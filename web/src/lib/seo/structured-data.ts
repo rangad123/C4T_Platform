@@ -1,4 +1,5 @@
 import { env } from '@/lib/env'
+import { SOCIAL_PROFILES } from '@/content/nav'
 import { SITE_NAME } from './metadata'
 import { getRoute, type RouteDef } from './routes'
 
@@ -38,10 +39,12 @@ export function organizationJsonLd() {
         availableLanguage: ['English'],
       },
     ],
-    // ⚠ UNVERIFIED. `sameAs` is how Google reconciles this entity with its
-    // social profiles; pointing at an account that is not the company's — or at
-    // a dead URL — is worse than omitting the field. Confirm both before launch.
-    sameAs: ['https://www.linkedin.com/company/crowd4test', 'https://www.facebook.com/Crowd4Test'],
+    // `sameAs` is how Google reconciles this entity with its social accounts.
+    // Derived from SOCIAL_PROFILES in content/nav.ts — the same array the footer
+    // renders — so the markup and the visible links can never disagree. The
+    // four URLs were supplied by the client and are confirmed; this previously
+    // held two hand-written guesses.
+    sameAs: SOCIAL_PROFILES.map((profile) => profile.url),
   }
 }
 

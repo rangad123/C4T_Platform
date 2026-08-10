@@ -20,7 +20,6 @@ import {
   COMPANY_CTAS,
   COMPANY_SECTIONS,
   PHOTOS,
-  PLACEHOLDER_CREDIT,
 } from '@/content'
 
 const PATH = '/company/careers'
@@ -72,7 +71,6 @@ export default function CareersPage() {
             ratio="4 / 3"
             priority
             sizes="(max-width: 900px) 100vw, 45vw"
-            caption={PLACEHOLDER_CREDIT}
           />
         }
       />

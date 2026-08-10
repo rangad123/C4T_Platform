@@ -6,14 +6,7 @@ import { JsonLd } from '@/components/seo/JsonLd'
 import { buildMetadata } from '@/lib/seo/metadata'
 import { requireRoute } from '@/lib/seo/routes'
 import { breadcrumbFor, serviceJsonLd } from '@/lib/seo/structured-data'
-import {
-  CLOSING_CTA,
-  HUB_SECTIONS,
-  PHOTOS,
-  PLACEHOLDER_CREDIT,
-  QA_SERVICES,
-  SERVICES_PAGE,
-} from '@/content'
+import { CLOSING_CTA, HUB_SECTIONS, PHOTOS, QA_SERVICES, SERVICES_PAGE } from '@/content'
 
 const PATH = '/services'
 
@@ -61,7 +54,6 @@ export default function ServicesHub() {
             ratio="4 / 3"
             priority
             sizes="(max-width: 900px) 100vw, 45vw"
-            caption={PLACEHOLDER_CREDIT}
           />
         }
       />

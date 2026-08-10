@@ -1,8 +1,14 @@
+/* The four social icons are inlined as React SVG components in
+ * `components/SocialIcons`, so the file-level lint rule for `<img>` elements
+ * no longer fires — the icons are proper `<svg>` elements where currentColor
+ * flows to the stroke from the parent `color` token. */
 import type { CSSProperties } from 'react'
 import Link from 'next/link'
 import { Logo } from '../core/Logo'
 import { Button } from '../core/Button'
 import { Input } from '../forms/Input'
+import { SOCIAL_ICONS } from '@/components/SocialIcons'
+import { SOCIAL_PROFILES } from '@/content/nav'
 import type { FooterColumn } from '@/content/nav'
 
 export interface FooterProps {
@@ -58,7 +64,7 @@ export function Footer({ columns, newsletter = true, style, className }: FooterP
           }}
         >
           <div>
-            <Logo size={22} tone="inverse" href="/" />
+            <Logo size={32} tone="inverse" href="/" />
             <p
               style={{
                 marginTop: 'var(--space-5)',
@@ -70,6 +76,63 @@ export function Footer({ columns, newsletter = true, style, className }: FooterP
               Digital quality engineering that pairs AI agents with a vetted global testing
               community.
             </p>
+
+            {/*
+             * The social row. Profiles are defined in SOCIAL_PROFILES at the
+             * bottom of this file.
+             *
+             * `target="_blank"` opens the platform in a new tab; `rel="noopener
+             * noreferrer"` is the standard hardening for that — `noreferrer` also
+             * strips the Referer header, which matters for a marketing site.
+             *
+             * The `aria-label` on each link names the platform, so a screen
+             * reader hears "Follow Crowd4Test on LinkedIn" rather than "link"
+             * four times. The glyph itself is `aria-hidden` — it carries no
+             * information the label does not already give.
+             */}
+            <ul
+              aria-label="Follow Crowd4Test"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-4)',
+                marginTop: 'var(--space-6)',
+                listStyle: 'none',
+                padding: 0,
+              }}
+            >
+              {SOCIAL_PROFILES.map(({ label, url, icon }) => {
+                const Glyph = SOCIAL_ICONS[icon]
+                return (
+                  <li key={icon}>
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Follow Crowd4Test on ${label}`}
+                      className="c4t-footer-social-link"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        // 36px, comfortably over the 24×24 minimum target size
+                        // WCAG 2.2 AA 2.5.8 asks for.
+                        width: 36,
+                        height: 36,
+                        borderRadius: 6,
+                        // The glyphs are stroke="currentColor", so this token
+                        // flows straight through to the stroke. --text-inverse
+                        // is --ink-50, the page floor — near-white on the
+                        // ink-950 band, and not pure #fff, which rule 2 bars.
+                        color: 'var(--text-inverse)',
+                      }}
+                    >
+                      <Glyph width={20} height={20} aria-hidden="true" />
+                    </a>
+                  </li>
+                )
+              })}
+            </ul>
 
             {newsletter ? (
               <form

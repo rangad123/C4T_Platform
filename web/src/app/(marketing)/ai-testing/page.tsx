@@ -17,14 +17,7 @@ import { JsonLd } from '@/components/seo/JsonLd'
 import { buildMetadata } from '@/lib/seo/metadata'
 import { requireRoute } from '@/lib/seo/routes'
 import { breadcrumbFor, faqJsonLd, serviceJsonLd } from '@/lib/seo/structured-data'
-import {
-  AI_SERVICES,
-  AI_TESTING_PAGE,
-  CLOSING_CTA,
-  HUB_SECTIONS,
-  PHOTOS,
-  PLACEHOLDER_CREDIT,
-} from '@/content'
+import { AI_SERVICES, AI_TESTING_PAGE, CLOSING_CTA, HUB_SECTIONS, PHOTOS } from '@/content'
 
 const PATH = '/ai-testing'
 
@@ -74,7 +67,6 @@ export default function AiTestingHub() {
             ratio="4 / 3"
             priority
             sizes="(max-width: 900px) 100vw, 45vw"
-            caption={PLACEHOLDER_CREDIT}
           />
         }
       />

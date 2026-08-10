@@ -1,4 +1,5 @@
 import type { IconName } from '@/components/ds'
+import type { SocialIconName } from '@/components/SocialIcons'
 import { STATS } from './stats'
 
 /**
@@ -329,3 +330,40 @@ export const ANNOUNCEMENT = {
   text: `New: The State of AI Quality 2026 report is out. ${STATS.surveyedTeams} teams told us how they test AI. Read it`,
   href: '/company/blog',
 } as const
+
+/**
+ * The company's social profiles — CONFIRMED URLs, supplied by the client.
+ *
+ * ONE SOURCE OF TRUTH, TWO CONSUMERS. The footer renders these as a row of
+ * links, and `lib/seo/structured-data.ts` feeds the same list to the
+ * `Organization` JSON-LD `sameAs` array. `sameAs` is how Google reconciles this
+ * entity with its social accounts, so the two must never disagree — a footer
+ * link the structured data does not corroborate is a weaker signal than either
+ * alone. Keeping them derived from one array makes divergence impossible.
+ *
+ * `icon` keys into SOCIAL_ICONS in `components/SocialIcons.tsx`. Adding a
+ * profile here without adding the matching glyph there is a type error, not a
+ * blank space in the footer.
+ */
+export const SOCIAL_PROFILES = [
+  {
+    label: 'LinkedIn',
+    url: 'https://www.linkedin.com/company/crowd4test/',
+    icon: 'linkedin',
+  },
+  {
+    label: 'YouTube',
+    url: 'https://www.youtube.com/channel/UCt-w9dMYL2foPmggRVWJv0Q',
+    icon: 'youtube',
+  },
+  {
+    label: 'Facebook',
+    url: 'https://www.facebook.com/Crowd4Test',
+    icon: 'facebook',
+  },
+  {
+    label: 'Instagram',
+    url: 'https://www.instagram.com/crowd4test/',
+    icon: 'instagram',
+  },
+] as const satisfies readonly { label: string; url: string; icon: SocialIconName }[]

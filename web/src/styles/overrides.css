@@ -166,3 +166,172 @@ main textarea:focus-visible {
 .c4t-checkbox--inverse input[type='checkbox']:focus-visible {
   outline-color: var(--ink-50);
 }
+
+/* ── Hero video edge feather ─────────────────────────────────────────────────
+ *
+ * The homepage hero carries `public/home.mp4`. A video element paints an opaque
+ * rectangle, so against the ink-950 band it reads as a sticker pasted onto the
+ * page rather than part of it. The four edges are feathered to transparent so
+ * the band shows through and the frame dissolves into it.
+ *
+ * A MASK, NOT A GRADIENT OVERLAY. An overlay has to hardcode the band colour
+ * and then silently drifts the moment that band changes; a mask blends into
+ * whatever is actually behind the element, so it stays correct on any surface.
+ *
+ * TWO LINEAR GRADIENTS, NOT ONE RADIAL. A radial ellipse rounds the corners
+ * hard and eats into the middle of the frame. Crossing a horizontal with a
+ * vertical gradient feathers each edge evenly and leaves the centre untouched.
+ *
+ * `-webkit-mask-composite: source-in` is the legacy WebKit spelling of
+ * `mask-composite: intersect`. Safari still needs the prefixed pair, so both
+ * are declared; the standard property is last so it wins where supported.
+ *
+ * NOT A RULE 2 VIOLATION. The `rgb(0 0 0 / 1)` stops are alpha channel values —
+ * a mask's luminance is never painted, so no black enters the composition. It
+ * is written long-form rather than as `#000` so a grep for pure black on this
+ * codebase stays honest.
+ */
+.c4t-hero-video {
+  /* THE BOX MODEL LIVES HERE, NOT INLINE ON THE ELEMENT.
+   *
+   * These four declarations were originally an inline `style` object on the
+   * <video>. An inline style outranks an external stylesheet rule regardless of
+   * selector specificity, so the inline `width: 100%` silently beat the widened
+   * `width` in the media query below — the frame could not be made bigger, and
+   * nothing in the cascade said why. The mask and the vertical nudge were
+   * unaffected only because neither is set inline.
+   *
+   * `aspect-ratio` plus `width` is what sizes the frame; `height: auto` lets
+   * the ratio drive it rather than the parent. `object-fit: cover` crops the
+   * 1920×1080 source into the 4:3 box — a deliberate crop, since 16:9 in this
+   * column would be markedly shorter.
+   */
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+
+  /* How far in from each edge the fade runs. 10% of a 4:3 frame is a soft
+   * ~40px feather at the hero's rendered width, enough to dissolve the border
+   * without losing subject matter at the edges. */
+  --feather: 10%;
+
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      rgb(0 0 0 / 1) var(--feather),
+      rgb(0 0 0 / 1) calc(100% - var(--feather)),
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      rgb(0 0 0 / 1) var(--feather),
+      rgb(0 0 0 / 1) calc(100% - var(--feather)),
+      transparent 100%
+    );
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      rgb(0 0 0 / 1) var(--feather),
+      rgb(0 0 0 / 1) calc(100% - var(--feather)),
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      rgb(0 0 0 / 1) var(--feather),
+      rgb(0 0 0 / 1) calc(100% - var(--feather)),
+      transparent 100%
+    );
+  mask-composite: intersect;
+}
+
+/* The video sits a little above the optical centre of the hero row.
+ *
+ * The Hero's split grid uses `align-items: center`, which centres the media
+ * against the whole copy column — headline, deck, bullets, CTAs and the trust
+ * line. That puts the frame lower than it looks like it should sit, because the
+ * copy's visual weight is concentrated at the top.
+ *
+ * `position: relative` + `top` rather than `margin-top`: this nudges the frame
+ * without changing the grid row's height, so nothing below the hero moves. A
+ * `transform` would do the same but promotes the element to its own compositing
+ * layer, and Safari has a history of mishandling a masked, transformed video.
+ *
+ * Scoped above 900px because that is where `.c4t-hero-split` collapses to a
+ * single column. Below it the video stacks above the copy, where lifting it
+ * would just open a gap.
+ */
+@media (min-width: 901px) {
+  .c4t-hero-video {
+    position: relative;
+    top: calc(-1 * var(--space-11));
+
+    /* Bleed out of the 1200px container toward the right viewport edge.
+     *
+     * The container caps the hero at `--container-max`, which caps the media
+     * column at roughly 610px. Widening the grid share further would only take
+     * the space back off the headline, so the extra width comes from outside
+     * the container instead — and because the right edge is already feathered
+     * to transparent, running it off toward the page edge reads as deliberate
+     * rather than clipped.
+     *
+     * The clamp is what keeps this safe. Its middle term is exactly the space
+     * between the container's right edge and the viewport's:
+     *
+     *   (100vw − container-max) / 2   +   container-gutter
+     *
+     * so the frame can never extend past the viewport and can never produce a
+     * horizontal scrollbar. Below `--container-max` that term goes negative and
+     * the 0px floor takes over; the 220px ceiling stops it running away on an
+     * ultrawide display. Under 901px `.c4t-hero-split` has already collapsed to
+     * one column, which is why the whole rule is inside this query.
+     *
+     * MEASURED in Chrome against the 1200px container — the media column is
+     * 609px before any bleed, and the frame is 4:3:
+     *
+     *   1200px viewport   +24px →  633 × 475
+     *   1440px viewport  +144px →  753 × 565
+     *   1600px viewport  +220px →  829 × 622   (224px available; ceiling caps it)
+     *   1920px viewport  +220px →  829 × 622   (384px available; ceiling caps it)
+     *
+     * The ceiling is the single number to turn for size. The clamp guarantees
+     * the frame cannot outrun the viewport at any width, and the headline column
+     * is unaffected either way because none of this comes out of the grid share.
+     */
+    width: calc(
+      100% + clamp(0px, (100vw - var(--container-max)) / 2 + var(--container-gutter), 220px)
+    );
+    max-width: none;
+  }
+}
+
+/* ── Dim a photograph so it settles into a dark band ─────────────────────────
+ *
+ * Opt-in utility, passed as `className` to <SiteImage>. Some supplied art is
+ * lit much cooler and brighter than the ink ramp — the robot photo on the
+ * homepage platform section is a saturated cyan against `--ink-950`, which is a
+ * warm near-black, so at full strength it reads as a lightbox cut into the
+ * page instead of part of it.
+ *
+ * Three filters, in this order:
+ *   saturate  — pulls the cool cast back toward the palette's low chroma
+ *   brightness— drops the highlights nearer the band's value
+ *   contrast  — a touch back, because the first two flatten the midtones
+ *
+ * A filter rather than an overlay: an overlay would tint toward one hardcoded
+ * colour and wash the subject out evenly, whereas dropping saturation keeps the
+ * form and only takes the intensity out of it.
+ *
+ * The selector targets the wrapper, so it covers the <img> and the caption
+ * layer together. `filter` on the wrapper also creates a containing block,
+ * which is harmless here — the wrapper is already positioned for `fill`.
+ */
+.c4t-media-dim {
+  filter: saturate(0.55) brightness(0.78) contrast(1.05);
+}

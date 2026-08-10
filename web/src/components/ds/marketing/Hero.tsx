@@ -16,6 +16,18 @@ export interface HeroProps {
   bullets?: string[]
   /** Custom media node; pass false to omit entirely (centred layout only). */
   media?: ReactNode | false
+  /**
+   * How the split layout divides its two columns.
+   *
+   *   'default' — `1.05fr 1fr`, copy slightly wider. Every hub and company page.
+   *   'wide'    — `1fr 1.25fr`, media wider than copy. The homepage, which
+   *               carries a video rather than a still and needs the room.
+   *
+   * The ratios stay inside this component rather than being passed in as raw
+   * CSS, so a call site cannot invent a third geometry. Ignored when
+   * `align="center"`.
+   */
+  mediaWidth?: 'default' | 'wide'
   tone?: 'canvas' | 'sunken' | 'inverse'
   align?: 'split' | 'center'
   /** Small line under the CTAs — compliance or social proof. */
@@ -33,9 +45,10 @@ export interface HeroProps {
  *    which keeps Hero a Server Component and makes the buttons work without JS.
  *  - Accent references moved off the raw coral ramp: the inverse eyebrow uses
  *    `--text-brand-inverse`, the bullet ticks `--accent-base`.
- *  - The split layout is `1.05fr 1fr` and collapses to one column under 900px
- *    via `.c4t-hero-split` in tokens/interactions.css; the title also steps
- *    down there through `.c4t-hero-title`. Both class names are load-bearing.
+ *  - The split layout is `1.05fr 1fr` by default (`mediaWidth="wide"` gives the
+ *    media the larger share instead) and collapses to one column under 900px via
+ *    `.c4t-hero-split` in tokens/interactions.css; the title also steps down
+ *    there through `.c4t-hero-title`. Both class names are load-bearing.
  */
 export function Hero({
   eyebrow,
@@ -47,6 +60,7 @@ export function Hero({
   secondaryHref,
   bullets,
   media,
+  mediaWidth = 'default',
   tone = 'canvas',
   align = 'split',
   trustLine,
@@ -55,6 +69,9 @@ export function Hero({
 }: HeroProps) {
   const inverse = tone === 'inverse'
   const centered = align === 'center'
+  // Both collapse to one column under 900px via `.c4t-hero-split`, so neither
+  // ratio survives to mobile and neither can cause a horizontal overflow there.
+  const splitColumns = mediaWidth === 'wide' ? '1fr 1.25fr' : '1.05fr 1fr'
 
   const copy = (
     <div
@@ -225,7 +242,7 @@ export function Hero({
             className="c4t-hero-split"
             style={{
               display: 'grid',
-              gridTemplateColumns: '1.05fr 1fr',
+              gridTemplateColumns: splitColumns,
               gap: 56,
               alignItems: 'center',
             }}

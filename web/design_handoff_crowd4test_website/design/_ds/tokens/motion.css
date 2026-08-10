@@ -1,19 +1,18 @@
-/* Short, functional motion. Nothing bounces; nothing slides more than 8px. */
 :root {
-  --duration-instant: 80ms; /* @kind other */
-  --duration-fast: 140ms; /* @kind other */
-  --duration-base: 200ms; /* @kind other */
-  --duration-slow: 320ms; /* @kind other */
-  --duration-reveal: 520ms; /* @kind other */
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --duration-reveal: 520ms;
 
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* @kind other */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
-  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* @kind other */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 
   --transition-control: color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
   --transition-surface: box-shadow var(--duration-base) var(--ease-standard), transform var(--duration-base) var(--ease-standard), border-color var(--duration-base) var(--ease-standard);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --duration-instant: 0ms; /* @kind other */ --duration-fast: 0ms; /* @kind other */ --duration-base: 0ms; /* @kind other */ --duration-slow: 0ms; /* @kind other */ --duration-reveal: 0ms; /* @kind other */ }
+  :root { --duration-instant: 0ms;  --duration-fast: 0ms;  --duration-base: 0ms;  --duration-slow: 0ms;  --duration-reveal: 0ms;  }
 }

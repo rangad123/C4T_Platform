@@ -20,7 +20,6 @@ import {
   HUB_SECTIONS,
   INTEGRATIONS,
   PHOTOS,
-  PLACEHOLDER_CREDIT,
   PLATFORM_MODULES,
   PLATFORM_PAGE,
 } from '@/content'
@@ -65,7 +64,6 @@ export default function PlatformHub() {
             ratio="4 / 3"
             priority
             sizes="(max-width: 900px) 100vw, 45vw"
-            caption={PLACEHOLDER_CREDIT}
           />
         }
       />

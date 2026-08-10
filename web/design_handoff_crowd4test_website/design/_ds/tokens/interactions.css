@@ -1,4 +1,3 @@
-/* Hover / press states for inline-styled primitives. Components set the class; this file owns the states. */
 .c4t-btn { user-select: none; }
 .c4t-btn--primary:hover:not([aria-disabled="true"]) { background: var(--action-primary-bg-hover) !important; }
 .c4t-btn--primary:active:not([aria-disabled="true"]) { background: var(--action-primary-bg-active) !important; }

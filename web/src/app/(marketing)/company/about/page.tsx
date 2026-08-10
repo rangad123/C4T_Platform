@@ -21,7 +21,6 @@ import {
   COMPANY_CTAS,
   COMPANY_SECTIONS,
   PHOTOS,
-  PLACEHOLDER_CREDIT,
   STAT_BAND,
 } from '@/content'
 
@@ -63,7 +62,6 @@ export default function AboutPage() {
             ratio="4 / 3"
             priority
             sizes="(max-width: 900px) 100vw, 45vw"
-            caption={PLACEHOLDER_CREDIT}
           />
         }
       />

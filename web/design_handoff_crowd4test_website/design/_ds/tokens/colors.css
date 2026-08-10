@@ -1,8 +1,5 @@
-/* Crowd4Test color system.
-   Warm neutral ink + a single coral "signal" accent + a teal verification accent.
-   Semantic aliases at the bottom are what components should reference. */
 :root {
-  /* Coral — the signal accent. Primary CTAs, active states, brand marks. */
+
   --coral-50: #fff4f0;
   --coral-100: #ffe3da;
   --coral-200: #ffc5b4;
@@ -13,7 +10,6 @@
   --coral-700: #a32f13;
   --coral-800: #7a230e;
 
-  /* Ink — warm neutral ramp. Text, surfaces, hairlines. */
   --ink-950: #17130f;
   --ink-900: #241e18;
   --ink-800: #332b23;
@@ -27,14 +23,12 @@
   --ink-50: #faf8f5;
   --white: #ffffff;
 
-  /* Teal — the verification accent. Pass states, AI-agent surfaces, data viz. */
   --teal-50: #eaf6f3;
   --teal-100: #cfe9e3;
   --teal-500: #0b7a6e;
   --teal-600: #086055;
   --teal-700: #05463e;
 
-  /* Status */
   --green-50: #e9f5ee;
   --green-500: #1f7a4d;
   --green-600: #17603c;
@@ -48,7 +42,6 @@
   --blue-500: #2563a8;
   --blue-600: #1c4d84;
 
-  /* ---- Semantic: surfaces ---- */
   --surface-canvas: var(--white);
   --surface-sunken: var(--ink-50);
   --surface-raised: var(--white);
@@ -60,7 +53,6 @@
   --surface-accent-subtle: var(--teal-50);
   --surface-scrim: rgb(23 19 15 / 0.55);
 
-  /* ---- Semantic: text ---- */
   --text-primary: var(--ink-950);
   --text-secondary: var(--ink-700);
   --text-muted: var(--ink-500);
@@ -73,7 +65,6 @@
   --text-link: var(--coral-600);
   --text-link-hover: var(--coral-700);
 
-  /* ---- Semantic: borders ---- */
   --border-subtle: var(--ink-100);
   --border-default: var(--ink-200);
   --border-strong: var(--ink-300);
@@ -81,7 +72,6 @@
   --border-brand: var(--coral-500);
   --border-focus: var(--ink-950);
 
-  /* ---- Semantic: interactive ---- */
   --action-primary-bg: var(--coral-500);
   --action-primary-bg-hover: var(--coral-600);
   --action-primary-bg-active: var(--coral-700);
@@ -93,7 +83,6 @@
   --action-inverse-bg: var(--white);
   --action-inverse-text: var(--ink-950);
 
-  /* ---- Semantic: status ---- */
   --status-success-bg: var(--green-50);
   --status-success-fg: var(--green-600);
   --status-warning-bg: var(--amber-50);

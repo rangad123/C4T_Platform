@@ -1,4 +1,3 @@
-/* Minimal global baseline. Everything else is component-level. */
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--surface-canvas); color: var(--text-primary); font: var(--fw-regular) var(--type-body-md-size)/var(--type-body-md-line) var(--font-sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }

@@ -114,7 +114,7 @@ export function TopNav({
           gap: 'var(--space-8)',
         }}
       >
-        <Logo size={21} href="/" />
+        <Logo size={32} href="/" />
 
         <nav
           aria-label="Primary"

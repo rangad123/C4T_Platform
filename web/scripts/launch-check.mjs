@@ -119,12 +119,15 @@ const CHECKS = [
     why: 'Every photograph is a hotlinked Unsplash placeholder. Agreement §5 makes sourcing real media the Client\'s responsibility. Self-host the final set, remove the "Placeholder · Unsplash licence" captions, and drop the Unsplash host from next.config.ts.',
   },
   {
-    id: 'placeholder-logo',
-    severity: 'blocker',
-    file: 'src/components/ds/core/Logo.tsx',
-    find: 'Real brand assets replace this',
-    why: 'The wordmark is set in the display face because no logotype was supplied. The favicon (src/app/icon.tsx) is derived from it and needs replacing too, along with an apple-icon.tsx for the 180px touch icon.',
+    id: 'apple-icon',
+    severity: 'warning',
+    file: 'src/app/apple-icon.tsx',
+    invert: true,
+    why: 'The 180px apple-touch-icon is missing. iOS Safari uses it for "Add to Home Screen" and proxied share previews. Add app/apple-icon.tsx when the brand supplies a 180px square icon — `next/image` is not available there, so the SVG or a hand-sized PNG is the simplest path.',
   },
+  // The wordmark / Logo check was removed once the real logo landed in
+  // public/logo.svg. The old placeholder note is gone from Logo.tsx — the OG
+  // card now reads the same file at build time.
 
   // ── Wiring ───────────────────────────────────────────────────────────────
   {
@@ -148,13 +151,17 @@ const CHECKS = [
     find: 'Scaffold',
     why: 'Terms, Privacy, Cookies, DPA and the Accessibility Statement are still scaffolds. The cookie banner links to /legal/cookies, and the Trust page promises a DPA. These need real legal text, not drafted copy.',
   },
-  {
-    id: 'social-profiles',
-    severity: 'warning',
-    file: 'src/lib/seo/structured-data.ts',
-    find: 'linkedin.com/company/crowd4test',
-    why: 'Organization JSON-LD `sameAs` points at two unverified social URLs. A wrong one is worse than none.',
-  },
+  // `social-profiles` was retired here. It warned that the Organization JSON-LD
+  // `sameAs` array held two hand-written, unverified URLs. The client has since
+  // supplied all four confirmed profiles, they live in SOCIAL_PROFILES in
+  // content/nav.ts, and both the footer and the JSON-LD derive from that one
+  // array — so there is no longer an unverified URL to warn about.
+  //
+  // It is deleted rather than left in place because its needle
+  // ('linkedin.com/company/crowd4test' in structured-data.ts) no longer appears
+  // in that file, so the check had already stopped firing on its own. A check
+  // that passes because its grep target moved is worse than no check: it reads
+  // as evidence when it is only silence.
 ]
 
 let blockers = 0

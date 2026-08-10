@@ -1,13 +1,9 @@
-/* Crowd4Test type scale.
-   Display sizes are set tight (negative tracking) — enterprise headlines carry the page.
-   Eyebrows and metrics use JetBrains Mono; it reads as instrumentation, which is the product. */
 :root {
-  --fw-regular: 400; /* @kind font */
-  --fw-medium: 500; /* @kind font */
-  --fw-semibold: 600; /* @kind font */
-  --fw-bold: 700; /* @kind font */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
 
-  /* Display */
   --type-display-2xl-size: 72px;
   --type-display-2xl-line: 1.02;
   --type-display-2xl-tracking: -2.6px;
@@ -21,7 +17,6 @@
   --type-display-md-line: 1.16;
   --type-display-md-tracking: -0.8px;
 
-  /* Headings */
   --type-heading-lg-size: 28px;
   --type-heading-lg-line: 1.25;
   --type-heading-lg-tracking: -0.4px;
@@ -32,7 +27,6 @@
   --type-heading-sm-line: 1.4;
   --type-heading-sm-tracking: -0.1px;
 
-  /* Body */
   --type-body-lg-size: 18px;
   --type-body-lg-line: 1.6;
   --type-body-md-size: 16px;
@@ -42,7 +36,6 @@
   --type-caption-size: 13px;
   --type-caption-line: 1.45;
 
-  /* Utility */
   --type-eyebrow-size: 12px;
   --type-eyebrow-line: 1.1;
   --type-eyebrow-tracking: 0.12em;

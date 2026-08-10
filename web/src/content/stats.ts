@@ -18,7 +18,7 @@
  */
 export const STATS = {
   /** Vetted testers on the platform. */
-  testers: '5,000+',
+  testers: '6,000+',
   /** Countries with at least one active tester. */
   countries: '120+',
   /** Unique real devices available. */

@@ -29,7 +29,6 @@ import {
   INDUSTRIES,
   INTEGRATIONS,
   PHOTOS,
-  PLACEHOLDER_CREDIT,
   PLATFORM_MODULES,
   PROBLEMS,
   QA_SERVICES,
@@ -86,15 +85,47 @@ export default function HomePage() {
           'Results triaged in your Jira',
         ]}
         trustLine={HOME_HERO.trustLine}
+        // The homepage is the only hero carrying a video, and a moving frame
+        // needs more room than a still to read. 'wide' flips the split from
+        // `1.05fr 1fr` to `1fr 1.25fr` — the media column goes from ~535px to
+        // ~610px inside the 1200px container, about a third more area. Every
+        // other hero keeps the default.
+        mediaWidth="wide"
         media={
-          <SiteImage
-            src={PHOTOS.deviceTesting.src}
-            alt={PHOTOS.deviceTesting.alt}
-            fill
-            ratio="4 / 3"
-            priority
-            sizes="(max-width: 900px) 100vw, 45vw"
-            caption={PLACEHOLDER_CREDIT}
+          // The brand video.
+          //
+          // The poster is the video's OWN first frame, extracted with ffmpeg to
+          // `public/home-poster.jpg` (90 KB). It used to be an unrelated
+          // Unsplash photo, which meant the hero visibly cut from a stock image
+          // to the video the moment playback began. Using frame 1 means the
+          // still and the first frame are identical, so there is nothing to
+          // see — and it removes one more Unsplash dependency from the page.
+          //
+          // Regenerate it whenever home.mp4 changes:
+          //   ffmpeg -y -i public/home.mp4 -vf "select=eq(n\,0)" \
+          //     -vframes 1 -q:v 2 public/home-poster.jpg
+          //
+          // `autoplay muted playsInline` is the standard autoplay recipe —
+          // `muted` is what lets Safari iOS play inline at all, `playsInline`
+          // keeps the user on the page rather than going fullscreen. No
+          // controls, no audio.
+          <video
+            src="/home.mp4"
+            poster="/home-poster.jpg"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            // ALL geometry lives in overrides.css against this class, and
+            // deliberately so: this element previously carried an inline
+            // `width: 100%`, and an inline style outranks any external
+            // stylesheet rule short of `!important`. That silently defeated the
+            // width rule in overrides.css — the mask and the vertical nudge
+            // applied, because neither is an inline property, but every attempt
+            // to widen the frame was overridden and had no effect. Keeping the
+            // box model in one place is what stops that recurring.
+            className="c4t-hero-video"
           />
         }
       />
@@ -169,7 +200,6 @@ export default function HomePage() {
                       fill
                       ratio="16 / 10"
                       sizes="(max-width: 900px) 100vw, 50vw"
-                      caption={PLACEHOLDER_CREDIT}
                     />
                   ) : null}
                 </div>
@@ -268,13 +298,18 @@ export default function HomePage() {
         description={HOME_SECTIONS.platform.description}
         capabilities={PLATFORM_MODULES}
         media={
+          // Client-supplied `robot.jpg`. `PHOTOS.triage` still backs the
+          // AI Testing hub hero and the detail rotation, so it stays defined.
+          //
+          // `c4t-media-dim` takes the cyan down so the frame settles into the
+          // ink-950 band instead of glowing out of it — see overrides.css.
           <SiteImage
-            src={PHOTOS.triage.src}
-            alt={PHOTOS.triage.alt}
+            src={PHOTOS.robot.src}
+            alt={PHOTOS.robot.alt}
+            className="c4t-media-dim"
             fill
             ratio="4 / 3"
             sizes="(max-width: 900px) 100vw, 55vw"
-            caption={PLACEHOLDER_CREDIT}
           />
         }
       />
@@ -325,7 +360,6 @@ export default function HomePage() {
           ratio="21 / 6"
           radius="0"
           sizes="100vw"
-          caption={PLACEHOLDER_CREDIT}
         />
       </div>
 
@@ -585,4 +619,7 @@ const BENTO_PLACEMENT = [
 ] as const
 
 /** The approach section's three photos, in step order. */
-const STEP_PHOTOS = [PHOTOS.scoping, PHOTOS.hardware, PHOTOS.dashboard] as const
+/* Step 02 ("Execute") carries the client-supplied `ai.jpg`. `PHOTOS.hardware` is
+ * untouched — the Services hub hero and the detail-page rotation both still use
+ * it, so only this one slot changed. */
+const STEP_PHOTOS = [PHOTOS.scoping, PHOTOS.ai, PHOTOS.dashboard] as const
