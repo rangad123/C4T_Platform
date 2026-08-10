@@ -101,9 +101,13 @@ export default function HomePage() {
           // still and the first frame are identical, so there is nothing to
           // see — and it removes one more Unsplash dependency from the page.
           //
-          // Regenerate it whenever home.mp4 changes:
-          //   ffmpeg -y -i public/home.mp4 -vf "select=eq(n\,0)" \
-          //     -vframes 1 -q:v 2 public/home-poster.jpg
+          // REGENERATE IT WHENEVER home.mp4 CHANGES — a poster left over from a
+          // previous cut is worse than none, because it shows a frame the video
+          // never reaches. Scaled to 1280 because the frame renders at ~830px:
+          //
+          //   ffmpeg -y -i public/home.mp4 \
+          //     -vf "select=eq(n\,0),scale=1280:-2" -vframes 1 -q:v 4 \
+          //     public/home-poster.jpg
           //
           // `autoplay muted playsInline` is the standard autoplay recipe —
           // `muted` is what lets Safari iOS play inline at all, `playsInline`
