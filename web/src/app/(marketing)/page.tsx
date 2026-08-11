@@ -302,14 +302,16 @@ export default function HomePage() {
         description={HOME_SECTIONS.platform.description}
         capabilities={PLATFORM_MODULES}
         media={
-          // Client-supplied `robot.jpg`. `PHOTOS.triage` still backs the
-          // AI Testing hub hero and the detail rotation, so it stays defined.
+          // Client-supplied `ai.jpg`. `PHOTOS.triage` still backs the AI Testing
+          // hub hero and the detail rotation, so it stays defined.
           //
-          // `c4t-media-dim` takes the cyan down so the frame settles into the
-          // ink-950 band instead of glowing out of it — see overrides.css.
+          // `c4t-media-dim` settles the frame into the ink-950 band — see
+          // overrides.css. It was added for the robot photo, whose cyan fought
+          // the warm band; this image is already low-chroma, so the filter does
+          // much less work here. Drop the class if it reads as murky.
           <SiteImage
-            src={PHOTOS.robot.src}
-            alt={PHOTOS.robot.alt}
+            src={PHOTOS.ai.src}
+            alt={PHOTOS.ai.alt}
             className="c4t-media-dim"
             fill
             ratio="4 / 3"
@@ -623,7 +625,4 @@ const BENTO_PLACEMENT = [
 ] as const
 
 /** The approach section's three photos, in step order. */
-/* Step 02 ("Execute") carries the client-supplied `ai.jpg`. `PHOTOS.hardware` is
- * untouched — the Services hub hero and the detail-page rotation both still use
- * it, so only this one slot changed. */
-const STEP_PHOTOS = [PHOTOS.scoping, PHOTOS.ai, PHOTOS.dashboard] as const
+const STEP_PHOTOS = [PHOTOS.scoping, PHOTOS.hardware, PHOTOS.dashboard] as const

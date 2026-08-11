@@ -66,21 +66,32 @@ export const PHOTOS = {
 
   /* ─── Client-supplied, self-hosted under public/pages/ ───────────────────
    *
-   * These two are NOT Unsplash placeholders, so they are not covered by the
-   * ⚠ at the top of this file and they are deliberately kept out of
-   * PHOTO_ROTATION below — adding an entry there changes the modulo cycle and
-   * reshuffles the imagery on all 33 detail pages.
+   * These are NOT Unsplash placeholders, so they are not covered by the ⚠ at
+   * the top of this file, and they are deliberately kept out of PHOTO_ROTATION
+   * below — adding an entry there changes the modulo cycle and reshuffles the
+   * imagery on all 33 detail pages.
+   */
+
+  /**
+   * In use: the homepage platform section, dimmed via `c4t-media-dim`.
    *
-   * ⚠ `ai.jpg` CARRIES A VISIBLE WATERMARK ("Zach Malinowitz", bottom-right).
-   * It renders as supplied. If this is a stock comp rather than a licensed
-   * copy, it needs replacing with the paid, unwatermarked version before
-   * launch — a watermark on a commercial marketing page is both a visual
-   * defect and a licensing exposure.
+   * ⚠ IT CARRIES A VISIBLE WATERMARK — "Zach Malinowitz", bottom-right — and it
+   * is LIVE on the homepage. If this is a stock comp rather than a licensed
+   * copy, it needs the paid, unwatermarked version before launch: a watermark on
+   * a commercial page is both a visual defect and a licensing exposure. This is
+   * the one open item on this file that is visible to a visitor today.
    */
   ai: {
     src: '/pages/ai.jpg',
     alt: 'A sculpted head in profile, the letters AI glowing among drifting particles inside its open cranium',
   },
+
+  /**
+   * ⚠ CURRENTLY UNUSED. It held the homepage platform section until `ai` took
+   * that slot. The entry and `public/pages/robot.jpg` (1.16 MB — the largest
+   * image in the repo) are both still here; if no slot is found for it, delete
+   * both rather than shipping an asset nothing points at.
+   */
   robot: {
     src: '/pages/robot.jpg',
     alt: 'A small white robot with an LED dot-matrix face, marked Bot across its chest',
