@@ -333,3 +333,12 @@
     gap: 8px !important;
   }
 }
+
+/* ─── Client logo wall spacing ──────────────────────────────────────────────
+ * Sits between the "Trusted by" label and the sector marquee on the homepage.
+ * The gap below is larger than the gap above so the wall groups visually with
+ * its own label rather than floating equidistant between two of them.
+ */
+.clientWall {
+  margin-top: 28px;
+}

@@ -80,25 +80,27 @@ export const PHOTOS = {
    * upward nudge and the container bleed all live on `.c4t-hero-media` in
    * overrides.css and describe a rectangle, not an element type.
    *
-   * 1454×1082 — a ratio of 1.344, within half a percent of the 4:3 box the
+   * 1451×1084 — a ratio of 1.339, within half a percent of the 4:3 box the
    * hero uses, so `object-fit: cover` crops almost nothing. If this art is
    * ever replaced at a materially different ratio, check the crop rather than
    * assuming it still fits.
    *
-   * ⚠ 1.8 MB as a PNG. `next/image` re-encodes it to WebP/AVIF on the fly, so
-   * what a visitor downloads is far smaller — but the original still sits in
-   * the repository at full size. If the source is a flat illustration rather
-   * than a photograph, an SVG export would be smaller than both.
+   * JPEG, NOT PNG. The first cut of this artwork was a 1.8 MB PNG; the Client
+   * re-supplied it as a 438 KB JPEG, which is the right format for what is
+   * effectively a rendered illustration with photographic shading. `next/image`
+   * re-encodes to WebP/AVIF either way, so the saving is in the repository
+   * rather than on the wire — but a quarter of the weight in git history is
+   * worth having.
    *
-   * SUPPLIED AS `C4T_Landing_Page.png`, RENAMED. Every path under `public/` is
-   * lowercase-kebab, and that is not only tidiness: `proxy.ts` canonicalises
-   * mixed-case URLs to lowercase, so an asset with capitals in its name was
-   * redirected to a filename that does not exist and 404'd. The proxy now
-   * exempts anything with a file extension, so this would work either way —
-   * but the convention is what stops the next person rediscovering it.
+   * NAMED IN LOWERCASE-KEBAB, AND THAT IS LOAD-BEARING. `proxy.ts`
+   * canonicalises mixed-case URLs to lowercase, so an asset with capitals in
+   * its name was once redirected to a filename that does not exist and 404'd.
+   * The proxy now exempts anything with a file extension, so this would work
+   * either way — but the convention is what stops the next person
+   * rediscovering it.
    */
   heroLanding: {
-    src: '/c4t-landing-page.png',
+    src: '/c4t-landing-page.jpeg',
     alt: 'Crowd4Test testers and AI agents working through a release across phones, tablets and desktop browsers',
   },
 

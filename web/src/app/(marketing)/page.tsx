@@ -7,6 +7,7 @@ import {
   FeatureCard,
   Hero,
   Icon,
+  LogoWall,
   ResourceCard,
   Section,
   SectionHeader,
@@ -22,6 +23,7 @@ import { buildMetadata } from '@/lib/seo/metadata'
 import {
   AI_SERVICES,
   CASE_STUDY_ENTRIES,
+  CLIENTS,
   CLOSING_CTA,
   HOME_CARDS,
   HOME_HERO,
@@ -72,8 +74,12 @@ export default function HomePage() {
       <Hero
         className={s.deep}
         tone="inverse"
-        eyebrow={HOME_HERO.eyebrow}
+        // No eyebrow: it repeated the opening of the headline word for word.
+        // See the note in content/home.ts.
         title={HOME_HERO.title}
+        // Tints the closing "Human Intelligence" in the accent. Teal-100 on
+        // this dark band, not teal-500 — see the note in Hero.
+        titleHighlight={HOME_HERO.titleHighlight}
         description={HOME_HERO.description}
         primaryCta={HOME_HERO.primaryCta}
         primaryHref="/contact"
@@ -85,11 +91,12 @@ export default function HomePage() {
           'Results triaged in your Jira',
         ]}
         trustLine={HOME_HERO.trustLine}
-        // The homepage hero art is given more room than the others. 'wide'
-        // flips the split from `1.05fr 1fr` to `1fr 1.25fr` — the media column
-        // goes from ~535px to ~610px inside the 1200px container, about a
-        // third more area. Every other hero keeps the default.
-        mediaWidth="wide"
+        // The headline is long — nine words — and at the default measure it
+        // broke over four lines, which reads as a paragraph rather than a
+        // statement. `copy-led` narrows the media column and lifts the copy
+        // cap so it sets in three. The art loses width; it is a wide
+        // illustration and crops to the same 4:3 box either way.
+        mediaWidth="copy-led"
         media={
           // The brand artwork. This slot held `public/home.mp4` until the
           // still was supplied; the geometry is unchanged, because the mask,
@@ -320,6 +327,29 @@ export default function HomePage() {
           />
         }
       />
+
+      {/* ─── Client wall ─────────────────────────────────────────────────── */}
+      {/*
+        content.md §4.2 specifies this slot as "Trusted by teams building at
+        scale" over `{{Client logo × 8}}`. It sits between the platform section
+        and the AI use cases, on the light band — the two sections either side
+        are both `tone="inverse"`, so a canvas band here also restores the
+        dark/light alternation the page rhythm is built on.
+
+        `tone="canvas"` is --ink-50, the page floor, NOT #fff. CLAUDE.md rule 2
+        bars pure white from composition.
+
+        ⚠ EVERY NAME NEEDS WRITTEN PERMISSION BEFORE THIS IS PUBLIC. §4.2 and
+        the §14 asset table both say so, and `npm run launch-check` fails while
+        any entry in content/clients.ts still has `permission: false`.
+      */}
+      <Section tone="canvas" compact>
+        <div className="c4t-eyebrow" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+          Trusted by teams building at scale
+        </div>
+
+        <LogoWall clients={CLIENTS} className={s.clientWall} />
+      </Section>
 
       {/* ─── AI use cases ────────────────────────────────────────────────── */}
       <Section tone="inverse" compact className={`${s.deep} ${s.edge}`}>
@@ -618,7 +648,12 @@ const BENTO_PLACEMENT = [
     gridRow: '1 / 3',
     display: 'flex',
     flexDirection: 'column',
-    justifyContent: 'flex-end',
+    // The tall card spans both rows, so its content has roughly twice the
+    // height to sit in. It was pinned to the bottom (`flex-end`), which left a
+    // large empty field above the icon and made the card read as though the
+    // artwork had failed to load. Centred, the block sits against the optical
+    // middle of the two cards beside it.
+    justifyContent: 'center',
   },
   { gridColumn: '2 / 4', gridRow: '1' },
   { gridColumn: '2', gridRow: '2' },

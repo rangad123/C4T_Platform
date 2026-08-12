@@ -23,8 +23,37 @@ import { STATS } from './stats'
 /* ─── Hero ─────────────────────────────────────────────────────────────────── */
 
 export const HOME_HERO = {
-  eyebrow: 'AI-Powered Digital Quality Engineering',
-  title: 'Ship AI and software your users can trust.',
+  /**
+   * NO EYEBROW ON THIS HERO — deliberately, and it is the only one without one.
+   *
+   * It read "AI-Powered Digital Quality Engineering", which is now the opening
+   * of the headline itself, so the hero said the same thing twice in a row:
+   *
+   *   AI-POWERED DIGITAL QUALITY ENGINEERING
+   *   AI-Powered Digital Quality Engineering with human Intelligence
+   *
+   * An eyebrow frames a headline; it should not preview it. Removed rather
+   * than reworded because the headline already carries the positioning.
+   *
+   * `Hero` renders the eyebrow only when the prop is present, so omitting it
+   * here is all that is required — page.tsx no longer passes one.
+   */
+  /**
+   * Client-supplied, replacing "Ship AI and software your users can trust."
+   * Written as "AI - Powered"; the spaces around the hyphen are closed up so
+   * the compound adjective matches the rest of the site.
+   */
+  title: 'AI-Powered Digital Quality Engineering with Human Intelligence',
+  /**
+   * The tail of `title`, rendered in the accent colour by `Hero`.
+   *
+   * Kept as a plain substring rather than JSX so this module stays serialisable
+   * data — `opengraph-image.tsx` reads `title` as a string for the social card,
+   * and markup here would break it. `Hero` finds this text inside `title` and
+   * wraps just that span; if the two ever stop matching it renders the headline
+   * plain rather than throwing.
+   */
+  titleHighlight: 'Human Intelligence',
   description:
     "We combine AI agents that test at machine speed with a vetted global community of human testers who catch what automation can't — wrong answers, broken journeys, cultural misfires and accessibility failures.",
   primaryCta: 'Book a demo',
@@ -41,8 +70,14 @@ export const HOME_HERO = {
 /* ─── Section headers ──────────────────────────────────────────────────────── */
 
 export interface SectionCopy {
-  eyebrow: string
+  /** Mono uppercase kicker. Omitted where it would restate the heading. */
+  eyebrow?: string
   title: string
+  /**
+   * A trailing clause of `title` set at a smaller size, on its own line.
+   * For headings that pair a claim with a list of qualities.
+   */
+  titleSmall?: string
   description?: string
   /** Trailing link on the header row. Omitted where the destination was cut. */
   action?: { label: string; href: string }
@@ -62,15 +97,43 @@ export const HOME_SECTIONS = {
       "We run both in one workflow. AI agents generate test cases from your requirements, execute regression at scale, and triage the results. Human experts then validate everything AI can't reliably judge on its own — factual accuracy, tone, cultural fit, accessibility and whether the experience actually works for a real person.",
   },
   aiQuality: {
-    eyebrow: 'AI Quality',
-    title: 'Testing built for products that think.',
+    /**
+     * NO EYEBROW. It read "AI Quality", which the heading beneath it already
+     * says twice over — the section opened with the words "AI" and "Testing"
+     * immediately below a kicker announcing "AI QUALITY".
+     */
+    /**
+     * Client-supplied, replacing "Testing built for products that think."
+     * Written as "AI-Powered Testing Platform  Intelligent, Autonomus, Faster".
+     *
+     * The double space between "Platform" and "Intelligent" was a separator, so
+     * the three qualities are split into `titleSmall` and set smaller on their
+     * own line — which is what the gap was reaching for. An em dash stood in
+     * for it briefly; it is gone now that the size change does the same job
+     * without leaving a dangling mark at the end of a line.
+     *
+     * "Autonomus" is spelled "Autonomous".
+     */
+    title: 'AI-Powered Testing Platform',
+    titleSmall: 'Intelligent, Autonomous, Faster',
     description:
       'AI features fail in ways traditional QA was never designed to catch. We test the failure modes that matter.',
     action: { label: 'Explore AI testing', href: '/ai-testing' },
   },
   services: {
-    eyebrow: 'Software Quality Engineering',
-    title: 'The full QA stack, still.',
+    /**
+     * NO EYEBROW. It read "Software Quality Engineering", and the heading below
+     * it is "Comprehensive Quality Engineering Services" — the same three words
+     * twice, one directly above the other.
+     *
+     * Third of three removed for the same reason (the hero and the AI quality
+     * section were the others). The pattern: these kickers were written to
+     * frame short, oblique headings like "The full QA stack, still." Once the
+     * headings became literal descriptions of the discipline, the kickers
+     * became echoes of them.
+     */
+    /** Client-supplied, replacing "The full QA stack, still." */
+    title: 'Comprehensive Quality Engineering Services',
     description:
       "AI didn't replace the fundamentals. We cover them across web, mobile, API and desktop.",
     action: { label: 'Explore all services', href: '/services' },

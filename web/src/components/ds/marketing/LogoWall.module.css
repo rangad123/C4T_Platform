@@ -1,0 +1,169 @@
+/* The client logo wall.
+ *
+ * A static grid rather than the scrolling marquee it sits next to. Client
+ * names are evidence, and evidence should hold still long enough to be read —
+ * a buyer scanning for a name they recognise should not have to wait for it to
+ * come round again. The marquee treatment stays right for the sector words,
+ * which are a mood rather than a list.
+ */
+
+/* FLEX-WRAP, NOT A GRID.
+ *
+ * A grid was the first attempt and it looked wrong. Ten items divide cleanly
+ * only by 5 and 2, so any other column count strands a short final row against
+ * the left edge — measured at 1440px the `auto-fit` track resolved to seven
+ * columns, giving a row of seven and an orphan row of three. Pinning it to five
+ * fixes that one width and breaks the others, because the names range from
+ * "DotPe" to "Trusting Social" and do not want equal tracks.
+ *
+ * Wrapping flex with `justify-content: center` lets the row break wherever the
+ * viewport says and centres whatever lands on the last line, so an incomplete
+ * row reads as deliberate at every width. Items size to their content rather
+ * than to a track, which is what a logo row should do when the marks are
+ * different shapes.
+ */
+.wall {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6) var(--space-8);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Grow a little to even out a sparse row, never shrink below the mark's own
+     width, and start from content size. */
+  flex: 0 1 auto;
+  min-height: 48px;
+  padding: var(--space-3) var(--space-4);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: var(--transition-control);
+}
+
+/* Logos and wordmarks sit back until looked at. The wall is supporting
+ * evidence under a label, not the headline — at full strength ten marks
+ * out-shout the sections they sit between. Higher than the 0.72 used on the
+ * dark band: the same value on a light surface reads as washed out rather
+ * than restrained, because the contrast is falling toward the background
+ * instead of away from it. */
+.item {
+  opacity: 0.85;
+}
+
+.item:hover,
+.item:focus-visible {
+  opacity: 1;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* The wordmark fallback, used until an official logo file is supplied.
+ * Display face, not the mono badge treatment — these are company names, and
+ * the copy rules keep uppercase for mono badges only.
+ *
+ * COLOURED FOR THE LIGHT BAND. The wall sits on `tone="canvas"` between the
+ * platform section and the AI use cases. It was first built on the dark band
+ * and used `--text-inverse-muted`; that token is a near-white and rendered
+ * these names all but invisible once the section moved. Secondary → primary on
+ * hover gives the same recede-then-resolve behaviour in the other direction.
+ */
+.wordmark {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  transition: var(--transition-control);
+}
+
+.item:hover .wordmark,
+.item:focus-visible .wordmark {
+  color: var(--text-primary);
+}
+
+/* Real logo art.
+ *
+ * `max-height` caps the tallest mark so a square logo and a wide wordmark
+ * occupy the same optical weight; without it a square mark renders roughly
+ * three times the area of a wordmark at the same width and dominates the row.
+ *
+ * The grayscale filter is what lets ten mismatched brand palettes coexist in
+ * one row without fighting each other or the page. It lifts on hover, so the
+ * real mark is still reachable, and it is a no-op on an already-monochrome
+ * asset.
+ *
+ * `brightness(0.45)` DARKENS, because this band is light. The dark-band build
+ * used `brightness(1.9)` to lift marks against ink-950; keeping that here would
+ * wash a logo out to nearly the colour of the surface behind it. Override
+ * `--client-logo-filter` per placement if the wall is ever reused on a dark
+ * section.
+ */
+/* A FIXED HEIGHT, NOT `max-height` WITH `height: auto`.
+ *
+ * Two things broke under the capping approach:
+ *
+ *   1. An SVG that declares only a `viewBox` and no width/height has no
+ *      intrinsic size. `height: auto` inside a flex row resolved it to zero,
+ *      so onmobile.svg rendered at 0×0 — loaded, painted, invisible.
+ *   2. A mark smaller than the cap was never scaled up. dotpe.svg is 103×26
+ *      natively and sat noticeably shorter than its neighbours, because
+ *      `max-height` only ever shrinks.
+ *
+ * Pinning the height normalises every mark to one optical line and gives the
+ * viewBox-only SVGs something concrete to resolve against. `width: auto` keeps
+ * each ratio, `max-width: 100%` stops a very wide wordmark overflowing its
+ * cell, and `object-fit: contain` guarantees nothing is distorted if both
+ * constraints bind at once.
+ */
+.logo {
+  height: 34px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  filter: var(--client-logo-filter, grayscale(1) brightness(0.45));
+  transition: var(--transition-control);
+}
+
+.item:hover .logo,
+.item:focus-visible .logo {
+  filter: none;
+}
+
+@media (max-width: 700px) {
+  .wall {
+    gap: var(--space-4) var(--space-5);
+  }
+
+  .item {
+    padding: var(--space-2) var(--space-3);
+    min-height: 40px;
+  }
+
+  .wordmark {
+    font-size: 16px;
+  }
+
+  .logo {
+    height: 26px;
+  }
+}
+
+/* Motion is decoration here; the opacity shift is the only movement and it is
+ * cheap, but honour the preference anyway. */
+@media (prefers-reduced-motion: reduce) {
+  .item,
+  .logo,
+  .wordmark {
+    transition: none;
+  }
+}

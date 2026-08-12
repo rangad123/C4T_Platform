@@ -27,7 +27,30 @@ export interface HeroProps {
    * CSS, so a call site cannot invent a third geometry. Ignored when
    * `align="center"`.
    */
-  mediaWidth?: 'default' | 'wide'
+  /**
+   * A substring of `title` to render in the accent colour.
+   *
+   * Takes a string, not JSX, so the content modules stay plain data — the OG
+   * card and the page metadata read the same `title` and cannot hold markup.
+   * Only the first occurrence is highlighted, and a value that does not appear
+   * in `title` is ignored rather than throwing, so a copy edit that breaks the
+   * pairing degrades to an unhighlighted headline instead of a crash.
+   */
+  titleHighlight?: string
+  /**
+   * How the split hero divides its two columns.
+   *
+   *   default   `1.05fr 1fr`  — near-even, what every inner page uses.
+   *   wide      `1fr 1.25fr`  — media-led, for art that carries the page.
+   *   copy-led  `1.5fr 1fr`   — for a long headline that needs the measure.
+   *
+   * `copy-led` also RAISES THE COPY COLUMN'S maxWidth, which is the part that
+   * actually matters. The copy is capped at 560px independently of the grid, so
+   * widening the track alone changes nothing — the headline keeps wrapping at
+   * the same place and only the whitespace beside it grows. Both have to move
+   * together.
+   */
+  mediaWidth?: 'default' | 'wide' | 'copy-led'
   tone?: 'canvas' | 'sunken' | 'inverse'
   align?: 'split' | 'center'
   /** Small line under the CTAs — compliance or social proof. */
@@ -53,6 +76,7 @@ export interface HeroProps {
 export function Hero({
   eyebrow,
   title,
+  titleHighlight,
   description,
   primaryCta,
   primaryHref,
@@ -71,7 +95,59 @@ export function Hero({
   const centered = align === 'center'
   // Both collapse to one column under 900px via `.c4t-hero-split`, so neither
   // ratio survives to mobile and neither can cause a horizontal overflow there.
-  const splitColumns = mediaWidth === 'wide' ? '1fr 1.25fr' : '1.05fr 1fr'
+  const splitColumns =
+    mediaWidth === 'wide' ? '1fr 1.25fr' : mediaWidth === 'copy-led' ? '1.5fr 1fr' : '1.05fr 1fr'
+
+  /**
+   * The measure the headline actually gets. 560px is the default and the reason
+   * a long title wraps early; `copy-led` lifts it to 760 so nine words set in
+   * three lines rather than four. The description keeps its own 540px cap below
+   * — body text at 760 would run past the ~75ch comfortable measure, so the
+   * headline widens and the paragraph does not.
+   */
+  const copyMaxWidth = centered ? 820 : mediaWidth === 'copy-led' ? 760 : 560
+
+  /**
+   * The headline, with `titleHighlight` tinted if it is present in `title`.
+   *
+   * ⚠ THIS USES `--accent-base` ON DARK, WHICH IS ONLY SAFE AT DISPLAY SIZE.
+   *
+   * colors.css routes the accent-on-dark role to `--text-brand-inverse`
+   * (teal-100) and warns that "teal-500 on ink-950 is unreadable". That
+   * guidance is written for text in general, and it is right for body copy —
+   * measured, `--accent-base` (#0b7a6e) on `--ink-950` (#17130f) is 3.54:1,
+   * short of the 4.5:1 WCAG 1.4.3 requires at normal size.
+   *
+   * A hero headline is not normal size. At ~56px it is comfortably past the
+   * 24px "large text" threshold, where the requirement is 3:1 — so 3.54:1
+   * conforms. The Client asked for the deeper teal of the primary button, and
+   * at this size it is legitimately available.
+   *
+   * DO NOT LIFT THIS PAIRING INTO SMALLER TEXT. Below 24px (or 18.66px bold)
+   * it silently becomes a contrast failure. Anything at body size on a dark
+   * band must go back to `--text-brand-inverse`, which measures 14.45:1.
+   *
+   * The span carries no semantics: it is a colour change, not emphasis. A
+   * screen reader reads the headline as one continuous sentence, which is
+   * right — the tint is a visual accent, and marking it up as <em> or <strong>
+   * would put stress on two words that are not being contrasted with anything.
+   */
+  const headline = (() => {
+    // `title` is ReactNode — callers may pass an element. Splitting only makes
+    // sense on a plain string, so anything else passes straight through.
+    if (!titleHighlight || typeof title !== 'string') return title
+    const at = title.indexOf(titleHighlight)
+    if (at === -1) return title
+    return (
+      <>
+        {title.slice(0, at)}
+        <span style={{ color: inverse ? 'var(--accent-base)' : 'var(--text-brand)' }}>
+          {titleHighlight}
+        </span>
+        {title.slice(at + titleHighlight.length)}
+      </>
+    )
+  })()
 
   const copy = (
     <div
@@ -80,7 +156,7 @@ export function Hero({
         flexDirection: 'column',
         alignItems: centered ? 'center' : 'flex-start',
         textAlign: centered ? 'center' : 'left',
-        maxWidth: centered ? 820 : 560,
+        maxWidth: copyMaxWidth,
         marginInline: centered ? 'auto' : 0,
       }}
     >
@@ -111,7 +187,7 @@ export function Hero({
           textWrap: 'balance',
         }}
       >
-        {title}
+        {headline}
       </h1>
 
       {description ? (

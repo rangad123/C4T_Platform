@@ -55,3 +55,4 @@ export {
   type CapabilitySectionProps,
   type Capability,
 } from './marketing/CapabilitySection'
+export { LogoWall, type LogoWallProps } from './marketing/LogoWall'

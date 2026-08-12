@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og'
 import { BRAND_COLORS } from '@/styles/brand'
+import { HOME_HERO } from '@/content/home'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 
@@ -144,7 +145,15 @@ export default async function OpengraphImage() {
               maxWidth: 540,
             }}
           >
-            Ship AI and software your users can trust.
+            {/*
+              READ FROM THE CONTENT MODULE, NOT RETYPED.
+              This card carried its own copy of the homepage headline, so when
+              the Client replaced that headline the social preview kept
+              advertising the old one — the link unfurled in Slack or LinkedIn
+              with a promise the page no longer made. Bound to HOME_HERO.title
+              so the two can no longer drift.
+            */}
+            {HOME_HERO.title}
           </div>
         </div>
 

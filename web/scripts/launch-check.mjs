@@ -88,6 +88,13 @@ const CHECKS = [
     why: 'The handoff placeholder is still rendering on the homepage. Replace with a real, attributable quote with written consent, or delete the section.',
   },
   {
+    id: 'client-logo-permission',
+    severity: 'blocker',
+    file: 'src/content/clients.ts',
+    find: 'permission: false',
+    why: 'The homepage names ten companies as clients. content.md §4.2 and the §14 asset table both require WRITTEN permission for each — verbal is not enough, and most MSAs require written approval for marketing use. Get sign-off per company, set `permission: true` on its entry, and only then ship. Naming a client without consent is the kind of claim their legal team, not their marketing team, responds to.',
+  },
+  {
     id: 'placeholder-case-studies',
     severity: 'blocker',
     file: 'src/content/case-studies.ts',

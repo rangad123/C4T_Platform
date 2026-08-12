@@ -20,6 +20,7 @@
 
 export * from './nav'
 export * from './stats'
+export * from './clients'
 export * from './media'
 export * from './home'
 export * from './pages'
