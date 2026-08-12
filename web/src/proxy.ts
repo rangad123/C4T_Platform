@@ -31,7 +31,7 @@ export function proxy(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl
 
   /**
-   * Canonicalise path casing.
+   * Canonicalise path casing — for PAGES ONLY.
    *
    * The old site used PascalCase paths (`/Pricing`, `/Contact`, `/Services`),
    * and Next's filesystem routing is case-SENSITIVE, so those inbound links
@@ -41,9 +41,29 @@ export function proxy(request: NextRequest): NextResponse {
    *
    * Here the comparison is exact, so it is safe. This also covers every stray
    * capitalisation the legacy map never enumerated.
+   *
+   * ── STATIC FILES ARE EXEMPT, and the exemption is not cosmetic
+   *
+   * A file served from `public/` keeps whatever case its filename has, and the
+   * filesystem serves it case-sensitively. Lowercasing the request redirects it
+   * to a name that does not exist, so the asset 404s. Worse, the failure does
+   * not look like a routing problem: `next/image` fetches the original path,
+   * follows the redirect into a 404, and reports `400 Bad Request` from
+   * `/_next/image` — which points at the optimizer, not at this file.
+   *
+   * That is exactly what a client-supplied `C4T_Landing_Page.png` did on the
+   * homepage hero. The matcher below already excludes `_next/*` and the
+   * well-known files, but nothing stopped an ordinary public asset with a
+   * capital letter in its name from being rewritten out of existence.
+   *
+   * The test is a dot in the LAST segment — i.e. a file extension. Page routes
+   * in this app never contain one; every static asset does.
    */
+  const lastSegment = pathname.slice(pathname.lastIndexOf('/') + 1)
+  const isStaticFile = lastSegment.includes('.')
+
   const lower = pathname.toLowerCase()
-  if (pathname !== lower) {
+  if (!isStaticFile && pathname !== lower) {
     const url = request.nextUrl.clone()
     url.pathname = lower
     return NextResponse.redirect(url, 308)

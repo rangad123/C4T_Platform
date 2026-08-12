@@ -167,12 +167,18 @@ main textarea:focus-visible {
   outline-color: var(--ink-50);
 }
 
-/* ── Hero video edge feather ─────────────────────────────────────────────────
+/* ── Hero media edge feather ─────────────────────────────────────────────────
  *
- * The homepage hero carries `public/home.mp4`. A video element paints an opaque
- * rectangle, so against the ink-950 band it reads as a sticker pasted onto the
- * page rather than part of it. The four edges are feathered to transparent so
- * the band shows through and the frame dissolves into it.
+ * The homepage hero carries `public/C4T_Landing_Page.png`. An image paints an
+ * opaque rectangle, so against the ink-950 band it reads as a sticker pasted
+ * onto the page rather than part of it. The four edges are feathered to
+ * transparent so the band shows through and the frame dissolves into it.
+ *
+ * NAMED `--media`, NOT `--video`. This class held a `<video>` until the brand
+ * still replaced it. The geometry and the mask are identical either way — they
+ * describe a rectangle in the hero's media column, not the element type — so
+ * the rule survived the swap and only the name had to change. Keep it
+ * element-neutral if the art changes again.
  *
  * A MASK, NOT A GRADIENT OVERLAY. An overlay has to hardcode the band colour
  * and then silently drifts the moment that band changes; a mask blends into
@@ -191,26 +197,35 @@ main textarea:focus-visible {
  * is written long-form rather than as `#000` so a grep for pure black on this
  * codebase stays honest.
  */
-.c4t-hero-video {
+.c4t-hero-media {
   /* THE BOX MODEL LIVES HERE, NOT INLINE ON THE ELEMENT.
    *
-   * These four declarations were originally an inline `style` object on the
-   * <video>. An inline style outranks an external stylesheet rule regardless of
-   * selector specificity, so the inline `width: 100%` silently beat the widened
-   * `width` in the media query below — the frame could not be made bigger, and
-   * nothing in the cascade said why. The mask and the vertical nudge were
-   * unaffected only because neither is set inline.
+   * These declarations were originally an inline `style` object. An inline
+   * style outranks an external stylesheet rule regardless of selector
+   * specificity, so the inline `width: 100%` silently beat the widened `width`
+   * in the media query below — the frame could not be made bigger, and nothing
+   * in the cascade said why. The mask and the vertical nudge were unaffected
+   * only because neither is set inline.
    *
    * `aspect-ratio` plus `width` is what sizes the frame; `height: auto` lets
-   * the ratio drive it rather than the parent. `object-fit: cover` crops the
-   * 1920×1080 source into the 4:3 box — a deliberate crop, since 16:9 in this
-   * column would be markedly shorter.
+   * the ratio drive it rather than the parent. The source is 1454×1082, which
+   * is 1.344 — within half a percent of 4:3, so the crop is imperceptible and
+   * the box keeps the proportions the surrounding layout was built around.
+   *
+   * THE TRANSPARENT BACKGROUND IS LOAD-BEARING. <SiteImage> paints
+   * `--surface-sunken` behind the picture so a slow load shows a surface
+   * rather than a hole. That is right on a light page and wrong here: this
+   * frame sits on the ink-950 band and its edges are feathered to transparent,
+   * so a light floor would show through the fade as a glowing rectangle and
+   * undo the blend. The mask hides the image edges, not the wrapper's own
+   * paint — the wrapper must simply not paint.
    */
   display: block;
   width: 100%;
   height: auto;
   aspect-ratio: 4 / 3;
   object-fit: cover;
+  background: transparent;
 
   /* How far in from each edge the fade runs. 10% of a 4:3 frame is a soft
    * ~40px feather at the hero's rendered width, enough to dissolve the border
@@ -251,7 +266,7 @@ main textarea:focus-visible {
   mask-composite: intersect;
 }
 
-/* The video sits a little above the optical centre of the hero row.
+/* The frame sits a little above the optical centre of the hero row.
  *
  * The Hero's split grid uses `align-items: center`, which centres the media
  * against the whole copy column — headline, deck, bullets, CTAs and the trust
@@ -261,14 +276,14 @@ main textarea:focus-visible {
  * `position: relative` + `top` rather than `margin-top`: this nudges the frame
  * without changing the grid row's height, so nothing below the hero moves. A
  * `transform` would do the same but promotes the element to its own compositing
- * layer, and Safari has a history of mishandling a masked, transformed video.
+ * layer, which is a needless repaint risk on a masked element.
  *
  * Scoped above 900px because that is where `.c4t-hero-split` collapses to a
- * single column. Below it the video stacks above the copy, where lifting it
+ * single column. Below it the media stacks above the copy, where lifting it
  * would just open a gap.
  */
 @media (min-width: 901px) {
-  .c4t-hero-video {
+  .c4t-hero-media {
     position: relative;
     top: calc(-1 * var(--space-11));
 

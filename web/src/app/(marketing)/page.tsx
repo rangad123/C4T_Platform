@@ -85,51 +85,52 @@ export default function HomePage() {
           'Results triaged in your Jira',
         ]}
         trustLine={HOME_HERO.trustLine}
-        // The homepage is the only hero carrying a video, and a moving frame
-        // needs more room than a still to read. 'wide' flips the split from
-        // `1.05fr 1fr` to `1fr 1.25fr` — the media column goes from ~535px to
-        // ~610px inside the 1200px container, about a third more area. Every
-        // other hero keeps the default.
+        // The homepage hero art is given more room than the others. 'wide'
+        // flips the split from `1.05fr 1fr` to `1fr 1.25fr` — the media column
+        // goes from ~535px to ~610px inside the 1200px container, about a
+        // third more area. Every other hero keeps the default.
         mediaWidth="wide"
         media={
-          // The brand video.
-          //
-          // The poster is the video's OWN first frame, extracted with ffmpeg to
-          // `public/home-poster.jpg` (90 KB). It used to be an unrelated
-          // Unsplash photo, which meant the hero visibly cut from a stock image
-          // to the video the moment playback began. Using frame 1 means the
-          // still and the first frame are identical, so there is nothing to
-          // see — and it removes one more Unsplash dependency from the page.
-          //
-          // REGENERATE IT WHENEVER home.mp4 CHANGES — a poster left over from a
-          // previous cut is worse than none, because it shows a frame the video
-          // never reaches. Scaled to 1280 because the frame renders at ~830px:
-          //
-          //   ffmpeg -y -i public/home.mp4 \
-          //     -vf "select=eq(n\,0),scale=1280:-2" -vframes 1 -q:v 4 \
-          //     public/home-poster.jpg
-          //
-          // `autoplay muted playsInline` is the standard autoplay recipe —
-          // `muted` is what lets Safari iOS play inline at all, `playsInline`
-          // keeps the user on the page rather than going fullscreen. No
-          // controls, no audio.
-          <video
-            src="/home.mp4"
-            poster="/home-poster.jpg"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="metadata"
+          // The brand artwork. This slot held `public/home.mp4` until the
+          // still was supplied; the geometry is unchanged, because the mask,
+          // the upward nudge and the container bleed all describe a rectangle
+          // rather than an element type. See `.c4t-hero-media` in
+          // overrides.css and the `heroLanding` note in content/media.ts.
+          <SiteImage
+            src={PHOTOS.heroLanding.src}
+            alt={PHOTOS.heroLanding.alt}
+            fill
+            // `priority` because this IS the LCP element on the homepage.
+            // Without it Next lazy-loads the hero, which is the one image on
+            // the site that must never wait.
+            priority
+            // The frame renders at ~610px in the container and up to ~830px
+            // once the bleed applies, so the browser never needs a
+            // full-viewport asset here. Left at the container's real ceiling
+            // rather than the default 50vw, which over-fetches on wide screens.
+            sizes="(max-width: 900px) 100vw, 830px"
+            // No rounded corners: the edges are feathered to transparent by
+            // the mask, so there is no visible corner left to round.
+            radius="0"
+            // MUST BE INLINE. <SiteImage> sets `background: var(--surface-sunken)`
+            // as an inline style so a slow load shows a surface instead of a
+            // hole. Inline beats any external stylesheet, so the `background:
+            // transparent` in overrides.css does NOT win — measured at
+            // rgb(241,237,232) on the rendered wrapper. On this hero that light
+            // floor shows straight through the feathered edges as a pale
+            // rectangle on the ink-950 band, which is precisely what the mask
+            // exists to avoid. SiteImage spreads `style` last, so this overrides
+            // it. Removing this line silently brings the rectangle back.
+            style={{ background: 'transparent' }}
             // ALL geometry lives in overrides.css against this class, and
-            // deliberately so: this element previously carried an inline
+            // deliberately so: this slot previously carried an inline
             // `width: 100%`, and an inline style outranks any external
             // stylesheet rule short of `!important`. That silently defeated the
             // width rule in overrides.css — the mask and the vertical nudge
             // applied, because neither is an inline property, but every attempt
             // to widen the frame was overridden and had no effect. Keeping the
             // box model in one place is what stops that recurring.
-            className="c4t-hero-video"
+            className="c4t-hero-media"
           />
         }
       />

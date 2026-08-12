@@ -114,7 +114,19 @@ export function TopNav({
           gap: 'var(--space-8)',
         }}
       >
-        <Logo size={32} href="/" />
+        {/* The supplied one-piece lockup. It contains the wordmark, so this
+            replaces the previous mark-plus-live-text pairing rather than
+            sitting beside it.
+
+            SIZED BY OPTICAL WEIGHT, NOT BY THE NUMBER IT REPLACES. The old
+            lockup was a 32px mark plus 24px live text and measured ~140px
+            across. Setting this artwork to a matching 32–34px height rendered
+            it 79px wide and visibly smaller, because the PNG carries its own
+            padding above and below the glyphs — height here buys less type
+            than it did on the bare mark. 50px brings it to ~116px, close to
+            the old footprint, and still leaves 11px of clearance top and
+            bottom inside the 72px bar. */}
+        <Logo variant="horizontal" size={50} href="/" />
 
         <nav
           aria-label="Primary"

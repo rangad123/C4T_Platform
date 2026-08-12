@@ -7,8 +7,22 @@ export interface LogoProps {
    * Mark height in px. The mark is square, so width follows.
    *   32 in nav and footer (matched).
    *   40+ for hero lockups and the footer brand column.
+   *
+   * With `variant="horizontal"` this is still the rendered HEIGHT; the width
+   * is derived from the artwork's 762×327 ratio.
    */
   size?: number
+  /**
+   * `mark` (default) draws the square mark beside a live-text wordmark.
+   * `horizontal` draws the single supplied lockup, `crowd4test-logo-horizontal.png`,
+   * which already contains the wordmark — so `withWordmark` is ignored.
+   *
+   * The two are not interchangeable at small sizes: the horizontal artwork
+   * carries baked-in type, which stops being legible below roughly 24px tall,
+   * where the mark-plus-live-text version still renders crisply. Use `mark`
+   * anywhere the lockup has to go small.
+   */
+  variant?: 'mark' | 'horizontal'
   /**
    * Wordmark font size in px. Defaults to 0.75 × `size` so the type reads as
    * a label to the mark's icon — 32 mark → 24 type, the 3:4 ratio that holds
@@ -46,8 +60,17 @@ export interface LogoProps {
  * hears the brand once, not "Crowd4Test Crowd4Test" (image alt + visible text).
  * The image's `alt=""` keeps assistive tech from repeating it.
  */
+/**
+ * Intrinsic size of `public/crowd4test-logo-horizontal.png`. Kept as a constant
+ * so the aspect ratio is derived rather than guessed — `next/image` needs real
+ * dimensions to reserve layout space, and a wrong ratio here shows up as a
+ * squashed logo on every page rather than a build error.
+ */
+const HORIZONTAL_INTRINSIC = { width: 762, height: 327 } as const
+
 export function Logo({
   size = 32,
+  variant = 'mark',
   wordmarkSize,
   tone = 'default',
   withWordmark = true,
@@ -61,7 +84,9 @@ export function Logo({
   const base: CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: Math.round(size / 3),
+    // The horizontal artwork already contains the wordmark, so there is no
+    // second element to space away from.
+    gap: variant === 'horizontal' ? 0 : Math.round(size / 3),
     lineHeight: 1,
     textDecoration: 'none',
     ...style,
@@ -93,6 +118,29 @@ export function Logo({
     />
   )
 
+  /**
+   * The supplied one-piece lockup. Width is derived from the artwork's real
+   * dimensions so the ratio cannot drift; `size` drives the height, matching
+   * how the `mark` variant behaves.
+   *
+   * ⚠ THE INVERSE FILTER IS A COMPROMISE HERE. `brightness(0) invert(1)` is
+   * correct for the square mark, which is single-colour artwork — it produces a
+   * clean white silhouette. This lockup contains the teal "4" and dark type, so
+   * the same filter flattens all of it to one white, losing the accent. It is
+   * applied anyway because an untreated dark logo is illegible on the ink-950
+   * band, and a flat white lockup is the lesser fault. If the brand supplies a
+   * light-on-dark version of this file, drop the filter and switch on `tone`.
+   */
+  const horizontal = (
+    <Image
+      src="/crowd4test-logo-horizontal.png"
+      alt=""
+      width={Math.round(size * (HORIZONTAL_INTRINSIC.width / HORIZONTAL_INTRINSIC.height))}
+      height={size}
+      style={markStyle}
+    />
+  )
+
   const wordmark = (
     <span
       style={{
@@ -115,14 +163,19 @@ export function Logo({
     </span>
   )
 
-  const content = withWordmark ? (
-    <>
-      {mark}
-      {wordmark}
-    </>
-  ) : (
-    mark
-  )
+  // `horizontal` ignores `withWordmark` — the wordmark is part of the artwork,
+  // so there is nothing to switch off.
+  const content =
+    variant === 'horizontal' ? (
+      horizontal
+    ) : withWordmark ? (
+      <>
+        {mark}
+        {wordmark}
+      </>
+    ) : (
+      mark
+    )
 
   if (!href) {
     return (
