@@ -73,11 +73,6 @@ export interface SectionCopy {
   /** Mono uppercase kicker. Omitted where it would restate the heading. */
   eyebrow?: string
   title: string
-  /**
-   * A trailing clause of `title` set at a smaller size, on its own line.
-   * For headings that pair a claim with a list of qualities.
-   */
-  titleSmall?: string
   description?: string
   /** Trailing link on the header row. Omitted where the destination was cut. */
   action?: { label: string; href: string }
@@ -98,40 +93,45 @@ export const HOME_SECTIONS = {
   },
   aiQuality: {
     /**
-     * NO EYEBROW. It read "AI Quality", which the heading beneath it already
-     * says twice over — the section opened with the words "AI" and "Testing"
-     * immediately below a kicker announcing "AI QUALITY".
+     * Restored. It was removed when the heading below it changed, because
+     * "AI QUALITY" sat above a headline opening with "AI-Powered Testing" —
+     * but every other section on the page carries a kicker ("The problem",
+     * "The approach", "Proof"), and dropping it from two sections broke that
+     * rhythm more visibly than the overlap did.
+     *
+     * Value is content.md §4.5 verbatim rather than something invented to
+     * dodge the repetition — CLAUDE.md is explicit that copy comes from the
+     * handoff.
      */
+    eyebrow: 'AI Quality',
     /**
-     * Client-supplied, replacing "Testing built for products that think."
-     * Written as "AI-Powered Testing Platform  Intelligent, Autonomus, Faster".
-     *
-     * The double space between "Platform" and "Intelligent" was a separator, so
-     * the three qualities are split into `titleSmall` and set smaller on their
-     * own line — which is what the gap was reaching for. An em dash stood in
-     * for it briefly; it is gone now that the size change does the same job
-     * without leaving a dangling mark at the end of a line.
-     *
-     * "Autonomus" is spelled "Autonomous".
+     * Reverted to the handoff copy at the Client's request. This briefly read
+     * "AI-Powered Testing Platform / Intelligent, Autonomous, Faster", set as a
+     * heading with a smaller trailing clause.
      */
-    title: 'AI-Powered Testing Platform',
-    titleSmall: 'Intelligent, Autonomous, Faster',
+    title: 'Testing built for products that think.',
     description:
       'AI features fail in ways traditional QA was never designed to catch. We test the failure modes that matter.',
     action: { label: 'Explore AI testing', href: '/ai-testing' },
   },
   services: {
     /**
-     * NO EYEBROW. It read "Software Quality Engineering", and the heading below
-     * it is "Comprehensive Quality Engineering Services" — the same three words
-     * twice, one directly above the other.
+     * Restored, content.md §4.6 verbatim — see the note on `aiQuality` above.
      *
-     * Third of three removed for the same reason (the hero and the AI quality
-     * section were the others). The pattern: these kickers were written to
-     * frame short, oblique headings like "The full QA stack, still." Once the
-     * headings became literal descriptions of the discipline, the kickers
-     * became echoes of them.
+     * ⚠ THIS ONE STILL READS AS A REPEAT. "SOFTWARE QUALITY ENGINEERING" sits
+     * directly above "Comprehensive Quality Engineering Services": two of the
+     * three words appear in both lines. The kicker was written to frame the
+     * original heading, "The full QA stack, still.", which said something
+     * different from it; the Client's replacement heading now says roughly the
+     * same thing.
+     *
+     * Kept because the section rhythm matters more than the repetition, and
+     * because inventing a replacement label would be writing marketing copy.
+     * If the Client wants it fixed, the shortest honest option is a one-word
+     * kicker in the house style — "Services" — matching "Industries", "Proof"
+     * and "Resources" elsewhere on this page.
      */
+    eyebrow: 'Software Quality Engineering',
     /** Client-supplied, replacing "The full QA stack, still." */
     title: 'Comprehensive Quality Engineering Services',
     description:

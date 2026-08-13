@@ -251,8 +251,44 @@ export default function HomePage() {
         </div>
       </Section>
 
-      {/* ─── AI quality ──────────────────────────────────────────────────── */}
+      {/* ─── QA services ─────────────────────────────────────────────────── */}
+      {/*
+        ORDER: QA services now precedes AI quality. The two were the other way
+        round, following content.md §4.5 → §4.6.
+
+        THE TONES DID NOT MOVE WITH THEM. Each band's tone belongs to its
+        POSITION in the page, not to its content — the page alternates
+        canvas/sunken/inverse deliberately so no two adjacent bands share a
+        surface. Carrying `tone="sunken"` up here with the services content
+        would have put a sunken band directly against the sunken stat band's
+        neighbour and flattened the rhythm. So the first slot keeps canvas and
+        the second keeps sunken, and only the contents swapped.
+      */}
       <Section>
+        <SectionHeader
+          {...HOME_SECTIONS.services}
+          actions={
+            <Button variant="secondary" iconRight="arrow-right" href="/services">
+              {HOME_SECTIONS.services.action.label}
+            </Button>
+          }
+        />
+        <div className="c4t-grid-4" style={GRID_4}>
+          {QA_SERVICES.map((service) => (
+            <FeatureCard
+              key={service.slug}
+              icon={service.icon}
+              title={service.title}
+              description={service.description}
+              meta={service.meta}
+              href={`/services/${service.slug}`}
+            />
+          ))}
+        </div>
+      </Section>
+
+      {/* ─── AI quality ──────────────────────────────────────────────────── */}
+      <Section tone="sunken">
         <SectionHeader
           {...HOME_SECTIONS.aiQuality}
           actions={
@@ -272,30 +308,6 @@ export default function HomePage() {
               points={service.points}
               badge={service.badge}
               href={`/ai-testing/${service.slug}`}
-            />
-          ))}
-        </div>
-      </Section>
-
-      {/* ─── QA services ─────────────────────────────────────────────────── */}
-      <Section tone="sunken">
-        <SectionHeader
-          {...HOME_SECTIONS.services}
-          actions={
-            <Button variant="secondary" iconRight="arrow-right" href="/services">
-              {HOME_SECTIONS.services.action.label}
-            </Button>
-          }
-        />
-        <div className="c4t-grid-4" style={GRID_4}>
-          {QA_SERVICES.map((service) => (
-            <FeatureCard
-              key={service.slug}
-              icon={service.icon}
-              title={service.title}
-              description={service.description}
-              meta={service.meta}
-              href={`/services/${service.slug}`}
             />
           ))}
         </div>

@@ -4,18 +4,6 @@ export interface SectionHeaderProps {
   /** Mono uppercase kicker. */
   eyebrow?: string
   title?: ReactNode
-  /**
-   * A trailing clause of the heading, set smaller and on its own line inside
-   * the same `<h2>`.
-   *
-   * One heading element, not two: "AI-Powered Testing Platform" and
-   * "Intelligent, Autonomous, Faster" are one thought, and splitting them into
-   * an h2 plus a sibling paragraph would either invent a heading level or
-   * demote half the sentence to body copy. Screen readers announce the whole
-   * string as a single heading, which is what it is — the size change is
-   * visual hierarchy, not structure.
-   */
-  titleSmall?: ReactNode
   description?: ReactNode
   align?: 'left' | 'center'
   tone?: 'default' | 'inverse'
@@ -35,7 +23,6 @@ export interface SectionHeaderProps {
 export function SectionHeader({
   eyebrow,
   title,
-  titleSmall,
   description,
   align = 'left',
   tone = 'default',
@@ -79,24 +66,6 @@ export function SectionHeader({
           }}
         >
           {title}
-          {titleSmall ? (
-            <span
-              style={{
-                display: 'block',
-                // One step down the display scale, not an arbitrary fraction:
-                // the qualities read as a subordinate clause while staying
-                // clearly part of the heading rather than turning into a deck.
-                fontSize: 'var(--type-heading-lg-size)',
-                lineHeight: 'var(--type-heading-lg-line)',
-                letterSpacing: 'var(--type-heading-lg-tracking)',
-                marginTop: 6,
-                // Slightly receded so the claim leads and the qualities follow.
-                color: inverse ? 'var(--text-inverse-muted)' : 'var(--text-secondary)',
-              }}
-            >
-              {titleSmall}
-            </span>
-          ) : null}
         </h2>
       ) : null}
 

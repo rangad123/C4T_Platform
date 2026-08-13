@@ -96,7 +96,7 @@ export function Hero({
   // Both collapse to one column under 900px via `.c4t-hero-split`, so neither
   // ratio survives to mobile and neither can cause a horizontal overflow there.
   const splitColumns =
-    mediaWidth === 'wide' ? '1fr 1.25fr' : mediaWidth === 'copy-led' ? '1.5fr 1fr' : '1.05fr 1fr'
+    mediaWidth === 'wide' ? '1fr 1.25fr' : mediaWidth === 'copy-led' ? '1.15fr 1fr' : '1.05fr 1fr'
 
   /**
    * The measure the headline actually gets. 560px is the default and the reason
@@ -141,7 +141,42 @@ export function Hero({
     return (
       <>
         {title.slice(0, at)}
-        <span style={{ color: inverse ? 'var(--accent-base)' : 'var(--text-brand)' }}>
+        <span
+          style={{
+            /**
+             * MONO UPPERCASE, borrowed from the eyebrow treatment — same face,
+             * same weight, same 0.12em tracking as `.c4t-eyebrow`, so the two
+             * read as one typographic voice even though this sits inside a
+             * display headline rather than above it.
+             *
+             * SIZED IN `em`, NOT A TOKEN — this is the important part.
+             *
+             * 0.64em is 36px against the 56px desktop headline, which is where
+             * this landed by eye: the eyebrow's own 12px disappears inside a
+             * display line, and 28px still read as a footnote rather than part
+             * of the sentence. Mono runs optically smaller than the display
+             * face at the same nominal size, so it has to sit higher on the
+             * scale than a like-for-like swap suggests.
+             *
+             * It was briefly a fixed `--type-display-md-size`. That breaks on
+             * small screens: the headline scales down to 34px at 375px wide
+             * while a fixed 36px does not, so the phrase meant to be SMALLER
+             * than the headline rendered LARGER than it. `em` inherits from the
+             * h1, so the ratio holds at every breakpoint.
+             *
+             * `text-transform` rather than uppercased source text: the string
+             * in content/home.ts stays "Human Intelligence", so the OG card,
+             * page metadata and any screen reader get the sentence-cased form.
+             * Only the rendering shouts.
+             */
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.64em',
+            fontWeight: 'var(--fw-semibold)',
+            letterSpacing: 'var(--type-eyebrow-tracking)',
+            textTransform: 'uppercase',
+            color: inverse ? 'var(--accent-base)' : 'var(--text-brand)',
+          }}
+        >
           {titleHighlight}
         </span>
         {title.slice(at + titleHighlight.length)}
