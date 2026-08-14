@@ -31,7 +31,8 @@
     "db:reset": "prisma migrate reset --force",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "legacy:verify": "tsx scripts/verify-legacy-login.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

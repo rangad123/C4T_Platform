@@ -1,7 +1,7 @@
 import 'server-only'
 import { cookies } from 'next/headers'
 import { env } from '@/lib/env'
-import { ApiError, type ApiFailure, type ApiSuccess } from './types'
+import { ApiError, type ApiFailure, type ApiSuccess, type PageMeta } from './types'
 
 /**
  * Server-side API access for Server Components, Route Handlers and Server
@@ -81,4 +81,49 @@ export async function serverFetchOrNull<T>(
   } catch {
     return null
   }
+}
+
+/**
+ * A list read that keeps `meta` as well as `data`.
+ *
+ * `serverFetch` returns the unwrapped `data` and DISCARDS `meta`, which is
+ * right for a single resource and wrong for a paginated list — the page count
+ * and total live in `meta`, so a caller that needs to render pagination has
+ * nothing to render it from. Reaching for `serverFetch` on a list endpoint and
+ * then reading `response.data` is the natural mistake, and it fails quietly:
+ * `data` is `undefined` on an already-unwrapped array, so the list renders as
+ * an error state rather than throwing anywhere useful.
+ *
+ * This returns the envelope intact. `meta` is optional because not every list
+ * endpoint paginates.
+ */
+export async function serverFetchPage<T>(
+  path: string,
+  options: ServerRequestOptions = {},
+): Promise<{ data: T[]; meta?: PageMeta }> {
+  const { body, query, headers, ...rest } = options
+  const cookieStore = await cookies()
+  const cookieHeader = cookieStore.toString()
+
+  const response = await fetch(buildUrl(path, query), {
+    ...rest,
+    headers: {
+      ...(cookieHeader ? { cookie: cookieHeader } : {}),
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...headers,
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    cache: 'no-store',
+  })
+
+  const text = await response.text()
+  const json: unknown = text ? JSON.parse(text) : null
+
+  if (!response.ok) {
+    const failure: Partial<ApiFailure> = typeof json === 'object' && json !== null ? json : {}
+    throw new ApiError(response.status, failure)
+  }
+
+  const envelope = json as ApiSuccess<T[]>
+  return { data: envelope.data, meta: envelope.meta }
 }

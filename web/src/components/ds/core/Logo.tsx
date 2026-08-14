@@ -14,7 +14,7 @@ export interface LogoProps {
   size?: number
   /**
    * `mark` (default) draws the square mark beside a live-text wordmark.
-   * `horizontal` draws the single supplied lockup, `crowd4test-logo-horizontal.png`,
+   * `horizontal` draws the single supplied lockup, `logo-with-text.png`,
    * which already contains the wordmark — so `withWordmark` is ignored.
    *
    * The two are not interchangeable at small sizes: the horizontal artwork
@@ -61,7 +61,7 @@ export interface LogoProps {
  * The image's `alt=""` keeps assistive tech from repeating it.
  */
 /**
- * Intrinsic size of `public/crowd4test-logo-horizontal.png`. Kept as a constant
+ * Intrinsic size of `public/images/logos/logo-with-text.png`. Kept as a constant
  * so the aspect ratio is derived rather than guessed — `next/image` needs real
  * dimensions to reserve layout space, and a wrong ratio here shows up as a
  * squashed logo on every page rather than a build error.
@@ -110,7 +110,7 @@ export function Logo({
       // so the browser doesn't reflow once the image arrives. `priority` is not
       // set because the logo is rarely the LCP element — on the homepage the
       // hero is, and on inner pages it is below the fold.
-      src="/logo.png"
+      src="/images/logos/logo-without-text.png"
       alt=""
       width={size}
       height={size}
@@ -133,7 +133,7 @@ export function Logo({
    */
   const horizontal = (
     <Image
-      src="/crowd4test-logo-horizontal.png"
+      src="/images/logos/logo-with-text.png"
       alt=""
       width={Math.round(size * (HORIZONTAL_INTRINSIC.width / HORIZONTAL_INTRINSIC.height))}
       height={size}

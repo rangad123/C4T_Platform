@@ -1,6 +1,15 @@
-import { Role, UserStatus, OrgMemberRole, OrganisationStatus, TesterStatus } from '@prisma/client'
+import {
+  Role,
+  UserStatus,
+  OrgMemberRole,
+  OrganisationStatus,
+  TesterStatus,
+  PasswordAlgo,
+} from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { hashPassword, verifyPassword, needsRehash } from '../../lib/password.js'
+import { isLegacyAlgo, verifyLegacyPassword } from '../../lib/legacy-password.js'
+import type { GoogleIdentity } from '../../lib/oauth/google.js'
 import {
   signAccessToken,
   generateRefreshToken,
@@ -238,10 +247,14 @@ export async function login(
     select: {
       id: true,
       passwordHash: true,
+      passwordAlgo: true,
       status: true,
       deletedAt: true,
       failedLoginCount: true,
       lockedUntil: true,
+      // Used only to tell an OAuth-only user WHICH provider to use, rather
+      // than reporting a wrong password for one they never set.
+      oauthAccounts: { select: { provider: true } },
     },
   })
 
@@ -259,7 +272,33 @@ export async function login(
     throw new ForbiddenError('Too many failed attempts. Try again in a few minutes.')
   }
 
-  const valid = await verifyPassword(record.passwordHash, input.password)
+  /**
+   * An account created through Google has no password. Rejecting it with
+   * "incorrect email or password" would be a lie that sends the user round a
+   * reset loop for a credential that does not exist, so it is named instead.
+   *
+   * This leaks that the address is registered — but so does the reset form, and
+   * the alternative is a support ticket from every Google user who forgets how
+   * they signed up.
+   */
+  if (!record.passwordHash) {
+    const provider = record.oauthAccounts[0]?.provider
+    throw new UnauthorizedError(
+      provider === 'google'
+        ? 'This account uses Google sign-in. Use the "Continue with Google" button.'
+        : 'This account has no password set. Reset your password to create one.',
+    )
+  }
+
+  /**
+   * Legacy rows from the MySQL platform hold an MD5 or SHA-1 digest that Argon2
+   * cannot parse — see lib/legacy-password.ts. Route by the recorded algorithm
+   * rather than guessing from the hash on every login.
+   */
+  const usingLegacy = isLegacyAlgo(record.passwordAlgo)
+  const valid = usingLegacy
+    ? verifyLegacyPassword(record.passwordAlgo, record.passwordHash, input.password)
+    : await verifyPassword(record.passwordHash, input.password)
 
   if (!valid) {
     const nextCount = record.failedLoginCount + 1
@@ -277,9 +316,22 @@ export async function login(
   if (record.status === UserStatus.DEACTIVATED)
     throw new ForbiddenError('This account is deactivated')
 
-  // Users migrated from the legacy MySQL platform (§2.8) may carry a weaker
-  // hash. Upgrade transparently on a successful login.
-  const rehash = needsRehash(record.passwordHash) ? await hashPassword(input.password) : undefined
+  /**
+   * UPGRADE THE HASH. This is the only moment the plaintext is legitimately in
+   * memory, so it is the only moment a stored digest can be strengthened
+   * without asking the user for anything.
+   *
+   * Two cases converge here:
+   *   - a legacy MD5/SHA-1 row, which must be replaced outright; and
+   *   - an Argon2 hash produced under weaker parameters than we now use.
+   *
+   * `needsRehash` only understands Argon2 encodings, so it is not consulted for
+   * legacy rows — those are always rehashed.
+   */
+  const rehash =
+    usingLegacy || needsRehash(record.passwordHash)
+      ? await hashPassword(input.password)
+      : undefined
 
   await prisma.user.update({
     where: { id: record.id },
@@ -287,7 +339,7 @@ export async function login(
       failedLoginCount: 0,
       lockedUntil: null,
       lastLoginAt: new Date(),
-      ...(rehash ? { passwordHash: rehash } : {}),
+      ...(rehash ? { passwordHash: rehash, passwordAlgo: PasswordAlgo.ARGON2ID } : {}),
     },
   })
 
@@ -604,6 +656,21 @@ export async function changePassword(
   })
   if (!user) throw new NotFoundError('User')
 
+  /**
+   * A Google-only account has no password to change. Sending it down the
+   * verification path would compare against null and report "current password
+   * is incorrect", which is both false and a dead end — there is no password
+   * they could type that would work.
+   *
+   * Setting a first password belongs in the reset flow, which proves control of
+   * the mailbox. This endpoint requires the existing one by definition.
+   */
+  if (!user.passwordHash) {
+    throw new BadRequestError(
+      'This account signs in with Google and has no password. Use "Forgot password" to set one.',
+    )
+  }
+
   const valid = await verifyPassword(user.passwordHash, currentPassword)
   if (!valid) throw new UnauthorizedError('Current password is incorrect')
 
@@ -623,3 +690,168 @@ export async function changePassword(
 }
 
 export { loadPublicUser }
+
+/* ─── Google sign-in ────────────────────────────────────────────────────────
+ *
+ * One entry point for both "sign in" and "sign up". Google does not tell us
+ * which the user intended, and asking them to pick the right button before we
+ * know whether they have an account is a needless dead end.
+ */
+
+/** Which role a brand-new Google account should be created as. */
+export type GoogleSignUpRole = typeof Role.CUSTOMER | typeof Role.TESTER
+
+export interface GoogleSignInResult {
+  user: PublicUser
+  tokens: SessionTokens
+  /** True when this call created the account rather than signing one in. */
+  created: boolean
+}
+
+/**
+ * Signs a user in from a verified Google identity, creating or linking as
+ * needed.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * THE LINKING RULE, AND WHY IT IS WHAT IT IS
+ *
+ * Three cases, resolved in this order:
+ *
+ *  1. The Google subject is already linked → sign that user in. The `sub` claim
+ *     is the join key, never the email: a Google account's address can change,
+ *     and matching on it would hand the account to whoever inherits the old
+ *     address.
+ *
+ *  2. No link, but a local account exists with the same VERIFIED address →
+ *     attach the identity to it. This is the migration path for legacy users:
+ *     someone who has always signed in with a password can press "Continue with
+ *     Google" and land in the same account rather than a duplicate.
+ *
+ *     ⚠ THE `email_verified` CHECK IS LOad-BEARING. Without it, anyone able to
+ *     create a Google account claiming an address could take over the local
+ *     account holding it. Google only sets the flag for addresses it controls
+ *     or has confirmed, so an unverified identity is refused rather than linked.
+ *
+ *  3. Neither → create a new account in `signUpRole`.
+ *
+ * A linked account keeps its existing password. Google becomes an additional
+ * way in, not a replacement, so nobody is locked out if they later revoke access
+ * on Google's side.
+ */
+export async function signInWithGoogle(
+  identity: GoogleIdentity,
+  signUpRole: GoogleSignUpRole,
+  context: { userAgent?: string; ipAddress?: string },
+): Promise<GoogleSignInResult> {
+  // ── 1. Known identity ────────────────────────────────────────────────────
+  const link = await prisma.oAuthAccount.findUnique({
+    where: { provider_providerSubject: { provider: 'google', providerSubject: identity.subject } },
+    select: { userId: true, user: { select: { status: true, deletedAt: true } } },
+  })
+
+  if (link) {
+    if (link.user.deletedAt) throw new UnauthorizedError('This account is no longer active')
+    assertUsableStatus(link.user.status)
+
+    await prisma.user.update({
+      where: { id: link.userId },
+      data: { lastLoginAt: new Date(), failedLoginCount: 0, lockedUntil: null },
+    })
+    const user = await loadPublicUser(link.userId)
+    return { user, tokens: await openSession(user, context), created: false }
+  }
+
+  // ── 2. Existing local account with the same verified address ─────────────
+  const existing = await prisma.user.findUnique({
+    where: { email: identity.email },
+    select: { id: true, status: true, deletedAt: true },
+  })
+
+  if (existing) {
+    if (!identity.emailVerified) {
+      throw new UnauthorizedError(
+        'Google has not verified this email address, so it cannot be linked to an existing account.',
+      )
+    }
+    if (existing.deletedAt) throw new UnauthorizedError('This account is no longer active')
+    assertUsableStatus(existing.status)
+
+    await prisma.$transaction([
+      prisma.oAuthAccount.create({
+        data: {
+          userId: existing.id,
+          provider: 'google',
+          providerSubject: identity.subject,
+          providerEmail: identity.email,
+        },
+      }),
+      prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          lastLoginAt: new Date(),
+          failedLoginCount: 0,
+          lockedUntil: null,
+          // Google vouching for the address is at least as strong as our own
+          // emailed link, so an unverified local account becomes verified and
+          // active here rather than being left in limbo.
+          ...(existing.status === UserStatus.PENDING_VERIFICATION
+            ? { status: UserStatus.ACTIVE, emailVerifiedAt: new Date() }
+            : {}),
+        },
+      }),
+    ])
+
+    const user = await loadPublicUser(existing.id)
+    return { user, tokens: await openSession(user, context), created: false }
+  }
+
+  // ── 3. New account ───────────────────────────────────────────────────────
+  const userId = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        email: identity.email,
+        // No password. `login` detects this and directs them back to Google
+        // rather than reporting a wrong password for one they never set.
+        passwordHash: null,
+        role: signUpRole,
+        // Google has already proven the address, so there is nothing for our
+        // own verification email to add.
+        status: identity.emailVerified ? UserStatus.ACTIVE : UserStatus.PENDING_VERIFICATION,
+        emailVerifiedAt: identity.emailVerified ? new Date() : null,
+        firstName: identity.firstName ?? null,
+        lastName: identity.lastName ?? null,
+        lastLoginAt: new Date(),
+      },
+      select: { id: true },
+    })
+
+    await tx.oAuthAccount.create({
+      data: {
+        userId: created.id,
+        provider: 'google',
+        providerSubject: identity.subject,
+        providerEmail: identity.email,
+      },
+    })
+
+    // Mirrors `register`: a tester signing up opens an application for Admin
+    // review (§2.2). A customer's organisation is NOT created here — Google
+    // gives us no company name, so that is collected during onboarding.
+    if (signUpRole === Role.TESTER) {
+      await tx.testerProfile.create({
+        data: { userId: created.id, status: TesterStatus.APPLIED },
+      })
+    }
+
+    return created.id
+  })
+
+  const user = await loadPublicUser(userId)
+  return { user, tokens: await openSession(user, context), created: true }
+}
+
+/** Shared status gate for the Google paths. */
+function assertUsableStatus(status: UserStatus): void {
+  if (status === UserStatus.SUSPENDED) throw new ForbiddenError('This account is suspended')
+  if (status === UserStatus.DEACTIVATED) throw new ForbiddenError('This account is deactivated')
+}

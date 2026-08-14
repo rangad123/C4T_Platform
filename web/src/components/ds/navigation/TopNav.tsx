@@ -195,9 +195,27 @@ export function TopNav({
           })}
         </nav>
 
+        {/*
+          THREE ACTIONS, IN DELIBERATE ORDER OF COMMITMENT.
+
+          "Sign in" for people who already have an account, "Sign up" for people
+          who want one, "Book a demo" for people who want to talk to someone
+          first — which is the one the business runs on, so it keeps the only
+          filled button.
+
+          Sign-up was previously reachable only from a text link at the bottom
+          of /login, which meant nobody could register without first landing on
+          a page for people who already had an account.
+
+          It points at bare /register, not a role, so the choice between
+          customer and tester is made on a page that can explain the difference.
+        */}
         <div className="c4t-nav-desktop" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Button variant="ghost" size="sm" href="/app">
+          <Button variant="ghost" size="sm" href="/login">
             Sign in
+          </Button>
+          <Button variant="secondary" size="sm" href="/register">
+            Sign up
           </Button>
           <Button variant="primary" size="sm" href="/contact">
             Book a demo
@@ -444,7 +462,10 @@ export function TopNav({
             <Button variant="primary" fullWidth href="/contact">
               Book a demo
             </Button>
-            <Button variant="secondary" fullWidth href="/app">
+            <Button variant="secondary" fullWidth href="/register">
+              Sign up
+            </Button>
+            <Button variant="ghost" fullWidth href="/login">
               Sign in
             </Button>
           </div>

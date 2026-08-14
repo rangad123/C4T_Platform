@@ -69,6 +69,33 @@ const schema = z.object({
    */
   REFRESH_COOKIE_PATH: z.string().startsWith('/').default('/v1/auth'),
 
+  /**
+   * Google OAuth. All three must be set together or Google sign-in stays off —
+   * `/v1/auth/google` returns 503 rather than redirecting to a broken consent
+   * screen. Credentials come from a Web application OAuth client in the Google
+   * Cloud console.
+   */
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  /**
+   * Must match a redirect URI registered on the OAuth client EXACTLY, including
+   * scheme, host, port and path. Google compares the string, not the resolved
+   * address.
+   *
+   * Point it at the Next.js origin, not this API: the browser reaches the API
+   * through the /api/v1 rewrite, so the callback has to land on the same origin
+   * that will hold the session cookies. Locally:
+   *   http://localhost:3000/api/v1/auth/google/callback
+   */
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+
+  /**
+   * Optional site-wide salt for legacy MySQL password digests (§2.8), for the
+   * CodeIgniter pattern md5($pepper . $password). Leave unset unless the
+   * legacy PHP source shows one. See lib/legacy-password.ts.
+   */
+  LEGACY_PASSWORD_PEPPER: z.string().optional(),
+
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   LOCAL_STORAGE_DIR: z.string().default('./.uploads'),
   AWS_REGION: z.string().default('ap-south-1'),
@@ -108,6 +135,15 @@ export const env = parsed.data
 
 export const isProduction = env.NODE_ENV === 'production'
 export const isTest = env.NODE_ENV === 'test'
+
+/**
+ * Whether Google sign-in is configured. Checked at the route rather than at
+ * boot: a deployment without Google credentials is a valid deployment, it just
+ * offers password sign-in only.
+ */
+export const googleOAuthEnabled = Boolean(
+  env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI,
+)
 
 // Guard rails that only matter in production.
 if (isProduction) {

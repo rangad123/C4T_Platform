@@ -25,10 +25,24 @@ export const registerSchema = z
     phone: z.string().trim().max(32).optional(),
     countryCode: z.string().trim().length(2).toUpperCase().optional(),
     /**
-     * Self-registration may only produce a USER, a CUSTOMER or a TESTER.
-     * ADMIN and SUB_ADMIN are created by an Admin (§2.2), never by signup.
+     * SELF-REGISTRATION IS CUSTOMER OR TESTER ONLY, and the choice is required.
+     *
+     * Those are the two things a stranger can be to this platform: someone who
+     * wants testing done, and someone who wants to do it. They lead to entirely
+     * different onboarding — a CUSTOMER gets an organisation, a TESTER gets a
+     * profile queued for Admin review (§2.2) — so there is no sensible default
+     * and the caller must say which.
+     *
+     * `USER` was previously accepted and defaulted to. It is the "registered but
+     * not yet onboarded" state (§2.1), which is a state the platform can put
+     * someone IN, not a thing anyone signs up as: it grants access to nothing
+     * and leaves the account in limbo with no route out.
+     *
+     * ADMIN and SUB_ADMIN are created by an Admin, never by signup.
      */
-    intendedRole: z.enum([Role.USER, Role.CUSTOMER, Role.TESTER]).default(Role.USER),
+    intendedRole: z.enum([Role.CUSTOMER, Role.TESTER], {
+      errorMap: () => ({ message: 'Choose whether you are signing up as a customer or a tester' }),
+    }),
     /** Required when intendedRole is CUSTOMER — creates the organisation. */
     organisationName: z.string().trim().min(2).max(160).optional(),
     acceptedTerms: z.literal(true, {

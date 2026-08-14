@@ -1,0 +1,122 @@
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  width: 256px;
+  height: 100dvh;
+  background: var(--surface-canvas);
+  border-right: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-6) var(--space-4);
+  gap: var(--space-5);
+  overflow-y: auto;
+}
+
+.brand {
+  padding: 0 var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sectionLabel {
+  padding: 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-input);
+  color: var(--text-secondary);
+  font-size: var(--type-body-sm-size);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  transition: var(--transition-control);
+}
+
+.link:hover {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.linkActive {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+.linkActive .icon {
+  color: var(--text-brand);
+}
+
+.linkDisabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.icon {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.badge {
+  margin-left: auto;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-default);
+  margin: 0 calc(var(--space-3) * -1);
+  padding-top: var(--space-4);
+}
+
+.userMeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.userName {
+  font-size: var(--type-body-sm-size);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userRole {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}

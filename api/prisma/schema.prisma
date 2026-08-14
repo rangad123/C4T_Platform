@@ -228,13 +228,24 @@ enum LeadStatus {
 // ─── Identity & access ───────────────────────────────────────────────────────
 
 model User {
-  id              String     @id @default(cuid())
-  legacyId        String?    @unique @map("legacy_id")
-  email           String     @unique
-  emailVerifiedAt DateTime?  @map("email_verified_at")
-  passwordHash    String     @map("password_hash")
-  role            Role       @default(USER)
-  status          UserStatus @default(PENDING_VERIFICATION)
+  id              String       @id @default(cuid())
+  legacyId        String?      @unique @map("legacy_id")
+  email           String       @unique
+  emailVerifiedAt DateTime?    @map("email_verified_at")
+  /**
+   * Null for accounts that have only ever signed in with Google. Those users
+   * have no password to verify, and `login` must refuse them by pointing at the
+   * provider rather than reporting a wrong password.
+   */
+  passwordHash    String?      @map("password_hash")
+  /**
+   * Which function produced `passwordHash`. Legacy values exist only on rows
+   * carried over from the MySQL platform (§2.8) and are upgraded to ARGON2ID
+   * the first time that user signs in successfully.
+   */
+  passwordAlgo    PasswordAlgo @default(ARGON2ID) @map("password_algo")
+  role            Role         @default(USER)
+  status          UserStatus   @default(PENDING_VERIFICATION)
 
   firstName    String? @map("first_name")
   lastName     String? @map("last_name")
@@ -254,6 +265,7 @@ model User {
   avatar FileObject? @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
 
   sessions           Session[]
+  oauthAccounts      OAuthAccount[]
   passwordResets     PasswordResetToken[]
   emailTokens        EmailVerificationToken[]
   permissions        UserPermission[]         @relation("PermissionHolder")
@@ -299,6 +311,48 @@ model User {
 ///
 /// The refresh token rotates in place on this row. `previousTokenHash` retains
 /// the superseded value so a replayed token is detectable as theft.
+/// How a stored password hash was produced. See lib/legacy-password.ts.
+enum PasswordAlgo {
+  /// The only algorithm this platform writes. Everything else is inbound-only.
+  ARGON2ID
+  /// Unsalted MD5 hex, 32 chars — a legacy MySQL row. Verify-once, then upgrade.
+  LEGACY_MD5
+  /// Unsalted SHA-1 hex, 40 chars — as above.
+  LEGACY_SHA1
+}
+
+/// An external identity linked to a user. Currently Google only.
+///
+/// SEPARATE TABLE, NOT COLUMNS ON `users`. One account may eventually link more
+/// than one provider, and a provider id is meaningless without knowing which
+/// provider issued it — `google|1234` and `github|1234` are different people.
+model OAuthAccount {
+  id     String @id @default(cuid())
+  userId String @map("user_id")
+
+  /// Lower-case provider key, e.g. "google".
+  provider        String
+  /// The provider's stable subject id. For Google this is the `sub` claim —
+  /// NOT the email, which the user can change.
+  providerSubject String @map("provider_subject")
+
+  /// Email as the provider reported it at link time. Kept for support queries;
+  /// never used to find the account.
+  providerEmail String? @map("provider_email")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One identity per provider subject, globally.
+  @@unique([provider, providerSubject])
+  /// A user links a given provider at most once.
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
 model Session {
   id     String @id @default(cuid())
   userId String @map("user_id")

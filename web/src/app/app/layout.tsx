@@ -16,15 +16,27 @@ export const metadata: Metadata = {
  * A layout does not re-run on client-side navigation within its segment, so
  * every Server Action and Route Handler under /app must call `requireUser()`
  * itself rather than assuming this layout vouched for the caller.
+ *
+ * ── Why there is no <main> here
+ *
+ * This layout used to wrap `children` in `<main id="main">`. The admin area
+ * (`/app/admin`) has a sidebar, and a sidebar's <nav> must NOT sit inside
+ * <main> — main is for content unique to the page, navigation is not. Nesting
+ * the area layout inside a main here also produced two <main> elements with
+ * the same id once the admin shell added its own.
+ *
+ * So the landmark belongs to whichever layout actually knows the page
+ * structure. Each area renders exactly one `<main id="main">`:
+ * `app/admin/layout.tsx` does, and `app/page.tsx` does for the customer view.
+ * Anything added under /app must do the same — the skip link in the marketing
+ * shell targets `#main`, and a page without it breaks that jump.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser('/app')
 
   return (
     <div style={{ minHeight: '100dvh' }}>
-      {/* TODO(design): <AppSidebar role={user.role} /> — nav differs per persona */}
-      {/* TODO(design): <AppTopBar user={user} /> — notifications, account menu */}
-      <main id="main">{children}</main>
+      {children}
       <span className="c4t-visually-hidden">Signed in as {user.email}</span>
     </div>
   )

@@ -312,6 +312,20 @@ export const FOOTER_COLUMNS: FooterColumn[] = [
     links: [
       { label: 'About', href: '/company/about' },
       { label: 'Careers', href: '/company/careers' },
+      /**
+       * The tester audience's entry point.
+       *
+       * It belongs in the footer rather than the header because the two
+       * audiences are not equal here: the header sells to customers, and a
+       * "become a tester" CTA competing with "Book a demo" would dilute the
+       * one the business runs on. Testers arrive already looking for it — via
+       * search, a referral or a job board — and the footer is where they check.
+       *
+       * Sits next to Careers deliberately. Someone reading that column is
+       * already asking "can I work with these people", which is the same
+       * question.
+       */
+      { label: 'Become a tester', href: '/register?role=tester' },
       { label: 'Blog', href: '/company/blog' },
       { label: 'Case Studies', href: '/company/case-studies' },
       { label: 'Partners', href: '/company/partners' },

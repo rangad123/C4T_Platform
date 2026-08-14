@@ -50,7 +50,19 @@ const nextConfig: NextConfig = {
    */
   async rewrites() {
     const origin = process.env.API_ORIGIN ?? 'http://localhost:4000'
-    return [{ source: '/api/v1/:path*', destination: `${origin}/v1/:path*` }]
+    /**
+     * `beforeFiles` on purpose: the array form lands in `afterFiles`, which only
+     * runs after the static-file check fails. The `/api/v1/` prefix does not
+     * match any static asset, so `afterFiles` SHOULD fire — but it did not,
+     * empirically, on Next 16.3.0. Putting the rewrite in `beforeFiles` runs
+     * it before the static-file check, which is the documented behaviour for
+     * catching things like `/api/*` that should never reach the filesystem.
+     */
+    return {
+      beforeFiles: [
+        { source: '/api/v1/:path*', destination: `${origin}/v1/:path*` },
+      ],
+    }
   },
 
   async redirects() {

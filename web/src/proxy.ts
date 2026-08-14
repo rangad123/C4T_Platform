@@ -87,7 +87,17 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.redirect(url)
   }
 
-  return NextResponse.next()
+  /**
+   * Forward the current path to downstream Server Components via request
+   * headers. Server Components cannot use `usePathname` (client only) and the
+   * admin layout needs to know which sidebar link to highlight — reading
+   * `x-pathname` here keeps the sidebar a Server Component instead of
+   * pushing a `"use client"` boundary onto the whole shell.
+   */
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-pathname', pathname)
+
+  return NextResponse.next({ request: { headers: requestHeaders } })
 }
 
 export const config = {

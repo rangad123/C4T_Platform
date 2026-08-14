@@ -12,7 +12,7 @@
  * Before launch: swap those URLs for self-hosted assets, remove the Unsplash
  * host from next.config.ts, and delete this warning.
  *
- * Client-supplied art is self-hosted under `public/pages/` and referenced by
+ * Client-supplied art is self-hosted under `public/images/pages/` and referenced by
  * root-relative path. Those need no `remotePatterns` entry — `next/image` treats
  * anything under `public/` as first-party.
  *
@@ -64,7 +64,12 @@ export const PHOTOS = {
     alt: 'A quality engineering team reviewing findings together',
   },
 
-  /* ─── Client-supplied, self-hosted under public/pages/ ───────────────────
+  /* ─── Client-supplied, self-hosted under public/images/pages/ ─────────────
+   *
+   * Files moved into public/images/ via the asset refactor. The leading
+   * `images/` is the only Next.js surface these need — assets under public/
+   * are served at the root, so the URL is `/images/pages/c4t-landing-page.jpeg`
+   * in the browser and the same path in `src`.
    *
    * These are NOT Unsplash placeholders, so they are not covered by the ⚠ at
    * the top of this file, and they are deliberately kept out of PHOTO_ROTATION
@@ -100,7 +105,7 @@ export const PHOTOS = {
    * rediscovering it.
    */
   heroLanding: {
-    src: '/c4t-landing-page.jpeg',
+    src: '/images/pages/c4t-landing-page.jpeg',
     alt: 'Crowd4Test testers and AI agents working through a release across phones, tablets and desktop browsers',
   },
 
@@ -114,18 +119,18 @@ export const PHOTOS = {
    * the one open item on this file that is visible to a visitor today.
    */
   ai: {
-    src: '/pages/ai.jpg',
+    src: '/images/pages/ai.jpg',
     alt: 'A sculpted head in profile, the letters AI glowing among drifting particles inside its open cranium',
   },
 
   /**
    * ⚠ CURRENTLY UNUSED. It held the homepage platform section until `ai` took
-   * that slot. The entry and `public/pages/robot.jpg` (1.16 MB — the largest
-   * image in the repo) are both still here; if no slot is found for it, delete
-   * both rather than shipping an asset nothing points at.
+   * that slot. The entry and `public/images/pages/robot.jpg` (1.16 MB — the
+   * largest image in the repo) are both still here; if no slot is found for it,
+   * delete both rather than shipping an asset nothing points at.
    */
   robot: {
-    src: '/pages/robot.jpg',
+    src: '/images/pages/robot.jpg',
     alt: 'A small white robot with an LED dot-matrix face, marked Bot across its chest',
   },
 } as const satisfies Record<string, Photo>

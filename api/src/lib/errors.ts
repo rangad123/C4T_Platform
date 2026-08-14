@@ -67,3 +67,16 @@ export class InternalError extends AppError {
     super(500, 'INTERNAL_ERROR', message)
   }
 }
+
+/**
+ * A feature the code supports but this deployment has not configured — Google
+ * sign-in without OAuth credentials, for instance.
+ *
+ * 503 rather than 404 or 501: the endpoint exists and will work once configured,
+ * which is what a client needs to know. 404 would suggest the route was removed.
+ */
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'This feature is not available') {
+    super(503, 'SERVICE_UNAVAILABLE', message)
+  }
+}

@@ -18,7 +18,7 @@ export function organizationJsonLd() {
     '@type': 'Organization',
     name: SITE_NAME,
     url: env.NEXT_PUBLIC_SITE_URL,
-    logo: new URL('/logo.png', env.NEXT_PUBLIC_SITE_URL).toString(),
+    logo: new URL('/images/logos/logo-without-text.png', env.NEXT_PUBLIC_SITE_URL).toString(),
     description:
       'AI-powered digital quality engineering combining AI agents with a vetted global community of expert testers.',
     foundingDate: '2015',
