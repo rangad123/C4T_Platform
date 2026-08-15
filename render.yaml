@@ -1,38 +1,3 @@
-# render.yaml — Crowd4Test platform (free tier)
-#
-# Apply from the Render dashboard: New → Blueprint → point at this repo.
-# Renders both services from the same Blueprint, both of `main` branch.
-# Secrets are marked `sync: false` — set them in the dashboard, not in this file.
-#
-# ============================================================================
-# FREE-TIER CAVEATS
-# ============================================================================
-#
-# - Pre-deploy command is PAID-ONLY. Migrations run inside `buildCommand`
-#   here. They execute once per build, before the image is published, so
-#   the new container only starts with the schema already up to date.
-# - Web services sleep after 15 minutes of inactivity. First request after
-#   idle takes ~1 minute while Render spins the container back up. Plan
-#   for a cold-start UX — the loading page Render shows is reasonable.
-# - Persistent disk is NOT available. Anything written to the local
-#   filesystem is wiped on every redeploy or spin-down. The app's file
-#   state already lives in S3 (or, for testing, you can swap STORAGE_DRIVER
-#   to 'local' on Neon — but not on Render, because env.ts refuses).
-# - Outbound SMTP on ports 25/465/587 is blocked. Use an HTTP provider
-#   (Resend, SendGrid, Postmark) for transactional email.
-# - 0.1 CPU / 512 MB RAM per service. API build is the most memory-hungry
-#   step and can OOM on a free plan — be prepared to upgrade if the
-#   build fails repeatedly with "JavaScript heap out of memory".
-# - 750 instance-hours / workspace / month. Sleeping services don't count,
-#   but two always-on services will burn 2 × 24 × 30 = 1440 hours —
-#   that's the limit. They will sleep after 15 min idle, so this is
-#   not actually a problem for a POC.
-# - 500 build minutes / month. Each service uses ~2-5 minutes per build.
-# - Render Postgres free tier expires 30 days after creation. Use Neon
-#   for anything lasting longer than a single demo.
-# - Build minutes on Render do not roll over. After 500, builds stop
-#   until next month unless you set a payment method.
-
 services:
 
   # ===========================================================================
