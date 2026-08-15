@@ -3,8 +3,9 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { serverFetch } from '@/lib/api/server'
+import { ApiError } from '@/lib/api/types'
 import { getUser } from '@/lib/auth/session'
-import { formString, formTrimmed } from '@/lib/form-data'
+import { formTrimmed } from '@/lib/form-data'
 
 interface OrganisationResponse {
   id: string
@@ -21,6 +22,10 @@ interface OrganisationResponse {
  * On success, redirect to the new detail page (`/app/admin/organisations/<id>`)
  * so the freshly created record is the one the user is looking at and the
  * back button takes them to the list with the new row in place.
+ *
+ * On failure, redirect back to the form with `?error=<code>` so the page can
+ * render an inline error banner. The page reads `params.error` and shows a
+ * sentence — the same channel the login form uses (`ERROR_MESSAGES`).
  */
 export async function createOrganisationAction(formData: FormData): Promise<void> {
   await getUser()
@@ -43,10 +48,20 @@ export async function createOrganisationAction(formData: FormData): Promise<void
     ownerUserId: formTrimmed(formData, 'ownerUserId') || undefined,
   }
 
-  const { id } = await serverFetch<OrganisationResponse>('organisations', {
-    method: 'POST',
-    body,
-  })
+  let id: string
+  try {
+    const response = await serverFetch<OrganisationResponse>('organisations', {
+      method: 'POST',
+      body,
+    })
+    id = response.id
+  } catch (err) {
+    // The page shows a generic-but-honest error banner for any non-2xx.
+    // A 409 (duplicate email) is the most common failure here; the API
+    // returns that as code "CONFLICT" via the standard error envelope.
+    const code = err instanceof ApiError && err.status === 409 ? 'duplicate' : 'failed'
+    redirect(`/app/admin/organisations/new?error=${code}`)
+  }
 
   revalidatePath('/app/admin/organisations')
   redirect(`/app/admin/organisations/${id}`)

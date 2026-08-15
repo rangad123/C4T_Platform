@@ -3,7 +3,7 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, personName } from '@/lib/admin/format'
+import { formatDate, personName, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -122,7 +122,8 @@ export default async function TestersPage({
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
       hrefFor={pageHrefBuilder(BASE, { status, countryCode })}
-      filtered={Boolean(status || countryCode)}
+      
+      filtered={hasFilter([status, countryCode])}
       permission="tester.read"
       emptyIcon="users"
       emptyTitle="No testers yet"

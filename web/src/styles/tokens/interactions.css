@@ -44,10 +44,24 @@
 @media (max-width: 900px) { .c4t-pricing-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; } .c4t-casestudy-featured { grid-template-columns: 1fr !important; } .c4t-casestudy-featured > *:first-child { padding: 28px !important; } .c4t-casestudy-featured > *:last-child { aspect-ratio: 16 / 9 !important; border-left: none !important; border-top: 1px solid var(--border-subtle) !important; } }
 @media (max-width: 700px) { .c4t-pricing-grid { grid-template-columns: 1fr !important; } .c4t-resource-horizontal { grid-template-columns: 1fr !important; } .c4t-resource-horizontal > *:first-child { aspect-ratio: 16 / 9 !important; height: auto !important; border-right: none !important; border-bottom: 1px solid var(--border-subtle) !important; } .c4t-resource-horizontal > *:last-child { padding: var(--space-card-padding) !important; } }
 
-.c4t-input:focus { outline: none; border-color: var(--border-focus) !important; box-shadow: 0 0 0 3px rgb(23 19 15 / 0.08); }
+.c4t-input:focus {
+  /* The 2px solid ink outline at 2px offset is the rule; the box-shadow
+     ring is layered on top so the focused state is visible against the
+     border-color change. The outline is the WCAG-compliant component
+     (it is not suppressed by the browser's default :focus-visible
+     styling), and the shadow is the brand colour cue. */
+  outline: 2px solid var(--ink-950);
+  outline-offset: 2px;
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 3px rgb(23 19 15 / 0.08);
+}
 .c4t-input::placeholder { color: var(--text-disabled); }
 .c4t-input[aria-invalid="true"] { border-color: var(--status-error-fg) !important; }
-.c4t-input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgb(179 38 30 / 0.14); }
+.c4t-input[aria-invalid="true"]:focus {
+  outline: 2px solid var(--status-error-fg);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgb(179 38 30 / 0.14);
+}
 
 .c4t-faq-trigger:hover { background: var(--surface-sunken); }
 .c4t-tab:hover { color: var(--text-primary) !important; }

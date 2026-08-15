@@ -39,7 +39,10 @@ export function createApp(): Express {
       // This API serves JSON and signed-URL redirects only; it never renders
       // HTML, so the default CSP would only get in the way.
       contentSecurityPolicy: false,
-      crossOriginResourcePolicy: { policy: 'same-site' },
+      // `cross-origin` is needed when the web app is on a different domain
+      // from the API (Vercel on one, Render on the other). `same-site`
+      // would block fetches from the Vercel front end to the Render API.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   )
 

@@ -586,13 +586,15 @@ export async function verifyEmail(rawToken: string): Promise<PublicUser> {
 
 // ─── Password reset ──────────────────────────────────────────────────────────
 
-export async function forgotPassword(email: string): Promise<void> {
+export async function forgotPassword(email: string): Promise<{ userId: string | null }> {
   const user = await prisma.user.findUnique({
     where: { email },
     select: { id: true, email: true, deletedAt: true },
   })
   // Always returns success to the caller regardless — see the controller.
-  if (!user || user.deletedAt) return
+  // The userId is returned so the controller can audit the attempt regardless
+  // of whether the address matched — without leaking that fact to the caller.
+  if (!user || user.deletedAt) return { userId: null }
 
   // Invalidate any outstanding reset tokens so only the newest link works.
   await prisma.passwordResetToken.updateMany({
@@ -610,9 +612,10 @@ export async function forgotPassword(email: string): Promise<void> {
   })
 
   await sendMail(passwordResetEmail(user.email, raw))
+  return { userId: user.id }
 }
 
-export async function resetPassword(rawToken: string, newPassword: string): Promise<void> {
+export async function resetPassword(rawToken: string, newPassword: string): Promise<string> {
   const stored = await prisma.passwordResetToken.findUnique({
     where: { tokenHash: hashToken(rawToken) },
     select: { id: true, userId: true, expiresAt: true, usedAt: true },
@@ -638,6 +641,7 @@ export async function resetPassword(rawToken: string, newPassword: string): Prom
       data: { revokedAt: new Date(), revokedReason: 'password_reset' },
     }),
   ])
+  return stored.userId
 }
 
 /**

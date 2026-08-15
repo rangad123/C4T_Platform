@@ -380,10 +380,16 @@ export async function changeStatus(
       status,
       ...(status === ProjectStatus.SUBMITTED ? { submittedAt: new Date() } : {}),
       ...(status === ProjectStatus.APPROVED ? { approvedAt: new Date() } : {}),
+      // Reopening a completed project — clear `completedAt` so the column
+      // is honest. `progressPercent` is also reset so the timeline
+      // indicator in the admin UI does not stay pinned at 100.
+      ...(project.status === ProjectStatus.COMPLETED && status !== ProjectStatus.COMPLETED
+        ? { completedAt: null, progressPercent: null }
+        : {}),
       ...(status === ProjectStatus.COMPLETED
         ? { completedAt: new Date(), progressPercent: 100 }
         : {}),
-    },
+    } as Prisma.ProjectUncheckedUpdateInput,
     select: projectSelect,
   })
 

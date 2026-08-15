@@ -5,7 +5,7 @@ import { Button } from '@/components/ds/core/Button'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate } from '@/lib/admin/format'
+import { formatDate, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -46,7 +46,7 @@ export default async function OrganisationsPage({
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? params.status
     : undefined
-  const search = params.search?.trim() || undefined
+  const search = searchTerm(params.search)
   const page = parsePage(params.page)
 
   const result = await loadList<OrganisationRow>('organisations', {
@@ -100,7 +100,7 @@ export default async function OrganisationsPage({
       columns={columns}
       rowKey={(row) => row.id}
       hrefFor={pageHrefBuilder(BASE, { status, search })}
-      filtered={Boolean(status || search)}
+      filtered={hasFilter([status, search])}
       permission="organisation.read"
       emptyIcon="building-2"
       emptyTitle="No organisations yet"

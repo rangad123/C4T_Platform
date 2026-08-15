@@ -5,7 +5,7 @@ import { Button } from '@/components/ds/core/Button'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, titleCase } from '@/lib/admin/format'
+import { formatDate, titleCase, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -59,7 +59,7 @@ export default async function ProjectsPage({
   const priority = PRIORITIES.includes(params.priority as (typeof PRIORITIES)[number])
     ? params.priority
     : undefined
-  const search = params.search?.trim() || undefined
+  const search = searchTerm(params.search)
   const page = parsePage(params.page)
 
   const result = await loadList<ProjectRow>('projects', {
@@ -147,7 +147,8 @@ export default async function ProjectsPage({
       columns={columns}
       rowKey={(row) => row.id}
       hrefFor={pageHrefBuilder(BASE, { status, priority, search })}
-      filtered={Boolean(status || priority || search)}
+      
+      filtered={hasFilter([status, priority, search])}
       permission="project.read"
       emptyIcon="briefcase"
       emptyTitle="No projects yet"

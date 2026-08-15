@@ -36,34 +36,22 @@ const nextConfig: NextConfig = {
   },
 
   /**
-   * Single-origin API access.
+   * Cross-origin API access.
    *
-   * The browser never talks to the Express service directly — it calls
-   * /api/v1/* on this origin and Next forwards it. That removes CORS entirely
-   * and lets the auth cookies be same-origin, which is far less fragile than
-   * coordinating COOKIE_DOMAIN across two hostnames.
+   * The browser calls the API directly at `NEXT_PUBLIC_API_BASE/v1/*`. The
+   * API allows CORS from this origin and the cookies are `SameSite=None;
+   * Secure` so they survive the cross-origin boundary.
    *
-   * IMPORTANT: the API issues its refresh cookie with Path=/v1/auth. When
-   * proxied through here the browser sees the path as /api/v1/auth, so the API
-   * must be started with REFRESH_COOKIE_PATH=/api/v1/auth or the refresh cookie
-   * will never be sent back. See web/README.md.
+   * No Next.js rewrite proxy is registered. A proxy only makes sense when
+   * the API and the web are on the same domain, which is not the case in
+   * the Vercel + Render deploy. The dev-local setup uses `API_BASE` of
+   * `/api/v1` together with a local Express proxy to keep the same code
+   * paths.
+   *
+   * If you ever move the API back to the same domain, change the rewrite
+   * block in this file to the one in git history dated before this comment.
    */
-  async rewrites() {
-    const origin = process.env.API_ORIGIN ?? 'http://localhost:4000'
-    /**
-     * `beforeFiles` on purpose: the array form lands in `afterFiles`, which only
-     * runs after the static-file check fails. The `/api/v1/` prefix does not
-     * match any static asset, so `afterFiles` SHOULD fire — but it did not,
-     * empirically, on Next 16.3.0. Putting the rewrite in `beforeFiles` runs
-     * it before the static-file check, which is the documented behaviour for
-     * catching things like `/api/*` that should never reach the filesystem.
-     */
-    return {
-      beforeFiles: [
-        { source: '/api/v1/:path*', destination: `${origin}/v1/:path*` },
-      ],
-    }
-  },
+  // No `rewrites` for /api/v1/* — intentionally absent.
 
   async redirects() {
     return legacyRedirects()

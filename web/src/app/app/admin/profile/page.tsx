@@ -165,27 +165,27 @@ function formatDateTime(iso: string | null | undefined): string {
 function deviceLabel(userAgent: string | null): string {
   if (!userAgent) return 'Unknown device'
 
-  const browser = /Edg\//.test(userAgent)
+  const browser = userAgent.includes('Edg/')
     ? 'Edge'
     : /OPR\/|Opera/.test(userAgent)
       ? 'Opera'
-      : /Chrome\//.test(userAgent)
+      : userAgent.includes('Chrome/')
         ? 'Chrome'
-        : /Firefox\//.test(userAgent)
+        : userAgent.includes('Firefox/')
           ? 'Firefox'
-          : /Safari\//.test(userAgent)
+          : userAgent.includes('Safari/')
             ? 'Safari'
             : null
 
-  const platform = /Windows NT/.test(userAgent)
+  const platform = userAgent.includes('Windows NT')
     ? 'Windows'
-    : /Android/.test(userAgent)
+    : userAgent.includes('Android')
       ? 'Android'
       : /iPhone|iPad|iPod/.test(userAgent)
         ? 'iOS'
         : /Mac OS X|Macintosh/.test(userAgent)
           ? 'macOS'
-          : /Linux/.test(userAgent)
+          : userAgent.includes('Linux')
             ? 'Linux'
             : null
 

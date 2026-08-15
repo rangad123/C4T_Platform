@@ -3,7 +3,7 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { personName } from '@/lib/admin/format'
+import { personName, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -45,7 +45,7 @@ export default async function ManagersPage({
   await requirePermission('manager.read')
 
   const params = await searchParams
-  const search = params.search?.trim() || undefined
+  const search = searchTerm(params.search)
   const page = parsePage(params.page)
 
   const result = await loadList<ManagerRow>('managers', {
@@ -82,7 +82,7 @@ export default async function ManagersPage({
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
       hrefFor={pageHrefBuilder(BASE, { search })}
-      filtered={Boolean(search)}
+      filtered={hasFilter([search])}
       permission="manager.read"
       emptyIcon="shield-check"
       emptyTitle="No managers yet"

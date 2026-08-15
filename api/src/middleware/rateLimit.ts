@@ -17,9 +17,32 @@ export const globalLimiter = rateLimit({
 })
 
 /**
- * Tight limit for credential endpoints. Keyed on IP + email so one attacker
- * cannot lock out every account from a single address, and one account cannot
- * be brute-forced from rotating addresses without hitting the per-account cap.
+ * Per-IP ceiling on credential attempts, applied FIRST on the auth routes.
+ *
+ * Without this, an attacker holding a single valid (email, password) pair from
+ * a breach could fire `${RATE_LIMIT_MAX}` successful logins per window from one
+ * IP with no consequence — the per-account limit further down is the right
+ * control for "wrong password against one account" but is irrelevant when the
+ * attempts succeed.
+ *
+ * Capping at the same value as the per-account limit keeps a single host within
+ * the same budget whether the attacker is targeting one account or many.
+ */
+export const authIpLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.AUTH_RATE_LIMIT_MAX,
+  keyGenerator: (req) => req.ip ?? 'unknown',
+  ...shared,
+})
+
+/**
+ * Tight limit for credential endpoints, keyed on IP + email. Applied AFTER
+ * the per-IP limit so a single host cannot blanket the same address from
+ * many emails and burn the victim's account.
+ *
+ * Failures and successes both count. The previous `skipSuccessfulRequests:
+ * true` left a brute-force surface against stolen credentials — a successful
+ * login was free as long as the email-and-IP pair was within budget.
  */
 export const authLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
@@ -33,7 +56,6 @@ export const authLimiter = rateLimit({
         : ''
     return `${req.ip ?? 'unknown'}:${email}`
   },
-  skipSuccessfulRequests: true,
   ...shared,
 })
 

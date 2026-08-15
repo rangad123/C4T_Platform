@@ -104,7 +104,22 @@ communicationRouter.post('/threads', validate({ body: createThreadSchema }), asy
     if (!allowed) throw new ForbiddenError('You do not have access to that project')
   }
 
-  const participantIds = [...new Set([...input.participantIds, req.user!.id])]
+  // Resolve the participantIds down to real user ids, and reject the
+  // request before INSERT if any of them are bogus. Without this, a non-admin
+  // could submit a thread with arbitrary cuid-shaped ids and read the
+  // resulting 409 to discriminate "valid user" from "no such user" — a
+  // small but real account-enumeration oracle.
+  const requested = [...new Set([...input.participantIds, req.user!.id])]
+  const found = await prisma.user.findMany({
+    where: { id: { in: requested }, deletedAt: null },
+    select: { id: true },
+  })
+  const foundIds = new Set(found.map((u) => u.id))
+  const missing = requested.filter((id) => !foundIds.has(id))
+  if (missing.length > 0) {
+    throw new BadRequestError('One or more participants do not exist')
+  }
+  const participantIds = requested
 
   const thread = await prisma.$transaction(async (tx) => {
     const created = await tx.thread.create({

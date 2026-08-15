@@ -54,6 +54,14 @@ function client(): S3Client {
           },
         }
       : {}),
+    // S3-compatible stores (Cloudflare R2, Backblaze B2, MinIO) require a
+    // custom endpoint and path-style addressing. AWS itself ignores this.
+    ...(env.S3_BUCKET_ENDPOINT
+      ? {
+          endpoint: env.S3_BUCKET_ENDPOINT,
+          forcePathStyle: true,
+        }
+      : {}),
   })
   return s3
 }

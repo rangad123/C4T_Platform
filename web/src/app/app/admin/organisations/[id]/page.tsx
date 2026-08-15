@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { serverFetch, serverFetchPage } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { hasPermission, requireRole } from '@/lib/auth/session'
-import { formatDate, personName, titleCase } from '@/lib/admin/format'
+import { formatDate, personName, searchTerm, titleCase } from '@/lib/admin/format'
 import {
   addOrganisationMember,
   archiveOrganisation,
@@ -225,7 +225,7 @@ export default async function OrganisationDetailPage({
 
   const { id } = await params
   const { notice, q } = await searchParams
-  const accountSearch = q?.trim() || undefined
+  const accountSearch = searchTerm(q)
 
   let organisation: OrganisationDetail | null = null
   let loadError: 'forbidden' | 'unknown' | null = null

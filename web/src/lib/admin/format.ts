@@ -69,3 +69,35 @@ export function stars(score: number): string {
   const clamped = Math.max(0, Math.min(5, Math.round(score)))
   return '★'.repeat(clamped) + '☆'.repeat(5 - clamped)
 }
+
+/**
+ * Trim a query-string value or default to `undefined`.
+ *
+ * The list-page URL keeps an empty string as the value (because the form is
+ * a GET), and an empty string is the wrong thing to send to the API as a
+ * filter. `??` does not help here because `''` is not nullish — only `||`
+ * collapses both missing and empty. A small helper centralises the rule so
+ * that the same call at the same call site in ten pages cannot drift.
+ */
+export function searchTerm(value: string | undefined | null): string | undefined {
+  if (value === null || value === undefined) return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+/**
+ * Whether any of the filter values is set, for the list page's `filtered` flag.
+ *
+ * `filtered` decides whether the empty-state copy says "no rows match your
+ * filters" (true) or "no rows yet" (false). The right operator is `||` —
+ * any truthy value means "filtered" — but ESLint's `prefer-nullish-coalescing`
+ * rule fires on every `||`. The helper centralises the call so the lint
+ * disable lives in one place.
+ *
+ * Takes a single array argument so callers pass `[status, severity, search]`
+ * instead of `hasFilter(status, severity, search)` — the varargs form loses
+ * the type at each call and triggers `no-unsafe-call`.
+ */
+export function hasFilter(values: readonly unknown[]): boolean {
+  return values.some((v) => Boolean(v))
+}

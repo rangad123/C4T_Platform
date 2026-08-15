@@ -3,7 +3,7 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, personName } from '@/lib/admin/format'
+import { formatDate, personName, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -62,7 +62,7 @@ export default async function BugsPage({
   const severity = SEVERITIES.includes(params.severity as (typeof SEVERITIES)[number])
     ? params.severity
     : undefined
-  const search = params.search?.trim() || undefined
+  const search = searchTerm(params.search)
   const page = parsePage(params.page)
 
   const result = await loadList<BugRow>('bugs', {
@@ -121,7 +121,8 @@ export default async function BugsPage({
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
       hrefFor={pageHrefBuilder(BASE, { status, severity, search })}
-      filtered={Boolean(status || severity || search)}
+      
+      filtered={hasFilter([status, severity, search])}
       permission="bug.read"
       emptyIcon="clipboard-check"
       emptyTitle="No bugs reported yet"

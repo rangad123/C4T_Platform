@@ -3,7 +3,7 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, formatMoney, personName, titleCase } from '@/lib/admin/format'
+import { formatDate, formatMoney, hasFilter, personName, titleCase } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 import type { PageMeta } from '@/lib/api/types'
 
@@ -131,7 +131,8 @@ export default async function TransactionsPage({
       columns={columns}
       rowKey={(row) => row.id}
       hrefFor={pageHrefBuilder(BASE, { type, status })}
-      filtered={Boolean(type || status)}
+      
+      filtered={hasFilter([type, status])}
       permission="transaction.read"
       emptyIcon="credit-card"
       emptyTitle="No transactions yet"

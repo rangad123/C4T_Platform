@@ -1,0 +1,161 @@
+# render.yaml — Crowd4Test platform (free tier)
+#
+# Apply from the Render dashboard: New → Blueprint → point at this repo.
+# Renders both services from the same Blueprint, both of `main` branch.
+# Secrets are marked `sync: false` — set them in the dashboard, not in this file.
+#
+# ============================================================================
+# FREE-TIER CAVEATS
+# ============================================================================
+#
+# - Pre-deploy command is PAID-ONLY. Migrations run inside `buildCommand`
+#   here. They execute once per build, before the image is published, so
+#   the new container only starts with the schema already up to date.
+# - Web services sleep after 15 minutes of inactivity. First request after
+#   idle takes ~1 minute while Render spins the container back up. Plan
+#   for a cold-start UX — the loading page Render shows is reasonable.
+# - Persistent disk is NOT available. Anything written to the local
+#   filesystem is wiped on every redeploy or spin-down. The app's file
+#   state already lives in S3 (or, for testing, you can swap STORAGE_DRIVER
+#   to 'local' on Neon — but not on Render, because env.ts refuses).
+# - Outbound SMTP on ports 25/465/587 is blocked. Use an HTTP provider
+#   (Resend, SendGrid, Postmark) for transactional email.
+# - 0.1 CPU / 512 MB RAM per service. API build is the most memory-hungry
+#   step and can OOM on a free plan — be prepared to upgrade if the
+#   build fails repeatedly with "JavaScript heap out of memory".
+# - 750 instance-hours / workspace / month. Sleeping services don't count,
+#   but two always-on services will burn 2 × 24 × 30 = 1440 hours —
+#   that's the limit. They will sleep after 15 min idle, so this is
+#   not actually a problem for a POC.
+# - 500 build minutes / month. Each service uses ~2-5 minutes per build.
+# - Render Postgres free tier expires 30 days after creation. Use Neon
+#   for anything lasting longer than a single demo.
+# - Build minutes on Render do not roll over. After 500, builds stop
+#   until next month unless you set a payment method.
+
+services:
+
+  # ===========================================================================
+  # 1. API — Express + Prisma
+  # ===========================================================================
+  - type: web
+    name: c4t-platform-api
+    runtime: node
+    rootDir: api
+    plan: free
+    region: oregon
+    branch: main
+    healthCheckPath: /health/ready
+
+    # Migrations run during the build, not as a pre-deploy step (paid-only).
+    # `prisma migrate deploy` is idempotent — running on every build is
+    # safe and only takes a few seconds when the schema is already current.
+    buildCommand: |
+      npm ci
+      npx prisma generate
+      npx prisma migrate deploy
+      npm run build
+    startCommand: npm run start
+
+    autoDeploy: true
+
+    envVars:
+      # ── Runtime ────────────────────────────────────────────────────────
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: LOG_LEVEL
+        value: info
+
+      # ── Public URLs (these become known AFTER first deploy; update then) ──
+      - key: API_PUBLIC_URL
+        value: https://c4t-platform-api.onrender.com
+      - key: WEB_PUBLIC_URL
+        value: https://c4t-platform-web.onrender.com
+
+      # ── Cookies ───────────────────────────────────────────────────────
+      #
+      # Split deploy: web on Vercel, API on Render. Cookies are cross-origin,
+      # which means `SameSite=None` (browser requirement) and `Secure` (required
+      # by browsers when `SameSite=None`). The env.ts validator refuses a `none`
+      # cookie without `Secure` so the misconfiguration is caught at boot.
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAME_SITE
+        value: none
+      - key: REFRESH_COOKIE_PATH
+        # Cross-origin deploy: the browser talks to the API directly at
+        # https://c4t-platform-api.onrender.com/v1/auth/, so the refresh
+        # cookie must be scoped to /api/v1/auth under the WEB origin to
+        # match the URL the browser is requesting.
+        value: /api/v1/auth
+
+      # ── CORS ──────────────────────────────────────────────────────────
+      - key: CORS_ORIGINS
+        value: https://c4t-platform-web.onrender.com
+
+      # ── Database — Neon recommended (free tier survives 30+ days) ────
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+
+      # ── JWT keypair (base64 PEM) — shared shape with the web service ──
+      - key: JWT_PRIVATE_KEY
+        sync: false
+      - key: JWT_PUBLIC_KEY
+        sync: false
+
+      # ── Google OAuth (optional — leave empty if you don't need it) ────
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://c4t-platform-web.onrender.com/api/v1/auth/google/callback
+
+      # ── Storage — S3 required in production (env.ts enforces this) ────
+      #
+      # Even on the free tier, you need an S3 bucket. Cloudflare R2's
+      # free tier (10 GB / month) is the cheapest option:
+      # https://developers.cloudflare.com/r2/
+      # The code uses the AWS SDK with a custom endpoint (S3_BUCKET_ENDPOINT).
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: AWS_REGION
+        value: auto
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_BUCKET_ENDPOINT
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: UPLOAD_MAX_BYTES
+        value: "52428800"
+      - key: UPLOAD_URL_TTL_SECONDS
+        value: "900"
+
+      # ── Mail (console for the POC — outbound SMTP is blocked on free) ─
+      - key: MAIL_DRIVER
+        value: console
+      - key: MAIL_FROM
+        value: "Crowd4Test <no-reply@crowd4test.com>"
+
+      # ── Rate limiting ──────────────────────────────────────────────────
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX
+        value: "300"
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "20"
+
+      # ── Seed (override the default password before going live) ─────────
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+  # The web is deployed on Vercel, not Render. See docs/DEPLOY-RENDER.md for
+  # the Vercel-side environment variable setup. The Vercel domain has to be
+  # listed in `CORS_ORIGINS` above for the cross-origin API call to work.
+

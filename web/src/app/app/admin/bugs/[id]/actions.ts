@@ -225,7 +225,7 @@ export async function deleteBug(formData: FormData): Promise<void> {
 
   const reference = formTrimmed(formData, 'reference')
   const confirmation = formTrimmed(formData, 'confirmation')
-  if (!reference || confirmation.toUpperCase() !== reference.toUpperCase()) {
+  if (!reference || confirmation.toUpperCase() !== reference?.toUpperCase()) {
     redirect(failurePath(id, 'delete', 'mismatch'))
   }
 

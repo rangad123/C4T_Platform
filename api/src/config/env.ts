@@ -59,6 +59,22 @@ const schema = z.object({
   COOKIE_DOMAIN: z.string().optional(),
   COOKIE_SECURE: bool.default('false'),
   /**
+   * Cookie cross-site attribute. The default `lax` is right for `SameSite`
+   * top-level navigation flows (clicking a link, opening a new tab). When the
+   * API and web are on different domains, the browser silently drops cookies
+   * marked `lax` across that boundary, so the API must set `none` to keep
+   * sessions working in the cross-site deploy.
+   *
+   * Two flavours are supported:
+   *  - `lax`  (default) — same-origin deploy, Vercel is the rewrite proxy.
+   *  - `none` — cross-origin deploy, Vercel calls the API directly.
+   *
+   * Cookie `Secure` is required by browsers when `SameSite=None`, so the auth
+   * controller forces `secure: true` whenever `COOKIE_SAME_SITE=none`. The
+   * validation below refuses a `none` cookie without Secure.
+   */
+  COOKIE_SAME_SITE: z.enum(['lax', 'none']).default('lax'),
+  /**
    * Path the refresh cookie is scoped to. Narrow by default so it is never sent
    * on ordinary API calls.
    *
@@ -100,6 +116,12 @@ const schema = z.object({
   LOCAL_STORAGE_DIR: z.string().default('./.uploads'),
   AWS_REGION: z.string().default('ap-south-1'),
   S3_BUCKET: z.string().optional(),
+  /**
+   * Optional custom endpoint for S3-compatible stores (Cloudflare R2, Backblaze
+   * B2, MinIO, etc.). When set, the AWS SDK uses this URL instead of
+   * `s3.<region>.amazonaws.com`. Leave it unset for real AWS S3.
+   */
+  S3_BUCKET_ENDPOINT: z.string().url().optional(),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(52_428_800),
@@ -155,5 +177,10 @@ if (isProduction) {
   }
   if (!env.COOKIE_SECURE) {
     throw new Error('COOKIE_SECURE must be true in production')
+  }
+  if (env.COOKIE_SAME_SITE === 'none' && !env.COOKIE_SECURE) {
+    // Browsers reject `SameSite=None` without `Secure`, so this is a hard
+    // error rather than a silent runtime failure. Caught at boot.
+    throw new Error('COOKIE_SAME_SITE=none requires COOKIE_SECURE=true')
   }
 }

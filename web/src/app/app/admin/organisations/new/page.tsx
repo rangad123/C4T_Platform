@@ -33,8 +33,6 @@ export default async function NewOrganisationPage({
   await requirePermission('organisation.write')
 
   const params = await searchParams
-  const error = params.error
-
   const backHref = '/app/admin/organisations'
 
   return (
@@ -51,6 +49,25 @@ export default async function NewOrganisationPage({
         title="Profile"
         description="The minimum needed to create an organisation. Everything else can be filled in on the detail page."
       >
+        {params.error ? (
+          <div
+            role="alert"
+            style={{
+              marginBottom: 'var(--space-6)',
+              padding: 'var(--space-4) var(--space-5)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-input)',
+              background: 'var(--status-error-bg)',
+              color: 'var(--status-error-fg)',
+              fontSize: 'var(--type-body-sm-size)',
+              lineHeight: 1.45,
+            }}
+          >
+            {params.error === 'duplicate'
+              ? "An organisation already uses that email or name. Pick another and try again."
+              : "Couldn't create the organisation. Check the form and try again."}
+          </div>
+        ) : null}
         <form action={createOrganisationAction} style={formStyle}>
           <div style={fieldGrid}>
             <Field label="Name" htmlFor="name" required hint="The legal or trading name shown to the team.">
@@ -150,32 +167,14 @@ export default async function NewOrganisationPage({
             <Textarea id="notes" name="notes" rows={4} />
           </Field>
 
-          {error ? (
-            <p
-              role="alert"
-              style={{
-                margin: 0,
-                padding: 'var(--space-4)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-card)',
-                background: 'var(--surface-canvas)',
-                color: 'var(--text-secondary)',
-                fontSize: 'var(--type-body-sm-size)',
-              }}
-            >
-              Couldn't create the organisation: {error}. Check the form and try again.
-            </p>
-          ) : null}
-
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
             <Button type="submit" variant="primary" iconLeft="check">
               Create organisation
             </Button>
-            <a href={backHref}>
-              <Button type="button" variant="ghost">
-                Cancel
-              </Button>
-            </a>
+
+            <Button type="button" variant="ghost" href={backHref}>
+              Cancel
+            </Button>
           </div>
         </form>
       </Panel>

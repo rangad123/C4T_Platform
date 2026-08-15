@@ -1,18 +1,11 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Button } from '@/components/ds/core/Button'
-import { Logo } from '@/components/ds/core/Logo'
 import { Icon } from '@/components/ds/core/Icon'
 import { AuthDivider, GoogleButton } from '@/components/auth/GoogleButton'
 import { registerAction } from '@/lib/auth/register-actions'
-
-export const metadata: Metadata = {
-  title: 'Create an account',
-  robots: { index: false, follow: false },
-}
 
 /**
  * Self-registration. `/register`
@@ -63,10 +56,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   failed: 'That did not work. Please try again.',
 }
 
-export default async function RegisterPage({
+export default async function RegisterForm({
   searchParams,
 }: {
-  searchParams: Promise<{
+  searchParams?: Promise<{
     role?: string
     error?: string
     detail?: string
@@ -75,8 +68,10 @@ export default async function RegisterPage({
     lastName?: string
     organisationName?: string
   }>
-}) {
-  const params = await searchParams
+} = {}) {
+  const params = searchParams
+    ? await searchParams
+    : { role: undefined, error: undefined, detail: undefined, email: undefined, firstName: undefined, lastName: undefined, organisationName: undefined }
   const role: SignUpRole | null =
     params.role === 'customer' || params.role === 'tester' ? params.role : null
 
@@ -90,42 +85,29 @@ export default async function RegisterPage({
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--space-9)' }}>
-        <Logo size={32} withWordmark />
-      </div>
+      {role === null ? <RoleChooser /> : <SignUpForm role={role} message={message} params={params} />}
 
       <div
         style={{
-          padding: 'var(--space-9)',
-          background: 'var(--surface-canvas)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-card)',
+          marginTop: 'var(--space-7)',
+          paddingTop: 'var(--space-6)',
+          borderTop: '1px solid var(--border-default)',
+          fontSize: 'var(--type-body-sm-size)',
+          color: 'var(--text-secondary)',
+          textAlign: 'center',
         }}
       >
-        {role === null ? <RoleChooser /> : <SignUpForm role={role} message={message} params={params} />}
-
-        <div
+        Already have an account?{' '}
+        <Link
+          href="/login"
           style={{
-            marginTop: 'var(--space-7)',
-            paddingTop: 'var(--space-6)',
-            borderTop: '1px solid var(--border-default)',
-            fontSize: 'var(--type-body-sm-size)',
-            color: 'var(--text-secondary)',
-            textAlign: 'center',
+            color: 'var(--text-brand)',
+            textDecoration: 'underline',
+            textUnderlineOffset: 3,
           }}
         >
-          Already have an account?{' '}
-          <Link
-            href="/login"
-            style={{
-              color: 'var(--text-brand)',
-              textDecoration: 'underline',
-              textUnderlineOffset: 3,
-            }}
-          >
-            Sign in
-          </Link>
-        </div>
+          Sign in
+        </Link>
       </div>
     </div>
   )

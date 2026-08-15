@@ -3,7 +3,7 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge, RoleBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, personName } from '@/lib/admin/format'
+import { formatDate, personName, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -50,7 +50,7 @@ export default async function UsersPage({
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? params.status
     : undefined
-  const search = params.search?.trim() || undefined
+  const search = searchTerm(params.search)
   const page = parsePage(params.page)
 
   const result = await loadList<UserRow>('users', {
@@ -103,7 +103,8 @@ export default async function UsersPage({
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
       hrefFor={pageHrefBuilder(BASE, { role, status, search })}
-      filtered={Boolean(role || status || search)}
+      
+      filtered={hasFilter([role, status, search])}
       permission="user.read"
       emptyIcon="user-check"
       emptyTitle="No users match"

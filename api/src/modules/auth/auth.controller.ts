@@ -8,8 +8,9 @@ import {
 } from '../../lib/errors.js'
 import { recordAudit } from '../../lib/audit.js'
 import { ACCESS_COOKIE, REFRESH_COOKIE } from '../../middleware/authenticate.js'
-import { parseDuration } from '../../lib/tokens.js'
+import { parseDuration, verifyAccessToken } from '../../lib/tokens.js'
 import { Role } from '@prisma/client'
+import { prisma } from '../../lib/prisma.js'
 import {
   buildAuthorizationUrl,
   createState,
@@ -27,10 +28,14 @@ const ACCESS_TTL_MS = parseDuration(env.JWT_ACCESS_TTL)
  * returned in the JSON body so non-browser clients can use Authorization headers.
  */
 function setAuthCookies(res: Response, tokens: SessionTokens): void {
+  const sameSite = env.COOKIE_SAME_SITE
   const base = {
     httpOnly: true,
-    secure: env.COOKIE_SECURE || isProduction,
-    sameSite: 'lax' as const,
+    // `Secure` is required by browsers when `SameSite=None`. The env
+    // validator refuses `none` without it, so this branch can rely on
+    // `Secure` being set whenever `sameSite === 'none'`.
+    secure: env.COOKIE_SECURE || isProduction || sameSite === 'none',
+    sameSite,
     path: '/',
     ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
   }
@@ -75,7 +80,14 @@ export async function login(req: Request, res: Response): Promise<void> {
 }
 
 export async function refresh(req: Request, res: Response): Promise<void> {
-  const raw = (req.body?.refreshToken as string | undefined) ?? req.cookies?.[REFRESH_COOKIE]
+  // The httpOnly cookie is the canonical refresh token. We accept the
+  // body as a fallback for non-browser clients (mobile apps, server-to-server
+  // scripts), but the body never overrides the cookie — a browser with a
+  // fresh cookie should not be rotated by a stale body token that some
+  // intermediate replayed.
+  const cookie = req.cookies?.[REFRESH_COOKIE] as string | undefined
+  const body = req.body?.refreshToken as string | undefined
+  const raw = cookie ?? body
   if (!raw) throw new UnauthorizedError('No refresh token supplied')
 
   const { user, tokens } = await authService.refresh(raw, requestContext(req))
@@ -134,7 +146,17 @@ export async function me(req: Request, res: Response): Promise<void> {
 }
 
 export async function forgotPassword(req: Request, res: Response): Promise<void> {
-  await authService.forgotPassword(req.body.email)
+  const result = await authService.forgotPassword(req.body.email)
+  // Record a forensic trail even though the response is constant. The
+  // audit row is keyed by the user id when the address exists, otherwise
+  // null — this lets an admin see "someone tried to reset foo@bar" without
+  // the endpoint becoming an account-enumeration oracle to the caller.
+  await recordAudit({
+    req,
+    action: 'auth.forgot_password',
+    entityType: 'User',
+    entityId: result.userId ?? undefined,
+  })
   // Always 200 with the same body, whether or not the address exists — this
   // endpoint must not be an account-enumeration oracle.
   res.json({
@@ -145,8 +167,14 @@ export async function forgotPassword(req: Request, res: Response): Promise<void>
 }
 
 export async function resetPassword(req: Request, res: Response): Promise<void> {
-  await authService.resetPassword(req.body.token, req.body.password)
+  const userId = await authService.resetPassword(req.body.token, req.body.password)
   clearAuthCookies(res)
+  await recordAudit({
+    req,
+    action: 'auth.password_reset',
+    entityType: 'User',
+    entityId: userId,
+  })
   res.json({ data: { message: 'Password updated. Please sign in with your new password.' } })
 }
 
@@ -286,6 +314,39 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
       userAgent: req.header('user-agent') ?? undefined,
       ipAddress: req.ip ?? undefined,
     })
+
+    /**
+     * If the caller was already signed in when they clicked "Continue with
+     * Google", the new session replaces the old one. Without this step,
+     * the previous session row would stay valid in the database — the
+     * browser stops sending its cookie, but anyone who captured it could
+     * keep using it. We can't tell who started the flow from the OAuth
+     * state alone (the cookies cleared above are the OAuth ones, not the
+     * session ones), so we look at the access cookie.
+     */
+    const existingAccess = req.cookies?.[ACCESS_COOKIE]
+    if (existingAccess) {
+      try {
+        const claims = verifyAccessToken(existingAccess)
+        if (claims.sub && claims.sub !== user.id) {
+          const result = await prisma.session.updateMany({
+            where: { userId: claims.sub, revokedAt: null },
+            data: { revokedAt: new Date(), revokedReason: 'session_swap' },
+          })
+          if (result.count > 0) {
+            await recordAudit({
+              req,
+              action: 'auth.session_replaced_by_google',
+              entityType: 'User',
+              entityId: claims.sub,
+              after: { replacedBy: user.id, sessionsRevoked: result.count },
+            })
+          }
+        }
+      } catch {
+        // A stale or tampered cookie should not abort the new sign-in.
+      }
+    }
 
     setAuthCookies(res, tokens)
     await recordAudit({

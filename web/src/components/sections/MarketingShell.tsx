@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { SkipLink } from '@/components/a11y/SkipLink'
 import { Analytics } from '@/components/analytics/Analytics'
 import { CookieBanner } from '@/components/analytics/CookieBanner'
 import { Footer, TopNav } from '@/components/ds'
@@ -46,6 +47,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           </>
         }
       />
+      <SkipLink />
       <main id="main">{children}</main>
       <Footer columns={FOOTER_COLUMNS} />
 

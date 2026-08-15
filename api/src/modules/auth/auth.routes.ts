@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { validate } from '../../middleware/validate.js'
 import { authenticate } from '../../middleware/authenticate.js'
-import { authLimiter } from '../../middleware/rateLimit.js'
+import { authLimiter, authIpLimiter } from '../../middleware/rateLimit.js'
 import * as controller from './auth.controller.js'
 import {
   registerSchema,
@@ -17,8 +17,8 @@ import {
 
 export const authRouter = Router()
 
-authRouter.post('/register', authLimiter, validate({ body: registerSchema }), controller.register)
-authRouter.post('/login', authLimiter, validate({ body: loginSchema }), controller.login)
+authRouter.post('/register', authIpLimiter, authLimiter, validate({ body: registerSchema }), controller.register)
+authRouter.post('/login', authIpLimiter, authLimiter, validate({ body: loginSchema }), controller.login)
 authRouter.post('/refresh', validate({ body: refreshSchema }), controller.refresh)
 authRouter.post('/logout', controller.logout)
 
@@ -36,12 +36,14 @@ authRouter.get('/google/callback', controller.googleCallback)
 
 authRouter.post(
   '/forgot-password',
+  authIpLimiter,
   authLimiter,
   validate({ body: forgotPasswordSchema }),
   controller.forgotPassword,
 )
 authRouter.post(
   '/reset-password',
+  authIpLimiter,
   authLimiter,
   validate({ body: resetPasswordSchema }),
   controller.resetPassword,
@@ -49,6 +51,7 @@ authRouter.post(
 authRouter.post('/verify-email', validate({ body: verifyEmailSchema }), controller.verifyEmail)
 authRouter.post(
   '/resend-verification',
+  authIpLimiter,
   authLimiter,
   validate({ body: resendVerificationSchema }),
   controller.resendVerification,

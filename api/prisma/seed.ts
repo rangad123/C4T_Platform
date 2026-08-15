@@ -283,7 +283,7 @@ async function main() {
         summary: 'Full regression across UPI, card and net-banking checkout on Android and iOS.',
         instructions:
           'Focus on the UPI collect flow and the 3DS step-up. Report anything that blocks a payment from completing, and always attach a screen recording.',
-        status: 'IN_PROGRESS',
+        status: ProjectStatus.IN_PROGRESS,
         priority: ProjectPriority.HIGH,
         platformTargets: ['android', 'ios'],
         targetCountries: ['IN', 'AE'],
@@ -292,6 +292,14 @@ async function main() {
         progressPercent: 35,
       },
     })
+    // Advance the sequence past the seed's hardcoded reference so the next
+    // API-created project (which calls nextval()) does not collide on the
+    // unique reference index. Without this, the seed would leave the sequence
+    // counter at 1 and the first project created by the API would write
+    // C4T-2026-0001 — colliding with the seeded row.
+    await prisma.$executeRawUnsafe(
+      `SELECT setval('"ref_project_${new Date().getUTCFullYear()}"', 2, true)`,
+    )
     console.log('  demo project created')
   }
 
@@ -382,9 +390,8 @@ async function main() {
   if (!secondProject) {
     const kairos = orgBySlug.get('kairos-health')
     if (kairos) {
-      await prisma.$executeRawUnsafe(
-        `CREATE SEQUENCE IF NOT EXISTS "ref_project_${new Date().getUTCFullYear()}" START 1`,
-      )
+      // The sequence was already created (and advanced past 1) by the first
+      // project block above. No need to recreate it.
       await prisma.project.create({
         data: {
           reference: `C4T-${new Date().getUTCFullYear()}-0002`,
@@ -393,8 +400,8 @@ async function main() {
           title: 'Patient portal — appointment booking',
           summary: 'End-to-end testing of the appointment booking flow including insurance capture and SMS reminders.',
           instructions: 'Cover both insured and self-pay paths. Test across desktop and mobile, with at least one session per US timezone.',
-          status: 'IN_PROGRESS',
-          priority: ProjectPriority.MEDIUM,
+          status: ProjectStatus.IN_PROGRESS,
+          priority: ProjectPriority.HIGH,
           platformTargets: ['web', 'android', 'ios'],
           targetCountries: ['US', 'CA'],
           targetLanguages: ['en', 'es'],
@@ -402,6 +409,11 @@ async function main() {
           progressPercent: 12,
         },
       })
+      // Advance the sequence past the second seed row so the next
+      // API-created project reads `nextval() = 3`.
+      await prisma.$executeRawUnsafe(
+        `SELECT setval('"ref_project_${new Date().getUTCFullYear()}"', 3, true)`,
+      )
     }
   }
 

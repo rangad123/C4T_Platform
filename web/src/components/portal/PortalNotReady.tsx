@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Icon } from '@/components/ds/core/Icon'
 import { Logo } from '@/components/ds/core/Logo'
 import { Button } from '@/components/ds/core/Button'
