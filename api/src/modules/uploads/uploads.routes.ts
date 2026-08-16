@@ -1,13 +1,17 @@
-import { Router, raw } from 'express'
+import { Router } from 'express'
+import { raw } from 'body-parser'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
 import { FileScope } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
+import { isAdminSide } from '../../middleware/authorize.js'
 import { validate } from '../../middleware/validate.js'
 import { uploadLimiter } from '../../middleware/rateLimit.js'
 import { NotFoundError, ForbiddenError, BadRequestError } from '../../lib/errors.js'
 import { env } from '../../config/env.js'
+import { bugRelations, projectRelations, threadRelations } from '../../lib/access/relations.js'
+import { authorize } from '../../lib/access/policy.js'
 import {
   createUploadUrl,
   createDownloadUrl,
@@ -93,6 +97,77 @@ uploadsRouter.post(
   },
 )
 
+/**
+ * Resolves whether the caller may download this file, by walking to whatever
+ * it's actually attached to and reusing that resource's own visibility rule
+ * — the same `bugRelations`/`projectRelations`/`threadRelations` + `authorize`
+ * pattern every other module uses. Admin-side roles bypass, matching how they
+ * already read bugs/projects/threads platform-wide elsewhere.
+ *
+ * Avatars and organisation logos are treated as viewable by any authenticated
+ * user: they render unscoped in list rows across the admin panel (a tester
+ * row shows the tester's avatar regardless of the viewer's specific
+ * relationship to that tester), so gating them per-viewer would just break
+ * those lists for no confidentiality gain — they are profile pictures, not
+ * sensitive documents.
+ *
+ * A file with no matching join row (e.g. TESTER_DOCUMENT, OTHER, or an
+ * attachment whose parent was deleted) falls back to uploader-only.
+ */
+async function assertCanDownload(
+  user: Express.AuthenticatedUser,
+  file: { id: string; scope: FileScope; uploadedById: string },
+): Promise<void> {
+  if (isAdminSide(user)) return
+
+  if (file.scope === FileScope.AVATAR || file.scope === FileScope.ORG_LOGO) return
+
+  if (file.scope === FileScope.BUG_ATTACHMENT) {
+    const attachment = await prisma.bugAttachment.findFirst({
+      where: { fileId: file.id },
+      select: { bugId: true },
+    })
+    if (attachment) {
+      const ctx = await bugRelations(user, attachment.bugId)
+      if (!ctx) throw new NotFoundError('File')
+      authorize(user, 'bug.read', ctx.relations)
+      return
+    }
+  }
+
+  if (file.scope === FileScope.PROJECT_MATERIAL) {
+    const material = await prisma.projectMaterial.findFirst({
+      where: { fileId: file.id },
+      select: { projectId: true },
+    })
+    if (material) {
+      const ctx = await projectRelations(user, material.projectId)
+      if (!ctx) throw new NotFoundError('File')
+      authorize(user, 'project.read', ctx.relations)
+      return
+    }
+  }
+
+  if (file.scope === FileScope.MESSAGE_ATTACHMENT) {
+    const attachment = await prisma.messageAttachment.findFirst({
+      where: { fileId: file.id },
+      select: { message: { select: { threadId: true } } },
+    })
+    if (attachment) {
+      const ctx = await threadRelations(user, attachment.message.threadId)
+      if (!ctx) throw new NotFoundError('File')
+      authorize(user, 'thread.read', ctx.relations)
+      return
+    }
+  }
+
+  // TESTER_DOCUMENT, OTHER, or an attachment row that no longer resolves —
+  // only the person who uploaded it may fetch it.
+  if (file.uploadedById !== user.id) {
+    throw new ForbiddenError('You do not have access to this file')
+  }
+}
+
 /** Short-lived signed download URL. Objects are never publicly readable. */
 uploadsRouter.get(
   '/:id/download-url',
@@ -101,15 +176,19 @@ uploadsRouter.get(
   async (req, res) => {
     const file = await prisma.fileObject.findUnique({
       where: { id: param(req, 'id') },
-      select: { id: true, storageKey: true, originalName: true, isComplete: true },
+      select: {
+        id: true,
+        scope: true,
+        storageKey: true,
+        originalName: true,
+        isComplete: true,
+        uploadedById: true,
+      },
     })
     if (!file?.isComplete) throw new NotFoundError('File')
 
-    // NOTE: this grants any authenticated user a URL for any known file id.
-    // File ids are unguessable cuids and are only surfaced through endpoints
-    // that already scope by role, so this is acceptable for launch — but if a
-    // stricter rule is needed, resolve the owning bug/message here and reuse
-    // its visibility filter. Flagged in docs/SCHEMA-RECONCILIATION.md.
+    await assertCanDownload(req.user!, file)
+
     res.json({ data: { url: await createDownloadUrl(file.storageKey, file.originalName) } })
   },
 )

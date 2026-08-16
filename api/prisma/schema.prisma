@@ -140,6 +140,20 @@ enum BugStatus {
   REJECTED
   DUPLICATE
   WONT_FIX
+  /// Not a defect — the reporter is asking for new behaviour, not fixing broken behaviour.
+  FEATURE_REQUEST
+}
+
+/// The kind of defect, independent of `BugSeverity` (how bad) and `BugStatus`
+/// (where it is in the workflow).
+enum BugType {
+  CRASH
+  APP_FREEZE
+  FUNCTIONAL
+  UI
+  UX
+  SECURITY
+  PERFORMANCE
 }
 
 enum BugReproducibility {
@@ -210,6 +224,17 @@ enum FileScope {
   AVATAR
   ORG_LOGO
   OTHER
+}
+
+/// Skills taxonomy. The legacy data has free-text skill names; this enum
+/// groups them so the admin can browse skills by purpose (what kind of work
+/// the skill applies to) rather than as a flat list. Categories are mutually
+/// exclusive — a skill lives in exactly one of them.
+enum SkillCategory {
+  DOMAIN       // a market or product area (e.g. "Fintech", "Gaming")
+  TYPE         // a testing discipline (e.g. "Functional", "Accessibility")
+  TOOL         // a tool the tester knows (e.g. "Postman", "Charles Proxy")
+  APPLICATION  // a product or app the tester has hands-on with (e.g. "iOS Safari")
 }
 
 /// Sales pipeline state for a marketing-site enquiry.
@@ -537,10 +562,11 @@ model TesterProfile {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  devices   TesterDevice[]
-  skills    TesterSkill[]
-  languages TesterLanguage[]
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  devices     TesterDevice[]
+  skills      TesterSkill[]
+  languages   TesterLanguage[]
+  workHistory TesterWorkHistory[]
 
   @@index([status])
   @@index([countryCode])
@@ -557,6 +583,15 @@ model TesterDevice {
   osName          String?    @map("os_name")
   osVersion       String?    @map("os_version")
   screenSize      String?    @map("screen_size")
+  /// RAM in GB (`"8"`, `"16"`). Free text rather than an enum — the field on
+  /// the legacy form is a single number, and a spurious enum would force
+  /// schema migrations whenever a new device ships with more RAM.
+  ramGb           String?    @map("ram_gb")
+  /// Network capability summary (e.g. `"WiFi 6 + 5G"`, `"Ethernet"`).
+  network         String?
+  /// Browser name + version on this device (e.g. `"Chrome 128"`). Separate
+  /// from the OS row so the same OS can list multiple browsers.
+  browser         String?
   isPrimary       Boolean    @default(false) @map("is_primary")
   createdAt       DateTime   @default(now()) @map("created_at")
 
@@ -567,12 +602,33 @@ model TesterDevice {
   @@map("tester_devices")
 }
 
-model Skill {
-  id      String        @id @default(cuid())
-  name    String        @unique
-  slug    String        @unique
-  testers TesterSkill[]
+model TesterWorkHistory {
+  id              String    @id @default(cuid())
+  testerProfileId String    @map("tester_profile_id")
+  company         String
+  jobTitle        String    @map("job_title")
+  startDate       DateTime  @map("start_date") @db.Date
+  /// Null means "current" — still working there.
+  endDate         DateTime? @map("end_date") @db.Date
+  description     String?
+  createdAt       DateTime  @default(now()) @map("created_at")
 
+  testerProfile TesterProfile @relation(fields: [testerProfileId], references: [id], onDelete: Cascade)
+
+  @@index([testerProfileId])
+  @@map("tester_work_history")
+}
+
+model Skill {
+  id       String        @id @default(cuid())
+  name     String        @unique
+  slug     String        @unique
+  /// Free-text skills from the legacy import get this default; new skills
+  /// should always pick a category.
+  category SkillCategory @default(TOOL)
+  testers  TesterSkill[]
+
+  @@index([category])
   @@map("skills")
 }
 
@@ -623,6 +679,16 @@ model Project {
   targetCountries String[] @map("target_countries") // ISO alpha-2
   targetLanguages String[] @map("target_languages") // ISO 639-1
 
+  /// Cap on how many testers may hold a non-removed assignment at once. Null
+  /// means uncapped — most existing projects predate this field.
+  maxTesters Int? @map("max_testers")
+
+  /// §2.2 Build Settings "Testers can see bugs raised by others?" — off by
+  /// default, matching the legacy platform's default. When true, a tester with
+  /// an active assignment on this project can read every bug on it, not only
+  /// their own reports.
+  testersCanSeeOtherBugs Boolean @default(false) @map("testers_can_see_other_bugs")
+
   startDate   DateTime? @map("start_date")
   endDate     DateTime? @map("end_date")
   submittedAt DateTime? @map("submitted_at")
@@ -643,14 +709,33 @@ model Project {
   assignments  ProjectAssignment[]
   managers     ManagerAssignment[]
   bugs         Bug[]
+  features     Feature[]
   threads      Thread[]
   ratings      Rating[]
   transactions Transaction[]
+  announcements Announcement[]
 
   @@index([organisationId])
   @@index([status])
   @@index([createdAt])
   @@map("projects")
+}
+
+/// §2.2 Build Settings "Feature Lists" — a project-scoped tag a bug can be
+/// filed against, e.g. "Checkout" or "Login". Deliberately just a name: the
+/// legacy platform did not describe anything richer than a flat, per-project
+/// list an admin curates and a reporter picks from.
+model Feature {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bugs    Bug[]
+
+  @@unique([projectId, name])
+  @@map("features")
 }
 
 /// §2.3 "testing instructions, scope, and materials for each assigned project"
@@ -727,6 +812,8 @@ model Bug {
   severity        BugSeverity
   status          BugStatus          @default(NEW)
   reproducibility BugReproducibility @default(ALWAYS)
+  type            BugType?
+  featureId       String?            @map("feature_id")
 
   // Environment captured at report time
   deviceModel String? @map("device_model")
@@ -746,10 +833,11 @@ model Bug {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  reportedBy  User    @relation("BugReporter", fields: [reportedById], references: [id], onDelete: Restrict)
-  duplicateOf Bug?    @relation("BugDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
-  duplicates  Bug[]   @relation("BugDuplicates")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  reportedBy  User     @relation("BugReporter", fields: [reportedById], references: [id], onDelete: Restrict)
+  duplicateOf Bug?     @relation("BugDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates  Bug[]    @relation("BugDuplicates")
+  feature     Feature? @relation(fields: [featureId], references: [id], onDelete: SetNull)
 
   attachments   BugAttachment[]
   comments      BugComment[]
@@ -757,6 +845,7 @@ model Bug {
 
   @@index([projectId, status])
   @@index([reportedById])
+  @@index([featureId])
   @@index([severity])
   @@index([createdAt])
   @@map("bugs")
@@ -884,14 +973,21 @@ model Announcement {
   title       String
   body        String
   audience    AnnouncementAudience @default(ALL)
+  /// When set, the announcement is shown only to members of this project
+  /// (testers, customer members, the project's manager). When null, the
+  /// audience enum alone decides who sees it. The two axes are independent:
+  /// a project-scoped announcement can still target TESTERS only.
+  projectId   String?              @map("project_id")
   publishedAt DateTime?            @map("published_at")
   expiresAt   DateTime?            @map("expires_at")
   createdAt   DateTime             @default(now()) @map("created_at")
   updatedAt   DateTime             @updatedAt @map("updated_at")
 
-  author User @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  author  User     @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([audience, publishedAt])
+  @@index([projectId])
   @@map("announcements")
 }
 

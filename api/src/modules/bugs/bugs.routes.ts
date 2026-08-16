@@ -7,6 +7,7 @@ import {
   createBugSchema,
   updateBugSchema,
   changeBugStatusSchema,
+  bulkChangeBugStatusSchema,
   addCommentSchema,
   addAttachmentSchema,
   bugIdParam,
@@ -28,6 +29,12 @@ export const bugsRouter = Router()
 bugsRouter.use(authenticate)
 
 bugsRouter.get('/', validate({ query: listBugsQuery }), controller.list)
+/**
+ * CSV export — declared before `/:id` so "export.csv" is not consumed as an
+ * id with a dot in it. The query schema is the same shape as the list
+ * endpoint, minus pagination.
+ */
+bugsRouter.get('/export.csv', validate({ query: listBugsQuery }), controller.exportCsv)
 bugsRouter.get('/:id', validate({ params: bugIdParam }), controller.getOne)
 
 /** Creating requires an active assignment — enforced in the service. */
@@ -50,6 +57,17 @@ bugsRouter.post(
   '/:id/triage',
   validate({ params: bugIdParam, body: changeBugStatusSchema }),
   controller.changeStatus,
+)
+
+/**
+ * Bulk status / severity change. Admin-side only — a customer marking dozens
+ * of bugs fixed in one click is a workflow we don't want to expose yet, and
+ * the transition matrix requires `bug.change_status` which is admin-shaped.
+ */
+bugsRouter.post(
+  '/bulk-status',
+  validate({ body: bulkChangeBugStatusSchema }),
+  controller.bulkStatus,
 )
 
 bugsRouter.delete('/:id', validate({ params: bugIdParam }), controller.remove)

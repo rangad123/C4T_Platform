@@ -5,6 +5,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission } from '@/lib/auth/session'
 import { createOrganisationAction } from '@/lib/admin/organisation-actions'
 import { titleCase } from '@/lib/admin/format'
@@ -68,7 +69,7 @@ export default async function NewOrganisationPage({
               : "Couldn't create the organisation. Check the form and try again."}
           </div>
         ) : null}
-        <form action={createOrganisationAction} style={formStyle}>
+        <TrackedForm action={createOrganisationAction} style={formStyle}>
           <div style={fieldGrid}>
             <Field label="Name" htmlFor="name" required hint="The legal or trading name shown to the team.">
               <Input id="name" name="name" required defaultValue={params.name ?? ''} />
@@ -176,7 +177,7 @@ export default async function NewOrganisationPage({
               Cancel
             </Button>
           </div>
-        </form>
+        </TrackedForm>
       </Panel>
     </DetailShell>
   )

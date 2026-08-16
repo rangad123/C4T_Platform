@@ -2,7 +2,7 @@
   "name": "@crowd4test/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Crowd4Test Platform \u2014 Next.js frontend (marketing site + authenticated portals)",
+  "description": "Crowd4Test Platform — Next.js frontend (marketing site + authenticated portals)",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20.9.0"
@@ -22,6 +22,7 @@
     "launch-check": "node scripts/launch-check.mjs"
   },
   "dependencies": {
+    "country-flag-icons": "^1.6.20",
     "lucide-react": "^1.30.0",
     "next": "16.3.0",
     "react": "19.2.8",

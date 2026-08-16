@@ -119,6 +119,39 @@ export async function triageBugSeverity(formData: FormData): Promise<void> {
 }
 
 /**
+ * Type and Feature are independent of the lifecycle (`status`) and the
+ * platform's judgement (`severity`) — they classify WHAT kind of defect this
+ * is and WHICH part of the product it's in, so they go through the plain
+ * `PATCH /bugs/:id` update path rather than the triage/status endpoints.
+ */
+export async function updateBugClassification(formData: FormData): Promise<void> {
+  await requireRole(['ADMIN', 'SUB_ADMIN'])
+
+  const id = formTrimmed(formData, 'id')
+  if (!id) redirect(LIST_PATH)
+
+  const type = formTrimmed(formData, 'type')
+  const featureId = formTrimmed(formData, 'featureId')
+
+  let reason: string | null = null
+  try {
+    await serverFetch(`bugs/${id}`, {
+      method: 'PATCH',
+      body: {
+        type: type || null,
+        featureId: featureId || null,
+      },
+    })
+  } catch (error) {
+    reason = reasonFor(error)
+  }
+  if (reason) redirect(failurePath(id, 'triage', reason))
+
+  revalidatePath(LIST_PATH)
+  revalidatePath(detailPath(id))
+}
+
+/**
  * A lifecycle move. The page only offers the transitions the API reported in
  * `capabilities.availableTransitions`, but the value is re-checked against the
  * enum here and the API decides legality either way.

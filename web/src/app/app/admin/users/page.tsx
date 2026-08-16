@@ -1,6 +1,8 @@
+import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
+import { Button } from '@/components/ds/core/Button'
 import { StatusBadge, RoleBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, personName, searchTerm, hasFilter } from '@/lib/admin/format'
@@ -10,6 +12,34 @@ const PAGE_SIZE = 25
 const BASE = '/app/admin/users'
 const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
 const STATUSES = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED'] as const
+const SORT_OPTIONS = [
+  { value: 'createdAt', label: 'Created' },
+  { value: 'email', label: 'Email' },
+  { value: 'role', label: 'Role' },
+  { value: 'status', label: 'Status' },
+  { value: 'lastLoginAt', label: 'Last seen' },
+] as const
+const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
+
+/**
+ * Build the CSV export URL for the current filter set. Goes through the
+ * catch-all Route Handler at `/app/admin/export/[...path]` so the export
+ * stays same-origin (the route streams from the API on behalf of the browser).
+ */
+function buildExportHref(filters: {
+  role?: string
+  status?: string
+  search?: string
+  sort?: string
+  order?: string
+}): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value)
+  }
+  const qs = params.toString()
+  return qs ? `/app/admin/export/users?${qs}` : '/app/admin/export/users'
+}
 
 interface UserRow {
   id: string
@@ -41,7 +71,14 @@ interface UserRow {
 export default async function UsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ role?: string; status?: string; search?: string; page?: string }>
+  searchParams: Promise<{
+    role?: string
+    status?: string
+    search?: string
+    page?: string
+    sort?: string
+    order?: string
+  }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
@@ -51,12 +88,16 @@ export default async function UsersPage({
     ? params.status
     : undefined
   const search = searchTerm(params.search)
+  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
+    ? params.sort
+    : undefined
+  const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
   const page = parsePage(params.page)
 
   const result = await loadList<UserRow>('users', {
     page,
     limit: PAGE_SIZE,
-    query: { role, status, search },
+    query: { role, status, search, sort, order },
   })
 
   const columns: readonly TableColumn<UserRow>[] = [
@@ -102,28 +143,37 @@ export default async function UsersPage({
       columns={columns}
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
-      hrefFor={pageHrefBuilder(BASE, { role, status, search })}
-      
+      hrefFor={pageHrefBuilder(BASE, { role, status, search, sort, order })}
       filtered={hasFilter([role, status, search])}
       permission="user.read"
       emptyIcon="user-check"
       emptyTitle="No users match"
       emptyDescription="Every account on the platform is listed here, including administrators."
       toolbar={
-        <ListFilters
-          action={BASE}
-          search={{ value: search, placeholder: 'Name or email' }}
-          selects={[
-            { name: 'role', label: 'Role', options: ROLES, value: role, allLabel: 'All roles' },
-            {
-              name: 'status',
-              label: 'Status',
-              options: STATUSES,
-              value: status,
-              allLabel: 'All statuses',
-            },
-          ]}
-        />
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <ListFilters
+              action={BASE}
+              search={{ value: search, placeholder: 'Name or email' }}
+              selects={[
+                { name: 'role', label: 'Role', options: ROLES, value: role, allLabel: 'All roles' },
+                {
+                  name: 'status',
+                  label: 'Status',
+                  options: STATUSES,
+                  value: status,
+                  allLabel: 'All statuses',
+                },
+              ]}
+              sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
+            />
+          </div>
+          <Link href={buildExportHref({ role, status, search, sort, order })} prefetch={false}>
+            <Button variant="secondary" iconLeft="download">
+              Export CSV
+            </Button>
+          </Link>
+        </div>
       }
     />
   )

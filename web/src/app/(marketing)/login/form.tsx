@@ -50,9 +50,9 @@ function errorMessage(code: string | undefined): string | null {
 export default async function LoginForm({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string; error?: string; email?: string }>
+  searchParams?: Promise<{ next?: string; error?: string; email?: string; notice?: string }>
 } = {}) {
-  const params = searchParams ? await searchParams : { next: undefined, error: undefined, email: undefined }
+  const params = searchParams ? await searchParams : { next: undefined, error: undefined, email: undefined, notice: undefined }
   const message = errorMessage(params.error)
   const preservedEmail = params.email ?? ''
 
@@ -70,6 +70,27 @@ export default async function LoginForm({
       >
         Sign in to your Crowd4Test workspace.
       </p>
+
+      {params.notice === 'password_reset' ? (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 'var(--space-3)',
+            padding: 'var(--space-4) var(--space-5)',
+            marginBottom: 'var(--space-6)',
+            background: 'var(--status-success-bg)',
+            color: 'var(--status-success-fg)',
+            borderRadius: 'var(--radius-input)',
+            fontSize: 'var(--type-body-sm-size)',
+            lineHeight: 1.45,
+          }}
+        >
+          <Icon name="check-circle-2" size={18} style={{ flex: 'none', marginTop: 2 }} />
+          <span>Your password has been updated. Sign in with your new password.</span>
+        </div>
+      ) : null}
 
       {message ? (
         <div
@@ -122,6 +143,7 @@ export default async function LoginForm({
             autoComplete="current-password"
             required
             iconLeft="lock"
+            showPasswordToggle
           />
         </Field>
 

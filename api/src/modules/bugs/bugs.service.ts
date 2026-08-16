@@ -30,6 +30,9 @@ const bugSelect = {
   severity: true,
   status: true,
   reproducibility: true,
+  type: true,
+  featureId: true,
+  feature: { select: { id: true, name: true } },
   deviceModel: true,
   osName: true,
   osVersion: true,
@@ -42,7 +45,15 @@ const bugSelect = {
   createdAt: true,
   updatedAt: true,
   project: { select: { id: true, reference: true, title: true, organisationId: true } },
-  reportedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  reportedBy: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      testerProfile: { select: { countryCode: true } },
+    },
+  },
   _count: { select: { attachments: true, comments: true } },
 } satisfies Prisma.BugSelect
 
@@ -65,6 +76,8 @@ export async function listBugs(user: Express.AuthenticatedUser, query: ListBugsQ
     ...(query.projectId ? { projectId: query.projectId } : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.severity ? { severity: query.severity } : {}),
+    ...(query.type ? { type: query.type } : {}),
+    ...(query.featureId ? { featureId: query.featureId } : {}),
     ...(query.reportedById ? { reportedById: query.reportedById } : {}),
     ...(query.search
       ? {
@@ -88,6 +101,110 @@ export async function listBugs(user: Express.AuthenticatedUser, query: ListBugsQ
   ])
 
   return { items, meta: buildMeta(query, total) }
+}
+
+/**
+ * CSV export of the same row set the list endpoint returns, minus pagination.
+ * Reuses the exact `where` clause from `listBugs` so the access scope, filters,
+ * and search term are identical — exporting never bypasses RBAC.
+ *
+ * Columns are picked to be useful in a spreadsheet — the descriptive ones from
+ * `bugSelect` plus a synthesised "Reporter" name rather than the raw id. The
+ * original nested `id`s are kept as separate columns so downstream joins still
+ * work.
+ */
+export async function exportBugsCSV(
+  user: Express.AuthenticatedUser,
+  query: ListBugsQuery,
+): Promise<string> {
+  const where: Prisma.BugWhereInput = {
+    deletedAt: null,
+    ...bugScope(user),
+    ...(query.projectId ? { projectId: query.projectId } : {}),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.severity ? { severity: query.severity } : {}),
+    ...(query.type ? { type: query.type } : {}),
+    ...(query.featureId ? { featureId: query.featureId } : {}),
+    ...(query.reportedById ? { reportedById: query.reportedById } : {}),
+    ...(query.search
+      ? {
+          OR: [
+            { title: { contains: query.search, mode: 'insensitive' } },
+            { reference: { contains: query.search, mode: 'insensitive' } },
+            { description: { contains: query.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  }
+
+  const items = await prisma.bug.findMany({
+    where,
+    select: bugSelect,
+    orderBy: buildOrderBy(query.sort, query.order, BUG_SORT_FIELDS, 'createdAt'),
+  })
+
+  const rows = items.map((b) => [
+    b.reference,
+    b.title,
+    b.severity,
+    b.status,
+    b.type ?? '',
+    b.feature?.name ?? '',
+    b.project?.reference ?? '',
+    b.project?.title ?? '',
+    [
+      b.reportedBy?.firstName,
+      b.reportedBy?.lastName,
+    ]
+      .filter(Boolean)
+      .join(' '),
+    b.reportedBy?.email ?? '',
+    b.reportedBy?.testerProfile?.countryCode ?? '',
+    b.deviceModel ?? '',
+    b.osName ?? '',
+    b.osVersion ?? '',
+    b.browser ?? '',
+    b.appVersion ?? '',
+    b.networkType ?? '',
+    b.reproducibility,
+    b._count.attachments,
+    b._count.comments,
+    b.triagedAt,
+    b.resolvedAt,
+    b.createdAt,
+    b.updatedAt,
+  ])
+
+  const { toCsv } = await import('../../lib/csv.js')
+  return toCsv(
+    [
+      'Reference',
+      'Title',
+      'Severity',
+      'Status',
+      'Type',
+      'Feature',
+      'Project reference',
+      'Project title',
+      'Reporter',
+      'Reporter email',
+      'Reporter country',
+      'Device',
+      'OS',
+      'OS version',
+      'Browser',
+      'App version',
+      'Network',
+      'Reproducibility',
+      'Attachments',
+      'Comments',
+      'Triaged at',
+      'Resolved at',
+      'Created at',
+      'Updated at',
+    ],
+    rows,
+  )
 }
 
 export async function getBug(user: Express.AuthenticatedUser, id: string) {
@@ -219,6 +336,14 @@ export async function createBug(
     }
   }
 
+  if (typeof data.featureId === 'string') {
+    const feature = await prisma.feature.findFirst({
+      where: { id: data.featureId, projectId },
+      select: { id: true },
+    })
+    if (!feature) throw new BadRequestError('That feature does not belong to this project')
+  }
+
   const bug = await prisma.bug.create({
     data: {
       ...(data as Prisma.BugCreateInput),
@@ -295,6 +420,14 @@ export async function updateBug(
     )
   }
 
+  if (typeof input.featureId === 'string') {
+    const feature = await prisma.feature.findFirst({
+      where: { id: input.featureId, projectId: bug.projectId },
+      select: { id: true },
+    })
+    if (!feature) throw new BadRequestError('That feature does not belong to this project')
+  }
+
   return prisma.bug.update({
     where: { id },
     data: input,
@@ -310,6 +443,7 @@ const RESOLVED_STATUSES: BugStatus[] = [
   BugStatus.WONT_FIX,
   BugStatus.REJECTED,
   BugStatus.DUPLICATE,
+  BugStatus.FEATURE_REQUEST,
 ]
 
 /**
@@ -440,6 +574,114 @@ export async function changeBugStatus(
   }
 
   return updated
+}
+
+/**
+ * Bulk status change for a batch of bugs.
+ *
+ * Per-row checks against the transition matrix and the actor's relations —
+ * one row that fails does NOT abort the batch; the response lists which ids
+ * were updated and which were skipped, with a reason for the skips. This is
+ * what makes a bulk operation survivable on a real queue where every row is
+ * likely at a different stage of triage.
+ *
+ * Returns `{ updated: string[], skipped: { id: string, reason: string }[] }`.
+ */
+export async function bulkChangeBugStatus(
+  user: Express.AuthenticatedUser,
+  input: {
+    ids: string[]
+    status?: BugStatus
+    severity?: BugSeverity
+    note?: string
+  },
+): Promise<{ updated: string[]; skipped: { id: string; reason: string }[] }> {
+  if (!input.status && !input.severity) {
+    throw new BadRequestError('Provide at least one of status or severity')
+  }
+
+  const updated: string[] = []
+  const skipped: { id: string; reason: string }[] = []
+
+  // Sequential rather than concurrent — the per-row auth check is cheap, but
+  // hammering the transition matrix and aggregate refresh in parallel is a
+  // recipe for surprising lock contention. 200 rows serialised is still
+  // sub-second on a real Postgres.
+  for (const id of input.ids) {
+    try {
+      const resolved = await bugRelations(user, id)
+      if (!resolved) {
+        skipped.push({ id, reason: 'Bug not found' })
+        continue
+      }
+      const { relations, bug } = resolved
+      if (!can(user, 'bug.read', relations)) {
+        skipped.push({ id, reason: 'Not found' })
+        continue
+      }
+      authorize(user, 'bug.change_status', relations)
+
+      const current = bug.status as BugStatus
+      const actors = bugActors(relations)
+
+      if (input.severity !== undefined && !actors.includes('platform')) {
+        skipped.push({ id, reason: 'Only platform staff can change severity' })
+        continue
+      }
+
+      if (input.status && input.status !== current) {
+        if (!canTransition(current, input.status, actors)) {
+          const allowed = allowedTransitions(current, actors)
+          skipped.push({
+            id,
+            reason:
+              allowed.length > 0
+                ? `Cannot move from ${current} to ${input.status}`
+                : `No transitions allowed from ${current}`,
+          })
+          continue
+        }
+      }
+
+      const nextStatus = input.status ?? current
+
+      await prisma.$transaction(async (tx) => {
+        await tx.bug.update({
+          where: { id },
+          data: {
+            ...(input.status ? { status: input.status } : {}),
+            ...(input.severity ? { severity: input.severity } : {}),
+            ...(current === BugStatus.NEW && input.status && input.status !== BugStatus.NEW
+              ? { triagedAt: new Date() }
+              : {}),
+            ...(RESOLVED_STATUSES.includes(nextStatus)
+              ? { resolvedAt: new Date() }
+              : { resolvedAt: null }),
+          },
+        })
+
+        if (input.status && input.status !== current) {
+          await tx.bugStatusHistory.create({
+            data: {
+              bugId: id,
+              changedById: user.id,
+              fromStatus: current,
+              toStatus: input.status,
+              note: input.note ?? null,
+            },
+          })
+        }
+      })
+
+      await refreshTesterAggregates(bug.reportedById)
+      updated.push(id)
+    } catch (err) {
+      // A single row failing should not abort the batch.
+      skipped.push({ id, reason: err instanceof Error ? err.message : 'Unknown error' })
+    }
+  }
+
+  return { updated, skipped }
 }
 
 // ─── Delete ──────────────────────────────────────────────────────────────────

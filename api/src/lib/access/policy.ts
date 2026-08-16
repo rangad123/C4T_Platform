@@ -142,6 +142,7 @@ const POLICY: Record<Action, Rule> = {
       'project:manager',
       'bug:customer',
       'bug:reporter',
+      'bug:project_tester',
     ],
     permission: PERMISSIONS.BUG_READ,
   },
@@ -333,6 +334,7 @@ const TRANSITIONS: Record<BugStatus, Partial<Record<BugActor, BugStatus[]>>> = {
       BugStatus.REJECTED,
       BugStatus.DUPLICATE,
       BugStatus.WONT_FIX,
+      BugStatus.FEATURE_REQUEST,
     ],
     // The customer can act on a report before triage — "already known",
     // "already fixed", "not a bug".
@@ -342,6 +344,7 @@ const TRANSITIONS: Record<BugStatus, Partial<Record<BugActor, BugStatus[]>>> = {
       BugStatus.REJECTED,
       BugStatus.DUPLICATE,
       BugStatus.WONT_FIX,
+      BugStatus.FEATURE_REQUEST,
     ],
   },
   [BugStatus.TRIAGED]: {
@@ -351,6 +354,7 @@ const TRANSITIONS: Record<BugStatus, Partial<Record<BugActor, BugStatus[]>>> = {
       BugStatus.DUPLICATE,
       BugStatus.WONT_FIX,
       BugStatus.IN_PROGRESS,
+      BugStatus.FEATURE_REQUEST,
     ],
     customer: [
       BugStatus.CONFIRMED,
@@ -358,6 +362,7 @@ const TRANSITIONS: Record<BugStatus, Partial<Record<BugActor, BugStatus[]>>> = {
       BugStatus.REJECTED,
       BugStatus.DUPLICATE,
       BugStatus.WONT_FIX,
+      BugStatus.FEATURE_REQUEST,
     ],
   },
   [BugStatus.CONFIRMED]: {
@@ -396,6 +401,12 @@ const TRANSITIONS: Record<BugStatus, Partial<Record<BugActor, BugStatus[]>>> = {
   [BugStatus.WONT_FIX]: {
     platform: [BugStatus.CONFIRMED, BugStatus.IN_PROGRESS],
     customer: [BugStatus.CONFIRMED, BugStatus.IN_PROGRESS],
+  },
+  [BugStatus.FEATURE_REQUEST]: {
+    // Reversible on appeal, same as REJECTED/DUPLICATE — a reporter can argue
+    // in a comment that it really is a defect.
+    platform: [BugStatus.NEW, BugStatus.CONFIRMED],
+    customer: [BugStatus.CONFIRMED],
   },
 }
 

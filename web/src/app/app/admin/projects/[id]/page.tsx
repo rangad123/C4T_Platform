@@ -15,7 +15,8 @@ import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
-import { serverFetch } from '@/lib/api/server'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { loadList } from '@/lib/admin/list'
 import { requireRole, hasPermission } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
@@ -24,6 +25,7 @@ import {
   ASSIGNMENT_STATUSES,
   PROJECT_PRIORITIES,
   allowedTransitions,
+  deviceFitsTargets,
   isProjectPriority,
   type ProjectAssignmentRow,
   type ProjectBugRow,
@@ -32,10 +34,12 @@ import {
   type VerifiedTesterRow,
 } from './constants'
 import {
+  addFeature,
   addMaterial,
   archiveProject,
   changeProjectStatus,
   inviteTesters,
+  removeFeature,
   removeMaterial,
   updateAssignment,
   updateProjectBrief,
@@ -120,7 +124,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
   // Both lists are read in parallel with each other; the project read above had
   // to come first because a 404 there means there is no page to fill in.
-  const [testerPool, bugs] = await Promise.all([
+  const [testerPool, bugs, features] = await Promise.all([
     capabilities.canAssignTesters
       ? loadList<VerifiedTesterRow>('testers', {
           page: 1,
@@ -133,6 +137,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       limit: BUG_PREVIEW_SIZE,
       query: { projectId: project.id },
     }),
+    serverFetchOrNull<readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]>(
+      `projects/${project.id}/features`,
+    ),
   ])
 
   const assignedTesterIds = new Set(project.assignments.map((row) => row.tester.id))
@@ -361,7 +368,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <Panel title="At a glance">
             <DescriptionList
               items={[
-                { label: 'Testers on the roster', value: String(project._count.assignments) },
+                {
+                  label: 'Testers on the roster',
+                  value: project.maxTesters
+                    ? `${project._count.assignments} / ${project.maxTesters}`
+                    : String(project._count.assignments),
+                },
                 { label: 'Bugs logged', value: String(project._count.bugs) },
                 { label: 'Materials attached', value: String(project._count.materials) },
               ]}
@@ -402,7 +414,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           title="Edit the brief"
           description="Scope, instructions and dates. Priority and progress are in the aside."
         >
-          <form action={updateProjectBrief} style={stackStyle}>
+          <TrackedForm action={updateProjectBrief} style={stackStyle}>
             <input type="hidden" name="id" value={project.id} />
 
             <Field label="Title" htmlFor="title" required>
@@ -498,14 +510,33 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   defaultValue={toDateInput(project.endDate)}
                 />
               </Field>
+
+              <Field label="Maximum testers" htmlFor="maxTesters" hint="Leave blank for no cap.">
+                <Input
+                  id="maxTesters"
+                  name="maxTesters"
+                  type="number"
+                  min={1}
+                  max={10000}
+                  defaultValue={project.maxTesters ?? ''}
+                />
+              </Field>
             </div>
+
+            <Checkbox
+              id="testersCanSeeOtherBugs"
+              name="testersCanSeeOtherBugs"
+              defaultChecked={project.testersCanSeeOtherBugs}
+              label="Testers can see bugs raised by others"
+              description="Off by default. When on, any tester with an accepted assignment on this project can read every bug logged against it, not just their own reports."
+            />
 
             <div>
               <Button type="submit" variant="primary">
                 Save the brief
               </Button>
             </div>
-          </form>
+          </TrackedForm>
         </Panel>
       ) : null}
 
@@ -560,18 +591,23 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                     Choose testers
                   </legend>
                   <div style={checkboxGridStyle}>
-                    {invitable.map((tester) => (
-                      <Checkbox
-                        key={tester.user.id}
-                        id={`tester-${tester.user.id}`}
-                        name="testerIds"
-                        value={tester.user.id}
-                        label={personName(tester.user)}
-                        description={`${tester.user.email} · ${
-                          tester.countryCode ?? 'no country'
-                        } · ${formatRating(tester.ratingAverage)}`}
-                      />
-                    ))}
+                    {invitable.map((tester) => {
+                      const fit = deviceFitsTargets(tester.devices, project.platformTargets)
+                      return (
+                        <Checkbox
+                          key={tester.user.id}
+                          id={`tester-${tester.user.id}`}
+                          name="testerIds"
+                          value={tester.user.id}
+                          label={personName(tester.user)}
+                          description={`${tester.user.email} · ${
+                            tester.countryCode ?? 'no country'
+                          } · ${formatRating(tester.ratingAverage)}${
+                            fit === 'mismatch' ? ' · no device on this platform' : ''
+                          }`}
+                        />
+                      )
+                    })}
                   </div>
                 </fieldset>
                 <Field
@@ -735,6 +771,51 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </form>
         </Panel>
       ) : null}
+
+      <Panel
+        title="Features"
+        description="The tags a bug can be filed against. Delete one and any bug already carrying it just loses the tag — the report stays."
+      >
+        {!features ? (
+          <Muted>Features could not be read.</Muted>
+        ) : features.length === 0 ? (
+          <Muted>No features listed yet.</Muted>
+        ) : (
+          <ul style={listResetStyle}>
+            {features.map((feature) => (
+              <li key={feature.id} style={rowStyle}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                  <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{feature.name}</span>
+                  <Caption>
+                    {feature._count.bugs} bug{feature._count.bugs === 1 ? '' : 's'}
+                  </Caption>
+                </div>
+                {capabilities.canManageMaterials ? (
+                  <form action={removeFeature}>
+                    <input type="hidden" name="id" value={project.id} />
+                    <input type="hidden" name="featureId" value={feature.id} />
+                    <Button type="submit" variant="ghost" size="sm" iconLeft="x">
+                      Remove
+                    </Button>
+                  </form>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+        {capabilities.canManageMaterials ? (
+          <form
+            action={addFeature}
+            style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-5)' }}
+          >
+            <input type="hidden" name="id" value={project.id} />
+            <Input name="name" required maxLength={120} placeholder="Checkout" />
+            <Button type="submit" variant="secondary" iconLeft="plus">
+              Add feature
+            </Button>
+          </form>
+        ) : null}
+      </Panel>
 
       <Panel
         title="Bugs"

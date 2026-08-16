@@ -13,6 +13,8 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { serverFetch, serverFetchPage } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { hasPermission, requireRole } from '@/lib/auth/session'
+import { Avatar } from '@/components/admin/Avatar'
+import { CountryLabel } from '@/components/admin/CountryFlag'
 import { formatDate, personName, searchTerm, titleCase } from '@/lib/admin/format'
 import {
   addOrganisationMember,
@@ -83,6 +85,7 @@ interface OrganisationDetail {
   onboardedAt: string | null
   createdAt: string
   updatedAt: string
+  logoFileId: string | null
   notes: string | null
   members: OrganisationMember[]
   _count: { projects: number; transactions: number }
@@ -346,10 +349,13 @@ export default async function OrganisationDetailPage({
       title={organisation.name}
       badges={<StatusBadge status={organisation.status} />}
       subtitle={
-        <>
-          {organisation.slug}
-          {organisation.contactEmail ? ` · ${organisation.contactEmail}` : ''}
-        </>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar name={organisation.name} fileId={organisation.logoFileId} size="md" />
+          <span>
+            {organisation.slug}
+            {organisation.contactEmail ? ` · ${organisation.contactEmail}` : ''}
+          </span>
+        </span>
       }
       aside={
         <>
@@ -577,7 +583,12 @@ export default async function OrganisationDetailPage({
               { label: 'City', value: organisation.city },
               { label: 'State', value: organisation.state },
               { label: 'Postal code', value: organisation.postalCode },
-              { label: 'Country', value: organisation.countryCode },
+              {
+                label: 'Country',
+                value: organisation.countryCode ? (
+                  <CountryLabel countryCode={organisation.countryCode} />
+                ) : null,
+              },
               { label: 'Tax id', value: organisation.taxId },
             ]}
             permission="organisation.write"

@@ -2,6 +2,7 @@ import type { Request, Response } from 'express'
 import { param } from '../../lib/http.js'
 import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
+import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './organisations.service.js'
 import type { ListOrganisationsQuery } from './organisations.schema.js'
 
@@ -9,6 +10,15 @@ export async function list(req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListOrganisationsQuery>(res)
   const { items, meta } = await service.listOrganisations(req.user!, query)
   res.json({ data: items, meta })
+}
+
+/** CSV export — same filters as `list`, no pagination. Access scope via the service. */
+export async function exportCsv(req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<ListOrganisationsQuery>(res)
+  const csv = await service.exportOrganisationsCSV(req.user!, query)
+  res.setHeader('content-type', 'text/csv; charset=utf-8')
+  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('organisations')}"`)
+  res.send(csv)
 }
 
 export async function listMine(req: Request, res: Response): Promise<void> {

@@ -13,11 +13,13 @@ import {
   updateProjectSchema,
   changeProjectStatusSchema,
   addMaterialSchema,
+  addFeatureSchema,
   assignTestersSchema,
   respondToAssignmentSchema,
   updateAssignmentSchema,
   projectIdParam,
   materialParam,
+  featureParam,
   assignmentParam,
 } from './projects.schema.js'
 
@@ -39,6 +41,12 @@ projectsRouter.get(
 // ─── Shared list/detail — the service scopes results by role ─────────────────
 
 projectsRouter.get('/', validate({ query: listProjectsQuery }), controller.list)
+/**
+ * CSV export — declared before "/:id" so "export.csv" is not consumed as an
+ * id with a dot in it. The query schema is the same shape as the list
+ * endpoint, minus pagination.
+ */
+projectsRouter.get('/export.csv', validate({ query: listProjectsQuery }), controller.exportCsv)
 projectsRouter.get('/:id', validate({ params: projectIdParam }), controller.getOne)
 
 // ─── Create / edit — Customers (own org) and Admin ───────────────────────────
@@ -90,6 +98,28 @@ projectsRouter.delete(
   requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
   validate({ params: materialParam }),
   controller.removeMaterial,
+)
+
+// ─── Features ────────────────────────────────────────────────────────────────
+
+projectsRouter.get(
+  '/:id/features',
+  validate({ params: projectIdParam }),
+  controller.listFeatures,
+)
+
+projectsRouter.post(
+  '/:id/features',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: projectIdParam, body: addFeatureSchema }),
+  controller.addFeature,
+)
+
+projectsRouter.delete(
+  '/:id/features/:featureId',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: featureParam }),
+  controller.removeFeature,
 )
 
 // ─── Assignments ─────────────────────────────────────────────────────────────

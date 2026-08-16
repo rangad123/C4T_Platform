@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
-import { ThreadType, AnnouncementAudience, Role, type Prisma } from '@prisma/client'
+import { ThreadType, AnnouncementAudience, Role, AssignmentStatus, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission, isAdminSide } from '../../middleware/authorize.js'
@@ -294,10 +294,40 @@ communicationRouter.get(
     const query = validatedQuery<z.infer<typeof paginationQuery>>(res)
     const now = new Date()
 
+    // Project-scoped announcements are only visible to users with a seat
+    // on that project. Admins / sub-admins always see everything — for them
+    // the project filter is a no-op, so the OR clause collapses to a single
+    // empty filter (`{}`) that matches every row.
+    const projectScopeOr: Prisma.AnnouncementWhereInput[] = isAdminSide(req.user!)
+      ? [{}]
+      : [{ projectId: null }]
+    if (req.user!.role === Role.TESTER) {
+      projectScopeOr.push({
+        project: {
+          assignments: {
+            some: {
+              testerId: req.user!.id,
+              status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] },
+            },
+          },
+        },
+      })
+    } else if (req.user!.role === Role.CUSTOMER) {
+      projectScopeOr.push({
+        project: {
+          organisation: { members: { some: { userId: req.user!.id } } },
+        },
+      })
+    }
+
     const where: Prisma.AnnouncementWhereInput = {
       audience: { in: announcementAudienceFor(req.user!.role) },
       publishedAt: { not: null, lte: now },
-      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: now } },
+      ],
+      AND: [{ OR: projectScopeOr }],
     }
 
     const [items, total] = await Promise.all([
@@ -308,6 +338,8 @@ communicationRouter.get(
           title: true,
           body: true,
           audience: true,
+          projectId: true,
+          project: { select: { id: true, reference: true, title: true } },
           publishedAt: true,
           expiresAt: true,
           author: { select: { id: true, firstName: true, lastName: true } },
@@ -326,6 +358,12 @@ const announcementSchema = z.object({
   title: z.string().trim().min(3).max(200),
   body: z.string().trim().min(1).max(10_000),
   audience: z.nativeEnum(AnnouncementAudience).default(AnnouncementAudience.ALL),
+  /**
+   * Optional project scope. When set, the announcement is only shown to
+   * members of this project (its testers, customer members, and assigned
+   * managers). When null, the audience enum alone decides who sees it.
+   */
+  projectId: z.string().cuid().nullable().optional(),
   publishNow: z.boolean().default(true),
   expiresAt: z.coerce.date().optional(),
 })
@@ -337,12 +375,24 @@ communicationRouter.post(
   async (req, res) => {
     const input = req.body as z.infer<typeof announcementSchema>
 
+    // Validate the project exists if one was supplied. No membership check
+    // here — admin-side roles can post to any project; non-admin authors
+    // would need a follow-up check in the service.
+    if (input.projectId) {
+      const exists = await prisma.project.findUnique({
+        where: { id: input.projectId },
+        select: { id: true },
+      })
+      if (!exists) throw new NotFoundError('Project')
+    }
+
     const announcement = await prisma.announcement.create({
       data: {
         authorId: req.user!.id,
         title: input.title,
         body: input.body,
         audience: input.audience,
+        projectId: input.projectId ?? null,
         publishedAt: input.publishNow ? new Date() : null,
         expiresAt: input.expiresAt ?? null,
       },
@@ -353,10 +403,33 @@ communicationRouter.post(
       action: 'announcement.created',
       entityType: 'Announcement',
       entityId: announcement.id,
-      after: { title: input.title, audience: input.audience },
+      after: { title: input.title, audience: input.audience, projectId: input.projectId ?? null },
     })
 
     res.status(201).json({ data: announcement })
+  },
+)
+
+communicationRouter.get(
+  '/announcements/:id',
+  validate({ params: threadIdParam }),
+  async (req, res) => {
+    const a = await prisma.announcement.findUnique({
+      where: { id: param(req, 'id') },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        audience: true,
+        projectId: true,
+        project: { select: { id: true, reference: true, title: true } },
+        publishedAt: true,
+        expiresAt: true,
+        author: { select: { id: true, firstName: true, lastName: true } },
+      },
+    })
+    if (!a) throw new NotFoundError('Announcement')
+    res.json({ data: a })
   },
 )
 

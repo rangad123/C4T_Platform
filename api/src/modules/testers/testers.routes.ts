@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { z } from 'zod'
 import { Role } from '@prisma/client'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission, requireRole } from '../../middleware/authorize.js'
@@ -12,9 +13,12 @@ import {
   deviceSchema,
   skillsSchema,
   languagesSchema,
+  setSkillCategorySchema,
   acceptNdaSchema,
+  workHistorySchema,
   testerIdParam,
   deviceIdParam,
+  workHistoryIdParam,
 } from './testers.schema.js'
 
 export const testersRouter = Router()
@@ -30,6 +34,12 @@ me.get('/', controller.getMine)
 me.patch('/', validate({ body: updateTesterProfileSchema }), controller.updateMine)
 me.post('/devices', validate({ body: deviceSchema }), controller.addDevice)
 me.delete('/devices/:deviceId', validate({ params: deviceIdParam }), controller.removeDevice)
+me.post('/work-history', validate({ body: workHistorySchema }), controller.addWorkHistory)
+me.delete(
+  '/work-history/:workHistoryId',
+  validate({ params: workHistoryIdParam }),
+  controller.removeWorkHistory,
+)
 me.put('/skills', validate({ body: skillsSchema }), controller.setSkills)
 me.put('/languages', validate({ body: languagesSchema }), controller.setLanguages)
 me.post('/nda', validate({ body: acceptNdaSchema }), controller.acceptNda)
@@ -45,11 +55,40 @@ testersRouter.get(
   controller.list,
 )
 
+/**
+ * CSV export — declared before "/:id" so "export.csv" is not consumed as an
+ * id with a dot in it. The query schema is the same shape as the list
+ * endpoint, minus pagination.
+ */
+testersRouter.get(
+  '/export.csv',
+  requirePermission(PERMISSIONS.TESTER_READ),
+  validate({ query: listTestersQuery }),
+  controller.exportCsv,
+)
+
 testersRouter.get(
   '/:id',
   requirePermission(PERMISSIONS.TESTER_READ),
   validate({ params: testerIdParam }),
   controller.getOne,
+)
+
+// ─── Skill taxonomy (admin-only) ─────────────────────────────────────────────
+
+const skillIdParam = z.object({ skillId: z.string().cuid() })
+
+testersRouter.get(
+  '/skills/catalogue',
+  requireRole(Role.ADMIN, Role.SUB_ADMIN),
+  controller.listSkillCatalogue,
+)
+
+testersRouter.patch(
+  '/skills/:skillId/category',
+  requireRole(Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: skillIdParam, body: setSkillCategorySchema }),
+  controller.setSkillCategory,
 )
 
 /**

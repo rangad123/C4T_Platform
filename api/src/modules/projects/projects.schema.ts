@@ -34,6 +34,8 @@ export const createProjectSchema = z
     platformTargets: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
     targetCountries: z.array(isoCountry).max(60).default([]),
     targetLanguages: z.array(isoLanguage).max(40).default([]),
+    maxTesters: z.coerce.number().int().min(1).max(10_000).optional(),
+    testersCanSeeOtherBugs: z.boolean().optional(),
     startDate: z.coerce.date().optional(),
     endDate: z.coerce.date().optional(),
   })
@@ -50,6 +52,8 @@ export const updateProjectSchema = z.object({
   platformTargets: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   targetCountries: z.array(isoCountry).max(60).optional(),
   targetLanguages: z.array(isoLanguage).max(40).optional(),
+  maxTesters: z.coerce.number().int().min(1).max(10_000).nullable().optional(),
+  testersCanSeeOtherBugs: z.boolean().optional(),
   startDate: z.coerce.date().nullable().optional(),
   endDate: z.coerce.date().nullable().optional(),
   progressPercent: z.coerce.number().int().min(0).max(100).optional(),
@@ -72,6 +76,10 @@ export const addMaterialSchema = z
     path: ['fileId'],
   })
 
+export const addFeatureSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+})
+
 export const assignTestersSchema = z.object({
   testerIds: z.array(z.string().cuid()).min(1).max(200),
   notes: z.string().trim().max(1000).optional(),
@@ -90,6 +98,7 @@ export const updateAssignmentSchema = z.object({
 
 export const projectIdParam = z.object({ id: z.string().cuid() })
 export const materialParam = z.object({ id: z.string().cuid(), materialId: z.string().cuid() })
+export const featureParam = z.object({ id: z.string().cuid(), featureId: z.string().cuid() })
 export const assignmentParam = z.object({ id: z.string().cuid(), testerId: z.string().cuid() })
 
 export type ListProjectsQuery = z.infer<typeof listProjectsQuery>

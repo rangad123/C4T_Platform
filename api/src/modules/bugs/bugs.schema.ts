@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { BugSeverity, BugStatus, BugReproducibility } from '@prisma/client'
+import { BugSeverity, BugStatus, BugReproducibility, BugType } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
 export const BUG_SORT_FIELDS = [
@@ -14,6 +14,8 @@ export const listBugsQuery = paginationQuery.extend({
   projectId: z.string().cuid().optional(),
   status: z.nativeEnum(BugStatus).optional(),
   severity: z.nativeEnum(BugSeverity).optional(),
+  type: z.nativeEnum(BugType).optional(),
+  featureId: z.string().cuid().optional(),
   reportedById: z.string().cuid().optional(),
   search: z.string().trim().max(160).optional(),
   sort: z.enum(BUG_SORT_FIELDS).optional(),
@@ -33,6 +35,9 @@ export const createBugSchema = z.object({
   actualResult: z.string().trim().max(4000).optional(),
   severity: z.nativeEnum(BugSeverity),
   reproducibility: z.nativeEnum(BugReproducibility).default(BugReproducibility.ALWAYS),
+  type: z.nativeEnum(BugType).optional(),
+  /** Must belong to the same project — checked in the service. */
+  featureId: z.string().cuid().optional(),
 
   deviceModel: z.string().trim().max(120).optional(),
   osName: z.string().trim().max(60).optional(),
@@ -54,6 +59,8 @@ export const updateBugSchema = z.object({
   actualResult: z.string().trim().max(4000).optional(),
   severity: z.nativeEnum(BugSeverity).optional(),
   reproducibility: z.nativeEnum(BugReproducibility).optional(),
+  type: z.nativeEnum(BugType).nullable().optional(),
+  featureId: z.string().cuid().nullable().optional(),
   deviceModel: z.string().trim().max(120).optional(),
   osName: z.string().trim().max(60).optional(),
   osVersion: z.string().trim().max(40).optional(),
@@ -117,6 +124,19 @@ export const bugIdParam = z.object({ id: z.string().cuid() })
 export const bugAttachmentParam = z.object({
   id: z.string().cuid(),
   attachmentId: z.string().cuid(),
+})
+
+/**
+ * Bulk status change. Same shape as `changeBugStatusSchema` but takes an
+ * array of bug ids. The transition matrix is applied per-bug; a bug that
+ * can't make the requested transition is skipped rather than aborting the
+ * whole batch, so a single misclicked row does not waste the other 49.
+ */
+export const bulkChangeBugStatusSchema = z.object({
+  ids: z.array(z.string().cuid()).min(1).max(200),
+  status: z.nativeEnum(BugStatus).optional(),
+  severity: z.nativeEnum(BugSeverity).optional(),
+  note: z.string().trim().max(2000).optional(),
 })
 
 export type ListBugsQuery = z.infer<typeof listBugsQuery>

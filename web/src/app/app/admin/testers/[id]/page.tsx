@@ -1,8 +1,11 @@
 import type { ReactNode } from 'react'
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
+import { Avatar } from '@/components/admin/Avatar'
+import { CountryFlag } from '@/components/admin/CountryFlag'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { Pagination } from '@/components/ds/admin/Pagination'
@@ -13,6 +16,7 @@ import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission, hasPermission } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { loadList, parsePage } from '@/lib/admin/list'
@@ -53,6 +57,9 @@ interface TesterDevice {
   osName: string | null
   osVersion: string | null
   screenSize: string | null
+  ramGb: string | null
+  network: string | null
+  browser: string | null
   isPrimary: boolean
   createdAt: string
 }
@@ -82,10 +89,25 @@ interface TesterDetail {
     lastName: string | null
     status: string
     avatarFileId: string | null
+    phone: string | null
+    timezone: string | null
+    role: string
+    lastLoginAt: string | null
+    createdAt: string
   }
   devices: TesterDevice[]
   skills: { skill: { id: string; name: string; slug: string } }[]
   languages: { code: string; proficiency: string }[]
+  workHistory: WorkHistoryEntry[]
+}
+
+interface WorkHistoryEntry {
+  id: string
+  company: string
+  jobTitle: string
+  startDate: string
+  endDate: string | null
+  description: string | null
 }
 
 interface RatingRow {
@@ -168,6 +190,12 @@ const deviceColumns: readonly TableColumn<TesterDevice>[] = [
     renderSecondary: (device) => device.osVersion ?? undefined,
   },
   {
+    key: 'specs',
+    header: 'Hardware',
+    render: (device) => device.ramGb ? `${device.ramGb} GB` : '—',
+    renderSecondary: (device) => [device.network, device.browser].filter(Boolean).join(' · ') || undefined,
+  },
+  {
     key: 'primary',
     header: 'Primary',
     render: (device) =>
@@ -178,6 +206,26 @@ const deviceColumns: readonly TableColumn<TesterDevice>[] = [
       ) : (
         <span style={{ color: 'var(--text-muted)' }}>—</span>
       ),
+  },
+]
+
+const workHistoryColumns: readonly TableColumn<WorkHistoryEntry>[] = [
+  {
+    key: 'company',
+    header: 'Company',
+    render: (entry) => entry.company,
+    renderSecondary: (entry) => entry.jobTitle,
+  },
+  {
+    key: 'dates',
+    header: 'Dates',
+    render: (entry) =>
+      `${formatDate(entry.startDate)} — ${entry.endDate ? formatDate(entry.endDate) : 'Present'}`,
+  },
+  {
+    key: 'description',
+    header: 'Description',
+    render: (entry) => entry.description ?? '—',
   },
 ]
 
@@ -230,6 +278,9 @@ export default async function TesterDetailPage({
   try {
     // `serverFetch` already unwraps the `{ data }` envelope — this IS the profile.
     tester = await serverFetch<TesterDetail>(`testers/${id}`)
+    // Defensive: an API version skew (mid-deploy, stale cache) could omit a
+    // field this page now expects. Normalise rather than crash on `.length`.
+    if (tester) tester.workHistory ??= []
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound()
     loadError = err instanceof ApiError && err.status === 403 ? 'forbidden' : 'unknown'
@@ -292,9 +343,12 @@ export default async function TesterDetailPage({
       eyebrow="Accounts"
       title={personName(tester.user)}
       subtitle={
-        <>
-          {tester.user.email} · Applied {formatDate(tester.createdAt)}
-        </>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar name={personName(tester.user)} fileId={tester.user.avatarFileId} size="md" />
+          <span>
+            {tester.user.email} · Applied {formatDate(tester.createdAt)}
+          </span>
+        </span>
       }
       badges={
         <>
@@ -318,7 +372,7 @@ export default async function TesterDetailPage({
           >
             {canVerify ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-7)' }}>
-                <form action={setTesterStatus} style={FORM_STYLE}>
+                <TrackedForm action={setTesterStatus} style={FORM_STYLE}>
                   <input type="hidden" name="id" value={tester.id} />
                   <Field
                     label="Status"
@@ -348,7 +402,7 @@ export default async function TesterDetailPage({
                   <Button type="submit" variant="primary" fullWidth>
                     Save status
                   </Button>
-                </form>
+                </TrackedForm>
 
                 <form
                   action={rejectTester}
@@ -427,7 +481,17 @@ export default async function TesterDetailPage({
               label: 'Experience',
               value: tester.experienceYears === null ? null : yearsLabel(tester.experienceYears),
             },
-            { label: 'Location', value: location },
+            {
+              label: 'Location',
+              value: location ? (
+                <span
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+                >
+                  <CountryFlag countryCode={tester.countryCode} size={16} />
+                  <span>{location}</span>
+                </span>
+              ) : null,
+            },
             { label: 'Account', value: <StatusBadge status={tester.user.status} /> },
             {
               label: 'NDA accepted',
@@ -436,6 +500,29 @@ export default async function TesterDetailPage({
             { label: 'Verified', value: tester.verifiedAt ? formatDate(tester.verifiedAt) : null },
             { label: 'Bio', value: tester.bio, wide: true },
             { label: 'Rejection reason', value: tester.rejectionReason, wide: true },
+          ]}
+        />
+      </Panel>
+
+      <Panel title="Contact info" description="How to reach this tester outside the platform.">
+        <DescriptionList
+          items={[
+            { label: 'Email', value: tester.user.email },
+            { label: 'Phone', value: tester.user.phone },
+          ]}
+        />
+      </Panel>
+
+      <Panel title="Account details" description="The account this tester profile is attached to.">
+        <DescriptionList
+          items={[
+            { label: 'Role', value: titleCase(tester.user.role) },
+            { label: 'Member since', value: formatDate(tester.user.createdAt) },
+            {
+              label: 'Last sign-in',
+              value: tester.user.lastLoginAt ? formatDate(tester.user.lastLoginAt) : 'Never',
+            },
+            { label: 'Timezone', value: tester.user.timezone },
           ]}
         />
       </Panel>
@@ -457,6 +544,23 @@ export default async function TesterDetailPage({
             No devices listed. A tester adds their own devices, and cannot be assigned
             device-specific work until they do.
           </Muted>
+        )}
+      </Panel>
+
+      <Panel
+        title="Work history"
+        description="Prior testing and QA experience, maintained by the tester on their own profile."
+        flush={tester.workHistory.length > 0}
+      >
+        {tester.workHistory.length > 0 ? (
+          <Table
+            ariaLabel="Work history"
+            columns={workHistoryColumns}
+            rows={tester.workHistory}
+            rowKey={(entry) => entry.id}
+          />
+        ) : (
+          <Muted>No work history listed yet.</Muted>
         )}
       </Panel>
 
@@ -538,6 +642,25 @@ export default async function TesterDetailPage({
       <Panel
         title="Ratings received"
         description="Reviews left on this tester. Hidden reviews stay listed, and are left out of the average."
+        actions={
+          <Link
+            href={`/app/admin/ratings?subjectUserId=${tester.user.id}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              padding: 'var(--space-2) var(--space-3)',
+              borderRadius: 'var(--radius-input)',
+              border: '1px solid var(--border-default)',
+              fontSize: 'var(--type-body-sm-size)',
+              color: 'var(--text-primary)',
+              textDecoration: 'none',
+            }}
+          >
+            View all
+            <Icon name="arrow-right" size={14} />
+          </Link>
+        }
         flush={ratingRows.length > 0}
       >
         {'error' in ratings ? (

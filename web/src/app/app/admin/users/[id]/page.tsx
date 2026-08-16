@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
+import { CountryLabel } from '@/components/admin/CountryFlag'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
@@ -13,6 +14,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
@@ -381,7 +383,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
         description="The name, phone and locale on the account. Email addresses change through account recovery, not here."
       >
         {canWrite ? (
-          <form action={updateUserIdentity} style={formStyle}>
+          <TrackedForm action={updateUserIdentity} style={formStyle}>
             <input type="hidden" name="id" value={user.id} />
             <div style={fieldGridStyle}>
               <Field label="First name" htmlFor="firstName" required>
@@ -446,7 +448,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
                 Save identity
               </Button>
             </div>
-          </form>
+          </TrackedForm>
         ) : (
           <div style={formStyle}>
             <DescriptionList
@@ -454,7 +456,10 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
                 { label: 'First name', value: user.firstName ?? '' },
                 { label: 'Last name', value: user.lastName ?? '' },
                 { label: 'Phone', value: user.phone ?? '' },
-                { label: 'Country', value: user.countryCode ?? '' },
+                {
+                  label: 'Country',
+                  value: user.countryCode ? <CountryLabel countryCode={user.countryCode} /> : '',
+                },
                 { label: 'Timezone', value: user.timezone ?? '' },
               ]}
             />
@@ -493,7 +498,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
               <GrantSummary grants={embeddedGrants} />
             </div>
           ) : permissionsEditable ? (
-            <form action={setSubAdminPermissions} style={formStyle}>
+            <TrackedForm action={setSubAdminPermissions} style={formStyle}>
               <input type="hidden" name="id" value={user.id} />
               {permissionGroups.map((group) => (
                 <fieldset
@@ -551,7 +556,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
                   This is a full replacement, not a change list. Every unticked box is revoked.
                 </span>
               </div>
-            </form>
+            </TrackedForm>
           ) : (
             <div style={formStyle}>
               <p style={noteStyle}>

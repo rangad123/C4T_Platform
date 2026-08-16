@@ -46,6 +46,10 @@ export async function createAnnouncement(formData: FormData): Promise<void> {
   const body = formTrimmed(formData, 'body')
   const audienceInput = formTrimmed(formData, 'audience')
   const expiresAtInput = formTrimmed(formData, 'expiresAt')
+  // Optional project scope — empty string treated as no scope. CUID length is
+  // 25, but the API's zod schema enforces the format anyway, so just trust
+  // whatever came back here.
+  const projectIdInput = formTrimmed(formData, 'projectId')
 
   // The API defaults an unknown audience to ALL, which is the widest possible
   // reach — so a tampered value is narrowed here rather than trusted.
@@ -76,6 +80,7 @@ export async function createAnnouncement(formData: FormData): Promise<void> {
       body,
       audience,
       publishNow,
+      ...(projectIdInput ? { projectId: projectIdInput } : {}),
       ...(expiresAt === null ? {} : { expiresAt }),
     },
   })

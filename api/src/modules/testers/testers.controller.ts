@@ -2,6 +2,7 @@ import type { Request, Response } from 'express'
 import { param } from '../../lib/http.js'
 import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
+import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './testers.service.js'
 import type { ListTestersQuery } from './testers.schema.js'
 
@@ -9,6 +10,15 @@ export async function list(_req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListTestersQuery>(res)
   const { items, meta } = await service.listTesters(query)
   res.json({ data: items, meta })
+}
+
+/** CSV export — same filters as `list`, no pagination. */
+export async function exportCsv(_req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<ListTestersQuery>(res)
+  const csv = await service.exportTestersCSV(query)
+  res.setHeader('content-type', 'text/csv; charset=utf-8')
+  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('testers')}"`)
+  res.send(csv)
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {
@@ -49,12 +59,37 @@ export async function removeDevice(req: Request, res: Response): Promise<void> {
   res.status(204).send()
 }
 
+export async function addWorkHistory(req: Request, res: Response): Promise<void> {
+  res.status(201).json({ data: await service.addWorkHistory(req.user!.id, req.body) })
+}
+
+export async function removeWorkHistory(req: Request, res: Response): Promise<void> {
+  await service.removeWorkHistory(req.user!.id, param(req, 'workHistoryId'))
+  res.status(204).send()
+}
+
 export async function setSkills(req: Request, res: Response): Promise<void> {
   res.json({ data: await service.setSkills(req.user!.id, req.body.skills) })
 }
 
 export async function setLanguages(req: Request, res: Response): Promise<void> {
   res.json({ data: await service.setLanguages(req.user!.id, req.body.languages) })
+}
+
+export async function listSkillCatalogue(_req: Request, res: Response): Promise<void> {
+  res.json({ data: await service.listSkillCatalogue() })
+}
+
+export async function setSkillCategory(req: Request, res: Response): Promise<void> {
+  const skill = await service.setSkillCategory(param(req, 'skillId'), req.body.category)
+  await recordAudit({
+    req,
+    action: 'skill.category_changed',
+    entityType: 'Skill',
+    entityId: skill.id,
+    after: { category: req.body.category },
+  })
+  res.json({ data: skill })
 }
 
 export async function acceptNda(req: Request, res: Response): Promise<void> {

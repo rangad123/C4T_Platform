@@ -69,6 +69,13 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   // stored title alone instead of failing the whole save on one empty field.
   if (title.length >= 3) body.title = title
 
+  const maxTesters = formTrimmed(formData, 'maxTesters')
+  body.maxTesters = maxTesters ? maxTesters : null
+
+  // A checkbox's FormData entry is present only when checked — there is no
+  // "false" value to read, so absence IS the off state.
+  body.testersCanSeeOtherBugs = formData.has('testersCanSeeOtherBugs')
+
   await serverFetch(`projects/${id}`, { method: 'PATCH', body })
   revalidateProject(id)
 }
@@ -184,6 +191,25 @@ export async function removeMaterial(formData: FormData): Promise<void> {
   if (!id || !materialId) return
 
   await serverFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
+  revalidateProject(id)
+}
+
+/** §2.2 Build Settings "Feature Lists" — the tags a bug can be filed against. */
+export async function addFeature(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const name = formTrimmed(formData, 'name')
+  if (!id || !name) return
+
+  await serverFetch(`projects/${id}/features`, { method: 'POST', body: { name } })
+  revalidateProject(id)
+}
+
+export async function removeFeature(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const featureId = formTrimmed(formData, 'featureId')
+  if (!id || !featureId) return
+
+  await serverFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
   revalidateProject(id)
 }
 

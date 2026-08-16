@@ -41,14 +41,21 @@ const SECTIONS: readonly SidebarSection[] = [
       { href: '/app/admin/users', label: 'Users', icon: 'user-check' },
       { href: '/app/admin/testers', label: 'Testers', icon: 'users' },
       { href: '/app/admin/managers', label: 'Managers', icon: 'shield-check' },
+      { href: '/app/admin/skills', label: 'Skills', icon: 'briefcase' },
     ],
   },
   {
+    /**
+     * Bugs and Ratings are not top-level sidebar entries — they live as
+     * sub-sections inside the project and tester detail pages respectively.
+     * The dedicated /app/admin/bugs and /app/admin/ratings routes stay so
+     * cross-project / cross-tester lists still exist; we just point at them
+     * via "View all" links from the parent detail page rather than having a
+     * permanent sidebar entry.
+     */
     label: 'Delivery',
     links: [
       { href: '/app/admin/projects', label: 'Projects', icon: 'briefcase' },
-      { href: '/app/admin/bugs', label: 'Bugs', icon: 'clipboard-check' },
-      { href: '/app/admin/ratings', label: 'Ratings', icon: 'trophy' },
     ],
   },
   {

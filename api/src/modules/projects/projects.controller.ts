@@ -3,6 +3,7 @@ import { param } from '../../lib/http.js'
 import { type AssignmentStatus } from '@prisma/client'
 import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
+import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './projects.service.js'
 import type { ListProjectsQuery } from './projects.schema.js'
 
@@ -10,6 +11,15 @@ export async function list(req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListProjectsQuery>(res)
   const { items, meta } = await service.listProjects(req.user!, query)
   res.json({ data: items, meta })
+}
+
+/** CSV export — same filters as `list`, no pagination. Access scope via the service. */
+export async function exportCsv(req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<ListProjectsQuery>(res)
+  const csv = await service.exportProjectsCSV(req.user!, query)
+  res.setHeader('content-type', 'text/csv; charset=utf-8')
+  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('projects')}"`)
+  res.send(csv)
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {
@@ -70,6 +80,21 @@ export async function addMaterial(req: Request, res: Response): Promise<void> {
 
 export async function removeMaterial(req: Request, res: Response): Promise<void> {
   await service.removeMaterial(req.user!, param(req, 'id'), param(req, 'materialId'))
+  res.status(204).send()
+}
+
+export async function listFeatures(req: Request, res: Response): Promise<void> {
+  const features = await service.listFeatures(req.user!, param(req, 'id'))
+  res.json({ data: features })
+}
+
+export async function addFeature(req: Request, res: Response): Promise<void> {
+  const feature = await service.addFeature(req.user!, param(req, 'id'), req.body.name)
+  res.status(201).json({ data: feature })
+}
+
+export async function removeFeature(req: Request, res: Response): Promise<void> {
+  await service.removeFeature(req.user!, param(req, 'id'), param(req, 'featureId'))
   res.status(204).send()
 }
 

@@ -166,7 +166,6 @@ export const isTest = env.NODE_ENV === 'test'
 export const googleOAuthEnabled = Boolean(
   env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI,
 )
-
 // Guard rails that only matter in production.
 if (isProduction) {
   if (env.STORAGE_DRIVER === 's3' && !env.S3_BUCKET) {

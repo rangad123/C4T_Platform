@@ -127,6 +127,8 @@ export interface ProjectDetail {
   platformTargets: string[]
   targetCountries: string[]
   targetLanguages: string[]
+  maxTesters: number | null
+  testersCanSeeOtherBugs: boolean
   startDate: string | null
   endDate: string | null
   submittedAt: string | null
@@ -161,6 +163,34 @@ export interface VerifiedTesterRow {
   ratingAverage: string | number | null
   ndaAcceptedAt: string | null
   user: ProjectPerson & { status: string }
+  devices: readonly { type: string }[]
+}
+
+/**
+ * Loose platform-fit check for the invite picker — not enforced by the API,
+ * since `platformTargets` is free text with no formal contract with
+ * `DeviceType`. This is a hint for the admin, not a hard eligibility gate:
+ * a project with no targets, or a tester with no devices listed yet, always
+ * reads as "no signal" rather than "ineligible."
+ */
+export function deviceFitsTargets(
+  devices: readonly { type: string }[],
+  platformTargets: readonly string[],
+): 'match' | 'no-signal' | 'mismatch' {
+  if (platformTargets.length === 0 || devices.length === 0) return 'no-signal'
+
+  const wantsMobile = platformTargets.some((t) => /android|ios|mobile/i.test(t))
+  const wantsWeb = platformTargets.some((t) => /web|desktop|browser/i.test(t))
+  const wantsTablet = platformTargets.some((t) => /tablet/i.test(t))
+
+  if (!wantsMobile && !wantsWeb && !wantsTablet) return 'no-signal'
+
+  const hasMobile = devices.some((d) => d.type === 'MOBILE')
+  const hasTablet = devices.some((d) => d.type === 'TABLET')
+  const hasDesktop = devices.some((d) => d.type === 'DESKTOP')
+
+  const matches = (wantsMobile && hasMobile) || (wantsWeb && hasDesktop) || (wantsTablet && hasTablet)
+  return matches ? 'match' : 'mismatch'
 }
 
 /** A row from `GET /v1/bugs?projectId=…`. */

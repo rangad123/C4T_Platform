@@ -56,6 +56,69 @@ export async function listUsers(query: ListUsersQuery) {
   return { items, meta: buildMeta(query, total) }
 }
 
+/**
+ * CSV export of the same row set the list endpoint returns, minus pagination.
+ * Reuses the exact `where` clause from `listUsers` so the filters are identical.
+ */
+export async function exportUsersCSV(query: ListUsersQuery): Promise<string> {
+  const where: Prisma.UserWhereInput = {
+    deletedAt: null,
+    ...(query.role ? { role: query.role } : {}),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.search
+      ? {
+          OR: [
+            { email: { contains: query.search, mode: 'insensitive' } },
+            { firstName: { contains: query.search, mode: 'insensitive' } },
+            { lastName: { contains: query.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  }
+
+  const items = await prisma.user.findMany({
+    where,
+    select: {
+      ...userSelect,
+      orgMemberships: { select: { organisation: { select: { id: true, name: true } } } },
+      testerProfile: { select: { id: true, status: true } },
+    },
+    orderBy: buildOrderBy(query.sort, query.order, USER_SORT_FIELDS, 'createdAt'),
+  })
+
+  const rows = items.map((u) => [
+    [u.firstName, u.lastName].filter(Boolean).join(' '),
+    u.email,
+    u.role,
+    u.status,
+    u.emailVerifiedAt ? 'verified' : 'unverified',
+    u.orgMemberships.map((m) => m.organisation.name).join('|'),
+    u.testerProfile?.status ?? '',
+    u.countryCode ?? '',
+    u.phone ?? '',
+    u.lastLoginAt,
+    u.createdAt,
+  ])
+
+  const { toCsv } = await import('../../lib/csv.js')
+  return toCsv(
+    [
+      'Name',
+      'Email',
+      'Role',
+      'Status',
+      'Email verified',
+      'Organisations',
+      'Tester profile status',
+      'Country',
+      'Phone',
+      'Last seen',
+      'Joined',
+    ],
+    rows,
+  )
+}
+
 export async function getUser(id: string) {
   const user = await prisma.user.findFirst({
     where: { id, deletedAt: null },

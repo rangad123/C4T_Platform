@@ -11,6 +11,7 @@ import { Button } from '@/components/ds/core/Button'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
@@ -402,7 +403,7 @@ export default async function AdminProfilePage({
         title="Profile"
         description="How your name and contact details appear across the panel."
       >
-        <form
+        <TrackedForm
           action={saveProfile}
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
         >
@@ -481,14 +482,14 @@ export default async function AdminProfilePage({
               Save profile
             </Button>
           </div>
-        </form>
+        </TrackedForm>
       </Panel>
 
       <Panel
         title="Password"
         description="Changing it keeps you signed in here and signs you out on every other device."
       >
-        <form
+        <TrackedForm
           action={changePassword}
           style={{
             display: 'flex',
@@ -504,6 +505,7 @@ export default async function AdminProfilePage({
               type="password"
               autoComplete="current-password"
               required
+              showPasswordToggle
             />
           </Field>
 
@@ -521,6 +523,7 @@ export default async function AdminProfilePage({
               maxLength={200}
               autoComplete="new-password"
               required
+              showPasswordToggle
             />
           </Field>
 
@@ -533,6 +536,7 @@ export default async function AdminProfilePage({
               maxLength={200}
               autoComplete="new-password"
               required
+              showPasswordToggle
             />
           </Field>
 
@@ -541,7 +545,7 @@ export default async function AdminProfilePage({
               Change password
             </Button>
           </div>
-        </form>
+        </TrackedForm>
       </Panel>
 
       <Panel

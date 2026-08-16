@@ -1,5 +1,6 @@
 import type { CSSProperties, InputHTMLAttributes } from 'react'
 import { Icon } from '../core/Icon'
+import { PasswordToggleInput } from './PasswordToggleInput'
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   /** Lucide icon name rendered inside the left edge. */
@@ -9,6 +10,14 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   disabled?: boolean
   style?: CSSProperties
   className?: string
+  /**
+   * Render a show/hide toggle on the right edge. Only meaningful for
+   * `type="password"`. Delegates to `PasswordToggleInput`, the only client
+   * leaf in this file — see that module's comment for why.
+   */
+  showPasswordToggle?: boolean
+  /** Accessible label for the toggle button. Defaults to "Show password". */
+  passwordToggleLabel?: string
 }
 
 /**
@@ -34,16 +43,50 @@ export const controlBase: CSSProperties = {
  * A text control. Focus ring, placeholder colour and the invalid state all live
  * in the `.c4t-input` rules in tokens/interactions.css — never restyle them
  * here, and never suppress the focus ring.
+ *
+ * Server Component by default. The password show/hide toggle is the only
+ * interactive path, and it delegates to `PasswordToggleInput` (a client
+ * component) rather than pulling `useState` into this file — every other
+ * `<Input>` in the app renders with zero client JS.
  */
-export function Input({ iconLeft, invalid, disabled, style, className, ...rest }: InputProps) {
+export function Input({
+  iconLeft,
+  invalid,
+  disabled,
+  style,
+  className,
+  showPasswordToggle = false,
+  passwordToggleLabel,
+  type,
+  ...rest
+}: InputProps) {
+  const isPassword = type === 'password'
+  const canToggle = isPassword && showPasswordToggle
+
+  if (canToggle) {
+    return (
+      <PasswordToggleInput
+        iconLeft={iconLeft}
+        invalid={invalid}
+        disabled={disabled}
+        style={style}
+        className={className}
+        passwordToggleLabel={passwordToggleLabel}
+        {...rest}
+      />
+    )
+  }
+
   const input = (
     <input
       className={['c4t-input', className].filter(Boolean).join(' ')}
       aria-invalid={invalid ? true : undefined}
       disabled={disabled}
+      type={type}
       style={{
         ...controlBase,
         paddingLeft: iconLeft ? 42 : 14,
+        paddingRight: 14,
         background: disabled ? 'var(--surface-sunken)' : controlBase.background,
         color: disabled ? 'var(--text-disabled)' : controlBase.color,
         ...style,

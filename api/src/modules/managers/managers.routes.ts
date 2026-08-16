@@ -8,9 +8,10 @@ import { requirePermission } from '../../middleware/authorize.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
 import { recordAudit } from '../../lib/audit.js'
 import { BadRequestError, NotFoundError } from '../../lib/errors.js'
-import { buildMeta, paginationQuery, toSkipTake } from '../../lib/pagination.js'
+import { buildMeta, buildOrderBy, paginationQuery, toSkipTake } from '../../lib/pagination.js'
 import { createNotification } from '../notifications/notifications.service.js'
 import { PERMISSIONS } from '../../config/permissions.js'
+import { timestampedFilename } from '../../lib/csv.js'
 
 /**
  * §2.2 "Manager Management" — internal managers and Sub-Admins overseeing
@@ -21,6 +22,8 @@ export const managersRouter = Router()
 
 managersRouter.use(authenticate)
 managersRouter.use(requirePermission(PERMISSIONS.MANAGER_READ))
+
+const MANAGER_SORT_FIELDS = ['createdAt', 'firstName', 'lastName', 'email', 'role', 'status'] as const
 
 const listQuery = paginationQuery.extend({
   search: z.string().trim().max(120).optional(),
@@ -56,13 +59,66 @@ managersRouter.get('/', validate({ query: listQuery }), async (_req, res) => {
         status: true,
         _count: { select: { projectsManaged: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: buildOrderBy(query.sort, query.order, MANAGER_SORT_FIELDS, 'createdAt'),
       ...toSkipTake(query),
     }),
     prisma.user.count({ where }),
   ])
 
   res.json({ data: items, meta: buildMeta(query, total) })
+})
+
+/**
+ * CSV export — declared before "/:id" routes so "export.csv" is not consumed
+ * as an id with a dot in it. Same filters as the list endpoint, no pagination.
+ */
+managersRouter.get('/export.csv', validate({ query: listQuery }), async (_req, res) => {
+  const query = validatedQuery<z.infer<typeof listQuery>>(res)
+
+  const where = {
+    role: { in: [Role.ADMIN, Role.SUB_ADMIN] },
+    deletedAt: null,
+    ...(query.search
+      ? {
+          OR: [
+            { email: { contains: query.search, mode: 'insensitive' as const } },
+            { firstName: { contains: query.search, mode: 'insensitive' as const } },
+            { lastName: { contains: query.search, mode: 'insensitive' as const } },
+          ],
+        }
+      : {}),
+  }
+
+  const items = await prisma.user.findMany({
+    where,
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      _count: { select: { projectsManaged: true } },
+    },
+    orderBy: buildOrderBy(query.sort, query.order, MANAGER_SORT_FIELDS, 'createdAt'),
+  })
+
+  const rows = items.map((m) => [
+    [m.firstName, m.lastName].filter(Boolean).join(' '),
+    m.email,
+    m.role,
+    m.status,
+    m._count.projectsManaged,
+    m.createdAt,
+  ])
+
+  const { toCsv } = await import('../../lib/csv.js')
+  const csv = toCsv(['Name', 'Email', 'Role', 'Status', 'Projects managed', 'Created at'], rows)
+
+  res.setHeader('content-type', 'text/csv; charset=utf-8')
+  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('managers')}"`)
+  res.send(csv)
 })
 
 /** Projects a given manager oversees. */

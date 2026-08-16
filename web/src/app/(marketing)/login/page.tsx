@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string; email?: string }>
+  searchParams: Promise<{ next?: string; error?: string; email?: string; notice?: string }>
 }) {
   // Resolve the searchParams here so the page wrapper still has the await
   // path Next expects, and the form below receives the awaited value.

@@ -4,8 +4,10 @@ import { Button } from '@/components/ds/core/Button'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { requirePermission } from '@/lib/auth/session'
+import { serverFetchOrNull } from '@/lib/api/server'
 import { createAnnouncement } from '../actions'
 
 const LIST_PATH = '/app/admin/communication'
@@ -78,6 +80,14 @@ const RADIO_SIZE = 20
  */
 export default async function NewAnnouncementPage() {
   await requirePermission('announcement.write')
+
+  // The project picker is a list, not a search — the platform has few enough
+  // projects that a Select with all of them is fine, and avoids pulling in an
+  // async typeahead just for this one field. Sorted by reference so the most
+  // recent cycle is at the top — same ordering as the projects list.
+  const projects = await serverFetchOrNull<readonly { id: string; reference: string; title: string }[]>(
+    'projects?limit=200',
+  )
 
   return (
     <DetailShell
@@ -237,6 +247,36 @@ export default async function NewAnnouncementPage() {
               ))}
             </div>
           </fieldset>
+        </Panel>
+
+        <Panel
+          title="Limit to one project"
+          description="Optional. Leave on Platform-wide when the announcement is for everyone."
+        >
+          {projects && projects.length > 0 ? (
+            <Field
+              label="Scope"
+              htmlFor="projectId"
+              hint="Pick a project to show the announcement only to its testers and customer members. Pick Platform-wide (the first option) for the usual reach."
+            >
+              <Select
+                id="projectId"
+                name="projectId"
+                defaultValue=""
+                options={[
+                  { value: '', label: 'Platform-wide' },
+                  ...projects.map((p) => ({
+                    value: p.id,
+                    label: `${p.reference} — ${p.title}`,
+                  })),
+                ]}
+              />
+            </Field>
+          ) : (
+            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+              No projects are available to scope to. The announcement will be platform-wide.
+            </p>
+          )}
         </Panel>
 
         <Panel

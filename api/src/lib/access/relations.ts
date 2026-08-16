@@ -31,6 +31,9 @@ export type Relation =
   // Bug
   | 'bug:reporter'
   | 'bug:customer'
+  /// Active tester on the bug's project, and that project has opted in to
+  /// letting its testers see each other's reports (§2.2 Build Settings).
+  | 'bug:project_tester'
   // Thread
   | 'thread:participant'
   // Self
@@ -165,6 +168,7 @@ export async function bugRelations(
       project: {
         select: {
           organisationId: true,
+          testersCanSeeOtherBugs: true,
           assignments: { where: { testerId: user.id }, select: { status: true }, take: 1 },
           managers: { where: { managerId: user.id }, select: { id: true }, take: 1 },
           organisation: {
@@ -197,6 +201,7 @@ export async function bugRelations(
       relations.push('project:tester_invited')
     } else if (ACTIVE_ASSIGNMENT.includes(assignment.status)) {
       relations.push('project:tester_active')
+      if (bug.project.testersCanSeeOtherBugs) relations.push('bug:project_tester')
     } else if (assignment.status === AssignmentStatus.COMPLETED) {
       relations.push('project:tester_past')
     }

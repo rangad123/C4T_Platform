@@ -21,6 +21,8 @@ const projectSelect = {
   platformTargets: true,
   targetCountries: true,
   targetLanguages: true,
+  maxTesters: true,
+  testersCanSeeOtherBugs: true,
   startDate: true,
   endDate: true,
   submittedAt: true,
@@ -102,6 +104,81 @@ export async function listProjects(user: Express.AuthenticatedUser, query: ListP
   ])
 
   return { items, meta: buildMeta(query, total) }
+}
+
+/**
+ * CSV export of the same row set the list endpoint returns, minus pagination.
+ * Reuses the exact `where` clause from `listProjects` so the access scope and
+ * filters are identical — exporting never bypasses RBAC.
+ */
+export async function exportProjectsCSV(
+  user: Express.AuthenticatedUser,
+  query: ListProjectsQuery,
+): Promise<string> {
+  const where: Prisma.ProjectWhereInput = {
+    deletedAt: null,
+    ...visibilityFilter(user),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.priority ? { priority: query.priority } : {}),
+    ...(query.organisationId ? { organisationId: query.organisationId } : {}),
+    ...(query.search
+      ? {
+          OR: [
+            { title: { contains: query.search, mode: 'insensitive' } },
+            { reference: { contains: query.search, mode: 'insensitive' } },
+            { summary: { contains: query.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  }
+
+  const items = await prisma.project.findMany({
+    where,
+    select: projectSelect,
+    orderBy: buildOrderBy(query.sort, query.order, PROJECT_SORT_FIELDS, 'createdAt'),
+  })
+
+  const rows = items.map((p) => [
+    p.reference,
+    p.title,
+    p.status,
+    p.priority,
+    p.organisation?.name ?? '',
+    [p.createdBy?.firstName, p.createdBy?.lastName].filter(Boolean).join(' '),
+    p.platformTargets.join('|'),
+    Array.isArray(p.targetCountries) ? p.targetCountries.join('|') : '',
+    p.maxTesters ?? '',
+    p.startDate,
+    p.endDate,
+    p.progressPercent,
+    p._count.bugs,
+    p._count.assignments,
+    p.createdAt,
+    p.updatedAt,
+  ])
+
+  const { toCsv } = await import('../../lib/csv.js')
+  return toCsv(
+    [
+      'Reference',
+      'Title',
+      'Status',
+      'Priority',
+      'Organisation',
+      'Created by',
+      'Platforms',
+      'Countries',
+      'Max testers',
+      'Start date',
+      'End date',
+      'Progress %',
+      'Bugs',
+      'Testers',
+      'Created at',
+      'Updated at',
+    ],
+    rows,
+  )
 }
 
 /**
@@ -478,12 +555,67 @@ export async function removeMaterial(
   await prisma.projectMaterial.delete({ where: { id: materialId } })
 }
 
+// ─── Features (§2.2 Build Settings "Feature Lists") ──────────────────────────
+
+export async function listFeatures(user: Express.AuthenticatedUser, projectId: string) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  return prisma.feature.findMany({
+    where: { projectId },
+    select: { id: true, name: true, createdAt: true, _count: { select: { bugs: true } } },
+    orderBy: { name: 'asc' },
+  })
+}
+
+export async function addFeature(user: Express.AuthenticatedUser, projectId: string, name: string) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.manage_materials', resolved.relations)
+
+  const existing = await prisma.feature.findUnique({
+    where: { projectId_name: { projectId, name } },
+    select: { id: true },
+  })
+  if (existing) throw new ConflictError('A feature with this name already exists on this project')
+
+  return prisma.feature.create({
+    data: { projectId, name },
+    select: { id: true, name: true, createdAt: true },
+  })
+}
+
+export async function removeFeature(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  featureId: string,
+) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.manage_materials', resolved.relations)
+
+  const feature = await prisma.feature.findFirst({
+    where: { id: featureId, projectId },
+    select: { id: true },
+  })
+  if (!feature) throw new NotFoundError('Feature')
+
+  // Bugs tagged with this feature keep their bug — `featureId` just goes null
+  // (onDelete: SetNull on Bug.feature) rather than losing the report.
+  await prisma.feature.delete({ where: { id: featureId } })
+}
+
 // ─── Assignments (§2.2 Project Management → assign testers) ──────────────────
 
 export async function assignTesters(projectId: string, testerIds: string[], notes?: string) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, deletedAt: null },
-    select: { id: true, title: true, status: true },
+    select: { id: true, title: true, status: true, maxTesters: true },
   })
   if (!project) throw new NotFoundError('Project')
   if (project.status === ProjectStatus.CANCELLED || project.status === ProjectStatus.COMPLETED) {
@@ -503,6 +635,28 @@ export async function assignTesters(projectId: string, testerIds: string[], note
   })
   const alreadyAssigned = new Set(existing.map((e) => e.testerId))
   const toCreate = unique.filter((id) => !alreadyAssigned.has(id))
+
+  if (project.maxTesters !== null && toCreate.length > 0) {
+    // REMOVED/DECLINED testers freed up their slot; everything else still
+    // occupies one.
+    const currentlyOnRoster = await prisma.projectAssignment.count({
+      where: {
+        projectId,
+        status: { notIn: [AssignmentStatus.REMOVED, AssignmentStatus.DECLINED] },
+      },
+    })
+    const remaining = project.maxTesters - currentlyOnRoster
+    if (remaining <= 0) {
+      throw new ConflictError(
+        `This project is already at its limit of ${project.maxTesters} tester${project.maxTesters === 1 ? '' : 's'}.`,
+      )
+    }
+    if (toCreate.length > remaining) {
+      throw new ConflictError(
+        `Only ${remaining} more tester${remaining === 1 ? '' : 's'} can be added — this project is capped at ${project.maxTesters}.`,
+      )
+    }
+  }
 
   if (toCreate.length > 0) {
     await prisma.projectAssignment.createMany({

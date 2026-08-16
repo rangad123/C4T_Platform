@@ -1,6 +1,8 @@
+import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
+import { Button } from '@/components/ds/core/Button'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, formatMoney, hasFilter, personName, titleCase } from '@/lib/admin/format'
@@ -18,6 +20,34 @@ const TYPES = [
   'REFUND',
 ] as const
 const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'] as const
+const SORT_OPTIONS = [
+  { value: 'occurredAt', label: 'Occurred' },
+  { value: 'createdAt', label: 'Created' },
+  { value: 'amountMinor', label: 'Amount' },
+  { value: 'type', label: 'Type' },
+  { value: 'status', label: 'Status' },
+  { value: 'reference', label: 'Reference' },
+] as const
+const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
+
+/**
+ * Build the CSV export URL for the current filter set. Goes through the
+ * catch-all Route Handler at `/app/admin/export/[...path]` so the export
+ * stays same-origin (the route streams from the API on behalf of the browser).
+ */
+function buildExportHref(filters: {
+  type?: string
+  status?: string
+  sort?: string
+  order?: string
+}): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value)
+  }
+  const qs = params.toString()
+  return qs ? `/app/admin/export/transactions?${qs}` : '/app/admin/export/transactions'
+}
 
 interface TransactionRow {
   id: string
@@ -63,7 +93,13 @@ interface TransactionMeta extends PageMeta {
 export default async function TransactionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; status?: string; page?: string }>
+  searchParams: Promise<{
+    type?: string
+    status?: string
+    page?: string
+    sort?: string
+    order?: string
+  }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
@@ -72,12 +108,16 @@ export default async function TransactionsPage({
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? params.status
     : undefined
+  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
+    ? params.sort
+    : undefined
+  const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
   const page = parsePage(params.page)
 
   const result = await loadList<TransactionRow>('transactions', {
     page,
     limit: PAGE_SIZE,
-    query: { type, status },
+    query: { type, status, sort, order },
   })
 
   const totals =
@@ -130,27 +170,37 @@ export default async function TransactionsPage({
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
-      hrefFor={pageHrefBuilder(BASE, { type, status })}
-      
+      rowHref={(row) => `${BASE}/${row.id}`}
+      hrefFor={pageHrefBuilder(BASE, { type, status, sort, order })}
       filtered={hasFilter([type, status])}
       permission="transaction.read"
       emptyIcon="credit-card"
       emptyTitle="No transactions yet"
       emptyDescription="Record an invoice or a payout and it appears here."
       toolbar={
-        <ListFilters
-          action={BASE}
-          selects={[
-            { name: 'type', label: 'Type', options: TYPES, value: type, allLabel: 'All types' },
-            {
-              name: 'status',
-              label: 'Status',
-              options: STATUSES,
-              value: status,
-              allLabel: 'All statuses',
-            },
-          ]}
-        />
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <ListFilters
+              action={BASE}
+              selects={[
+                { name: 'type', label: 'Type', options: TYPES, value: type, allLabel: 'All types' },
+                {
+                  name: 'status',
+                  label: 'Status',
+                  options: STATUSES,
+                  value: status,
+                  allLabel: 'All statuses',
+                },
+              ]}
+              sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
+            />
+          </div>
+          <Link href={buildExportHref({ type, status, sort, order })} prefetch={false}>
+            <Button variant="secondary" iconLeft="download">
+              Export CSV
+            </Button>
+          </Link>
+        </div>
       }
       summary={
         totals.length > 0 ? (

@@ -20,6 +20,36 @@ const STATUSES = [
   'CANCELLED',
 ] as const
 const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const
+const SORT_OPTIONS = [
+  { value: 'createdAt', label: 'Created' },
+  { value: 'updatedAt', label: 'Last updated' },
+  { value: 'title', label: 'Title' },
+  { value: 'status', label: 'Status' },
+  { value: 'priority', label: 'Priority' },
+  { value: 'startDate', label: 'Start date' },
+  { value: 'endDate', label: 'End date' },
+] as const
+const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
+
+/**
+ * Build the CSV export URL for the current filter set. Goes through the
+ * catch-all Route Handler at `/app/admin/export/[...path]` so the export
+ * stays same-origin (the route streams from the API on behalf of the browser).
+ */
+function buildExportHref(filters: {
+  status?: string
+  priority?: string
+  search?: string
+  sort?: string
+  order?: string
+}): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value)
+  }
+  const qs = params.toString()
+  return qs ? `/app/admin/export/projects?${qs}` : '/app/admin/export/projects'
+}
 
 interface ProjectRow {
   id: string
@@ -48,7 +78,14 @@ interface ProjectRow {
 export default async function ProjectsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; priority?: string; search?: string; page?: string }>
+  searchParams: Promise<{
+    status?: string
+    priority?: string
+    search?: string
+    page?: string
+    sort?: string
+    order?: string
+  }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
@@ -60,12 +97,16 @@ export default async function ProjectsPage({
     ? params.priority
     : undefined
   const search = searchTerm(params.search)
+  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
+    ? params.sort
+    : undefined
+  const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
   const page = parsePage(params.page)
 
   const result = await loadList<ProjectRow>('projects', {
     page,
     limit: PAGE_SIZE,
-    query: { status, priority, search },
+    query: { status, priority, search, sort, order },
   })
 
   const columns: readonly TableColumn<ProjectRow>[] = [
@@ -146,7 +187,8 @@ export default async function ProjectsPage({
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
-      hrefFor={pageHrefBuilder(BASE, { status, priority, search })}
+      rowHref={(row) => `${BASE}/${row.id}`}
+      hrefFor={pageHrefBuilder(BASE, { status, priority, search, sort, order })}
       
       filtered={hasFilter([status, priority, search])}
       permission="project.read"
@@ -175,8 +217,14 @@ export default async function ProjectsPage({
                   allLabel: 'All priorities',
                 },
               ]}
+              sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
+          <Link href={buildExportHref({ status, priority, search, sort, order })} prefetch={false}>
+            <Button variant="secondary" iconLeft="download">
+              Export CSV
+            </Button>
+          </Link>
           <Link href="/app/admin/projects/new">
             <Button variant="primary" iconLeft="plus">
               New project

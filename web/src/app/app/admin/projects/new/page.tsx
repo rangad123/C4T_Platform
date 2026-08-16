@@ -6,6 +6,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission } from '@/lib/auth/session'
 import { serverFetchPage } from '@/lib/api/server'
 import { createProjectAction } from '@/lib/admin/project-actions'
@@ -70,7 +71,7 @@ export default async function NewProjectPage() {
         title="Profile"
         description="The minimum needed to open a project. Start date defaults to today; end date to one month later."
       >
-        <form action={createProjectAction} style={formStyle}>
+        <TrackedForm action={createProjectAction} style={formStyle}>
           <Field
             label="Organisation"
             htmlFor="organisationId"
@@ -138,6 +139,13 @@ export default async function NewProjectPage() {
             >
               <Input id="endDate" name="endDate" type="date" />
             </Field>
+            <Field
+              label="Maximum testers"
+              htmlFor="maxTesters"
+              hint="Leave blank for no cap."
+            >
+              <Input id="maxTesters" name="maxTesters" type="number" min={1} max={10000} />
+            </Field>
           </div>
 
           <Panel
@@ -179,7 +187,7 @@ export default async function NewProjectPage() {
               </Button>
             </Link>
           </div>
-        </form>
+        </TrackedForm>
       </Panel>
     </DetailShell>
   )

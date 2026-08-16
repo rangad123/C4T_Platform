@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
+import { Avatar } from '@/components/admin/Avatar'
+import { CountryFlag } from '@/components/admin/CountryFlag'
 import { Button } from '@/components/ds/core/Button'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
@@ -11,6 +13,13 @@ import type { TableColumn } from '@/components/ds/admin/Table'
 const PAGE_SIZE = 25
 const BASE = '/app/admin/organisations'
 const STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const
+const SORT_OPTIONS = [
+  { value: 'createdAt', label: 'Created' },
+  { value: 'updatedAt', label: 'Last updated' },
+  { value: 'name', label: 'Name' },
+  { value: 'status', label: 'Status' },
+] as const
+const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
 
 interface OrganisationRow {
   id: string
@@ -19,11 +28,32 @@ interface OrganisationRow {
   status: string
   industry: string | null
   contactEmail: string | null
+  contactPhone: string | null
   city: string | null
   countryCode: string | null
   onboardedAt: string | null
   createdAt: string
+  logoFileId: string | null
   _count: { members: number; projects: number }
+}
+
+/**
+ * Build the CSV export URL for the current filter set. Goes through the
+ * catch-all Route Handler at `/app/admin/export/[...path]` so the export
+ * stays same-origin (the route streams from the API on behalf of the browser).
+ */
+function buildExportHref(filters: {
+  status?: string
+  search?: string
+  sort?: string
+  order?: string
+}): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value)
+  }
+  const qs = params.toString()
+  return qs ? `/app/admin/export/organisations?${qs}` : '/app/admin/export/organisations'
 }
 
 /**
@@ -38,7 +68,13 @@ interface OrganisationRow {
 export default async function OrganisationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; search?: string; page?: string }>
+  searchParams: Promise<{
+    status?: string
+    search?: string
+    page?: string
+    sort?: string
+    order?: string
+  }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
@@ -47,29 +83,54 @@ export default async function OrganisationsPage({
     ? params.status
     : undefined
   const search = searchTerm(params.search)
+  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
+    ? params.sort
+    : undefined
+  const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
   const page = parsePage(params.page)
 
   const result = await loadList<OrganisationRow>('organisations', {
     page,
     limit: PAGE_SIZE,
-    query: { status, search },
+    query: { status, search, sort, order },
   })
 
   const columns: readonly TableColumn<OrganisationRow>[] = [
     {
       key: 'name',
       header: 'Organisation',
-      render: (row) => row.name,
+      render: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar name={row.name} fileId={row.logoFileId} size="sm" />
+          {row.name}
+        </span>
+      ),
       renderSecondary: (row) => row.contactEmail ?? row.slug,
     },
     {
       key: 'industry',
       header: 'Industry',
       render: (row) => row.industry ?? '—',
-      renderSecondary: (row) =>
-        [row.city, row.countryCode].filter(Boolean).join(', ') || undefined,
+      renderSecondary: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <CountryFlag countryCode={row.countryCode} size={14} />
+          <span>{[row.city, row.countryCode].filter(Boolean).join(', ') || undefined}</span>
+        </span>
+      ),
     },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+    {
+      key: 'phone',
+      header: 'Phone',
+      render: (row) =>
+        row.contactPhone ? (
+          <a href={`tel:${row.contactPhone}`} style={{ color: 'var(--text-primary)' }}>
+            {row.contactPhone}
+          </a>
+        ) : (
+          '—'
+        ),
+    },
     {
       key: 'members',
       header: 'Members',
@@ -99,7 +160,8 @@ export default async function OrganisationsPage({
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
-      hrefFor={pageHrefBuilder(BASE, { status, search })}
+      rowHref={(row) => `${BASE}/${row.id}`}
+      hrefFor={pageHrefBuilder(BASE, { status, search, sort, order })}
       filtered={hasFilter([status, search])}
       permission="organisation.read"
       emptyIcon="building-2"
@@ -120,8 +182,14 @@ export default async function OrganisationsPage({
                   allLabel: 'All statuses',
                 },
               ]}
+              sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
+          <Link href={buildExportHref({ status, search, sort, order })} prefetch={false}>
+            <Button variant="secondary" iconLeft="download">
+              Export CSV
+            </Button>
+          </Link>
           <Link href="/app/admin/organisations/new">
             <Button variant="primary" iconLeft="plus">
               New organisation

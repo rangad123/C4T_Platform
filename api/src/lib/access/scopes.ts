@@ -70,7 +70,25 @@ export function bugScope(user: Express.AuthenticatedUser): Prisma.BugWhereInput 
     return { project: { organisation: { members: { some: { userId: user.id } } } } }
   }
 
-  if (user.role === Role.TESTER) return { reportedById: user.id }
+  if (user.role === Role.TESTER) {
+    return {
+      OR: [
+        { reportedById: user.id },
+        // §2.2 Build Settings "Testers can see bugs raised by others?" — must
+        // agree with the ACCEPTED/ACTIVE-only relation computed in
+        // bugRelations() (relations.ts), or a tester would see a row here
+        // they get a 404 opening, or vice versa.
+        {
+          project: {
+            testersCanSeeOtherBugs: true,
+            assignments: {
+              some: { testerId: user.id, status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] } },
+            },
+          },
+        },
+      ],
+    }
+  }
 
   return DENY_ALL
 }

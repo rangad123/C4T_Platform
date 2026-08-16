@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TesterStatus, DeviceType } from '@prisma/client'
+import { TesterStatus, DeviceType, SkillCategory } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
 export const TESTER_SORT_FIELDS = [
@@ -69,12 +69,20 @@ export const deviceSchema = z.object({
   osName: z.string().trim().max(60).optional(),
   osVersion: z.string().trim().max(40).optional(),
   screenSize: z.string().trim().max(40).optional(),
+  ramGb: z.string().trim().max(20).optional(),
+  network: z.string().trim().max(80).optional(),
+  browser: z.string().trim().max(80).optional(),
   isPrimary: z.boolean().default(false),
 })
 
 export const skillsSchema = z.object({
   /** Full replacement set of skill slugs. */
   skills: z.array(z.string().trim().min(1).max(80)).max(40),
+})
+
+/** Admin-only — sets a skill's taxonomy category. */
+export const setSkillCategorySchema = z.object({
+  category: z.nativeEnum(SkillCategory),
 })
 
 export const languagesSchema = z.object({
@@ -94,7 +102,22 @@ export const acceptNdaSchema = z.object({
   }),
 })
 
+export const workHistorySchema = z
+  .object({
+    company: z.string().trim().min(1).max(160),
+    jobTitle: z.string().trim().min(1).max(160),
+    startDate: z.coerce.date(),
+    /** Omit for a current role. */
+    endDate: z.coerce.date().optional(),
+    description: z.string().trim().max(2000).optional(),
+  })
+  .refine((d) => !d.endDate || d.endDate >= d.startDate, {
+    message: 'End date cannot be before the start date',
+    path: ['endDate'],
+  })
+
 export const testerIdParam = z.object({ id: z.string().cuid() })
 export const deviceIdParam = z.object({ deviceId: z.string().cuid() })
+export const workHistoryIdParam = z.object({ workHistoryId: z.string().cuid() })
 
 export type ListTestersQuery = z.infer<typeof listTestersQuery>

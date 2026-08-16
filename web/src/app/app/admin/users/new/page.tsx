@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
@@ -208,7 +209,7 @@ export default async function NewUserPage({
         </Panel>
       }
     >
-      <form action={createAccount} style={formStyle}>
+      <TrackedForm action={createAccount} style={formStyle}>
         {rejected ? (
           <div
             role="alert"
@@ -401,7 +402,7 @@ export default async function NewUserPage({
             Back to users
           </Button>
         </div>
-      </form>
+      </TrackedForm>
     </DetailShell>
   )
 }

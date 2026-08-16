@@ -34,6 +34,12 @@ organisationsRouter.get('/mine', controller.listMine)
  * tests/access/consistency.test.ts.
  */
 organisationsRouter.get('/', validate({ query: listOrganisationsQuery }), controller.list)
+/**
+ * CSV export — declared before "/:id" so "export.csv" is not consumed as an
+ * id with a dot in it. The query schema is the same shape as the list
+ * endpoint, minus pagination.
+ */
+organisationsRouter.get('/export.csv', validate({ query: listOrganisationsQuery }), controller.exportCsv)
 
 organisationsRouter.post(
   '/',

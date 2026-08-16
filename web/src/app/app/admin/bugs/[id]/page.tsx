@@ -14,12 +14,14 @@ import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
-import { serverFetch } from '@/lib/api/server'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, personName } from '@/lib/admin/format'
 import {
   triageBugSeverity,
+  updateBugClassification,
   moveBugStatus,
   addBugComment,
   removeBugAttachment,
@@ -43,6 +45,7 @@ import {
 const LIST_PATH = '/app/admin/bugs'
 
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
+const BUG_TYPES = ['CRASH', 'APP_FREEZE', 'FUNCTIONAL', 'UI', 'UX', 'SECURITY', 'PERFORMANCE'] as const
 
 /** Fixed copy for every reason code `./actions.ts` can redirect with. */
 const REASON_COPY: Record<string, string> = {
@@ -77,6 +80,9 @@ interface BugDetail {
   severity: string
   status: string
   reproducibility: string
+  type: string | null
+  featureId: string | null
+  feature: { id: string; name: string } | null
   deviceModel: string | null
   osName: string | null
   osVersion: string | null
@@ -300,6 +306,13 @@ export default async function BugDetailPage({
   const projectHref = `/app/admin/projects/${bug.project.id}`
   const transitions = capabilities.availableTransitions
   const canMarkDuplicate = transitions.includes('DUPLICATE')
+
+  // Best-effort: a reader without project.read on this project (rare — bug
+  // access and project access are usually granted together) just gets no
+  // feature options rather than a broken page.
+  const features = await serverFetchOrNull<readonly { id: string; name: string }[]>(
+    `projects/${bug.project.id}/features`,
+  )
   const isDuplicate = bug.status === 'DUPLICATE' || bug.duplicateOfId !== null
 
   const reportItems: DescriptionItem[] = [
@@ -308,6 +321,8 @@ export default async function BugDetailPage({
       value: <span style={{ fontFamily: 'var(--font-mono)' }}>{bug.reference}</span>,
     },
     { label: 'Severity', value: <SeverityBadge severity={bug.severity} /> },
+    { label: 'Type', value: bug.type ? titleCase(bug.type) : null },
+    { label: 'Feature', value: bug.feature?.name ?? null },
     { label: 'Reproducibility', value: titleCase(bug.reproducibility) },
     { label: 'Description', value: <Reported text={bug.description} />, wide: true },
     {
@@ -415,6 +430,49 @@ export default async function BugDetailPage({
             )}
           </Panel>
 
+          {/* ── Classification: type + feature ───────────────────────────── */}
+          <Panel
+            title="Classification"
+            description="What kind of defect this is, and which part of the product it's in."
+          >
+            {capabilities.canChangeSeverity ? (
+              <TrackedForm action={updateBugClassification} style={FORM_STYLE}>
+                <input type="hidden" name="id" value={bug.id} />
+                <FormError message={panelError(error, 'triage')} />
+                <Field label="Type" htmlFor="type" hint="Leave blank if it doesn't fit a category.">
+                  <Select
+                    id="type"
+                    name="type"
+                    defaultValue={bug.type ?? ''}
+                    options={[
+                      { value: '', label: 'None' },
+                      ...BUG_TYPES.map((value) => ({ value, label: titleCase(value) })),
+                    ]}
+                  />
+                </Field>
+                <Field label="Feature" htmlFor="featureId">
+                  <Select
+                    id="featureId"
+                    name="featureId"
+                    defaultValue={bug.featureId ?? ''}
+                    options={[
+                      { value: '', label: features && features.length > 0 ? 'None' : 'No features yet' },
+                      ...(features ?? []).map((f) => ({ value: f.id, label: f.name })),
+                    ]}
+                  />
+                </Field>
+                <Button type="submit" variant="primary" fullWidth>
+                  Save classification
+                </Button>
+              </TrackedForm>
+            ) : (
+              <Note>
+                Only an administrator or the project&rsquo;s manager can reclassify a bug. Ask for
+                the bug.triage permission.
+              </Note>
+            )}
+          </Panel>
+
           {/* ── Status: the lifecycle ────────────────────────────────────── */}
           <Panel
             title="Status"
@@ -461,7 +519,7 @@ export default async function BugDetailPage({
                   role. An administrator can reopen the report if it needs to move again.
                 </Note>
               ) : (
-                <form action={moveBugStatus} style={FORM_STYLE}>
+                <TrackedForm action={moveBugStatus} style={FORM_STYLE}>
                   <input type="hidden" name="id" value={bug.id} />
                   <FormError message={panelError(error, 'status')} />
 
@@ -519,7 +577,7 @@ export default async function BugDetailPage({
                   <Button type="submit" variant="primary" fullWidth>
                     Save status
                   </Button>
-                </form>
+                </TrackedForm>
               )}
             </div>
           </Panel>

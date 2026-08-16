@@ -36,7 +36,16 @@ interface RatingRow {
 export default async function RatingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ subjectType?: string; page?: string }>
+  searchParams: Promise<{
+    subjectType?: string
+    /**
+     * Tester-scoped view. Set when arriving from a tester's "View all
+     * ratings" link — narrows the list to ratings where this user is the
+     * subject. The API filter accepts this on `listRatingsQuery`.
+     */
+    subjectUserId?: string
+    page?: string
+  }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
@@ -44,12 +53,13 @@ export default async function RatingsPage({
   const subjectType = SUBJECT_TYPES.includes(params.subjectType as (typeof SUBJECT_TYPES)[number])
     ? params.subjectType
     : undefined
+  const subjectUserId = params.subjectUserId?.length === 25 ? params.subjectUserId : undefined
   const page = parsePage(params.page)
 
   const result = await loadList<RatingRow>('ratings', {
     page,
     limit: PAGE_SIZE,
-    query: { subjectType },
+    query: { subjectType, subjectUserId },
   })
 
   const columns: readonly TableColumn<RatingRow>[] = [
@@ -114,16 +124,28 @@ export default async function RatingsPage({
       eyebrow="Delivery"
       title="Ratings"
       description="Reviews left on testers, customers and projects. Hidden reviews stay listed so a moderation decision can be reversed."
-      crumbs={[{ label: 'Ratings' }]}
+      crumbs={
+        subjectUserId
+          ? [
+              { label: 'Testers', href: '/app/admin/testers' },
+              { label: 'Tester', href: `/app/admin/testers/${subjectUserId}` },
+              { label: 'Ratings' },
+            ]
+          : [{ label: 'Ratings' }]
+      }
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
-      hrefFor={pageHrefBuilder(BASE, { subjectType })}
-      filtered={Boolean(subjectType)}
+      hrefFor={pageHrefBuilder(BASE, { subjectType, subjectUserId })}
+      filtered={Boolean(subjectType || subjectUserId)} /* eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- any-of filter set */
       permission="rating.read"
       emptyIcon="trophy"
-      emptyTitle="No ratings yet"
-      emptyDescription="A rating appears here when a customer reviews a tester, or a tester reviews a project."
+      emptyTitle={subjectUserId ? 'No ratings for this tester yet' : 'No ratings yet'}
+      emptyDescription={
+        subjectUserId
+          ? 'Reviews written about this tester appear here. Clear the subject filter to see all ratings.'
+          : 'A rating appears here when a customer reviews a tester, or a tester reviews a project.'
+      }
       toolbar={
         <ListFilters
           action={BASE}

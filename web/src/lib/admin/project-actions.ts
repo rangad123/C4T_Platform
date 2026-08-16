@@ -29,6 +29,7 @@ export async function createProjectAction(formData: FormData): Promise<void> {
 
   const startDate = formTrimmed(formData, 'startDate')
   const endDate = formTrimmed(formData, 'endDate')
+  const maxTesters = formTrimmed(formData, 'maxTesters')
 
   const body = {
     organisationId: formTrimmed(formData, 'organisationId') || undefined,
@@ -45,6 +46,7 @@ export async function createProjectAction(formData: FormData): Promise<void> {
     ),
     ...(startDate ? { startDate } : {}),
     ...(endDate ? { endDate } : {}),
+    ...(maxTesters ? { maxTesters } : {}),
   }
 
   const { id } = await serverFetch<ProjectResponse>('projects', {

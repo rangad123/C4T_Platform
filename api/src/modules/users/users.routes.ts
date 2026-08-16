@@ -4,6 +4,7 @@ import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission } from '../../middleware/authorize.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
 import { recordAudit } from '../../lib/audit.js'
+import { timestampedFilename } from '../../lib/csv.js'
 import { PERMISSIONS } from '../../config/permissions.js'
 import * as service from './users.service.js'
 import {
@@ -52,6 +53,24 @@ usersRouter.get(
     const query = validatedQuery<ListUsersQuery>(res)
     const { items, meta } = await service.listUsers(query)
     res.json({ data: items, meta })
+  },
+)
+
+/**
+ * CSV export — declared before "/:id" so "export.csv" is not consumed as an
+ * id with a dot in it. The query schema is the same shape as the list
+ * endpoint, minus pagination.
+ */
+usersRouter.get(
+  '/export.csv',
+  requirePermission(PERMISSIONS.USER_READ),
+  validate({ query: listUsersQuery }),
+  async (_req, res) => {
+    const query = validatedQuery<ListUsersQuery>(res)
+    const csv = await service.exportUsersCSV(query)
+    res.setHeader('content-type', 'text/csv; charset=utf-8')
+    res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('users')}"`)
+    res.send(csv)
   },
 )
 

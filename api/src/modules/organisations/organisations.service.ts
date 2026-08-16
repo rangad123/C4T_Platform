@@ -96,6 +96,76 @@ export async function listOrganisations(
   return { items, meta: buildMeta(query, total) }
 }
 
+/**
+ * CSV export of the same row set the list endpoint returns, minus pagination.
+ * Reuses the exact `where` clause from `listOrganisations` so the access scope
+ * and filters are identical — exporting never bypasses RBAC.
+ */
+export async function exportOrganisationsCSV(
+  user: Express.AuthenticatedUser,
+  query: ListOrganisationsQuery,
+): Promise<string> {
+  const where: Prisma.OrganisationWhereInput = {
+    deletedAt: null,
+    ...organisationScope(user),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.search
+      ? {
+          OR: [
+            { name: { contains: query.search, mode: 'insensitive' } },
+            { contactEmail: { contains: query.search, mode: 'insensitive' } },
+            { slug: { contains: query.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  }
+
+  const items = await prisma.organisation.findMany({
+    where,
+    select: {
+      ...orgSelect,
+      _count: { select: { members: true, projects: true } },
+    },
+    orderBy: buildOrderBy(query.sort, query.order, ORG_SORT_FIELDS, 'createdAt'),
+  })
+
+  const rows = items.map((o) => [
+    o.name,
+    o.slug,
+    o.status,
+    o.industry ?? '',
+    o.contactEmail ?? '',
+    o.contactPhone ?? '',
+    o.city ?? '',
+    o.countryCode ?? '',
+    o._count.members,
+    o._count.projects,
+    o.onboardedAt,
+    o.createdAt,
+    o.updatedAt,
+  ])
+
+  const { toCsv } = await import('../../lib/csv.js')
+  return toCsv(
+    [
+      'Name',
+      'Slug',
+      'Status',
+      'Industry',
+      'Contact email',
+      'Contact phone',
+      'City',
+      'Country',
+      'Members',
+      'Projects',
+      'Onboarded at',
+      'Created at',
+      'Updated at',
+    ],
+    rows,
+  )
+}
+
 /** Organisations the calling Customer belongs to (§2.4). */
 export async function listMyOrganisations(userId: string) {
   const memberships = await prisma.organisationMember.findMany({

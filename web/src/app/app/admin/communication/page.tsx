@@ -15,6 +15,8 @@ interface AnnouncementRow {
   title: string
   body: string
   audience: string
+  projectId: string | null
+  project: { id: string; reference: string; title: string } | null
   publishedAt: string | null
   expiresAt: string | null
   author: { id: string; firstName: string | null; lastName: string | null } | null
@@ -76,6 +78,16 @@ export default async function CommunicationPage({
       ),
     },
     {
+      key: 'scope',
+      header: 'Scope',
+      render: (row) =>
+        row.project ? (
+          <Link href={`/app/admin/projects/${row.project.id}`}>{row.project.reference}</Link>
+        ) : (
+          <span style={{ color: 'var(--text-muted)' }}>Platform-wide</span>
+        ),
+    },
+    {
       key: 'author',
       header: 'Author',
       render: (row) => personName(row.author),
@@ -110,6 +122,7 @@ export default async function CommunicationPage({
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
+      rowHref={(row) => `/app/admin/communication/announcements/${row.id}`}
       hrefFor={pageHrefBuilder(BASE, {})}
       permission="announcement.write"
       emptyIcon="message-square"
