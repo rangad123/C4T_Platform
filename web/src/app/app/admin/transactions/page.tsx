@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
@@ -195,11 +194,14 @@ export default async function TransactionsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Link href={buildExportHref({ type, status, sort, order })} prefetch={false}>
-            <Button variant="secondary" iconLeft="download">
-              Export CSV
-            </Button>
-          </Link>
+          <Button
+            href={buildExportHref({ type, status, sort, order })}
+            prefetch={false}
+            variant="secondary"
+            iconLeft="download"
+          >
+            Export CSV
+          </Button>
         </div>
       }
       summary={

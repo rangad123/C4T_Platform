@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { CountryFlag } from '@/components/admin/CountryFlag'
@@ -155,6 +154,9 @@ export default async function BugsPage({
   const columns: readonly TableColumn<BugRow>[] = [
     {
       key: 'select',
+      // Owns the bulk-select checkbox. Without this the row link swallows the
+      // click and the checkbox navigates instead of toggling.
+      interactive: true,
       header: (
         <input
           type="checkbox"
@@ -288,14 +290,9 @@ export default async function BugsPage({
                 sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
               />
             </div>
-            <Link
-              href={buildExportHref({ status, severity, type, search, projectId, sort, order })}
-              prefetch={false}
-            >
-              <Button variant="secondary" iconLeft="download">
+            <Button href={buildExportHref({ status, severity, type, search, projectId, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
                 Export CSV
               </Button>
-            </Link>
           </div>
 
           {/*

@@ -448,3 +448,91 @@ communicationRouter.delete(
     res.status(204).send()
   },
 )
+
+// ─── Message templates (§23) ──────────────────────────────────────────────────
+//
+// Reusable subject/body pairs for the announcement and broadcast composers.
+// No pagination — template counts are small (a handful to a few dozen), and
+// both consuming UIs need the full set at once to populate a <select>.
+
+const templateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  subject: z.string().trim().max(200).optional(),
+  body: z.string().trim().min(1).max(10_000),
+})
+
+communicationRouter.get(
+  '/templates',
+  requirePermission(PERMISSIONS.COMMUNICATION_READ),
+  async (_req, res) => {
+    const templates = await prisma.messageTemplate.findMany({
+      select: {
+        id: true,
+        name: true,
+        subject: true,
+        body: true,
+        createdAt: true,
+        createdBy: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { name: 'asc' },
+    })
+    res.json({ data: templates })
+  },
+)
+
+communicationRouter.post(
+  '/templates',
+  requirePermission(PERMISSIONS.COMMUNICATION_WRITE),
+  validate({ body: templateSchema }),
+  async (req, res) => {
+    const input = req.body as z.infer<typeof templateSchema>
+
+    const existing = await prisma.messageTemplate.findUnique({
+      where: { name: input.name },
+      select: { id: true },
+    })
+    if (existing) throw new BadRequestError('A template with this name already exists')
+
+    const template = await prisma.messageTemplate.create({
+      data: {
+        name: input.name,
+        subject: input.subject ?? null,
+        body: input.body,
+        createdById: req.user!.id,
+      },
+    })
+
+    await recordAudit({
+      req,
+      action: 'message_template.created',
+      entityType: 'MessageTemplate',
+      entityId: template.id,
+      after: { name: input.name },
+    })
+
+    res.status(201).json({ data: template })
+  },
+)
+
+communicationRouter.delete(
+  '/templates/:id',
+  requirePermission(PERMISSIONS.COMMUNICATION_WRITE),
+  validate({ params: threadIdParam }),
+  async (req, res) => {
+    const existing = await prisma.messageTemplate.findUnique({
+      where: { id: param(req, 'id') },
+      select: { id: true, name: true },
+    })
+    if (!existing) throw new NotFoundError('Template')
+
+    await prisma.messageTemplate.delete({ where: { id: param(req, 'id') } })
+    await recordAudit({
+      req,
+      action: 'message_template.deleted',
+      entityType: 'MessageTemplate',
+      entityId: existing.id,
+      before: { name: existing.name },
+    })
+    res.status(204).send()
+  },
+)

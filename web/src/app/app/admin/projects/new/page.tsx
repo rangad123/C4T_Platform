@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { Button } from '@/components/ds/core/Button'
@@ -181,11 +180,9 @@ export default async function NewProjectPage() {
             <Button type="submit" variant="primary" iconLeft="check">
               Create project
             </Button>
-            <Link href="/app/admin/projects">
-              <Button type="button" variant="ghost">
+            <Button href="/app/admin/projects" type="button" variant="ghost">
                 Cancel
               </Button>
-            </Link>
           </div>
         </TrackedForm>
       </Panel>

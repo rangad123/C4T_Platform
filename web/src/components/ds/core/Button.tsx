@@ -15,6 +15,12 @@ export interface ButtonProps {
   disabled?: boolean
   /** Renders a link instead of a <button>. */
   href?: string
+  /**
+   * Passed to next/link when `href` is internal. Set `false` for links whose
+   * target does real work on GET — a CSV export endpoint, for instance, which
+   * would otherwise run on hover as Next prefetches it.
+   */
+  prefetch?: boolean
   type?: 'button' | 'submit' | 'reset'
   onClick?: (e: MouseEvent) => void
   className?: string
@@ -94,6 +100,7 @@ export function Button({
   fullWidth,
   disabled,
   href,
+  prefetch,
   type = 'button',
   onClick,
   className,
@@ -148,7 +155,7 @@ export function Button({
     }
 
     return isInternal ? (
-      <Link href={href} {...shared}>
+      <Link href={href} prefetch={prefetch} {...shared}>
         {content}
       </Link>
     ) : (

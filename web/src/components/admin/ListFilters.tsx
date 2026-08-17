@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -174,11 +173,9 @@ export function ListFilters({ action, search, selects = [], texts = [], sort }: 
           Filter
         </Button>
         {hasApplied ? (
-          <Link href={action}>
-            <Button type="button" variant="ghost">
+          <Button href={action} type="button" variant="ghost">
               Clear
             </Button>
-          </Link>
         ) : null}
       </div>
     </form>

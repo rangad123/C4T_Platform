@@ -321,6 +321,7 @@ model User {
   announcements Announcement[] @relation("AnnouncementAuthor")
   auditLogs     AuditLog[]
   filesUploaded FileObject[]   @relation("FileUploader")
+  messageTemplatesAuthored MessageTemplate[] @relation("MessageTemplateAuthor")
 
   @@index([role, status])
   @@index([createdAt])
@@ -989,6 +990,27 @@ model Announcement {
   @@index([audience, publishedAt])
   @@index([projectId])
   @@map("announcements")
+}
+
+/// §2.2 Communication — reusable message text for the announcement composer
+/// and the tester-broadcast composer. Legacy §23 example: "Profile Update
+/// Request". No variable/placeholder substitution — the legacy checklist
+/// marks that "if required," and nothing in this platform's message bodies
+/// needs per-recipient interpolation (a broadcast already fans out to each
+/// tester as an independent private thread; there is no shared render pass
+/// where a `{{name}}` token would need resolving).
+model MessageTemplate {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  subject     String?
+  body        String
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User @relation("MessageTemplateAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@map("message_templates")
 }
 
 // ─── Ratings ─────────────────────────────────────────────────────────────────

@@ -14,6 +14,21 @@ export interface TableColumn<Row> {
   align?: 'left' | 'right'
   /** Optional width hint (px or %). */
   width?: string | number
+  /**
+   * Opt this column OUT of the row-level link, for cells that contain their
+   * own interactive element — a checkbox, a `tel:`/`mailto:` link, a link to
+   * a different record, a per-row form.
+   *
+   * `rowHref` works by wrapping every cell's contents in an `<a>`. Putting an
+   * anchor, button or form input inside that is invalid HTML (React reports
+   * "‹a› cannot be a descendant of ‹a›" and it breaks hydration), and worse,
+   * it is functionally wrong: the row link swallows the click, so a checkbox
+   * navigates instead of toggling.
+   *
+   * Setting this renders the cell's content bare, so its own control works
+   * and the surrounding row stays clickable everywhere else.
+   */
+  interactive?: boolean
 }
 
 export interface TableProps<Row> {
@@ -98,7 +113,15 @@ export function Table<Row>({
                       key={col.key}
                       className={col.align === 'right' ? styles.alignRight : undefined}
                     >
-                      {col.align === 'right' ? (
+                      {col.interactive ? (
+                        // Bare — this cell owns its own control. See `interactive`.
+                        <>
+                          <span className={styles.cellPrimary}>{col.render(row)}</span>
+                          {col.renderSecondary ? (
+                            <span className={styles.cellSecondary}>{col.renderSecondary(row)}</span>
+                          ) : null}
+                        </>
+                      ) : col.align === 'right' ? (
                         <a
                           href={href}
                           style={{

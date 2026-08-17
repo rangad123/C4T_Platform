@@ -1,0 +1,438 @@
+import type { ReactNode } from 'react'
+import Link from 'next/link'
+import { requireRole } from '@/lib/auth/session'
+import { serverFetchOrNull } from '@/lib/api/server'
+import { Panel } from '@/components/admin/Panel'
+import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Badge } from '@/components/ds/core/Badge'
+import { Button } from '@/components/ds/core/Button'
+import { Field } from '@/components/ds/forms/Field'
+import { Input } from '@/components/ds/forms/Input'
+import { Select } from '@/components/ds/forms/Select'
+import { Textarea } from '@/components/ds/forms/Textarea'
+import { Checkbox } from '@/components/ds/forms/Checkbox'
+import { TrackedForm } from '@/components/ds/forms/TrackedForm'
+import { formatDate, titleCase } from '@/lib/admin/format'
+import {
+  updateBasicInfoAction,
+  addDeviceAction,
+  removeDeviceAction,
+  setSkillsAction,
+  addLanguageAction,
+  removeLanguageAction,
+  addWorkHistoryAction,
+  removeWorkHistoryAction,
+  acceptNdaAction,
+} from './actions'
+
+const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
+const PROFICIENCIES = ['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC'] as const
+
+interface TesterDevice {
+  id: string
+  type: string
+  manufacturer: string | null
+  model: string
+  osName: string | null
+  osVersion: string | null
+  network: string | null
+  browser: string | null
+  isPrimary: boolean
+}
+
+interface WorkHistoryEntry {
+  id: string
+  company: string
+  jobTitle: string
+  startDate: string
+  endDate: string | null
+  description: string | null
+}
+
+interface ProfileDetail {
+  id: string
+  status: string
+  headline: string | null
+  bio: string | null
+  experienceYears: number | null
+  city: string | null
+  countryCode: string | null
+  ndaAcceptedAt: string | null
+  devices: readonly TesterDevice[]
+  skills: readonly { skill: { id: string; name: string } }[]
+  languages: readonly { code: string; proficiency: string }[]
+  workHistory: readonly WorkHistoryEntry[]
+}
+
+function Muted({ children }: { children: ReactNode }) {
+  return (
+    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+      {children}
+    </span>
+  )
+}
+
+const FORM_STYLE = { display: 'flex', flexDirection: 'column' as const, gap: 'var(--space-5)' }
+
+/**
+ * `/app/tester/profile` — the tester's own self-service profile.
+ *
+ * Every field on this page is edited through an API endpoint that already
+ * existed before this pass — `PATCH /testers/me`, the device/work-history
+ * add-remove pair, and the skills/languages full-replacement PUTs. Nothing
+ * here needed an API change; the gap was entirely that no web UI called any
+ * of these self-service endpoints yet.
+ *
+ * Languages has no per-row API — `PUT /testers/me/languages` replaces the
+ * whole set — so each add/remove form carries the current list as a hidden
+ * JSON snapshot and the Server Action recomputes the full array before
+ * PUTting it. See the actions file for the detail.
+ */
+export default async function TesterProfilePage() {
+  await requireRole(['TESTER'])
+
+  const profile = await serverFetchOrNull<ProfileDetail>('testers/me')
+
+  if (!profile) {
+    return (
+      <main id="main" style={{ maxWidth: 720, margin: '0 auto', padding: 'var(--space-9)' }}>
+        <p style={{ color: 'var(--text-secondary)' }}>
+          Your profile could not be loaded. Refresh in a moment.
+        </p>
+      </main>
+    )
+  }
+
+  const languagesJson = JSON.stringify(profile.languages.map((l) => ({ code: l.code, proficiency: l.proficiency })))
+
+  return (
+    <main
+      id="main"
+      style={{
+        maxWidth: 840,
+        margin: '0 auto',
+        padding: 'var(--space-9) var(--space-7)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--space-7)',
+      }}
+    >
+      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <Link
+          href="/app/tester"
+          style={{ color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}
+        >
+          ← Back to your account
+        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <h1 className="c4t-display-md" style={{ margin: 0 }}>
+            Your profile
+          </h1>
+          <StatusBadge status={profile.status} />
+        </div>
+        <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+          What projects see when deciding whether to invite you, and how we reach you.
+        </p>
+      </header>
+
+      {!profile.ndaAcceptedAt ? (
+        <Panel
+          title="Accept the NDA"
+          description="Required before you can be assigned to a project."
+        >
+          <form action={acceptNdaAction}>
+            <Button type="submit" variant="primary" iconLeft="check">
+              Accept the NDA
+            </Button>
+          </form>
+        </Panel>
+      ) : null}
+
+      <Panel title="About you" description="Shown to project owners considering you for an invite.">
+        <TrackedForm action={updateBasicInfoAction} style={FORM_STYLE}>
+          <Field label="Headline" htmlFor="headline" hint="A one-line summary, up to 160 characters.">
+            <Input id="headline" name="headline" maxLength={160} defaultValue={profile.headline ?? ''} />
+          </Field>
+          <Field label="Bio" htmlFor="bio">
+            <Textarea id="bio" name="bio" rows={5} maxLength={4000} defaultValue={profile.bio ?? ''} />
+          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-5)' }}>
+            <Field label="Years of experience" htmlFor="experienceYears">
+              <Input
+                id="experienceYears"
+                name="experienceYears"
+                type="number"
+                min={0}
+                max={60}
+                defaultValue={profile.experienceYears ?? ''}
+              />
+            </Field>
+            <Field label="City" htmlFor="city">
+              <Input id="city" name="city" maxLength={120} defaultValue={profile.city ?? ''} />
+            </Field>
+            <Field label="Country" htmlFor="countryCode" hint="Two-letter code, e.g. IN.">
+              <Input
+                id="countryCode"
+                name="countryCode"
+                maxLength={2}
+                defaultValue={profile.countryCode ?? ''}
+                style={{ textTransform: 'uppercase' }}
+              />
+            </Field>
+          </div>
+          <div>
+            <Button type="submit" variant="primary">
+              Save
+            </Button>
+          </div>
+        </TrackedForm>
+      </Panel>
+
+      <Panel title="Devices" description="What you can test on. Projects match testers by device coverage.">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+          {profile.devices.length > 0 ? (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {profile.devices.map((device) => (
+                <li
+                  key={device.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto',
+                    gap: 'var(--space-4)',
+                    alignItems: 'center',
+                    padding: 'var(--space-4)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-card)',
+                    background: 'var(--surface-canvas)',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                      {[device.manufacturer, device.model].filter(Boolean).join(' ')}
+                      {device.isPrimary ? (
+                        <Badge tone="accent" uppercase={false} style={{ marginLeft: 'var(--space-2)' }}>
+                          Primary
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <Muted>
+                      {[titleCase(device.type), device.osName, device.osVersion, device.network, device.browser]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Muted>
+                  </div>
+                  <form action={removeDeviceAction}>
+                    <input type="hidden" name="deviceId" value={device.id} />
+                    <Button type="submit" variant="ghost" size="sm" style={{ color: 'var(--status-error-fg)' }}>
+                      Remove
+                    </Button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Muted>No devices added yet.</Muted>
+          )}
+
+          <TrackedForm
+            action={addDeviceAction}
+            style={{
+              ...FORM_STYLE,
+              paddingTop: 'var(--space-5)',
+              borderTop: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
+              <Field label="Type" htmlFor="type">
+                <Select
+                  id="type"
+                  name="type"
+                  defaultValue="MOBILE"
+                  options={DEVICE_TYPES.map((value) => ({ value, label: titleCase(value) }))}
+                />
+              </Field>
+              <Field label="Brand" htmlFor="manufacturer">
+                <Input id="manufacturer" name="manufacturer" maxLength={80} />
+              </Field>
+              <Field label="Model" htmlFor="model" required>
+                <Input id="model" name="model" required maxLength={120} placeholder="Pixel 7a" />
+              </Field>
+              <Field label="OS name" htmlFor="osName">
+                <Input id="osName" name="osName" maxLength={60} placeholder="Android" />
+              </Field>
+              <Field label="OS version" htmlFor="osVersion">
+                <Input id="osVersion" name="osVersion" maxLength={40} placeholder="14" />
+              </Field>
+              <Field label="Network" htmlFor="network">
+                <Input id="network" name="network" maxLength={80} placeholder="5G" />
+              </Field>
+              <Field label="Browser" htmlFor="browser">
+                <Input id="browser" name="browser" maxLength={80} placeholder="Chrome 128" />
+              </Field>
+            </div>
+            <Checkbox id="isPrimary" name="isPrimary" label="This is my primary device" />
+            <div>
+              <Button type="submit" variant="secondary" iconLeft="plus">
+                Add device
+              </Button>
+            </div>
+          </TrackedForm>
+        </div>
+      </Panel>
+
+      <Panel title="Skills" description="Comma-separated. Saving replaces the full list.">
+        <form
+          action={setSkillsAction}
+          style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
+        >
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <Field label="Skills" htmlFor="skills">
+              <Input
+                id="skills"
+                name="skills"
+                defaultValue={profile.skills.map((s) => s.skill.name).join(', ')}
+                placeholder="Manual Testing, API Testing, Payment Testing"
+              />
+            </Field>
+          </div>
+          <Button type="submit" variant="secondary">
+            Save
+          </Button>
+        </form>
+      </Panel>
+
+      <Panel title="Languages">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+          {profile.languages.length > 0 ? (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', maxWidth: '40ch' }}>
+              {profile.languages.map((language) => (
+                <li
+                  key={language.code}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 'var(--space-4)',
+                    fontSize: 'var(--type-body-sm-size)',
+                  }}
+                >
+                  <span>
+                    {language.code.toUpperCase()} · {titleCase(language.proficiency)}
+                  </span>
+                  <form action={removeLanguageAction}>
+                    <input type="hidden" name="code" value={language.code} />
+                    <input type="hidden" name="current" value={languagesJson} />
+                    <Button type="submit" variant="ghost" size="sm" style={{ color: 'var(--status-error-fg)' }}>
+                      Remove
+                    </Button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Muted>No languages added yet.</Muted>
+          )}
+
+          <form
+            action={addLanguageAction}
+            style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
+          >
+            <input type="hidden" name="current" value={languagesJson} />
+            <Field label="Language code" htmlFor="code" hint="Two letters, e.g. en.">
+              <Input id="code" name="code" maxLength={2} style={{ width: 100 }} />
+            </Field>
+            <Field label="Proficiency" htmlFor="proficiency">
+              <Select
+                id="proficiency"
+                name="proficiency"
+                defaultValue="FLUENT"
+                options={PROFICIENCIES.map((value) => ({ value, label: titleCase(value) }))}
+              />
+            </Field>
+            <Button type="submit" variant="secondary" iconLeft="plus">
+              Add
+            </Button>
+          </form>
+        </div>
+      </Panel>
+
+      <Panel title="Work history">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+          {profile.workHistory.length > 0 ? (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {profile.workHistory.map((entry) => (
+                <li
+                  key={entry.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto',
+                    gap: 'var(--space-4)',
+                    alignItems: 'center',
+                    padding: 'var(--space-4)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-card)',
+                    background: 'var(--surface-canvas)',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                      {entry.jobTitle} · {entry.company}
+                    </div>
+                    <Muted>
+                      {formatDate(entry.startDate)} – {entry.endDate ? formatDate(entry.endDate) : 'Present'}
+                    </Muted>
+                    {entry.description ? (
+                      <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
+                        {entry.description}
+                      </p>
+                    ) : null}
+                  </div>
+                  <form action={removeWorkHistoryAction}>
+                    <input type="hidden" name="workHistoryId" value={entry.id} />
+                    <Button type="submit" variant="ghost" size="sm" style={{ color: 'var(--status-error-fg)' }}>
+                      Remove
+                    </Button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Muted>No work history added yet.</Muted>
+          )}
+
+          <TrackedForm
+            action={addWorkHistoryAction}
+            style={{
+              ...FORM_STYLE,
+              paddingTop: 'var(--space-5)',
+              borderTop: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
+              <Field label="Company" htmlFor="company" required>
+                <Input id="company" name="company" required maxLength={160} />
+              </Field>
+              <Field label="Job title" htmlFor="jobTitle" required>
+                <Input id="jobTitle" name="jobTitle" required maxLength={160} />
+              </Field>
+              <Field label="Start date" htmlFor="startDate" required>
+                <Input id="startDate" name="startDate" type="date" required />
+              </Field>
+              <Field label="End date" htmlFor="endDate" hint="Leave blank if current.">
+                <Input id="endDate" name="endDate" type="date" />
+              </Field>
+            </div>
+            <Field label="Description" htmlFor="description">
+              <Textarea id="description" name="description" rows={3} maxLength={2000} />
+            </Field>
+            <div>
+              <Button type="submit" variant="secondary" iconLeft="plus">
+                Add role
+              </Button>
+            </div>
+          </TrackedForm>
+        </div>
+      </Panel>
+    </main>
+  )
+}

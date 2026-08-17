@@ -80,6 +80,8 @@ export default async function CommunicationPage({
     {
       key: 'scope',
       header: 'Scope',
+      // Links to the project, i.e. a different record than the row link.
+      interactive: true,
       render: (row) =>
         row.project ? (
           <Link href={`/app/admin/projects/${row.project.id}`}>{row.project.reference}</Link>
@@ -134,16 +136,18 @@ export default async function CommunicationPage({
            the announcements half; threads get their own list because the useful
            columns are completely different. */
         <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-          <Link href="/app/admin/communication/announcements/new">
-            <Button variant="primary" iconLeft="plus">
+          <Button href="/app/admin/communication/announcements/new" variant="primary" iconLeft="plus">
               Compose announcement
             </Button>
-          </Link>
-          <Link href="/app/admin/communication/threads">
-            <Button variant="secondary" iconLeft="message-square">
+          <Button href="/app/admin/communication/broadcast" variant="secondary" iconLeft="users">
+              Message a group of testers
+            </Button>
+          <Button href="/app/admin/communication/threads" variant="secondary" iconLeft="message-square">
               Open message threads
             </Button>
-          </Link>
+          <Button href="/app/admin/communication/templates" variant="secondary" iconLeft="file-text">
+              Manage templates
+            </Button>
         </div>
       }
     />

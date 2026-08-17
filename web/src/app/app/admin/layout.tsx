@@ -42,6 +42,8 @@ const SECTIONS: readonly SidebarSection[] = [
       { href: '/app/admin/testers', label: 'Testers', icon: 'users' },
       { href: '/app/admin/managers', label: 'Managers', icon: 'shield-check' },
       { href: '/app/admin/skills', label: 'Skills', icon: 'briefcase' },
+      { href: '/app/admin/assets/devices', label: 'Devices', icon: 'smartphone' },
+      { href: '/app/admin/assets/browsers', label: 'Browsers', icon: 'monitor' },
     ],
   },
   {

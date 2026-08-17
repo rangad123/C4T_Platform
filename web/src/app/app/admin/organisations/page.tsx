@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { Avatar } from '@/components/admin/Avatar'
@@ -122,6 +121,8 @@ export default async function OrganisationsPage({
     {
       key: 'phone',
       header: 'Phone',
+      // Owns a `tel:` link — must not be wrapped in the row link.
+      interactive: true,
       render: (row) =>
         row.contactPhone ? (
           <a href={`tel:${row.contactPhone}`} style={{ color: 'var(--text-primary)' }}>
@@ -185,16 +186,12 @@ export default async function OrganisationsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Link href={buildExportHref({ status, search, sort, order })} prefetch={false}>
-            <Button variant="secondary" iconLeft="download">
+          <Button href={buildExportHref({ status, search, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
               Export CSV
             </Button>
-          </Link>
-          <Link href="/app/admin/organisations/new">
-            <Button variant="primary" iconLeft="plus">
+          <Button href="/app/admin/organisations/new" variant="primary" iconLeft="plus">
               New organisation
             </Button>
-          </Link>
         </div>
       }
     />

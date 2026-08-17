@@ -85,6 +85,29 @@ export function stars(score: number): string {
 }
 
 /**
+ * Formats a tester's average rating.
+ *
+ * `TesterProfile.ratingAverage` is a Prisma `Decimal`, which serialises over
+ * JSON as a STRING, not a number — so `value.toFixed(1)` throws
+ * "toFixed is not a function" the moment a tester actually has a rating.
+ * That crash is invisible until then, because an unrated tester is `null`
+ * and takes the early return.
+ *
+ * Typing the field as `number` and calling `toFixed` directly is the bug this
+ * exists to prevent; coerce through here instead. Pass `suffix: false` for a
+ * bare "4.5" rather than "4.5 / 5".
+ */
+export function formatRating(
+  value: string | number | null | undefined,
+  { suffix = true }: { suffix?: boolean } = {},
+): string {
+  if (value === null || value === undefined) return '—'
+  const score = Number(value)
+  if (!Number.isFinite(score)) return '—'
+  return suffix ? `${score.toFixed(1)} / 5` : score.toFixed(1)
+}
+
+/**
  * Trim a query-string value or default to `undefined`.
  *
  * The list-page URL keeps an empty string as the value (because the form is

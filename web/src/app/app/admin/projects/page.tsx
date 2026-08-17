@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { Button } from '@/components/ds/core/Button'
@@ -220,16 +219,12 @@ export default async function ProjectsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Link href={buildExportHref({ status, priority, search, sort, order })} prefetch={false}>
-            <Button variant="secondary" iconLeft="download">
+          <Button href={buildExportHref({ status, priority, search, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
               Export CSV
             </Button>
-          </Link>
-          <Link href="/app/admin/projects/new">
-            <Button variant="primary" iconLeft="plus">
+          <Button href="/app/admin/projects/new" variant="primary" iconLeft="plus">
               New project
             </Button>
-          </Link>
         </div>
       }
     />

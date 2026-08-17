@@ -1,5 +1,6 @@
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
+import { TemplatePicker } from '@/components/admin/TemplatePicker'
 import { Button } from '@/components/ds/core/Button'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
@@ -88,6 +89,9 @@ export default async function NewAnnouncementPage() {
   const projects = await serverFetchOrNull<readonly { id: string; reference: string; title: string }[]>(
     'projects?limit=200',
   )
+  const templates = await serverFetchOrNull<
+    readonly { id: string; name: string; subject: string | null; body: string }[]
+  >('communication/templates')
 
   return (
     <DetailShell
@@ -141,7 +145,14 @@ export default async function NewAnnouncementPage() {
         action={createAnnouncement}
         style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
       >
-        <Panel title="What it says">
+        <Panel
+          title="What it says"
+          actions={
+            templates && templates.length > 0 ? (
+              <TemplatePicker templates={templates} subjectFieldId="title" bodyFieldId="body" />
+            ) : undefined
+          }
+        >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
             <Field
               label="Title"

@@ -75,6 +75,27 @@ export const deviceSchema = z.object({
   isPrimary: z.boolean().default(false),
 })
 
+export const DEVICE_SORT_FIELDS = ['createdAt', 'model', 'manufacturer'] as const
+
+/**
+ * Admin-only, cross-tenant device/browser catalogue (§18 "Global Assets
+ * Management"). There is no separate reference-catalogue entity in this
+ * schema — legacy's "Devices"/"Browsers" assets are, in this platform, just
+ * every tester's own `TesterDevice` rows viewed in aggregate. `onlyWithBrowser`
+ * powers the "Browsers" tab: same rows, filtered to ones that recorded a
+ * browser, so the two legacy tabs are one dataset with two lenses rather than
+ * two separately-maintained tables.
+ */
+export const listGlobalDevicesQuery = paginationQuery.extend({
+  search: z.string().trim().max(120).optional(),
+  type: z.nativeEnum(DeviceType).optional(),
+  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  onlyWithBrowser: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
+})
+
 export const skillsSchema = z.object({
   /** Full replacement set of skill slugs. */
   skills: z.array(z.string().trim().min(1).max(80)).max(40),
@@ -121,3 +142,4 @@ export const deviceIdParam = z.object({ deviceId: z.string().cuid() })
 export const workHistoryIdParam = z.object({ workHistoryId: z.string().cuid() })
 
 export type ListTestersQuery = z.infer<typeof listTestersQuery>
+export type ListGlobalDevicesQuery = z.infer<typeof listGlobalDevicesQuery>

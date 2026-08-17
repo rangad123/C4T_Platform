@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
@@ -7,7 +6,7 @@ import { CountryFlag } from '@/components/admin/CountryFlag'
 import { Button } from '@/components/ds/core/Button'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, personName, searchTerm, hasFilter } from '@/lib/admin/format'
+import { formatDate, formatRating, personName, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -49,7 +48,8 @@ interface TesterRow {
   experienceYears: number | null
   city: string | null
   countryCode: string | null
-  ratingAverage: number | null
+  /** Prisma Decimal — arrives as a STRING. Never call .toFixed() on it directly. */
+  ratingAverage: string | number | null
   ratingCount: number
   bugsReportedCount: number
   bugsAcceptedCount: number
@@ -162,7 +162,7 @@ export default async function TestersPage({
       key: 'rating',
       header: 'Rating',
       align: 'right',
-      render: (row) => (row.ratingAverage === null ? '—' : row.ratingAverage.toFixed(1)),
+      render: (row) => formatRating(row.ratingAverage, { suffix: false }),
       renderSecondary: (row) => (row.ratingCount > 0 ? `${row.ratingCount} reviews` : undefined),
     },
     {
@@ -222,11 +222,9 @@ export default async function TestersPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Link href={buildExportHref({ status, countryCode, search, sort, order })} prefetch={false}>
-            <Button variant="secondary" iconLeft="download">
+          <Button href={buildExportHref({ status, countryCode, search, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
               Export CSV
             </Button>
-          </Link>
         </div>
       }
     />

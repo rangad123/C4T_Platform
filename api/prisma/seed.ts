@@ -412,6 +412,9 @@ async function main() {
       // Advance the sequence past the second seed row so the next
       // API-created project reads `nextval() = 3`.
       await prisma.$executeRawUnsafe(
+        `CREATE SEQUENCE IF NOT EXISTS "ref_project_${new Date().getUTCFullYear()}" START 1`,
+      )
+      await prisma.$executeRawUnsafe(
         `SELECT setval('"ref_project_${new Date().getUTCFullYear()}"', 3, true)`,
       )
     }
@@ -427,7 +430,7 @@ async function main() {
   if (allProjects.length > 0) {
     const bugSeeds = [
       {
-        ref: 'BUG-2026-0001',
+        ref: `BUG-${new Date().getUTCFullYear()}-00001`,
         title: 'UPI collect screen hangs after PIN entry',
         projectIdx: 0,
         severity: BugSeverity.CRITICAL,
@@ -436,7 +439,7 @@ async function main() {
         env: 'Android 13, Pixel 7a, app v4.3.1',
       },
       {
-        ref: 'BUG-2026-0002',
+        ref: `BUG-${new Date().getUTCFullYear()}-00002`,
         title: 'Checkout shows netbanking redirect in plain text on a hidden iframe',
         projectIdx: 0,
         severity: BugSeverity.MEDIUM,
@@ -445,7 +448,7 @@ async function main() {
         env: 'Chrome 119, desktop',
       },
       {
-        ref: 'BUG-2026-0003',
+        ref: `BUG-${new Date().getUTCFullYear()}-00003`,
         title: 'Patient dashboard times out at 30s in EU regions',
         projectIdx: 1,
         severity: BugSeverity.HIGH,
@@ -454,7 +457,7 @@ async function main() {
         env: 'iOS 17, iPhone 13, EU',
       },
       {
-        ref: 'BUG-2026-0004',
+        ref: `BUG-${new Date().getUTCFullYear()}-00004`,
         title: 'Insurance capture form does not validate phone format',
         projectIdx: 1,
         severity: BugSeverity.LOW,
@@ -489,6 +492,19 @@ async function main() {
         update: {},
       })
     }
+    // Advance the bug sequence past the seeded references, for the same
+    // reason the project sequence is advanced above: `nextReference('bug')`
+    // starts at nextval = 1, so without this the first API-reported bug
+    // would be numbered 1 again. It did not previously collide on the unique
+    // index only because the seed's padding (4 digits) differed from
+    // `nextReference`'s (5) — now that both are 5, the setval is what
+    // actually prevents the collision.
+    await prisma.$executeRawUnsafe(
+      `CREATE SEQUENCE IF NOT EXISTS "ref_bug_${new Date().getUTCFullYear()}" START 1`,
+    )
+    await prisma.$executeRawUnsafe(
+      `SELECT setval('"ref_bug_${new Date().getUTCFullYear()}"', ${bugSeeds.length}, true)`,
+    )
   }
 
   // ─── Ratings given by the customer to a couple of testers ───────────────
@@ -543,21 +559,21 @@ async function main() {
   if (allProjects[0]) {
     const txnSeeds = [
       {
-        reference: `TXN-${new Date().getUTCFullYear()}-0001`,
+        reference: `TXN-${new Date().getUTCFullYear()}-00001`,
         type: TransactionType.CUSTOMER_INVOICE,
         status: TransactionStatus.PAID,
         amountMinor: BigInt(250000), // ₹2,500.00
         description: 'UPI regression — milestone 1',
       },
       {
-        reference: `TXN-${new Date().getUTCFullYear()}-0002`,
+        reference: `TXN-${new Date().getUTCFullYear()}-00002`,
         type: TransactionType.TESTER_PAYOUT,
         status: TransactionStatus.APPROVED,
         amountMinor: BigInt(75000), // ₹750.00
         description: 'Tester payout — Hrvoje Nikolic',
       },
       {
-        reference: `TXN-${new Date().getUTCFullYear()}-0003`,
+        reference: `TXN-${new Date().getUTCFullYear()}-00003`,
         type: TransactionType.ADJUSTMENT,
         status: TransactionStatus.PAID,
         amountMinor: BigInt(-15000),
@@ -585,6 +601,13 @@ async function main() {
         update: {},
       })
     }
+    // Same reasoning as the project and bug sequences above.
+    await prisma.$executeRawUnsafe(
+      `CREATE SEQUENCE IF NOT EXISTS "ref_transaction_${new Date().getUTCFullYear()}" START 1`,
+    )
+    await prisma.$executeRawUnsafe(
+      `SELECT setval('"ref_transaction_${new Date().getUTCFullYear()}"', ${txnSeeds.length}, true)`,
+    )
   }
 
   // ─── A few platform announcements so the comms section isn't empty ─────

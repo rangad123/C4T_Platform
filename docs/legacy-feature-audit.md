@@ -211,23 +211,244 @@ Where a fix is described here, treat the corresponding finding further down as h
     snapshot by DOM element identity (a `WeakMap<Element, string>`) instead of by name,
     and to read `.checked` for checkbox/radio inputs instead of `.value`. This is a real
     correctness fix, not just new coverage — `web tsc`/`eslint` clean after the rewrite.
+18. **Bulk tester messaging / broadcast (§22)** — previously deferred as a multi-day feature
+    ("needs a new admin thread-create UI; the API (`POST /threads`) already supports it"). Turned
+    out to be a same-session lift once actually scoped: the API needed nothing at all.
+    New page `/app/admin/communication/broadcast` — a recipient picker (reusing the testers
+    list's search/status-filter/sort pattern, defaulting to VERIFIED testers sorted by rating)
+    with a checkbox per row, plus a compose panel (subject + body). Submitting calls
+    `POST /v1/communication/threads` once per selected tester with `type: DIRECT` and a
+    single-element `participantIds` — deliberately fanning out into N private one-to-one
+    conversations rather than one shared group thread, so a tester never sees who else got the
+    same message or how they replied. Capped at 100 recipients per send; one recipient failing
+    does not abort the rest of the batch. A "Message a group of testers" button was added to the
+    Communication page's toolbar alongside "Compose announcement" and "Open message threads".
+    Verified end-to-end: sent a test broadcast to 2 testers, confirmed each got their own private
+    thread seeded with the message and the sender as the only other participant, confirmed
+    tester3 got a 404 attempting to read tester2's copy of the thread directly (privacy holds),
+    confirmed tester2's own thread list shows exactly 1 conversation. Cleaned up both test
+    threads via a direct Prisma delete afterward (the API has no thread-delete route — only
+    close, which is a different semantic than "never happened").
+    **While verifying this feature, found and fixed a real bug from earlier in this session:**
+    every "Export CSV" button added across all 7 admin lists used `iconLeft="download"`, and the
+    bulk bug-status bar's "Apply to selected" button used `iconLeft="check-check"` — neither
+    icon was registered in `web/src/components/ds/core/icon-registry.ts`. Because `Button`'s
+    `iconLeft` prop is typed as a loose `string` rather than the strict `IconName` union,
+    `tsc` never caught it; at runtime the `Icon` component silently renders nothing for an
+    unregistered name (by design, to avoid a hard crash on a bad name) and logs a dev-only
+    console warning, which is how it surfaced — while restarting the dev server for this
+    feature, the log showed `[Icon] "download" is not in the icon registry` repeated dozens of
+    times. Added `Download` and `CheckCheck` to the registry; both are real `lucide-react`
+    exports, so this was a one-line-per-icon fix, not a design decision. Every Export CSV button
+    across the app, and the bulk-action bar, now renders its icon correctly.
+    **Also found while restarting servers for this verification:** a stale zombie `next dev`
+    process from earlier in the session was still bound to port 3000 with a corrupted Turbopack
+    cache, silently serving 404s for routes that exist (`/app/admin/bugs`, the new broadcast
+    page, etc.) while a *fresh* `npm run dev` invocation quietly fell back to port 3001 instead
+    of failing loudly. Killed the zombie, cleared `.next/`, restarted clean on 3000 — worth
+    flagging as a recurring hazard in this environment: a 404 on a route that should exist is not
+    proof the route is broken, it may mean the dev server serving that port is stale.
+19. **Communication Templates (§23)** — previously deferred alongside bulk messaging as "no
+    `MessageTemplate` model." New model, project-scoped nowhere — templates are platform-wide,
+    matching the legacy example ("Profile Update Request" applies to any tester, not one
+    project). `GET/POST /v1/communication/templates` and `DELETE .../templates/:id`, gated by
+    the existing `communication.read`/`communication.write` permissions (no new permission
+    codes needed). No update route — deleting and recreating is the correction path, matching
+    the Announcement model's existing "no edit, only delete" precedent in this same module.
+    New management page `/app/admin/communication/templates`; a new `<TemplatePicker>` client
+    component (the one genuinely interactive piece — populating two other fields from a
+    `<select>` cannot be done without JS) wired into both the announcement composer and the
+    broadcast composer via `Panel`'s `actions` slot. Deliberately did not build
+    variable/placeholder substitution — no message body in this platform needs per-recipient
+    interpolation, since broadcasts already fan out into independent private threads rather
+    than one shared render pass. Verified end-to-end: created "Profile Update Request" as
+    permanent demo data (matching the precedent set for the Checkout feature and the Vela
+    Travel phone number), confirmed it round-trips through the same fetch path both composer
+    pages use, confirmed the duplicate-name guard rejects a second template with the same
+    name. Caught and fixed a data-corruption artifact from my own test tooling along the way:
+    an em dash typed directly into a bash `curl -d '...'` heredoc landed in Postgres as a
+    replacement character (U+FFFD) — not an API or app bug, a Git-Bash/MSYS encoding issue with
+    that particular shell invocation. Fixed by deleting and recreating the template from a
+    `--data-binary @file.json` payload instead of an inline string.
+20. **Global Assets Management (§18)** — previously deferred as needing "new `Device`/`Browser`
+    lookup tables." Re-examined: legacy's Devices/Browsers assets have "Added By" and "Country"
+    columns, which only make sense as an aggregate view of what testers themselves registered,
+    not a curated reference table an admin maintains independently — this platform's
+    `TesterDevice` rows already are that data, just scoped to one tester at a time on the
+    existing detail page. New `GET /v1/testers/devices` (admin, `tester.read`) lists every
+    device across every tester with search/type/country filters and sort; `onlyWithBrowser=true`
+    reuses the same endpoint as the Browsers tab rather than a second table. Two new pages,
+    `/app/admin/assets/devices` and `/app/admin/assets/browsers`, added to the sidebar under
+    Accounts. One honest gap flagged rather than papered over: `TesterDevice.browser` is a
+    single free-text field (`"Chrome 128"`), not separate name/version columns, so "Browser
+    Version" is marked `[~]` in `checklist.md` — folded into the Browser column — rather than
+    faked as an empty column with no data source. Caught and fixed a real bug in my own draft
+    before it shipped: the `where` clause built `testerProfile: {...}` from two separate
+    conditional spreads (`user.deletedAt` and `countryCode`), which — being the same top-level
+    key — would have silently overwritten each other instead of combining, meaning a
+    country-filtered query would have leaked devices belonging to soft-deleted testers. Fixed
+    by merging both conditions into one `testerProfile` object before the filters are combined.
+    Verified end-to-end with real data: re-registered a tester's device through the real
+    add/remove device endpoints (no update route exists) to attach a `browser` value as
+    permanent demo data, confirmed the Devices page lists all 3 seeded devices, confirmed
+    `?countryCode=IN` narrows to exactly the Indian tester's device, confirmed the Browsers page
+    shows only the one device with a browser on file.
+    **While verifying this feature, hit two unrelated processes from other projects on this
+    machine squatting on the ports this project uses** — a compiled `dist/main.js` Node/Nest app
+    (almost certainly this environment's separate PaymentWallet project) repeatedly respawned on
+    port 4000, and an unrelated Next.js dev server from `C:\Users\laptop\Desktop\DBSK CBT` took
+    over port 3000 after this project's own web server had died earlier in the session. Neither
+    was touched without asking first; the user confirmed both were safe to kill. Where the API
+    process kept respawning under what looks like a supervisor, rather than keep fighting it,
+    the web server was instead pointed at this project's API on an alternate port
+    (`API_ORIGIN=http://localhost:4010`) as a one-off environment override for verification —
+    nothing was written back to the committed `.env`.
+21. **Tester Account/Finance — read-only slice (§21)** — previously deferred as "100% missing
+    at the schema level." Re-examined: the *balance/earnings* half needed zero schema changes
+    — `GET /v1/transactions/summary/mine` (groups the tester's own `TESTER_EARNING`/
+    `TESTER_PAYOUT` rows by status) and `GET /v1/transactions` (auto-scoped to
+    `counterpartyId: user.id` via `transactionScope`) already existed and were already callable
+    by any authenticated tester with no permission gate beyond `authenticate`. What was
+    actually missing was the UI. Replaced `web/src/app/app/tester/page.tsx`'s
+    `<PortalNotReady />` with a real dashboard — the tester's actual `ROLE_HOME` destination —
+    showing four stat tiles (Available balance, Total earned, Pending review, Paid out) and a
+    50-row transaction history table, every figure a live read from the same ledger the admin
+    Transactions list uses. "Available balance" is computed client-side as approved earnings
+    minus paid-out amounts and labelled with that formula explicitly, rather than presented as
+    an unqualified number.
+    **Deliberately NOT built, and explicitly said so on the page itself:** a Credit Fund /
+    Release Fund split (the schema's `TransactionStatus` enum has no such two-stage semantic —
+    fabricating one would misstate the account holder's real position), a payment
+    method/PayPal field (no such field exists on `User` or `TesterProfile`), a TDS figure (no
+    `tdsAmountMinor` field on `Transaction`), and a Finance Year date-range filter (small,
+    real follow-up — the admin Transactions list already has `from`/`to` params, this page
+    just doesn't expose them yet). Also explicitly deferred: bug reporting, evidence upload,
+    profile self-service, and an announcements feed — the rest of the tester portal, called out
+    as "coming soon" directly on the page so it never implies more is done than actually is.
+    Verified end-to-end with real accounts: tester1's page shows their real transaction
+    (`TXN-2026-0002`); tester2's page correctly shows "No transactions yet" (no cross-tester
+    leakage); an ADMIN account visiting `/app/tester` directly is redirected to `/app/admin`
+    rather than reaching tester data, proving the role gate holds independently of the shared
+    `/app/layout.tsx`'s "is signed in" check.
+    **Caught a real build-artifact corruption while re-verifying, unrelated to this feature's
+    own code:** a prior `tsc`/`eslint` verification command in this session piped output
+    through `tail` and checked `$?` afterward — which captures `tail`'s exit code, not `tsc`'s,
+    so a genuine failure was silently reported as passing. Re-running properly (capturing the
+    real command's exit code) surfaced 7 syntax errors in `.next/dev/types/routes.d.ts`, a
+    Next.js auto-generated file that had been left mid-write and corrupted — almost certainly
+    from one of this session's several forceful `taskkill`s against dev-server processes during
+    the port-conflict cleanup. `.next/` is gitignored build output, not source; cleared it and
+    let Next.js regenerate cleanly, then re-verified all four checks (`api tsc`/`eslint`,
+    `web tsc`/`eslint`) with correctly-captured exit codes this time — all genuinely clean, zero
+    lines of output.
+22. **Tester profile self-service (§2.3)** — the second real slice of the tester portal. Like
+    the finance slice, this needed **zero API changes**: `PATCH /testers/me`, the device and
+    work-history add/remove pairs, the skills/languages full-replacement PUTs, and the NDA
+    accept endpoint all already existed under a `requireRole(TESTER)` sub-router. The gap was
+    that no web UI had ever called any of them. New page `/app/tester/profile` with sections
+    for basic info, devices, skills, languages, work history, and an NDA-acceptance panel that
+    only renders when `ndaAcceptedAt` is null. Linked from the tester dashboard, and the
+    dashboard's "coming soon" note narrowed accordingly so it never overstates what is done.
+    Languages needed care: the API has no per-row endpoint, only a full-collection
+    `PUT /testers/me/languages`, so each add/remove form carries the current set as a hidden
+    JSON snapshot and the Server Action recomputes the whole array before PUTting it — that
+    mirrors the API's actual contract rather than working around it.
+    **Found and fixed a real pre-existing production bug while verifying this** — not test
+    flakiness, and not something this pass introduced. `setSkills` ran N `skill.upsert` calls
+    **plus** a `deleteMany`, a `createMany`, **and** a final `findUnique` using the heavy
+    `profileSelect` (which fans out across five relations) all inside one interactive
+    transaction. Prisma's default interactive-transaction budget is 5000ms; each round trip to
+    the remote Neon instance is roughly a second. The result was that a tester saving **three
+    or more skills got a 400 with nothing saved** — reproduced deterministically from the API
+    log at 5270ms and 5283ms across separate attempts, while a two-skill save squeaked
+    through. `setLanguages` had the same shape (delete + create + heavy read) and was
+    intermittently failing for the same reason.
+    The fix scopes each transaction down to only the work that genuinely needs atomicity —
+    the delete-then-recreate of that one tester's rows, so the set is never observable
+    half-replaced. The `skill.upsert` calls moved out (they create rows in the *global*
+    catalogue, are idempotent, and are not part of the set being swapped — an orphaned
+    catalogue row on failure is harmless), and the final profile read moved out too (it only
+    builds the response, and reading after commit is if anything more correct). Verified: the
+    exact three-skill payload that previously failed now returns 200 with all three saved, and
+    an **eight**-skill payload completes in 12.44s versus 12.41s for three — near-identical,
+    confirming the transaction is now N-independent and the upserts parallelise properly
+    outside it. (Those wall-clock figures are dev-laptop-to-us-east-Neon latency across ~7
+    round trips, not representative of a co-located deployment; the correctness fix is the
+    point, not the timing.)
+    All test mutations reverted afterward: tester1's skills and languages restored to their
+    original values, and the two skill-catalogue rows the eight-skill test created
+    (`Load Testing`, `Regression Testing`, both with zero testers) deleted directly via
+    Prisma since the API intentionally exposes no skill-delete route — catalogue verified back
+    at its original 8 rows with unchanged tester counts.
+23. **Tester bug reporting (§2.3)** — the third slice, and the core tester workflow. Again
+    **zero API changes**: `POST /v1/bugs` already gated `bug.create` on an ACCEPTED/ACTIVE
+    assignment and already refused DRAFT/COMPLETED/CANCELLED projects. Two new pages —
+    `/app/tester/bugs` (the tester's bug list) and `/app/tester/bugs/new` (the report form,
+    covering title, description, steps, expected/actual, severity, reproducibility, type, and
+    the full environment block). The project picker is built from `/projects/my-assignments`
+    filtered to assignments that actually confer `bug.create` and to projects in an
+    accepting status — a UX courtesy, explicitly *not* the security boundary, since the API
+    re-checks the relation on every submit.
+    Verified both layers independently: tester1 (ACCEPTED assignment) filed a real report that
+    appears in their list and in the admin cross-tenant list attributed to them; tester2 (no
+    assignment) sees "No project to report against" in the UI **and** gets a 403 from a
+    hand-built `POST /v1/bugs` bypassing the UI entirely; tester2's bug list correctly shows
+    "No bugs yet" rather than tester1's report, confirming `bugScope` holds.
+    Setting this up required a real assignment, created through the actual admin workflow
+    (`POST /projects/:id/assignments` then the tester's own `POST /projects/:id/respond`)
+    rather than by writing to the database — that assignment and the resulting bug report are
+    kept as demo data, consistent with the precedent set for the Checkout feature and the
+    Profile Update Request template. (It also surfaced that the one pre-existing assignment on
+    C4T-2026-0002 is `REMOVED` — leftover from this session's earlier `maxTesters` testing.
+    Left in place: `REMOVED` is a valid terminal state and deleting assignment history would
+    destroy a real audit trail.)
+    **Found and fixed a latent reference-numbering bug while verifying.** The new bug was
+    numbered `BUG-2026-00001` while the seeded bugs are `BUG-2026-0004` — investigating showed
+    `nextReference()` pads bugs and transactions to 5 digits (matching the schema's own
+    documented examples, `BUG-2026-00417` / `TXN-2026-00318`) but `prisma/seed.ts` hardcoded
+    them at 4. Worse, the seed advanced the **project** sequence with `setval` — with an
+    explicit comment explaining that skipping it would collide on the unique reference index —
+    but never did the same for bugs or transactions. Those only avoided a collision *by
+    accident*, because the mismatched padding made `BUG-2026-00001` ≠ `BUG-2026-0001`; aligning
+    the padding without also adding the `setval` would have turned a cosmetic wart into a hard
+    unique-constraint failure on the first bug reported after any re-seed. Fixed all of it:
+    padding aligned to 5, `setval` added for both sequences, and the bug refs' hardcoded literal
+    year `2026` templated like the others (seeding in 2027 would otherwise have produced
+    `BUG-2026-*`). Also guarded the new `setval`s with `CREATE SEQUENCE IF NOT EXISTS`, since
+    these sequences are created lazily by `nextReference()` and would not exist on a genuinely
+    fresh database. **This takes effect on the next re-seed; the current dev database keeps its
+    existing 4-digit seeded references and is not in a collision state.**
 
 **Explicitly deferred** (each is a multi-day feature on its own; implementing any of them
 partially would have produced exactly the "UI exists but isn't real" anti-pattern this audit
 was built to catch):
 
-- Tester self-service portal (`web/src/app/app/tester/`) — still `<PortalNotReady />`.
+- The rest of the tester self-service portal — Account/Finance (Pass 1 #21), profile
+  self-service (Pass 1 #22) and bug reporting (Pass 1 #23) are now real. Still missing:
+  **evidence upload** (needs the presign → upload → attach flow wired end to end, and a
+  client-side file input, which is the one genuinely new UI mechanic left) and a
+  **project-announcements feed** for the tester.
 - Reports module (§24) — no code exists to build on top of; needs a `reports` API module.
-- Communication Templates (§23) — no `MessageTemplate` model.
-- Bulk tester messaging / broadcast (§22) — needs a new admin thread-create UI; the API
-  (`POST /threads`) already supports it.
-- Global Assets catalog (§18) — needs new `Device`/`Browser` lookup tables.
-- Tester Account/Finance (§21) — needs new schema fields (TDS, payment method, balance) with no
-  existing UI to extend.
 - Build Settings' remaining sub-feature: fully dynamic Custom Bug Fields (Feature Lists and the
   tester-bug-visibility toggle — the other two sub-features — are now both done, see above).
-- Sorting on the managers and transactions admin lists — their API routes hardcode `orderBy`
-  server-side with no `sort` query param, so this needs an API change first, not just a UI one.
+
+**No longer deferred, done in a later pass despite the original multi-day estimate:**
+- ~~Bulk tester messaging / broadcast (§22)~~ — see Implementation Pass 1 #18. The API needed
+  zero changes; the estimate assumed a new thread-create UI would be a bigger lift than it
+  turned out to be once actually scoped down to "checkbox picker + compose form + fan-out loop".
+- ~~Sorting on the managers and transactions admin lists~~ — see Implementation Pass 1 #16.
+- ~~Communication Templates (§23)~~ — see Implementation Pass 1 #19. The "no `MessageTemplate`
+  model" framing made it sound bigger than "a Skill-sized lookup table plus one `<select>` that
+  writes into two other fields" — which is what it actually was once scoped down.
+- ~~Global Assets catalog (§18)~~ — see Implementation Pass 1 #20. The "needs new lookup
+  tables" framing assumed a curated reference catalogue; the legacy columns ("Added By",
+  "Country") actually described an aggregate view of tester-submitted data this platform
+  already stores.
+- ~~Tester Account/Finance — balance and transaction history half (§21)~~ — see Implementation
+  Pass 1 #21. The "100% missing at the schema level" framing was true for the Credit
+  Fund/Release Fund/TDS/payment-method parts, but the balance/earnings/history part needed no
+  schema at all — `GET /v1/transactions/summary/mine` already existed and had already done the
+  real work.
 
 ---
 
@@ -1244,14 +1465,15 @@ bar, not skipped.
 
 ### Priority 2 — Major
 
-6. Bulk tester messaging (broadcast) — API supports it, no UI creates a thread at all;
-   Announcements are the only working broadcast path and are audience-enum-only.
+6. ~~Bulk tester messaging (broadcast)~~ — **done**, see Implementation Pass 1 #18.
 7. Reports module — 100% missing, including navigation.
-8. Communication Templates — 100% missing.
-9. Global Assets (Devices/Browsers catalog) — 100% missing.
-10. Build Settings (Feature Lists, custom bug fields, tester-bug-visibility toggle) — 100% missing.
-11. Tester Account/Finance (balance, credit fund, release fund, TDS, payment method) — 100%
-    missing at the schema level, not just the UI.
+8. ~~Communication Templates~~ — **done**, see Implementation Pass 1 #19.
+9. ~~Global Assets (Devices/Browsers catalog)~~ — **done**, see Implementation Pass 1 #20.
+10. Build Settings — ~~Feature Lists~~ and ~~tester-bug-visibility toggle~~ done (Implementation
+    Pass 1 #4, #5); fully dynamic Custom Bug Fields is the one sub-feature still missing.
+11. Tester Account/Finance — **balance/earnings/transaction history done**, see Implementation
+    Pass 1 #21. Credit fund, release fund, TDS, and payment method remain genuinely missing at
+    the schema level — those still need real schema work, not just UI.
 12. Payment state entirely disconnected from the tester roster, despite `Transaction` having
     the fields needed to join it.
 13. No per-project bug analytics (severity/status/reproducibility breakdown scoped to one

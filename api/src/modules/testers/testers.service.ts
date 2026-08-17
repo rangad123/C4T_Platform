@@ -2,7 +2,12 @@ import { type Prisma, TesterStatus, Role, UserStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
-import { TESTER_SORT_FIELDS, type ListTestersQuery } from './testers.schema.js'
+import {
+  TESTER_SORT_FIELDS,
+  DEVICE_SORT_FIELDS,
+  type ListTestersQuery,
+  type ListGlobalDevicesQuery,
+} from './testers.schema.js'
 import { createNotification } from '../notifications/notifications.service.js'
 
 const profileSelect = {
@@ -158,6 +163,71 @@ export async function exportTestersCSV(query: ListTestersQuery): Promise<string>
   )
 }
 
+const globalDeviceSelect = {
+  id: true,
+  type: true,
+  manufacturer: true,
+  model: true,
+  osName: true,
+  osVersion: true,
+  screenSize: true,
+  ramGb: true,
+  network: true,
+  browser: true,
+  isPrimary: true,
+  createdAt: true,
+  testerProfile: {
+    select: {
+      id: true,
+      countryCode: true,
+      user: { select: { id: true, firstName: true, lastName: true } },
+    },
+  },
+} satisfies Prisma.TesterDeviceSelect
+
+/**
+ * §18 "Global Assets Management" — every device (and, filtered, every
+ * recorded browser) across every tester, browsable by an admin. See the
+ * schema-level note on `listGlobalDevicesQuery` for why this reads from
+ * `TesterDevice` rather than a separate catalogue table.
+ */
+export async function listGlobalDevices(query: ListGlobalDevicesQuery) {
+  const where: Prisma.TesterDeviceWhereInput = {
+    // Both conditions target the same relation, so they're merged into one
+    // `testerProfile` filter rather than spread as separate top-level keys —
+    // two `...(cond ? {testerProfile: ...} : {})` spreads would silently
+    // overwrite each other instead of combining.
+    testerProfile: {
+      user: { deletedAt: null },
+      ...(query.countryCode ? { countryCode: query.countryCode } : {}),
+    },
+    ...(query.type ? { type: query.type } : {}),
+    ...(query.onlyWithBrowser ? { browser: { not: null } } : {}),
+    ...(query.search
+      ? {
+          OR: [
+            { model: { contains: query.search, mode: 'insensitive' } },
+            { manufacturer: { contains: query.search, mode: 'insensitive' } },
+            { browser: { contains: query.search, mode: 'insensitive' } },
+            { osName: { contains: query.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.testerDevice.findMany({
+      where,
+      select: globalDeviceSelect,
+      orderBy: buildOrderBy(query.sort, query.order, DEVICE_SORT_FIELDS, 'createdAt'),
+      ...toSkipTake(query),
+    }),
+    prisma.testerDevice.count({ where }),
+  ])
+
+  return { items, meta: buildMeta(query, total) }
+}
+
 export async function getTesterById(id: string) {
   const profile = await prisma.testerProfile.findUnique({ where: { id }, select: profileSelect })
   if (!profile) throw new NotFoundError('Tester')
@@ -310,32 +380,54 @@ export async function removeWorkHistory(userId: string, workHistoryId: string) {
 
 // ─── Skills & languages ──────────────────────────────────────────────────────
 
-/** Replaces the tester's skill set, creating any skill that does not yet exist. */
+/**
+ * Replaces the tester's skill set, creating any skill that does not yet exist.
+ *
+ * ── Why the transaction is kept deliberately small
+ *
+ * Only the delete-then-recreate of THIS tester's rows needs atomicity — a
+ * tester must never be observable with a half-replaced skill set. Two other
+ * things used to sit inside the same transaction and do not belong there:
+ *
+ *   1. The `skill.upsert` calls. Those create rows in the GLOBAL skill
+ *      catalogue, are idempotent, and are not part of the tester's set being
+ *      swapped — if the swap below fails, an extra catalogue row is harmless.
+ *   2. The final profile read. It only builds the response payload, and
+ *      reading it after the commit is if anything more correct, since it is
+ *      then guaranteed to reflect committed state.
+ *
+ * Keeping them inside cost real correctness, not just speed: each Prisma
+ * round trip to a remote Postgres is ~1s, `profileSelect` fans out across
+ * five relations, and the interactive-transaction budget is 5s — so a tester
+ * saving three or more skills reliably blew the timeout and got a 400 with
+ * nothing saved. Two writes is well inside the budget.
+ */
 export async function setSkills(userId: string, slugs: string[]) {
   const profile = await requireOwnProfile(userId)
   const normalised = [...new Set(slugs.map((s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')))]
 
-  return prisma.$transaction(async (tx) => {
-    const skills = await Promise.all(
-      normalised.map((slug) =>
-        tx.skill.upsert({
-          where: { slug },
-          create: { slug, name: slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) },
-          update: {},
-          select: { id: true },
-        }),
-      ),
-    )
+  // Outside the transaction — see the note above.
+  const skills = await Promise.all(
+    normalised.map((slug) =>
+      prisma.skill.upsert({
+        where: { slug },
+        create: { slug, name: slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) },
+        update: {},
+        select: { id: true },
+      }),
+    ),
+  )
 
+  await prisma.$transaction(async (tx) => {
     await tx.testerSkill.deleteMany({ where: { testerProfileId: profile.id } })
     if (skills.length > 0) {
       await tx.testerSkill.createMany({
         data: skills.map((s) => ({ testerProfileId: profile.id, skillId: s.id })),
       })
     }
-
-    return tx.testerProfile.findUnique({ where: { id: profile.id }, select: profileSelect })
   })
+
+  return prisma.testerProfile.findUnique({ where: { id: profile.id }, select: profileSelect })
 }
 
 /**
@@ -367,21 +459,23 @@ export async function setSkillCategory(
   return prisma.skill.update({ where: { id: skillId }, data: { category } })
 }
 
+/** Replaces the tester's language set. Same transaction-scoping rationale as `setSkills`. */
 export async function setLanguages(
   userId: string,
   languages: { code: string; proficiency: string }[],
 ) {
   const profile = await requireOwnProfile(userId)
 
-  return prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     await tx.testerLanguage.deleteMany({ where: { testerProfileId: profile.id } })
     if (languages.length > 0) {
       await tx.testerLanguage.createMany({
         data: languages.map((l) => ({ ...l, testerProfileId: profile.id })),
       })
     }
-    return tx.testerProfile.findUnique({ where: { id: profile.id }, select: profileSelect })
   })
+
+  return prisma.testerProfile.findUnique({ where: { id: profile.id }, select: profileSelect })
 }
 
 export async function acceptNda(userId: string) {

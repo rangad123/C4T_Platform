@@ -16,6 +16,7 @@ import {
   setSkillCategorySchema,
   acceptNdaSchema,
   workHistorySchema,
+  listGlobalDevicesQuery,
   testerIdParam,
   deviceIdParam,
   workHistoryIdParam,
@@ -65,6 +66,18 @@ testersRouter.get(
   requirePermission(PERMISSIONS.TESTER_READ),
   validate({ query: listTestersQuery }),
   controller.exportCsv,
+)
+
+/**
+ * §18 Global Assets — every device (and, filtered, every recorded browser)
+ * across every tester. Declared before "/:id" for the same reason as
+ * "export.csv" — "devices" must never be parsed as an id.
+ */
+testersRouter.get(
+  '/devices',
+  requirePermission(PERMISSIONS.TESTER_READ),
+  validate({ query: listGlobalDevicesQuery }),
+  controller.listGlobalDevices,
 )
 
 testersRouter.get(

@@ -4,7 +4,7 @@ import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
 import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './testers.service.js'
-import type { ListTestersQuery } from './testers.schema.js'
+import type { ListTestersQuery, ListGlobalDevicesQuery } from './testers.schema.js'
 
 export async function list(_req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListTestersQuery>(res)
@@ -19,6 +19,13 @@ export async function exportCsv(_req: Request, res: Response): Promise<void> {
   res.setHeader('content-type', 'text/csv; charset=utf-8')
   res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('testers')}"`)
   res.send(csv)
+}
+
+/** §18 Global Assets — every device across every tester. */
+export async function listGlobalDevices(_req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<ListGlobalDevicesQuery>(res)
+  const { items, meta } = await service.listGlobalDevices(query)
+  res.json({ data: items, meta })
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {
