@@ -25,6 +25,13 @@ export interface AdminListPageProps<Row> {
   /** Builds the URL for a given page, preserving filters. */
   hrefFor: (page: number) => string
 
+  /**
+   * Optional sub-navigation rendered directly under the header, above the
+   * toolbar. Sits there rather than below the toolbar because the tabs choose
+   * which list you are filtering — the filters belong to the chosen tab, not
+   * the other way round.
+   */
+  tabs?: ReactNode
   /** Optional filter form / actions rendered between the header and the table. */
   toolbar?: ReactNode
   /** Optional summary strip (totals, counts) above the table. */
@@ -70,6 +77,7 @@ export function AdminListPage<Row>({
   rowKey,
   rowHref,
   hrefFor,
+  tabs,
   toolbar,
   summary,
   emptyTitle,
@@ -102,6 +110,8 @@ export function AdminListPage<Row>({
             {description}
           </p>
         </header>
+
+        {tabs}
 
         {toolbar}
 

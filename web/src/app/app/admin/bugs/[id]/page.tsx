@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
 import { StatusBadge, SeverityBadge, RoleBadge } from '@/components/admin/StatusBadge'
@@ -246,17 +247,34 @@ const FORM_STYLE = {
   gap: 'var(--space-5)',
 } as const
 
+/**
+ * Four things live on a bug, and they are read at different moments: the
+ * report itself (triage), what was attached (reproduction), the discussion
+ * (working it), and the status trail (audit). Stacked they were one long
+ * scroll where a busy comment thread pushed the trail off the bottom.
+ *
+ * The aside — triage, classification, status — stays outside the sections:
+ * it is what you act on, and it has to stay reachable from every tab.
+ */
+const SECTIONS = [
+  { value: 'report', label: 'Report', icon: 'file-text' },
+  { value: 'attachments', label: 'Attachments', icon: 'paperclip' },
+  { value: 'comments', label: 'Comments', icon: 'message-square' },
+  { value: 'history', label: 'History', icon: 'clock' },
+] as const
+
 export default async function BugDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string }>
+  searchParams: Promise<{ error?: string; section?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
   const { id } = await params
-  const { error } = await searchParams
+  const { error, section: rawSection } = await searchParams
+  const section = resolveSection(SECTIONS, rawSection)
 
   let bug: BugDetail
   try {
@@ -393,6 +411,19 @@ export default async function BugDetailPage({
             {bug.project.title}
           </Link>
         </>
+      }
+      tabs={
+        <SectionTabs
+          basePath={`${LIST_PATH}/${bug.id}`}
+          tabs={SECTIONS.map((t) =>
+            t.value === 'attachments'
+              ? { ...t, count: bug.attachments.length }
+              : t.value === 'comments'
+                ? { ...t, count: bug.comments.length }
+                : t,
+          )}
+          active={section}
+        />
       }
       aside={
         <>
@@ -620,288 +651,305 @@ export default async function BugDetailPage({
         </>
       }
     >
-      {/* ── The report, as filed ───────────────────────────────────────── */}
-      <Panel
-        title="Report"
-        description="The defect exactly as the tester filed it. Only the reporter may correct it, and only before triage."
-      >
-        <DescriptionList items={reportItems} />
+      {section === 'report' ? (
+        <>
+          {/* ── The report, as filed ───────────────────────────────────────── */}
+          <Panel
+            title="Report"
+            description="The defect exactly as the tester filed it. Only the reporter may correct it, and only before triage."
+          >
+            <DescriptionList items={reportItems} />
 
-        <div
-          style={{
-            marginTop: 'var(--space-6)',
-            paddingTop: 'var(--space-6)',
-            borderTop: '1px solid var(--border-subtle)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-5)',
-          }}
-        >
-          <h3 className="c4t-heading-sm" style={{ margin: 0 }}>
-            Captured environment
-          </h3>
-          <DescriptionList items={environmentItems} />
-        </div>
-      </Panel>
-
-      {/* ── Attachments ───────────────────────────────────────────────── */}
-      <Panel
-        title="Attachments"
-        description="Screenshots and recordings filed with the report. Download links are signed and short-lived."
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-          <FormError message={panelError(error, 'attachment')} />
-
-          {bug.attachments.length === 0 ? (
-            <Note>
-              Nothing was attached. Testers add screenshots and recordings when they file the
-              report, or from the tester portal afterwards.
-            </Note>
-          ) : (
-            <ul
+            <div
               style={{
-                listStyle: 'none',
-                margin: 0,
-                padding: 0,
+                marginTop: 'var(--space-6)',
+                paddingTop: 'var(--space-6)',
+                borderTop: '1px solid var(--border-subtle)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 'var(--space-3)',
+                gap: 'var(--space-5)',
               }}
             >
-              {bug.attachments.map((attachment) => (
-                <li
-                  key={attachment.id}
+              <h3 className="c4t-heading-sm" style={{ margin: 0 }}>
+                Captured environment
+              </h3>
+              <DescriptionList items={environmentItems} />
+            </div>
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'attachments' ? (
+        <>
+          {/* ── Attachments ───────────────────────────────────────────────── */}
+          <Panel
+            title="Attachments"
+            description="Screenshots and recordings filed with the report. Download links are signed and short-lived."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <FormError message={panelError(error, 'attachment')} />
+
+              {bug.attachments.length === 0 ? (
+                <Note>
+                  Nothing was attached. Testers add screenshots and recordings when they file the
+                  report, or from the tester portal afterwards.
+                </Note>
+              ) : (
+                <ul
                   style={{
+                    listStyle: 'none',
+                    margin: 0,
+                    padding: 0,
                     display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
-                    gap: 'var(--space-5)',
-                    padding: 'var(--space-4) var(--space-5)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-card)',
+                    flexDirection: 'column',
+                    gap: 'var(--space-3)',
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 'var(--space-4)',
-                      alignItems: 'flex-start',
-                      minWidth: 0,
-                    }}
-                  >
-                    <Icon
-                      name={attachment.file.mimeType.startsWith('image/') ? 'image' : 'file-text'}
-                      size={20}
-                      style={{ color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}
-                    />
-                    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                      <a
-                        href={attachment.file.downloadUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ ...LINK_STYLE, wordBreak: 'break-word' }}
+                  {bug.attachments.map((attachment) => (
+                    <li
+                      key={attachment.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: 'var(--space-5)',
+                        padding: 'var(--space-4) var(--space-5)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-card)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 'var(--space-4)',
+                          alignItems: 'flex-start',
+                          minWidth: 0,
+                        }}
                       >
-                        {attachment.file.originalName}
-                      </a>
+                        <Icon
+                          name={attachment.file.mimeType.startsWith('image/') ? 'image' : 'file-text'}
+                          size={20}
+                          style={{ color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                          <a
+                            href={attachment.file.downloadUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ ...LINK_STYLE, wordBreak: 'break-word' }}
+                          >
+                            {attachment.file.originalName}
+                          </a>
+                          <span
+                            style={{
+                              color: 'var(--text-muted)',
+                              fontSize: 'var(--type-body-sm-size)',
+                            }}
+                          >
+                            {formatBytes(attachment.file.sizeBytes)} · {attachment.file.mimeType} ·
+                            added {formatDate(attachment.createdAt)}
+                          </span>
+                          {attachment.caption ? (
+                            <span
+                              style={{
+                                color: 'var(--text-secondary)',
+                                fontSize: 'var(--type-body-sm-size)',
+                              }}
+                            >
+                              {attachment.caption}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {capabilities.canAttach ? (
+                        <form action={removeBugAttachment}>
+                          <input type="hidden" name="id" value={bug.id} />
+                          <input type="hidden" name="attachmentId" value={attachment.id} />
+                          <Button type="submit" variant="ghost" size="sm">
+                            Remove
+                          </Button>
+                        </form>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'comments' ? (
+        <>
+          {/* ── Comments ──────────────────────────────────────────────────── */}
+          <Panel
+            title="Comments"
+            description="The conversation on this defect. Internal notes are hidden from the customer and the reporter."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              {bug.comments.length === 0 ? (
+                <Note>No comments yet. Say what you found, or what you need from the reporter.</Note>
+              ) : (
+                <ul
+                  style={{
+                    listStyle: 'none',
+                    margin: 0,
+                    padding: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--space-4)',
+                  }}
+                >
+                  {bug.comments.map((comment) => (
+                    <li
+                      key={comment.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 'var(--space-3)',
+                        padding: 'var(--space-5)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-card)',
+                        background: comment.isInternal
+                          ? 'var(--surface-sunken)'
+                          : 'var(--surface-canvas)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 'var(--space-3)',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <span style={{ fontWeight: 'var(--fw-semibold)' }}>
+                          {personName(comment.author)}
+                        </span>
+                        <RoleBadge role={comment.author?.role} />
+                        {comment.isInternal ? <Badge tone="warning">Internal</Badge> : null}
+                        <span
+                          style={{
+                            color: 'var(--text-muted)',
+                            fontSize: 'var(--type-body-sm-size)',
+                          }}
+                        >
+                          {formatTimestamp(comment.createdAt)}
+                        </span>
+                      </div>
+                      <Reported text={comment.body} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <form
+                action={addBugComment}
+                style={{
+                  ...FORM_STYLE,
+                  paddingTop: 'var(--space-5)',
+                  borderTop: '1px solid var(--border-subtle)',
+                }}
+              >
+                <input type="hidden" name="id" value={bug.id} />
+                <FormError message={panelError(error, 'comment')} />
+                <Field label="Add a comment" htmlFor="body" required>
+                  <Textarea
+                    id="body"
+                    name="body"
+                    rows={4}
+                    required
+                    maxLength={5000}
+                    placeholder="Ask the reporter for a build number, or record what triage decided."
+                  />
+                </Field>
+                {capabilities.canCommentInternally ? (
+                  <Checkbox
+                    name="isInternal"
+                    label="Post as an internal note"
+                    description="Visible to platform staff and project managers only."
+                  />
+                ) : null}
+                <div>
+                  <Button type="submit" variant="primary" disabled={!capabilities.canComment}>
+                    Post comment
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'history' ? (
+        <>
+          {/* ── The triage trail ──────────────────────────────────────────── */}
+          <Panel
+            title="Status history"
+            description="Every lifecycle move on this report, oldest first."
+          >
+            {bug.statusHistory.length === 0 ? (
+              <Note>Nothing recorded yet.</Note>
+            ) : (
+              <ol
+                style={{
+                  listStyle: 'none',
+                  margin: 0,
+                  padding: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                {bug.statusHistory.map((entry) => (
+                  <li
+                    key={entry.id}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-3)',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      {entry.fromStatus ? (
+                        <>
+                          <StatusBadge status={entry.fromStatus} />
+                          <Icon name="arrow-right" size={16} style={{ color: 'var(--text-muted)' }} />
+                        </>
+                      ) : null}
+                      <StatusBadge status={entry.toStatus} />
                       <span
                         style={{
                           color: 'var(--text-muted)',
                           fontSize: 'var(--type-body-sm-size)',
                         }}
                       >
-                        {formatBytes(attachment.file.sizeBytes)} · {attachment.file.mimeType} ·
-                        added {formatDate(attachment.createdAt)}
+                        {personName(entry.changedBy)} · {formatTimestamp(entry.createdAt)}
                       </span>
-                      {attachment.caption ? (
-                        <span
-                          style={{
-                            color: 'var(--text-secondary)',
-                            fontSize: 'var(--type-body-sm-size)',
-                          }}
-                        >
-                          {attachment.caption}
-                        </span>
-                      ) : null}
                     </div>
-                  </div>
+                    {entry.note ? (
+                      <span
+                        style={{
+                          color: 'var(--text-secondary)',
+                          fontSize: 'var(--type-body-sm-size)',
+                          whiteSpace: 'pre-wrap',
+                        }}
+                      >
+                        {entry.note}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Panel>
+        </>
+      ) : null}
 
-                  {capabilities.canAttach ? (
-                    <form action={removeBugAttachment}>
-                      <input type="hidden" name="id" value={bug.id} />
-                      <input type="hidden" name="attachmentId" value={attachment.id} />
-                      <Button type="submit" variant="ghost" size="sm">
-                        Remove
-                      </Button>
-                    </form>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </Panel>
-
-      {/* ── Comments ──────────────────────────────────────────────────── */}
-      <Panel
-        title="Comments"
-        description="The conversation on this defect. Internal notes are hidden from the customer and the reporter."
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-          {bug.comments.length === 0 ? (
-            <Note>No comments yet. Say what you found, or what you need from the reporter.</Note>
-          ) : (
-            <ul
-              style={{
-                listStyle: 'none',
-                margin: 0,
-                padding: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-4)',
-              }}
-            >
-              {bug.comments.map((comment) => (
-                <li
-                  key={comment.id}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-3)',
-                    padding: 'var(--space-5)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-card)',
-                    background: comment.isInternal
-                      ? 'var(--surface-sunken)'
-                      : 'var(--surface-canvas)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 'var(--space-3)',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <span style={{ fontWeight: 'var(--fw-semibold)' }}>
-                      {personName(comment.author)}
-                    </span>
-                    <RoleBadge role={comment.author?.role} />
-                    {comment.isInternal ? <Badge tone="warning">Internal</Badge> : null}
-                    <span
-                      style={{
-                        color: 'var(--text-muted)',
-                        fontSize: 'var(--type-body-sm-size)',
-                      }}
-                    >
-                      {formatTimestamp(comment.createdAt)}
-                    </span>
-                  </div>
-                  <Reported text={comment.body} />
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <form
-            action={addBugComment}
-            style={{
-              ...FORM_STYLE,
-              paddingTop: 'var(--space-5)',
-              borderTop: '1px solid var(--border-subtle)',
-            }}
-          >
-            <input type="hidden" name="id" value={bug.id} />
-            <FormError message={panelError(error, 'comment')} />
-            <Field label="Add a comment" htmlFor="body" required>
-              <Textarea
-                id="body"
-                name="body"
-                rows={4}
-                required
-                maxLength={5000}
-                placeholder="Ask the reporter for a build number, or record what triage decided."
-              />
-            </Field>
-            {capabilities.canCommentInternally ? (
-              <Checkbox
-                name="isInternal"
-                label="Post as an internal note"
-                description="Visible to platform staff and project managers only."
-              />
-            ) : null}
-            <div>
-              <Button type="submit" variant="primary" disabled={!capabilities.canComment}>
-                Post comment
-              </Button>
-            </div>
-          </form>
-        </div>
-      </Panel>
-
-      {/* ── The triage trail ──────────────────────────────────────────── */}
-      <Panel
-        title="Status history"
-        description="Every lifecycle move on this report, oldest first."
-      >
-        {bug.statusHistory.length === 0 ? (
-          <Note>Nothing recorded yet.</Note>
-        ) : (
-          <ol
-            style={{
-              listStyle: 'none',
-              margin: 0,
-              padding: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-4)',
-            }}
-          >
-            {bug.statusHistory.map((entry) => (
-              <li
-                key={entry.id}
-                style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-3)',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  {entry.fromStatus ? (
-                    <>
-                      <StatusBadge status={entry.fromStatus} />
-                      <Icon name="arrow-right" size={16} style={{ color: 'var(--text-muted)' }} />
-                    </>
-                  ) : null}
-                  <StatusBadge status={entry.toStatus} />
-                  <span
-                    style={{
-                      color: 'var(--text-muted)',
-                      fontSize: 'var(--type-body-sm-size)',
-                    }}
-                  >
-                    {personName(entry.changedBy)} · {formatTimestamp(entry.createdAt)}
-                  </span>
-                </div>
-                {entry.note ? (
-                  <span
-                    style={{
-                      color: 'var(--text-secondary)',
-                      fontSize: 'var(--type-body-sm-size)',
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {entry.note}
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ol>
-        )}
-      </Panel>
     </DetailShell>
   )
 }

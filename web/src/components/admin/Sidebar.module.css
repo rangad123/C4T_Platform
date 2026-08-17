@@ -120,3 +120,84 @@
   text-transform: uppercase;
   color: var(--text-muted);
 }
+
+/* ── Collapsed state ─────────────────────────────────────────────────────────
+   Icon-only rail. The width is the one thing that animates; everything else
+   is hidden outright rather than faded, so a half-visible label never sits
+   under an icon mid-transition. */
+
+.sidebar.collapsed {
+  width: 64px;
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.sidebar.collapsed .sectionLabel,
+.sidebar.collapsed .linkLabel,
+.sidebar.collapsed .userMeta,
+.sidebar.collapsed .wordmark {
+  display: none;
+}
+
+.sidebar.collapsed .link {
+  justify-content: center;
+  padding: 0;
+}
+
+/* A collapsed rail gives no room for a group heading, so the groups need a
+   divider instead — otherwise every icon runs together in one strip. */
+.sidebar.collapsed .section + .section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.sidebar.collapsed .brand,
+.sidebar.collapsed .user {
+  display: flex;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.toggleRow {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 var(--space-2);
+}
+
+.sidebar.collapsed .toggleRow {
+  justify-content: center;
+  padding: 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-input);
+  background: var(--surface-canvas);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.toggle:hover {
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* Respect the platform-wide motion rule: transitions are opt-in, and
+   prefers-reduced-motion zeroes them. */
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar {
+    transition: width 200ms cubic-bezier(0.2, 0, 0, 1);
+  }
+}

@@ -1,6 +1,7 @@
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Panel } from '@/components/admin/Panel'
+import { Card, CardGrid } from '@/components/admin/Card'
 import { Button } from '@/components/ds/core/Button'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -9,6 +10,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { formatDate, personName } from '@/lib/admin/format'
 import { createTemplateAction, deleteTemplateAction } from './actions'
+import { CommunicationTabs } from '../tabs'
 
 interface TemplateRow {
   id: string
@@ -65,6 +67,8 @@ export default async function TemplatesPage({
         </p>
       </header>
 
+      <CommunicationTabs active="templates" />
+
       <Panel title="New template">
         {errorMessage ? (
           <p
@@ -110,75 +114,45 @@ export default async function TemplatesPage({
             description="Save one above and it becomes available in the announcement and broadcast composers."
           />
         ) : (
-          <ul
-            style={{
-              listStyle: 'none',
-              margin: 0,
-              padding: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-3)',
-            }}
-          >
+          /* Templates are peers, and each is short — a grid fits three or four
+             across where a stack showed one per screenful. */
+          <CardGrid min={320}>
             {templates.map((t) => (
-              <li
+              <Card
                 key={t.id}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr auto',
-                  gap: 'var(--space-4)',
-                  alignItems: 'start',
-                  padding: 'var(--space-4)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-card)',
-                  background: 'var(--surface-canvas)',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
-                    {t.name}
-                  </div>
-                  {t.subject ? (
-                    <div
-                      style={{
-                        marginTop: 'var(--space-1)',
-                        fontSize: 'var(--type-body-sm-size)',
-                        color: 'var(--text-secondary)',
-                      }}
+                title={t.name}
+                meta={t.subject ? `Subject: ${t.subject}` : undefined}
+                actions={
+                  <form action={deleteTemplateAction}>
+                    <input type="hidden" name="id" value={t.id} />
+                    <Button
+                      type="submit"
+                      variant="ghost"
+                      size="sm"
+                      style={{ color: 'var(--status-error-fg)' }}
                     >
-                      Subject: {t.subject}
-                    </div>
-                  ) : null}
-                  <p
-                    style={{
-                      margin: 'var(--space-2) 0 0',
-                      fontSize: 'var(--type-body-sm-size)',
-                      color: 'var(--text-secondary)',
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {t.body.length > 240 ? `${t.body.slice(0, 240).trimEnd()}…` : t.body}
-                  </p>
-                  <div
-                    style={{
-                      marginTop: 'var(--space-2)',
-                      fontSize: 'var(--type-body-sm-size)',
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    {t.createdBy ? `Created by ${personName(t.createdBy)}` : 'Created'} on{' '}
-                    {formatDate(t.createdAt)}
-                  </div>
+                      Delete
+                    </Button>
+                  </form>
+                }
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 'var(--type-body-sm-size)',
+                    color: 'var(--text-secondary)',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {t.body.length > 240 ? `${t.body.slice(0, 240).trimEnd()}…` : t.body}
+                </p>
+                <div style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-muted)' }}>
+                  {t.createdBy ? `Created by ${personName(t.createdBy)}` : 'Created'} on{' '}
+                  {formatDate(t.createdAt)}
                 </div>
-                <form action={deleteTemplateAction}>
-                  <input type="hidden" name="id" value={t.id} />
-                  <Button type="submit" variant="ghost" size="sm" style={{ color: 'var(--status-error-fg)' }}>
-                    Delete
-                  </Button>
-                </form>
-              </li>
+              </Card>
             ))}
-          </ul>
+          </CardGrid>
         )}
       </Panel>
     </div>

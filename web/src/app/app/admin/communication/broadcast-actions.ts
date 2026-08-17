@@ -7,7 +7,7 @@ import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 
 const LIST_PATH = '/app/admin/communication'
-const BROADCAST_PATH = '/app/admin/communication/broadcast'
+const BROADCAST_PATH = '/app/admin/communication'
 
 /**
  * Sends the same message to a selected set of testers as a batch of separate

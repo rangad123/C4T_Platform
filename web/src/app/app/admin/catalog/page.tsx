@@ -1,6 +1,7 @@
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Panel } from '@/components/admin/Panel'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { Field } from '@/components/ds/forms/Field'
@@ -16,6 +17,21 @@ import {
   addOsVersionAction,
   addNetworkAction,
 } from './actions'
+
+/**
+ * The catalog is five independent reference lists. Stacked, they were one
+ * long scroll where finding carriers meant passing every device model; the
+ * lists also have nothing to do with one another, so there is no reading
+ * order that makes them one page. Tabs give each list the full viewport and
+ * make the catalog's shape visible before you scroll at all.
+ */
+const SECTIONS = [
+  { value: 'devices', label: 'Device models', icon: 'smartphone' },
+  { value: 'brands', label: 'Brands', icon: 'briefcase' },
+  { value: 'os', label: 'Operating systems', icon: 'monitor' },
+  { value: 'browsers', label: 'Browsers', icon: 'globe' },
+  { value: 'networks', label: 'Network providers', icon: 'plug' },
+] as const
 
 const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
 
@@ -84,11 +100,11 @@ const INLINE_FORM: React.CSSProperties = {
  * `mobile_os_version`, `os_versions`, `browsers`, `browser_versions`,
  * `network_providers`, the catalog half of `devices`, and `user_browsers`.
  *
- * This is deliberately ONE page rather than nine sidebar entries. The rows are
- * short reference lists that are read together and edited rarely; nine
- * near-identical CRUD screens would be more navigation than content. The
- * legacy system's own separation into nine tables is a storage concern, not a
- * reason to fragment the UI.
+ * One sidebar entry, five tabs — not nine sidebar entries. The legacy system's
+ * split across nine tables is a storage concern, and promoting it into
+ * top-level navigation would bury five short reference lists under more
+ * chrome than content. Tabs keep the catalog a single destination while giving
+ * each list the whole viewport.
  *
  * Catalog data is global, not tenant-scoped — see the schema comment on
  * `DeviceBrand` for why.
@@ -96,11 +112,12 @@ const INLINE_FORM: React.CSSProperties = {
 export default async function CatalogPage({
   searchParams,
 }: {
-  searchParams: Promise<{ all?: string; error?: string }>
+  searchParams: Promise<{ all?: string; error?: string; section?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
   const params = await searchParams
   const showAll = params.all === 'true'
+  const section = resolveSection(SECTIONS, params.section)
 
   const catalog = await serverFetchOrNull<Catalog>(
     showAll ? 'catalog?all=true' : 'catalog',
@@ -155,6 +172,13 @@ export default async function CatalogPage({
         </div>
       </header>
 
+      <SectionTabs
+        basePath="/app/admin/catalog"
+        tabs={SECTIONS}
+        active={section}
+        preserve={{ all: showAll ? 'true' : undefined }}
+      />
+
       {params.error ? (
         <p
           role="alert"
@@ -173,6 +197,7 @@ export default async function CatalogPage({
         </p>
       ) : null}
 
+      {section === 'devices' ? (
       <Panel
         title="Device models"
         description={`${catalog.deviceModels.length} models across ${catalog.brands.length} brands.`}
@@ -257,7 +282,9 @@ export default async function CatalogPage({
           </Button>
         </form>
       </Panel>
+      ) : null}
 
+      {section === 'brands' ? (
       <Panel title="Brands" description={`${catalog.brands.length} brands.`}>
         <ul style={LIST}>
           {catalog.brands.map((b) => (
@@ -280,7 +307,9 @@ export default async function CatalogPage({
           </Button>
         </form>
       </Panel>
+      ) : null}
 
+      {section === 'os' ? (
       <Panel
         title="Operating systems"
         description="Mobile and desktop, with their versions. One list — the legacy schema split these across four tables for no behavioural reason."
@@ -339,7 +368,9 @@ export default async function CatalogPage({
           ))}
         </div>
       </Panel>
+      ) : null}
 
+      {section === 'browsers' ? (
       <Panel title="Browsers" description={`${catalog.browsers.length} browsers.`}>
         <ul style={LIST}>
           {catalog.browsers.map((b) => (
@@ -388,7 +419,9 @@ export default async function CatalogPage({
           </Button>
         </form>
       </Panel>
+      ) : null}
 
+      {section === 'networks' ? (
       <Panel title="Network providers" description={`${catalog.networks.length} carriers.`}>
         <ul style={LIST}>
           {catalog.networks.map((n) => (
@@ -432,6 +465,8 @@ export default async function CatalogPage({
           </Button>
         </form>
       </Panel>
+      ) : null}
+
     </main>
   )
 }

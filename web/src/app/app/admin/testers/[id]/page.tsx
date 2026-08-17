@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { Avatar } from '@/components/admin/Avatar'
@@ -260,17 +261,35 @@ const ratingColumns: readonly TableColumn<RatingRow>[] = [
   { key: 'created', header: 'Left', align: 'right', render: (row) => formatDate(row.createdAt) },
 ]
 
+/**
+ * Seven panels, read for four different reasons: who this person is, what
+ * they can test on, what they can test, and how they have performed. The
+ * profile tab keeps the three identity panels together because they are
+ * read as one thing; everything else earns its own tab.
+ *
+ * Verification and performance stay in the aside — they are the decision
+ * you came to make, and they have to stay visible whichever tab is open.
+ */
+const SECTIONS = [
+  { value: 'profile', label: 'Profile', icon: 'user-check' },
+  { value: 'devices', label: 'Devices', icon: 'smartphone' },
+  { value: 'skills', label: 'Skills and languages', icon: 'briefcase' },
+  { value: 'work', label: 'Work history', icon: 'clipboard-check' },
+  { value: 'ratings', label: 'Ratings', icon: 'star' },
+] as const
+
 export default async function TesterDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ ratingsPage?: string }>
+  searchParams: Promise<{ ratingsPage?: string; section?: string }>
 }) {
   const viewer = await requirePermission('tester.read')
 
   const { id } = await params
-  const { ratingsPage } = await searchParams
+  const { ratingsPage, section: rawSection } = await searchParams
+  const section = resolveSection(SECTIONS, rawSection)
 
   let tester: TesterDetail | null = null
   let loadError: 'forbidden' | 'unknown' | null = null
@@ -364,6 +383,7 @@ export default async function TesterDetailPage({
           )}
         </>
       }
+      tabs={<SectionTabs basePath={detailPath} tabs={SECTIONS} active={section} />}
       aside={
         <>
           <Panel
@@ -473,234 +493,257 @@ export default async function TesterDetailPage({
         </>
       }
     >
-      <Panel title="Profile" description="Maintained by the tester, reviewed by us.">
-        <DescriptionList
-          items={[
-            { label: 'Headline', value: tester.headline },
-            {
-              label: 'Experience',
-              value: tester.experienceYears === null ? null : yearsLabel(tester.experienceYears),
-            },
-            {
-              label: 'Location',
-              value: location ? (
-                <span
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
-                >
-                  <CountryFlag countryCode={tester.countryCode} size={16} />
-                  <span>{location}</span>
-                </span>
-              ) : null,
-            },
-            { label: 'Account', value: <StatusBadge status={tester.user.status} /> },
-            {
-              label: 'NDA accepted',
-              value: tester.ndaAcceptedAt ? formatDate(tester.ndaAcceptedAt) : null,
-            },
-            { label: 'Verified', value: tester.verifiedAt ? formatDate(tester.verifiedAt) : null },
-            { label: 'Bio', value: tester.bio, wide: true },
-            { label: 'Rejection reason', value: tester.rejectionReason, wide: true },
-          ]}
-        />
-      </Panel>
+      {section === 'profile' ? (
+        <>
+          <Panel title="Profile" description="Maintained by the tester, reviewed by us.">
+            <DescriptionList
+              items={[
+                { label: 'Headline', value: tester.headline },
+                {
+                  label: 'Experience',
+                  value: tester.experienceYears === null ? null : yearsLabel(tester.experienceYears),
+                },
+                {
+                  label: 'Location',
+                  value: location ? (
+                    <span
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+                    >
+                      <CountryFlag countryCode={tester.countryCode} size={16} />
+                      <span>{location}</span>
+                    </span>
+                  ) : null,
+                },
+                { label: 'Account', value: <StatusBadge status={tester.user.status} /> },
+                {
+                  label: 'NDA accepted',
+                  value: tester.ndaAcceptedAt ? formatDate(tester.ndaAcceptedAt) : null,
+                },
+                { label: 'Verified', value: tester.verifiedAt ? formatDate(tester.verifiedAt) : null },
+                { label: 'Bio', value: tester.bio, wide: true },
+                { label: 'Rejection reason', value: tester.rejectionReason, wide: true },
+              ]}
+            />
+          </Panel>
 
-      <Panel title="Contact info" description="How to reach this tester outside the platform.">
-        <DescriptionList
-          items={[
-            { label: 'Email', value: tester.user.email },
-            { label: 'Phone', value: tester.user.phone },
-          ]}
-        />
-      </Panel>
+          <Panel title="Contact info" description="How to reach this tester outside the platform.">
+            <DescriptionList
+              items={[
+                { label: 'Email', value: tester.user.email },
+                { label: 'Phone', value: tester.user.phone },
+              ]}
+            />
+          </Panel>
 
-      <Panel title="Account details" description="The account this tester profile is attached to.">
-        <DescriptionList
-          items={[
-            { label: 'Role', value: titleCase(tester.user.role) },
-            { label: 'Member since', value: formatDate(tester.user.createdAt) },
-            {
-              label: 'Last sign-in',
-              value: tester.user.lastLoginAt ? formatDate(tester.user.lastLoginAt) : 'Never',
-            },
-            { label: 'Timezone', value: tester.user.timezone },
-          ]}
-        />
-      </Panel>
+          <Panel title="Account details" description="The account this tester profile is attached to.">
+            <DescriptionList
+              items={[
+                { label: 'Role', value: titleCase(tester.user.role) },
+                { label: 'Member since', value: formatDate(tester.user.createdAt) },
+                {
+                  label: 'Last sign-in',
+                  value: tester.user.lastLoginAt ? formatDate(tester.user.lastLoginAt) : 'Never',
+                },
+                { label: 'Timezone', value: tester.user.timezone },
+              ]}
+            />
+          </Panel>
+        </>
+      ) : null}
 
-      <Panel
-        title="Devices"
-        description="What this tester can test on. One device is marked primary."
-        flush={tester.devices.length > 0}
-      >
-        {tester.devices.length > 0 ? (
-          <Table
-            ariaLabel="Devices"
-            columns={deviceColumns}
-            rows={tester.devices}
-            rowKey={(device) => device.id}
-          />
-        ) : (
-          <Muted>
-            No devices listed. A tester adds their own devices, and cannot be assigned
-            device-specific work until they do.
-          </Muted>
-        )}
-      </Panel>
-
-      <Panel
-        title="Work history"
-        description="Prior testing and QA experience, maintained by the tester on their own profile."
-        flush={tester.workHistory.length > 0}
-      >
-        {tester.workHistory.length > 0 ? (
-          <Table
-            ariaLabel="Work history"
-            columns={workHistoryColumns}
-            rows={tester.workHistory}
-            rowKey={(entry) => entry.id}
-          />
-        ) : (
-          <Muted>No work history listed yet.</Muted>
-        )}
-      </Panel>
-
-      <Panel
-        title="Skills and languages"
-        description="Both sets are maintained by the tester on their own profile."
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-          <div>
-            <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}>
-              Skills
-            </p>
-            {tester.skills.length > 0 ? (
-              <ul
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 'var(--space-2)',
-                }}
-              >
-                {tester.skills.map(({ skill }) => (
-                  <li key={skill.id}>
-                    <Badge tone="brand" uppercase={false}>
-                      {skill.name}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
+      {section === 'devices' ? (
+        <>
+          <Panel
+            title="Devices"
+            description="What this tester can test on. One device is marked primary."
+            flush={tester.devices.length > 0}
+          >
+            {tester.devices.length > 0 ? (
+              <Table
+                ariaLabel="Devices"
+                columns={deviceColumns}
+                rows={tester.devices}
+                rowKey={(device) => device.id}
+              />
             ) : (
-              <Muted>No skills recorded yet.</Muted>
+              <Muted>
+                No devices listed. A tester adds their own devices, and cannot be assigned
+                device-specific work until they do.
+              </Muted>
             )}
-          </div>
+          </Panel>
+        </>
+      ) : null}
 
-          <div>
-            <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}>
-              Languages
-            </p>
-            {tester.languages.length > 0 ? (
-              <ul
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 'var(--space-2)',
-                  maxWidth: '40ch',
-                }}
-              >
-                {tester.languages.map((language) => (
-                  <li
-                    key={language.code}
+      {section === 'work' ? (
+        <>
+          <Panel
+            title="Work history"
+            description="Prior testing and QA experience, maintained by the tester on their own profile."
+            flush={tester.workHistory.length > 0}
+          >
+            {tester.workHistory.length > 0 ? (
+              <Table
+                ariaLabel="Work history"
+                columns={workHistoryColumns}
+                rows={tester.workHistory}
+                rowKey={(entry) => entry.id}
+              />
+            ) : (
+              <Muted>No work history listed yet.</Muted>
+            )}
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'skills' ? (
+        <>
+          <Panel
+            title="Skills and languages"
+            description="Both sets are maintained by the tester on their own profile."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              <div>
+                <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}>
+                  Skills
+                </p>
+                {tester.skills.length > 0 ? (
+                  <ul
                     style={{
+                      listStyle: 'none',
+                      margin: 0,
+                      padding: 0,
                       display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 'var(--space-4)',
-                      fontSize: 'var(--type-body-sm-size)',
+                      flexWrap: 'wrap',
+                      gap: 'var(--space-2)',
                     }}
                   >
-                    <span style={{ color: 'var(--text-primary)' }}>
-                      {languageName(language.code)}
-                    </span>
-                    <span style={{ color: 'var(--text-secondary)' }}>
-                      {titleCase(language.proficiency)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <Muted>No languages recorded yet.</Muted>
-            )}
-          </div>
-        </div>
-      </Panel>
+                    {tester.skills.map(({ skill }) => (
+                      <li key={skill.id}>
+                        <Badge tone="brand" uppercase={false}>
+                          {skill.name}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <Muted>No skills recorded yet.</Muted>
+                )}
+              </div>
 
-      <Panel
-        title="Ratings received"
-        description="Reviews left on this tester. Hidden reviews stay listed, and are left out of the average."
-        actions={
-          <Link
-            href={`/app/admin/ratings?subjectUserId=${tester.user.id}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              padding: 'var(--space-2) var(--space-3)',
-              borderRadius: 'var(--radius-input)',
-              border: '1px solid var(--border-default)',
-              fontSize: 'var(--type-body-sm-size)',
-              color: 'var(--text-primary)',
-              textDecoration: 'none',
-            }}
-          >
-            View all
-            <Icon name="arrow-right" size={14} />
-          </Link>
-        }
-        flush={ratingRows.length > 0}
-      >
-        {'error' in ratings ? (
-          <Muted>
-            {ratings.error === 'forbidden'
-              ? 'Ask an administrator to grant you the rating.read permission.'
-              : 'The ratings service is unreachable. Refresh in a moment.'}
-          </Muted>
-        ) : ratingRows.length === 0 ? (
-          <Muted>
-            No ratings yet. One appears here when a customer reviews this tester on a project they
-            worked on together.
-          </Muted>
-        ) : (
-          <>
-            <Table
-              ariaLabel="Ratings received"
-              columns={ratingColumns}
-              rows={ratingRows}
-              rowKey={(row) => row.id}
-            />
-            <div
-              style={{
-                padding: 'var(--space-5) var(--space-6)',
-                borderTop: '1px solid var(--border-subtle)',
-              }}
-            >
-              <Pagination
-                page={ratings.meta.page}
-                totalPages={Math.max(1, ratings.meta.totalPages)}
-                total={ratings.meta.total}
-                limit={ratings.meta.limit}
-                hrefFor={(target) =>
-                  target > 1 ? `${detailPath}?ratingsPage=${target}` : detailPath
-                }
-              />
+              <div>
+                <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}>
+                  Languages
+                </p>
+                {tester.languages.length > 0 ? (
+                  <ul
+                    style={{
+                      listStyle: 'none',
+                      margin: 0,
+                      padding: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-2)',
+                      maxWidth: '40ch',
+                    }}
+                  >
+                    {tester.languages.map((language) => (
+                      <li
+                        key={language.code}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 'var(--space-4)',
+                          fontSize: 'var(--type-body-sm-size)',
+                        }}
+                      >
+                        <span style={{ color: 'var(--text-primary)' }}>
+                          {languageName(language.code)}
+                        </span>
+                        <span style={{ color: 'var(--text-secondary)' }}>
+                          {titleCase(language.proficiency)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <Muted>No languages recorded yet.</Muted>
+                )}
+              </div>
             </div>
-          </>
-        )}
-      </Panel>
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'ratings' ? (
+        <>
+          <Panel
+            title="Ratings received"
+            description="Reviews left on this tester. Hidden reviews stay listed, and are left out of the average."
+            actions={
+              <Link
+                href={`/app/admin/ratings?subjectUserId=${tester.user.id}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  padding: 'var(--space-2) var(--space-3)',
+                  borderRadius: 'var(--radius-input)',
+                  border: '1px solid var(--border-default)',
+                  fontSize: 'var(--type-body-sm-size)',
+                  color: 'var(--text-primary)',
+                  textDecoration: 'none',
+                }}
+              >
+                View all
+                <Icon name="arrow-right" size={14} />
+              </Link>
+            }
+            flush={ratingRows.length > 0}
+          >
+            {'error' in ratings ? (
+              <Muted>
+                {ratings.error === 'forbidden'
+                  ? 'Ask an administrator to grant you the rating.read permission.'
+                  : 'The ratings service is unreachable. Refresh in a moment.'}
+              </Muted>
+            ) : ratingRows.length === 0 ? (
+              <Muted>
+                No ratings yet. One appears here when a customer reviews this tester on a project they
+                worked on together.
+              </Muted>
+            ) : (
+              <>
+                <Table
+                  ariaLabel="Ratings received"
+                  columns={ratingColumns}
+                  rows={ratingRows}
+                  rowKey={(row) => row.id}
+                />
+                <div
+                  style={{
+                    padding: 'var(--space-5) var(--space-6)',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <Pagination
+                    page={ratings.meta.page}
+                    totalPages={Math.max(1, ratings.meta.totalPages)}
+                    total={ratings.meta.total}
+                    limit={ratings.meta.limit}
+                    hrefFor={(target) =>
+                      target > 1
+                        ? `${detailPath}?section=ratings&ratingsPage=${target}`
+                        : `${detailPath}?section=ratings`
+                    }
+                  />
+                </div>
+              </>
+            )}
+          </Panel>
+        </>
+      ) : null}
+
     </DetailShell>
   )
 }

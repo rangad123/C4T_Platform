@@ -1,5 +1,6 @@
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
+import { AssetsTabs } from '../tabs'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { CountryFlag } from '@/components/admin/CountryFlag'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
@@ -116,6 +117,7 @@ export default async function DevicesAssetPage({
       title="Devices"
       description="Every device a tester has registered against their profile, across every project. There is no separate reference catalogue — this is the aggregate of what testers actually own."
       crumbs={[{ label: 'Assets' }, { label: 'Devices' }]}
+      tabs={<AssetsTabs active="devices" />}
       result={result}
       columns={columns}
       rowKey={(row) => row.id}

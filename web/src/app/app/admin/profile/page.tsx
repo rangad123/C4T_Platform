@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
@@ -271,14 +272,26 @@ const SESSION_COLUMNS: readonly TableColumn<ActiveSession>[] = [
  */
 const TIMEZONES: readonly string[] = Intl.supportedValuesOf('timeZone')
 
+/**
+ * Contact details, credentials and live sessions are three different jobs,
+ * and the last two are what someone reaches for when something is wrong.
+ * Tabs put both one click away instead of below a form nobody is editing.
+ */
+const SECTIONS = [
+  { value: 'profile', label: 'Profile', icon: 'user-check' },
+  { value: 'password', label: 'Password', icon: 'lock' },
+  { value: 'sessions', label: 'Active sessions', icon: 'monitor' },
+] as const
+
 export default async function AdminProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; error?: string }>
+  searchParams: Promise<{ ok?: string; error?: string; section?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'], PROFILE_PATH)
 
   const params = await searchParams
+  const section = resolveSection(SECTIONS, params.section)
   const notice = NOTICES[params.error ?? ''] ?? NOTICES[params.ok ?? ''] ?? null
 
   let profile: OwnProfile | null = null
@@ -340,6 +353,7 @@ export default async function AdminProfilePage({
           <StatusBadge status={profile.status} />
         </>
       }
+      tabs={<SectionTabs basePath="/app/admin/profile" tabs={SECTIONS} active={section} />}
       aside={
         <Panel
           title="Account"
@@ -399,195 +413,202 @@ export default async function AdminProfilePage({
         </p>
       ) : null}
 
-      <Panel
-        title="Profile"
-        description="How your name and contact details appear across the panel."
-      >
-        <TrackedForm
-          action={saveProfile}
-          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
-        >
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 'var(--space-5)',
-            }}
+      {section === 'profile' ? (
+          <Panel
+            title="Profile"
+            description="How your name and contact details appear across the panel."
           >
-            <Field label="First name" htmlFor="firstName" required>
-              <Input
-                id="firstName"
-                name="firstName"
-                defaultValue={profile.firstName ?? ''}
-                maxLength={80}
-                autoComplete="given-name"
+            <TrackedForm
+              action={saveProfile}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 'var(--space-5)',
+                }}
+              >
+                <Field label="First name" htmlFor="firstName" required>
+                  <Input
+                    id="firstName"
+                    name="firstName"
+                    defaultValue={profile.firstName ?? ''}
+                    maxLength={80}
+                    autoComplete="given-name"
+                    required
+                  />
+                </Field>
+
+                <Field label="Last name" htmlFor="lastName">
+                  <Input
+                    id="lastName"
+                    name="lastName"
+                    defaultValue={profile.lastName ?? ''}
+                    maxLength={80}
+                    autoComplete="family-name"
+                  />
+                </Field>
+
+                <Field label="Phone" htmlFor="phone" hint="Up to 32 characters, including the code.">
+                  <Input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    defaultValue={profile.phone ?? ''}
+                    maxLength={32}
+                    autoComplete="tel"
+                  />
+                </Field>
+
+                <Field
+                  label="Country"
+                  htmlFor="countryCode"
+                  hint="Two-letter code, for example IN or US."
+                >
+                  <Input
+                    id="countryCode"
+                    name="countryCode"
+                    defaultValue={profile.countryCode ?? ''}
+                    maxLength={2}
+                    pattern="[A-Za-z]{2}"
+                    autoComplete="country"
+                    style={{ textTransform: 'uppercase' }}
+                  />
+                </Field>
+
+                <Field
+                  label="Timezone"
+                  htmlFor="timezone"
+                  hint="Used for the dates and times shown to you."
+                >
+                  <Select
+                    id="timezone"
+                    name="timezone"
+                    defaultValue={profile.timezone ?? ''}
+                    placeholder="Not set"
+                    options={zoneOptions}
+                  />
+                </Field>
+              </div>
+
+              <div>
+                <Button type="submit" variant="primary">
+                  Save profile
+                </Button>
+              </div>
+            </TrackedForm>
+          </Panel>
+      ) : null}
+
+      {section === 'password' ? (
+          <Panel
+            title="Password"
+            description="Changing it keeps you signed in here and signs you out on every other device."
+          >
+            <TrackedForm
+              action={changePassword}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-5)',
+                maxWidth: 'var(--container-form)',
+              }}
+            >
+              <Field label="Current password" htmlFor="currentPassword" required>
+                <Input
+                  id="currentPassword"
+                  name="currentPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
+
+              <Field
+                label="New password"
+                htmlFor="newPassword"
+                hint="At least 12 characters. Length is what the API checks, so a long phrase beats a short scramble."
                 required
-              />
-            </Field>
+              >
+                <Input
+                  id="newPassword"
+                  name="newPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={200}
+                  autoComplete="new-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
 
-            <Field label="Last name" htmlFor="lastName">
-              <Input
-                id="lastName"
-                name="lastName"
-                defaultValue={profile.lastName ?? ''}
-                maxLength={80}
-                autoComplete="family-name"
-              />
-            </Field>
+              <Field label="Confirm new password" htmlFor="confirmPassword" required>
+                <Input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={200}
+                  autoComplete="new-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
 
-            <Field label="Phone" htmlFor="phone" hint="Up to 32 characters, including the code.">
-              <Input
-                id="phone"
-                name="phone"
-                type="tel"
-                defaultValue={profile.phone ?? ''}
-                maxLength={32}
-                autoComplete="tel"
-              />
-            </Field>
+              <div style={{ marginTop: 'var(--space-1)' }}>
+                <Button type="submit" variant="secondary">
+                  Change password
+                </Button>
+              </div>
+            </TrackedForm>
+          </Panel>
+      ) : null}
 
-            <Field
-              label="Country"
-              htmlFor="countryCode"
-              hint="Two-letter code, for example IN or US."
-            >
-              <Input
-                id="countryCode"
-                name="countryCode"
-                defaultValue={profile.countryCode ?? ''}
-                maxLength={2}
-                pattern="[A-Za-z]{2}"
-                autoComplete="country"
-                style={{ textTransform: 'uppercase' }}
-              />
-            </Field>
-
-            <Field
-              label="Timezone"
-              htmlFor="timezone"
-              hint="Used for the dates and times shown to you."
-            >
-              <Select
-                id="timezone"
-                name="timezone"
-                defaultValue={profile.timezone ?? ''}
-                placeholder="Not set"
-                options={zoneOptions}
-              />
-            </Field>
-          </div>
-
-          <div>
-            <Button type="submit" variant="primary">
-              Save profile
-            </Button>
-          </div>
-        </TrackedForm>
-      </Panel>
-
-      <Panel
-        title="Password"
-        description="Changing it keeps you signed in here and signs you out on every other device."
-      >
-        <TrackedForm
-          action={changePassword}
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-5)',
-            maxWidth: 'var(--container-form)',
-          }}
-        >
-          <Field label="Current password" htmlFor="currentPassword" required>
-            <Input
-              id="currentPassword"
-              name="currentPassword"
-              type="password"
-              autoComplete="current-password"
-              required
-              showPasswordToggle
-            />
-          </Field>
-
-          <Field
-            label="New password"
-            htmlFor="newPassword"
-            hint="At least 12 characters. Length is what the API checks, so a long phrase beats a short scramble."
-            required
+      {section === 'sessions' ? (
+          <Panel
+            title="Active sessions"
+            description="Every device holding a live sign-in for your account."
+            actions={
+              <form action={signOutEverywhere}>
+                <Button type="submit" variant="secondary" size="sm" iconLeft="log-out">
+                  Sign out everywhere, including here
+                </Button>
+              </form>
+            }
+            flush={!sessionsFailed && sessions.length > 0}
           >
-            <Input
-              id="newPassword"
-              name="newPassword"
-              type="password"
-              minLength={12}
-              maxLength={200}
-              autoComplete="new-password"
-              required
-              showPasswordToggle
-            />
-          </Field>
+            {sessionsFailed ? (
+              <EmptyState
+                icon="alert-triangle"
+                title="We couldn't read your sessions"
+                description="The sign-in service did not answer. Refresh in a moment."
+              />
+            ) : sessions.length === 0 ? (
+              <EmptyState
+                icon="shield-check"
+                title="No live sessions are recorded"
+                description="Your current sign-in should appear here. If it does not, the session store is out of step with your cookies — sign out and back in."
+              />
+            ) : (
+              <Table
+                columns={SESSION_COLUMNS}
+                rows={sessions}
+                rowKey={(session) => session.id}
+                ariaLabel="Devices where you are signed in"
+                /* The panel already draws the frame — drop the table's own so the
+                   two hairlines do not stack into one heavy 2px rule. */
+                style={{
+                  border: 'none',
+                  borderRadius: 'var(--radius-none)',
+                  background: 'transparent',
+                }}
+              />
+            )}
+          </Panel>
+      ) : null}
 
-          <Field label="Confirm new password" htmlFor="confirmPassword" required>
-            <Input
-              id="confirmPassword"
-              name="confirmPassword"
-              type="password"
-              minLength={12}
-              maxLength={200}
-              autoComplete="new-password"
-              required
-              showPasswordToggle
-            />
-          </Field>
-
-          <div style={{ marginTop: 'var(--space-1)' }}>
-            <Button type="submit" variant="secondary">
-              Change password
-            </Button>
-          </div>
-        </TrackedForm>
-      </Panel>
-
-      <Panel
-        title="Active sessions"
-        description="Every device holding a live sign-in for your account."
-        actions={
-          <form action={signOutEverywhere}>
-            <Button type="submit" variant="secondary" size="sm" iconLeft="log-out">
-              Sign out everywhere, including here
-            </Button>
-          </form>
-        }
-        flush={!sessionsFailed && sessions.length > 0}
-      >
-        {sessionsFailed ? (
-          <EmptyState
-            icon="alert-triangle"
-            title="We couldn't read your sessions"
-            description="The sign-in service did not answer. Refresh in a moment."
-          />
-        ) : sessions.length === 0 ? (
-          <EmptyState
-            icon="shield-check"
-            title="No live sessions are recorded"
-            description="Your current sign-in should appear here. If it does not, the session store is out of step with your cookies — sign out and back in."
-          />
-        ) : (
-          <Table
-            columns={SESSION_COLUMNS}
-            rows={sessions}
-            rowKey={(session) => session.id}
-            ariaLabel="Devices where you are signed in"
-            /* The panel already draws the frame — drop the table's own so the
-               two hairlines do not stack into one heavy 2px rule. */
-            style={{
-              border: 'none',
-              borderRadius: 'var(--radius-none)',
-              background: 'transparent',
-            }}
-          />
-        )}
-      </Panel>
     </DetailShell>
   )
 }

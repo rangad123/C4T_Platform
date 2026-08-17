@@ -1,5 +1,6 @@
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
+import { AssetsTabs } from '../tabs'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { CountryFlag } from '@/components/admin/CountryFlag'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
@@ -102,6 +103,7 @@ export default async function BrowsersAssetPage({
       title="Browsers"
       description="Every browser a tester has recorded on a device, across every project. The same devices also appear on the Devices page — this view filters to the ones with a browser on file."
       crumbs={[{ label: 'Assets' }, { label: 'Browsers' }]}
+      tabs={<AssetsTabs active="browsers" />}
       result={result}
       columns={columns}
       rowKey={(row) => row.id}

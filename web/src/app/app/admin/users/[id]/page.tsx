@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { SectionTabs, resolveSection, type SectionTab } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { CountryLabel } from '@/components/admin/CountryFlag'
@@ -141,7 +142,13 @@ function ratingLabel(value: number | string | null): string {
   return `${stars(score)} ${score.toFixed(1)}`
 }
 
-export default async function UserDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function UserDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ section?: string }>
+}) {
   const { id } = await params
   const viewer = await requirePermission('user.read', `${BASE}/${id}`)
 
@@ -238,6 +245,21 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
     },
   ]
 
+  /*
+    Two of the four sections are conditional — a customer has no permission
+    grid, and a read-only viewer gets no danger zone — so the tab set is
+    built here rather than declared at module scope. `resolveSection` then
+    falls back to Identity if someone lands on `?section=permissions` for an
+    account that has none.
+  */
+  const sections: SectionTab[] = [
+    { value: 'identity', label: 'Identity', icon: 'user-check' },
+    ...(isSubAdmin ? [{ value: 'permissions', label: 'Permissions', icon: 'shield-check' as const, count: grantedCodes.size }] : []),
+    { value: 'organisations', label: 'Organisations', icon: 'building-2', count: membershipRows.length },
+    ...(canWrite ? [{ value: 'danger', label: 'Danger zone', icon: 'shield-alert' as const }] : []),
+  ]
+  const section = resolveSection(sections, (await searchParams).section)
+
   return (
     <DetailShell
       crumbs={[{ label: 'Users', href: BASE }, { label: displayName }]}
@@ -260,6 +282,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
           ) : null}
         </>
       }
+      tabs={<SectionTabs basePath={`${BASE}/${user.id}`} tabs={sections} active={section} />}
       aside={
         <>
           <Panel
@@ -378,254 +401,264 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
         </>
       }
     >
-      <Panel
-        title="Identity"
-        description="The name, phone and locale on the account. Email addresses change through account recovery, not here."
-      >
-        {canWrite ? (
-          <TrackedForm action={updateUserIdentity} style={formStyle}>
-            <input type="hidden" name="id" value={user.id} />
-            <div style={fieldGridStyle}>
-              <Field label="First name" htmlFor="firstName" required>
-                <Input
-                  id="firstName"
-                  name="firstName"
-                  defaultValue={user.firstName ?? ''}
-                  maxLength={80}
-                  required
-                  autoComplete="off"
-                />
-              </Field>
-              <Field label="Last name" htmlFor="lastName">
-                <Input
-                  id="lastName"
-                  name="lastName"
-                  defaultValue={user.lastName ?? ''}
-                  maxLength={80}
-                  autoComplete="off"
-                />
-              </Field>
-              <Field label="Phone" htmlFor="phone" hint="Include the country dialling code.">
-                <Input
-                  id="phone"
-                  name="phone"
-                  type="tel"
-                  defaultValue={user.phone ?? ''}
-                  maxLength={32}
-                  autoComplete="off"
-                />
-              </Field>
-              <Field
-                label="Country"
-                htmlFor="countryCode"
-                hint="Two-letter code, for example IN. It can be changed but not cleared."
-              >
-                <Input
-                  id="countryCode"
-                  name="countryCode"
-                  defaultValue={user.countryCode ?? ''}
-                  minLength={2}
-                  maxLength={2}
-                  autoComplete="off"
-                />
-              </Field>
-              <Field
-                label="Timezone"
-                htmlFor="timezone"
-                hint="An IANA name, for example Asia/Kolkata."
-              >
-                <Input
-                  id="timezone"
-                  name="timezone"
-                  defaultValue={user.timezone ?? ''}
-                  maxLength={60}
-                  autoComplete="off"
-                />
-              </Field>
-            </div>
-            <div>
-              <Button type="submit" variant="primary">
-                Save identity
-              </Button>
-            </div>
-          </TrackedForm>
-        ) : (
-          <div style={formStyle}>
-            <DescriptionList
-              items={[
-                { label: 'First name', value: user.firstName ?? '' },
-                { label: 'Last name', value: user.lastName ?? '' },
-                { label: 'Phone', value: user.phone ?? '' },
-                {
-                  label: 'Country',
-                  value: user.countryCode ? <CountryLabel countryCode={user.countryCode} /> : '',
-                },
-                { label: 'Timezone', value: user.timezone ?? '' },
-              ]}
-            />
-            <p style={noteStyle}>
-              You can read this account but not change it. Editing needs the user.write permission.
-            </p>
-          </div>
-        )}
-      </Panel>
-
-      {isSubAdmin ? (
-        <Panel
-          title="Sub-admin permissions"
-          description="What this sub-admin can do in the back office. Saving replaces the whole grant set, so anything left unticked is revoked."
-          actions={
-            <Badge tone="accent" uppercase={false}>
-              {grantedCodes.size} granted
-            </Badge>
-          }
-        >
-          {permissionsError !== null ? (
-            <div style={formStyle}>
-              <EmptyState
-                icon={permissionsError === 'forbidden' ? 'lock' : 'alert-triangle'}
-                title={
-                  permissionsError === 'forbidden'
-                    ? "You can't edit these permissions"
-                    : "Couldn't load the permission catalogue"
-                }
-                description={
-                  permissionsError === 'forbidden'
-                    ? "Editing a sub-admin's access needs the subadmin.manage permission. Ask an administrator to grant it."
-                    : 'The users service is unreachable. Refresh in a moment.'
-                }
-              />
-              <GrantSummary grants={embeddedGrants} />
-            </div>
-          ) : permissionsEditable ? (
-            <TrackedForm action={setSubAdminPermissions} style={formStyle}>
-              <input type="hidden" name="id" value={user.id} />
-              {permissionGroups.map((group) => (
-                <fieldset
-                  key={group.group}
-                  style={{
-                    margin: 0,
-                    padding: 0,
-                    border: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-4)',
-                  }}
-                >
-                  <legend
-                    className="c4t-eyebrow"
-                    style={{ padding: 0, color: 'var(--text-muted)' }}
+      {section === 'identity' ? (
+        <>
+          <Panel
+            title="Identity"
+            description="The name, phone and locale on the account. Email addresses change through account recovery, not here."
+          >
+            {canWrite ? (
+              <TrackedForm action={updateUserIdentity} style={formStyle}>
+                <input type="hidden" name="id" value={user.id} />
+                <div style={fieldGridStyle}>
+                  <Field label="First name" htmlFor="firstName" required>
+                    <Input
+                      id="firstName"
+                      name="firstName"
+                      defaultValue={user.firstName ?? ''}
+                      maxLength={80}
+                      required
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field label="Last name" htmlFor="lastName">
+                    <Input
+                      id="lastName"
+                      name="lastName"
+                      defaultValue={user.lastName ?? ''}
+                      maxLength={80}
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field label="Phone" htmlFor="phone" hint="Include the country dialling code.">
+                    <Input
+                      id="phone"
+                      name="phone"
+                      type="tel"
+                      defaultValue={user.phone ?? ''}
+                      maxLength={32}
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field
+                    label="Country"
+                    htmlFor="countryCode"
+                    hint="Two-letter code, for example IN. It can be changed but not cleared."
                   >
-                    {group.group}
-                  </legend>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                      gap: 'var(--space-4) var(--space-6)',
-                    }}
+                    <Input
+                      id="countryCode"
+                      name="countryCode"
+                      defaultValue={user.countryCode ?? ''}
+                      minLength={2}
+                      maxLength={2}
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field
+                    label="Timezone"
+                    htmlFor="timezone"
+                    hint="An IANA name, for example Asia/Kolkata."
                   >
-                    {group.items.map((permission) => (
-                      <Checkbox
-                        key={permission.code}
-                        id={`perm-${permission.code}`}
-                        name="permissionCodes"
-                        value={permission.code}
-                        defaultChecked={grantedCodes.has(permission.code)}
-                        label={permission.label}
-                        description={permission.description}
-                      />
-                    ))}
-                  </div>
-                </fieldset>
-              ))}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-5)',
-                  flexWrap: 'wrap',
-                  paddingTop: 'var(--space-6)',
-                  borderTop: '1px solid var(--border-subtle)',
-                }}
-              >
-                <Button type="submit" variant="primary">
-                  Save permissions
-                </Button>
-                <span style={noteStyle}>
-                  This is a full replacement, not a change list. Every unticked box is revoked.
-                </span>
+                    <Input
+                      id="timezone"
+                      name="timezone"
+                      defaultValue={user.timezone ?? ''}
+                      maxLength={60}
+                      autoComplete="off"
+                    />
+                  </Field>
+                </div>
+                <div>
+                  <Button type="submit" variant="primary">
+                    Save identity
+                  </Button>
+                </div>
+              </TrackedForm>
+            ) : (
+              <div style={formStyle}>
+                <DescriptionList
+                  items={[
+                    { label: 'First name', value: user.firstName ?? '' },
+                    { label: 'Last name', value: user.lastName ?? '' },
+                    { label: 'Phone', value: user.phone ?? '' },
+                    {
+                      label: 'Country',
+                      value: user.countryCode ? <CountryLabel countryCode={user.countryCode} /> : '',
+                    },
+                    { label: 'Timezone', value: user.timezone ?? '' },
+                  ]}
+                />
+                <p style={noteStyle}>
+                  You can read this account but not change it. Editing needs the user.write permission.
+                </p>
               </div>
-            </TrackedForm>
-          ) : (
-            <div style={formStyle}>
-              <p style={noteStyle}>
-                {isSelf
-                  ? 'These are your own permissions, and the API refuses to let anyone edit their own grants. Ask another administrator to change them.'
-                  : 'The permission catalogue came back empty, so there is nothing to grant. Seed the permissions table on the API and reload.'}
-              </p>
-              <GrantSummary grants={grants} />
-            </div>
-          )}
-        </Panel>
+            )}
+          </Panel>
+        </>
       ) : null}
 
-      <Panel
-        title="Organisations"
-        description="Customer organisations this account belongs to."
-      >
-        {membershipRows.length > 0 ? (
-          <Table
-            ariaLabel="Organisation memberships"
-            columns={membershipColumns}
-            rows={membershipRows}
-            rowKey={(row) => row.id}
-            rowHref={(row) => `/app/admin/organisations/${row.id}`}
-          />
-        ) : (
-          <p style={noteStyle}>
-            This account is not a member of any organisation. Administrators, sub-admins and testers
-            normally are not.
-          </p>
-        )}
-      </Panel>
-
-      {canWrite ? (
-        <Panel
-          title="Danger zone"
-          description="Archiving is the only removal the platform offers, and it cannot be undone from here."
-        >
-          <form action={archiveUserAccount} style={formStyle}>
-            <input type="hidden" name="id" value={user.id} />
-            <div
-              style={{
-                padding: 'var(--space-5)',
-                borderRadius: 'var(--radius-card)',
-                background: 'var(--status-error-bg)',
-                color: 'var(--status-error-fg)',
-                fontSize: 'var(--type-body-sm-size)',
-                lineHeight: 1.55,
-              }}
+      {/* The tab only exists for a sub-admin, so `section` can never resolve
+          here for anyone else — the second test is belt and braces. */}
+      {section === 'permissions' && isSubAdmin ? (
+            <Panel
+              title="Sub-admin permissions"
+              description="What this sub-admin can do in the back office. Saving replaces the whole grant set, so anything left unticked is revoked."
+              actions={
+                <Badge tone="accent" uppercase={false}>
+                  {grantedCodes.size} granted
+                </Badge>
+              }
             >
-              The record is kept for audit and marked deactivated, every live session is revoked, and
-              the email address is released so it can be used again. The account then drops out of
-              the users list. The last active administrator cannot be archived.
-            </div>
-            <div>
-              <Button
-                type="submit"
-                variant="secondary"
-                iconLeft="shield-alert"
-                style={{
-                  color: 'var(--status-error-fg)',
-                  borderColor: 'var(--status-error-fg)',
-                }}
-              >
-                Deactivate and archive this account
-              </Button>
-            </div>
-          </form>
-        </Panel>
+              {permissionsError !== null ? (
+                <div style={formStyle}>
+                  <EmptyState
+                    icon={permissionsError === 'forbidden' ? 'lock' : 'alert-triangle'}
+                    title={
+                      permissionsError === 'forbidden'
+                        ? "You can't edit these permissions"
+                        : "Couldn't load the permission catalogue"
+                    }
+                    description={
+                      permissionsError === 'forbidden'
+                        ? "Editing a sub-admin's access needs the subadmin.manage permission. Ask an administrator to grant it."
+                        : 'The users service is unreachable. Refresh in a moment.'
+                    }
+                  />
+                  <GrantSummary grants={embeddedGrants} />
+                </div>
+              ) : permissionsEditable ? (
+                <TrackedForm action={setSubAdminPermissions} style={formStyle}>
+                  <input type="hidden" name="id" value={user.id} />
+                  {permissionGroups.map((group) => (
+                    <fieldset
+                      key={group.group}
+                      style={{
+                        margin: 0,
+                        padding: 0,
+                        border: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 'var(--space-4)',
+                      }}
+                    >
+                      <legend
+                        className="c4t-eyebrow"
+                        style={{ padding: 0, color: 'var(--text-muted)' }}
+                      >
+                        {group.group}
+                      </legend>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                          gap: 'var(--space-4) var(--space-6)',
+                        }}
+                      >
+                        {group.items.map((permission) => (
+                          <Checkbox
+                            key={permission.code}
+                            id={`perm-${permission.code}`}
+                            name="permissionCodes"
+                            value={permission.code}
+                            defaultChecked={grantedCodes.has(permission.code)}
+                            label={permission.label}
+                            description={permission.description}
+                          />
+                        ))}
+                      </div>
+                    </fieldset>
+                  ))}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-5)',
+                      flexWrap: 'wrap',
+                      paddingTop: 'var(--space-6)',
+                      borderTop: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    <Button type="submit" variant="primary">
+                      Save permissions
+                    </Button>
+                    <span style={noteStyle}>
+                      This is a full replacement, not a change list. Every unticked box is revoked.
+                    </span>
+                  </div>
+                </TrackedForm>
+              ) : (
+                <div style={formStyle}>
+                  <p style={noteStyle}>
+                    {isSelf
+                      ? 'These are your own permissions, and the API refuses to let anyone edit their own grants. Ask another administrator to change them.'
+                      : 'The permission catalogue came back empty, so there is nothing to grant. Seed the permissions table on the API and reload.'}
+                  </p>
+                  <GrantSummary grants={grants} />
+                </div>
+              )}
+            </Panel>
+      ) : null}
+
+      {section === 'organisations' ? (
+        <>
+          <Panel
+            title="Organisations"
+            description="Customer organisations this account belongs to."
+          >
+            {membershipRows.length > 0 ? (
+              <Table
+                ariaLabel="Organisation memberships"
+                columns={membershipColumns}
+                rows={membershipRows}
+                rowKey={(row) => row.id}
+                rowHref={(row) => `/app/admin/organisations/${row.id}`}
+              />
+            ) : (
+              <p style={noteStyle}>
+                This account is not a member of any organisation. Administrators, sub-admins and testers
+                normally are not.
+              </p>
+            )}
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'danger' && canWrite ? (
+            <Panel
+              title="Danger zone"
+              description="Archiving is the only removal the platform offers, and it cannot be undone from here."
+            >
+              <form action={archiveUserAccount} style={formStyle}>
+                <input type="hidden" name="id" value={user.id} />
+                <div
+                  style={{
+                    padding: 'var(--space-5)',
+                    borderRadius: 'var(--radius-card)',
+                    background: 'var(--status-error-bg)',
+                    color: 'var(--status-error-fg)',
+                    fontSize: 'var(--type-body-sm-size)',
+                    lineHeight: 1.55,
+                  }}
+                >
+                  The record is kept for audit and marked deactivated, every live session is revoked, and
+                  the email address is released so it can be used again. The account then drops out of
+                  the users list. The last active administrator cannot be archived.
+                </div>
+                <div>
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    iconLeft="shield-alert"
+                    style={{
+                      color: 'var(--status-error-fg)',
+                      borderColor: 'var(--status-error-fg)',
+                    }}
+                  >
+                    Deactivate and archive this account
+                  </Button>
+                </div>
+              </form>
+            </Panel>
       ) : null}
     </DetailShell>
   )

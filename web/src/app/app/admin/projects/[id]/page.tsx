@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
 import { StatusBadge, SeverityBadge, RoleBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
@@ -64,9 +65,35 @@ const TESTER_POOL_SIZE = 40
 /** Bugs shown inline. The full set lives on the bugs list. */
 const BUG_PREVIEW_SIZE = 10
 
-export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * Sub-navigation for the record. The page carried fifteen panels in one
+ * column — everything below "Edit the brief" was several screens of scrolling
+ * away, and the page rendered all of it on every visit regardless of what the
+ * reader came for.
+ *
+ * The aside (status, progress, at-a-glance, managers) deliberately stays
+ * outside these sections: it is the record's context, and it is as relevant
+ * while reading bugs as while editing the brief.
+ */
+const SECTIONS = [
+  { value: 'overview', label: 'Overview', icon: 'file-text' },
+  { value: 'testers', label: 'Testers', icon: 'users' },
+  { value: 'materials', label: 'Materials', icon: 'book-open' },
+  { value: 'features', label: 'Features', icon: 'layout-grid' },
+  { value: 'bugs', label: 'Bugs', icon: 'clipboard-check' },
+  { value: 'settings', label: 'Settings', icon: 'shield-alert' },
+] as const
+
+export default async function ProjectDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ section?: string }>
+}) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
   const { id } = await params
+  const section = resolveSection(SECTIONS, (await searchParams).section)
 
   let project: ProjectDetail | null = null
   let loadError: 'forbidden' | 'unknown' | null = null
@@ -276,6 +303,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           {personName(project.createdBy)} on {formatDate(project.createdAt)}
         </>
       }
+      tabs={
+        <SectionTabs
+          basePath={`/app/admin/projects/${project.id}`}
+          tabs={SECTIONS}
+          active={section}
+        />
+      }
       aside={
         <>
           <Panel
@@ -405,6 +439,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         </>
       }
     >
+      {section === 'overview' ? (
+        <>
       <Panel title="Overview" description="What the customer asked for and where it stands.">
         <DescriptionList items={overview} />
       </Panel>
@@ -539,7 +575,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </TrackedForm>
         </Panel>
       ) : null}
+        </>
+      ) : null}
 
+      {section === 'testers' ? (
+        <>
       <Panel
         title="Tester roster"
         description={`${project._count.assignments} tester${
@@ -688,7 +728,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </Muted>
         </Panel>
       )}
+        </>
+      ) : null}
 
+      {section === 'materials' ? (
+        <>
       <Panel
         title="Materials"
         description="Builds, credentials and reference documents an accepted tester can open."
@@ -771,7 +815,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </form>
         </Panel>
       ) : null}
+        </>
+      ) : null}
 
+      {section === 'features' ? (
+        <>
       <Panel
         title="Features"
         description="The tags a bug can be filed against. Delete one and any bug already carrying it just loses the tag — the report stays."
@@ -816,7 +864,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </form>
         ) : null}
       </Panel>
+        </>
+      ) : null}
 
+      {section === 'bugs' ? (
+        <>
       <Panel
         title="Bugs"
         description={
@@ -850,7 +902,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           />
         )}
       </Panel>
+        </>
+      ) : null}
 
+      {section === 'settings' ? (
+        <>
       {canDelete ? (
         <Panel
           title="Archive this project"
@@ -874,6 +930,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </form>
         </Panel>
       ) : null}
+        </>
+      ) : null}
+
     </DetailShell>
   )
 }

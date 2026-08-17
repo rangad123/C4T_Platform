@@ -35,8 +35,15 @@ const PROFILE_PATH = '/app/admin/profile'
 const ACCESS_COOKIE = 'c4t_access'
 const REFRESH_COOKIE = 'c4t_refresh'
 
-function back(slug: string, kind: 'ok' | 'error'): never {
-  redirect(`${PROFILE_PATH}?${kind}=${slug}`)
+/**
+ * The page is tabbed, so the redirect has to name the tab the form lives on —
+ * otherwise a failed password change lands back on Profile with an error
+ * message about a form that is no longer on screen. Profile is the default
+ * tab and needs no param.
+ */
+function back(slug: string, kind: 'ok' | 'error', section?: 'password' | 'sessions'): never {
+  const sectionParam = section ? `section=${section}&` : ''
+  redirect(`${PROFILE_PATH}?${sectionParam}${kind}=${slug}`)
 }
 
 /**
@@ -117,11 +124,11 @@ export async function changePassword(formData: FormData): Promise<void> {
   const newPassword = formString(formData, 'newPassword')
   const confirmPassword = formString(formData, 'confirmPassword')
 
-  if (!currentPassword || !newPassword) back('password_missing', 'error')
-  if (newPassword !== confirmPassword) back('password_mismatch', 'error')
+  if (!currentPassword || !newPassword) back('password_missing', 'error', 'password')
+  if (newPassword !== confirmPassword) back('password_mismatch', 'error', 'password')
   // Mirrors the API's own minimum. Checked here only so the reply is instant.
-  if (newPassword.length < 12) back('password_short', 'error')
-  if (newPassword === currentPassword) back('password_reused', 'error')
+  if (newPassword.length < 12) back('password_short', 'error', 'password')
+  if (newPassword === currentPassword) back('password_reused', 'error', 'password')
 
   let failure: string | null = null
   try {
@@ -143,10 +150,10 @@ export async function changePassword(formData: FormData): Promise<void> {
     }
   }
 
-  if (failure) back(failure, 'error')
+  if (failure) back(failure, 'error', 'password')
 
   revalidatePath(PROFILE_PATH)
-  back('password', 'ok')
+  back('password', 'ok', 'password')
 }
 
 /**
@@ -158,7 +165,7 @@ export async function changePassword(formData: FormData): Promise<void> {
  */
 export async function revokeSession(formData: FormData): Promise<void> {
   const sessionId = formTrimmed(formData, 'sessionId')
-  if (!sessionId) back('session_missing', 'error')
+  if (!sessionId) back('session_missing', 'error', 'sessions')
 
   let wasCurrent = false
   try {
@@ -178,7 +185,7 @@ export async function revokeSession(formData: FormData): Promise<void> {
     else failure = 'session_failed'
   }
 
-  if (failure) back(failure, 'error')
+  if (failure) back(failure, 'error', 'sessions')
 
   if (wasCurrent) {
     await clearBridgedCookies()
@@ -186,7 +193,7 @@ export async function revokeSession(formData: FormData): Promise<void> {
   }
 
   revalidatePath(PROFILE_PATH)
-  back('session_revoked', 'ok')
+  back('session_revoked', 'ok', 'sessions')
 }
 
 /**

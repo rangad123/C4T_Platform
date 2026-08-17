@@ -16,6 +16,12 @@ export interface DetailShellProps {
   children: ReactNode
   /** Secondary panels — the right, narrower column. Omit for a single column. */
   aside?: ReactNode
+  /**
+   * Sub-navigation for a record with more content than one scroll can hold —
+   * pass a `<SectionTabs>`. Rendered between the header and the columns so it
+   * reads as belonging to the record, not to the page chrome.
+   */
+  tabs?: ReactNode
 }
 
 /**
@@ -39,6 +45,7 @@ export function DetailShell({
   badges,
   children,
   aside,
+  tabs,
 }: DetailShellProps) {
   return (
     <>
@@ -74,6 +81,8 @@ export function DetailShell({
             <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{subtitle}</p>
           ) : null}
         </header>
+
+        {tabs}
 
         {aside ? (
           <div

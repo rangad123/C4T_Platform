@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
@@ -217,17 +218,32 @@ async function loadAccounts(
   }
 }
 
+/**
+ * Four unrelated jobs share this record: correcting the billing profile,
+ * managing who can sign in, reading the internal notes, and archiving.
+ * Only one of them is ever the reason you opened the page, so they get
+ * tabs rather than 800 lines of scroll. Archiving in particular is safer
+ * behind a deliberate click than sitting at the bottom of the profile.
+ */
+const SECTIONS = [
+  { value: 'profile', label: 'Profile', icon: 'building-2' },
+  { value: 'members', label: 'Members', icon: 'users' },
+  { value: 'notes', label: 'Internal notes', icon: 'file-text' },
+  { value: 'danger', label: 'Danger zone', icon: 'shield-alert' },
+] as const
+
 export default async function OrganisationDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ notice?: string; q?: string }>
+  searchParams: Promise<{ notice?: string; q?: string; section?: string }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
 
   const { id } = await params
-  const { notice, q } = await searchParams
+  const { notice, q, section: rawSection } = await searchParams
+  const section = resolveSection(SECTIONS, rawSection)
   const accountSearch = searchTerm(q)
 
   let organisation: OrganisationDetail | null = null
@@ -357,6 +373,13 @@ export default async function OrganisationDetailPage({
           </span>
         </span>
       }
+      tabs={
+        <SectionTabs
+          basePath={detailHref}
+          tabs={SECTIONS}
+          active={section}
+        />
+      }
       aside={
         <>
           <Panel
@@ -412,403 +435,424 @@ export default async function OrganisationDetailPage({
     >
       <Notice code={notice} />
 
-      <Panel
-        title="Profile"
-        description="The billing and contact details we hold for this organisation."
-      >
-        {canWrite ? (
-          <form
-            action={saveOrganisationProfile}
-            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+      {section === 'profile' ? (
+        <>
+          <Panel
+            title="Profile"
+            description="The billing and contact details we hold for this organisation."
           >
-            <input type="hidden" name="id" value={organisation.id} />
+            {canWrite ? (
+              <form
+                action={saveOrganisationProfile}
+                style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+              >
+                <input type="hidden" name="id" value={organisation.id} />
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: 'var(--space-5)',
+                  }}
+                >
+                  <Field label="Name" htmlFor="name" required>
+                    <Input
+                      id="name"
+                      name="name"
+                      defaultValue={organisation.name}
+                      required
+                      minLength={2}
+                      maxLength={160}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Slug"
+                    htmlFor="slug"
+                    hint="Derived from the name when the record was created. The API does not accept changes."
+                  >
+                    <Input id="slug" name="slug" defaultValue={organisation.slug} disabled />
+                  </Field>
+
+                  <Field label="Website" htmlFor="website" hint="Include https://. Blank clears it.">
+                    <Input
+                      id="website"
+                      name="website"
+                      type="url"
+                      defaultValue={organisation.website ?? ''}
+                      maxLength={255}
+                      placeholder="https://example.com"
+                    />
+                  </Field>
+
+                  <Field label="Industry" htmlFor="industry">
+                    <Input
+                      id="industry"
+                      name="industry"
+                      defaultValue={organisation.industry ?? ''}
+                      maxLength={120}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Contact email"
+                    htmlFor="contactEmail"
+                    hint="Blank keeps the address on file — the API cannot clear this field."
+                  >
+                    <Input
+                      id="contactEmail"
+                      name="contactEmail"
+                      type="email"
+                      defaultValue={organisation.contactEmail ?? ''}
+                      maxLength={255}
+                    />
+                  </Field>
+
+                  <Field label="Contact phone" htmlFor="contactPhone">
+                    <Input
+                      id="contactPhone"
+                      name="contactPhone"
+                      type="tel"
+                      defaultValue={organisation.contactPhone ?? ''}
+                      maxLength={32}
+                    />
+                  </Field>
+
+                  <Field label="Address line 1" htmlFor="addressLine1" style={{ gridColumn: '1 / -1' }}>
+                    <Input
+                      id="addressLine1"
+                      name="addressLine1"
+                      defaultValue={organisation.addressLine1 ?? ''}
+                      maxLength={255}
+                    />
+                  </Field>
+
+                  <Field label="Address line 2" htmlFor="addressLine2" style={{ gridColumn: '1 / -1' }}>
+                    <Input
+                      id="addressLine2"
+                      name="addressLine2"
+                      defaultValue={organisation.addressLine2 ?? ''}
+                      maxLength={255}
+                    />
+                  </Field>
+
+                  <Field label="City" htmlFor="city">
+                    <Input
+                      id="city"
+                      name="city"
+                      defaultValue={organisation.city ?? ''}
+                      maxLength={120}
+                    />
+                  </Field>
+
+                  <Field label="State" htmlFor="state">
+                    <Input
+                      id="state"
+                      name="state"
+                      defaultValue={organisation.state ?? ''}
+                      maxLength={120}
+                    />
+                  </Field>
+
+                  <Field label="Postal code" htmlFor="postalCode">
+                    <Input
+                      id="postalCode"
+                      name="postalCode"
+                      defaultValue={organisation.postalCode ?? ''}
+                      maxLength={20}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Country"
+                    htmlFor="countryCode"
+                    hint="Two-letter code, such as IN. Blank keeps the current code."
+                  >
+                    <Input
+                      id="countryCode"
+                      name="countryCode"
+                      defaultValue={organisation.countryCode ?? ''}
+                      minLength={2}
+                      maxLength={2}
+                      placeholder="IN"
+                    />
+                  </Field>
+
+                  <Field label="Tax id" htmlFor="taxId" hint="GSTIN or the local equivalent.">
+                    <Input
+                      id="taxId"
+                      name="taxId"
+                      defaultValue={organisation.taxId ?? ''}
+                      maxLength={40}
+                    />
+                  </Field>
+                </div>
+
+                <div>
+                  <Button type="submit" variant="primary">
+                    Save profile
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <ReadOnlyHint
+                items={[
+                  { label: 'Name', value: organisation.name },
+                  { label: 'Slug', value: organisation.slug },
+                  { label: 'Website', value: organisation.website },
+                  { label: 'Industry', value: organisation.industry },
+                  { label: 'Contact email', value: organisation.contactEmail },
+                  { label: 'Contact phone', value: organisation.contactPhone },
+                  { label: 'Address line 1', value: organisation.addressLine1, wide: true },
+                  { label: 'Address line 2', value: organisation.addressLine2, wide: true },
+                  { label: 'City', value: organisation.city },
+                  { label: 'State', value: organisation.state },
+                  { label: 'Postal code', value: organisation.postalCode },
+                  {
+                    label: 'Country',
+                    value: organisation.countryCode ? (
+                      <CountryLabel countryCode={organisation.countryCode} />
+                    ) : null,
+                  },
+                  { label: 'Tax id', value: organisation.taxId },
+                ]}
+                permission="organisation.write"
+              />
+            )}
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'notes' ? (
+        <>
+          <Panel
+            title="Internal notes"
+            description="Visible to admin-side roles only. The customer never sees this."
+          >
+            {canWrite ? (
+              <form
+                action={saveOrganisationNotes}
+                style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+              >
+                <input type="hidden" name="id" value={organisation.id} />
+                <Field label="Notes" htmlFor="notes" hint="Up to 4,000 characters.">
+                  <Textarea
+                    id="notes"
+                    name="notes"
+                    defaultValue={organisation.notes ?? ''}
+                    rows={5}
+                    maxLength={4000}
+                    placeholder="Who introduced this account, what they test, and anything the next admin should know."
+                  />
+                </Field>
+                <div>
+                  <Button type="submit" variant="secondary">
+                    Save notes
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <ReadOnlyHint
+                items={[{ label: 'Notes', value: organisation.notes, wide: true }]}
+                permission="organisation.write"
+              />
+            )}
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'members' ? (
+        <>
+          <Panel
+            title="Members"
+            description="Who can sign in for this organisation. An owner can edit the profile and submit projects; a member can only work inside them."
+            flush
+          >
+            {organisation.members.length > 0 ? (
+              <Table
+                ariaLabel="Organisation members"
+                columns={memberColumns}
+                rows={organisation.members}
+                rowKey={(member) => member.user.id}
+                style={{ border: 'none', borderRadius: 0 }}
+              />
+            ) : (
+              <p
+                style={{
+                  margin: 0,
+                  padding: 'var(--space-6)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                No members yet. Add an owner so someone can sign in and submit projects for this
+                account.
+              </p>
+            )}
 
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                display: 'flex',
+                flexDirection: 'column',
                 gap: 'var(--space-5)',
+                padding: 'var(--space-6)',
+                borderTop: '1px solid var(--border-subtle)',
+                background: 'var(--surface-sunken)',
               }}
             >
-              <Field label="Name" htmlFor="name" required>
-                <Input
-                  id="name"
-                  name="name"
-                  defaultValue={organisation.name}
-                  required
-                  minLength={2}
-                  maxLength={160}
-                />
-              </Field>
-
-              <Field
-                label="Slug"
-                htmlFor="slug"
-                hint="Derived from the name when the record was created. The API does not accept changes."
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 'var(--type-body-md-size)',
+                  fontWeight: 'var(--fw-semibold)',
+                  color: 'var(--text-primary)',
+                }}
               >
-                <Input id="slug" name="slug" defaultValue={organisation.slug} disabled />
-              </Field>
+                Add a member
+              </h3>
 
-              <Field label="Website" htmlFor="website" hint="Include https://. Blank clears it.">
-                <Input
-                  id="website"
-                  name="website"
-                  type="url"
-                  defaultValue={organisation.website ?? ''}
-                  maxLength={255}
-                  placeholder="https://example.com"
-                />
-              </Field>
+              {accountsAvailable ? (
+                <>
+                  <form
+                    method="get"
+                    action={detailHref}
+                    style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
+                  >
+                    <Field
+                      label="Find an account"
+                      htmlFor="q"
+                      hint="The picker holds the first 100 customer and unassigned accounts. Search to reach the rest."
+                      style={{ flex: 1 }}
+                    >
+                      <Input
+                        id="q"
+                        name="q"
+                        defaultValue={accountSearch ?? ''}
+                        placeholder="Name or email"
+                        iconLeft="search"
+                      />
+                    </Field>
+                    {/* The GET rebuilds the URL from this form's fields alone, so the
+                        active section has to ride along or searching for an account
+                        would bounce back to the profile tab. */}
+                    <input type="hidden" name="section" value="members" />
+                    <Button type="submit" variant="secondary">
+                      Search accounts
+                    </Button>
+                  </form>
 
-              <Field label="Industry" htmlFor="industry">
-                <Input
-                  id="industry"
-                  name="industry"
-                  defaultValue={organisation.industry ?? ''}
-                  maxLength={120}
-                />
-              </Field>
-
-              <Field
-                label="Contact email"
-                htmlFor="contactEmail"
-                hint="Blank keeps the address on file — the API cannot clear this field."
-              >
-                <Input
-                  id="contactEmail"
-                  name="contactEmail"
-                  type="email"
-                  defaultValue={organisation.contactEmail ?? ''}
-                  maxLength={255}
-                />
-              </Field>
-
-              <Field label="Contact phone" htmlFor="contactPhone">
-                <Input
-                  id="contactPhone"
-                  name="contactPhone"
-                  type="tel"
-                  defaultValue={organisation.contactPhone ?? ''}
-                  maxLength={32}
-                />
-              </Field>
-
-              <Field label="Address line 1" htmlFor="addressLine1" style={{ gridColumn: '1 / -1' }}>
-                <Input
-                  id="addressLine1"
-                  name="addressLine1"
-                  defaultValue={organisation.addressLine1 ?? ''}
-                  maxLength={255}
-                />
-              </Field>
-
-              <Field label="Address line 2" htmlFor="addressLine2" style={{ gridColumn: '1 / -1' }}>
-                <Input
-                  id="addressLine2"
-                  name="addressLine2"
-                  defaultValue={organisation.addressLine2 ?? ''}
-                  maxLength={255}
-                />
-              </Field>
-
-              <Field label="City" htmlFor="city">
-                <Input
-                  id="city"
-                  name="city"
-                  defaultValue={organisation.city ?? ''}
-                  maxLength={120}
-                />
-              </Field>
-
-              <Field label="State" htmlFor="state">
-                <Input
-                  id="state"
-                  name="state"
-                  defaultValue={organisation.state ?? ''}
-                  maxLength={120}
-                />
-              </Field>
-
-              <Field label="Postal code" htmlFor="postalCode">
-                <Input
-                  id="postalCode"
-                  name="postalCode"
-                  defaultValue={organisation.postalCode ?? ''}
-                  maxLength={20}
-                />
-              </Field>
-
-              <Field
-                label="Country"
-                htmlFor="countryCode"
-                hint="Two-letter code, such as IN. Blank keeps the current code."
-              >
-                <Input
-                  id="countryCode"
-                  name="countryCode"
-                  defaultValue={organisation.countryCode ?? ''}
-                  minLength={2}
-                  maxLength={2}
-                  placeholder="IN"
-                />
-              </Field>
-
-              <Field label="Tax id" htmlFor="taxId" hint="GSTIN or the local equivalent.">
-                <Input
-                  id="taxId"
-                  name="taxId"
-                  defaultValue={organisation.taxId ?? ''}
-                  maxLength={40}
-                />
-              </Field>
-            </div>
-
-            <div>
-              <Button type="submit" variant="primary">
-                Save profile
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <ReadOnlyHint
-            items={[
-              { label: 'Name', value: organisation.name },
-              { label: 'Slug', value: organisation.slug },
-              { label: 'Website', value: organisation.website },
-              { label: 'Industry', value: organisation.industry },
-              { label: 'Contact email', value: organisation.contactEmail },
-              { label: 'Contact phone', value: organisation.contactPhone },
-              { label: 'Address line 1', value: organisation.addressLine1, wide: true },
-              { label: 'Address line 2', value: organisation.addressLine2, wide: true },
-              { label: 'City', value: organisation.city },
-              { label: 'State', value: organisation.state },
-              { label: 'Postal code', value: organisation.postalCode },
-              {
-                label: 'Country',
-                value: organisation.countryCode ? (
-                  <CountryLabel countryCode={organisation.countryCode} />
-                ) : null,
-              },
-              { label: 'Tax id', value: organisation.taxId },
-            ]}
-            permission="organisation.write"
-          />
-        )}
-      </Panel>
-
-      <Panel
-        title="Internal notes"
-        description="Visible to admin-side roles only. The customer never sees this."
-      >
-        {canWrite ? (
-          <form
-            action={saveOrganisationNotes}
-            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
-          >
-            <input type="hidden" name="id" value={organisation.id} />
-            <Field label="Notes" htmlFor="notes" hint="Up to 4,000 characters.">
-              <Textarea
-                id="notes"
-                name="notes"
-                defaultValue={organisation.notes ?? ''}
-                rows={5}
-                maxLength={4000}
-                placeholder="Who introduced this account, what they test, and anything the next admin should know."
-              />
-            </Field>
-            <div>
-              <Button type="submit" variant="secondary">
-                Save notes
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <ReadOnlyHint
-            items={[{ label: 'Notes', value: organisation.notes, wide: true }]}
-            permission="organisation.write"
-          />
-        )}
-      </Panel>
-
-      <Panel
-        title="Members"
-        description="Who can sign in for this organisation. An owner can edit the profile and submit projects; a member can only work inside them."
-        flush
-      >
-        {organisation.members.length > 0 ? (
-          <Table
-            ariaLabel="Organisation members"
-            columns={memberColumns}
-            rows={organisation.members}
-            rowKey={(member) => member.user.id}
-            style={{ border: 'none', borderRadius: 0 }}
-          />
-        ) : (
-          <p
-            style={{
-              margin: 0,
-              padding: 'var(--space-6)',
-              color: 'var(--text-secondary)',
-              fontSize: 'var(--type-body-sm-size)',
-            }}
-          >
-            No members yet. Add an owner so someone can sign in and submit projects for this
-            account.
-          </p>
-        )}
-
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-5)',
-            padding: 'var(--space-6)',
-            borderTop: '1px solid var(--border-subtle)',
-            background: 'var(--surface-sunken)',
-          }}
-        >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: 'var(--type-body-md-size)',
-              fontWeight: 'var(--fw-semibold)',
-              color: 'var(--text-primary)',
-            }}
-          >
-            Add a member
-          </h3>
-
-          {accountsAvailable ? (
-            <>
-              <form
-                method="get"
-                action={detailHref}
-                style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
-              >
-                <Field
-                  label="Find an account"
-                  htmlFor="q"
-                  hint="The picker holds the first 100 customer and unassigned accounts. Search to reach the rest."
-                  style={{ flex: 1 }}
+                  <form
+                    action={addOrganisationMember}
+                    style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
+                  >
+                    <input type="hidden" name="id" value={organisation.id} />
+                    <Field label="Account" htmlFor="userId" style={{ flex: 1 }}>
+                      <Select
+                        id="userId"
+                        name="userId"
+                        required
+                        placeholder={
+                          candidates.length > 0
+                            ? 'Choose an account'
+                            : 'No matching account is free to join'
+                        }
+                        options={candidates.map((account) => ({
+                          value: account.id,
+                          label: accountLabel(account),
+                        }))}
+                      />
+                    </Field>
+                    <Field label="Org role" htmlFor="orgRole">
+                      <Select
+                        id="orgRole"
+                        name="orgRole"
+                        defaultValue="MEMBER"
+                        options={MEMBER_ROLE_OPTIONS}
+                        style={{ width: 150 }}
+                      />
+                    </Field>
+                    <Button type="submit" variant="primary" iconLeft="plus">
+                      Add member
+                    </Button>
+                  </form>
+                </>
+              ) : (
+                <form
+                  action={addOrganisationMember}
+                  style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
                 >
-                  <Input
-                    id="q"
-                    name="q"
-                    defaultValue={accountSearch ?? ''}
-                    placeholder="Name or email"
-                    iconLeft="search"
-                  />
-                </Field>
-                <Button type="submit" variant="secondary">
-                  Search accounts
-                </Button>
-              </form>
+                  <input type="hidden" name="id" value={organisation.id} />
+                  <Field
+                    label="Account id"
+                    htmlFor="userId"
+                    hint="Browsing accounts needs the user.read permission. Paste the account id instead."
+                    style={{ flex: 1 }}
+                  >
+                    <Input id="userId" name="userId" required placeholder="Account id" />
+                  </Field>
+                  <Field label="Org role" htmlFor="orgRole">
+                    <Select
+                      id="orgRole"
+                      name="orgRole"
+                      defaultValue="MEMBER"
+                      options={MEMBER_ROLE_OPTIONS}
+                      style={{ width: 150 }}
+                    />
+                  </Field>
+                  <Button type="submit" variant="primary" iconLeft="plus">
+                    Add member
+                  </Button>
+                </form>
+              )}
+            </div>
+          </Panel>
+        </>
+      ) : null}
 
+      {section === 'danger' ? (
+        <>
+          <Panel
+            title="Danger zone"
+            description="Archiving keeps the record. It sets the status to archived, hides the account from the lists, and the API refuses while projects are still in flight."
+          >
+            {canArchive ? (
               <form
-                action={addOrganisationMember}
+                action={archiveOrganisation}
                 style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
               >
                 <input type="hidden" name="id" value={organisation.id} />
-                <Field label="Account" htmlFor="userId" style={{ flex: 1 }}>
-                  <Select
-                    id="userId"
-                    name="userId"
-                    required
-                    placeholder={
-                      candidates.length > 0
-                        ? 'Choose an account'
-                        : 'No matching account is free to join'
-                    }
-                    options={candidates.map((account) => ({
-                      value: account.id,
-                      label: accountLabel(account),
-                    }))}
-                  />
+                <Field
+                  label="Type ARCHIVE to confirm"
+                  htmlFor="confirm"
+                  hint="Nothing is deleted. An admin can restore the record through the API."
+                  style={{ flex: 1 }}
+                >
+                  <Input id="confirm" name="confirm" required placeholder="ARCHIVE" />
                 </Field>
-                <Field label="Org role" htmlFor="orgRole">
-                  <Select
-                    id="orgRole"
-                    name="orgRole"
-                    defaultValue="MEMBER"
-                    options={MEMBER_ROLE_OPTIONS}
-                    style={{ width: 150 }}
-                  />
-                </Field>
-                <Button type="submit" variant="primary" iconLeft="plus">
-                  Add member
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  iconLeft="shield-alert"
+                  style={{ color: 'var(--status-error-fg)' }}
+                >
+                  Archive this organisation
                 </Button>
               </form>
-            </>
-          ) : (
-            <form
-              action={addOrganisationMember}
-              style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
-            >
-              <input type="hidden" name="id" value={organisation.id} />
-              <Field
-                label="Account id"
-                htmlFor="userId"
-                hint="Browsing accounts needs the user.read permission. Paste the account id instead."
-                style={{ flex: 1 }}
+            ) : (
+              <p
+                style={{
+                  margin: 0,
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
               >
-                <Input id="userId" name="userId" required placeholder="Account id" />
-              </Field>
-              <Field label="Org role" htmlFor="orgRole">
-                <Select
-                  id="orgRole"
-                  name="orgRole"
-                  defaultValue="MEMBER"
-                  options={MEMBER_ROLE_OPTIONS}
-                  style={{ width: 150 }}
-                />
-              </Field>
-              <Button type="submit" variant="primary" iconLeft="plus">
-                Add member
-              </Button>
-            </form>
-          )}
-        </div>
-      </Panel>
+                Archiving needs the organisation.delete permission. Ask an administrator to grant it.
+              </p>
+            )}
+          </Panel>
+        </>
+      ) : null}
 
-      <Panel
-        title="Danger zone"
-        description="Archiving keeps the record. It sets the status to archived, hides the account from the lists, and the API refuses while projects are still in flight."
-      >
-        {canArchive ? (
-          <form
-            action={archiveOrganisation}
-            style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
-          >
-            <input type="hidden" name="id" value={organisation.id} />
-            <Field
-              label="Type ARCHIVE to confirm"
-              htmlFor="confirm"
-              hint="Nothing is deleted. An admin can restore the record through the API."
-              style={{ flex: 1 }}
-            >
-              <Input id="confirm" name="confirm" required placeholder="ARCHIVE" />
-            </Field>
-            <Button
-              type="submit"
-              variant="secondary"
-              iconLeft="shield-alert"
-              style={{ color: 'var(--status-error-fg)' }}
-            >
-              Archive this organisation
-            </Button>
-          </form>
-        ) : (
-          <p
-            style={{
-              margin: 0,
-              color: 'var(--text-secondary)',
-              fontSize: 'var(--type-body-sm-size)',
-            }}
-          >
-            Archiving needs the organisation.delete permission. Ask an administrator to grant it.
-          </p>
-        )}
-      </Panel>
     </DetailShell>
   )
 }

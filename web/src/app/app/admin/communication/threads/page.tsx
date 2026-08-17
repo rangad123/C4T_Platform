@@ -5,6 +5,7 @@ import { Badge } from '@/components/ds/core/Badge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { personName, titleCase } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { CommunicationTabs } from '../tabs'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/communication/threads'
@@ -177,6 +178,7 @@ export default async function CommunicationThreadsPage({
       // that excluded everything.
       filtered={Boolean(type)}
       permission="communication.read"
+      tabs={<CommunicationTabs active="threads" />}
       emptyIcon="message-square"
       emptyTitle="No conversations yet"
       emptyDescription="A thread appears here when a customer or a tester starts one on a project, or when someone opens a support conversation."

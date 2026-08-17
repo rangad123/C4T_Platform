@@ -1,154 +1,252 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
-import { Badge } from '@/components/ds/core/Badge'
+import { ListFilters } from '@/components/admin/ListFilters'
+import { Avatar } from '@/components/admin/Avatar'
+import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Panel } from '@/components/admin/Panel'
+import { TemplatePicker } from '@/components/admin/TemplatePicker'
 import { Button } from '@/components/ds/core/Button'
+import { Field } from '@/components/ds/forms/Field'
+import { Input } from '@/components/ds/forms/Input'
+import { Textarea } from '@/components/ds/forms/Textarea'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, personName, titleCase } from '@/lib/admin/format'
+import { personName, searchTerm, hasFilter, formatRating } from '@/lib/admin/format'
+import { serverFetchOrNull } from '@/lib/api/server'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { sendBroadcastAction } from './broadcast-actions'
+import { CommunicationTabs } from './tabs'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/communication'
+const STATUSES = ['APPLIED', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED', 'SUSPENDED'] as const
+const SORT_OPTIONS = [
+  { value: 'ratingAverage', label: 'Rating' },
+  { value: 'createdAt', label: 'Applied' },
+  { value: 'bugsReportedCount', label: 'Bugs reported' },
+] as const
+const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
 
-interface AnnouncementRow {
+interface TesterRow {
   id: string
-  title: string
-  body: string
-  audience: string
-  projectId: string | null
-  project: { id: string; reference: string; title: string } | null
-  publishedAt: string | null
-  expiresAt: string | null
-  author: { id: string; firstName: string | null; lastName: string | null } | null
-}
-
-/** Audience is not a status, so it gets its own tone map rather than reusing one. */
-const AUDIENCE_TONE: Record<string, 'neutral' | 'brand' | 'info' | 'accent'> = {
-  ALL: 'brand',
-  CUSTOMERS: 'info',
-  TESTERS: 'accent',
-  ADMINS: 'neutral',
+  status: string
+  headline: string | null
+  /** Prisma Decimal — arrives as a STRING. Never call .toFixed() on it directly. */
+  ratingAverage: string | number | null
+  ratingCount: number
+  bugsReportedCount: number
+  user: {
+    id: string
+    email: string
+    firstName: string | null
+    lastName: string | null
+    avatarFileId: string | null
+  }
 }
 
 /**
- * `/app/admin/communication` — platform announcements.
+ * `/app/admin/communication` — send one message to many testers.
  *
- * The API's communication module covers two things: announcements (one author,
- * many readers) and message threads (many participants, scoped by membership).
- * This page is the announcements half, because that is the one an admin *sends*
- * — threads are a reply surface and want a different layout, so they will get
- * their own page rather than a second table here.
+ * This is the module's landing page. Opening Communication almost always means
+ * wanting to say something, so the composer is the first thing on screen and
+ * the recipient picker sits directly under it; the archive of past
+ * announcements, the thread list and the templates are one tab away.
  *
- * A row with no `publishedAt` is a draft. It shows as "Draft" rather than as an
- * empty date cell, because an unpublished announcement looks identical to a
- * published one otherwise, and sending is the irreversible bit.
+ * There is no group-broadcast entity on the API — this composes the same
+ * `POST /threads` call the one-to-one messaging UI would use, once per
+ * selected tester, so each recipient gets a private conversation with the
+ * sender rather than a shared group thread. See `sendBroadcastAction` for
+ * why that fan-out shape was chosen over one big thread.
+ *
+ * Selection is checkbox-per-row via the native `form="broadcast-form"`
+ * attribute — the checkboxes live inside the table `AdminListPage` renders,
+ * the compose form lives beside it, and the browser submits both together
+ * without any client-side state. Selection only covers the current page:
+ * there is no cross-page "select all 400 testers" here, matching the same
+ * scoping the bulk bug-status action uses.
  */
-export default async function CommunicationPage({
+export default async function BroadcastPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>
+  searchParams: Promise<{
+    search?: string
+    status?: string
+    sort?: string
+    order?: string
+    page?: string
+    sent?: string
+    of?: string
+  }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
   const params = await searchParams
+  const search = searchTerm(params.search)
+  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
+    ? params.status
+    : 'VERIFIED'
+  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
+    ? params.sort
+    : 'ratingAverage'
+  const order = params.order === 'asc' ? 'asc' : 'desc'
   const page = parsePage(params.page)
+  const sentNotice =
+    params.sent !== undefined && params.of !== undefined
+      ? { sent: Number(params.sent), of: Number(params.of) }
+      : null
+  const templates = await serverFetchOrNull<
+    readonly { id: string; name: string; subject: string | null; body: string }[]
+  >('communication/templates')
 
-  // The announcements endpoint takes pagination only — no filter params, so
-  // passing any would earn a 422 from the strict query schema.
-  const result = await loadList<AnnouncementRow>('communication/announcements', {
+  const result = await loadList<TesterRow>('testers', {
     page,
     limit: PAGE_SIZE,
+    query: { search, status, sort, order },
   })
 
-  const columns: readonly TableColumn<AnnouncementRow>[] = [
+  const columns: readonly TableColumn<TesterRow>[] = [
     {
-      key: 'title',
-      header: 'Announcement',
-      render: (row) => row.title,
-      renderSecondary: (row) =>
-        row.body.length > 110 ? `${row.body.slice(0, 110).trimEnd()}…` : row.body,
-    },
-    {
-      key: 'audience',
-      header: 'Audience',
+      key: 'select',
+      header: '',
+      width: 36,
       render: (row) => (
-        <Badge tone={AUDIENCE_TONE[row.audience] ?? 'neutral'} uppercase={false}>
-          {titleCase(row.audience)}
-        </Badge>
+        <input
+          type="checkbox"
+          name="testerIds"
+          value={row.user.id}
+          form="broadcast-form"
+          aria-label={`Select ${personName(row.user)}`}
+          style={{ margin: 0, cursor: 'pointer' }}
+        />
       ),
     },
     {
-      key: 'scope',
-      header: 'Scope',
-      // Links to the project, i.e. a different record than the row link.
-      interactive: true,
-      render: (row) =>
-        row.project ? (
-          <Link href={`/app/admin/projects/${row.project.id}`}>{row.project.reference}</Link>
-        ) : (
-          <span style={{ color: 'var(--text-muted)' }}>Platform-wide</span>
-        ),
+      key: 'name',
+      header: 'Tester',
+      render: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar name={personName(row.user)} fileId={row.user.avatarFileId} size="sm" />
+          {personName(row.user)}
+        </span>
+      ),
+      renderSecondary: (row) => row.user.email,
     },
+    { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     {
-      key: 'author',
-      header: 'Author',
-      render: (row) => personName(row.author),
-    },
-    {
-      key: 'published',
-      header: 'Published',
+      key: 'rating',
+      header: 'Rating',
       align: 'right',
-      render: (row) =>
-        row.publishedAt ? (
-          formatDate(row.publishedAt)
-        ) : (
-          <Badge tone="warning" uppercase={false}>
-            Draft
-          </Badge>
-        ),
+      render: (row) => formatRating(row.ratingAverage, { suffix: false }),
+      renderSecondary: (row) => (row.ratingCount > 0 ? `${row.ratingCount} reviews` : undefined),
     },
     {
-      key: 'expires',
-      header: 'Expires',
+      key: 'bugs',
+      header: 'Bugs reported',
       align: 'right',
-      render: (row) => formatDate(row.expiresAt),
+      render: (row) => row.bugsReportedCount,
     },
   ]
+
+  /*
+    The composer is declared before the recipient list so the table below it
+    reads as "now choose who gets this" — but the <form> tag itself only has
+    to exist somewhere in the DOM for the table's checkboxes to target it via
+    `form="broadcast-form"`, and tag order does not affect that association.
+
+    It goes through `toolbar` rather than beside the shell so that it renders
+    inside <main>, under the topbar and the section tabs, instead of above
+    them.
+  */
+  const compose = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      {sentNotice ? (
+        <div
+          role="status"
+          style={{
+            padding: 'var(--space-4) var(--space-5)',
+            borderRadius: 'var(--radius-card)',
+            background: 'var(--status-success-bg)',
+            color: 'var(--status-success-fg)',
+          }}
+        >
+          Sent to {sentNotice.sent} of {sentNotice.of} selected tester
+          {sentNotice.of === 1 ? '' : 's'}
+          {sentNotice.sent < sentNotice.of
+            ? ' — the rest could not be reached, most likely because the account changed between loading this page and sending.'
+            : '.'}
+        </div>
+      ) : null}
+
+      <Panel
+        title="Compose"
+        description="Sent as a private one-to-one conversation with each tester you select below — nobody sees who else received it."
+        actions={
+          templates && templates.length > 0 ? (
+            <TemplatePicker templates={templates} subjectFieldId="subject" bodyFieldId="message" />
+          ) : undefined
+        }
+      >
+        <form
+          id="broadcast-form"
+          action={sendBroadcastAction}
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+        >
+          <Field label="Subject" htmlFor="subject" hint="Optional.">
+            <Input id="subject" name="subject" maxLength={200} placeholder="Update on this week's builds" />
+          </Field>
+          <Field label="Message" htmlFor="message" required>
+            <Textarea
+              id="message"
+              name="message"
+              rows={5}
+              required
+              maxLength={5000}
+              placeholder="What you want every selected tester to know."
+            />
+          </Field>
+          <div>
+            <Button type="submit" variant="primary" iconLeft="message-square">
+              Send to selected testers
+            </Button>
+          </div>
+        </form>
+      </Panel>
+    </div>
+  )
 
   return (
     <AdminListPage
       eyebrow="Operations"
       title="Communication"
-      description="Announcements published to the platform, and who each one reaches. An announcement with no publish date is still a draft."
+      description="Write the message first, then pick who receives it. Verified testers are listed by default — widen the status filter to reach applicants or suspended accounts."
       crumbs={[{ label: 'Communication' }]}
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
-      rowHref={(row) => `/app/admin/communication/announcements/${row.id}`}
-      hrefFor={pageHrefBuilder(BASE, {})}
-      permission="announcement.write"
-      emptyIcon="message-square"
-      emptyTitle="No announcements yet"
-      emptyDescription="Publish one to tell customers or testers about a release, a maintenance window, or a policy change."
+      hrefFor={pageHrefBuilder(BASE, { search, status, sort, order })}
+      filtered={hasFilter([search, status !== 'VERIFIED' ? status : undefined])}
+      permission="tester.read"
+      emptyIcon="users"
+      emptyTitle="No testers match"
+      emptyDescription="Widen the status filter or clear the search to find recipients."
+      tabs={<CommunicationTabs active="compose" />}
       toolbar={
-        /* Communication covers two surfaces: announcements (one author, many
-           readers) and threads (a conversation with participants). This page is
-           the announcements half; threads get their own list because the useful
-           columns are completely different. */
-        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-          <Button href="/app/admin/communication/announcements/new" variant="primary" iconLeft="plus">
-              Compose announcement
-            </Button>
-          <Button href="/app/admin/communication/broadcast" variant="secondary" iconLeft="users">
-              Message a group of testers
-            </Button>
-          <Button href="/app/admin/communication/threads" variant="secondary" iconLeft="message-square">
-              Open message threads
-            </Button>
-          <Button href="/app/admin/communication/templates" variant="secondary" iconLeft="file-text">
-              Manage templates
-            </Button>
-        </div>
+        <>
+          {compose}
+          <ListFilters
+            action={BASE}
+            search={{ value: search, placeholder: 'Name, email or headline' }}
+            selects={[
+              {
+                name: 'status',
+                label: 'Status',
+                options: STATUSES,
+                value: status,
+                allLabel: 'All statuses',
+              },
+            ]}
+            sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
+          />
+        </>
       }
     />
   )
