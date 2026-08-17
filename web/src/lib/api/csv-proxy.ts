@@ -13,13 +13,13 @@ import { env } from '@/lib/env'
  * the UI is a normal `<a>` to a same-origin path.
  *
  * Errors are forwarded verbatim so the user sees the real reason from the
- * API — an expired access token, a 422 from a bad filter, etc. — rather than
- * a generic 500.
+ * API -- an expired access token, a 422 from a bad filter, etc. -- rather
+ * than a generic 500.
  *
- * Always dynamic; never cache per-user CSV across requests.
+ * Route segment config (`dynamic`, `runtime`) is declared by the route file
+ * that imports this handler, not here, because Next.js cannot statically
+ * resolve config fields that are re-exported from another module.
  */
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
 
 export async function GET(
   _req: NextRequest,
