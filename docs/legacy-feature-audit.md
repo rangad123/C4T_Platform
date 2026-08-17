@@ -445,6 +445,43 @@ Where a fix is described here, treat the corresponding finding further down as h
     promise — replaced with an accurate summary of what is live, and the page's stale docblock
     (which still claimed bug reporting and announcements were unbuilt) corrected.
 
+25. **Legacy SQL schema parity audit + device/browser catalog (§18)** — a full audit against
+    `api/old sql/crowd4testDB.sql`, the actual legacy MariaDB dump, rather than only the demo
+    checklist. **66 legacy tables / 600 columns** inventoried against the current 36 models /
+    477 fields: **16 MAPPED, 11 PARTIAL, 39 MISSING**. Three new documents:
+    `docs/legacy-schema-inventory.md` (every table, every column, with types/nullability/
+    defaults/legacy comments), `docs/schema-parity-audit.md` (table-level verdicts), and
+    `docs/legacy-feature-schema-mapping.md` (capability-level — whether the feature those
+    columns supported is actually usable, plus a prioritised gap list).
+    **The schema proved capabilities the demo never showed.** `test_case` → `assign_testCase`
+    → `test_report` (with `trep_defect_id` → `bugs_report`) → `test_review` shows a bug was
+    the *outcome of executing a test case*, not a free-floating report. `applied_tests` vs
+    `assigned_tests` shows a tester could **apply**, not only be invited.
+    `payment_history.pmt_type = credit|debit|release` is exactly the Credit/Release Fund split
+    §21 asks for — the current `TransactionStatus` has no release stage, which is *why* that
+    gap exists. None of this is in `checklist.md`.
+    **Implemented: the device/browser catalog.** Ten legacy tables (`mobile_brands`,
+    `mobile_os_type`, `os`, `mobile_os_version`, `os_versions`, `browsers`,
+    `browser_versions`, `network_providers`, the catalog half of `devices`, `user_browsers`)
+    recovered as six models plus one join, with `GET /v1/catalog` (all roles — it is global
+    reference data every tester needs) and admin-only writes, seeded with real data, and an
+    admin page at `/app/admin/catalog`.
+    Improved rather than copied: `mobile_os_type`/`os` and `mobile_os_version`/`os_versions`
+    were near-duplicate pairs differing only by mobile-vs-desktop, so they collapse into one
+    `OperatingSystem`+`OsVersion` pair with a `kind` discriminator; every row gained
+    `isActive` (legacy could only hard-delete, orphaning tester references); and the catalog is
+    global rather than per-tenant, since per-tenant copies would fragment the very matching data
+    it exists to provide. One page, not nine sidebar entries — these are short lists read
+    together and edited rarely.
+    **Non-destructive by construction.** `TesterDevice` keeps every free-text column and *adds*
+    nullable FKs beside them. Nothing was dropped or backfilled: pre-catalog rows render exactly
+    as before, and a tester can still describe a device the catalog does not list.
+    Verified end-to-end: tester reads the catalog (200) and adds Chrome 128/Android (201);
+    duplicate add 409; tester attempting an admin write 403; tester2 deleting tester1's row
+    404 while tester1's row survives (isolation, not a silent no-op); admin brand/version
+    creates 201 with 409 on duplicate; the page renders live data with 0 nested-anchor
+    violations; `next build` exit 0.
+
 **Explicitly deferred** (each is a multi-day feature on its own; implementing any of them
 partially would have produced exactly the "UI exists but isn't real" anti-pattern this audit
 was built to catch):
@@ -1474,20 +1511,16 @@ bar, not skipped.
 
 ### Priority 1 — Critical
 
-1. **File download authorization has no tenant/ownership check**
-   (`api/src/modules/uploads/uploads.routes.ts:98-116`) — any authenticated user can fetch a
-   signed URL for any file by id. Self-documented in the code as an accepted gap; should not
-   stay accepted. **This is the only finding in the audit that is an active security exposure
-   rather than a missing feature.**
-2. **No maximum-tester-limit enforcement** — a project can be assigned an unbounded number of
-   testers; no field, no check.
-3. **No tester eligibility gate on assignment** (device/OS/browser) — any VERIFIED tester can be
-   assigned to any project regardless of platform fit.
-4. **No tester-facing portal at all** — blocks bug reporting, evidence upload, profile
-   self-service, and viewing testing instructions/announcements, even though the backing APIs
-   for most of these are already built and correct.
-5. **Bug classification (type + feature) has no schema support** — blocks Section 7's analytics,
-   Section 9/10's bug list/detail "type"/"feature" columns, and Section 13's Feature Lists.
+**All five done.** This section was left un-struck through the whole implementation pass — fixing
+that now so it stops reading as outstanding.
+
+1. ~~File download authorization has no tenant/ownership check~~ — **done**, Pass 1 #1.
+2. ~~No maximum-tester-limit enforcement~~ — **done**, Pass 1 #2.
+3. ~~No tester eligibility gate on assignment~~ — **done** (as a non-blocking signal, by design;
+   see Pass 1 #3 for why a hard gate was the wrong call).
+4. ~~No tester-facing portal at all~~ — **done**. Bug reporting, evidence upload, profile
+   self-service, earnings, and announcements are all real — Pass 1 #21–#24.
+5. ~~Bug classification (type + feature) has no schema support~~ — **done**, Pass 1 #4.
 
 ### Priority 2 — Major
 

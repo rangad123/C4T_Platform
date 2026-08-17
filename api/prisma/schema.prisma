@@ -565,6 +565,7 @@ model TesterProfile {
 
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   devices     TesterDevice[]
+  browsers    TesterBrowser[]
   skills      TesterSkill[]
   languages   TesterLanguage[]
   workHistory TesterWorkHistory[]
@@ -596,11 +597,198 @@ model TesterDevice {
   isPrimary       Boolean    @default(false) @map("is_primary")
   createdAt       DateTime   @default(now()) @map("created_at")
 
-  testerProfile TesterProfile @relation(fields: [testerProfileId], references: [id], onDelete: Cascade)
+  /// ── Catalog references (legacy parity: `devices.dvc_manufacturer`,
+  /// `dvc_mob_os_ver_id`, `dvc_primary_network`, `dvc_secondary_network`).
+  ///
+  /// These sit ALONGSIDE the free-text columns above rather than replacing
+  /// them. Rows created before the catalog existed keep rendering from the
+  /// strings, and a tester can still describe a device the catalog has not
+  /// listed yet — the catalog is the preferred path, not the only one. When
+  /// a FK is set the reader should prefer it, because only the FK supports
+  /// reliable "find every tester on Android 15" matching.
+  deviceModelId     String? @map("device_model_id")
+  osVersionRefId    String? @map("os_version_ref_id")
+  primaryNetworkId  String? @map("primary_network_id")
+  secondaryNetworkId String? @map("secondary_network_id")
+
+  testerProfile    TesterProfile    @relation(fields: [testerProfileId], references: [id], onDelete: Cascade)
+  deviceModel      DeviceModel?     @relation(fields: [deviceModelId], references: [id], onDelete: SetNull)
+  osVersionRef     OsVersion?       @relation(fields: [osVersionRefId], references: [id], onDelete: SetNull)
+  primaryNetwork   NetworkProvider? @relation("DevicePrimaryNetwork", fields: [primaryNetworkId], references: [id], onDelete: SetNull)
+  secondaryNetwork NetworkProvider? @relation("DeviceSecondaryNetwork", fields: [secondaryNetworkId], references: [id], onDelete: SetNull)
 
   @@index([testerProfileId])
   @@index([type])
+  @@index([deviceModelId])
+  @@index([osVersionRefId])
   @@map("tester_devices")
+}
+
+// ─── Device / browser catalog (§18 Global Assets) ────────────────────────────
+//
+// Recovers ten legacy tables — `mobile_brands`, `mobile_os_type`, `os`,
+// `mobile_os_version`, `os_versions`, `browsers`, `browser_versions`,
+// `network_providers`, the catalog half of `devices`, and `user_browsers` —
+// as six models plus one join.
+//
+// Two deliberate improvements over the legacy shape:
+//
+//   1. `mobile_os_type`/`os` and `mobile_os_version`/`os_versions` were
+//      near-duplicate pairs whose only real difference was mobile vs desktop.
+//      They collapse into one `OperatingSystem` + `OsVersion` pair carrying a
+//      `kind` discriminator — same information, half the tables, one code path.
+//   2. Every row has `isActive`. Legacy could only retire a device (via
+//      `dvc_deleted_date`), so withdrawing a browser version meant deleting a
+//      row that tester records pointed at.
+//
+// Catalog rows are GLOBAL, not tenant-scoped: a Galaxy S24 is the same device
+// for every customer, and per-tenant copies would fragment the matching data
+// the catalog exists to provide. Tenant-specific facts live on `TesterDevice`
+// and `TesterBrowser`.
+
+/// Whether an operating system targets handsets or desktops. Replaces the
+/// legacy `mobile_os_type` vs `os` table split.
+enum OsKind {
+  MOBILE
+  DESKTOP
+}
+
+/// Legacy `mobile_brands`. Not mobile-only despite the legacy name — desktop
+/// and tablet makers belong here too.
+model DeviceBrand {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  models DeviceModel[]
+
+  @@map("device_brands")
+}
+
+/// Legacy `mobile_os_type` + `os`, merged behind `kind`.
+model OperatingSystem {
+  id        String   @id @default(cuid())
+  name      String
+  kind      OsKind
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  versions      OsVersion[]
+  deviceModels  DeviceModel[]
+  testerBrowsers TesterBrowser[]
+
+  @@unique([name, kind])
+  @@map("operating_systems")
+}
+
+/// Legacy `mobile_os_version` + `os_versions`.
+model OsVersion {
+  id                String   @id @default(cuid())
+  operatingSystemId String   @map("operating_system_id")
+  version           String
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  operatingSystem OperatingSystem @relation(fields: [operatingSystemId], references: [id], onDelete: Cascade)
+  testerDevices   TesterDevice[]
+
+  @@unique([operatingSystemId, version])
+  @@index([operatingSystemId])
+  @@map("os_versions")
+}
+
+/// Legacy `browsers`.
+model Browser {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  versions BrowserVersion[]
+  testers  TesterBrowser[]
+
+  @@map("browsers")
+}
+
+/// Legacy `browser_versions`.
+model BrowserVersion {
+  id        String   @id @default(cuid())
+  browserId String   @map("browser_id")
+  version   String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  browser Browser         @relation(fields: [browserId], references: [id], onDelete: Cascade)
+  testers TesterBrowser[]
+
+  @@unique([browserId, version])
+  @@index([browserId])
+  @@map("browser_versions")
+}
+
+/// Legacy `network_providers` — carrier, with the country it operates in.
+model NetworkProvider {
+  id          String   @id @default(cuid())
+  name        String
+  countryCode String?  @map("country_code")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  primaryFor   TesterDevice[] @relation("DevicePrimaryNetwork")
+  secondaryFor TesterDevice[] @relation("DeviceSecondaryNetwork")
+
+  @@unique([name, countryCode])
+  @@map("network_providers")
+}
+
+/// The catalog half of legacy `devices` — the handset itself, independent of
+/// which tester owns one. `dvc_ram` and `dvc_screen` live here because they
+/// are properties of the model, not of a tester's copy of it.
+model DeviceModel {
+  id             String     @id @default(cuid())
+  brandId        String     @map("brand_id")
+  name           String
+  type           DeviceType
+  /// Default OS for this model. A tester's actual OS version is recorded on
+  /// their own `TesterDevice` row, since it varies per handset.
+  defaultOsId    String?    @map("default_os_id")
+  ramGb          String?    @map("ram_gb")
+  screenSize     String?    @map("screen_size")
+  isActive       Boolean    @default(true) @map("is_active")
+  createdAt      DateTime   @default(now()) @map("created_at")
+
+  brand         DeviceBrand      @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  defaultOs     OperatingSystem? @relation(fields: [defaultOsId], references: [id], onDelete: SetNull)
+  testerDevices TesterDevice[]
+
+  @@unique([brandId, name])
+  @@index([brandId])
+  @@index([type])
+  @@map("device_models")
+}
+
+/// Legacy `user_browsers` — the (tester, browser, version, OS) join. Legacy
+/// kept this separate from `devices`, and so does this: a tester runs several
+/// browsers, and which OS they run them on is not necessarily the OS of a
+/// handset they registered.
+model TesterBrowser {
+  id                String   @id @default(cuid())
+  testerProfileId   String   @map("tester_profile_id")
+  browserId         String   @map("browser_id")
+  browserVersionId  String?  @map("browser_version_id")
+  operatingSystemId String?  @map("operating_system_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  testerProfile   TesterProfile    @relation(fields: [testerProfileId], references: [id], onDelete: Cascade)
+  browser         Browser          @relation(fields: [browserId], references: [id], onDelete: Cascade)
+  browserVersion  BrowserVersion?  @relation(fields: [browserVersionId], references: [id], onDelete: SetNull)
+  operatingSystem OperatingSystem? @relation(fields: [operatingSystemId], references: [id], onDelete: SetNull)
+
+  @@unique([testerProfileId, browserId, browserVersionId])
+  @@index([testerProfileId])
+  @@index([browserId])
+  @@map("tester_browsers")
 }
 
 model TesterWorkHistory {

@@ -13,6 +13,7 @@ import { notificationsRouter } from '../modules/notifications/notifications.rout
 import { uploadsRouter } from '../modules/uploads/uploads.routes.js'
 import { statsRouter } from '../modules/stats/stats.routes.js'
 import { leadsRouter } from '../modules/leads/leads.routes.js'
+import { catalogRouter } from '../modules/catalog/catalog.routes.js'
 
 /**
  * API v1. Every route is mounted under /v1 so a future breaking change can ship
@@ -24,6 +25,7 @@ v1Router.use('/auth', authRouter)
 v1Router.use('/users', usersRouter)
 v1Router.use('/organisations', organisationsRouter)
 v1Router.use('/testers', testersRouter)
+v1Router.use('/catalog', catalogRouter)
 v1Router.use('/projects', projectsRouter)
 v1Router.use('/bugs', bugsRouter)
 v1Router.use('/managers', managersRouter)

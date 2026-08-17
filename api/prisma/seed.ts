@@ -152,6 +152,143 @@ async function main() {
     update: {},
   })
 
+  // ─── Device / browser catalog (§18 Global Assets) ──────────────────────────
+  // Recovers the legacy `mobile_brands` / `os` / `browsers` / `network_providers`
+  // reference tables. Global, not tenant-scoped — a Galaxy S24 is the same
+  // device for every customer. Everything is upserted on a natural key, so
+  // re-seeding never duplicates and never clobbers admin edits to `isActive`.
+  console.log('Seeding device/browser catalog…')
+
+  const osSeeds: { name: string; kind: 'MOBILE' | 'DESKTOP'; versions: string[] }[] = [
+    { name: 'Android', kind: 'MOBILE', versions: ['12', '13', '14', '15'] },
+    { name: 'iOS', kind: 'MOBILE', versions: ['16', '17', '18'] },
+    { name: 'iPadOS', kind: 'MOBILE', versions: ['17', '18'] },
+    { name: 'Windows', kind: 'DESKTOP', versions: ['10', '11'] },
+    { name: 'macOS', kind: 'DESKTOP', versions: ['13 Ventura', '14 Sonoma', '15 Sequoia'] },
+    { name: 'Linux', kind: 'DESKTOP', versions: ['Ubuntu 22.04', 'Ubuntu 24.04', 'Fedora 40'] },
+  ]
+  const osByName = new Map<string, string>()
+  for (const o of osSeeds) {
+    const row = await prisma.operatingSystem.upsert({
+      where: { name_kind: { name: o.name, kind: o.kind } },
+      create: { name: o.name, kind: o.kind },
+      update: {},
+      select: { id: true },
+    })
+    osByName.set(o.name, row.id)
+    for (const v of o.versions) {
+      await prisma.osVersion.upsert({
+        where: { operatingSystemId_version: { operatingSystemId: row.id, version: v } },
+        create: { operatingSystemId: row.id, version: v },
+        update: {},
+      })
+    }
+  }
+
+  const browserSeeds: { name: string; versions: string[] }[] = [
+    { name: 'Chrome', versions: ['126', '127', '128'] },
+    { name: 'Safari', versions: ['17', '18'] },
+    { name: 'Firefox', versions: ['128', '129'] },
+    { name: 'Edge', versions: ['127', '128'] },
+    { name: 'Samsung Internet', versions: ['25', '26'] },
+  ]
+  for (const b of browserSeeds) {
+    const row = await prisma.browser.upsert({
+      where: { name: b.name },
+      create: { name: b.name },
+      update: {},
+      select: { id: true },
+    })
+    for (const v of b.versions) {
+      await prisma.browserVersion.upsert({
+        where: { browserId_version: { browserId: row.id, version: v } },
+        create: { browserId: row.id, version: v },
+        update: {},
+      })
+    }
+  }
+
+  for (const n of [
+    { name: 'Airtel', countryCode: 'IN' },
+    { name: 'Jio', countryCode: 'IN' },
+    { name: 'Vodafone Idea', countryCode: 'IN' },
+    { name: 'Verizon', countryCode: 'US' },
+    { name: 'AT&T', countryCode: 'US' },
+    { name: 'T-Mobile', countryCode: 'US' },
+    { name: 'Vodafone', countryCode: 'GB' },
+    { name: 'EE', countryCode: 'GB' },
+  ]) {
+    await prisma.networkProvider.upsert({
+      where: { name_countryCode: { name: n.name, countryCode: n.countryCode } },
+      create: n,
+      update: {},
+    })
+  }
+
+  const deviceSeeds: {
+    brand: string
+    models: { name: string; type: DeviceType; os: string; ramGb?: string; screenSize?: string }[]
+  }[] = [
+    {
+      brand: 'Google',
+      models: [
+        { name: 'Pixel 7a', type: DeviceType.MOBILE, os: 'Android', ramGb: '8', screenSize: '6.1' },
+        { name: 'Pixel 8 Pro', type: DeviceType.MOBILE, os: 'Android', ramGb: '12', screenSize: '6.7' },
+      ],
+    },
+    {
+      brand: 'Apple',
+      models: [
+        { name: 'iPhone 13', type: DeviceType.MOBILE, os: 'iOS', ramGb: '4', screenSize: '6.1' },
+        { name: 'iPhone 15 Pro', type: DeviceType.MOBILE, os: 'iOS', ramGb: '8', screenSize: '6.1' },
+        { name: 'iPad Air (M2)', type: DeviceType.TABLET, os: 'iPadOS', ramGb: '8', screenSize: '11' },
+        { name: 'MacBook Pro 14"', type: DeviceType.DESKTOP, os: 'macOS', ramGb: '18', screenSize: '14.2' },
+      ],
+    },
+    {
+      brand: 'Samsung',
+      models: [
+        { name: 'Galaxy S24', type: DeviceType.MOBILE, os: 'Android', ramGb: '8', screenSize: '6.2' },
+        { name: 'Galaxy Tab S9', type: DeviceType.TABLET, os: 'Android', ramGb: '8', screenSize: '11' },
+      ],
+    },
+    {
+      brand: 'Xiaomi',
+      models: [
+        { name: 'Redmi Note 12', type: DeviceType.MOBILE, os: 'Android', ramGb: '6', screenSize: '6.67' },
+      ],
+    },
+    {
+      brand: 'Dell',
+      models: [
+        { name: 'XPS 15', type: DeviceType.DESKTOP, os: 'Windows', ramGb: '16', screenSize: '15.6' },
+      ],
+    },
+  ]
+  for (const b of deviceSeeds) {
+    const brand = await prisma.deviceBrand.upsert({
+      where: { name: b.brand },
+      create: { name: b.brand },
+      update: {},
+      select: { id: true },
+    })
+    for (const m of b.models) {
+      await prisma.deviceModel.upsert({
+        where: { brandId_name: { brandId: brand.id, name: m.name } },
+        create: {
+          brandId: brand.id,
+          name: m.name,
+          type: m.type,
+          defaultOsId: osByName.get(m.os) ?? null,
+          ramGb: m.ramGb ?? null,
+          screenSize: m.screenSize ?? null,
+        },
+        update: {},
+      })
+    }
+  }
+  console.log('  catalog ready')
+
   // ─── Skills catalogue ──────────────────────────────────────────────────────
   const skillNames = [
     'Manual Testing',
