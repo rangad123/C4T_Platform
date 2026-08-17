@@ -240,15 +240,32 @@ export default async function LeadsPage({
             />
           )
         ) : result.items.length === 0 ? (
-          <EmptyState
-            icon="inbox"
-            title={search || status ? 'No leads match your filters' : 'No leads yet'}
-            description={
-              search || status
-                ? 'Try widening the search or clearing the status filter.'
-                : 'New demo requests land here as soon as a visitor submits the contact form.'
-            }
-          />
+          /*
+           * Two different absences, two different shapes.
+           *
+           * Filtered to nothing — the user narrowed the list a second ago and
+           * already knows why it is empty, so this is one quiet line directly
+           * under the controls they need to widen it again. A full-height
+           * panel here reads as an error for what is a non-event.
+           *
+           * Genuinely no leads — worth the block treatment, because it is the
+           * first thing a new operator sees and it should explain where leads
+           * come from.
+           */
+          search || status ? (
+            <EmptyState
+              variant="inline"
+              icon="inbox"
+              title="No records found"
+              description="Try widening the search or clearing the status filter."
+            />
+          ) : (
+            <EmptyState
+              icon="inbox"
+              title="No leads yet"
+              description="New demo requests land here as soon as a visitor submits the contact form."
+            />
+          )
         ) : (
           <>
             <Table

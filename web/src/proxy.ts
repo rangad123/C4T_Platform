@@ -80,7 +80,36 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.redirect(url)
   }
 
-  if (hasSession && GUEST_ONLY.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+  /**
+   * Bounce a signed-in visitor off the guest-only pages — but NEVER when the
+   * URL carries `?next=`.
+   *
+   * ── The redirect loop this guard exists to prevent
+   *
+   * `hasSession` above is a cookie-PRESENCE check; it deliberately never
+   * validates the token. `requireUser()` in the page validates LIVENESS by
+   * asking the API. When a cookie is present but the session behind it is dead
+   * — expired, revoked, or signed by a previous deployment — the two
+   * permanently disagree, and without this guard they ping-pong:
+   *
+   *     /app          → page: session dead   → /login?next=/app
+   *     /login?next=  → proxy: cookie there  → /app
+   *     /app          → page: session dead   → /login?next=/app        …forever
+   *
+   * The browser gives up with ERR_TOO_MANY_REDIRECTS, and because the loop
+   * never renders anything the user sees a blank screen first.
+   *
+   * A `next` parameter is the tell: it is only ever set by a page-level check
+   * that has just rejected this request. Honouring a presence-only cookie at
+   * that exact moment is what closes the cycle, so we stand down and let
+   * `/login` render. The page itself re-checks with the API and redirects a
+   * genuinely live session onward — the correct layer for that decision,
+   * since only the API can answer it.
+   */
+  const isGuestOnly = GUEST_ONLY.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  const arrivedFromAuthCheck = request.nextUrl.searchParams.has('next')
+
+  if (hasSession && isGuestOnly && !arrivedFromAuthCheck) {
     const url = request.nextUrl.clone()
     url.pathname = '/app'
     url.search = ''
