@@ -71,6 +71,14 @@ export async function reportBugAction(formData: FormData): Promise<void> {
   const appVersion = formTrimmed(formData, 'appVersion')
   const networkType = formTrimmed(formData, 'networkType')
 
+  // Contributed by <EvidenceUpload>, one hidden input per finished upload.
+  // Each id already points at a completed FileObject owned by this user —
+  // `createBug` re-checks both, so a forged id fails there rather than here.
+  const attachmentFileIds = formData
+    .getAll('attachmentFileIds')
+    .map((v) => (typeof v === 'string' ? v : ''))
+    .filter(Boolean)
+
   // The API's own minimums. Bailing here rather than posting a request we
   // know will 422 — the fields carry the same limits as native constraints,
   // so this is only reachable from a hand-built post.
@@ -98,6 +106,7 @@ export async function reportBugAction(formData: FormData): Promise<void> {
         ...(browser ? { browser } : {}),
         ...(appVersion ? { appVersion } : {}),
         ...(networkType ? { networkType } : {}),
+        ...(attachmentFileIds.length > 0 ? { attachmentFileIds } : {}),
       },
     })
   } catch (error) {

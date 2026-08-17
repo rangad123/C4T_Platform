@@ -9,6 +9,7 @@ import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
+import { EvidenceUpload } from '@/components/tester/EvidenceUpload'
 import { titleCase } from '@/lib/admin/format'
 import { reportBugAction } from '../actions'
 
@@ -261,6 +262,13 @@ export default async function NewTesterBugPage({
                 <Input id="networkType" name="networkType" maxLength={40} placeholder="5G" />
               </Field>
             </div>
+          </Panel>
+
+          <Panel
+            title="Evidence"
+            description="A screenshot or short recording is the fastest way to get a report reproduced. Optional, but it makes a real difference."
+          >
+            <EvidenceUpload />
           </Panel>
 
           <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>

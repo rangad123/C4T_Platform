@@ -419,20 +419,46 @@ Where a fix is described here, treat the corresponding finding further down as h
     fresh database. **This takes effect on the next re-seed; the current dev database keeps its
     existing 4-digit seeded references and is not in a collision state.**
 
+24. **Evidence upload and the tester announcements feed (§2.3)** — the last two tester-portal
+    gaps, closing the portal out. Evidence upload is the one piece in this whole pass that
+    genuinely needed new plumbing rather than just a page: the API's flow is three calls
+    (presign → PUT the bytes → mark complete), and the browser cannot drive it directly here
+    because there is no `/api/v1` rewrite and the auth cookie is issued for the API's own
+    domain, so a cross-origin `fetch` arrives with no credentials. A Route Handler at
+    `/app/tester/bugs/upload` runs all three server-side with the cookie forwarded — the same
+    approach the CSV export takes — which also collapses three browser round trips into one,
+    worth having when the payload is a screen recording. `<EvidenceUpload>` (a small client
+    component, since a file picker cannot be a Server Component) uploads on pick rather than on
+    submit, because `createBug` rejects any attachment that is not already complete, and
+    contributes one hidden `attachmentFileIds` input per finished upload so the surrounding
+    plain `<form>` carries them with no extra wiring. Verified end-to-end: uploaded a real file
+    through the proxy (200, returned a `fileId`), attached it to a new report
+    (`BUG-2026-00002`, `attachments: 1`), and confirmed the download authorization added earlier
+    in this pass still holds on it — uploader 200, unrelated tester 403, admin 200.
+    The announcements feed (`/app/tester/announcements`) needed no API work at all: the endpoint
+    already scopes on both axes — `announcementAudienceFor` maps TESTER to `[ALL, TESTERS]`, and
+    the project-scoping added in Pass 1 #13 restricts project announcements to testers with an
+    ACCEPTED/ACTIVE assignment. The page therefore does no filtering of its own, so there is no
+    second definition of visibility to drift out of step. Verified: tester1 sees the ALL and
+    TESTERS notices and correctly does **not** see the ADMINS-only one.
+    The dashboard's "coming soon" strip is now gone — there is nothing left in the portal to
+    promise — replaced with an accurate summary of what is live, and the page's stale docblock
+    (which still claimed bug reporting and announcements were unbuilt) corrected.
+
 **Explicitly deferred** (each is a multi-day feature on its own; implementing any of them
 partially would have produced exactly the "UI exists but isn't real" anti-pattern this audit
 was built to catch):
 
-- The rest of the tester self-service portal — Account/Finance (Pass 1 #21), profile
-  self-service (Pass 1 #22) and bug reporting (Pass 1 #23) are now real. Still missing:
-  **evidence upload** (needs the presign → upload → attach flow wired end to end, and a
-  client-side file input, which is the one genuinely new UI mechanic left) and a
-  **project-announcements feed** for the tester.
 - Reports module (§24) — no code exists to build on top of; needs a `reports` API module.
 - Build Settings' remaining sub-feature: fully dynamic Custom Bug Fields (Feature Lists and the
   tester-bug-visibility toggle — the other two sub-features — are now both done, see above).
 
 **No longer deferred, done in a later pass despite the original multi-day estimate:**
+- ~~The tester self-service portal~~ — see Implementation Pass 1 #21–#24. All four slices
+  (earnings, profile, bug reporting, evidence upload + announcements) landed without a single
+  API change: every endpoint already existed under `/testers/me`, `/transactions`, `/bugs` and
+  `/communication/announcements`. The original "multi-day feature" estimate was reading the
+  `<PortalNotReady />` placeholder as "no backend", when in fact only the UI was absent.
 - ~~Bulk tester messaging / broadcast (§22)~~ — see Implementation Pass 1 #18. The API needed
   zero changes; the estimate assumed a new thread-create UI would be a bigger lift than it
   turned out to be once actually scoped down to "checkbox picker + compose form + fan-out loop".

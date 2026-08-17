@@ -70,22 +70,23 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
 /**
  * `/app/tester` — the tester home.
  *
- * Ships one real, working slice of the tester self-service portal: earnings
- * and transaction history (§21 "Tester Account / Finance"), because the API
- * already supports it in full — `GET /v1/transactions/summary/mine` and
- * `GET /v1/transactions` (auto-scoped to the caller via `transactionScope`)
- * needed zero changes. Every number on this page is a real, live read from
- * the same ledger the admin Transactions list uses; nothing here is mocked.
+ * The landing page of the tester portal, and its earnings view (§21 "Tester
+ * Account / Finance"). Every number here is a live read from the same ledger
+ * the admin Transactions list uses — `GET /v1/transactions/summary/mine` and
+ * `GET /v1/transactions`, both auto-scoped to the caller by
+ * `transactionScope` — nothing on this page is mocked.
  *
- * What this page deliberately does NOT attempt: bug reporting, evidence
- * upload, profile self-service, or an announcements feed — those need real
- * UI builds of their own and are still on the way. It also does not show a
- * Credit Fund / Release Fund split, a payment method, or a TDS figure — the
- * schema has no two-stage credit/release semantics and no payment-method or
- * tax-deduction fields to read from, so fabricating those would misstate an
- * account holder's actual position. "Available balance" below is computed
- * as approved earnings minus paid-out amounts, which is the only reading of
- * "balance" the underlying ledger can actually support.
+ * The rest of the portal hangs off the buttons in the header: bug reporting
+ * with evidence upload (`/bugs`), profile self-service (`/profile`), and the
+ * announcements feed (`/announcements`).
+ *
+ * What is deliberately NOT shown: a Credit Fund / Release Fund split, a
+ * payment method, or a TDS figure. The schema has no two-stage credit/release
+ * semantics and no payment-method or tax-deduction fields, so rendering those
+ * would misstate an account holder's actual position. "Available balance" is
+ * computed as approved earnings minus paid-out amounts, which is the only
+ * reading of "balance" this ledger can actually support — and it is labelled
+ * with that formula rather than presented as an unqualified number.
  */
 export default async function TesterHomePage() {
   const user = await requireRole(['TESTER'], '/app/tester')
@@ -163,6 +164,9 @@ export default async function TesterHomePage() {
         <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
           <Button href="/app/tester/bugs" variant="primary" iconLeft="clipboard-check">
             Bugs
+          </Button>
+          <Button href="/app/tester/announcements" variant="secondary" iconLeft="message-square">
+            Announcements
           </Button>
           <Button href="/app/tester/profile" variant="secondary" iconLeft="user-check">
             Your profile
@@ -264,12 +268,12 @@ export default async function TesterHomePage() {
         }}
       >
         <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-          Coming soon
+          Your workspace
         </span>
         <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-          Attaching screenshots or video to a report, and reading project announcements from
-          here, are still on the way. Earnings, transaction history, your profile, and filing
-          bug reports are real and live today.
+          Everything above is live: your earnings and transaction history, your profile and
+          devices, filing bug reports with screenshots or recordings attached, and announcements
+          from the platform and from projects you are on.
         </p>
       </section>
     </main>
