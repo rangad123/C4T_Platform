@@ -1,1 +1,2 @@
-Only Frontend has been built
+User + Admin -> Complete
+Tester -> Remaining
