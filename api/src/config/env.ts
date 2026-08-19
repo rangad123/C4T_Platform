@@ -7,6 +7,17 @@ import { z } from 'zod'
  */
 const bool = z.enum(['true', 'false']).transform((v) => v === 'true')
 
+/**
+ * An optional URL that tolerates the common dashboard footgun of a variable
+ * left present-but-blank rather than actually removed — Render, Vercel and
+ * friends all make it easy to add a key with an empty value. Without this,
+ * `z.string().url().optional()` still rejects `""` (only a truly absent key
+ * passes), which crashes the whole app at boot instead of the field's own
+ * "just treat it as not configured" behaviour.
+ */
+const optionalUrl = () =>
+  z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional())
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -57,7 +68,11 @@ const schema = z.object({
   SESSION_IDLE_TTL: z.string().default('7d'),
 
   COOKIE_DOMAIN: z.string().optional(),
-  COOKIE_SECURE: z.boolean().default(false),
+  // Every env var is a string, never a real boolean — plain z.boolean() only
+  // ever matches Zod's own default, and rejects the literal "true"/"false"
+  // any .env file or dashboard actually sets it to. `bool` (used by
+  // SMTP_SECURE below) parses the string first, then transforms.
+  COOKIE_SECURE: bool.default('false'),
   /**
    * Cookie cross-site attribute. The default `lax` is right for `SameSite`
    * top-level navigation flows (clicking a link, opening a new tab). When the
@@ -104,7 +119,7 @@ const schema = z.object({
    * the browser on to `WEB_PUBLIC_URL` once sign-in succeeds. Locally:
    *   http://localhost:4000/v1/auth/google/callback
    */
-  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  GOOGLE_REDIRECT_URI: optionalUrl(),
 
   /**
    * Optional site-wide salt for legacy MySQL password digests (§2.8), for the
@@ -140,7 +155,7 @@ const schema = z.object({
    * B2, MinIO, etc.). When set, the AWS SDK uses this URL instead of
    * `s3.<region>.amazonaws.com`. Leave it unset for real AWS S3.
    */
-  S3_BUCKET_ENDPOINT: z.string().url().optional(),
+  S3_BUCKET_ENDPOINT: optionalUrl(),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(52_428_800),
