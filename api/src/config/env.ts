@@ -57,7 +57,7 @@ const schema = z.object({
   SESSION_IDLE_TTL: z.string().default('7d'),
 
   COOKIE_DOMAIN: z.string().optional(),
-  COOKIE_SECURE: bool.default('false'),
+  COOKIE_SECURE: z.boolean().default(false),
   /**
    * Cookie cross-site attribute. The default `lax` is right for `SameSite`
    * top-level navigation flows (clicking a link, opening a new tab). When the
@@ -98,10 +98,11 @@ const schema = z.object({
    * scheme, host, port and path. Google compares the string, not the resolved
    * address.
    *
-   * Point it at the Next.js origin, not this API: the browser reaches the API
-   * through the /api/v1 rewrite, so the callback has to land on the same origin
-   * that will hold the session cookies. Locally:
-   *   http://localhost:3000/api/v1/auth/google/callback
+   * Point it at THIS API, not the web app: `GET /v1/auth/google/callback` is
+   * handled here, and there is no rewrite forwarding it from the web origin
+   * (see the comment in web/next.config.ts). The callback itself redirects
+   * the browser on to `WEB_PUBLIC_URL` once sign-in succeeds. Locally:
+   *   http://localhost:4000/v1/auth/google/callback
    */
   GOOGLE_REDIRECT_URI: z.string().url().optional(),
 

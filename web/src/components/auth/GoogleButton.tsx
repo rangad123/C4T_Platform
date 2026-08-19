@@ -1,4 +1,5 @@
 import { GoogleMark } from '@/components/GoogleMark'
+import { env } from '@/lib/env'
 
 export interface GoogleButtonProps {
   /**
@@ -21,10 +22,16 @@ export interface GoogleButtonProps {
  * right element: it works without JavaScript, it is keyboard and
  * middle-click friendly, and it keeps this a Server Component.
  *
- * It points at `/api/v1/...` — the Next.js rewrite — rather than the API's own
- * origin. That matters: the session cookies the callback sets have to be
- * same-origin with the app that will read them, and the redirect URI registered
- * with Google must match this path exactly.
+ * It points straight at the API's own origin (`env.API_ORIGIN`) — the same
+ * server the other auth flows already call directly (see
+ * `lib/auth/actions.ts`'s `new URL('/v1/auth/...', env.API_ORIGIN)` calls).
+ * There is no same-origin rewrite to lean on: `next.config.ts` deliberately
+ * has none in the Vercel + Render split deploy, so a relative `/api/v1/...`
+ * link 404s on Vercel's own domain instead of ever reaching the API. This
+ * link has to carry the full origin because, unlike a fetch, the browser
+ * itself follows it — Google's redirect has to land on wherever the API's
+ * `GET /v1/auth/google/callback` route actually lives, which is the API's
+ * origin, not the web app's.
  */
 export function GoogleButton({ role, next, label = 'Continue with Google' }: GoogleButtonProps) {
   const params = new URLSearchParams()
@@ -32,9 +39,11 @@ export function GoogleButton({ role, next, label = 'Continue with Google' }: Goo
   if (next) params.set('next', next)
   const query = params.toString()
 
+  const href = new URL(`/v1/auth/google${query ? `?${query}` : ''}`, env.API_ORIGIN).toString()
+
   return (
     <a
-      href={`/api/v1/auth/google${query ? `?${query}` : ''}`}
+      href={href}
       className="c4t-btn c4t-btn--secondary"
       style={{
         display: 'flex',

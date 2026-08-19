@@ -117,7 +117,7 @@ Dashboard → `c4t-platform-api` → **Environment** → add:
 | `S3_BUCKET_ENDPOINT` | R2 endpoint URL |
 | `AWS_ACCESS_KEY_ID` | R2 access key |
 | `AWS_SECRET_ACCESS_KEY` | R2 secret key |
-| `GOOGLE_REDIRECT_URI` | `https://<vercel-domain>/api/v1/auth/google/callback` (the **Vercel** URL, not the Render URL — the redirect URI is what the BROWSER sees) |
+| `GOOGLE_REDIRECT_URI` | `https://<render-api-domain>/v1/auth/google/callback` (the **Render** URL — `GET /v1/auth/google/callback` is handled by this API, not the web app; there is no rewrite forwarding it from Vercel) |
 | `SEED_ADMIN_PASSWORD` | a real password |
 
 ### 2.4 First deploy
@@ -184,7 +184,7 @@ If the refresh cookie path is `/v1/auth` instead of `/api/v1/auth`, the API need
 | Login works, refresh 401s | `REFRESH_COOKIE_PATH` is `/v1/auth` | Set to `/api/v1/auth` |
 | Browser drops cookies silently | `SameSite=Lax` and cross-origin deploy | Set `COOKIE_SAME_SITE=none` and `COOKIE_SECURE=true` |
 | "Could not reach the sign-in service" on the web | `NEXT_PUBLIC_API_BASE` is wrong | Check the value matches the Render API URL exactly |
-| `redirect_uri_mismatch` from Google | OAuth client's redirect URI doesn't match `GOOGLE_REDIRECT_URI` | Match exactly — use the **Vercel** URL, not Render |
+| `redirect_uri_mismatch` from Google | OAuth client's redirect URI doesn't match `GOOGLE_REDIRECT_URI` | Match exactly — use the **Render** API URL, not Vercel |
 
 ## 6. Production safety checklist
 
@@ -194,7 +194,7 @@ If the refresh cookie path is `/v1/auth` instead of `/api/v1/auth`, the API need
 - [ ] `COOKIE_SECURE=true` AND `COOKIE_SAME_SITE=none` on the API service
 - [ ] `CORS_ORIGINS` includes the Vercel domain
 - [ ] `STORAGE_DRIVER=s3` and `S3_BUCKET` set
-- [ ] `GOOGLE_REDIRECT_URI` matches the registered redirect URI on the Google OAuth client (use the **Vercel** URL, not Render)
+- [ ] `GOOGLE_REDIRECT_URI` matches the registered redirect URI on the Google OAuth client (use the **Render** API URL, not Vercel)
 
 ## 7. Why this split
 

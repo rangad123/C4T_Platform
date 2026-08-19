@@ -72,6 +72,17 @@ services:
       - key: JWT_PUBLIC_KEY
         sync: false
 
+      # ── Tester payout details encryption ──────────────────────────────
+      #
+      # Required at boot (env.ts fails fast without it) — base64, must decode
+      # to exactly 32 bytes for AES-256-GCM. Generate with:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+      # Rotating this key makes every existing PaymentAccount.secureDetails
+      # row unreadable — there is no rotation support yet beyond the
+      # envelope's reserved key-version byte. See lib/payment-encryption.ts.
+      - key: PAYMENT_ENCRYPTION_KEY
+        sync: false
+
       # ── Google OAuth (optional — leave empty if you don't need it) ────
       - key: GOOGLE_CLIENT_ID
         sync: false
