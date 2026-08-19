@@ -136,7 +136,13 @@ paymentAccountsRouter.put(
         paymentType: input.paymentType,
         bankName: input.bankName ?? null,
         branchName: input.branchName ?? null,
-        secureDetails,
+        // Prisma's generated `Bytes` field type wants `Uint8Array<ArrayBuffer>`;
+        // `Buffer` is generic over the wider `ArrayBufferLike` (it also allows
+        // a `SharedArrayBuffer` backing store), so newer TypeScript treats the
+        // two as structurally incompatible despite `Buffer` being a `Uint8Array`
+        // at runtime. Re-wrapping copies the bytes into a plain `Uint8Array`
+        // backed by a real `ArrayBuffer`, satisfying the stricter type.
+        secureDetails: new Uint8Array(secureDetails),
         ...masked,
       },
       select: maskedSelect,
