@@ -22,3 +22,12 @@ export function formString(formData: FormData, key: string): string {
 export function formTrimmed(formData: FormData, key: string): string {
   return formString(formData, key).trim()
 }
+
+/**
+ * Reads every value for a repeated field — a checkbox group sharing one
+ * `name`, most commonly. Non-string entries (a stray `File`) are dropped
+ * rather than stringified, for the same reason `formString` narrows.
+ */
+export function formStringArray(formData: FormData, key: string): string[] {
+  return formData.getAll(key).filter((v): v is string => typeof v === 'string')
+}

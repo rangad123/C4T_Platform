@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TesterStatus, DeviceType, SkillCategory } from '@prisma/client'
+import { TesterStatus, DeviceType } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
 export const TESTER_SORT_FIELDS = [
@@ -70,9 +70,22 @@ export const deviceSchema = z.object({
   osVersion: z.string().trim().max(40).optional(),
   screenSize: z.string().trim().max(40).optional(),
   ramGb: z.string().trim().max(20).optional(),
+  storageGb: z.string().trim().max(20).optional(),
   network: z.string().trim().max(80).optional(),
   browser: z.string().trim().max(80).optional(),
   isPrimary: z.boolean().default(false),
+  /**
+   * Catalog selections, alongside the free-text fields above rather than
+   * replacing them — see the schema comment on `TesterDevice`. When present,
+   * the service resolves each id to its catalog row and mirrors the name into
+   * the matching free-text field, so existing rendering code (which reads the
+   * free-text fields) needs no changes and a catalog-backed device still
+   * supports "find every tester on Android 15" matching.
+   */
+  deviceModelId: z.string().cuid().optional(),
+  osVersionRefId: z.string().cuid().optional(),
+  primaryNetworkId: z.string().cuid().optional(),
+  secondaryNetworkId: z.string().cuid().optional(),
 })
 
 export const DEVICE_SORT_FIELDS = ['createdAt', 'model', 'manufacturer'] as const
@@ -96,14 +109,14 @@ export const listGlobalDevicesQuery = paginationQuery.extend({
     .transform((v) => v === 'true'),
 })
 
+/**
+ * Full replacement set, by catalog id — not free text. A tester picks from
+ * the skill catalog (`GET /v1/catalog`); they no longer type a skill name
+ * into existence, so there is nothing here to upsert against a global table.
+ * See `catalog.routes.ts` for admin-side skill/category creation.
+ */
 export const skillsSchema = z.object({
-  /** Full replacement set of skill slugs. */
-  skills: z.array(z.string().trim().min(1).max(80)).max(40),
-})
-
-/** Admin-only — sets a skill's taxonomy category. */
-export const setSkillCategorySchema = z.object({
-  category: z.nativeEnum(SkillCategory),
+  skillIds: z.array(z.string().cuid()).max(40),
 })
 
 export const languagesSchema = z.object({

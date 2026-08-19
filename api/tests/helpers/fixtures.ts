@@ -71,8 +71,8 @@ export interface World {
   testerUnassigned: { id: string; email: string }
   orgA: { id: string }
   orgB: { id: string }
-  projectA: { id: string; reference: string }
-  projectB: { id: string }
+  projectA: { id: string; reference: string; buildId: string }
+  projectB: { id: string; buildId: string }
   /** Reported by testerActive on projectA, status NEW. */
   bugA: { id: string; reference: string }
 }
@@ -225,15 +225,34 @@ export async function seedWorld(): Promise<World> {
       title: 'Project A',
       instructions: 'CONFIDENTIAL BRIEF A',
       status: ProjectStatus.IN_PROGRESS,
-      assignments: {
-        create: [
-          { testerId: testerActive.id, status: AssignmentStatus.ACTIVE, respondedAt: new Date() },
-          { testerId: testerInvited.id, status: AssignmentStatus.INVITED },
-        ],
-      },
-      materials: { create: [{ title: 'Build link', url: 'https://example.com/build' }] },
+      // Every project gets one build; the nested assignments/materials/bugs
+      // below need that build's id, so it is created here and re-fetched
+      // rather than nested three levels deep in one `create`.
+      builds: { create: { name: 'Original build', isDefault: true } },
     },
-    select: { id: true, reference: true },
+    select: { id: true, reference: true, builds: { select: { id: true } } },
+  })
+  const buildA = projectA.builds[0]!.id
+
+  await prisma.projectAssignment.createMany({
+    data: [
+      {
+        projectId: projectA.id,
+        buildId: buildA,
+        testerId: testerActive.id,
+        status: AssignmentStatus.ACTIVE,
+        respondedAt: new Date(),
+      },
+      {
+        projectId: projectA.id,
+        buildId: buildA,
+        testerId: testerInvited.id,
+        status: AssignmentStatus.INVITED,
+      },
+    ],
+  })
+  await prisma.projectMaterial.create({
+    data: { projectId: projectA.id, buildId: buildA, title: 'Build link', url: 'https://example.com/build' },
   })
 
   const projectB = await prisma.project.create({
@@ -244,19 +263,27 @@ export async function seedWorld(): Promise<World> {
       title: 'Project B',
       instructions: 'CONFIDENTIAL BRIEF B',
       status: ProjectStatus.IN_PROGRESS,
-      assignments: {
-        create: [
-          { testerId: testerOther.id, status: AssignmentStatus.ACTIVE, respondedAt: new Date() },
-        ],
-      },
+      builds: { create: { name: 'Original build', isDefault: true } },
     },
-    select: { id: true },
+    select: { id: true, builds: { select: { id: true } } },
+  })
+  const buildB = projectB.builds[0]!.id
+
+  await prisma.projectAssignment.create({
+    data: {
+      projectId: projectB.id,
+      buildId: buildB,
+      testerId: testerOther.id,
+      status: AssignmentStatus.ACTIVE,
+      respondedAt: new Date(),
+    },
   })
 
   const bugA = await prisma.bug.create({
     data: {
       reference: 'BUG-TEST-0001',
       projectId: projectA.id,
+      buildId: buildA,
       reportedById: testerActive.id,
       title: 'Checkout fails on UPI',
       description: 'Payment never completes',
@@ -283,8 +310,8 @@ export async function seedWorld(): Promise<World> {
     testerUnassigned,
     orgA,
     orgB,
-    projectA,
-    projectB,
+    projectA: { id: projectA.id, reference: projectA.reference, buildId: buildA },
+    projectB: { id: projectB.id, buildId: buildB },
     bugA,
   }
 }

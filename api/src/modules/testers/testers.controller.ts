@@ -76,27 +76,11 @@ export async function removeWorkHistory(req: Request, res: Response): Promise<vo
 }
 
 export async function setSkills(req: Request, res: Response): Promise<void> {
-  res.json({ data: await service.setSkills(req.user!.id, req.body.skills) })
+  res.json({ data: await service.setSkills(req.user!.id, req.body.skillIds) })
 }
 
 export async function setLanguages(req: Request, res: Response): Promise<void> {
   res.json({ data: await service.setLanguages(req.user!.id, req.body.languages) })
-}
-
-export async function listSkillCatalogue(_req: Request, res: Response): Promise<void> {
-  res.json({ data: await service.listSkillCatalogue() })
-}
-
-export async function setSkillCategory(req: Request, res: Response): Promise<void> {
-  const skill = await service.setSkillCategory(param(req, 'skillId'), req.body.category)
-  await recordAudit({
-    req,
-    action: 'skill.category_changed',
-    entityType: 'Skill',
-    entityId: skill.id,
-    after: { category: req.body.category },
-  })
-  res.json({ data: skill })
 }
 
 export async function acceptNda(req: Request, res: Response): Promise<void> {

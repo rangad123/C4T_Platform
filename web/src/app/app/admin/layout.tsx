@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { headers } from 'next/headers'
 import { requireRole } from '@/lib/auth/session'
 import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
 
@@ -14,19 +13,25 @@ export const metadata: Metadata = {
  * Gates the route to ADMIN and SUB_ADMIN, then mounts the sidebar + topbar
  * shell. Every page below inherits the same chrome.
  *
- * `headers()` is read to derive the current pathname for the sidebar's
- * active-link highlight. The marketing site does this in the client TopNav
- * via `usePathname`; here we are Server Components, so headers is the
- * equivalent without crossing the boundary.
+ * The sidebar's active-link highlight used to be computed here (from a
+ * request header) and passed down as a `pathname` prop. That was wrong: this
+ * layout does not re-render on a client-side navigation within its own
+ * segment, so the prop went stale after the first page load — every sidebar
+ * link click left "Dashboard" looking open no matter which page was actually
+ * showing. `Sidebar` now reads its own pathname via `usePathname()`, which
+ * updates on every navigation regardless of whether this layout re-runs.
  */
 
 const SECTIONS: readonly SidebarSection[] = [
   {
+    // No group label — a "Dashboard" heading over the one "Dashboard" link
+    // would just repeat itself. Every other group is a category of several
+    // links; this one is a single top-level destination.
+    links: [{ href: '/app/admin', label: 'Dashboard', icon: 'layout-dashboard' }],
+  },
+  {
     label: 'Pipeline',
-    links: [
-      { href: '/app/admin', label: 'Dashboard', icon: 'layout-dashboard' },
-      { href: '/app/admin/leads', label: 'Leads', icon: 'mail' },
-    ],
+    links: [{ href: '/app/admin/leads', label: 'Leads', icon: 'mail' }],
   },
   /**
    * Grouped by what an admin is actually doing, not by API module. The group
@@ -41,9 +46,9 @@ const SECTIONS: readonly SidebarSection[] = [
       { href: '/app/admin/users', label: 'Users', icon: 'user-check' },
       { href: '/app/admin/testers', label: 'Testers', icon: 'users' },
       { href: '/app/admin/managers', label: 'Managers', icon: 'shield-check' },
-      { href: '/app/admin/skills', label: 'Skills', icon: 'briefcase' },
       { href: '/app/admin/assets/devices', label: 'Devices', icon: 'smartphone' },
       { href: '/app/admin/assets/browsers', label: 'Browsers', icon: 'monitor' },
+      { href: '/app/admin/assets/skills', label: 'Skills', icon: 'graduation-cap' },
     ],
   },
   {
@@ -59,6 +64,10 @@ const SECTIONS: readonly SidebarSection[] = [
     links: [
       { href: '/app/admin/projects', label: 'Projects', icon: 'briefcase' },
     ],
+  },
+  {
+    label: 'Reports',
+    links: [{ href: '/app/admin/reports', label: 'Reports', icon: 'line-chart' }],
   },
   {
     label: 'Operations',
@@ -77,16 +86,11 @@ const SECTIONS: readonly SidebarSection[] = [
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
 
-  // The current path, read from the request headers set by Next. We don't
-  // trust the value for anything except "what link should be highlighted".
-  const headerList = await headers()
-  const pathname = headerList.get('x-pathname') ?? headerList.get('x-invoke-path') ?? '/app/admin'
-
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
 
   return (
     <div style={{ display: 'flex', minHeight: '100dvh', background: 'var(--surface-sunken)' }}>
-      <Sidebar pathname={pathname} userName={displayName} role={user.role} sections={SECTIONS} />
+      <Sidebar userName={displayName} role={user.role} sections={SECTIONS} />
 
       {/* Each page renders its own <Topbar> (so the breadcrumb reflects the
           route) followed by its own <main id="main">. The landmark is NOT

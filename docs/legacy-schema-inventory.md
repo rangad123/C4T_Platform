@@ -9,10 +9,15 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 
 | Status | Tables |
 | --- | --- |
-| MAPPED | 16 |
-| PARTIAL | 11 |
-| MISSING | 39 |
+| MAPPED | 27 |
+| PARTIAL | 10 |
+| MISSING | 29 |
 | **Total** | **66** |
+
+_Updated after the catalog/skills/bank-details/transactions pass: `browser_versions`, `browsers`,
+`mobile_brands`, `mobile_os_type`, `mobile_os_version`, `network_providers`, `os`, `os_versions`,
+`payment_acc_details` and `tds_history` moved MISSING → MAPPED; `user_browsers` moved PARTIAL →
+MAPPED. See each table's entry below for what's new and what's still genuinely absent._
 
 ---
 
@@ -772,10 +777,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 
 ## Devices / OS / Browsers
 
-### `browser_versions`  —  **MISSING**
+### `browser_versions`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Browser version catalog.
+- **New equivalent:** BrowserVersion
+- **Assessment:** Catalog table, seeded by hand (no `browser_versions.csv` in the legacy export). `brw_id`→`browserId`, `version` carried as-is. No `created_by` equivalent (catalog rows are admin-managed generically, not per-author).
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -785,10 +790,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `created_by` | int(11) | no |  |  |
 | `created_date` | timestamp | no | `current_timestamp()` |  |
 
-### `browsers`  —  **MISSING**
+### `browsers`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Browser catalog with logo.
+- **New equivalent:** Browser
+- **Assessment:** Catalog table, seeded from `DataCSV/browsers.csv` (6 rows: Firefox, Chrome, Safari, IE, Opera, IE Edge). `brw_desc`/`brw_image` not carried — no requirement calls for a logo, and the description duplicated the name in every source row.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -797,30 +802,30 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `brw_desc` | varchar(50) | yes | `NULL` |  |
 | `brw_image` | varchar(100) | no |  |  |
 
-### `mobile_brands`  —  **MISSING**
+### `mobile_brands`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Device brand catalog.
+- **New equivalent:** DeviceBrand
+- **Assessment:** Catalog table, seeded from `DataCSV/mobile_brands.csv` (53 rows, reconciled to 51 unique brands — `lge` merged into `LG`, `google`/`vivo`/`vsmart` recased to match the rest of the list).
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
 | `mbr_id` | int(11) | no |  |  |
 | `mbr_name` | varchar(255) | no |  |  |
 
-### `mobile_os_type`  —  **MISSING**
+### `mobile_os_type`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Mobile OS catalog (Android/iOS).
+- **New equivalent:** OperatingSystem (`kind = MOBILE`)
+- **Assessment:** Deliberately merged with `os` (below) into one `OperatingSystem` model with an `OsKind` discriminator, rather than kept as two near-duplicate tables. The legacy split was mobile-vs-desktop, which `kind` expresses directly — one table, one code path, same information.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
 | `ost_id` | int(11) | no |  |  |
 | `ost_name` | varchar(255) | no |  |  |
 
-### `mobile_os_version`  —  **MISSING**
+### `mobile_os_version`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Mobile OS version catalog.
+- **New equivalent:** OsVersion (rows whose `OperatingSystem.kind = MOBILE`)
+- **Assessment:** Merged with `os_versions` (below) for the same reason as `mobile_os_type`/`os`. Seeded from `DataCSV/os.csv` + `os_versions.csv` — the CSV's own `os_type_id` values select MOBILE vs DESKTOP.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -828,10 +833,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `mov_type_id` | int(11) | no |  |  |
 | `mov_name` | varchar(255) | no |  |  |
 
-### `network_providers`  —  **MISSING**
+### `network_providers`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Network/carrier catalog with country + logo.
+- **New equivalent:** NetworkProvider
+- **Assessment:** Catalog table. No `network_providers.csv` exists in the legacy export, so this is seeded by hand (8 carriers across IN/US/GB) rather than from CSV — the only catalog entity without a source file. `network_desc`/`network_image` not carried, same reasoning as `browsers`.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -841,10 +846,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `network_desc` | varchar(200) | yes | `NULL` |  |
 | `network_image` | varchar(100) | yes | `NULL` |  |
 
-### `os`  —  **MISSING**
+### `os`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Desktop/web OS catalog.
+- **New equivalent:** OperatingSystem (`kind = DESKTOP` for Windows/Mac IOS/Linux; `kind = MOBILE` for Android/iOS/Fire OS)
+- **Assessment:** This table is actually the unified OS-type list — `os_versions.os_type_id` references its 7 rows directly, spanning both desktop and mobile entries (`os_id` 2, "Cross", has no `os_versions` rows and is not imported). Seeded from `DataCSV/os.csv`.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -852,10 +857,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `os_name` | varchar(50) | yes | `NULL` |  |
 | `os_desc` | varchar(50) | yes | `NULL` |  |
 
-### `os_versions`  —  **MISSING**
+### `os_versions`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** OS version catalog.
+- **New equivalent:** OsVersion
+- **Assessment:** Seeded from `DataCSV/os_versions.csv` (60 rows → 59 unique after deduping one case-variant duplicate). `os_desc`/`os_image` not carried. `iPadOS` has no legacy row (covered under "iOS" in the export) and is seeded separately by hand for the platform's own demo device models.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -868,7 +873,7 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 ### `devices`  —  **PARTIAL**
 
 - **New equivalent:** TesterDevice
-- **Assessment:** FREE TEXT, not a catalog. Missing structured brand/os/os-version/network FKs; ram/screen present as free text; no soft delete.
+- **Assessment:** `deviceModelId`/`osVersionRefId`/`primaryNetworkId`/`secondaryNetworkId` catalog FKs now exist ALONGSIDE the free-text columns (never replacing them — a tester can still describe a device the catalog hasn't listed). The device-add form offers catalog selects that mirror into the matching free-text field when it's left blank. `storageGb` was added as a new free-text field with no legacy or prior-platform column (the brief classifies it as tester input, not a catalog concept). Still PARTIAL rather than MAPPED: the model NAME stays free text by design, and there is still no soft delete equivalent to `dvc_deleted_date`.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -888,10 +893,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `dvc_updated_date` | timestamp | no | `current_timestamp()` |  |
 | `dvc_deleted_date` | timestamp | yes | `NULL` |  |
 
-### `user_browsers`  —  **PARTIAL**
+### `user_browsers`  —  **MAPPED**
 
-- **New equivalent:** TesterDevice.browser
-- **Assessment:** Free-text string on the device row. Loses browser/version/OS relationships and per-tester browser rows.
+- **New equivalent:** TesterBrowser
+- **Assessment:** A real per-tester join to `Browser`/`BrowserVersion`/`OperatingSystem` now exists (`GET`/`POST`/`DELETE /v1/catalog/me/browsers`), independent of `TesterDevice.browser`'s free-text mirror. `created_by` has no equivalent — every `TesterBrowser` row is created by its own tester, so an author column would be redundant.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -924,10 +929,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `remaining_projects` | int(20) | yes | `NULL` |  |
 | `remaining_private_testers` | int(20) | yes | `NULL` |  |
 
-### `payment_acc_details`  —  **MISSING**
+### `payment_acc_details`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Tester payout accounts (bank/PayPal/Paytm, IFSC, Indian/non-Indian).
+- **New equivalent:** PaymentAccount
+- **Assessment:** `pmt_account_name`/`pmt_account_no`/`pmt_ifsc_code`/`pmt_paypal_email`/`pmt_paytm_number` are the sensitive fields and live ONLY inside `secureDetails`, an AES-256-GCM envelope — never a plaintext column (see `api/src/lib/payment-encryption.ts`). `pmt_bank_name`/`pmt_branch_name` stay plaintext (not identifying on their own). `pmt_country`/`pmt_payment_type`/`pmt_status` map onto `PaymentAccountCountry`/`PaymentMethod`/`PaymentAccountStatus`. Masked projections (`accountNumberLast4`, `paypalEmailMasked`, `paytmNumberLast4`) are new — the legacy table had no masked-display concept at all. Reveal is a separate, audited, password-gated admin action (`POST /v1/payment-accounts/:id/reveal`), not a normal read.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -957,10 +962,10 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 | `pm_name` | varchar(50) | yes | `'0'` |  |
 | `pm_desc` | varchar(500) | yes | `'0'` |  |
 
-### `tds_history`  —  **MISSING**
+### `tds_history`  —  **MAPPED**
 
-- **New equivalent:** _none_
-- **Assessment:** Per-financial-year TDS deductions.
+- **New equivalent:** Transaction.tdsAmountMinor
+- **Assessment:** Folded into the transaction it belongs to rather than kept as a separate per-financial-year table — every legacy `tds_history` row was already one TDS figure tied to one payment via `tds_user_id`, so a join was doing what a column can do directly. `tds_fy` (the financial year) has no stored equivalent: India's financial year is a deterministic function of `occurredAt` (1 Apr – 31 Mar), computed at query time by the `financeYear` filter rather than stored and risking drift from the date it's derived from.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -974,7 +979,7 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 ### `payment_history`  —  **PARTIAL**
 
 - **New equivalent:** Transaction
-- **Assessment:** Missing: credit/debit/release semantics, pmt_method + details, contest linkage, seen/new status.
+- **Assessment:** `pmt_method`→`paymentMethod` (shared with `PaymentAccount`, so one taxonomy rather than two), `pmt_method_details`→the linked `paymentAccountId` (read back through `PaymentAccount`'s masked select, never plaintext on the transaction itself), `pmt_amount`→`amountMinor`, `pmt_summary`→`description`, `pmt_for_build_id`/`pmt_for_contest_id`→`buildOrContestRef` (free text; `projectId` already covers the Build case, and no `Contest` model exists). `pmt_type` (credit/debit/release) maps conceptually onto `TransactionType`'s six values rather than a literal 1:1 field. Still PARTIAL: `pmt_status`'s `new`/`seen` is a read-tracking flag on the payment notification, a different concept from `TransactionStatus` (the payment's own lifecycle) and has no equivalent here. Indian/International/Pending categorisation (§21-27) is derived from `paymentMethod`+`currency`+`status` at query time, not a stored field — see `transactions.routes.ts`'s `categoryFilter`.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -1072,8 +1077,8 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 
 ### `skill_categories`  —  **MAPPED**
 
-- **New equivalent:** SkillCategory enum
-- **Assessment:** Legacy dynamic table -> fixed 4-value enum.
+- **New equivalent:** SkillCategory (model — see revision note below)
+- **Assessment:** Previously mapped onto a fixed 4-value `SkillCategory` enum; promoted to a real catalog table in the §11-13 catalog pass, matching every other reference entity (`DeviceBrand`, `Browser`, etc.) and letting an admin add a category without a schema migration. Seeded from `DataCSV/skill_categories.csv` (4 rows — Domain Knowledge / Type of Testing / Testing Tools Used / Applications Tested, a near-exact match to the enum's original 4 values).
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |
@@ -1084,7 +1089,7 @@ Status values: `MAPPED` (concept fully present, possibly renamed/normalised), `P
 ### `skills`  —  **MAPPED**
 
 - **New equivalent:** Skill
-- **Assessment:** sname_cat_id -> SkillCategory enum.
+- **Assessment:** `sname_cat_id`→`Skill.categoryId`, a relation to `SkillCategory` (was the enum above). Seeded from `DataCSV/skills.csv` (26 rows), reconciled with the 8 skills this platform had already seeded before the catalog existed — two names normalised to match (`"Security Testing(Sc)"`→`"Security Testing"`, `"Localisation Testing"`→`"Localization Testing"`) rather than creating near-duplicates; 2 skills (Payment Testing, Accessibility Testing) have no legacy counterpart and are kept as platform-only additions. Testers now SELECT from this catalog (`skillIds`) rather than typing a skill into existence — creation is admin-only, via `catalog.routes.ts`.
 
 | Legacy column | Type | Null | Default | Legacy comment |
 | --- | --- | --- | --- | --- |

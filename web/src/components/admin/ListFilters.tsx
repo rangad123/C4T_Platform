@@ -2,6 +2,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Button } from '@/components/ds/core/Button'
+import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { titleCase } from '@/lib/admin/format'
 
 export interface SelectFilter {
@@ -63,21 +64,38 @@ export interface ListFiltersProps {
   texts?: readonly TextFilter[]
   /** Optional "sort by" + direction pair. Omit for a list with a single fixed order. */
   sort?: SortFilter
+  /**
+   * Query params to carry through unchanged — a `SectionTabs` value, most
+   * commonly. Without this, submitting the filter form drops whatever tab
+   * you were on and lands back on the default one, since a plain GET form
+   * only ever sends its own named fields.
+   */
+  hidden?: Record<string, string | undefined>
 }
 
 /**
  * The filter strip above an admin table.
  *
- * A plain GET form, so filtering is a navigation: the URL always describes what
- * you are looking at, the back button works, and the result is linkable and
- * bookmarkable. That keeps the whole list page a Server Component — no client
- * state, no `useSearchParams`, no hydration for a control that only ever
- * produces a URL.
+ * A GET form (via `LiveGetForm`), so filtering is still a navigation: the URL
+ * always describes what you are looking at, and the result is linkable and
+ * bookmarkable. The list page itself stays a plain Server Component reading
+ * `searchParams` exactly as before — only this strip needs to be a client
+ * boundary, since only it needs to react to a field changing.
  *
- * The Clear link only appears when something is actually applied, so the strip
- * does not offer to undo nothing.
+ * Every field applies itself (immediately for a select, debounced for text),
+ * so there is no separate "Filter" button to click — `LiveFormStatus` shows a
+ * small "Updating…" in its place while a change is in flight. The Clear link
+ * only appears when something is actually applied, so the strip does not
+ * offer to undo nothing.
  */
-export function ListFilters({ action, search, selects = [], texts = [], sort }: ListFiltersProps) {
+export function ListFilters({
+  action,
+  search,
+  selects = [],
+  texts = [],
+  sort,
+  hidden,
+}: ListFiltersProps) {
   const hasApplied =
     Boolean(search?.value) ||
     selects.some((s) => s.value) ||
@@ -94,8 +112,7 @@ export function ListFilters({ action, search, selects = [], texts = [], sort }: 
   ].join(' ')
 
   return (
-    <form
-      method="get"
+    <LiveGetForm
       action={action}
       style={{
         display: 'grid',
@@ -104,6 +121,9 @@ export function ListFilters({ action, search, selects = [], texts = [], sort }: 
         alignItems: 'end',
       }}
     >
+      {Object.entries(hidden ?? {}).map(([name, value]) =>
+        value ? <input key={name} type="hidden" name={name} value={value} /> : null,
+      )}
       {search ? (
         <Field label="Search" htmlFor="search">
           <Input
@@ -168,16 +188,14 @@ export function ListFilters({ action, search, selects = [], texts = [], sort }: 
         </>
       ) : null}
 
-      <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-        <Button type="submit" variant="primary" iconLeft="filter">
-          Filter
-        </Button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        <LiveFormStatus />
         {hasApplied ? (
           <Button href={action} type="button" variant="ghost">
-              Clear
-            </Button>
+            Clear
+          </Button>
         ) : null}
       </div>
-    </form>
+    </LiveGetForm>
   )
 }

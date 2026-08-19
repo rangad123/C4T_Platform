@@ -20,13 +20,30 @@ import { formString, formTrimmed } from '@/lib/form-data'
  * the permission is re-checked here rather than trusted from the render that
  * produced the form.
  *
- * PATCH transactions/:id accepts exactly four fields — status, description,
- * externalRef, settledAt. Amount, currency, type and the linked records are
- * immutable by design: correcting a wrong amount means recording an ADJUSTMENT
- * against it, which is what keeps the ledger auditable.
+ * PATCH transactions/:id accepts status, description, externalRef, settledAt,
+ * plus (§21-27) paymentMethod, paymentAccountId, paidAmountMinor,
+ * tdsAmountMinor, buildOrContestRef. Amount, currency, type and the linked
+ * records are immutable by design: correcting a wrong amount means recording
+ * an ADJUSTMENT against it, which is what keeps the ledger auditable.
  */
 
 const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'] as const
+const PAYMENT_METHODS = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
+
+/**
+ * Major units → minor units, by string surgery rather than `amount * 100` —
+ * same reasoning and same shape as `toMinorUnits` in `new/page.tsx` (IEEE 754
+ * makes `19.99 * 100` come out `1998.9999999999998`). Null for empty/zero,
+ * which the caller below treats as "no change" for these optional fields.
+ */
+function toMinorUnitsOrNull(input: string): string | null {
+  const cleaned = input.replace(/[\s,]/g, '')
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null
+  const [whole, fraction = ''] = cleaned.split('.')
+  const minor = `${whole}${`${fraction}00`.slice(0, 2)}`.replace(/^0+(?=\d)/, '')
+  if (/^0+$/.test(minor) || minor.length > 15) return null
+  return minor
+}
 
 /** A `<input type="date">` value. Sent as-is, so it lands on UTC midnight. */
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
@@ -88,6 +105,39 @@ export async function saveTransactionDetails(formData: FormData): Promise<void> 
     body: {
       description: formTrimmed(formData, 'description').slice(0, 1000),
       externalRef: formTrimmed(formData, 'externalRef').slice(0, 120),
+    },
+  })
+
+  revalidate(id)
+}
+
+/**
+ * §21-27's payout fields. Unlike `saveTransactionDetails`, the two amount
+ * fields are OMITTED rather than sent as `''` when blank — the API types them
+ * as `z.coerce.bigint()`, which throws on an empty string instead of treating
+ * it as "clear this field" the way the string fields above do. Leaving a
+ * money field blank here means "no change", not "set to zero".
+ */
+export async function savePayoutDetails(formData: FormData): Promise<void> {
+  await requirePermission('transaction.write')
+
+  const id = formTrimmed(formData, 'id')
+  if (!id) return
+
+  const paymentMethod = formTrimmed(formData, 'paymentMethod')
+  const paidAmountMinor = toMinorUnitsOrNull(formTrimmed(formData, 'paidAmount'))
+  const tdsAmountMinor = toMinorUnitsOrNull(formTrimmed(formData, 'tdsAmount'))
+  const buildOrContestRef = formTrimmed(formData, 'buildOrContestRef')
+
+  await serverFetch<{ id: string }>(`transactions/${id}`, {
+    method: 'PATCH',
+    body: {
+      ...((PAYMENT_METHODS as readonly string[]).includes(paymentMethod)
+        ? { paymentMethod }
+        : {}),
+      ...(paidAmountMinor ? { paidAmountMinor } : {}),
+      ...(tdsAmountMinor ? { tdsAmountMinor } : {}),
+      buildOrContestRef: buildOrContestRef.slice(0, 160),
     },
   })
 

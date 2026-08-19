@@ -136,9 +136,10 @@ export async function inviteTesters(formData: FormData): Promise<void> {
   if (testerIds.length === 0) return
 
   const notes = formTrimmed(formData, 'notes')
+  const buildId = formTrimmed(formData, 'buildId')
   await serverFetch(`projects/${id}/assignments`, {
     method: 'POST',
-    body: { testerIds, ...(notes ? { notes } : {}) },
+    body: { testerIds, ...(notes ? { notes } : {}), ...(buildId ? { buildId } : {}) },
   })
   revalidateProject(id)
 }
@@ -171,6 +172,7 @@ export async function addMaterial(formData: FormData): Promise<void> {
   const description = formTrimmed(formData, 'description')
   const url = formTrimmed(formData, 'url')
   const fileId = formTrimmed(formData, 'fileId')
+  const buildId = formTrimmed(formData, 'buildId')
   if (!url && !fileId) return
 
   await serverFetch(`projects/${id}/materials`, {
@@ -180,6 +182,7 @@ export async function addMaterial(formData: FormData): Promise<void> {
       ...(description ? { description } : {}),
       ...(url ? { url } : {}),
       ...(fileId ? { fileId } : {}),
+      ...(buildId ? { buildId } : {}),
     },
   })
   revalidateProject(id)
@@ -200,7 +203,11 @@ export async function addFeature(formData: FormData): Promise<void> {
   const name = formTrimmed(formData, 'name')
   if (!id || !name) return
 
-  await serverFetch(`projects/${id}/features`, { method: 'POST', body: { name } })
+  const buildId = formTrimmed(formData, 'buildId')
+  await serverFetch(`projects/${id}/features`, {
+    method: 'POST',
+    body: { name, ...(buildId ? { buildId } : {}) },
+  })
   revalidateProject(id)
 }
 
@@ -233,4 +240,121 @@ export async function archiveProject(formData: FormData): Promise<void> {
   // `redirect` throws to unwind — it must be the last statement and must not sit
   // inside a try/catch.
   redirect('/app/admin/projects')
+}
+
+// ─── Builds ────────────────────────────────────────────────────────────────
+
+/**
+ * A new build is also a navigation: the reader almost always wants to land
+ * looking at what they just created, not stay on whichever build they were
+ * viewing before. `section` rides along as a hidden field so switching
+ * builds does not also bounce back to the Overview tab.
+ */
+export async function createBuild(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const name = formTrimmed(formData, 'name')
+  if (!id || !name) return
+
+  const section = formTrimmed(formData, 'section')
+
+  const build = await serverFetch<{ id: string }>(`projects/${id}/builds`, {
+    method: 'POST',
+    body: { name },
+  })
+  revalidateProject(id)
+
+  const params = new URLSearchParams({ buildId: build.id })
+  if (section) params.set('section', section)
+  redirect(`/app/admin/projects/${id}?${params.toString()}`)
+}
+
+export async function renameBuild(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  const name = formTrimmed(formData, 'name')
+  if (!id || !buildId || !name) return
+
+  await serverFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
+  revalidateProject(id)
+}
+
+/**
+ * The full Build Details form — §6 of the platform UX brief. Every field is
+ * optional at the API, so a blank input clears it (matching
+ * `updateProjectBrief`'s convention) rather than being dropped from the body.
+ */
+export async function updateBuild(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  if (!id || !buildId) return
+
+  const name = formTrimmed(formData, 'name')
+  const body: Record<string, unknown> = {
+    status: formTrimmed(formData, 'status'),
+    testType: formTrimmed(formData, 'testType') || null,
+    description: formTrimmed(formData, 'description') || null,
+    appUrl: formTrimmed(formData, 'appUrl') || null,
+    releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
+    instructions: formTrimmed(formData, 'instructions') || null,
+    specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
+    targetDevices: parseList(formString(formData, 'targetDevices')),
+    targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
+    targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
+    targetCountries: parseList(formString(formData, 'targetCountries')).map((c) => c.toUpperCase()),
+    targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) => l.toLowerCase()),
+    startDate: formTrimmed(formData, 'startDate') || null,
+    endDate: formTrimmed(formData, 'endDate') || null,
+    testersCanSeeOtherBugs: formData.has('testersCanSeeOtherBugs'),
+  }
+  if (name) body.name = name
+  const maxTesters = formTrimmed(formData, 'maxTesters')
+  body.maxTesters = maxTesters ? maxTesters : null
+
+  await serverFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
+  revalidateProject(id)
+}
+
+/** §7 "Copy Build" — lands on the new copy, on the build-details tab. */
+export async function copyBuild(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  if (!id || !buildId) return
+
+  const copy = await serverFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
+    method: 'POST',
+  })
+  revalidateProject(id)
+  redirect(`/app/admin/projects/${id}?section=build&buildId=${copy.id}`)
+}
+
+// ─── Structured testing workflow ──────────────────────────────────────────
+
+export async function createTestCase(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  const title = formTrimmed(formData, 'title')
+  const description = formTrimmed(formData, 'description')
+  const steps = formTrimmed(formData, 'steps')
+  const expectedResult = formTrimmed(formData, 'expectedResult')
+  if (!id || !buildId || !title || !description || !steps || !expectedResult) return
+
+  const feature = formTrimmed(formData, 'feature')
+  await serverFetch('test-cases', {
+    method: 'POST',
+    body: { buildId, title, description, steps, expectedResult, ...(feature ? { feature } : {}) },
+  })
+  revalidateProject(id)
+}
+
+export async function assignTestCase(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const testCaseId = formTrimmed(formData, 'testCaseId')
+  const testerId = formTrimmed(formData, 'testerId')
+  if (!id || !testCaseId || !testerId) return
+
+  await serverFetch(`test-cases/${testCaseId}/assignments`, {
+    method: 'POST',
+    body: { testerIds: [testerId] },
+  })
+  revalidateProject(id)
 }

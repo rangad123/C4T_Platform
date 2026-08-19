@@ -6,6 +6,7 @@ import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
 import { StatusBadge, SeverityBadge, RoleBadge } from '@/components/admin/StatusBadge'
+import { Modal } from '@/components/admin/Modal'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { Icon } from '@/components/ds/core/Icon'
@@ -268,12 +269,12 @@ export default async function BugDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; section?: string }>
+  searchParams: Promise<{ error?: string; section?: string; edit?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
   const { id } = await params
-  const { error, section: rawSection } = await searchParams
+  const { error, section: rawSection, edit } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let bug: BugDetail
@@ -332,6 +333,17 @@ export default async function BugDetailPage({
     `projects/${bug.project.id}/features`,
   )
   const isDuplicate = bug.status === 'DUPLICATE' || bug.duplicateOfId !== null
+
+  // The URL to land on when a modal closes -- this page, on whichever
+  // section the reader was already on, with `edit`/`error` stripped. A
+  // modal's open state also reopens on a rejected submit -- `error` already
+  // carries which panel failed ("triage:reason"), so no change is needed
+  // to the redirects in actions.ts to make that work.
+  const detailPath = `${LIST_PATH}/${bug.id}`
+  const closedHref = section === SECTIONS[0].value ? detailPath : `${detailPath}?section=${section}`
+  const triageModalOpen = edit === 'triage' || Boolean(error?.startsWith('triage:'))
+  const classificationModalOpen = edit === 'classification' || Boolean(error?.startsWith('triage:'))
+  const statusModalOpen = edit === 'status' || Boolean(error?.startsWith('status:'))
 
   const reportItems: DescriptionItem[] = [
     {
@@ -431,8 +443,26 @@ export default async function BugDetailPage({
           <Panel
             title="Triage"
             description="Severity is the platform's judgement, not the customer's."
+            actions={
+              capabilities.canChangeSeverity ? (
+                <Button href={`${detailPath}?section=${section}&edit=triage`} variant="secondary" size="sm">
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
             {capabilities.canChangeSeverity ? (
+              <SeverityBadge severity={bug.severity} />
+            ) : (
+              <Note>
+                Only an administrator or the project&rsquo;s manager can re-grade severity. Ask for
+                the bug.triage permission.
+              </Note>
+            )}
+          </Panel>
+
+          {capabilities.canChangeSeverity ? (
+            <Modal open={triageModalOpen} closedHref={closedHref} title="Triage">
               <form action={triageBugSeverity} style={FORM_STYLE}>
                 <input type="hidden" name="id" value={bug.id} />
                 <input type="hidden" name="currentSeverity" value={bug.severity} />
@@ -453,20 +483,40 @@ export default async function BugDetailPage({
                   Save severity
                 </Button>
               </form>
-            ) : (
-              <Note>
-                Only an administrator or the project&rsquo;s manager can re-grade severity. Ask for
-                the bug.triage permission.
-              </Note>
-            )}
-          </Panel>
+            </Modal>
+          ) : null}
 
           {/* ── Classification: type + feature ───────────────────────────── */}
           <Panel
             title="Classification"
             description="What kind of defect this is, and which part of the product it's in."
+            actions={
+              capabilities.canChangeSeverity ? (
+                <Button
+                  href={`${detailPath}?section=${section}&edit=classification`}
+                  variant="secondary"
+                  size="sm"
+                >
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
             {capabilities.canChangeSeverity ? (
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+                {[bug.type ? titleCase(bug.type) : null, bug.feature?.name].filter(Boolean).join(' · ') ||
+                  'Not classified yet.'}
+              </p>
+            ) : (
+              <Note>
+                Only an administrator or the project&rsquo;s manager can reclassify a bug. Ask for
+                the bug.triage permission.
+              </Note>
+            )}
+          </Panel>
+
+          {capabilities.canChangeSeverity ? (
+            <Modal open={classificationModalOpen} closedHref={closedHref} title="Classification">
               <TrackedForm action={updateBugClassification} style={FORM_STYLE}>
                 <input type="hidden" name="id" value={bug.id} />
                 <FormError message={panelError(error, 'triage')} />
@@ -496,18 +546,20 @@ export default async function BugDetailPage({
                   Save classification
                 </Button>
               </TrackedForm>
-            ) : (
-              <Note>
-                Only an administrator or the project&rsquo;s manager can reclassify a bug. Ask for
-                the bug.triage permission.
-              </Note>
-            )}
-          </Panel>
+            </Modal>
+          ) : null}
 
           {/* ── Status: the lifecycle ────────────────────────────────────── */}
           <Panel
             title="Status"
             description="Only the moves the API will accept from this status are listed."
+            actions={
+              transitions.length > 0 ? (
+                <Button href={`${detailPath}?section=${section}&edit=status`} variant="secondary" size="sm">
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               {isDuplicate ? (
@@ -550,68 +602,74 @@ export default async function BugDetailPage({
                   role. An administrator can reopen the report if it needs to move again.
                 </Note>
               ) : (
-                <TrackedForm action={moveBugStatus} style={FORM_STYLE}>
-                  <input type="hidden" name="id" value={bug.id} />
-                  <FormError message={panelError(error, 'status')} />
-
-                  <Field label="Move to" htmlFor="status" required>
-                    <Select
-                      id="status"
-                      name="status"
-                      required
-                      placeholder="Choose a move"
-                      options={transitions.map((value) => ({
-                        value,
-                        label: titleCase(value),
-                      }))}
-                    />
-                  </Field>
-
-                  {canMarkDuplicate ? (
-                    <Field
-                      label="Duplicate of"
-                      htmlFor="duplicateOfId"
-                      hint="Required when marking a duplicate. Paste the id of the earlier bug — it must be on this project."
-                    >
-                      <Input
-                        id="duplicateOfId"
-                        name="duplicateOfId"
-                        defaultValue={bug.duplicateOfId ?? ''}
-                        placeholder="Bug id"
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </Field>
-                  ) : null}
-
-                  {isDuplicate && !canMarkDuplicate ? (
-                    <Checkbox
-                      name="clearDuplicate"
-                      label="Clear the duplicate link"
-                      description="A duplicate reference only means something while the status is duplicate."
-                    />
-                  ) : null}
-
-                  <Field
-                    label="Note"
-                    htmlFor="note"
-                    hint="Recorded against the move and sent to the reporter. Required when rejecting a bug or marking it won’t fix."
-                  >
-                    <Textarea
-                      id="note"
-                      name="note"
-                      rows={4}
-                      placeholder="What did you find, and what happens next?"
-                    />
-                  </Field>
-
-                  <Button type="submit" variant="primary" fullWidth>
-                    Save status
-                  </Button>
-                </TrackedForm>
+                <StatusBadge status={bug.status} />
               )}
             </div>
           </Panel>
+
+          {transitions.length > 0 ? (
+            <Modal open={statusModalOpen} closedHref={closedHref} title="Move status">
+              <TrackedForm action={moveBugStatus} style={FORM_STYLE}>
+                <input type="hidden" name="id" value={bug.id} />
+                <FormError message={panelError(error, 'status')} />
+
+                <Field label="Move to" htmlFor="status" required>
+                  <Select
+                    id="status"
+                    name="status"
+                    required
+                    placeholder="Choose a move"
+                    options={transitions.map((value) => ({
+                      value,
+                      label: titleCase(value),
+                    }))}
+                  />
+                </Field>
+
+                {canMarkDuplicate ? (
+                  <Field
+                    label="Duplicate of"
+                    htmlFor="duplicateOfId"
+                    hint="Required when marking a duplicate. Paste the id of the earlier bug — it must be on this project."
+                  >
+                    <Input
+                      id="duplicateOfId"
+                      name="duplicateOfId"
+                      defaultValue={bug.duplicateOfId ?? ''}
+                      placeholder="Bug id"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </Field>
+                ) : null}
+
+                {isDuplicate && !canMarkDuplicate ? (
+                  <Checkbox
+                    name="clearDuplicate"
+                    label="Clear the duplicate link"
+                    description="A duplicate reference only means something while the status is duplicate."
+                  />
+                ) : null}
+
+                <Field
+                  label="Note"
+                  htmlFor="note"
+                  hint="Recorded against the move and sent to the reporter. Required when rejecting a bug or marking it won’t fix."
+                >
+                  <Textarea
+                    id="note"
+                    name="note"
+                    rows={4}
+                    placeholder="What did you find, and what happens next?"
+                  />
+                </Field>
+
+                <Button type="submit" variant="primary" fullWidth>
+                  Save status
+                </Button>
+              </TrackedForm>
+            </Modal>
+          ) : null}
 
           {/* ── Metadata ─────────────────────────────────────────────────── */}
           <Panel title="Details">

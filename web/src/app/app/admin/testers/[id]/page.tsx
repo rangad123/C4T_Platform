@@ -7,7 +7,7 @@ import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { Avatar } from '@/components/admin/Avatar'
 import { CountryFlag } from '@/components/admin/CountryFlag'
-import { StatusBadge } from '@/components/admin/StatusBadge'
+import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { Pagination } from '@/components/ds/admin/Pagination'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
@@ -19,10 +19,12 @@ import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission, hasPermission } from '@/lib/auth/session'
-import { serverFetch } from '@/lib/api/server'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
+import { RevealPaymentDetails } from '@/components/admin/RevealPaymentDetails'
+import { Modal } from '@/components/admin/Modal'
 import { loadList, parsePage } from '@/lib/admin/list'
 import { ApiError } from '@/lib/api/types'
-import { formatDate, personName, stars, titleCase } from '@/lib/admin/format'
+import { formatDate, formatMoney, personName, stars, titleCase } from '@/lib/admin/format'
 import { setTesterStatus, rejectTester } from './actions'
 
 /**
@@ -119,6 +121,25 @@ interface RatingRow {
   isVisible: boolean
   createdAt: string
   author: { id: string; firstName: string | null; lastName: string | null; role: string } | null
+  project: { id: string; reference: string; title: string } | null
+}
+
+interface PlatformProjectRow {
+  id: string
+  reference: string
+  title: string
+  status: string
+  createdAt: string
+  organisation: { id: string; name: string } | null
+}
+
+interface ReportedBugRow {
+  id: string
+  reference: string
+  title: string
+  severity: string
+  status: string
+  createdAt: string
   project: { id: string; reference: string; title: string } | null
 }
 
@@ -230,6 +251,46 @@ const workHistoryColumns: readonly TableColumn<WorkHistoryEntry>[] = [
   },
 ]
 
+const platformProjectColumns: readonly TableColumn<PlatformProjectRow>[] = [
+  {
+    key: 'title',
+    header: 'Project',
+    render: (row) => row.title,
+    renderSecondary: (row) => [row.reference, row.organisation?.name].filter(Boolean).join(' · '),
+  },
+  { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+  { key: 'created', header: 'Raised', align: 'right', render: (row) => formatDate(row.createdAt) },
+]
+
+const reportedBugColumns: readonly TableColumn<ReportedBugRow>[] = [
+  {
+    key: 'title',
+    header: 'Bug',
+    render: (row) => row.title,
+    renderSecondary: (row) => [row.reference, row.project?.reference].filter(Boolean).join(' · '),
+  },
+  { key: 'severity', header: 'Severity', render: (row) => <SeverityBadge severity={row.severity} /> },
+  { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+  { key: 'reported', header: 'Reported', align: 'right', render: (row) => formatDate(row.createdAt) },
+]
+
+const paymentHistoryColumns: readonly TableColumn<PaymentHistoryRow>[] = [
+  {
+    key: 'reference',
+    header: 'Transaction',
+    render: (row) => row.reference,
+    renderSecondary: (row) => titleCase(row.type),
+  },
+  { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+  {
+    key: 'amount',
+    header: 'Amount',
+    align: 'right',
+    render: (row) => formatMoney(row.amountMinor, row.currency),
+  },
+  { key: 'date', header: 'Date', align: 'right', render: (row) => formatDate(row.createdAt) },
+]
+
 const ratingColumns: readonly TableColumn<RatingRow>[] = [
   { key: 'score', header: 'Score', width: 130, render: (row) => <Score score={row.score} /> },
   {
@@ -275,20 +336,43 @@ const SECTIONS = [
   { value: 'devices', label: 'Devices', icon: 'smartphone' },
   { value: 'skills', label: 'Skills and languages', icon: 'briefcase' },
   { value: 'work', label: 'Work history', icon: 'clipboard-check' },
+  { value: 'payment', label: 'Payment details', icon: 'credit-card' },
   { value: 'ratings', label: 'Ratings', icon: 'star' },
 ] as const
+
+interface PaymentAccountDetail {
+  id: string
+  country: string
+  paymentType: string
+  status: string
+  bankName: string | null
+  branchName: string | null
+  accountNumberLast4: string | null
+  paypalEmailMasked: string | null
+  paytmNumberLast4: string | null
+}
+
+interface PaymentHistoryRow {
+  id: string
+  reference: string
+  type: string
+  status: string
+  amountMinor: string
+  currency: string
+  createdAt: string
+}
 
 export default async function TesterDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ ratingsPage?: string; section?: string }>
+  searchParams: Promise<{ ratingsPage?: string; section?: string; edit?: string }>
 }) {
   const viewer = await requirePermission('tester.read')
 
   const { id } = await params
-  const { ratingsPage, section: rawSection } = await searchParams
+  const { ratingsPage, section: rawSection, edit } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let tester: TesterDetail | null = null
@@ -340,7 +424,33 @@ export default async function TesterDetailPage({
   }
 
   const detailPath = `${BASE}/${tester.id}`
+  // The URL to land on when a modal closes -- this page, on whichever
+  // section the user was already on, with `edit` (and any error/echo
+  // params a rejected submit added) stripped.
+  const closedHref = section === SECTIONS[0].value ? detailPath : `${detailPath}?section=${section}`
+  const verificationModalOpen = edit === 'verification'
   const canVerify = hasPermission(viewer, 'tester.verify')
+  const canDecryptPayment = hasPermission(viewer, 'payment_account.decrypt')
+  const paymentAccount = await serverFetchOrNull<PaymentAccountDetail | null>(
+    `payment-accounts?userId=${tester.user.id}`,
+  )
+
+  // §23 "Account details" — payment HISTORY, not just the payout instrument
+  // above. Reuses the exact Transaction rows the Transactions module already
+  // tracks for this tester as counterparty.
+  const canReadTransactions = hasPermission(viewer, 'transaction.read')
+  const paymentHistory = canReadTransactions
+    ? await loadList<PaymentHistoryRow>('transactions', {
+        page: 1,
+        limit: 10,
+        query: {
+          counterpartyId: tester.user.id,
+          type: 'TESTER_EARNING,TESTER_PAYOUT',
+          sort: 'createdAt',
+          order: 'desc',
+        },
+      })
+    : ({ error: 'forbidden' as const })
 
   // Ratings are keyed by user id, not profile id.
   const ratings = await loadList<RatingRow>('ratings', {
@@ -348,6 +458,22 @@ export default async function TesterDetailPage({
     limit: RATINGS_PAGE_SIZE,
     query: { subjectUserId: tester.user.id },
   })
+
+  // §23 "Work history" — actual platform activity, alongside the tester's
+  // own self-reported prior experience below. Both use tester.user.id: the
+  // projects/bugs relations key on User.id, not the tester profile's id.
+  const [platformProjects, reportedBugs] = await Promise.all([
+    loadList<PlatformProjectRow>('projects', {
+      page: 1,
+      limit: 25,
+      query: { testerId: tester.user.id, sort: 'createdAt', order: 'desc' },
+    }),
+    loadList<ReportedBugRow>('bugs', {
+      page: 1,
+      limit: 10,
+      query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
+    }),
+  ])
 
   const ratingRows = 'error' in ratings ? [] : ratings.items
   const average = toRating(tester.ratingAverage)
@@ -389,8 +515,44 @@ export default async function TesterDetailPage({
           <Panel
             title="Verification"
             description="Where this application sits in review. We notify the tester on every change."
+            actions={
+              canVerify ? (
+                <Button href={`${detailPath}?section=${section}&edit=verification`} variant="secondary" size="sm">
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
             {canVerify ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                <StatusBadge status={tester.status} />
+                {tester.rejectionReason ? (
+                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+                    {tester.rejectionReason}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 'var(--space-3)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--type-body-sm-size)',
+                  lineHeight: 1.55,
+                }}
+              >
+                <Icon name="lock" size={20} style={{ flexShrink: 0 }} />
+                <p style={{ margin: 0 }}>
+                  Ask an administrator to grant you the tester.verify permission. It covers
+                  verifying, rejecting, suspending and reinstating a tester.
+                </p>
+              </div>
+            )}
+          </Panel>
+
+          {canVerify ? (
+            <Modal open={verificationModalOpen} closedHref={closedHref} title="Verification">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-7)' }}>
                 <TrackedForm action={setTesterStatus} style={FORM_STYLE}>
                   <input type="hidden" name="id" value={tester.id} />
@@ -454,24 +616,8 @@ export default async function TesterDetailPage({
                   </Button>
                 </form>
               </div>
-            ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 'var(--space-3)',
-                  color: 'var(--text-secondary)',
-                  fontSize: 'var(--type-body-sm-size)',
-                  lineHeight: 1.55,
-                }}
-              >
-                <Icon name="lock" size={20} style={{ flexShrink: 0 }} />
-                <p style={{ margin: 0 }}>
-                  Ask an administrator to grant you the tester.verify permission. It covers
-                  verifying, rejecting, suspending and reinstating a tester.
-                </p>
-              </div>
-            )}
-          </Panel>
+            </Modal>
+          ) : null}
 
           <Panel
             title="Performance"
@@ -578,19 +724,63 @@ export default async function TesterDetailPage({
       {section === 'work' ? (
         <>
           <Panel
-            title="Work history"
-            description="Prior testing and QA experience, maintained by the tester on their own profile."
+            title="Projects on this platform"
+            description="Every project this tester has been assigned to, across every status."
+            flush={'items' in platformProjects && platformProjects.items.length > 0}
+          >
+            {'error' in platformProjects ? (
+              <Muted>Projects could not be loaded.</Muted>
+            ) : platformProjects.items.length === 0 ? (
+              <Muted>Not assigned to a project yet.</Muted>
+            ) : (
+              <Table
+                ariaLabel="Projects on this platform"
+                columns={platformProjectColumns}
+                rows={platformProjects.items}
+                rowKey={(row) => row.id}
+                rowHref={(row) => `/app/admin/projects/${row.id}`}
+              />
+            )}
+          </Panel>
+
+          <Panel
+            title="Bugs reported"
+            description={
+              tester.bugsReportedCount > 10
+                ? `The 10 most recent of ${tester.bugsReportedCount} reports.`
+                : `${tester.bugsReportedCount} report${tester.bugsReportedCount === 1 ? '' : 's'}.`
+            }
+            flush={'items' in reportedBugs && reportedBugs.items.length > 0}
+          >
+            {'error' in reportedBugs ? (
+              <Muted>Bugs could not be loaded.</Muted>
+            ) : reportedBugs.items.length === 0 ? (
+              <Muted>No bugs reported yet.</Muted>
+            ) : (
+              <Table
+                ariaLabel="Bugs reported"
+                columns={reportedBugColumns}
+                rows={reportedBugs.items}
+                rowKey={(row) => row.id}
+                rowHref={(row) => `/app/admin/bugs/${row.id}`}
+              />
+            )}
+          </Panel>
+
+          <Panel
+            title="Prior experience"
+            description="Testing and QA experience before this platform, maintained by the tester on their own profile."
             flush={tester.workHistory.length > 0}
           >
             {tester.workHistory.length > 0 ? (
               <Table
-                ariaLabel="Work history"
+                ariaLabel="Prior experience"
                 columns={workHistoryColumns}
                 rows={tester.workHistory}
                 rowKey={(entry) => entry.id}
               />
             ) : (
-              <Muted>No work history listed yet.</Muted>
+              <Muted>No prior experience listed yet.</Muted>
             )}
           </Panel>
         </>
@@ -671,6 +861,77 @@ export default async function TesterDetailPage({
                 )}
               </div>
             </div>
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'payment' ? (
+        <>
+          <Panel
+            title="Payment details"
+            description="Where this tester's earnings get paid out. Maintained by the tester on their own profile. Sensitive fields are encrypted at rest and shown masked here by default."
+          >
+            {!paymentAccount ? (
+              <Muted>No payment details on file yet.</Muted>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                <DescriptionList
+                  items={[
+                    { label: 'Country', value: titleCase(paymentAccount.country) },
+                    { label: 'Payout method', value: titleCase(paymentAccount.paymentType) },
+                    { label: 'Status', value: titleCase(paymentAccount.status) },
+                    ...(paymentAccount.bankName
+                      ? [{ label: 'Bank', value: paymentAccount.bankName }]
+                      : []),
+                    ...(paymentAccount.branchName
+                      ? [{ label: 'Branch', value: paymentAccount.branchName }]
+                      : []),
+                    ...(paymentAccount.accountNumberLast4
+                      ? [{ label: 'Account number', value: `•••• ${paymentAccount.accountNumberLast4}` }]
+                      : []),
+                    ...(paymentAccount.paypalEmailMasked
+                      ? [{ label: 'PayPal', value: paymentAccount.paypalEmailMasked }]
+                      : []),
+                    ...(paymentAccount.paytmNumberLast4
+                      ? [{ label: 'Paytm', value: `•••• ${paymentAccount.paytmNumberLast4}` }]
+                      : []),
+                  ]}
+                />
+
+                {canDecryptPayment ? (
+                  <RevealPaymentDetails paymentAccountId={paymentAccount.id} />
+                ) : (
+                  <Muted>
+                    Ask an administrator to grant you the payment_account.decrypt permission to view
+                    decrypted details.
+                  </Muted>
+                )}
+              </div>
+            )}
+          </Panel>
+
+          <Panel
+            title="Payment history"
+            description="Earnings and payouts recorded against this tester. The same rows the Transactions module tracks, filtered to this tester."
+            flush={'items' in paymentHistory && paymentHistory.items.length > 0}
+          >
+            {'error' in paymentHistory ? (
+              <Muted>
+                {paymentHistory.error === 'forbidden'
+                  ? 'Ask an administrator to grant you the transaction.read permission.'
+                  : 'The transactions service is unreachable. Refresh in a moment.'}
+              </Muted>
+            ) : paymentHistory.items.length === 0 ? (
+              <Muted>No earnings or payouts recorded yet.</Muted>
+            ) : (
+              <Table
+                ariaLabel="Payment history"
+                columns={paymentHistoryColumns}
+                rows={paymentHistory.items}
+                rowKey={(row) => row.id}
+                rowHref={(row) => `/app/admin/transactions/${row.id}`}
+              />
+            )}
           </Panel>
         </>
       ) : null}

@@ -1,72 +1,169 @@
 import Link from 'next/link'
-import { requireRole, hasPermission } from '@/lib/auth/session'
-import { serverFetchPage } from '@/lib/api/server'
+import { requireRole } from '@/lib/auth/session'
+import { serverFetchOrNull } from '@/lib/api/server'
 import { Topbar } from '@/components/admin/Topbar'
+import { Icon } from '@/components/ds/core/Icon'
+import type { IconName } from '@/components/ds/core/icon-registry'
+import { BarChart, type BarSegment } from '@/components/admin/charts/BarChart'
+import { DonutChart } from '@/components/admin/charts/DonutChart'
+import { statusTone, severityTone } from '@/components/admin/StatusBadge'
+import { titleCase, formatMoney } from '@/lib/admin/format'
 
 /**
  * The admin landing — where ADMIN and SUB_ADMIN arrive after sign-in.
  *
- * Slice A ships the leads inbox only, so this is a set of lead counts and one
- * prominent way into the list. It becomes a real dashboard when the other
- * admin areas land.
+ * One fetch, real numbers. Every figure on this page comes from
+ * `GET /v1/stats/admin` (`api/src/modules/stats/stats.routes.ts`), which
+ * already existed and already aggregated projects/bugs/testers/orgs/users —
+ * this pass only added a `leads` block (reusing the exact groupBy the old
+ * version of this page ran as four separate `GET /leads?limit=1` calls) and
+ * a `payouts.byCategory` block (reusing the Indian/International/Pending
+ * `categoryFilter` the Transactions module already built). Nothing here is
+ * mocked or hardcoded — a zero on this page is a real zero.
  *
- * ── Why the counts are not read from /v1/stats/admin
- *
- * That endpoint returns projects, bugs, testers, organisations, users and
- * finance — but NO leads. Rather than add a field to the API for one card,
- * each count comes from the leads list itself: `limit=1` with a status
- * filter, reading `meta.total`. The rows are discarded; only the count is
- * used. Four small queries in parallel, and no API change to keep in sync.
- *
- * If the leads dashboard grows past a handful of tiles, move this into a
- * `GET /v1/leads/stats` that does one `groupBy` instead.
+ * `leads` is `null`, not a row of zeros, when the caller lacks `lead.read` —
+ * the API omits it deliberately (see the route's own comment) so a
+ * permission gap never reads as "no leads exist".
  */
 
-const COUNTED_STATUSES = [
-  { status: 'NEW', label: 'New' },
-  { status: 'CONTACTED', label: 'In conversation' },
-  { status: 'QUALIFIED', label: 'Qualified' },
-  { status: 'WON', label: 'Won' },
-] as const
-
-async function countLeads(status: string): Promise<number | null> {
-  try {
-    // `serverFetchPage` keeps `meta`; `serverFetch`/`serverFetchOrNull` unwrap
-    // to `data` and discard it, so the total would always read as null here.
-    const response = await serverFetchPage<unknown>('leads', {
-      query: { status, limit: 1 },
-    })
-    return response.meta?.total ?? null
-  } catch {
-    // A tile that cannot be counted shows an em dash, not a zero. See StatCard.
-    return null
+interface StatsResponse {
+  projects: { byStatus: Record<string, number>; newLast30Days: number }
+  bugs: {
+    byStatus: Record<string, number>
+    bySeverity: Record<string, number>
+    openCritical: number
+    newLast30Days: number
   }
+  testers: { byStatus: Record<string, number> }
+  organisations: { byStatus: Record<string, number> }
+  users: { byRole: Record<string, number> }
+  leads: Record<string, number> | null
+  finance: { currency: string; collectedMinor: string; paidOutMinor: string }
+  payouts: { currency: string; byCategory: { indian: string; international: string; pending: string } }
+}
+
+function segmentsFromCounts(
+  counts: Record<string, number>,
+  tone: (key: string) => string,
+): BarSegment[] {
+  return Object.entries(counts)
+    .filter(([, value]) => value > 0)
+    .map(([key, value]) => ({
+      label: titleCase(key),
+      value,
+      tone: tone(key) as BarSegment['tone'],
+    }))
+}
+
+function KpiCard({
+  icon,
+  label,
+  value,
+  href,
+}: {
+  icon: IconName
+  label: string
+  value: string | number
+  href: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="c4t-card-hover"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--space-2)',
+        padding: 'var(--space-5)',
+        background: 'var(--surface-raised)',
+        border: '1px solid var(--border-default)',
+        borderRadius: 'var(--radius-card)',
+        textDecoration: 'none',
+        color: 'inherit',
+        transition: 'var(--transition-surface)',
+      }}
+    >
+      <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <Icon name={icon} size={16} style={{ color: 'var(--text-muted)' }} />
+        <span
+          className="c4t-eyebrow"
+          style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
+        >
+          {label}
+        </span>
+      </span>
+      <span
+        style={{
+          fontSize: 28,
+          fontWeight: 'var(--fw-semibold)',
+          letterSpacing: '-0.02em',
+          color: 'var(--text-primary)',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {value}
+      </span>
+    </Link>
+  )
+}
+
+function ChartCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        padding: 'var(--space-5)',
+        background: 'var(--surface-raised)',
+        border: '1px solid var(--border-default)',
+        borderRadius: 'var(--radius-card)',
+      }}
+    >
+      {children}
+    </div>
+  )
 }
 
 export default async function AdminDashboardPage() {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
-  const canReadLeads = hasPermission(user, 'lead.read')
-
-  // A sub-admin without lead.read gets no tiles rather than a row of zeros —
-  // a zero reads as "no leads", which is a different and misleading claim.
-  const counts = canReadLeads
-    ? await Promise.all(COUNTED_STATUSES.map((entry) => countLeads(entry.status)))
-    : []
-
+  const stats = await serverFetchOrNull<StatsResponse>('stats/admin')
   const displayName = user.firstName ?? user.email
+
+  if (!stats) {
+    return (
+      <>
+        <Topbar crumbs={[{ label: 'Dashboard' }]} />
+        <main id="main" style={{ padding: 'var(--space-9)', maxWidth: 720 }}>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            The dashboard summary is unreachable right now. Refresh in a moment, or ask an
+            administrator to grant you the stats.read permission.
+          </p>
+        </main>
+      </>
+    )
+  }
+
+  const activeProjects = stats.projects.byStatus.IN_PROGRESS ?? 0
+  const verifiedTesters = stats.testers.byStatus.VERIFIED ?? 0
+  const newLeads = stats.leads?.NEW ?? 0
+
+  // BigInt, not Number: these are minor-unit strings and a float sum risks
+  // precision loss above 2^53 — same care `formatMoney` itself takes.
+  const payoutTotalMinor = (
+    BigInt(stats.payouts.byCategory.indian) +
+    BigInt(stats.payouts.byCategory.international) +
+    BigInt(stats.payouts.byCategory.pending)
+  ).toString()
 
   return (
     <>
       <Topbar crumbs={[{ label: 'Dashboard' }]} />
-
       <main
         id="main"
         style={{
           padding: 'var(--space-9)',
-          maxWidth: 980,
+          maxWidth: 1200,
           display: 'flex',
           flexDirection: 'column',
-          gap: 'var(--space-9)',
+          gap: 'var(--space-8)',
         }}
       >
         <header>
@@ -76,129 +173,135 @@ export default async function AdminDashboardPage() {
           >
             Admin
           </p>
-          <h1 className="c4t-display-md" style={{ marginBottom: 'var(--space-4)' }}>
+          <h1 className="c4t-display-md" style={{ marginBottom: 'var(--space-2)' }}>
             Welcome back, {displayName}
           </h1>
-          <p
-            style={{
-              color: 'var(--text-secondary)',
-              maxWidth: 560,
-              fontSize: 'var(--type-body-md-size)',
-              margin: 0,
-            }}
-          >
-            Start with the leads inbox — every demo request lands there as it arrives. The rest of
-            the admin surface is still being built.
+          <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: 640 }}>
+            A glimpse of the platform — every number links through to the filtered list behind it.
           </p>
         </header>
 
-        {canReadLeads ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 'var(--space-5)',
-            }}
-          >
-            {COUNTED_STATUSES.map((entry, index) => (
-              <StatCard
-                key={entry.status}
-                label={entry.label}
-                value={counts[index] ?? null}
-                href={`/app/admin/leads?status=${entry.status}`}
-              />
-            ))}
-          </div>
-        ) : null}
-
-        <section
+        <div
           style={{
-            padding: 'var(--space-9)',
-            background: 'var(--surface-canvas)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-card)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-4)',
-            alignItems: 'flex-start',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: 'var(--space-5)',
           }}
         >
-          <h2 className="c4t-heading-md" style={{ margin: 0 }}>
-            {canReadLeads ? 'Open the leads inbox' : 'Nothing assigned to you yet'}
-          </h2>
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-            {canReadLeads
-              ? 'Triage enquiries from the website contact form: change status, leave notes, and record the ones that convert.'
-              : 'Ask an administrator to grant you the permissions for the areas you need.'}
-          </p>
-          {canReadLeads ? (
-            <Link
-              href="/app/admin/leads"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                height: 44,
-                padding: '0 20px',
-                background: 'var(--action-primary-bg)',
-                color: 'var(--text-on-brand)',
-                borderRadius: 'var(--radius-button)',
-                fontWeight: 'var(--fw-medium)',
-                textDecoration: 'none',
-              }}
-            >
-              Go to leads inbox
-            </Link>
+          <KpiCard
+            icon="clipboard-check"
+            label="Open critical bugs"
+            value={stats.bugs.openCritical}
+            href="/app/admin/bugs?severity=CRITICAL"
+          />
+          <KpiCard
+            icon="briefcase"
+            label="Projects in progress"
+            value={activeProjects}
+            href="/app/admin/projects?status=IN_PROGRESS"
+          />
+          <KpiCard
+            icon="user-check"
+            label="Verified testers"
+            value={verifiedTesters}
+            href="/app/admin/testers?status=VERIFIED"
+          />
+          <KpiCard
+            icon="clock"
+            label="Pending tester payouts"
+            value={formatMoney(stats.payouts.byCategory.pending, stats.payouts.currency)}
+            href="/app/admin/transactions?section=pending"
+          />
+          {stats.leads ? (
+            <KpiCard
+              icon="mail"
+              label="New leads"
+              value={newLeads}
+              href="/app/admin/leads?status=NEW"
+            />
           ) : null}
-        </section>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: 'var(--space-5)',
+          }}
+        >
+          <ChartCard>
+            <BarChart
+              title="Projects by status"
+              href="/app/admin/projects"
+              segments={segmentsFromCounts(stats.projects.byStatus, statusTone)}
+            />
+          </ChartCard>
+
+          <ChartCard>
+            <DonutChart
+              title="Bugs by severity"
+              centerLabel={String(
+                Object.values(stats.bugs.bySeverity).reduce((a, b) => a + b, 0),
+              )}
+              segments={segmentsFromCounts(stats.bugs.bySeverity, severityTone)}
+            />
+          </ChartCard>
+
+          <ChartCard>
+            <BarChart
+              title="Bugs by status"
+              href="/app/admin/bugs"
+              segments={segmentsFromCounts(stats.bugs.byStatus, statusTone)}
+            />
+          </ChartCard>
+
+          <ChartCard>
+            <BarChart
+              title="Testers by status"
+              href="/app/admin/testers"
+              segments={segmentsFromCounts(stats.testers.byStatus, statusTone)}
+            />
+          </ChartCard>
+
+          <ChartCard>
+            <BarChart
+              title="Organisations by status"
+              href="/app/admin/organisations"
+              segments={segmentsFromCounts(stats.organisations.byStatus, statusTone)}
+            />
+          </ChartCard>
+
+          {stats.leads ? (
+            <ChartCard>
+              <BarChart
+                title="Pipeline by stage"
+                href="/app/admin/leads"
+                segments={segmentsFromCounts(stats.leads, statusTone)}
+              />
+            </ChartCard>
+          ) : null}
+
+          <ChartCard>
+            <DonutChart
+              title="Tester payouts by category"
+              href="/app/admin/transactions"
+              centerLabel={formatMoney(payoutTotalMinor, stats.payouts.currency)}
+              segments={(
+                [
+                  { key: 'indian', label: 'Indian', tone: 'info' },
+                  { key: 'international', label: 'International', tone: 'accent' },
+                  { key: 'pending', label: 'Pending', tone: 'warning' },
+                ] as const
+              ).map(({ key, label, tone }) => ({
+                label,
+                tone,
+                value: Number(stats.payouts.byCategory[key]),
+                displayValue: formatMoney(stats.payouts.byCategory[key], stats.payouts.currency),
+              }))}
+            />
+          </ChartCard>
+        </div>
       </main>
     </>
-  )
-}
-
-function StatCard({ label, value, href }: { label: string; value: number | null; href: string }) {
-  return (
-    <Link
-      href={href}
-      className="c4t-card-hover"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: 'var(--space-5) var(--space-6)',
-        background: 'var(--surface-canvas)',
-        border: '1px solid var(--border-default)',
-        borderRadius: 'var(--radius-card)',
-        textDecoration: 'none',
-        color: 'inherit',
-        transition: 'var(--transition-surface)',
-      }}
-    >
-      <span
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 11,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: 'var(--text-muted)',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 32,
-          fontWeight: 'var(--fw-semibold)',
-          letterSpacing: '-0.02em',
-          color: value === null ? 'var(--text-muted)' : 'var(--text-primary)',
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {/* An em dash, not 0 — the count is unknown, which is not the same
-            claim as "there are none". A real 0 still renders as 0, because
-            `??` only falls through on null/undefined. */}
-        {value ?? '—'}
-      </span>
-    </Link>
   )
 }

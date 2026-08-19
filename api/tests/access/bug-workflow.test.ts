@@ -148,6 +148,7 @@ describe('the customer can resolve a report without waiting for triage', () => {
       data: {
         reference: 'BUG-TEST-DUP',
         projectId: world.projectA.id,
+        buildId: world.projectA.buildId,
         reportedById: world.testerActive.id,
         title: 'Already known',
         description: 'x',
@@ -202,6 +203,7 @@ describe('transition guards', () => {
       data: {
         reference: 'BUG-TEST-FOREIGN',
         projectId: world.projectB.id,
+        buildId: world.projectB.buildId,
         reportedById: world.testerOther.id,
         title: 'Other project',
         description: 'x',

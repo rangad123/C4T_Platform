@@ -2,17 +2,20 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
+import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge, RoleBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
+import { Badge } from '@/components/ds/core/Badge'
 import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
 import { Button } from '@/components/ds/core/Button'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
+import { CountryLabel } from '@/components/admin/CountryFlag'
 import { requirePermission } from '@/lib/auth/session'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { assignProjectAction, unassignProjectAction } from '@/lib/admin/manager-actions'
-import { personName, titleCase } from '@/lib/admin/format'
+import { formatDate, personName, titleCase } from '@/lib/admin/format'
 
 /**
  * `/app/admin/managers/[id]` — manager profile and the projects they oversee.
@@ -36,6 +39,13 @@ interface ManagerRecord {
   lastName: string | null
   role: string
   status: string
+  phone: string | null
+  countryCode: string | null
+  timezone: string | null
+  emailVerifiedAt: string | null
+  lastLoginAt: string | null
+  createdAt: string
+  permissions: readonly { permission: { code: string; label: string; group: string } }[]
 }
 
 interface ManagerProjectEnvelope {
@@ -165,6 +175,53 @@ export default async function ManagerDetailPage({ params }: { params: Promise<{ 
         </>
       }
     >
+      <Panel title="Personal details" description="What the platform knows about this manager.">
+        <DescriptionList
+          items={[
+            { label: 'Name', value: personName(manager) || '—' },
+            { label: 'Email', value: manager.email },
+            { label: 'Phone', value: manager.phone ?? '—' },
+            {
+              label: 'Country',
+              value: manager.countryCode ? <CountryLabel countryCode={manager.countryCode} /> : '—',
+            },
+            { label: 'Timezone', value: manager.timezone ?? '—' },
+          ]}
+        />
+      </Panel>
+
+      <Panel title="Account details" description="Role, access and sign-in activity.">
+        <DescriptionList
+          items={[
+            { label: 'Role', value: <RoleBadge role={manager.role} /> },
+            { label: 'Status', value: <StatusBadge status={manager.status} /> },
+            { label: 'Email verified', value: manager.emailVerifiedAt ? formatDate(manager.emailVerifiedAt) : 'Not verified' },
+            { label: 'Last signed in', value: manager.lastLoginAt ? formatDate(manager.lastLoginAt) : 'Never' },
+            { label: 'Account created', value: formatDate(manager.createdAt) },
+            {
+              label: 'Permissions',
+              wide: true,
+              value:
+                manager.role === 'SUB_ADMIN' ? (
+                  manager.permissions.length > 0 ? (
+                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                      {manager.permissions.map((p) => (
+                        <Badge key={p.permission.code} tone="neutral">
+                          {p.permission.label}
+                        </Badge>
+                      ))}
+                    </span>
+                  ) : (
+                    'No permissions granted yet.'
+                  )
+                ) : (
+                  'Administrators implicitly hold every permission.'
+                ),
+            },
+          ]}
+        />
+      </Panel>
+
       <Panel
         title="Projects overseen"
         description={

@@ -12,11 +12,25 @@ export const BUG_SORT_FIELDS = [
 
 export const listBugsQuery = paginationQuery.extend({
   projectId: z.string().cuid().optional(),
+  buildId: z.string().cuid().optional(),
+  /**
+   * Comma-separated build ids — the Reports module's "by build range" report
+   * scopes to every build between a start and end build, which `buildId`
+   * alone (an exact match) cannot express. Independent of `buildId`: a
+   * caller sends one or the other, never both.
+   */
+  buildIds: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined)),
   status: z.nativeEnum(BugStatus).optional(),
   severity: z.nativeEnum(BugSeverity).optional(),
   type: z.nativeEnum(BugType).optional(),
   featureId: z.string().cuid().optional(),
   reportedById: z.string().cuid().optional(),
+  /** Reports "by date" — filters on `createdAt`, inclusive. */
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
   search: z.string().trim().max(160).optional(),
   sort: z.enum(BUG_SORT_FIELDS).optional(),
 })
@@ -24,6 +38,8 @@ export const listBugsQuery = paginationQuery.extend({
 /** §2.3 — the fields a Tester fills in when logging a defect. */
 export const createBugSchema = z.object({
   projectId: z.string().cuid(),
+  /** Defaults to the project's default build when omitted. */
+  buildId: z.string().cuid().optional(),
   title: z.string().trim().min(5, 'Give the bug a clear one-line title').max(200),
   description: z.string().trim().min(10, 'Describe what is wrong').max(10_000),
   stepsToReproduce: z

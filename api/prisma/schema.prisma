@@ -122,6 +122,24 @@ enum AssignmentStatus {
   REMOVED
 }
 
+/// Legacy `builds.build_test_status`.
+enum BuildStatus {
+  NEW
+  ASSIGNED
+  TESTED
+  REVIEWED
+  CLOSED
+}
+
+/// Legacy `test_report.trep_result` ("pass fail blocked"), plus NOT_TESTED
+/// for a test case that has been assigned but has no report yet.
+enum TestCaseResult {
+  NOT_TESTED
+  PASS
+  FAIL
+  BLOCKED
+}
+
 enum BugSeverity {
   CRITICAL
   HIGH
@@ -226,17 +244,6 @@ enum FileScope {
   OTHER
 }
 
-/// Skills taxonomy. The legacy data has free-text skill names; this enum
-/// groups them so the admin can browse skills by purpose (what kind of work
-/// the skill applies to) rather than as a flat list. Categories are mutually
-/// exclusive — a skill lives in exactly one of them.
-enum SkillCategory {
-  DOMAIN       // a market or product area (e.g. "Fintech", "Gaming")
-  TYPE         // a testing discipline (e.g. "Functional", "Accessibility")
-  TOOL         // a tool the tester knows (e.g. "Postman", "Charles Proxy")
-  APPLICATION  // a product or app the tester has hands-on with (e.g. "iOS Safari")
-}
-
 /// Sales pipeline state for a marketing-site enquiry.
 enum LeadStatus {
   NEW
@@ -307,6 +314,11 @@ model User {
   bugStatusChanges BugStatusHistory[]
   bugComments      BugComment[]
 
+  testCasesCreated     TestCase[]           @relation("TestCaseCreatedBy")
+  testCaseAssignments  TestCaseAssignment[] @relation("TestCaseAssignee")
+  testReportsSubmitted TestReport[]         @relation("TestReportSubmittedBy")
+  testReviewsWritten   TestReview[]         @relation("TestReviewCreatedBy")
+
   threadsCreated       Thread[]            @relation("ThreadCreatedBy")
   threadParticipations ThreadParticipant[]
   messagesSent         Message[]
@@ -314,13 +326,14 @@ model User {
   ratingsGiven    Rating[] @relation("RatingAuthor")
   ratingsReceived Rating[] @relation("RatingSubjectUser")
 
-  transactionsAsCounterparty Transaction[] @relation("TransactionCounterparty")
-  transactionsRecorded       Transaction[] @relation("TransactionRecordedBy")
+  transactionsAsCounterparty Transaction[]   @relation("TransactionCounterparty")
+  transactionsRecorded       Transaction[]   @relation("TransactionRecordedBy")
+  paymentAccount             PaymentAccount?
 
-  notifications Notification[]
-  announcements Announcement[] @relation("AnnouncementAuthor")
-  auditLogs     AuditLog[]
-  filesUploaded FileObject[]   @relation("FileUploader")
+  notifications            Notification[]
+  announcements            Announcement[]    @relation("AnnouncementAuthor")
+  auditLogs                AuditLog[]
+  filesUploaded            FileObject[]      @relation("FileUploader")
   messageTemplatesAuthored MessageTemplate[] @relation("MessageTemplateAuthor")
 
   @@index([role, status])
@@ -589,6 +602,10 @@ model TesterDevice {
   /// the legacy form is a single number, and a spurious enum would force
   /// schema migrations whenever a new device ships with more RAM.
   ramGb           String?    @map("ram_gb")
+  /// Storage capacity (e.g. `"256"`). No legacy or prior-platform equivalent —
+  /// free text like `ramGb`, for the same reason: a spurious enum would force
+  /// a migration whenever a new capacity ships.
+  storageGb       String?    @map("storage_gb")
   /// Network capability summary (e.g. `"WiFi 6 + 5G"`, `"Ethernet"`).
   network         String?
   /// Browser name + version on this device (e.g. `"Chrome 128"`). Separate
@@ -606,9 +623,9 @@ model TesterDevice {
   /// listed yet — the catalog is the preferred path, not the only one. When
   /// a FK is set the reader should prefer it, because only the FK supports
   /// reliable "find every tester on Android 15" matching.
-  deviceModelId     String? @map("device_model_id")
-  osVersionRefId    String? @map("os_version_ref_id")
-  primaryNetworkId  String? @map("primary_network_id")
+  deviceModelId      String? @map("device_model_id")
+  osVersionRefId     String? @map("os_version_ref_id")
+  primaryNetworkId   String? @map("primary_network_id")
   secondaryNetworkId String? @map("secondary_network_id")
 
   testerProfile    TesterProfile    @relation(fields: [testerProfileId], references: [id], onDelete: Cascade)
@@ -674,8 +691,8 @@ model OperatingSystem {
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
 
-  versions      OsVersion[]
-  deviceModels  DeviceModel[]
+  versions       OsVersion[]
+  deviceModels   DeviceModel[]
   testerBrowsers TesterBrowser[]
 
   @@unique([name, kind])
@@ -746,17 +763,17 @@ model NetworkProvider {
 /// which tester owns one. `dvc_ram` and `dvc_screen` live here because they
 /// are properties of the model, not of a tester's copy of it.
 model DeviceModel {
-  id             String     @id @default(cuid())
-  brandId        String     @map("brand_id")
-  name           String
-  type           DeviceType
+  id          String     @id @default(cuid())
+  brandId     String     @map("brand_id")
+  name        String
+  type        DeviceType
   /// Default OS for this model. A tester's actual OS version is recorded on
   /// their own `TesterDevice` row, since it varies per handset.
-  defaultOsId    String?    @map("default_os_id")
-  ramGb          String?    @map("ram_gb")
-  screenSize     String?    @map("screen_size")
-  isActive       Boolean    @default(true) @map("is_active")
-  createdAt      DateTime   @default(now()) @map("created_at")
+  defaultOsId String?    @map("default_os_id")
+  ramGb       String?    @map("ram_gb")
+  screenSize  String?    @map("screen_size")
+  isActive    Boolean    @default(true) @map("is_active")
+  createdAt   DateTime   @default(now()) @map("created_at")
 
   brand         DeviceBrand      @relation(fields: [brandId], references: [id], onDelete: Restrict)
   defaultOs     OperatingSystem? @relation(fields: [defaultOsId], references: [id], onDelete: SetNull)
@@ -808,16 +825,33 @@ model TesterWorkHistory {
   @@map("tester_work_history")
 }
 
+/// Legacy `skill_categories`. Was a fixed 4-value enum on `Skill` in an
+/// earlier pass; promoted to a real catalog table so an admin can add a
+/// category without a schema migration, matching every other catalog entity.
+model SkillCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  skills Skill[]
+
+  @@map("skill_categories")
+}
+
+/// Legacy `skills`. Catalog, not free text — see `SkillCategory` above.
 model Skill {
-  id       String        @id @default(cuid())
-  name     String        @unique
-  slug     String        @unique
-  /// Free-text skills from the legacy import get this default; new skills
-  /// should always pick a category.
-  category SkillCategory @default(TOOL)
+  id         String  @id @default(cuid())
+  name       String  @unique
+  slug       String  @unique
+  categoryId String  @map("category_id")
+  isActive   Boolean @default(true) @map("is_active")
+
+  category SkillCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   testers  TesterSkill[]
 
-  @@index([category])
+  @@index([categoryId])
   @@map("skills")
 }
 
@@ -850,6 +884,189 @@ model TesterLanguage {
 // ─── Projects ────────────────────────────────────────────────────────────────
 
 /// §2.2 "Project Management", §2.4 Customer submits, §2.3 Tester works on.
+/// A project may span multiple test cycles — one `Build` per cycle
+/// ("Build 1.2", "Release candidate 3", …). Every project gets exactly one
+/// `isDefault` build the moment it is created, so a project that never
+/// outgrows a single cycle behaves exactly as it did before this model
+/// existed. Testers, Features, Materials and Bugs each carry a `buildId` so
+/// switching the active build actually changes what those tabs show; the
+/// project's own identity (organisation, status, brief) and its aggregate
+/// counts stay build-agnostic on purpose — see the field comments on those
+/// models.
+model Build {
+  id        String      @id @default(cuid())
+  projectId String      @map("project_id")
+  name      String
+  isDefault Boolean     @default(false) @map("is_default")
+  status    BuildStatus @default(NEW)
+
+  /// Free text on purpose, same as `test_types` was never promoted to a
+  /// structured catalog in this pass — see the schema-parity audit.
+  testType            String? @map("test_type")
+  description         String?
+  /// Legacy `build_app_link` — the application or website under test.
+  appUrl              String? @map("app_url")
+  releaseNotes        String? @map("release_notes")
+  /// Build-specific testing instructions. Independent of `Project.instructions`
+  /// — a build can narrow or replace the project's overall brief.
+  instructions        String?
+  /// Legacy `build_outof_scope` folded in here — "special requirements" and
+  /// "what's out of scope" are the same reader-facing concept.
+  specialRequirements String? @map("special_requirements")
+
+  /// Legacy `build_devices` / `build_browsers` / `build_os` / `TestCountry` /
+  /// `build_languages` — free-text arrays, matching how `Project` already
+  /// models `platformTargets`/`targetCountries`/`targetLanguages`. Kept
+  /// separate from the device/browser CATALOG (`DeviceModel`/`Browser`):
+  /// those describe what a tester's kit IS, these describe what a build
+  /// ASKS for, and the two lists are never guaranteed to line up.
+  targetDevices          String[] @map("target_devices")
+  targetBrowsers         String[] @map("target_browsers")
+  targetOperatingSystems String[] @map("target_operating_systems")
+  targetCountries        String[] @map("target_countries")
+  targetLanguages        String[] @map("target_languages")
+
+  /// Per-build override of `Project.maxTesters`. Null defers to the project.
+  maxTesters             Int?     @map("max_testers")
+  /// Per-build override of `Project.testersCanSeeOtherBugs`. Null defers to
+  /// the project.
+  testersCanSeeOtherBugs Boolean? @map("testers_can_see_other_bugs")
+
+  startDate DateTime? @map("start_date")
+  endDate   DateTime? @map("end_date")
+
+  testDocumentFileId String? @map("test_document_file_id")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  testDocument FileObject? @relation("BuildTestDocument", fields: [testDocumentFileId], references: [id], onDelete: SetNull)
+
+  features      Feature[]
+  materials     ProjectMaterial[]
+  assignments   ProjectAssignment[]
+  bugs          Bug[]
+  announcements Announcement[]
+  testCases     TestCase[]
+  testReports   TestReport[]
+  testReviews   TestReview[]
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@map("builds")
+}
+
+// ─── Structured testing workflow ───────────────────────────────────────────
+//
+// Legacy `test_case` / `assign_testCase` / `test_report` / `test_review` —
+// the largest gap in the legacy-parity audit (see
+// docs/legacy-feature-schema-mapping.md capability 1). A test case is a
+// scripted check an admin/manager writes for a build; it gets assigned to
+// one or more testers, each of whom files a pass/fail/blocked TestReport —
+// optionally pointing at the Bug that failing it produced. TestReview is
+// the build-level summary + rating that closes the cycle out.
+//
+// Deliberately NOT modelled: `applied_tests` (tester-initiated application —
+// this platform is invite-only, see `ProjectAssignment`), `testing_time_sheet`
+// (per-tester time logging/billing), and the separate `test_scenarios` /
+// `test_scenario_reports` pair, which the legacy schema shows as a lighter,
+// parallel flavour of the same case → report shape — the brief's own
+// "Test Case / Scenario" phrasing treats them as one concept here rather
+// than a second model.
+
+model TestCase {
+  id             String    @id @default(cuid())
+  buildId        String    @map("build_id")
+  /// Matches legacy `testCaseFeature`. Free text rather than a `Feature`
+  /// relation — a test case is often written before the feature list is,
+  /// and forcing the FK would block writing the case at all.
+  feature        String?
+  title          String
+  description    String
+  steps          String
+  expectedResult String    @map("expected_result")
+  createdById    String    @map("created_by_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  build       Build                @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  createdBy   User                 @relation("TestCaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  assignments TestCaseAssignment[]
+  reports     TestReport[]
+
+  @@index([buildId])
+  @@map("test_cases")
+}
+
+/// Legacy `assign_testCase` — which tester owns which test case.
+model TestCaseAssignment {
+  id         String   @id @default(cuid())
+  testCaseId String   @map("test_case_id")
+  testerId   String   @map("tester_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  tester   User     @relation("TestCaseAssignee", fields: [testerId], references: [id], onDelete: Cascade)
+
+  @@unique([testCaseId, testerId])
+  @@index([testerId])
+  @@map("test_case_assignments")
+}
+
+/// Legacy `test_report` — the outcome of a tester actually executing a test
+/// case. This is what makes a bug, when there is one, the RESULT of running
+/// a script rather than a free-floating report.
+model TestReport {
+  id          String         @id @default(cuid())
+  testCaseId  String         @map("test_case_id")
+  /// Denormalised from `testCase.buildId` — same reasoning as `Bug.buildId`
+  /// alongside `Bug.projectId`: every build-scoped list reads this directly
+  /// rather than joining through the test case.
+  buildId     String         @map("build_id")
+  testerId    String         @map("tester_id")
+  result      TestCaseResult
+  notes       String?
+  devices     String?
+  browsers    String?
+  /// Set when executing this case produced a defect — see `Bug.testReports`.
+  linkedBugId String?        @map("linked_bug_id")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  testCase  TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  build     Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  tester    User     @relation("TestReportSubmittedBy", fields: [testerId], references: [id], onDelete: Cascade)
+  linkedBug Bug?     @relation("TestReportDefect", fields: [linkedBugId], references: [id], onDelete: SetNull)
+
+  @@index([buildId])
+  @@index([testCaseId])
+  @@index([testerId])
+  @@map("test_reports")
+}
+
+/// Legacy `test_review` — a build-level summary and rating, not tied to any
+/// one test case. Closes out a test cycle the way a bug's resolution note
+/// closes out one report.
+model TestReview {
+  id          String   @id @default(cuid())
+  buildId     String   @map("build_id")
+  summary     String
+  /// Legacy `rvw_val` — unconstrained in the source schema; clamped to 1-5
+  /// at the API layer to match this platform's other rating scale (`Rating`).
+  rating      Int?
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  build     Build @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  createdBy User  @relation("TestReviewCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([buildId])
+  @@map("test_reviews")
+}
+
 model Project {
   id             String  @id @default(cuid())
   legacyId       String? @unique @map("legacy_id")
@@ -894,15 +1111,16 @@ model Project {
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
   createdBy    User         @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
-  materials    ProjectMaterial[]
-  assignments  ProjectAssignment[]
-  managers     ManagerAssignment[]
-  bugs         Bug[]
-  features     Feature[]
-  threads      Thread[]
-  ratings      Rating[]
-  transactions Transaction[]
+  materials     ProjectMaterial[]
+  assignments   ProjectAssignment[]
+  managers      ManagerAssignment[]
+  bugs          Bug[]
+  features      Feature[]
+  threads       Thread[]
+  ratings       Rating[]
+  transactions  Transaction[]
   announcements Announcement[]
+  builds        Build[]
 
   @@index([organisationId])
   @@index([status])
@@ -917,13 +1135,16 @@ model Project {
 model Feature {
   id        String   @id @default(cuid())
   projectId String   @map("project_id")
+  buildId   String   @map("build_id")
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build   Build   @relation(fields: [buildId], references: [id], onDelete: Cascade)
   bugs    Bug[]
 
-  @@unique([projectId, name])
+  @@unique([buildId, name])
+  @@index([projectId])
   @@map("features")
 }
 
@@ -931,6 +1152,7 @@ model Feature {
 model ProjectMaterial {
   id          String   @id @default(cuid())
   projectId   String   @map("project_id")
+  buildId     String   @map("build_id")
   title       String
   description String?
   /// Either an uploaded file or an external URL (e.g. a build link).
@@ -939,15 +1161,24 @@ model ProjectMaterial {
   createdAt   DateTime @default(now()) @map("created_at")
 
   project Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build   Build       @relation(fields: [buildId], references: [id], onDelete: Cascade)
   file    FileObject? @relation("MaterialFile", fields: [fileId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
+  @@index([buildId])
   @@map("project_materials")
 }
 
 model ProjectAssignment {
   id        String           @id @default(cuid())
   projectId String           @map("project_id")
+  /// Deliberately NOT part of a unique constraint with `testerId`: a tester
+  /// keeps exactly one roster row per PROJECT (matching the existing
+  /// accept/decline flow, which a tester reaches by project, not by build),
+  /// tagged with whichever build they were invited under. Moving a tester to
+  /// a different build re-tags this same row rather than creating a second
+  /// one.
+  buildId   String           @map("build_id")
   testerId  String           @map("tester_id") // User.id where role = TESTER
   status    AssignmentStatus @default(INVITED)
 
@@ -958,10 +1189,12 @@ model ProjectAssignment {
   notes       String?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build   Build   @relation(fields: [buildId], references: [id], onDelete: Cascade)
   tester  User    @relation(fields: [testerId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, testerId])
   @@index([testerId, status])
+  @@index([buildId])
   @@map("project_assignments")
 }
 
@@ -990,6 +1223,7 @@ model Bug {
   legacyId     String? @unique @map("legacy_id")
   reference    String  @unique // e.g. "BUG-2026-00417"
   projectId    String  @map("project_id")
+  buildId      String  @map("build_id")
   reportedById String  @map("reported_by_id")
 
   title            String
@@ -1023,6 +1257,7 @@ model Bug {
   deletedAt DateTime? @map("deleted_at")
 
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build       Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
   reportedBy  User     @relation("BugReporter", fields: [reportedById], references: [id], onDelete: Restrict)
   duplicateOf Bug?     @relation("BugDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
   duplicates  Bug[]    @relation("BugDuplicates")
@@ -1031,8 +1266,13 @@ model Bug {
   attachments   BugAttachment[]
   comments      BugComment[]
   statusHistory BugStatusHistory[]
+  /// A bug that turned out to BE the failure a test report already
+  /// described — see `TestReport.linkedBugId`. Not every bug traces back to
+  /// a test case; a tester can still file one directly.
+  testReports   TestReport[]       @relation("TestReportDefect")
 
   @@index([projectId, status])
+  @@index([buildId])
   @@index([reportedById])
   @@index([featureId])
   @@index([severity])
@@ -1167,6 +1407,11 @@ model Announcement {
   /// audience enum alone decides who sees it. The two axes are independent:
   /// a project-scoped announcement can still target TESTERS only.
   projectId   String?              @map("project_id")
+  /// Optional further narrowing to one build of `projectId`. Unlike the
+  /// other four models, this stays optional forever — most announcements
+  /// ("the project is paused") apply to every build, and there is no
+  /// backfill for existing rows.
+  buildId     String?              @map("build_id")
   publishedAt DateTime?            @map("published_at")
   expiresAt   DateTime?            @map("expires_at")
   createdAt   DateTime             @default(now()) @map("created_at")
@@ -1174,6 +1419,7 @@ model Announcement {
 
   author  User     @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: Restrict)
   project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build   Build?   @relation(fields: [buildId], references: [id], onDelete: SetNull)
 
   @@index([audience, publishedAt])
   @@index([projectId])
@@ -1232,6 +1478,77 @@ model Rating {
   @@map("ratings")
 }
 
+// ─── Payment accounts ────────────────────────────────────────────────────────
+//
+// Recovers legacy `payment_acc_details` — where a tester's earnings get paid
+// out to. Every field the legacy table treats as sensitive (account holder
+// name, account number, IFSC, PayPal email, Paytm number) lives ONLY inside
+// `secureDetails`, an AES-256-GCM envelope — never as a plaintext column. See
+// `lib/payment-encryption.ts` for the encrypt/decrypt pair and
+// `modules/payment-accounts/` for why decryption is a separate, audited,
+// password-gated code path rather than a field on the normal read.
+//
+// `accountNumberLast4` / `paypalEmailMasked` / `paytmNumberLast4` are
+// deliberately plaintext columns, computed once at write time: GCM ciphertext
+// cannot be partially decrypted, so a masked display has to be produced while
+// the real value is briefly in hand, not derived later from the blob.
+
+enum PaymentAccountCountry {
+  INDIAN
+  NON_INDIAN
+}
+
+/// Shared with `Transaction.paymentMethod` — one payment-method taxonomy,
+/// not two that could drift apart.
+enum PaymentMethod {
+  IND_BANK_ACCOUNT
+  NON_IND_BANK_ACCOUNT
+  PAYPAL
+  PAYTM
+}
+
+enum PaymentAccountStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model PaymentAccount {
+  id       String  @id @default(cuid())
+  legacyId String? @unique @map("legacy_id")
+  /// One account per user — legacy testers switch payout method by editing
+  /// this row rather than by adding a second one, and `PUT /mine` is a
+  /// create-or-replace, not an append.
+  userId   String  @unique @map("user_id")
+
+  country     PaymentAccountCountry
+  paymentType PaymentMethod         @map("payment_type")
+  status      PaymentAccountStatus  @default(ACTIVE)
+
+  /// Not sensitive on their own (no account number, no identity), so these
+  /// stay plaintext — masking them would only make the masked view less
+  /// useful with no privacy benefit.
+  bankName   String? @map("bank_name")
+  branchName String? @map("branch_name")
+
+  /// AES-256-GCM envelope: `[1B key version][12B IV][ciphertext][16B tag]`,
+  /// holding JSON of `{ accountName, accountNumber, ifscCode, paypalEmail,
+  /// paytmNumber }`. Never selected by the ordinary read path — see the
+  /// module-level comment above.
+  secureDetails Bytes @map("secure_details")
+
+  accountNumberLast4 String? @map("account_number_last4")
+  paypalEmailMasked  String? @map("paypal_email_masked")
+  paytmNumberLast4   String? @map("paytm_number_last4")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@map("payment_accounts")
+}
+
 // ─── Transactions ────────────────────────────────────────────────────────────
 
 /// §2.2 "Transactions" — payment/billing records for projects, Customers and
@@ -1258,18 +1575,41 @@ model Transaction {
   occurredAt  DateTime  @map("occurred_at")
   settledAt   DateTime? @map("settled_at")
 
+  /// §21-27 — Indian/International/Pending is DERIVED from these at query
+  /// time (see `transactions.routes.ts` `categoryFilter`), not stored as its
+  /// own field: it would just be a second place `paymentMethod` could drift
+  /// out of sync with `currency`.
+  paymentMethod     PaymentMethod? @map("payment_method")
+  /// Always read through `PaymentAccount`'s masked `select` — a `Transaction`
+  /// read must never be able to carry the linked account's ciphertext.
+  paymentAccountId  String?        @map("payment_account_id")
+  /// TDS withheld on this transaction. Legacy `tds_history` kept a separate
+  /// per-financial-year table; folded in here instead, since every legacy row
+  /// there was already one figure tied to one payment.
+  tdsAmountMinor    BigInt?        @map("tds_amount_minor")
+  /// How much of `amountMinor` has actually been paid — defaults to 0
+  /// (nothing paid yet) rather than null, so `amountMinor - paidAmountMinor`
+  /// (the "Outstanding amount" the brief asks for) is always a plain
+  /// subtraction, never a null-check first.
+  paidAmountMinor   BigInt         @default(0) @map("paid_amount_minor")
+  /// Free text — no `Contest` model exists in this schema yet, and `projectId`
+  /// already covers the Build case.
+  buildOrContestRef String?        @map("build_or_contest_ref")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  organisation Organisation? @relation(fields: [organisationId], references: [id], onDelete: SetNull)
-  project      Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  counterparty User?         @relation("TransactionCounterparty", fields: [counterpartyId], references: [id], onDelete: SetNull)
-  recordedBy   User          @relation("TransactionRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+  organisation   Organisation?   @relation(fields: [organisationId], references: [id], onDelete: SetNull)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  counterparty   User?           @relation("TransactionCounterparty", fields: [counterpartyId], references: [id], onDelete: SetNull)
+  recordedBy     User            @relation("TransactionRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+  paymentAccount PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
 
   @@index([organisationId])
   @@index([counterpartyId])
   @@index([type, status])
   @@index([occurredAt])
+  @@index([paymentAccountId])
   @@map("transactions")
 }
 
@@ -1321,6 +1661,7 @@ model FileObject {
   projectMaterials   ProjectMaterial[]   @relation("MaterialFile")
   bugAttachments     BugAttachment[]     @relation("BugFile")
   messageAttachments MessageAttachment[] @relation("MessageFile")
+  buildTestDocuments Build[]             @relation("BuildTestDocument")
 
   @@index([uploadedById])
   @@index([scope])

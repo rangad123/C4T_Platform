@@ -165,6 +165,9 @@ export default async function TesterHomePage() {
           <Button href="/app/tester/bugs" variant="primary" iconLeft="clipboard-check">
             Bugs
           </Button>
+          <Button href="/app/tester/test-cases" variant="secondary" iconLeft="test-tube-diagonal">
+            Test cases
+          </Button>
           <Button href="/app/tester/announcements" variant="secondary" iconLeft="message-square">
             Announcements
           </Button>

@@ -12,6 +12,7 @@ import { SectionTabs, type SectionTab } from '@/components/admin/SectionTabs'
 const TABS: readonly SectionTab[] = [
   { value: 'devices', label: 'Devices', icon: 'smartphone', href: '/app/admin/assets/devices' },
   { value: 'browsers', label: 'Browsers', icon: 'monitor', href: '/app/admin/assets/browsers' },
+  { value: 'skills', label: 'Skills', icon: 'graduation-cap', href: '/app/admin/assets/skills' },
 ]
 
 export function AssetsTabs({ active }: { active: string }) {

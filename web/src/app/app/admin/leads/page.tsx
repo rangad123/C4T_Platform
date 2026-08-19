@@ -8,6 +8,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Button } from '@/components/ds/core/Button'
+import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { requirePermission } from '@/lib/auth/session'
 import { serverFetchPage } from '@/lib/api/server'
 import { ApiError, type PageMeta } from '@/lib/api/types'
@@ -181,8 +182,7 @@ export default async function LeadsPage({
           </p>
         </header>
 
-        <form
-          method="get"
+        <LiveGetForm
           action="/app/admin/leads"
           style={{
             display: 'grid',
@@ -211,10 +211,8 @@ export default async function LeadsPage({
             />
           </Field>
 
-          <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-            <Button type="submit" variant="primary" iconLeft="filter">
-              Filter
-            </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+            <LiveFormStatus />
             {status !== undefined || search !== undefined ? (
               <Link href="/app/admin/leads">
                 <Button type="button" variant="ghost">
@@ -223,7 +221,7 @@ export default async function LeadsPage({
               </Link>
             ) : null}
           </div>
-        </form>
+        </LiveGetForm>
 
         {'error' in result ? (
           result.error === 'forbidden' ? (

@@ -105,3 +105,18 @@ export async function addNetworkAction(formData: FormData): Promise<void> {
     ...(countryCode ? { countryCode: countryCode.toUpperCase() } : {}),
   })
 }
+
+export async function addSkillCategoryAction(formData: FormData): Promise<void> {
+  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  const name = formTrimmed(formData, 'name')
+  if (!name) return
+  await submit('catalog/skill-categories', { name })
+}
+
+export async function addSkillAction(formData: FormData): Promise<void> {
+  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  const name = formTrimmed(formData, 'name')
+  const categoryId = formTrimmed(formData, 'categoryId')
+  if (!name || !categoryId) return
+  await submit('catalog/skills', { name, categoryId })
+}

@@ -14,7 +14,7 @@ export interface LogoProps {
   size?: number
   /**
    * `mark` (default) draws the square mark beside a live-text wordmark.
-   * `horizontal` draws the single supplied lockup, `logo-with-text.png`,
+   * `horizontal` draws the single supplied lockup, `logo-with-text-no-bg.png`,
    * which already contains the wordmark — so `withWordmark` is ignored.
    *
    * The two are not interchangeable at small sizes: the horizontal artwork
@@ -61,10 +61,10 @@ export interface LogoProps {
  * The image's `alt=""` keeps assistive tech from repeating it.
  */
 /**
- * Intrinsic size of `public/images/logos/logo-with-text.png`. Kept as a constant
- * so the aspect ratio is derived rather than guessed — `next/image` needs real
- * dimensions to reserve layout space, and a wrong ratio here shows up as a
- * squashed logo on every page rather than a build error.
+ * Intrinsic size of `public/images/logos/logo-with-text-no-bg.png`. Kept as a
+ * constant so the aspect ratio is derived rather than guessed — `next/image`
+ * needs real dimensions to reserve layout space, and a wrong ratio here shows
+ * up as a squashed logo on every page rather than a build error.
  */
 const HORIZONTAL_INTRINSIC = { width: 762, height: 327 } as const
 
@@ -133,7 +133,7 @@ export function Logo({
    */
   const horizontal = (
     <Image
-      src="/images/logos/logo-with-text.png"
+      src="/images/logos/logo-with-text-no-bg.png"
       alt=""
       width={Math.round(size * (HORIZONTAL_INTRINSIC.width / HORIZONTAL_INTRINSIC.height))}
       height={size}

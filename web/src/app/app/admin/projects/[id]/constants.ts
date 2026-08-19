@@ -87,6 +87,7 @@ export interface ProjectPerson {
 
 export interface ProjectMaterial {
   id: string
+  buildId: string
   title: string
   description: string | null
   url: string | null
@@ -96,6 +97,7 @@ export interface ProjectMaterial {
 }
 
 export interface ProjectAssignmentRow {
+  buildId: string
   status: string
   invitedAt: string
   respondedAt: string | null
@@ -109,6 +111,14 @@ export interface ProjectAssignmentRow {
       countryCode: string | null
     } | null
   }
+}
+
+/** A project's own test cycle — see the schema comment on the `Build` model. */
+export interface ProjectBuild {
+  id: string
+  name: string
+  isDefault: boolean
+  createdAt: string
 }
 
 export interface ProjectManagerRow {
@@ -140,6 +150,10 @@ export interface ProjectDetail {
   organisation: { id: string; name: string; slug: string; status: string }
   createdBy: ProjectPerson | null
   _count: { bugs: number; assignments: number; materials: number }
+  /** Every build on this project, oldest-default-first. Project-level, not build-scoped. */
+  builds: ProjectBuild[]
+  /** Which build `materials`/`assignments` below are scoped to. */
+  activeBuildId: string
   materials: ProjectMaterial[]
   assignments: ProjectAssignmentRow[]
   managers: ProjectManagerRow[]
@@ -191,6 +205,104 @@ export function deviceFitsTargets(
 
   const matches = (wantsMobile && hasMobile) || (wantsWeb && hasDesktop) || (wantsTablet && hasTablet)
   return matches ? 'match' : 'mismatch'
+}
+
+// ─── Build details, summary, structured testing ───────────────────────────
+// Response shapes taken from projects.service.ts's `buildSelect` and
+// testing.service.ts's `buildSummary`/`testCaseSelect`.
+
+export const BUILD_STATUSES = ['NEW', 'ASSIGNED', 'TESTED', 'REVIEWED', 'CLOSED'] as const
+export type BuildStatusValue = (typeof BUILD_STATUSES)[number]
+export function isBuildStatus(value: string): value is BuildStatusValue {
+  return (BUILD_STATUSES as readonly string[]).includes(value)
+}
+
+export interface BuildDetail {
+  id: string
+  projectId: string
+  name: string
+  isDefault: boolean
+  status: string
+  testType: string | null
+  description: string | null
+  appUrl: string | null
+  releaseNotes: string | null
+  instructions: string | null
+  specialRequirements: string | null
+  targetDevices: string[]
+  targetBrowsers: string[]
+  targetOperatingSystems: string[]
+  targetCountries: string[]
+  targetLanguages: string[]
+  maxTesters: number | null
+  testersCanSeeOtherBugs: boolean | null
+  startDate: string | null
+  endDate: string | null
+  testDocumentFileId: string | null
+  testDocument: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
+  createdAt: string
+  updatedAt: string
+  _count: { assignments: number; bugs: number; materials: number; features: number; testCases: number }
+  capabilities: { canUpdate: boolean }
+}
+
+export interface BuildSummary {
+  testerCount: number
+  bugCount: number
+  bugsBySeverity: Record<string, number>
+  bugsByStatus: Record<string, number>
+  bugsByType: Record<string, number>
+  bugsByReproducibility: Record<string, number>
+  testCaseCount: number
+  testCaseCompletion: number | null
+  testReportsByResult: Record<string, number>
+  reviewCount: number
+  averageRating: number | null
+}
+
+/**
+ * `GET /reports/by-project/:id` — the same by-project report the Reports
+ * module's "By project" section renders, reused here for the Overview tab's
+ * summary panel rather than a second aggregation. Unlike `BuildSummary`, this
+ * is rolled up across every build on the project, not just the active one.
+ */
+export interface ProjectReportSummary {
+  testerCount: number
+  testCaseCount: number
+  bugs: {
+    total: number
+    bySeverity: Record<string, number>
+    byStatus: Record<string, number>
+    byType: Record<string, number>
+  }
+  /** Roster country codes, across every build — `ISO code` or `"Unknown"`. */
+  testersByCountry: Record<string, number>
+}
+
+export interface TestCaseRow {
+  id: string
+  buildId: string
+  feature: string | null
+  title: string
+  description: string
+  steps: string
+  expectedResult: string
+  createdAt: string
+  updatedAt: string
+  createdBy: ProjectPerson
+  assignments: readonly { id: string; assignedAt: string; tester: ProjectPerson }[]
+  reports: readonly {
+    id: string
+    result: string
+    notes: string | null
+    devices: string | null
+    browsers: string | null
+    linkedBugId: string | null
+    createdAt: string
+    tester: ProjectPerson
+    linkedBug: { id: string; reference: string; title: string } | null
+  }[]
+  _count: { reports: number }
 }
 
 /** A row from `GET /v1/bugs?projectId=…`. */

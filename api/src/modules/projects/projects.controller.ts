@@ -23,7 +23,8 @@ export async function exportCsv(req: Request, res: Response): Promise<void> {
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {
-  res.json({ data: await service.getProject(req.user!, param(req, 'id')) })
+  const { buildId } = validatedQuery<{ buildId?: string }>(res)
+  res.json({ data: await service.getProject(req.user!, param(req, 'id'), buildId) })
 }
 
 export async function create(req: Request, res: Response): Promise<void> {
@@ -84,12 +85,18 @@ export async function removeMaterial(req: Request, res: Response): Promise<void>
 }
 
 export async function listFeatures(req: Request, res: Response): Promise<void> {
-  const features = await service.listFeatures(req.user!, param(req, 'id'))
+  const { buildId } = validatedQuery<{ buildId?: string }>(res)
+  const features = await service.listFeatures(req.user!, param(req, 'id'), buildId)
   res.json({ data: features })
 }
 
 export async function addFeature(req: Request, res: Response): Promise<void> {
-  const feature = await service.addFeature(req.user!, param(req, 'id'), req.body.name)
+  const feature = await service.addFeature(
+    req.user!,
+    param(req, 'id'),
+    req.body.name,
+    req.body.buildId,
+  )
   res.status(201).json({ data: feature })
 }
 
@@ -99,7 +106,12 @@ export async function removeFeature(req: Request, res: Response): Promise<void> 
 }
 
 export async function assignTesters(req: Request, res: Response): Promise<void> {
-  const result = await service.assignTesters(param(req, 'id'), req.body.testerIds, req.body.notes)
+  const result = await service.assignTesters(
+    param(req, 'id'),
+    req.body.testerIds,
+    req.body.notes,
+    req.body.buildId,
+  )
   await recordAudit({
     req,
     action: 'project.testers_assigned',
@@ -141,4 +153,61 @@ export async function listMyAssignments(req: Request, res: Response): Promise<vo
   const query = validatedQuery<{ page: number; limit: number; status?: AssignmentStatus }>(res)
   const { items, meta } = await service.listMyAssignments(req.user!.id, query)
   res.json({ data: items, meta })
+}
+
+export async function listBuilds(req: Request, res: Response): Promise<void> {
+  const builds = await service.listBuilds(req.user!, param(req, 'id'))
+  res.json({ data: builds })
+}
+
+export async function getBuild(req: Request, res: Response): Promise<void> {
+  const build = await service.getBuild(req.user!, param(req, 'id'), param(req, 'buildId'))
+  res.json({ data: build })
+}
+
+export async function createBuild(req: Request, res: Response): Promise<void> {
+  const build = await service.createBuild(req.user!, param(req, 'id'), req.body.name)
+  await recordAudit({
+    req,
+    action: 'project.build_created',
+    entityType: 'Build',
+    entityId: build.id,
+    after: { name: build.name },
+  })
+  res.status(201).json({ data: build })
+}
+
+export async function updateBuild(req: Request, res: Response): Promise<void> {
+  const build = await service.updateBuild(req.user!, param(req, 'id'), param(req, 'buildId'), req.body)
+  await recordAudit({
+    req,
+    action: 'project.build_updated',
+    entityType: 'Build',
+    entityId: build.id,
+    after: req.body,
+  })
+  res.json({ data: build })
+}
+
+export async function copyBuild(req: Request, res: Response): Promise<void> {
+  const build = await service.copyBuild(req.user!, param(req, 'id'), param(req, 'buildId'))
+  await recordAudit({
+    req,
+    action: 'project.build_copied',
+    entityType: 'Build',
+    entityId: build.id,
+    after: { name: build.name, copiedFrom: param(req, 'buildId') },
+  })
+  res.status(201).json({ data: build })
+}
+
+export async function archiveBuild(req: Request, res: Response): Promise<void> {
+  const build = await service.archiveBuild(req.user!, param(req, 'id'), param(req, 'buildId'))
+  await recordAudit({
+    req,
+    action: 'project.build_archived',
+    entityType: 'Build',
+    entityId: build.id,
+  })
+  res.status(204).send()
 }

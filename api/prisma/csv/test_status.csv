@@ -1,0 +1,7 @@
+"ts_id","ts_name","ts_desc"
+"1","Assigned","Assigned by Admin"
+"2","Tested","Submitted by tester"
+"3","Reviewed","Reviewed by admin, when admin does submit to custo"
+"4","Closed","Closed by customer"
+"5","invited","invited by customer"
+"6","joined","joined by tester"

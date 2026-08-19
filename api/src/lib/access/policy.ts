@@ -53,6 +53,11 @@ export type Action =
   | 'rating.moderate'
   // Reports
   | 'report.generate'
+  // Structured testing workflow — test cases, execution reports, reviews
+  | 'testcase.read'
+  | 'testcase.manage'
+  | 'testreport.create'
+  | 'testreview.create'
 
 interface Rule {
   /** Holding any one of these grants the action. */
@@ -247,6 +252,33 @@ const POLICY: Record<Action, Rule> = {
   'report.generate': {
     relations: ['platform:admin', 'platform:subadmin', 'project:customer', 'project:manager'],
     permission: PERMISSIONS.PROJECT_READ,
+  },
+
+  // ─── Structured testing workflow ─────────────────────────────────────────
+  // Same shape as bugs: everyone with a stake in the project can READ test
+  // cases and their reports, but only the platform side and the project's
+  // own manager write them. Submitting a report is `bug.create`'s mirror —
+  // only a tester actively assigned to the project may file one, and only
+  // for a case assigned to them (checked in the service, not here).
+  'testcase.read': {
+    relations: [
+      'platform:admin',
+      'platform:subadmin',
+      'project:customer',
+      'project:manager',
+      'project:tester_active',
+      'project:tester_past',
+    ],
+    permission: PERMISSIONS.PROJECT_READ,
+  },
+  'testcase.manage': {
+    relations: ['platform:admin', 'platform:subadmin', 'project:manager'],
+    permission: PERMISSIONS.PROJECT_WRITE,
+  },
+  'testreport.create': { relations: ['project:tester_active'] },
+  'testreview.create': {
+    relations: ['platform:admin', 'platform:subadmin', 'project:manager'],
+    permission: PERMISSIONS.PROJECT_WRITE,
   },
 }
 

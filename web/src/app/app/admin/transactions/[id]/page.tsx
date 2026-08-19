@@ -16,7 +16,7 @@ import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, titleCase } from '@/lib/admin/format'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
-import { saveTransactionDetails, saveTransactionStatus } from './actions'
+import { saveTransactionDetails, saveTransactionStatus, savePayoutDetails } from './actions'
 
 /**
  * `/app/admin/transactions/[id]` — one ledger entry.
@@ -45,6 +45,14 @@ const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'].ma
   label: titleCase(status),
 }))
 
+const PAYMENT_METHOD_OPTIONS = [
+  { value: '', label: 'Not set' },
+  { value: 'IND_BANK_ACCOUNT', label: 'Indian bank account' },
+  { value: 'NON_IND_BANK_ACCOUNT', label: 'International bank account' },
+  { value: 'PAYPAL', label: 'PayPal' },
+  { value: 'PAYTM', label: 'Paytm' },
+]
+
 interface TransactionDetail {
   id: string
   reference: string
@@ -52,6 +60,12 @@ interface TransactionDetail {
   status: string
   /** Minor units. A BigInt column, serialised as a string — never parse it as a float. */
   amountMinor: string
+  /** `amountMinor - paidAmountMinor`, computed by the API — not stored. */
+  outstandingMinor: string
+  paidAmountMinor: string
+  tdsAmountMinor: string | null
+  paymentMethod: string | null
+  buildOrContestRef: string | null
   currency: string
   description: string | null
   externalRef: string | null
@@ -60,6 +74,14 @@ interface TransactionDetail {
   createdAt: string
   organisation: { id: string; name: string } | null
   project: { id: string; reference: string; title: string } | null
+  paymentAccount: {
+    id: string
+    paymentType: string
+    bankName: string | null
+    accountNumberLast4: string | null
+    paypalEmailMasked: string | null
+    paytmNumberLast4: string | null
+  } | null
   counterparty: {
     id: string
     firstName: string | null
@@ -184,6 +206,21 @@ export default async function TransactionDetailPage({
         </Link>
       ) : null,
     },
+    {
+      label: 'Bank details',
+      value: tx.paymentAccount
+        ? [
+            titleCase(tx.paymentAccount.paymentType),
+            tx.paymentAccount.bankName,
+            tx.paymentAccount.accountNumberLast4 ? `•••• ${tx.paymentAccount.accountNumberLast4}` : null,
+            tx.paymentAccount.paypalEmailMasked,
+            tx.paymentAccount.paytmNumberLast4 ? `•••• ${tx.paymentAccount.paytmNumberLast4}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        : null,
+    },
+    { label: 'Build / contest reference', value: tx.buildOrContestRef },
   ]
 
   return (
@@ -293,6 +330,51 @@ export default async function TransactionDetailPage({
 
           <div
             style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 'var(--space-6)',
+              paddingTop: 'var(--space-5)',
+              borderTop: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+                Paid
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
+                {formatMoney(tx.paidAmountMinor, tx.currency)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+                Outstanding
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
+                {formatMoney(tx.outstandingMinor, tx.currency)}
+              </span>
+            </div>
+            {tx.tdsAmountMinor ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+                  TDS
+                </span>
+                <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
+                  {formatMoney(tx.tdsAmountMinor, tx.currency)}
+                </span>
+              </div>
+            ) : null}
+            {tx.paymentMethod ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+                  Payment method
+                </span>
+                <span style={{ color: 'var(--text-primary)' }}>{titleCase(tx.paymentMethod)}</span>
+              </div>
+            ) : null}
+          </div>
+
+          <div
+            style={{
               paddingTop: 'var(--space-6)',
               borderTop: '1px solid var(--border-subtle)',
             }}
@@ -349,6 +431,61 @@ export default async function TransactionDetailPage({
             <div>
               <Button type="submit" variant="secondary">
                 Save reconciliation details
+              </Button>
+            </div>
+          </form>
+        </Panel>
+      ) : null}
+
+      {canWrite ? (
+        <Panel
+          title="Payout details"
+          description="§21-27 — drives which category (Indian / International / Pending) this row appears under, and what a customer or tester's outstanding balance shows."
+        >
+          <form
+            action={savePayoutDetails}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+          >
+            <input type="hidden" name="id" value={tx.id} />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
+              <Field label="Payment method" htmlFor="paymentMethod">
+                <Select
+                  id="paymentMethod"
+                  name="paymentMethod"
+                  defaultValue={tx.paymentMethod ?? ''}
+                  options={PAYMENT_METHOD_OPTIONS}
+                />
+              </Field>
+              <Field
+                label="Paid amount"
+                htmlFor="paidAmount"
+                hint="Major units, e.g. 1500.50. Blank leaves it unchanged."
+              >
+                <Input id="paidAmount" name="paidAmount" inputMode="decimal" placeholder="0.00" />
+              </Field>
+              <Field
+                label="TDS amount"
+                htmlFor="tdsAmount"
+                hint="Major units. Blank leaves it unchanged."
+              >
+                <Input id="tdsAmount" name="tdsAmount" inputMode="decimal" placeholder="0.00" />
+              </Field>
+              <Field
+                label="Build / contest reference"
+                htmlFor="buildOrContestRef"
+                hint="Free text — the build or contest this payout is for, if not already covered by the linked project."
+              >
+                <Input
+                  id="buildOrContestRef"
+                  name="buildOrContestRef"
+                  maxLength={160}
+                  defaultValue={tx.buildOrContestRef ?? ''}
+                />
+              </Field>
+            </div>
+            <div>
+              <Button type="submit" variant="secondary">
+                Save payout details
               </Button>
             </div>
           </form>

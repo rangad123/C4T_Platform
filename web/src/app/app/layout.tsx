@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 import { requireUser } from '@/lib/auth/session'
 
 export const metadata: Metadata = {
@@ -17,6 +18,18 @@ export const metadata: Metadata = {
  * every Server Action and Route Handler under /app must call `requireUser()`
  * itself rather than assuming this layout vouched for the caller.
  *
+ * ── `returnTo` is the real page, not a hardcoded `/app`
+ *
+ * This layout wraps every route under /app, admin included, so it is the
+ * one place a session that died mid-visit gets caught — an admin three
+ * levels into a project page is just as likely to land here as a customer
+ * on their own home. `x-full-path` (set by `proxy.ts` from the actual
+ * request URL) is what `loginAction` redirects back to after a fresh
+ * sign-in, so the visitor returns to where they were instead of the bare
+ * `/app` placeholder. Falling back to `/app` only happens if the header is
+ * ever missing (`proxy.ts`'s matcher excludes a request from Proxy
+ * entirely).
+ *
  * ── Why there is no <main> here
  *
  * This layout used to wrap `children` in `<main id="main">`. The admin area
@@ -32,7 +45,9 @@ export const metadata: Metadata = {
  * shell targets `#main`, and a page without it breaks that jump.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const user = await requireUser('/app')
+  const headerList = await headers()
+  const returnTo = headerList.get('x-full-path') ?? '/app'
+  const user = await requireUser(returnTo)
 
   return (
     <div style={{ minHeight: '100dvh' }}>

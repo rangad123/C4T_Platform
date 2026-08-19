@@ -36,23 +36,15 @@ import { formTrimmed } from '@/lib/form-data'
 
 const BASE = '/app/admin/transactions'
 
-const TYPES = [
-  'CUSTOMER_INVOICE',
-  'CUSTOMER_PAYMENT',
-  'TESTER_EARNING',
-  'TESTER_PAYOUT',
-  'ADJUSTMENT',
-  'REFUND',
-] as const
+// Tester payouts only -- see the same note in ../page.tsx. Customer
+// invoices/payments/refunds are handled offline and are not offered here;
+// the API's TransactionType enum and CUSTOMER_TYPES coherence rule are
+// untouched, this form just never sends those values.
+const TYPES = ['TESTER_EARNING', 'TESTER_PAYOUT', 'ADJUSTMENT'] as const
 
 const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'] as const
 
-/** Mirrors the API's own coherence rules, so the message arrives without a round trip. */
-const ORGANISATION_REQUIRED: readonly string[] = [
-  'CUSTOMER_INVOICE',
-  'CUSTOMER_PAYMENT',
-  'REFUND',
-]
+/** Mirrors the API's own coherence rule, so the message arrives without a round trip. */
 const COUNTERPARTY_REQUIRED: readonly string[] = ['TESTER_EARNING', 'TESTER_PAYOUT']
 
 const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP'] as const
@@ -74,13 +66,22 @@ const ECHO_KEYS = [
   'status',
   'amount',
   'currency',
-  'organisationId',
   'projectId',
   'counterpartyId',
   'description',
   'externalRef',
   'occurredAt',
+  'paymentMethod',
+  'buildOrContestRef',
 ] as const
+
+const PAYMENT_METHOD_OPTIONS: readonly SelectOption[] = [
+  { value: '', label: 'Not set' },
+  { value: 'IND_BANK_ACCOUNT', label: 'Indian bank account' },
+  { value: 'NON_IND_BANK_ACCOUNT', label: 'International bank account' },
+  { value: 'PAYPAL', label: 'PayPal' },
+  { value: 'PAYTM', label: 'Paytm' },
+]
 
 type EchoKey = (typeof ECHO_KEYS)[number]
 type Echo = Partial<Record<EchoKey, string>>
@@ -165,9 +166,6 @@ async function recordTransaction(formData: FormData): Promise<void> {
     redirect(backToForm('Enter the date it occurred as a calendar date.', echo))
   }
   const label = titleCase(type).toLowerCase()
-  if (ORGANISATION_REQUIRED.includes(type) && !echo.organisationId) {
-    redirect(backToForm(`Pick an organisation — a ${label} needs one.`, echo))
-  }
   if (COUNTERPARTY_REQUIRED.includes(type) && !echo.counterpartyId) {
     redirect(backToForm(`Pick a tester — a ${label} needs one.`, echo))
   }
@@ -183,12 +181,13 @@ async function recordTransaction(formData: FormData): Promise<void> {
         status,
         amountMinor,
         currency,
-        ...(echo.organisationId ? { organisationId: echo.organisationId } : {}),
         ...(echo.projectId ? { projectId: echo.projectId } : {}),
         ...(echo.counterpartyId ? { counterpartyId: echo.counterpartyId } : {}),
         ...(echo.description ? { description: echo.description.slice(0, 1000) } : {}),
         ...(echo.externalRef ? { externalRef: echo.externalRef.slice(0, 120) } : {}),
         ...(occurredAt ? { occurredAt } : {}),
+        ...(echo.paymentMethod ? { paymentMethod: echo.paymentMethod } : {}),
+        ...(echo.buildOrContestRef ? { buildOrContestRef: echo.buildOrContestRef.slice(0, 160) } : {}),
       },
     })
     createdId = created.id
@@ -208,10 +207,6 @@ async function recordTransaction(formData: FormData): Promise<void> {
   redirect(`${BASE}/${createdId}`)
 }
 
-interface OrganisationRow {
-  id: string
-  name: string
-}
 interface ProjectRow {
   id: string
   reference: string
@@ -276,12 +271,7 @@ export default async function NewTransactionPage({
   await requirePermission('transaction.write')
 
   const params = await searchParams
-  const [organisations, projects, testers] = await Promise.all([
-    loadRows<OrganisationRow>('organisations', {
-      limit: PICKER_LIMIT,
-      sort: 'name',
-      order: 'asc',
-    }),
+  const [projects, testers] = await Promise.all([
     loadRows<ProjectRow>('projects', { limit: PICKER_LIMIT, sort: 'title', order: 'asc' }),
     loadRows<TesterRow>('users', {
       limit: PICKER_LIMIT,
@@ -292,10 +282,6 @@ export default async function NewTransactionPage({
     }),
   ])
 
-  const organisationOptions: SelectOption[] = organisations.rows.map((org) => ({
-    value: org.id,
-    label: org.name,
-  }))
   const projectOptions: SelectOption[] = projects.rows.map((project) => ({
     value: project.id,
     label: project.organisation
@@ -472,6 +458,33 @@ export default async function NewTransactionPage({
                 defaultValue={params.externalRef ?? ''}
               />
             </Field>
+
+            <Field
+              label="Payment method"
+              htmlFor="paymentMethod"
+              hint="Drives which of Indian / International / Pending this row appears under once settled."
+            >
+              <Select
+                id="paymentMethod"
+                name="paymentMethod"
+                defaultValue={params.paymentMethod ?? ''}
+                options={PAYMENT_METHOD_OPTIONS}
+              />
+            </Field>
+
+            <Field
+              label="Build / contest reference"
+              htmlFor="buildOrContestRef"
+              hint="Free text — only needed if this isn't already covered by the linked project."
+            >
+              <Input
+                id="buildOrContestRef"
+                name="buildOrContestRef"
+                maxLength={160}
+                autoComplete="off"
+                defaultValue={params.buildOrContestRef ?? ''}
+              />
+            </Field>
           </div>
 
           <div
@@ -483,26 +496,6 @@ export default async function NewTransactionPage({
               borderTop: '1px solid var(--border-subtle)',
             }}
           >
-            <Field
-              label="Organisation"
-              htmlFor="organisationId"
-              hint={pickerHint({
-                failed: organisations.failed,
-                count: organisationOptions.length,
-                permission: 'organisation.read',
-                empty: 'No organisations exist yet, so only tester-side entries can be recorded.',
-                hint: 'Required for a customer invoice, a customer payment and a refund.',
-              })}
-            >
-              <Select
-                id="organisationId"
-                name="organisationId"
-                defaultValue={params.organisationId ?? ''}
-                placeholder="No organisation"
-                options={organisationOptions}
-              />
-            </Field>
-
             <Field
               label="Project"
               htmlFor="projectId"

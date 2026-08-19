@@ -43,7 +43,18 @@ const profileSelect = {
     },
   },
   devices: true,
-  skills: { select: { skill: { select: { id: true, name: true, slug: true, category: true } } } },
+  skills: {
+    select: {
+      skill: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          category: { select: { id: true, name: true, slug: true } },
+        },
+      },
+    },
+  },
   languages: { select: { code: true, proficiency: true } },
   workHistory: { orderBy: { startDate: 'desc' } },
 } satisfies Prisma.TesterProfileSelect
@@ -320,11 +331,58 @@ export async function changeTesterStatus(
 
 // ─── Devices ─────────────────────────────────────────────────────────────────
 
+/**
+ * Catalog fields a device may be submitted with, mapped to the free-text
+ * columns they mirror into on create. A catalog pick fills the matching
+ * free-text field ONLY when the caller left it blank — an explicit typed
+ * value always wins, since it describes this tester's actual unit more
+ * precisely than the catalog default (e.g. a modified/unusual OS string).
+ */
+async function resolveDeviceCatalogMirror(
+  input: Prisma.TesterDeviceUncheckedCreateInput,
+): Promise<Partial<Prisma.TesterDeviceUncheckedCreateInput>> {
+  const mirror: Partial<Prisma.TesterDeviceUncheckedCreateInput> = {}
+
+  if (input.deviceModelId && !input.manufacturer) {
+    const model = await prisma.deviceModel.findUnique({
+      where: { id: input.deviceModelId },
+      select: { brand: { select: { name: true } } },
+    })
+    // `model` (the free-text model name) is always caller-supplied — the
+    // brief treats the exact model name as tester input even when the brand
+    // is picked from the catalog, since model names vary more than the
+    // catalog can keep pace with. Only the brand mirrors here.
+    if (model) mirror.manufacturer = model.brand.name
+  }
+  if (input.osVersionRefId && !input.osName && !input.osVersion) {
+    const version = await prisma.osVersion.findUnique({
+      where: { id: input.osVersionRefId },
+      select: { version: true, operatingSystem: { select: { name: true } } },
+    })
+    if (version) {
+      mirror.osName = version.operatingSystem.name
+      mirror.osVersion = version.version
+    }
+  }
+  if (input.primaryNetworkId && !input.network) {
+    const network = await prisma.networkProvider.findUnique({
+      where: { id: input.primaryNetworkId },
+      select: { name: true },
+    })
+    if (network) mirror.network = network.name
+  }
+
+  return mirror
+}
+
 export async function addDevice(
   userId: string,
   input: Omit<Prisma.TesterDeviceUncheckedCreateInput, 'id' | 'testerProfileId' | 'createdAt'>,
 ) {
   const profile = await requireOwnProfile(userId)
+  const mirror = await resolveDeviceCatalogMirror(
+    input as Prisma.TesterDeviceUncheckedCreateInput,
+  )
 
   return prisma.$transaction(async (tx) => {
     // Only one device can be primary, so clear the flag before setting a new one.
@@ -335,7 +393,7 @@ export async function addDevice(
       })
     }
     return tx.testerDevice.create({
-      data: { ...input, testerProfileId: profile.id },
+      data: { ...input, ...mirror, testerProfileId: profile.id },
     })
   })
 }
@@ -381,82 +439,44 @@ export async function removeWorkHistory(userId: string, workHistoryId: string) {
 // ─── Skills & languages ──────────────────────────────────────────────────────
 
 /**
- * Replaces the tester's skill set, creating any skill that does not yet exist.
+ * Replaces the tester's skill set with a selection from the catalog — no
+ * longer free text (§13 "do not allow arbitrary duplicate skill names when a
+ * catalog entry already exists"; catalog creation now lives in
+ * `catalog.routes.ts`). Ids that don't resolve to an active catalog skill are
+ * silently dropped rather than rejecting the whole save: the catalog is
+ * fetched separately from this write, so a skill retired between the two
+ * requests should not block saving the rest of a valid selection.
  *
  * ── Why the transaction is kept deliberately small
  *
  * Only the delete-then-recreate of THIS tester's rows needs atomicity — a
- * tester must never be observable with a half-replaced skill set. Two other
- * things used to sit inside the same transaction and do not belong there:
- *
- *   1. The `skill.upsert` calls. Those create rows in the GLOBAL skill
- *      catalogue, are idempotent, and are not part of the tester's set being
- *      swapped — if the swap below fails, an extra catalogue row is harmless.
- *   2. The final profile read. It only builds the response payload, and
- *      reading it after the commit is if anything more correct, since it is
- *      then guaranteed to reflect committed state.
- *
- * Keeping them inside cost real correctness, not just speed: each Prisma
- * round trip to a remote Postgres is ~1s, `profileSelect` fans out across
- * five relations, and the interactive-transaction budget is 5s — so a tester
- * saving three or more skills reliably blew the timeout and got a 400 with
- * nothing saved. Two writes is well inside the budget.
+ * tester must never be observable with a half-replaced skill set. The final
+ * profile read does not belong inside it: it only builds the response
+ * payload, and reading it after the commit is if anything more correct, since
+ * it is then guaranteed to reflect committed state. `profileSelect` fans out
+ * across five relations and each Prisma round trip to a remote Postgres is
+ * ~1s against a 5s interactive-transaction budget, so keeping the read out
+ * matters for the same reason it did when this accepted free text.
  */
-export async function setSkills(userId: string, slugs: string[]) {
+export async function setSkills(userId: string, skillIds: string[]) {
   const profile = await requireOwnProfile(userId)
-  const normalised = [...new Set(slugs.map((s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')))]
+  const requested = [...new Set(skillIds)]
 
-  // Outside the transaction — see the note above.
-  const skills = await Promise.all(
-    normalised.map((slug) =>
-      prisma.skill.upsert({
-        where: { slug },
-        create: { slug, name: slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) },
-        update: {},
-        select: { id: true },
-      }),
-    ),
-  )
+  const valid = await prisma.skill.findMany({
+    where: { id: { in: requested }, isActive: true },
+    select: { id: true },
+  })
 
   await prisma.$transaction(async (tx) => {
     await tx.testerSkill.deleteMany({ where: { testerProfileId: profile.id } })
-    if (skills.length > 0) {
+    if (valid.length > 0) {
       await tx.testerSkill.createMany({
-        data: skills.map((s) => ({ testerProfileId: profile.id, skillId: s.id })),
+        data: valid.map((s) => ({ testerProfileId: profile.id, skillId: s.id })),
       })
     }
   })
 
   return prisma.testerProfile.findUnique({ where: { id: profile.id }, select: profileSelect })
-}
-
-/**
- * Lists every skill in the catalogue, with how many testers carry it. Used by
- * the admin skill-browser to assign categories. Sorted by category then name
- * so the same category clusters together.
- */
-export async function listSkillCatalogue() {
-  const skills = await prisma.skill.findMany({
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      category: true,
-      _count: { select: { testers: true } },
-    },
-    orderBy: [{ category: 'asc' }, { name: 'asc' }],
-  })
-  return skills
-}
-
-/** Admin: re-classify a skill. */
-export async function setSkillCategory(
-  skillId: string,
-  category: 'DOMAIN' | 'TYPE' | 'TOOL' | 'APPLICATION',
-) {
-  const skill = await prisma.skill.findUnique({ where: { id: skillId }, select: { id: true } })
-  if (!skill) throw new NotFoundError('Skill')
-  return prisma.skill.update({ where: { id: skillId }, data: { category } })
 }
 
 /** Replaces the tester's language set. Same transaction-scoping rationale as `setSkills`. */

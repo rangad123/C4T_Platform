@@ -13,7 +13,10 @@
   overflow-y: auto;
 }
 
-.brand {
+.brandRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 var(--space-3);
   margin-bottom: var(--space-3);
 }
@@ -151,7 +154,6 @@
   padding-top: var(--space-3);
 }
 
-.sidebar.collapsed .brand,
 .sidebar.collapsed .user {
   display: flex;
   justify-content: center;
@@ -159,14 +161,11 @@
   padding-right: 0;
 }
 
-.toggleRow {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 var(--space-2);
-}
-
-.sidebar.collapsed .toggleRow {
-  justify-content: center;
+/* Collapsed rail has no room for the logo and the toggle side by side —
+   stack them instead of hiding either one. */
+.sidebar.collapsed .brandRow {
+  flex-direction: column;
+  gap: var(--space-3);
   padding: 0;
 }
 

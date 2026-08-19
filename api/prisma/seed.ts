@@ -6,6 +6,7 @@ import {
   OrganisationStatus,
   OrgMemberRole,
   DeviceType,
+  OsKind,
   BugSeverity,
   BugStatus,
   TransactionType,
@@ -17,6 +18,7 @@ import {
 } from '@prisma/client'
 import argon2 from 'argon2'
 import { PERMISSION_CATALOGUE, DEFAULT_SUBADMIN_PERMISSIONS } from '../src/config/permissions.js'
+import { seedCatalog } from './seed-catalog.js'
 
 const prisma = new PrismaClient()
 
@@ -152,47 +154,53 @@ async function main() {
     update: {},
   })
 
-  // ─── Device / browser catalog (§18 Global Assets) ──────────────────────────
-  // Recovers the legacy `mobile_brands` / `os` / `browsers` / `network_providers`
-  // reference tables. Global, not tenant-scoped — a Galaxy S24 is the same
-  // device for every customer. Everything is upserted on a natural key, so
-  // re-seeding never duplicates and never clobbers admin edits to `isActive`.
-  console.log('Seeding device/browser catalog…')
+  // ─── Device / browser / skill catalog (§18 Global Assets) ──────────────────
+  // Recovers the legacy `mobile_brands` / `os` / `os_versions` / `browsers` /
+  // `skill_categories` / `skills` reference tables from the real legacy export
+  // in `prisma/csv/` (see `seed-catalog.ts`). Global, not tenant-scoped — a
+  // Galaxy S24 is the same device for every customer. Everything is upserted
+  // on a natural key, so re-seeding never duplicates and never clobbers an
+  // admin's edit to `isActive`.
+  console.log('Seeding device/browser/skill catalog…')
+  await seedCatalog(prisma)
 
-  const osSeeds: { name: string; kind: 'MOBILE' | 'DESKTOP'; versions: string[] }[] = [
-    { name: 'Android', kind: 'MOBILE', versions: ['12', '13', '14', '15'] },
-    { name: 'iOS', kind: 'MOBILE', versions: ['16', '17', '18'] },
-    { name: 'iPadOS', kind: 'MOBILE', versions: ['17', '18'] },
-    { name: 'Windows', kind: 'DESKTOP', versions: ['10', '11'] },
-    { name: 'macOS', kind: 'DESKTOP', versions: ['13 Ventura', '14 Sonoma', '15 Sequoia'] },
-    { name: 'Linux', kind: 'DESKTOP', versions: ['Ubuntu 22.04', 'Ubuntu 24.04', 'Fedora 40'] },
-  ]
-  const osByName = new Map<string, string>()
-  for (const o of osSeeds) {
-    const row = await prisma.operatingSystem.upsert({
-      where: { name_kind: { name: o.name, kind: o.kind } },
-      create: { name: o.name, kind: o.kind },
+  // iPadOS has no legacy row of its own (the legacy export covers iPad under
+  // "iOS"), but the demo device models below need it, so it gets one line
+  // here rather than a whole CSV for a single value.
+  const ipadOs = await prisma.operatingSystem.upsert({
+    where: { name_kind: { name: 'iPadOS', kind: OsKind.MOBILE } },
+    create: { name: 'iPadOS', kind: OsKind.MOBILE },
+    update: {},
+    select: { id: true },
+  })
+  for (const v of ['17', '18']) {
+    await prisma.osVersion.upsert({
+      where: { operatingSystemId_version: { operatingSystemId: ipadOs.id, version: v } },
+      create: { operatingSystemId: ipadOs.id, version: v },
       update: {},
-      select: { id: true },
     })
-    osByName.set(o.name, row.id)
-    for (const v of o.versions) {
-      await prisma.osVersion.upsert({
-        where: { operatingSystemId_version: { operatingSystemId: row.id, version: v } },
-        create: { operatingSystemId: row.id, version: v },
-        update: {},
-      })
-    }
   }
 
-  const browserSeeds: { name: string; versions: string[] }[] = [
+  const osByName = new Map<string, string>(
+    (await prisma.operatingSystem.findMany({ select: { id: true, name: true } })).map((o) => [
+      o.name,
+      o.id,
+    ]),
+  )
+
+  // Legacy `browsers.csv` has no version list (that was a separate table with
+  // no CSV export) — demo version numbers stay hand-picked, against the
+  // browser names `seedCatalog` just created from the CSV import. "Samsung
+  // Internet" has no legacy row; kept anyway as a reasonable modern addition
+  // that doesn't collide with anything.
+  const browserVersionSeeds: { name: string; versions: string[] }[] = [
     { name: 'Chrome', versions: ['126', '127', '128'] },
     { name: 'Safari', versions: ['17', '18'] },
     { name: 'Firefox', versions: ['128', '129'] },
-    { name: 'Edge', versions: ['127', '128'] },
+    { name: 'IE Edge', versions: ['127', '128'] },
     { name: 'Samsung Internet', versions: ['25', '26'] },
   ]
-  for (const b of browserSeeds) {
+  for (const b of browserVersionSeeds) {
     const row = await prisma.browser.upsert({
       where: { name: b.name },
       create: { name: b.name },
@@ -242,7 +250,7 @@ async function main() {
         { name: 'iPhone 13', type: DeviceType.MOBILE, os: 'iOS', ramGb: '4', screenSize: '6.1' },
         { name: 'iPhone 15 Pro', type: DeviceType.MOBILE, os: 'iOS', ramGb: '8', screenSize: '6.1' },
         { name: 'iPad Air (M2)', type: DeviceType.TABLET, os: 'iPadOS', ramGb: '8', screenSize: '11' },
-        { name: 'MacBook Pro 14"', type: DeviceType.DESKTOP, os: 'macOS', ramGb: '18', screenSize: '14.2' },
+        { name: 'MacBook Pro 14"', type: DeviceType.DESKTOP, os: 'Mac IOS', ramGb: '18', screenSize: '14.2' },
       ],
     },
     {
@@ -289,28 +297,25 @@ async function main() {
   }
   console.log('  catalog ready')
 
-  // ─── Skills catalogue ──────────────────────────────────────────────────────
-  const skillNames = [
-    'Manual Testing',
-    'Automation Testing',
-    'Security Testing',
-    'Localization Testing',
-    'Payment Testing',
-    'API Testing',
-    'Accessibility Testing',
-    'Performance Testing',
+  // ─── Skills for the demo testers below ──────────────────────────────────────
+  // `seedCatalog` above owns skill creation now (from `skills.csv`, reconciled
+  // with two skills this platform seeded before the catalog existed — see
+  // `SKILL_NAME_FIXES` and the categoryId backfill in `seed-catalog.ts`). This
+  // just reads back the ones the demo testers get assigned, by the same slugs.
+  const demoSkillSlugs = [
+    'manual-testing',
+    'automation-testing',
+    'security-testing',
+    'localization-testing',
+    'payment-testing',
+    'api-testing',
+    'accessibility-testing',
+    'performance-testing',
   ]
-  const skills = await Promise.all(
-    skillNames.map((name) => {
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-      return prisma.skill.upsert({
-        where: { slug },
-        create: { name, slug },
-        update: {},
-        select: { id: true, slug: true },
-      })
-    }),
-  )
+  const skills = await prisma.skill.findMany({
+    where: { slug: { in: demoSkillSlugs } },
+    select: { id: true, slug: true },
+  })
 
   // ─── Verified testers ──────────────────────────────────────────────────────
   const testerSeeds = [
@@ -427,6 +432,7 @@ async function main() {
         targetLanguages: ['en', 'hi'],
         startDate: new Date(),
         progressPercent: 35,
+        builds: { create: { name: 'Original build', isDefault: true } },
       },
     })
     // Advance the sequence past the seed's hardcoded reference so the next
@@ -544,6 +550,7 @@ async function main() {
           targetLanguages: ['en', 'es'],
           startDate: new Date(),
           progressPercent: 12,
+          builds: { create: { name: 'Original build', isDefault: true } },
         },
       })
       // Advance the sequence past the second seed row so the next
@@ -558,10 +565,16 @@ async function main() {
   }
 
   // ─── Bugs against the existing projects so the bug list is not empty ─────
-  // The bug model needs projectId and a reportedById; we use the admin as the
-  // reporter and link to whichever project the seed happened to create first.
+  // The bug model needs projectId, buildId and a reportedById; we use the
+  // admin as the reporter, each project's default build, and link to
+  // whichever project the seed happened to create first.
   const allProjects = await prisma.project.findMany({
-    select: { id: true, reference: true, organisationId: true },
+    select: {
+      id: true,
+      reference: true,
+      organisationId: true,
+      builds: { where: { isDefault: true }, select: { id: true }, take: 1 },
+    },
     orderBy: { createdAt: 'asc' },
   })
   if (allProjects.length > 0) {
@@ -605,12 +618,14 @@ async function main() {
     ]
     for (const b of bugSeeds) {
       const project = allProjects[Math.min(b.projectIdx, allProjects.length - 1)]
-      if (!project) continue
+      const defaultBuild = project?.builds[0]
+      if (!project || !defaultBuild) continue
       await prisma.bug.upsert({
         where: { reference: b.ref },
         create: {
           reference: b.ref,
           projectId: project.id,
+          buildId: defaultBuild.id,
           reportedById: admin.id,
           title: b.title,
           description: b.stepsToReproduce,

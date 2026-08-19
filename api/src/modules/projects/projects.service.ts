@@ -36,6 +36,79 @@ const projectSelect = {
   _count: { select: { bugs: true, assignments: true, materials: true } },
 } satisfies Prisma.ProjectSelect
 
+/** The compact shape nested inside a project read — the build switcher only needs this much. */
+const buildSummarySelect = {
+  id: true,
+  name: true,
+  isDefault: true,
+  createdAt: true,
+} satisfies Prisma.BuildSelect
+
+/** The full shape for Build Details / Edit Build — every field §6 of the brief asks for. */
+const buildSelect = {
+  id: true,
+  projectId: true,
+  name: true,
+  isDefault: true,
+  status: true,
+  testType: true,
+  description: true,
+  appUrl: true,
+  releaseNotes: true,
+  instructions: true,
+  specialRequirements: true,
+  targetDevices: true,
+  targetBrowsers: true,
+  targetOperatingSystems: true,
+  targetCountries: true,
+  targetLanguages: true,
+  maxTesters: true,
+  testersCanSeeOtherBugs: true,
+  startDate: true,
+  endDate: true,
+  testDocumentFileId: true,
+  testDocument: {
+    select: { id: true, originalName: true, mimeType: true, sizeBytes: true },
+  },
+  createdAt: true,
+  updatedAt: true,
+  _count: { select: { assignments: true, bugs: true, materials: true, features: true, testCases: true } },
+} satisfies Prisma.BuildSelect
+
+/**
+ * Resolves which build a read or write should be scoped to.
+ *
+ * `requested` is untrusted input (a query param or a form field) — it must
+ * belong to `projectId` or it is rejected outright, so one project's build id
+ * can never be used to reach into another project's rows. Omitting it falls
+ * back to the project's `isDefault` build, which is what makes every
+ * existing caller that has never heard of builds (the tester portal, an
+ * older integration) keep working unchanged after this migration.
+ *
+ * Exported for `bugs.service.ts`'s `createBug` — one build-resolution rule,
+ * not two.
+ */
+export async function resolveBuildId(projectId: string, requested?: string | null): Promise<string> {
+  if (requested) {
+    const build = await prisma.build.findFirst({
+      where: { id: requested, projectId, deletedAt: null },
+      select: { id: true },
+    })
+    if (!build) throw new BadRequestError('That build does not belong to this project')
+    return build.id
+  }
+
+  const fallback = await prisma.build.findFirst({
+    where: { projectId, deletedAt: null },
+    orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+    select: { id: true },
+  })
+  // Every project gets its default build at creation time (see `createProject`)
+  // — reaching this means the data is in a state the app never produces.
+  if (!fallback) throw new NotFoundError('Build')
+  return fallback.id
+}
+
 /**
  * Valid status transitions (§2.2 Project Management).
  * Encoded rather than free-form so the Admin UI and the API agree, and so an
@@ -82,6 +155,7 @@ export async function listProjects(user: Express.AuthenticatedUser, query: ListP
     ...(query.status ? { status: query.status } : {}),
     ...(query.priority ? { priority: query.priority } : {}),
     ...(query.organisationId ? { organisationId: query.organisationId } : {}),
+    ...(query.testerId ? { assignments: { some: { testerId: query.testerId } } } : {}),
     ...(query.search
       ? {
           OR: [
@@ -121,6 +195,7 @@ export async function exportProjectsCSV(
     ...(query.status ? { status: query.status } : {}),
     ...(query.priority ? { priority: query.priority } : {}),
     ...(query.organisationId ? { organisationId: query.organisationId } : {}),
+    ...(query.testerId ? { assignments: { some: { testerId: query.testerId } } } : {}),
     ...(query.search
       ? {
           OR: [
@@ -192,7 +267,11 @@ export async function exportProjectsCSV(
  *   project.read_contacts named people to raise a question with. An active
  *                         tester gets names and roles, never billing detail.
  */
-export async function getProject(user: Express.AuthenticatedUser, id: string) {
+export async function getProject(
+  user: Express.AuthenticatedUser,
+  id: string,
+  requestedBuildId?: string,
+) {
   const resolved = await projectRelations(user, id)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
     throw new NotFoundError('Project')
@@ -208,9 +287,15 @@ export async function getProject(user: Express.AuthenticatedUser, id: string) {
     select: {
       ...projectSelect,
       instructions: true,
+      builds: {
+        where: { deletedAt: null },
+        select: buildSummarySelect,
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      },
       materials: {
         select: {
           id: true,
+          buildId: true,
           title: true,
           description: true,
           url: true,
@@ -221,6 +306,7 @@ export async function getProject(user: Express.AuthenticatedUser, id: string) {
       },
       assignments: {
         select: {
+          buildId: true,
           status: true,
           invitedAt: true,
           respondedAt: true,
@@ -250,7 +336,18 @@ export async function getProject(user: Express.AuthenticatedUser, id: string) {
 
   if (!project) throw new NotFoundError('Project')
 
+  // Fetched unscoped by build (Prisma can't apply a build filter here AND
+  // still let the tester branch below fall back to "whichever build my own
+  // assignment is on") and filtered in JS instead, per branch, right below.
   const myAssignment = project.assignments.find((a) => a.tester.id === user.id)
+
+  // The build switcher is an admin/manager/customer affordance — a tester has
+  // no concept of "the active build," only of their own single assignment, so
+  // their effective build is whichever one that assignment was made under,
+  // never a `?buildId=` they never had a UI to set.
+  const activeBuildId = seesTeam
+    ? await resolveBuildId(id, requestedBuildId)
+    : (myAssignment?.buildId ?? (await resolveBuildId(id)))
 
   const contacts = seesContacts
     ? await projectContacts(id, project.organisation.id, {
@@ -262,10 +359,17 @@ export async function getProject(user: Express.AuthenticatedUser, id: string) {
 
   return {
     ...project,
+    activeBuildId,
     instructions: seesBrief ? project.instructions : null,
-    materials: seesBrief ? project.materials : [],
-    // A tester sees only their own assignment row, never the rest of the crowd.
-    assignments: seesTeam ? project.assignments : myAssignment ? [myAssignment] : [],
+    materials: seesBrief ? project.materials.filter((m) => m.buildId === activeBuildId) : [],
+    // A tester sees only their own assignment row, never the rest of the
+    // crowd — and never filtered by build, since it is their one row
+    // regardless of which build it belongs to.
+    assignments: seesTeam
+      ? project.assignments.filter((a) => a.buildId === activeBuildId)
+      : myAssignment
+        ? [myAssignment]
+        : [],
     managers: seesTeam ? project.managers : [],
     contacts,
     capabilities: {
@@ -370,6 +474,10 @@ export async function createProject(
       organisation: { connect: { id: organisationId } },
       createdBy: { connect: { id: user.id } },
       status: ProjectStatus.DRAFT,
+      // Every project gets one build the moment it exists, so a caller that
+      // never opens the build switcher (the tester portal, a bug report, an
+      // older integration) always has a `buildId` to fall back to.
+      builds: { create: { name: 'Original build', isDefault: true } },
     },
     select: projectSelect,
   })
@@ -516,7 +624,7 @@ export async function archiveProject(id: string) {
 export async function addMaterial(
   user: Express.AuthenticatedUser,
   projectId: string,
-  input: { title: string; description?: string; fileId?: string; url?: string },
+  input: { title: string; description?: string; fileId?: string; url?: string; buildId?: string },
 ) {
   const resolved = await projectRelations(user, projectId)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
@@ -524,9 +632,12 @@ export async function addMaterial(
   }
   authorize(user, 'project.manage_materials', resolved.relations)
 
+  const buildId = await resolveBuildId(projectId, input.buildId)
+
   return prisma.projectMaterial.create({
     data: {
       projectId,
+      buildId,
       title: input.title,
       description: input.description ?? null,
       fileId: input.fileId ?? null,
@@ -557,33 +668,45 @@ export async function removeMaterial(
 
 // ─── Features (§2.2 Build Settings "Feature Lists") ──────────────────────────
 
-export async function listFeatures(user: Express.AuthenticatedUser, projectId: string) {
+export async function listFeatures(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  requestedBuildId?: string,
+) {
   const resolved = await projectRelations(user, projectId)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
     throw new NotFoundError('Project')
   }
+  const buildId = await resolveBuildId(projectId, requestedBuildId)
   return prisma.feature.findMany({
-    where: { projectId },
+    where: { projectId, buildId },
     select: { id: true, name: true, createdAt: true, _count: { select: { bugs: true } } },
     orderBy: { name: 'asc' },
   })
 }
 
-export async function addFeature(user: Express.AuthenticatedUser, projectId: string, name: string) {
+export async function addFeature(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  name: string,
+  requestedBuildId?: string,
+) {
   const resolved = await projectRelations(user, projectId)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
     throw new NotFoundError('Project')
   }
   authorize(user, 'project.manage_materials', resolved.relations)
 
+  const buildId = await resolveBuildId(projectId, requestedBuildId)
+
   const existing = await prisma.feature.findUnique({
-    where: { projectId_name: { projectId, name } },
+    where: { buildId_name: { buildId, name } },
     select: { id: true },
   })
-  if (existing) throw new ConflictError('A feature with this name already exists on this project')
+  if (existing) throw new ConflictError('A feature with this name already exists on this build')
 
   return prisma.feature.create({
-    data: { projectId, name },
+    data: { projectId, buildId, name },
     select: { id: true, name: true, createdAt: true },
   })
 }
@@ -612,7 +735,12 @@ export async function removeFeature(
 
 // ─── Assignments (§2.2 Project Management → assign testers) ──────────────────
 
-export async function assignTesters(projectId: string, testerIds: string[], notes?: string) {
+export async function assignTesters(
+  projectId: string,
+  testerIds: string[],
+  notes?: string,
+  requestedBuildId?: string,
+) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, deletedAt: null },
     select: { id: true, title: true, status: true, maxTesters: true },
@@ -622,6 +750,8 @@ export async function assignTesters(projectId: string, testerIds: string[], note
     throw new ConflictError('Cannot assign testers to a closed project')
   }
 
+  const buildId = await resolveBuildId(projectId, requestedBuildId)
+
   // Validate every tester before writing any of them, so a partial batch never
   // half-applies.
   const unique = [...new Set(testerIds)]
@@ -629,6 +759,11 @@ export async function assignTesters(projectId: string, testerIds: string[], note
     await assertAssignable(testerId)
   }
 
+  // A tester keeps exactly one roster row per PROJECT, not per build (see the
+  // schema comment on `ProjectAssignment.buildId`) — so someone already on
+  // the roster under a different build is skipped here, the same as someone
+  // already invited under this one. Moving a tester between builds is not
+  // exposed by this endpoint.
   const existing = await prisma.projectAssignment.findMany({
     where: { projectId, testerId: { in: unique } },
     select: { testerId: true },
@@ -662,6 +797,7 @@ export async function assignTesters(projectId: string, testerIds: string[], note
     await prisma.projectAssignment.createMany({
       data: toCreate.map((testerId) => ({
         projectId,
+        buildId,
         testerId,
         status: AssignmentStatus.INVITED,
         notes: notes ?? null,
@@ -792,4 +928,193 @@ export async function listMyAssignments(
   ])
 
   return { items, meta: buildMeta(query, total) }
+}
+
+// ─── Builds (§6-9 of the platform UX brief — a project may span several) ─────
+//
+// Build management rides on `project.update` — the same permission that gates
+// "Edit the brief" — because adding, renaming or retiring a build reshapes
+// the project's own structure, not its testers/materials/bugs content.
+
+export async function listBuilds(user: Express.AuthenticatedUser, projectId: string) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  return prisma.build.findMany({
+    where: { projectId, deletedAt: null },
+    select: buildSelect,
+    orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+  })
+}
+
+export async function getBuild(user: Express.AuthenticatedUser, projectId: string, buildId: string) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  const build = await prisma.build.findFirst({
+    where: { id: buildId, projectId, deletedAt: null },
+    select: buildSelect,
+  })
+  if (!build) throw new NotFoundError('Build')
+  return { ...build, capabilities: { canUpdate: can(user, 'project.update', resolved.relations) } }
+}
+
+export async function createBuild(user: Express.AuthenticatedUser, projectId: string, name: string) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.update', resolved.relations)
+
+  const existing = await prisma.build.findFirst({
+    where: { projectId, name, deletedAt: null },
+    select: { id: true },
+  })
+  if (existing) throw new ConflictError('A build with this name already exists on this project')
+
+  return prisma.build.create({
+    data: { projectId, name },
+    select: buildSelect,
+  })
+}
+
+/**
+ * Full Build Details edit — name plus every field §6 of the platform UX
+ * brief lists (test type, dates, app URL, test document, countries,
+ * OS/browsers, instructions, special requirements, bug visibility, max
+ * testers). `input` is whatever subset of those the caller sent; only a
+ * rename touches the uniqueness check.
+ */
+export async function updateBuild(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  buildId: string,
+  input: Record<string, unknown> & { name?: string },
+) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.update', resolved.relations)
+
+  const build = await prisma.build.findFirst({
+    where: { id: buildId, projectId, deletedAt: null },
+    select: { id: true },
+  })
+  if (!build) throw new NotFoundError('Build')
+
+  if (input.name) {
+    const clash = await prisma.build.findFirst({
+      where: { projectId, name: input.name, deletedAt: null, id: { not: buildId } },
+      select: { id: true },
+    })
+    if (clash) throw new ConflictError('A build with this name already exists on this project')
+  }
+
+  return prisma.build.update({ where: { id: buildId }, data: input, select: buildSelect })
+}
+
+/**
+ * Duplicate a build's own configuration onto a new build of the same
+ * project — §7 "Copy Build". Copies the descriptive fields (test type,
+ * dates, targets, instructions, …) and the Feature list, since those define
+ * what the NEW build tests. Deliberately does NOT copy testers, bugs,
+ * materials, test cases/reports/reviews or payment records — those are
+ * history that belongs to the build that produced them, not a template to
+ * hand the copy a head start on.
+ */
+export async function copyBuild(user: Express.AuthenticatedUser, projectId: string, buildId: string) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.update', resolved.relations)
+
+  const source = await prisma.build.findFirst({
+    where: { id: buildId, projectId, deletedAt: null },
+    select: buildSelect,
+  })
+  if (!source) throw new NotFoundError('Build')
+
+  const existingNames = new Set(
+    (
+      await prisma.build.findMany({ where: { projectId, deletedAt: null }, select: { name: true } })
+    ).map((b) => b.name),
+  )
+  let name = `${source.name} (copy)`
+  let suffix = 2
+  while (existingNames.has(name)) {
+    name = `${source.name} (copy ${suffix})`
+    suffix += 1
+  }
+
+  const copy = await prisma.build.create({
+    data: {
+      projectId,
+      name,
+      isDefault: false,
+      status: 'NEW',
+      testType: source.testType,
+      description: source.description,
+      appUrl: source.appUrl,
+      releaseNotes: source.releaseNotes,
+      instructions: source.instructions,
+      specialRequirements: source.specialRequirements,
+      targetDevices: source.targetDevices,
+      targetBrowsers: source.targetBrowsers,
+      targetOperatingSystems: source.targetOperatingSystems,
+      targetCountries: source.targetCountries,
+      targetLanguages: source.targetLanguages,
+      maxTesters: source.maxTesters,
+      testersCanSeeOtherBugs: source.testersCanSeeOtherBugs,
+      testDocumentFileId: source.testDocumentFileId,
+    },
+    select: buildSelect,
+  })
+
+  const features = await prisma.feature.findMany({ where: { buildId }, select: { name: true } })
+  if (features.length === 0) return copy
+
+  await prisma.feature.createMany({
+    data: features.map((f) => ({ projectId, buildId: copy.id, name: f.name })),
+  })
+  // `copy`'s `_count.features` was snapshotted before the createMany above —
+  // re-read so the response the caller sees matches what actually happened.
+  return prisma.build.findUniqueOrThrow({ where: { id: copy.id }, select: buildSelect })
+}
+
+/**
+ * Soft-delete a build. Refused for the default build, and refused for the
+ * last remaining one — every project must always have somewhere for its
+ * testers/materials/features/bugs to point, and the default build is what
+ * every build-unaware caller falls back to.
+ */
+export async function archiveBuild(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  buildId: string,
+) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.update', resolved.relations)
+
+  const build = await prisma.build.findFirst({
+    where: { id: buildId, projectId, deletedAt: null },
+    select: { id: true, isDefault: true },
+  })
+  if (!build) throw new NotFoundError('Build')
+  if (build.isDefault) throw new ConflictError('The default build cannot be removed')
+
+  const remaining = await prisma.build.count({ where: { projectId, deletedAt: null } })
+  if (remaining <= 1) throw new ConflictError('A project must keep at least one build')
+
+  return prisma.build.update({
+    where: { id: buildId },
+    data: { deletedAt: new Date() },
+    select: { id: true, deletedAt: true },
+  })
 }

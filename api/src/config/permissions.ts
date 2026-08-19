@@ -70,6 +70,8 @@ export const PERMISSIONS = {
   // Transactions — §2.2 Transactions
   TRANSACTION_READ: 'transaction.read',
   TRANSACTION_WRITE: 'transaction.write',
+  /** Highly sensitive — reveals a tester's decrypted bank/payout details. */
+  PAYMENT_ACCOUNT_DECRYPT: 'payment_account.decrypt',
 
   // Users & access
   USER_READ: 'user.read',
@@ -232,6 +234,13 @@ export const PERMISSION_CATALOGUE: PermissionDefinition[] = [
     group: PERMISSION_GROUPS.TRANSACTIONS,
     label: 'Manage transactions',
     description: 'Record and update transactions',
+  },
+  {
+    code: PERMISSIONS.PAYMENT_ACCOUNT_DECRYPT,
+    group: PERMISSION_GROUPS.TRANSACTIONS,
+    label: 'Decrypt bank details',
+    description:
+      'Reveal a tester’s decrypted bank/payout details. Every reveal is audited. Grant sparingly.',
   },
 
   {

@@ -17,6 +17,7 @@ import { nextReference } from '../../lib/reference.js'
 import { createNotification, createNotifications } from '../notifications/notifications.service.js'
 import { refreshTesterAggregates } from '../testers/testers.service.js'
 import { createDownloadUrl } from '../../lib/storage.js'
+import { resolveBuildId } from '../projects/projects.service.js'
 import { BUG_SORT_FIELDS, type ListBugsQuery } from './bugs.schema.js'
 
 const bugSelect = {
@@ -74,11 +75,21 @@ export async function listBugs(user: Express.AuthenticatedUser, query: ListBugsQ
     deletedAt: null,
     ...bugScope(user),
     ...(query.projectId ? { projectId: query.projectId } : {}),
+    ...(query.buildId ? { buildId: query.buildId } : {}),
+    ...(query.buildIds?.length ? { buildId: { in: query.buildIds } } : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.severity ? { severity: query.severity } : {}),
     ...(query.type ? { type: query.type } : {}),
     ...(query.featureId ? { featureId: query.featureId } : {}),
     ...(query.reportedById ? { reportedById: query.reportedById } : {}),
+    ...(query.startDate || query.endDate
+      ? {
+          createdAt: {
+            ...(query.startDate ? { gte: query.startDate } : {}),
+            ...(query.endDate ? { lte: query.endDate } : {}),
+          },
+        }
+      : {}),
     ...(query.search
       ? {
           OR: [
@@ -121,11 +132,21 @@ export async function exportBugsCSV(
     deletedAt: null,
     ...bugScope(user),
     ...(query.projectId ? { projectId: query.projectId } : {}),
+    ...(query.buildId ? { buildId: query.buildId } : {}),
+    ...(query.buildIds?.length ? { buildId: { in: query.buildIds } } : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.severity ? { severity: query.severity } : {}),
     ...(query.type ? { type: query.type } : {}),
     ...(query.featureId ? { featureId: query.featureId } : {}),
     ...(query.reportedById ? { reportedById: query.reportedById } : {}),
+    ...(query.startDate || query.endDate
+      ? {
+          createdAt: {
+            ...(query.startDate ? { gte: query.startDate } : {}),
+            ...(query.endDate ? { lte: query.endDate } : {}),
+          },
+        }
+      : {}),
     ...(query.search
       ? {
           OR: [
@@ -312,9 +333,9 @@ export async function getBug(user: Express.AuthenticatedUser, id: string) {
 
 export async function createBug(
   user: Express.AuthenticatedUser,
-  input: Record<string, unknown> & { projectId: string; attachmentFileIds: string[] },
+  input: Record<string, unknown> & { projectId: string; buildId?: string; attachmentFileIds: string[] },
 ) {
-  const { projectId, attachmentFileIds, ...data } = input
+  const { projectId, buildId: requestedBuildId, attachmentFileIds, ...data } = input
 
   const resolved = await projectRelations(user, projectId)
   if (!resolved) throw new NotFoundError('Project')
@@ -325,6 +346,11 @@ export async function createBug(
   if (['COMPLETED', 'CANCELLED', 'DRAFT'].includes(resolved.project.status)) {
     throw new ConflictError('This project is not currently accepting bug reports')
   }
+
+  // The tester portal has no build switcher — a report always lands on the
+  // project's default build unless a build-aware caller (the admin panel)
+  // names one explicitly.
+  const buildId = await resolveBuildId(projectId, requestedBuildId)
 
   if (attachmentFileIds.length > 0) {
     const files = await prisma.fileObject.findMany({
@@ -338,10 +364,10 @@ export async function createBug(
 
   if (typeof data.featureId === 'string') {
     const feature = await prisma.feature.findFirst({
-      where: { id: data.featureId, projectId },
+      where: { id: data.featureId, projectId, buildId },
       select: { id: true },
     })
-    if (!feature) throw new BadRequestError('That feature does not belong to this project')
+    if (!feature) throw new BadRequestError('That feature does not belong to this build')
   }
 
   const bug = await prisma.bug.create({
@@ -349,6 +375,7 @@ export async function createBug(
       ...(data as Prisma.BugCreateInput),
       reference: await nextReference('bug'),
       project: { connect: { id: projectId } },
+      build: { connect: { id: buildId } },
       reportedBy: { connect: { id: user.id } },
       status: BugStatus.NEW,
       ...(attachmentFileIds.length > 0
@@ -422,10 +449,10 @@ export async function updateBug(
 
   if (typeof input.featureId === 'string') {
     const feature = await prisma.feature.findFirst({
-      where: { id: input.featureId, projectId: bug.projectId },
+      where: { id: input.featureId, projectId: bug.projectId, buildId: bug.buildId },
       select: { id: true },
     })
-    if (!feature) throw new BadRequestError('That feature does not belong to this project')
+    if (!feature) throw new BadRequestError('That feature does not belong to this build')
   }
 
   return prisma.bug.update({

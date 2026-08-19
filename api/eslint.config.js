@@ -98,7 +98,14 @@ export default tseslint.config(
 
   // Boot code and one-off scripts print to stdout and exit by design.
   {
-    files: ['src/index.ts', 'src/config/env.ts', 'scripts/**/*.ts', 'prisma/seed.ts'],
+    files: [
+      'src/index.ts',
+      'src/config/env.ts',
+      'scripts/**/*.ts',
+      'prisma/seed.ts',
+      'prisma/seed-catalog.ts',
+      'prisma/backfill-builds.ts',
+    ],
     rules: {
       'no-console': 'off',
       'no-process-exit': 'off',

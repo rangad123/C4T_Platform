@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
@@ -6,7 +7,7 @@ import { CountryFlag } from '@/components/admin/CountryFlag'
 import { Button } from '@/components/ds/core/Button'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, formatRating, personName, searchTerm, hasFilter } from '@/lib/admin/format'
+import { formatDate, formatRating, personName, searchTerm, hasFilter, titleCase } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -32,6 +33,7 @@ function buildExportHref(filters: {
   search?: string
   sort?: string
   order?: string
+  skills?: string
 }): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(filters)) {
@@ -98,6 +100,7 @@ export default async function TestersPage({
     page?: string
     sort?: string
     order?: string
+    skills?: string
   }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
@@ -116,11 +119,16 @@ export default async function TestersPage({
     : undefined
   const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
   const page = parsePage(params.page)
+  // Comma-separated skill slugs — arrives from the Assets > Skills rollup's
+  // "View testers" link. No dedicated filter UI: it is a deep link in, not a
+  // control a reader builds by hand here, so it rides along as a hidden field
+  // on the filter form instead (see `hidden` below).
+  const skills = searchTerm(params.skills)
 
   const result = await loadList<TesterRow>('testers', {
     page,
     limit: PAGE_SIZE,
-    query: { status, countryCode, search, sort, order },
+    query: { status, countryCode, search, sort, order, skills },
   })
 
   const columns: readonly TableColumn<TesterRow>[] = [
@@ -189,42 +197,73 @@ export default async function TestersPage({
       columns={columns}
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
-      hrefFor={pageHrefBuilder(BASE, { status, countryCode, search, sort, order })}
-      filtered={hasFilter([status, countryCode, search])}
+      hrefFor={pageHrefBuilder(BASE, { status, countryCode, search, sort, order, skills })}
+      filtered={hasFilter([status, countryCode, search, skills])}
       permission="tester.read"
       emptyIcon="users"
       emptyTitle="No testers yet"
       emptyDescription="Testers appear here as soon as someone completes the sign-up form."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 280 }}>
-            <ListFilters
-              action={BASE}
-              search={{ value: search, placeholder: 'Name, email or headline' }}
-              selects={[
-                {
-                  name: 'status',
-                  label: 'Status',
-                  options: STATUSES,
-                  value: status,
-                  allLabel: 'All statuses',
-                },
-              ]}
-              texts={[
-                {
-                  name: 'countryCode',
-                  label: 'Country',
-                  value: countryCode,
-                  placeholder: 'ISO 2-letter',
-                  maxLength: 2,
-                },
-              ]}
-              sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
-            />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          {skills ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-3)',
+                fontSize: 'var(--type-body-sm-size)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <span>
+                Filtered to testers with the{' '}
+                <strong style={{ color: 'var(--text-primary)' }}>
+                  {skills
+                    .split(',')
+                    .map((slug) => titleCase(slug.replace(/-/g, ' ')))
+                    .join(', ')}
+                </strong>{' '}
+                skill.
+              </span>
+              <Link
+                href={pageHrefBuilder(BASE, { status, countryCode, search, sort, order })(1)}
+                style={{ color: 'var(--text-brand)', textDecoration: 'underline', textUnderlineOffset: 3 }}
+              >
+                Clear
+              </Link>
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <ListFilters
+                action={BASE}
+                search={{ value: search, placeholder: 'Name, email or headline' }}
+                selects={[
+                  {
+                    name: 'status',
+                    label: 'Status',
+                    options: STATUSES,
+                    value: status,
+                    allLabel: 'All statuses',
+                  },
+                ]}
+                texts={[
+                  {
+                    name: 'countryCode',
+                    label: 'Country',
+                    value: countryCode,
+                    placeholder: 'ISO 2-letter',
+                    maxLength: 2,
+                  },
+                ]}
+                sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
+                hidden={{ skills }}
+              />
+            </div>
+            <Button href={buildExportHref({ status, countryCode, search, sort, order, skills })} prefetch={false} variant="secondary" iconLeft="download">
+                Export CSV
+              </Button>
           </div>
-          <Button href={buildExportHref({ status, countryCode, search, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
-              Export CSV
-            </Button>
         </div>
       }
     />

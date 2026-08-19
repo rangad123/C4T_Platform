@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
+import { Modal } from '@/components/admin/Modal'
+import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
@@ -16,7 +18,7 @@ import { ApiError } from '@/lib/api/types'
 import { hasPermission, requireRole } from '@/lib/auth/session'
 import { Avatar } from '@/components/admin/Avatar'
 import { CountryLabel } from '@/components/admin/CountryFlag'
-import { formatDate, personName, searchTerm, titleCase } from '@/lib/admin/format'
+import { formatDate, formatMoney, personName, searchTerm, titleCase } from '@/lib/admin/format'
 import {
   addOrganisationMember,
   archiveOrganisation,
@@ -228,6 +230,8 @@ async function loadAccounts(
 const SECTIONS = [
   { value: 'profile', label: 'Profile', icon: 'building-2' },
   { value: 'members', label: 'Members', icon: 'users' },
+  { value: 'work', label: 'Work history', icon: 'briefcase' },
+  { value: 'billing', label: 'Billing settings', icon: 'credit-card' },
   { value: 'notes', label: 'Internal notes', icon: 'file-text' },
   { value: 'danger', label: 'Danger zone', icon: 'shield-alert' },
 ] as const
@@ -237,12 +241,12 @@ export default async function OrganisationDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ notice?: string; q?: string; section?: string }>
+  searchParams: Promise<{ notice?: string; q?: string; section?: string; edit?: string }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
 
   const { id } = await params
-  const { notice, q, section: rawSection } = await searchParams
+  const { notice, q, section: rawSection, edit } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
   const accountSearch = searchTerm(q)
 
@@ -297,6 +301,27 @@ export default async function OrganisationDetailPage({
   const canWrite = hasPermission(user, 'organisation.write')
   const canArchive = hasPermission(user, 'organisation.delete')
   const detailHref = `${BASE}/${organisation.id}`
+  const closedHref = section === SECTIONS[0].value ? detailHref : `${detailHref}?section=${section}`
+  const profileModalOpen = edit === 'profile'
+
+  const profileItems = [
+    { label: 'Name', value: organisation.name },
+    { label: 'Slug', value: organisation.slug },
+    { label: 'Website', value: organisation.website },
+    { label: 'Industry', value: organisation.industry },
+    { label: 'Contact email', value: organisation.contactEmail },
+    { label: 'Contact phone', value: organisation.contactPhone },
+    { label: 'Address line 1', value: organisation.addressLine1, wide: true },
+    { label: 'Address line 2', value: organisation.addressLine2, wide: true },
+    { label: 'City', value: organisation.city },
+    { label: 'State', value: organisation.state },
+    { label: 'Postal code', value: organisation.postalCode },
+    {
+      label: 'Country',
+      value: organisation.countryCode ? <CountryLabel countryCode={organisation.countryCode} /> : null,
+    },
+    { label: 'Tax id', value: organisation.taxId },
+  ]
 
   const memberIds = new Set(organisation.members.map((member) => member.user.id))
   const { accounts, available: accountsAvailable } = await loadAccounts(accountSearch)
@@ -440,13 +465,30 @@ export default async function OrganisationDetailPage({
           <Panel
             title="Profile"
             description="The billing and contact details we hold for this organisation."
+            actions={
+              canWrite ? (
+                <Button href={`${detailHref}?section=${section}&edit=profile`} variant="secondary" size="sm">
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
             {canWrite ? (
-              <form
-                action={saveOrganisationProfile}
-                style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
-              >
-                <input type="hidden" name="id" value={organisation.id} />
+              <DescriptionList items={profileItems} />
+            ) : (
+              <ReadOnlyHint items={profileItems} permission="organisation.write" />
+            )}
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'profile' && canWrite ? (
+        <Modal open={profileModalOpen} closedHref={closedHref} title="Edit profile">
+          <form
+            action={saveOrganisationProfile}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+          >
+            <input type="hidden" name="id" value={organisation.id} />
 
                 <div
                   style={{
@@ -594,33 +636,7 @@ export default async function OrganisationDetailPage({
                   </Button>
                 </div>
               </form>
-            ) : (
-              <ReadOnlyHint
-                items={[
-                  { label: 'Name', value: organisation.name },
-                  { label: 'Slug', value: organisation.slug },
-                  { label: 'Website', value: organisation.website },
-                  { label: 'Industry', value: organisation.industry },
-                  { label: 'Contact email', value: organisation.contactEmail },
-                  { label: 'Contact phone', value: organisation.contactPhone },
-                  { label: 'Address line 1', value: organisation.addressLine1, wide: true },
-                  { label: 'Address line 2', value: organisation.addressLine2, wide: true },
-                  { label: 'City', value: organisation.city },
-                  { label: 'State', value: organisation.state },
-                  { label: 'Postal code', value: organisation.postalCode },
-                  {
-                    label: 'Country',
-                    value: organisation.countryCode ? (
-                      <CountryLabel countryCode={organisation.countryCode} />
-                    ) : null,
-                  },
-                  { label: 'Tax id', value: organisation.taxId },
-                ]}
-                permission="organisation.write"
-              />
-            )}
-          </Panel>
-        </>
+        </Modal>
       ) : null}
 
       {section === 'notes' ? (
@@ -713,11 +729,7 @@ export default async function OrganisationDetailPage({
 
               {accountsAvailable ? (
                 <>
-                  <form
-                    method="get"
-                    action={detailHref}
-                    style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
-                  >
+                  <LiveGetForm action={detailHref} style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}>
                     <Field
                       label="Find an account"
                       htmlFor="q"
@@ -736,10 +748,8 @@ export default async function OrganisationDetailPage({
                         active section has to ride along or searching for an account
                         would bounce back to the profile tab. */}
                     <input type="hidden" name="section" value="members" />
-                    <Button type="submit" variant="secondary">
-                      Search accounts
-                    </Button>
-                  </form>
+                    <LiveFormStatus />
+                  </LiveGetForm>
 
                   <form
                     action={addOrganisationMember}
@@ -809,6 +819,10 @@ export default async function OrganisationDetailPage({
         </>
       ) : null}
 
+      {section === 'work' ? <WorkHistory organisationId={organisation.id} /> : null}
+
+      {section === 'billing' ? <BillingSettings organisationId={organisation.id} /> : null}
+
       {section === 'danger' ? (
         <>
           <Panel
@@ -854,6 +868,166 @@ export default async function OrganisationDetailPage({
       ) : null}
 
     </DetailShell>
+  )
+}
+
+interface OrgProjectRow {
+  id: string
+  reference: string
+  title: string
+  status: string
+  priority: string
+  createdAt: string
+  _count: { bugs: number; assignments: number }
+}
+
+/**
+ * §22 "Work History" — the projects this organisation has raised, and
+ * (through each project's own build count) the test cycles run against
+ * them. Reuses `GET /v1/projects?organisationId=`, the exact same read the
+ * Projects list already scopes with — no second project store, no second
+ * query.
+ */
+async function WorkHistory({ organisationId }: { organisationId: string }) {
+  let rows: OrgProjectRow[] = []
+  let failed = false
+  try {
+    const result = await serverFetchPage<OrgProjectRow>('projects', {
+      query: { organisationId, limit: 100, sort: 'createdAt', order: 'desc' },
+    })
+    rows = result.data
+  } catch {
+    failed = true
+  }
+
+  const columns: readonly TableColumn<OrgProjectRow>[] = [
+    {
+      key: 'title',
+      header: 'Project',
+      render: (row) => row.title,
+      renderSecondary: (row) => row.reference,
+    },
+    { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+    { key: 'priority', header: 'Priority', render: (row) => titleCase(row.priority) },
+    { key: 'bugs', header: 'Bugs', align: 'right', render: (row) => row._count.bugs },
+    { key: 'testers', header: 'Testers', align: 'right', render: (row) => row._count.assignments },
+    { key: 'raised', header: 'Raised', align: 'right', render: (row) => formatDate(row.createdAt) },
+  ]
+
+  return (
+    <Panel
+      title="Work history"
+      description="Every project this organisation has raised, across every status. Open one to see its builds."
+      flush
+    >
+      {failed ? (
+        <div style={{ padding: 'var(--space-6)' }}>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+            The projects service is unreachable. Refresh in a moment.
+          </p>
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon="briefcase"
+          title="No projects yet"
+          description="A project raised for this organisation will appear here."
+        />
+      ) : (
+        <Table
+          ariaLabel="Work history"
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          rowHref={(row) => `/app/admin/projects/${row.id}`}
+          style={{ border: 'none', borderRadius: 0 }}
+        />
+      )}
+    </Panel>
+  )
+}
+
+interface OrgTransactionRow {
+  id: string
+  reference: string
+  type: string
+  status: string
+  amountMinor: string
+  currency: string
+  createdAt: string
+}
+
+/**
+ * §22 "Billing Settings" — this organisation's OWN customer-side ledger
+ * (invoices, payments, refunds). Explicitly NOT the Transactions module —
+ * that was scoped to tester payouts only (§4 of the previous brief), and
+ * customer invoices moved offline. The underlying `CUSTOMER_*` transaction
+ * types and rows were kept, not deleted, specifically so this view could
+ * still show them here instead.
+ */
+async function BillingSettings({ organisationId }: { organisationId: string }) {
+  let rows: OrgTransactionRow[] = []
+  let failed = false
+  try {
+    const result = await serverFetchPage<OrgTransactionRow>('transactions', {
+      query: {
+        organisationId,
+        type: 'CUSTOMER_INVOICE,CUSTOMER_PAYMENT,REFUND',
+        limit: 100,
+        sort: 'createdAt',
+        order: 'desc',
+      },
+    })
+    rows = result.data
+  } catch {
+    failed = true
+  }
+
+  const columns: readonly TableColumn<OrgTransactionRow>[] = [
+    {
+      key: 'reference',
+      header: 'Transaction',
+      render: (row) => row.reference,
+      renderSecondary: (row) => titleCase(row.type),
+    },
+    { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (row) => formatMoney(row.amountMinor, row.currency),
+    },
+    { key: 'date', header: 'Date', align: 'right', render: (row) => formatDate(row.createdAt) },
+  ]
+
+  return (
+    <Panel
+      title="Billing settings"
+      description="This organisation's own invoices, payments and refunds. Customer invoicing is handled offline — this is a read of the underlying record, not a place to raise a new one. Not to be confused with the Transactions module, which covers tester payouts only."
+      flush
+    >
+      {failed ? (
+        <div style={{ padding: 'var(--space-6)' }}>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+            The transactions service is unreachable. Refresh in a moment.
+          </p>
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon="credit-card"
+          title="No billing activity yet"
+          description="An invoice, payment or refund recorded against this organisation will appear here."
+        />
+      ) : (
+        <Table
+          ariaLabel="Billing settings"
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          rowHref={(row) => `/app/admin/transactions/${row.id}`}
+          style={{ border: 'none', borderRadius: 0 }}
+        />
+      )}
+    </Panel>
   )
 }
 

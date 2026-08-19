@@ -1,0 +1,116 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+a.wrapper {
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius-md);
+  transition: var(--transition-surface);
+}
+
+a.wrapper:hover {
+  background: var(--surface-sunken);
+}
+
+a.wrapper:hover .ring {
+  box-shadow: var(--shadow-md);
+}
+
+.title {
+  font-size: var(--type-body-sm-size);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+
+.body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.ring {
+  position: relative;
+  width: 116px;
+  height: 116px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+}
+
+.hole {
+  position: absolute;
+  inset: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  text-align: center;
+  padding: 4px;
+  overflow: hidden;
+}
+
+.centerValue {
+  font-family: var(--font-display);
+  font-size: var(--type-body-sm-size);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.centerCaption {
+  font-size: 10px;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.emptyLabel {
+  font-size: var(--type-caption-size);
+  color: var(--text-muted);
+}
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-caption-size);
+}
+
+.legendDot {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 2px var(--surface-raised);
+  flex-shrink: 0;
+}
+
+.legendLabel {
+  color: var(--text-secondary);
+  min-width: 72px;
+}
+
+.legendValue {
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.legendPercent {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}

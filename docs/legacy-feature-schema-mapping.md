@@ -71,7 +71,9 @@ representation at all beyond a single string column.
 **Now:** a real catalog — see *Implemented in this pass* below.
 
 **Status: IMPLEMENTED** (catalog + structured tester selection). Legacy free-text values are
-preserved alongside the new foreign keys rather than being discarded.
+preserved alongside the new foreign keys rather than being discarded. A follow-up pass replaced
+the catalog's original hand-picked demo seed (5 brands, 6 OSes, 5 browsers) with the actual
+legacy export data from `DataCSV/` — see *Implemented in this pass* below for what changed.
 
 ---
 
@@ -93,7 +95,7 @@ not show the workflow, so the schema is the only evidence of its real depth.
 
 ---
 
-### 4. Payments / plans / finance — **PARTIAL**
+### 4. Payments / plans / finance — **PARTIAL → payout accounts, TDS and categorisation now IMPLEMENTED (this pass)**
 
 **Schema:** `active_plans`, `pricing_models`, `payment_acc_details`, `payment_history`,
 `tds_history`, plus `organisation.org_wallet_balance` / `locked_amount` / `credit_rate` /
@@ -106,11 +108,19 @@ it: `TransactionStatus` has no release stage. `organisation.locked_amount` is th
 the same mechanism. `payment_acc_details` holds real payout instruments (Indian/non-Indian bank,
 IFSC, PayPal, Paytm). `tds_history` is per-financial-year tax deduction.
 
-**New platform:** `Transaction` covers the ledger; earnings and history are live on the tester
-portal. Missing: release semantics, payout accounts, TDS, org wallet/escrow, plans, pricing
-models.
+**Now implemented:** `payment_acc_details` → `PaymentAccount`, encrypted at rest (AES-256-GCM),
+masked by default, admin reveal gated by the admin's own password and audited — see *Implemented
+in this pass* below. `tds_history` folded into `Transaction.tdsAmountMinor`. `payment_history`'s
+`pmt_method`/`pmt_method_details`/build-contest linkage now map onto `Transaction.paymentMethod`/
+`paymentAccountId`/`buildOrContestRef`. Indian / International / Pending Payments (`checklist.md`
+§25-27) is now a real backend categorisation, not three tabs over one flat list.
 
-**Status: PARTIAL.**
+**Still missing:** the credit/debit/**release** three-stage semantics (`TransactionStatus` still
+has no release stage distinct from PAID), `organisation.locked_amount`/`org_wallet_balance`
+escrow, and `active_plans`/`pricing_models`/`builds.tester_reward` subscription/pricing.
+
+**Status: PARTIAL** — meaningfully narrower than before this pass, but release semantics and org
+wallet/escrow are a different piece of work from payout-account storage and remain open.
 
 ---
 
@@ -166,13 +176,18 @@ expected/actual, device/browser, feature, attachments, comments. **Not** represe
 ### 9. Reference/lookup data — **PARTIAL**
 
 `base_country`, `app_types`, `test_types`, `test_status`, `pricing_models`, `network_providers`,
-`os`, `browsers` were all lookup tables. The new platform stores several of these as free text
-(`platformTargets`) or fixed enums (`BugType`, `SkillCategory`). Enums are defensible where the
-set is genuinely closed and platform-owned; free text is not, where the legacy data was a
-controlled list.
+`os`, `browsers`, `skill_categories`, `skills` were all lookup tables. The new platform stores
+several of these as free text (`platformTargets`) or fixed enums (`BugType`). Enums are
+defensible where the set is genuinely closed and platform-owned; free text is not, where the
+legacy data was a controlled list.
 
-**Status: PARTIAL** — improved for devices/browsers in this pass; `base_country`, `app_types`,
-`test_types`, `pricing_models` remain unstructured.
+`skill_categories`/`skills` were previously mapped onto a fixed 4-value `SkillCategory` enum with
+implicit free-text skill creation — a tester typing a new skill silently created a global
+catalogue row, which is exactly the kind of "controlled list treated as free text" this section
+flags elsewhere. Promoted to real catalog tables this pass: see *Implemented in this pass* below.
+
+**Status: PARTIAL** — improved for devices/browsers/skills across the two catalog passes;
+`base_country`, `app_types`, `test_types`, `pricing_models` remain unstructured.
 
 ---
 
@@ -237,6 +252,61 @@ and *adds* nullable FKs beside them. Nothing was dropped or backfilled destructi
 entered before the catalog existed still render exactly as before, and a tester can still type a
 device the catalog does not list. The FK is the preferred path, not the only one.
 
+### CSV-driven catalog seed (follow-up to capability 2)
+
+The catalog models above existed already but were seeded with 5 hand-picked demo brands, 6
+demo OSes and 5 demo browsers — placeholder data written before the legacy CSV export was
+available. This pass replaced that with the actual legacy export (`DataCSV/`, copied into
+`api/prisma/csv/`): 51 device brands (53 CSV rows, 2 reconciled as duplicates — `lge`→`LG`,
+casing fixes for `google`/`vivo`/`vsmart`), 6 operating systems with 59 versions (from `os.csv` +
+`os_versions.csv` — the CSV's own `os_type_id` selects mobile vs. desktop, landing on the exact
+same `OsKind` split the previous pass already modelled), and 6 browsers. `network_providers` has
+no CSV in the export, so it stays hand-seeded. The import is idempotent (upsert on natural key)
+and non-destructive — it does not touch existing `TesterDevice`/`DeviceModel` rows, only adds to
+the catalog they can reference.
+
+Two CSVs in the export were deliberately **not** imported as new catalog UI: `bug_types.csv`
+(the platform already has an adequate `BugType` enum) and `roles.csv` (the `Role` enum already
+covers it). `app_types.csv`/`test_status.csv`/`test_types.csv` belong to capability 1 (structured
+testing workflow), which is explicitly parked, not to this pass.
+
+### Skills as a real catalog (capability 9)
+
+`skill_categories`/`skills` were a fixed 4-value `SkillCategory` enum with implicit free-text
+skill creation on save. Promoted to two catalog tables (`SkillCategory`, `Skill.categoryId` as a
+relation), seeded from `skill_categories.csv` (4 rows) and `skills.csv` (26 rows, reconciled with
+8 skills the platform had already seeded — `"Security Testing(Sc)"`→`"Security Testing"` and
+`"Localisation Testing"`→`"Localization Testing"` normalised onto the existing rows rather than
+duplicated). A tester now SELECTS skills from this catalog (`PUT /testers/me/skills` takes
+`skillIds`, not typed slugs); creating a new skill or category is admin-only, through the same
+`catalog.routes.ts` pattern as brands/browsers/networks. The standalone "Skills" sidebar item is
+gone — it lives as two tabs on the Catalog page, the same page the device/browser catalog is on.
+
+### Bank-detail encryption (capability 4)
+
+`payment_acc_details` → `PaymentAccount`. The sensitive fields (`pmt_account_name`,
+`pmt_account_no`, `pmt_ifsc_code`, `pmt_paypal_email`, `pmt_paytm_number`) live inside a single
+AES-256-GCM envelope (`secureDetails: Bytes`) — never a plaintext column — encrypted with
+`node:crypto`, keyed by an env-only `PAYMENT_ENCRYPTION_KEY` that never touches the database.
+Masked projections (`accountNumberLast4`, `paypalEmailMasked`, `paytmNumberLast4`) are plaintext
+columns computed once at write time, since GCM ciphertext cannot be partially decrypted. Every
+ordinary read (tester's own profile, admin's masked view) goes through an explicit Prisma
+`select` that excludes `secureDetails`; the one path that decrypts lives in its own file
+(`payment-accounts.reveal.ts`), reachable only from a step-up-gated admin action (the admin
+re-enters their own password) that is rate-limited and writes an audit-log entry naming which
+fields were revealed — never their values.
+
+### Transaction categorisation (capabilities 4, plus `checklist.md` §25-27)
+
+Indian / International / Pending Payments, as three real backend query categories
+(`?category=` on `GET /v1/transactions`) rather than three client-side filters over one flat
+fetch. Pending is any transaction still `PENDING`/`APPROVED`, regardless of currency; settled
+rows split by `Transaction.paymentMethod` (new — shared with `PaymentAccount.paymentType`),
+falling back to `currency = 'INR'` for the handful of rows recorded before a payment method
+existed. `tds_history` folded into `Transaction.tdsAmountMinor`; `paidAmountMinor` (defaulting to
+0) makes "Outstanding Amount" a plain subtraction rather than a separate tracked field. Finance
+year and month are computed date-range filters, not stored columns.
+
 ---
 
 ## Prioritised remaining gaps
@@ -244,7 +314,7 @@ device the catalog does not list. The FK is the preferred path, not the only one
 | # | Gap | Priority | Why |
 | --- | --- | --- | --- |
 | 1 | Structured testing workflow (test cases, execution, scenarios, reviews, timesheets, applications) | **Critical** | Largest capability loss; ~9 tables; changes what the product *is*, not just what it stores. |
-| 2 | Payments: release semantics, payout accounts, TDS, org wallet/escrow | **High** | Real money. `checklist.md` §21 already blocked on it. |
+| 2 | Payments: release semantics (credit/release fund split), org wallet/escrow | **High** | Real money. `checklist.md` §21 already blocked on it. Payout-account storage and TDS are now done (see *Implemented in this pass*) — this is the narrower remainder. |
 | 3 | Contests module | **High** | 8 tables, entirely absent. |
 | 4 | Custom bug fields | **Medium** | 2 tables; per-tenant bug extensibility. |
 | 5 | Multi-build projects | **Medium** | Architectural; large migration. |
@@ -253,5 +323,5 @@ device the catalog does not list. The FK is the preferred path, not the only one
 | 8 | Org member invitations | **Low** | Users can be created directly today. |
 | 9 | Notification preferences | **Low** | Feed exists; only per-user choice is missing. |
 | 10 | Reports module (`build_reports`) | **High** | Already tracked as an open gap in `legacy-feature-audit.md`. |
-| 11 | `base_country` / `app_types` / `test_types` / `pricing_models` lookups | **Low** | Same catalog treatment as devices; smaller payoff. |
+| 11 | `base_country` / `app_types` / `test_types` / `pricing_models` lookups | **Low** | Same catalog treatment as devices/skills; smaller payoff. |
 | 12 | Site settings / statistics | **Low** | Live queries currently sufficient. |

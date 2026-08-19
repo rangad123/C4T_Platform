@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ds/core/Badge'
 import { titleCase } from '@/lib/admin/format'
 
-type Tone = NonNullable<React.ComponentProps<typeof Badge>['tone']>
+export type Tone = NonNullable<React.ComponentProps<typeof Badge>['tone']>
 
 /**
  * One badge for every status enum on the platform.
@@ -64,6 +64,11 @@ const TONES: Record<string, Tone> = {
   DEACTIVATED: 'neutral',
 }
 
+/** The tone a status maps to, for anything that needs the color without the pill (e.g. a chart segment). */
+export function statusTone(status: string): Tone {
+  return TONES[status] ?? 'neutral'
+}
+
 export function StatusBadge({ status }: { status: string | null | undefined }) {
   if (!status) return <span style={{ color: 'var(--text-muted)' }}>—</span>
   return (
@@ -86,6 +91,11 @@ const SEVERITY_TONES: Record<string, Tone> = {
   LOW: 'neutral',
 }
 
+/** Same as `statusTone`, for bug severity's separate ordered-scale map. */
+export function severityTone(severity: string): Tone {
+  return SEVERITY_TONES[severity] ?? 'neutral'
+}
+
 export function SeverityBadge({ severity }: { severity: string | null | undefined }) {
   if (!severity) return <span style={{ color: 'var(--text-muted)' }}>—</span>
   return (
@@ -93,6 +103,28 @@ export function SeverityBadge({ severity }: { severity: string | null | undefine
       {titleCase(severity)}
     </Badge>
   )
+}
+
+/**
+ * Bug type is a plain classification, not a status or an ordered scale — so
+ * unlike the two maps above, there is no "good/bad" meaning to lean on. Each
+ * type still gets its own fixed, distinct tone (never cycled or assigned by
+ * whichever types happen to be present) so a "Bugs by type" chart can use
+ * color for identity the same way severity and status charts do.
+ */
+const BUG_TYPE_TONES: Record<string, Tone> = {
+  CRASH: 'error',
+  APP_FREEZE: 'warning',
+  FUNCTIONAL: 'info',
+  UI: 'accent',
+  UX: 'brand',
+  SECURITY: 'success',
+  PERFORMANCE: 'neutral',
+}
+
+/** Same as `statusTone`, for bug type's separate classification map. */
+export function bugTypeTone(type: string): Tone {
+  return BUG_TYPE_TONES[type] ?? 'neutral'
 }
 
 /** Roles are not statuses either, but they want the same pill treatment. */

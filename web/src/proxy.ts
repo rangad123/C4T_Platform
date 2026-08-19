@@ -117,14 +117,19 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   /**
-   * Forward the current path to downstream Server Components via request
-   * headers. Server Components cannot use `usePathname` (client only) and the
-   * admin layout needs to know which sidebar link to highlight — reading
-   * `x-pathname` here keeps the sidebar a Server Component instead of
-   * pushing a `"use client"` boundary onto the whole shell.
+   * Forward the full current path (with query string) to `app/layout.tsx`
+   * via a request header, for one purpose only: the `next` target of a
+   * session-expiry redirect, so re-signing in returns to the page the
+   * visitor was actually on instead of a hardcoded `/app`. (The sidebar's
+   * active-link highlight used to be threaded through a sibling
+   * `x-pathname` header too, but that only ever reflected the URL at the
+   * moment the admin layout last mounted — layouts don't re-render on a
+   * client-side navigation within their own segment, so every sidebar click
+   * left the highlight stuck on stale. `Sidebar` now reads `usePathname()`
+   * itself instead, which is the client hook built for exactly this.)
    */
   const requestHeaders = new Headers(request.headers)
-  requestHeaders.set('x-pathname', pathname)
+  requestHeaders.set('x-full-path', `${pathname}${search}`)
 
   return NextResponse.next({ request: { headers: requestHeaders } })
 }

@@ -364,6 +364,8 @@ const announcementSchema = z.object({
    * managers). When null, the audience enum alone decides who sees it.
    */
   projectId: z.string().cuid().nullable().optional(),
+  /** Optional further narrowing to one build of `projectId`. Always optional. */
+  buildId: z.string().cuid().nullable().optional(),
   publishNow: z.boolean().default(true),
   expiresAt: z.coerce.date().optional(),
 })
@@ -386,6 +388,16 @@ communicationRouter.post(
       if (!exists) throw new NotFoundError('Project')
     }
 
+    // A build only makes sense alongside its own project.
+    if (input.buildId) {
+      if (!input.projectId) throw new BadRequestError('buildId requires projectId')
+      const build = await prisma.build.findFirst({
+        where: { id: input.buildId, projectId: input.projectId, deletedAt: null },
+        select: { id: true },
+      })
+      if (!build) throw new NotFoundError('Build')
+    }
+
     const announcement = await prisma.announcement.create({
       data: {
         authorId: req.user!.id,
@@ -393,6 +405,7 @@ communicationRouter.post(
         body: input.body,
         audience: input.audience,
         projectId: input.projectId ?? null,
+        buildId: input.buildId ?? null,
         publishedAt: input.publishNow ? new Date() : null,
         expiresAt: input.expiresAt ?? null,
       },

@@ -8,12 +8,14 @@ import {
   Role,
   TransactionType,
   TransactionStatus,
+  LeadStatus,
 } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
-import { requirePermission, isAdminSide } from '../../middleware/authorize.js'
+import { requirePermission, isAdminSide, hasPermission } from '../../middleware/authorize.js'
 import { PERMISSIONS } from '../../config/permissions.js'
 import { visibilityFilter } from '../projects/projects.service.js'
+import { categoryFilter } from '../transactions/transactions.routes.js'
 
 /**
  * §2.2 — the centralised Admin dashboard summary, plus lighter per-role
@@ -23,8 +25,17 @@ export const statsRouter = Router()
 
 statsRouter.use(authenticate)
 
-statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (_req, res) => {
+/** §21-27 -- dashboard payout breakdown is scoped to tester types only, same as the Transactions module's own tester-payouts-only scope. */
+const TESTER_PAYOUT_TYPES = [TransactionType.TESTER_EARNING, TransactionType.TESTER_PAYOUT]
+
+statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req, res) => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  // A sub-admin can hold STATS_READ (a dashboard-wide grant) without also
+  // holding LEAD_READ -- leads are omitted from the response rather than
+  // returned as a row of zeros, which would misreport "no leads" instead of
+  // "not permitted to see leads". Mirrors the pre-existing web-side check in
+  // the old dashboard page, just moved server-side.
+  const canReadLeads = hasPermission(req.user!, PERMISSIONS.LEAD_READ)
 
   const [
     projectsByStatus,
@@ -38,6 +49,10 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (_req
     newProjects30d,
     revenue,
     payouts,
+    leadsByStatus,
+    payoutsIndian,
+    payoutsInternational,
+    payoutsPending,
   ] = await Promise.all([
     prisma.project.groupBy({ by: ['status'], where: { deletedAt: null }, _count: true }),
     prisma.bug.groupBy({ by: ['status'], where: { deletedAt: null }, _count: true }),
@@ -60,6 +75,21 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (_req
     }),
     prisma.transaction.aggregate({
       where: { type: TransactionType.TESTER_PAYOUT, status: TransactionStatus.PAID },
+      _sum: { amountMinor: true },
+    }),
+    canReadLeads
+      ? prisma.lead.groupBy({ by: ['status'], where: { status: { not: LeadStatus.SPAM } }, _count: true })
+      : Promise.resolve(null),
+    prisma.transaction.aggregate({
+      where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('indian') },
+      _sum: { amountMinor: true },
+    }),
+    prisma.transaction.aggregate({
+      where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('international') },
+      _sum: { amountMinor: true },
+    }),
+    prisma.transaction.aggregate({
+      where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('pending') },
       _sum: { amountMinor: true },
     }),
   ])
@@ -89,10 +119,25 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (_req
       testers: { byStatus: tally(testersByStatus, 'status', Object.values(TesterStatus)) },
       organisations: { byStatus: tally(orgsByStatus, 'status', Object.values(OrganisationStatus)) },
       users: { byRole: tally(usersByRole, 'role', Object.values(Role)) },
+      leads: leadsByStatus
+        ? tally(
+            leadsByStatus,
+            'status',
+            Object.values(LeadStatus).filter((s) => s !== LeadStatus.SPAM),
+          )
+        : null,
       finance: {
         currency: 'INR',
         collectedMinor: (revenue._sum.amountMinor ?? 0n).toString(),
         paidOutMinor: (payouts._sum.amountMinor ?? 0n).toString(),
+      },
+      payouts: {
+        currency: 'INR',
+        byCategory: {
+          indian: (payoutsIndian._sum.amountMinor ?? 0n).toString(),
+          international: (payoutsInternational._sum.amountMinor ?? 0n).toString(),
+          pending: (payoutsPending._sum.amountMinor ?? 0n).toString(),
+        },
       },
     },
   })

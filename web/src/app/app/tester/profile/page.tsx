@@ -25,9 +25,18 @@ import {
   addWorkHistoryAction,
   removeWorkHistoryAction,
   acceptNdaAction,
+  savePaymentAccountAction,
 } from './actions'
 
 const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
+const PAYMENT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const
+const PAYMENT_TYPES = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
+const PAYMENT_TYPE_LABEL: Record<(typeof PAYMENT_TYPES)[number], string> = {
+  IND_BANK_ACCOUNT: 'Indian bank account',
+  NON_IND_BANK_ACCOUNT: 'International bank account',
+  PAYPAL: 'PayPal',
+  PAYTM: 'Paytm',
+}
 const PROFICIENCIES = ['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC'] as const
 
 interface TesterDevice {
@@ -37,6 +46,9 @@ interface TesterDevice {
   model: string
   osName: string | null
   osVersion: string | null
+  screenSize: string | null
+  ramGb: string | null
+  storageGb: string | null
   network: string | null
   browser: string | null
   isPrimary: boolean
@@ -64,6 +76,40 @@ interface ProfileDetail {
   skills: readonly { skill: { id: string; name: string } }[]
   languages: readonly { code: string; proficiency: string }[]
   workHistory: readonly WorkHistoryEntry[]
+}
+
+interface PaymentAccount {
+  id: string
+  country: string
+  paymentType: string
+  status: string
+  bankName: string | null
+  branchName: string | null
+  accountNumberLast4: string | null
+  paypalEmailMasked: string | null
+  paytmNumberLast4: string | null
+}
+
+interface Catalog {
+  brands: readonly { id: string; name: string }[]
+  deviceModels: readonly {
+    id: string
+    name: string
+    brand: { id: string; name: string }
+    defaultOs: { id: string; name: string } | null
+  }[]
+  operatingSystems: readonly {
+    id: string
+    name: string
+    kind: string
+    versions: readonly { id: string; version: string }[]
+  }[]
+  networks: readonly { id: string; name: string; countryCode: string | null }[]
+  skillCategories: readonly {
+    id: string
+    name: string
+    skills: readonly { id: string; name: string }[]
+  }[]
 }
 
 function Muted({ children }: { children: ReactNode }) {
@@ -104,6 +150,7 @@ const SECTIONS = [
   { value: 'devices', label: 'Devices', icon: 'smartphone' },
   { value: 'skills', label: 'Skills and languages', icon: 'briefcase' },
   { value: 'work', label: 'Work history', icon: 'clipboard-check' },
+  { value: 'payment', label: 'Payment details', icon: 'credit-card' },
 ] as const
 
 export default async function TesterProfilePage({
@@ -115,7 +162,11 @@ export default async function TesterProfilePage({
 
   const section = resolveSection(SECTIONS, (await searchParams).section)
 
-  const profile = await serverFetchOrNull<ProfileDetail>('testers/me')
+  const [profile, catalog, paymentAccount] = await Promise.all([
+    serverFetchOrNull<ProfileDetail>('testers/me'),
+    serverFetchOrNull<Catalog>('catalog'),
+    serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine'),
+  ])
 
   if (!profile) {
     return (
@@ -128,6 +179,14 @@ export default async function TesterProfilePage({
   }
 
   const languagesJson = JSON.stringify(profile.languages.map((l) => ({ code: l.code, proficiency: l.proficiency })))
+  const mySkillIds = new Set(profile.skills.map((s) => s.skill.id))
+  const osVersionOptions = (catalog?.operatingSystems ?? []).flatMap((os) =>
+    os.versions.map((v) => ({ value: v.id, label: `${os.name} ${v.version}` })),
+  )
+  const deviceModelOptions = (catalog?.deviceModels ?? []).map((m) => ({
+    value: m.id,
+    label: `${m.brand.name} ${m.name}`,
+  }))
 
   return (
     <main
@@ -241,6 +300,9 @@ export default async function TesterProfilePage({
                         titleCase(device.type),
                         device.osName,
                         device.osVersion,
+                        device.screenSize ? `${device.screenSize}"` : null,
+                        device.ramGb ? `${device.ramGb} GB RAM` : null,
+                        device.storageGb ? `${device.storageGb} GB storage` : null,
                         device.network,
                         device.browser,
                       ]
@@ -274,6 +336,20 @@ export default async function TesterProfilePage({
                   borderTop: '1px solid var(--border-subtle)',
                 }}
               >
+                {deviceModelOptions.length > 0 ? (
+                  <Field
+                    label="Known device model"
+                    htmlFor="deviceModelId"
+                    hint="Pick yours if it's listed — fills the brand in below. Not listed? Skip this and type the brand and model directly."
+                  >
+                    <Select
+                      id="deviceModelId"
+                      name="deviceModelId"
+                      defaultValue=""
+                      options={[{ value: '', label: "Not listed / I'll type it below" }, ...deviceModelOptions]}
+                    />
+                  </Field>
+                ) : null}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
                   <Field label="Type" htmlFor="type">
                     <Select
@@ -289,13 +365,52 @@ export default async function TesterProfilePage({
                   <Field label="Model" htmlFor="model" required>
                     <Input id="model" name="model" required maxLength={120} placeholder="Pixel 7a" />
                   </Field>
+                  <Field label="Screen size" htmlFor="screenSize">
+                    <Input id="screenSize" name="screenSize" maxLength={40} placeholder="6.1 inch" />
+                  </Field>
+                  <Field label="RAM" htmlFor="ramGb">
+                    <Input id="ramGb" name="ramGb" maxLength={20} placeholder="8 GB" />
+                  </Field>
+                  <Field label="Storage" htmlFor="storageGb">
+                    <Input id="storageGb" name="storageGb" maxLength={20} placeholder="256 GB" />
+                  </Field>
+                </div>
+                {osVersionOptions.length > 0 ? (
+                  <Field
+                    label="OS version"
+                    htmlFor="osVersionRefId"
+                    hint="Pick yours if it's listed. Not listed? Skip this and type it below instead."
+                  >
+                    <Select
+                      id="osVersionRefId"
+                      name="osVersionRefId"
+                      defaultValue=""
+                      options={[{ value: '', label: "Not listed / I'll type it below" }, ...osVersionOptions]}
+                    />
+                  </Field>
+                ) : null}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
                   <Field label="OS name" htmlFor="osName">
                     <Input id="osName" name="osName" maxLength={60} placeholder="Android" />
                   </Field>
-                  <Field label="OS version" htmlFor="osVersion">
+                  <Field label="OS version (typed)" htmlFor="osVersion">
                     <Input id="osVersion" name="osVersion" maxLength={40} placeholder="14" />
                   </Field>
-                  <Field label="Network" htmlFor="network">
+                  <Field label="Network provider" htmlFor="primaryNetworkId">
+                    <Select
+                      id="primaryNetworkId"
+                      name="primaryNetworkId"
+                      defaultValue=""
+                      options={[
+                        { value: '', label: "Not listed" },
+                        ...(catalog?.networks ?? []).map((n) => ({
+                          value: n.id,
+                          label: n.countryCode ? `${n.name} (${n.countryCode})` : n.name,
+                        })),
+                      ]}
+                    />
+                  </Field>
+                  <Field label="Network (typed)" htmlFor="network">
                     <Input id="network" name="network" maxLength={80} placeholder="5G" />
                   </Field>
                   <Field label="Browser" htmlFor="browser">
@@ -316,25 +431,55 @@ export default async function TesterProfilePage({
 
       {section === 'skills' ? (
         <>
-          <Panel title="Skills" description="Comma-separated. Saving replaces the full list.">
-            <form
-              action={setSkillsAction}
-              style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
-            >
-              <div style={{ flex: 1, minWidth: 260 }}>
-                <Field label="Skills" htmlFor="skills">
-                  <Input
-                    id="skills"
-                    name="skills"
-                    defaultValue={profile.skills.map((s) => s.skill.name).join(', ')}
-                    placeholder="Manual Testing, API Testing, Payment Testing"
-                  />
-                </Field>
-              </div>
-              <Button type="submit" variant="secondary">
-                Save
-              </Button>
-            </form>
+          <Panel
+            title="Skills"
+            description="Picked from the platform's skill catalog — saving replaces the full list. Don't see a skill you have? Ask an administrator to add it."
+          >
+            {catalog && catalog.skillCategories.length > 0 ? (
+              <form action={setSkillsAction} style={FORM_STYLE}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                  {catalog.skillCategories.map((category) => (
+                    <div key={category.id}>
+                      <p
+                        className="c4t-eyebrow"
+                        style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
+                      >
+                        {category.name}
+                      </p>
+                      {category.skills.length === 0 ? (
+                        <Muted>No skills in this category yet.</Muted>
+                      ) : (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                            gap: 'var(--space-2) var(--space-4)',
+                          }}
+                        >
+                          {category.skills.map((skill) => (
+                            <Checkbox
+                              key={skill.id}
+                              id={`skill-${skill.id}`}
+                              name="skillIds"
+                              value={skill.id}
+                              label={skill.name}
+                              defaultChecked={mySkillIds.has(skill.id)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <Button type="submit" variant="secondary">
+                    Save skills
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <Muted>The skill catalog is not reachable right now. Refresh in a moment.</Muted>
+            )}
           </Panel>
 
           <Panel title="Languages">
@@ -468,6 +613,117 @@ export default async function TesterProfilePage({
                 <div>
                   <Button type="submit" variant="secondary" iconLeft="plus">
                     Add role
+                  </Button>
+                </div>
+              </TrackedForm>
+            </div>
+          </Panel>
+        </>
+      ) : null}
+
+      {section === 'payment' ? (
+        <>
+          <Panel
+            title="Payment details"
+            description="Where your earnings get paid out. Sensitive fields are encrypted — this page never shows the full account number back to you either, only what you'd need to confirm it's the right account."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              {paymentAccount ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--space-1)',
+                    padding: 'var(--space-4)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-card)',
+                    background: 'var(--surface-canvas)',
+                  }}
+                >
+                  <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                    {PAYMENT_TYPE_LABEL[paymentAccount.paymentType as (typeof PAYMENT_TYPES)[number]] ??
+                      titleCase(paymentAccount.paymentType)}
+                  </div>
+                  <Muted>
+                    {[
+                      paymentAccount.bankName,
+                      paymentAccount.accountNumberLast4 ? `Account ending ${paymentAccount.accountNumberLast4}` : null,
+                      paymentAccount.paypalEmailMasked,
+                      paymentAccount.paytmNumberLast4 ? `Paytm ending ${paymentAccount.paytmNumberLast4}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || 'Saved — details on file.'}
+                  </Muted>
+                </div>
+              ) : (
+                <Muted>No payment details on file yet.</Muted>
+              )}
+
+              <TrackedForm
+                action={savePaymentAccountAction}
+                style={{
+                  ...FORM_STYLE,
+                  paddingTop: 'var(--space-5)',
+                  borderTop: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
+                  <Field label="Country" htmlFor="country">
+                    <Select
+                      id="country"
+                      name="country"
+                      defaultValue={paymentAccount?.country ?? 'INDIAN'}
+                      options={PAYMENT_COUNTRIES.map((value) => ({
+                        value,
+                        label: value === 'INDIAN' ? 'India' : 'Outside India',
+                      }))}
+                    />
+                  </Field>
+                  <Field label="Payout method" htmlFor="paymentType">
+                    <Select
+                      id="paymentType"
+                      name="paymentType"
+                      defaultValue={paymentAccount?.paymentType ?? 'IND_BANK_ACCOUNT'}
+                      options={PAYMENT_TYPES.map((value) => ({
+                        value,
+                        label: PAYMENT_TYPE_LABEL[value],
+                      }))}
+                    />
+                  </Field>
+                </div>
+
+                <p style={{ margin: 0, fontSize: 'var(--type-body-sm-size)', color: 'var(--text-muted)' }}>
+                  Fill in the section below that matches your payout method above. Saving replaces
+                  everything below in full, so re-enter every field even if you&rsquo;re only
+                  changing one.
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
+                  <Field label="Account holder name" htmlFor="accountName">
+                    <Input id="accountName" name="accountName" maxLength={255} />
+                  </Field>
+                  <Field label="Account number" htmlFor="accountNumber">
+                    <Input id="accountNumber" name="accountNumber" maxLength={25} />
+                  </Field>
+                  <Field label="Bank name" htmlFor="bankName">
+                    <Input id="bankName" name="bankName" maxLength={255} />
+                  </Field>
+                  <Field label="Branch name" htmlFor="branchName">
+                    <Input id="branchName" name="branchName" maxLength={255} />
+                  </Field>
+                  <Field label="IFSC code" htmlFor="ifscCode" hint="Indian bank accounts only.">
+                    <Input id="ifscCode" name="ifscCode" maxLength={25} style={{ textTransform: 'uppercase' }} />
+                  </Field>
+                  <Field label="PayPal email" htmlFor="paypalEmail">
+                    <Input id="paypalEmail" name="paypalEmail" type="email" maxLength={255} />
+                  </Field>
+                  <Field label="Paytm number" htmlFor="paytmNumber">
+                    <Input id="paytmNumber" name="paytmNumber" maxLength={10} />
+                  </Field>
+                </div>
+                <div>
+                  <Button type="submit" variant="primary">
+                    Save payment details
                   </Button>
                 </div>
               </TrackedForm>

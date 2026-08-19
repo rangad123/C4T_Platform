@@ -112,6 +112,24 @@ const schema = z.object({
    */
   LEGACY_PASSWORD_PEPPER: z.string().optional(),
 
+  /**
+   * AES-256-GCM key for tester bank/payout details (`PaymentAccount.secure
+   * Details`) — base64, must decode to exactly 32 bytes. Generate with:
+   *   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   * Never stored in the database alongside the encrypted values. See
+   * lib/payment-encryption.ts.
+   */
+  PAYMENT_ENCRYPTION_KEY: z
+    .string()
+    .min(1, 'PAYMENT_ENCRYPTION_KEY is required (see .env.example for how to generate one)')
+    .refine((v) => {
+      try {
+        return Buffer.from(v, 'base64').length === 32
+      } catch {
+        return false
+      }
+    }, 'PAYMENT_ENCRYPTION_KEY must be base64 and decode to exactly 32 bytes'),
+
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   LOCAL_STORAGE_DIR: z.string().default('./.uploads'),
   AWS_REGION: z.string().default('ap-south-1'),

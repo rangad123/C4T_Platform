@@ -149,6 +149,7 @@ export async function projectRelations(
 export interface BugContext {
   id: string
   projectId: string
+  buildId: string
   organisationId: string
   reportedById: string
   status: string
@@ -163,6 +164,7 @@ export async function bugRelations(
     select: {
       id: true,
       projectId: true,
+      buildId: true,
       reportedById: true,
       status: true,
       project: {
@@ -212,6 +214,7 @@ export async function bugRelations(
     bug: {
       id: bug.id,
       projectId: bug.projectId,
+      buildId: bug.buildId,
       organisationId: bug.project.organisationId,
       reportedById: bug.reportedById,
       status: bug.status,

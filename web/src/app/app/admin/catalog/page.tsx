@@ -16,14 +16,21 @@ import {
   addBrowserVersionAction,
   addOsVersionAction,
   addNetworkAction,
+  addSkillCategoryAction,
+  addSkillAction,
 } from './actions'
 
 /**
- * The catalog is five independent reference lists. Stacked, they were one
+ * The catalog is seven independent reference lists. Stacked, they were one
  * long scroll where finding carriers meant passing every device model; the
  * lists also have nothing to do with one another, so there is no reading
  * order that makes them one page. Tabs give each list the full viewport and
  * make the catalog's shape visible before you scroll at all.
+ *
+ * Skill categories and skills joined this page rather than getting their own
+ * sidebar entry — they were a standalone "Skills" item before, but a skill is
+ * exactly the same kind of thing as a browser or a network provider: a
+ * controlled list a tester picks from rather than types.
  */
 const SECTIONS = [
   { value: 'devices', label: 'Device models', icon: 'smartphone' },
@@ -31,7 +38,32 @@ const SECTIONS = [
   { value: 'os', label: 'Operating systems', icon: 'monitor' },
   { value: 'browsers', label: 'Browsers', icon: 'globe' },
   { value: 'networks', label: 'Network providers', icon: 'plug' },
+  { value: 'skill-categories', label: 'Skill categories', icon: 'layout-grid' },
+  { value: 'skills', label: 'Skills', icon: 'graduation-cap' },
 ] as const
+
+/**
+ * Seven lists read more clearly as four families than as one flat row of
+ * tabs — Device models / Brands / Operating systems are all facets of "what
+ * a tester's kit is", and Skill categories / Skills are "definition" and
+ * "the definitions inside it" for the exact same underlying data. Browsers
+ * and Network providers stand alone because there is nothing else in their
+ * family.
+ *
+ * Each group's own default (the tab a bare click on the group lands on) is
+ * its first member — Devices → Device models, Skills → Skills itself, since
+ * that is the list someone reaches for, not the categories behind it.
+ */
+const GROUPS = [
+  { key: 'devices', label: 'Devices', icon: 'smartphone', sections: ['devices', 'brands', 'os'] },
+  { key: 'browsers', label: 'Browsers', icon: 'globe', sections: ['browsers'] },
+  { key: 'networks', label: 'Network providers', icon: 'plug', sections: ['networks'] },
+  { key: 'skills', label: 'Skills', icon: 'graduation-cap', sections: ['skills', 'skill-categories'] },
+] as const satisfies readonly { key: string; label: string; icon: string; sections: readonly string[] }[]
+
+function groupFor(section: string): (typeof GROUPS)[number] {
+  return GROUPS.find((g) => (g.sections as readonly string[]).includes(section)) ?? GROUPS[0]
+}
 
 const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
 
@@ -61,6 +93,13 @@ interface Catalog {
     versions: readonly { id: string; version: string; isActive: boolean }[]
   }[]
   networks: readonly { id: string; name: string; countryCode: string | null; isActive: boolean }[]
+  skillCategories: readonly {
+    id: string
+    name: string
+    slug: string
+    isActive: boolean
+    skills: readonly { id: string; name: string; slug: string; isActive: boolean }[]
+  }[]
 }
 
 const ROW: React.CSSProperties = {
@@ -81,6 +120,43 @@ const LIST: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 'var(--space-2)',
+}
+
+/**
+ * A wrapping row of pills rather than one-per-line rows — for lists that are
+ * genuinely just a name (brands, network providers). Device models, OSes and
+ * browsers keep the row layout above: each of those carries real per-item
+ * detail (type/RAM, a versions list, an inline add-version form) that a chip
+ * has no room for. Only convert a list here if every row really is just a
+ * name — that's the difference between "compact" and "lossy".
+ */
+const CHIP_LIST: React.CSSProperties = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-2)',
+}
+
+const CHIP: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: 'var(--space-1) var(--space-3)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-full)',
+  background: 'var(--surface-canvas)',
+  fontSize: 'var(--type-body-sm-size)',
+  color: 'var(--text-primary)',
+  lineHeight: 'var(--type-body-sm-line)',
+}
+
+/** A retired chip stays legible (not just faded to nothing) — dimmed text plus a compact inline label beats a full `Badge` per chip, which would fight the point of being compact. */
+const CHIP_RETIRED: React.CSSProperties = {
+  ...CHIP,
+  color: 'var(--text-muted)',
+  borderStyle: 'dashed',
 }
 
 const INLINE_FORM: React.CSSProperties = {
@@ -118,6 +194,7 @@ export default async function CatalogPage({
   const params = await searchParams
   const showAll = params.all === 'true'
   const section = resolveSection(SECTIONS, params.section)
+  const activeGroup = groupFor(section)
 
   const catalog = await serverFetchOrNull<Catalog>(
     showAll ? 'catalog?all=true' : 'catalog',
@@ -174,9 +251,13 @@ export default async function CatalogPage({
 
       <SectionTabs
         basePath="/app/admin/catalog"
-        tabs={SECTIONS}
-        active={section}
-        preserve={{ all: showAll ? 'true' : undefined }}
+        tabs={GROUPS.map((g) => ({
+          value: g.key,
+          label: g.label,
+          icon: g.icon,
+          href: `/app/admin/catalog?section=${g.sections[0]}${showAll ? '&all=true' : ''}`,
+        }))}
+        active={activeGroup.key}
       />
 
       {params.error ? (
@@ -197,7 +278,7 @@ export default async function CatalogPage({
         </p>
       ) : null}
 
-      {section === 'devices' ? (
+      {activeGroup.key === 'devices' ? (
       <Panel
         title="Device models"
         description={`${catalog.deviceModels.length} models across ${catalog.brands.length} brands.`}
@@ -284,16 +365,14 @@ export default async function CatalogPage({
       </Panel>
       ) : null}
 
-      {section === 'brands' ? (
+      {activeGroup.key === 'devices' ? (
       <Panel title="Brands" description={`${catalog.brands.length} brands.`}>
-        <ul style={LIST}>
+        <ul style={CHIP_LIST}>
           {catalog.brands.map((b) => (
-            <li key={b.id} style={ROW}>
-              <span style={{ color: 'var(--text-primary)' }}>{b.name}</span>
+            <li key={b.id} style={b.isActive ? CHIP : CHIP_RETIRED}>
+              {b.name}
               {!b.isActive ? (
-                <Badge tone="neutral" uppercase={false}>
-                  Retired
-                </Badge>
+                <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
               ) : null}
             </li>
           ))}
@@ -309,7 +388,7 @@ export default async function CatalogPage({
       </Panel>
       ) : null}
 
-      {section === 'os' ? (
+      {activeGroup.key === 'devices' ? (
       <Panel
         title="Operating systems"
         description="Mobile and desktop, with their versions. One list — the legacy schema split these across four tables for no behavioural reason."
@@ -370,7 +449,7 @@ export default async function CatalogPage({
       </Panel>
       ) : null}
 
-      {section === 'browsers' ? (
+      {activeGroup.key === 'browsers' ? (
       <Panel title="Browsers" description={`${catalog.browsers.length} browsers.`}>
         <ul style={LIST}>
           {catalog.browsers.map((b) => (
@@ -421,29 +500,19 @@ export default async function CatalogPage({
       </Panel>
       ) : null}
 
-      {section === 'networks' ? (
+      {activeGroup.key === 'networks' ? (
       <Panel title="Network providers" description={`${catalog.networks.length} carriers.`}>
-        <ul style={LIST}>
+        <ul style={CHIP_LIST}>
           {catalog.networks.map((n) => (
-            <li key={n.id} style={ROW}>
-              <span style={{ color: 'var(--text-primary)' }}>
-                {n.name}
-                {n.countryCode ? (
-                  <span
-                    style={{
-                      marginLeft: 'var(--space-2)',
-                      color: 'var(--text-muted)',
-                      fontSize: 'var(--type-body-sm-size)',
-                    }}
-                  >
-                    {n.countryCode}
-                  </span>
-                ) : null}
-              </span>
+            <li key={n.id} style={n.isActive ? CHIP : CHIP_RETIRED}>
+              {n.name}
+              {n.countryCode ? (
+                <span style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}>
+                  {n.countryCode}
+                </span>
+              ) : null}
               {!n.isActive ? (
-                <Badge tone="neutral" uppercase={false}>
-                  Retired
-                </Badge>
+                <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
               ) : null}
             </li>
           ))}
@@ -462,6 +531,109 @@ export default async function CatalogPage({
           </Field>
           <Button type="submit" variant="secondary" iconLeft="plus">
             Add carrier
+          </Button>
+        </form>
+      </Panel>
+      ) : null}
+
+      {activeGroup.key === 'skills' ? (
+      <Panel
+        title="Skill categories"
+        description={`${catalog.skillCategories.length} categories.`}
+      >
+        <ul style={LIST}>
+          {catalog.skillCategories.map((c) => (
+            <li key={c.id} style={ROW}>
+              <span style={{ color: 'var(--text-primary)' }}>
+                {c.name}
+                <span
+                  style={{
+                    marginLeft: 'var(--space-3)',
+                    color: 'var(--text-muted)',
+                    fontSize: 'var(--type-body-sm-size)',
+                  }}
+                >
+                  {c.skills.length} {c.skills.length === 1 ? 'skill' : 'skills'}
+                </span>
+              </span>
+              {!c.isActive ? (
+                <Badge tone="neutral" uppercase={false}>
+                  Retired
+                </Badge>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        <form action={addSkillCategoryAction} style={INLINE_FORM}>
+          <Field label="Category name" htmlFor="skillCategoryName">
+            <Input
+              id="skillCategoryName"
+              name="name"
+              required
+              maxLength={120}
+              placeholder="Domain knowledge"
+            />
+          </Field>
+          <Button type="submit" variant="secondary" iconLeft="plus">
+            Add category
+          </Button>
+        </form>
+      </Panel>
+      ) : null}
+
+      {activeGroup.key === 'skills' ? (
+      <Panel
+        title="Skills"
+        description="What a tester picks from when describing their expertise — no longer free text, so the list stays tidy instead of accumulating near-duplicates."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+          {catalog.skillCategories.map((c) => (
+            <div key={c.id}>
+              <p
+                className="c4t-eyebrow"
+                style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
+              >
+                {c.name}
+              </p>
+              {c.skills.length === 0 ? (
+                <p style={{ margin: 0, color: 'var(--text-muted)' }}>No skills yet.</p>
+              ) : (
+                <ul style={LIST}>
+                  {c.skills.map((s) => (
+                    <li key={s.id} style={ROW}>
+                      <span style={{ color: 'var(--text-primary)' }}>{s.name}</span>
+                      {!s.isActive ? (
+                        <Badge tone="neutral" uppercase={false}>
+                          Retired
+                        </Badge>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+        <form action={addSkillAction} style={INLINE_FORM}>
+          <Field label="Skill name" htmlFor="skillName">
+            <Input
+              id="skillName"
+              name="name"
+              required
+              maxLength={120}
+              placeholder="Contract testing"
+            />
+          </Field>
+          <Field label="Category" htmlFor="skillCategoryId">
+            <Select
+              id="skillCategoryId"
+              name="categoryId"
+              required
+              options={catalog.skillCategories.map((c) => ({ value: c.id, label: c.name }))}
+            />
+          </Field>
+          <Button type="submit" variant="secondary" iconLeft="plus">
+            Add skill
           </Button>
         </form>
       </Panel>

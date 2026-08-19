@@ -21,6 +21,10 @@ import {
   materialParam,
   featureParam,
   assignmentParam,
+  buildParam,
+  projectBuildQuery,
+  createBuildSchema,
+  updateBuildSchema,
 } from './projects.schema.js'
 
 export const projectsRouter = Router()
@@ -47,7 +51,11 @@ projectsRouter.get('/', validate({ query: listProjectsQuery }), controller.list)
  * endpoint, minus pagination.
  */
 projectsRouter.get('/export.csv', validate({ query: listProjectsQuery }), controller.exportCsv)
-projectsRouter.get('/:id', validate({ params: projectIdParam }), controller.getOne)
+projectsRouter.get(
+  '/:id',
+  validate({ params: projectIdParam, query: projectBuildQuery }),
+  controller.getOne,
+)
 
 // ─── Create / edit — Customers (own org) and Admin ───────────────────────────
 
@@ -104,7 +112,7 @@ projectsRouter.delete(
 
 projectsRouter.get(
   '/:id/features',
-  validate({ params: projectIdParam }),
+  validate({ params: projectIdParam, query: projectBuildQuery }),
   controller.listFeatures,
 )
 
@@ -144,4 +152,42 @@ projectsRouter.post(
   requireRole(Role.TESTER),
   validate({ params: projectIdParam, body: respondToAssignmentSchema }),
   controller.respondToAssignment,
+)
+
+// ─── Builds (§6-9 — a project may span several test cycles) ──────────────────
+
+projectsRouter.get('/:id/builds', validate({ params: projectIdParam }), controller.listBuilds)
+
+projectsRouter.get(
+  '/:id/builds/:buildId',
+  validate({ params: buildParam }),
+  controller.getBuild,
+)
+
+projectsRouter.post(
+  '/:id/builds',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: projectIdParam, body: createBuildSchema }),
+  controller.createBuild,
+)
+
+projectsRouter.patch(
+  '/:id/builds/:buildId',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: buildParam, body: updateBuildSchema }),
+  controller.updateBuild,
+)
+
+projectsRouter.post(
+  '/:id/builds/:buildId/copy',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: buildParam }),
+  controller.copyBuild,
+)
+
+projectsRouter.delete(
+  '/:id/builds/:buildId',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: buildParam }),
+  controller.archiveBuild,
 )

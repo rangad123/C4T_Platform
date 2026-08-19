@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { serverFetch } from '@/lib/api/server'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { ApiError } from '@/lib/api/types'
 
 /**
  * Server Actions for the tester verification workflow (§2.2 "Onboard, verify,
@@ -84,4 +85,55 @@ export async function rejectTester(formData: FormData): Promise<void> {
   if (!id || !reason) return
 
   await patchTesterStatus(id, 'REJECTED', reason)
+}
+
+export interface RevealedPaymentDetails {
+  accountName?: string
+  accountNumber?: string
+  ifscCode?: string
+  paypalEmail?: string
+  paytmNumber?: string
+}
+
+export type RevealPaymentAccountResult =
+  | { ok: true; details: RevealedPaymentDetails }
+  | { ok: false; message: string }
+
+/**
+ * Called directly from `RevealPaymentDetails` (a client component) rather
+ * than via a `<form action>` — the result has to flow back into that
+ * component's state to render inline, and a form submit has no return value
+ * a client component can read. Nothing here writes the plaintext anywhere:
+ * not a cookie, not the URL, not a log. React holds it in memory for as long
+ * as the component is mounted and forgets it on navigation or refresh.
+ *
+ * `requirePermission` re-checks `payment_account.decrypt` even though the
+ * page that renders the reveal button already gated on it — same reasoning
+ * as every other action in this file: a Server Action is a reachable POST
+ * endpoint independent of the page. The API re-checks a third time and is
+ * the actual security boundary; this and the page gate are both UX, and the
+ * API is additionally what enforces the step-up password check and the
+ * per-account rate limit.
+ */
+export async function revealPaymentAccountAction(
+  paymentAccountId: string,
+  password: string,
+): Promise<RevealPaymentAccountResult> {
+  await requirePermission('payment_account.decrypt')
+
+  try {
+    const details = await serverFetch<RevealedPaymentDetails>(
+      `payment-accounts/${paymentAccountId}/reveal`,
+      { method: 'POST', body: { password } },
+    )
+    return { ok: true, details }
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      return { ok: false, message: 'Incorrect password.' }
+    }
+    if (error instanceof ApiError && error.status === 429) {
+      return { ok: false, message: 'Too many attempts. Try again in a few minutes.' }
+    }
+    return { ok: false, message: 'Could not reveal these details. Try again.' }
+  }
 }

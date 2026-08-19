@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { Logo } from '@/components/ds/core/Logo'
 import { Icon } from '@/components/ds/core/Icon'
 import type { IconName } from '@/components/ds/core/icon-registry'
@@ -25,8 +26,6 @@ export interface SidebarSection {
 }
 
 export interface SidebarProps {
-  /** Pathname of the current page, used to derive the active link. */
-  pathname: string
   /** Display name of the signed-in user. */
   userName: string
   /** Role of the signed-in user — used for the role chip and section gating. */
@@ -104,29 +103,42 @@ function setCollapsedPreference(next: boolean): void {
  *
  * ── Why this is a client component
  *
- * Only for the collapse toggle. It lives in the admin *layout*, which Next
- * does not re-mount on client-side navigation, so the open/closed state
- * survives moving between pages for free — no context, no URL parameter, no
- * cookie round trip. `localStorage` then carries it across full reloads and
- * sessions.
+ * Two independent reasons.
  *
- * The state is read in an effect rather than during render on purpose: reading
- * `localStorage` while rendering would produce different markup on the server
- * (where it does not exist) than on the client, which is a hydration
- * mismatch. So the first paint is always expanded, and a stored preference
- * applies immediately after. `suppressHydrationWarning` is deliberately NOT
- * used here — there is no mismatch to suppress, because the first render
- * genuinely is the default on both sides.
+ * 1. The collapse toggle. This component lives in the admin *layout*, which
+ *    Next does not re-mount on client-side navigation, so the open/closed
+ *    state survives moving between pages for free — no context, no URL
+ *    parameter, no cookie round trip. `localStorage` then carries it across
+ *    full reloads and sessions.
+ *
+ * 2. The active-link highlight. This ALSO has to live here rather than be
+ *    passed down from the layout as a prop, and for the same underlying
+ *    reason: a layout does not re-render on a client-side navigation within
+ *    its own segment. A server-computed `pathname` prop would be correct on
+ *    the page that first mounted this layout and then silently stale on
+ *    every subsequent sidebar click — every page would look like "Dashboard"
+ *    is still open, because the layout never ran again to recompute it.
+ *    `usePathname()` is the client hook built exactly for this: it re-reads
+ *    on every navigation regardless of which layout does or doesn't re-run.
+ *
+ * The collapse state is read in an effect rather than during render on
+ * purpose: reading `localStorage` while rendering would produce different
+ * markup on the server (where it does not exist) than on the client, which
+ * is a hydration mismatch. So the first paint is always expanded, and a
+ * stored preference applies immediately after. `suppressHydrationWarning` is
+ * deliberately NOT used here — there is no mismatch to suppress, because the
+ * first render genuinely is the default on both sides.
  */
-export function Sidebar({ pathname, userName, role, sections }: SidebarProps) {
+export function Sidebar({ userName, role, sections }: SidebarProps) {
   const collapsed = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+  const pathname = usePathname()
 
   return (
     <aside
       className={[styles.sidebar, collapsed ? styles.collapsed : null].filter(Boolean).join(' ')}
       aria-label="Admin navigation"
     >
-      <div className={styles.brand}>
+      <div className={styles.brandRow}>
         {/* `href={null}` makes Logo render a plain <span>. Logo links to "/"
             by default, and an anchor inside this anchor is invalid HTML — it
             threw a hydration error and made the whole lockup unclickable. The
@@ -134,9 +146,7 @@ export function Sidebar({ pathname, userName, role, sections }: SidebarProps) {
         <Link href="/app/admin" aria-label="Crowd4Test admin home">
           <Logo size={28} wordmarkSize={14} withWordmark={!collapsed} href={null} />
         </Link>
-      </div>
 
-      <div className={styles.toggleRow}>
         <button
           type="button"
           className={styles.toggle}

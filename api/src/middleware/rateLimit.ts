@@ -67,6 +67,21 @@ export const uploadLimiter = rateLimit({
 })
 
 /**
+ * The bank-details reveal endpoint requires the caller's own password, so it
+ * is exactly the kind of thing a stolen session token would try to brute-
+ * force. Keyed on the caller's user id (the route sits behind `authenticate`,
+ * so `req.user` is always set) rather than IP — the threat here is one
+ * compromised admin session guessing its own owner's password, which an IP
+ * key would not usefully constrain any tighter than this already does.
+ */
+export const paymentRevealLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? 'unknown',
+  ...shared,
+})
+
+/**
  * The public lead form.
  *
  * ⚠ THIS IS THE ONLY UNAUTHENTICATED WRITE ON THE API, so it is the only one an

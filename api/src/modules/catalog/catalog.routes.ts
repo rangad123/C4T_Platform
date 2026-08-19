@@ -66,58 +66,82 @@ catalogRouter.get('/', validate({ query: listQuery }), async (_req, res) => {
   const q = validatedQuery<ListQuery>(res)
   const where = activeFilter(q)
 
-  const [brands, deviceModels, operatingSystems, browsers, networks] = await Promise.all([
-    prisma.deviceBrand.findMany({ where, orderBy: { name: 'asc' } }),
-    prisma.deviceModel.findMany({
-      where,
-      select: {
-        id: true,
-        name: true,
-        type: true,
-        ramGb: true,
-        screenSize: true,
-        isActive: true,
-        brand: { select: { id: true, name: true } },
-        defaultOs: { select: { id: true, name: true, kind: true } },
-      },
-      orderBy: [{ brand: { name: 'asc' } }, { name: 'asc' }],
-    }),
-    prisma.operatingSystem.findMany({
-      where,
-      select: {
-        id: true,
-        name: true,
-        kind: true,
-        isActive: true,
-        versions: {
-          where: activeFilter(q),
-          select: { id: true, version: true, isActive: true },
-          orderBy: { version: 'asc' },
+  const [brands, deviceModels, operatingSystems, browsers, networks, skillCategories] =
+    await Promise.all([
+      prisma.deviceBrand.findMany({ where, orderBy: { name: 'asc' } }),
+      prisma.deviceModel.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          ramGb: true,
+          screenSize: true,
+          isActive: true,
+          brand: { select: { id: true, name: true } },
+          defaultOs: { select: { id: true, name: true, kind: true } },
         },
-      },
-      orderBy: [{ kind: 'asc' }, { name: 'asc' }],
-    }),
-    prisma.browser.findMany({
-      where,
-      select: {
-        id: true,
-        name: true,
-        isActive: true,
-        versions: {
-          where: activeFilter(q),
-          select: { id: true, version: true, isActive: true },
-          orderBy: { version: 'asc' },
+        orderBy: [{ brand: { name: 'asc' } }, { name: 'asc' }],
+      }),
+      prisma.operatingSystem.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          kind: true,
+          isActive: true,
+          versions: {
+            where: activeFilter(q),
+            select: { id: true, version: true, isActive: true },
+            orderBy: { version: 'asc' },
+          },
         },
-      },
-      orderBy: { name: 'asc' },
-    }),
-    prisma.networkProvider.findMany({
-      where,
-      orderBy: [{ countryCode: 'asc' }, { name: 'asc' }],
-    }),
-  ])
+        orderBy: [{ kind: 'asc' }, { name: 'asc' }],
+      }),
+      prisma.browser.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          versions: {
+            where: activeFilter(q),
+            select: { id: true, version: true, isActive: true },
+            orderBy: { version: 'asc' },
+          },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.networkProvider.findMany({
+        where,
+        orderBy: [{ countryCode: 'asc' }, { name: 'asc' }],
+      }),
+      prisma.skillCategory.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          isActive: true,
+          skills: {
+            where: activeFilter(q),
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              isActive: true,
+              _count: { select: { testers: true } },
+            },
+            orderBy: { name: 'asc' },
+          },
+        },
+        orderBy: { name: 'asc' },
+      }),
+    ])
 
-  res.json({ data: { brands, deviceModels, operatingSystems, browsers, networks } })
+  res.json({
+    data: { brands, deviceModels, operatingSystems, browsers, networks, skillCategories },
+  })
 })
 
 // ─── Device brands ───────────────────────────────────────────────────────────
@@ -378,6 +402,127 @@ catalogRouter.post('/networks', adminOnly, validate({ body: networkBody }), asyn
     after: { name: row.name, countryCode: row.countryCode },
   })
   res.status(201).json({ data: row })
+})
+
+// ─── Skill categories + skills (legacy `skill_categories` / `skills`) ────────
+//
+// Skill *creation* lives here, admin-only, same as every other catalog entity
+// — a tester picks from this list (`testers.service.ts` `setSkills`) but can
+// no longer type a new skill into existence, which is what let the legacy
+// free-text field accumulate near-duplicates in the first place.
+
+const skillCategoryBody = z.object({ name: z.string().trim().min(1).max(120) })
+
+catalogRouter.post(
+  '/skill-categories',
+  adminOnly,
+  validate({ body: skillCategoryBody }),
+  async (req, res) => {
+    const { name } = req.body as z.infer<typeof skillCategoryBody>
+    const slug = name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    const clash = await prisma.skillCategory.findUnique({ where: { slug }, select: { id: true } })
+    if (clash) throw new ConflictError('A skill category with this name already exists')
+
+    const row = await prisma.skillCategory.create({ data: { name, slug } })
+    await recordAudit({
+      req,
+      action: 'catalog.skill_category_created',
+      entityType: 'SkillCategory',
+      entityId: row.id,
+      after: { name: row.name },
+    })
+    res.status(201).json({ data: row })
+  },
+)
+
+catalogRouter.patch(
+  '/skill-categories/:id',
+  adminOnly,
+  validate({ params: idParam, body: toggleBody }),
+  async (req, res) => {
+    const row = await prisma.skillCategory
+      .update({
+        where: { id: param(req, 'id') },
+        data: { isActive: (req.body as z.infer<typeof toggleBody>).isActive },
+      })
+      .catch(() => null)
+    if (!row) throw new NotFoundError('Skill category')
+    await recordAudit({
+      req,
+      action: 'catalog.skill_category_updated',
+      entityType: 'SkillCategory',
+      entityId: row.id,
+      after: { isActive: row.isActive },
+    })
+    res.json({ data: row })
+  },
+)
+
+const skillBody = z.object({
+  name: z.string().trim().min(1).max(120),
+  categoryId: z.string().cuid(),
+})
+
+catalogRouter.post('/skills', adminOnly, validate({ body: skillBody }), async (req, res) => {
+  const input = req.body as z.infer<typeof skillBody>
+  const category = await prisma.skillCategory.findUnique({
+    where: { id: input.categoryId },
+    select: { id: true },
+  })
+  if (!category) throw new NotFoundError('Skill category')
+
+  const slug = input.name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  const clash = await prisma.skill.findUnique({ where: { slug }, select: { id: true } })
+  if (clash) throw new ConflictError('A skill with this name already exists')
+
+  const row = await prisma.skill.create({
+    data: { name: input.name, slug, categoryId: input.categoryId },
+  })
+  await recordAudit({
+    req,
+    action: 'catalog.skill_created',
+    entityType: 'Skill',
+    entityId: row.id,
+    after: { name: row.name, category: category.id },
+  })
+  res.status(201).json({ data: row })
+})
+
+const skillUpdateBody = z.object({
+  categoryId: z.string().cuid().optional(),
+  isActive: z.boolean().optional(),
+})
+
+catalogRouter.patch('/skills/:id', adminOnly, validate({ params: idParam, body: skillUpdateBody }), async (req, res) => {
+  const input = req.body as z.infer<typeof skillUpdateBody>
+  if (input.categoryId) {
+    const category = await prisma.skillCategory.findUnique({
+      where: { id: input.categoryId },
+      select: { id: true },
+    })
+    if (!category) throw new NotFoundError('Skill category')
+  }
+
+  const row = await prisma.skill
+    .update({ where: { id: param(req, 'id') }, data: input })
+    .catch(() => null)
+  if (!row) throw new NotFoundError('Skill')
+  await recordAudit({
+    req,
+    action: 'catalog.skill_updated',
+    entityType: 'Skill',
+    entityId: row.id,
+    after: input,
+  })
+  res.json({ data: row })
 })
 
 // ─── Tester's own browsers (legacy `user_browsers`) ──────────────────────────

@@ -1,5 +1,4 @@
 import { Router } from 'express'
-import { z } from 'zod'
 import { Role } from '@prisma/client'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission, requireRole } from '../../middleware/authorize.js'
@@ -13,7 +12,6 @@ import {
   deviceSchema,
   skillsSchema,
   languagesSchema,
-  setSkillCategorySchema,
   acceptNdaSchema,
   workHistorySchema,
   listGlobalDevicesQuery,
@@ -85,23 +83,6 @@ testersRouter.get(
   requirePermission(PERMISSIONS.TESTER_READ),
   validate({ params: testerIdParam }),
   controller.getOne,
-)
-
-// ─── Skill taxonomy (admin-only) ─────────────────────────────────────────────
-
-const skillIdParam = z.object({ skillId: z.string().cuid() })
-
-testersRouter.get(
-  '/skills/catalogue',
-  requireRole(Role.ADMIN, Role.SUB_ADMIN),
-  controller.listSkillCatalogue,
-)
-
-testersRouter.patch(
-  '/skills/:skillId/category',
-  requireRole(Role.ADMIN, Role.SUB_ADMIN),
-  validate({ params: skillIdParam, body: setSkillCategorySchema }),
-  controller.setSkillCategory,
 )
 
 /**

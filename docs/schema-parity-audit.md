@@ -1,7 +1,7 @@
 # Schema parity audit — legacy vs new
 
 `api/old sql/crowd4testDB.sql` (66 tables / 600 columns) vs `api/prisma/schema.prisma`
-(36 models / 477 fields).
+(46 models / 572 fields, up from 36/477 before the catalog/skills/bank-details/transactions pass).
 
 This is the table-level verdict. Column-level detail is in
 `legacy-schema-inventory.md`; capability-level detail is in
@@ -11,12 +11,12 @@ This is the table-level verdict. Column-level detail is in
 
 | Status | Count | Meaning |
 | --- | --- | --- |
-| MAPPED | 16 | Concept fully carried over, often renamed or normalised. |
-| PARTIAL | 11 | Present, but specific legacy fields or relationships are not represented. |
-| MISSING | 39 | No equivalent exists in the new platform. |
+| MAPPED | 27 | Concept fully carried over, often renamed or normalised. |
+| PARTIAL | 10 | Present, but specific legacy fields or relationships are not represented. |
+| MISSING | 29 | No equivalent exists in the new platform. |
 | **Total** | **66** | |
 
-> The new platform has **36 models vs 66 legacy tables**. That is not itself a loss —
+> The new platform has **46 models vs 66 legacy tables**. That is not itself a loss —
 > lookup tables became enums, and several legacy tables were normalised together. The
 > real losses are enumerated below.
 
@@ -64,28 +64,28 @@ This is the table-level verdict. Column-level detail is in
 | `contests` | — | **MISSING** | Entire contests module. |
 | `cust_feedback_answers` | — | **MISSING** | Answers to the above. |
 | `cust_feedback_fields` | — | **MISSING** | Per-contest custom feedback fields. |
-| `browser_versions` | — | **MISSING** | Browser version catalog. |
-| `browsers` | — | **MISSING** | Browser catalog with logo. |
-| `mobile_brands` | — | **MISSING** | Device brand catalog. |
-| `mobile_os_type` | — | **MISSING** | Mobile OS catalog (Android/iOS). |
-| `mobile_os_version` | — | **MISSING** | Mobile OS version catalog. |
-| `network_providers` | — | **MISSING** | Network/carrier catalog with country + logo. |
-| `os` | — | **MISSING** | Desktop/web OS catalog. |
-| `os_versions` | — | **MISSING** | OS version catalog. |
-| `devices` | TesterDevice | **PARTIAL** | FREE TEXT, not a catalog. Missing structured brand/os/os-version/network FKs; ram/screen present as free text; no soft delete. |
-| `user_browsers` | TesterDevice.browser | **PARTIAL** | Free-text string on the device row. Loses browser/version/OS relationships and per-tester browser rows. |
+| `browser_versions` | BrowserVersion | **MAPPED** | Catalog table, seeded by hand (no CSV source). |
+| `browsers` | Browser | **MAPPED** | Seeded from `DataCSV/browsers.csv` (6 rows). |
+| `mobile_brands` | DeviceBrand | **MAPPED** | Seeded from `DataCSV/mobile_brands.csv` (53 rows → 51 unique, deduped). |
+| `mobile_os_type` | OperatingSystem (`kind=MOBILE`) | **MAPPED** | Merged with `os` into one table with an `OsKind` discriminator. |
+| `mobile_os_version` | OsVersion (mobile rows) | **MAPPED** | Merged with `os_versions`, same reasoning. |
+| `network_providers` | NetworkProvider | **MAPPED** | No CSV source in the legacy export; seeded by hand (8 carriers). |
+| `os` | OperatingSystem | **MAPPED** | Seeded from `DataCSV/os.csv` — this is the unified OS-type list `os_versions.os_type_id` actually references. |
+| `os_versions` | OsVersion | **MAPPED** | Seeded from `DataCSV/os_versions.csv` (60 rows → 59 unique). |
+| `devices` | TesterDevice | **PARTIAL** | Catalog FKs (`deviceModelId`/`osVersionRefId`/`primaryNetworkId`/`secondaryNetworkId`) now exist alongside the free-text columns, never replacing them. Still no soft delete; model name stays free text by design. |
+| `user_browsers` | TesterBrowser | **MAPPED** | Real per-tester join to Browser/BrowserVersion/OperatingSystem now exists, independent of `TesterDevice.browser`'s free-text mirror. |
 | `active_plans` | — | **MISSING** | Org subscription plan + remaining project/tester quotas. |
-| `payment_acc_details` | — | **MISSING** | Tester payout accounts (bank/PayPal/Paytm, IFSC, Indian/non-Indian). |
+| `payment_acc_details` | PaymentAccount | **MAPPED** | Sensitive fields (account name/number, IFSC, PayPal email, Paytm number) live only inside an AES-256-GCM envelope, never a plaintext column. Masked-by-default; reveal is a separate audited, password-gated admin action. |
 | `pricing_models` | — | **MISSING** | Pricing model lookup (tester_credit/hourly_rate/bug_bounty). |
-| `tds_history` | — | **MISSING** | Per-financial-year TDS deductions. |
-| `payment_history` | Transaction | **PARTIAL** | Missing: credit/debit/release semantics, pmt_method + details, contest linkage, seen/new status. |
+| `tds_history` | Transaction.tdsAmountMinor | **MAPPED** | Folded into the transaction it belongs to, rather than a separate table — every row was already one TDS figure tied to one payment. Financial year is computed from `occurredAt`, not stored. |
+| `payment_history` | Transaction | **PARTIAL** | `pmt_method`/`pmt_method_details`/`pmt_amount`/`pmt_summary`/build-contest linkage now map onto `paymentMethod`/`paymentAccountId`/`amountMinor`/`description`/`buildOrContestRef`. Still missing: `pmt_status`'s new/seen read-tracking flag (a different concept from `TransactionStatus`). Indian/International/Pending (§21-27) is derived from `paymentMethod`+`currency`+`status`, not stored. |
 | `automation_modules` | — | **MISSING** | Automation module/script definitions per build. |
 | `automation_reports` | — | **MISSING** | Automation run reports. |
 | `notification` | Notification | **PARTIAL** | Legacy was per-org notification preferences (allN/buildStatus/criticalDef); new is a notification feed. Preference concept MISSING. |
 | `message` | Message | **MAPPED** | Now thread-based rather than standalone message+recipient. |
 | `message_recipient` | ThreadParticipant | **MAPPED** | is_read -> lastReadAt. |
-| `skill_categories` | SkillCategory enum | **MAPPED** | Legacy dynamic table -> fixed 4-value enum. |
-| `skills` | Skill | **MAPPED** | sname_cat_id -> SkillCategory enum. |
+| `skill_categories` | SkillCategory | **MAPPED** | Was a fixed 4-value enum; promoted to a real catalog table (matching every other reference entity) and seeded from `DataCSV/skill_categories.csv`. |
+| `skills` | Skill | **MAPPED** | `sname_cat_id` → a relation to `SkillCategory`. Seeded from `DataCSV/skills.csv` (26 rows), reconciled with 8 pre-existing skills. Testers now select from this catalog rather than typing a skill into existence. |
 | `site_settings` | — | **MISSING** | Global key/value settings. |
 | `site_statistics` | — | **MISSING** | Daily aggregate stats (logins, new tests, tested). |
 | `base_country` | countryCode strings | **PARTIAL** | No country lookup table; ISO codes stored as free strings. |
@@ -95,7 +95,7 @@ This is the table-level verdict. Column-level detail is in
 
 ---
 
-## Tables with no equivalent (39)
+## Tables with no equivalent (29)
 
 **Organisation / User / RBAC** — `user_invitation`
 
@@ -105,9 +105,11 @@ This is the table-level verdict. Column-level detail is in
 
 **Contests** — `contests`, `contest_participant`, `contest_question`, `contest_answers`, `contest_tasks`, `contest_feedback`, `cust_feedback_fields`, `cust_feedback_answers`
 
-**Devices / OS / Browsers** — `mobile_brands`, `mobile_os_type`, `mobile_os_version`, `network_providers`, `os`, `os_versions`, `browsers`, `browser_versions`
+**Payments / Plans** — `active_plans`, `pricing_models`
 
-**Payments / Plans** — `active_plans`, `pricing_models`, `payment_acc_details`, `tds_history`
+_(`payment_acc_details` and `tds_history` moved to MAPPED — see the table above. The
+Devices/OS/Browsers catalog is now fully MAPPED or PARTIAL — none of that family is MISSING
+any longer.)_
 
 **Automation** — `automation_modules`, `automation_reports`
 

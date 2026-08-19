@@ -14,6 +14,9 @@ import { uploadsRouter } from '../modules/uploads/uploads.routes.js'
 import { statsRouter } from '../modules/stats/stats.routes.js'
 import { leadsRouter } from '../modules/leads/leads.routes.js'
 import { catalogRouter } from '../modules/catalog/catalog.routes.js'
+import { paymentAccountsRouter } from '../modules/payment-accounts/payment-accounts.routes.js'
+import { testingRouter } from '../modules/testing/testing.routes.js'
+import { reportsRouter } from '../modules/reports/reports.routes.js'
 
 /**
  * API v1. Every route is mounted under /v1 so a future breaking change can ship
@@ -32,9 +35,19 @@ v1Router.use('/managers', managersRouter)
 v1Router.use('/communication', communicationRouter)
 v1Router.use('/ratings', ratingsRouter)
 v1Router.use('/transactions', transactionsRouter)
+v1Router.use('/payment-accounts', paymentAccountsRouter)
 v1Router.use('/notifications', notificationsRouter)
 v1Router.use('/uploads', uploadsRouter)
 v1Router.use('/stats', statsRouter)
+/**
+ * Mounted at the v1 root, not a prefix — the router's own routes already
+ * spell out `/test-cases/*` and `/builds/:buildId/*` (a test case is not
+ * "owned" by one single collection path the way projects/bugs are, and
+ * `builds` already lives nested under `/projects/:id/builds` for create/
+ * list/rename — this covers the reads a build id alone is enough for).
+ */
+v1Router.use('/', testingRouter)
+v1Router.use('/reports', reportsRouter)
 /**
  * ⚠ `/leads` is the only router here whose POST is UNAUTHENTICATED — the
  * marketing site's contact form has no session to present. It applies its own
