@@ -64,6 +64,11 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(1).optional(),
 })
 
+/** Body of `POST /v1/auth/google/exchange` — see auth.controller.ts's `googleExchange`. */
+export const googleExchangeSchema = z.object({
+  code: z.string().min(1, 'code is required'),
+})
+
 export const forgotPasswordSchema = z.object({ email })
 
 export const resetPasswordSchema = z.object({

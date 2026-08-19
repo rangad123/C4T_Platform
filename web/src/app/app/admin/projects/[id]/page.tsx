@@ -111,7 +111,6 @@ export default async function ProjectDetailPage({
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
   const { id } = await params
   const resolvedSearchParams = await searchParams
-  const section = resolveSection(SECTIONS, resolvedSearchParams.section)
   const edit = resolvedSearchParams.edit
   const buildId = resolvedSearchParams.buildId
 
@@ -176,10 +175,23 @@ export default async function ProjectDetailPage({
   // arrived pre-filtered to it; `bugs`/`features` are separate fetches that
   // need to pass it along themselves.
   const activeBuildId = project.activeBuildId
+  // The build "New build" copies its general details from — see §2 below.
+  // Falls back to the active build if a project somehow has no build flagged
+  // default (shouldn't happen; every project gets one on creation).
+  const defaultBuildId = project.builds.find((b) => b.isDefault)?.id ?? activeBuildId
 
   // Both lists are read in parallel with each other; the project read above had
   // to come first because a 404 there means there is no page to fill in.
-  const [testerPool, bugs, features, buildDetail, buildSummaryData, testCases, projectReport] = await Promise.all([
+  const [
+    testerPool,
+    bugs,
+    features,
+    buildDetail,
+    buildSummaryData,
+    testCases,
+    projectReport,
+    defaultBuildDetailIfDifferent,
+  ] = await Promise.all([
     capabilities.canAssignTesters
       ? loadList<VerifiedTesterRow>('testers', {
           page: 1,
@@ -207,7 +219,14 @@ export default async function ProjectDetailPage({
     // renders — reused for the Overview tab's summary rather than a second
     // aggregation. Rolled up across every build, unlike `buildSummaryData`.
     serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`),
+    // Most projects have exactly one build, so the active one already IS the
+    // default and `buildDetail` above already has what "New build" needs —
+    // no reason to fetch it twice.
+    defaultBuildId !== activeBuildId
+      ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
+      : Promise.resolve(null),
   ])
+  const defaultBuildDetail = defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
 
   const assignedTesterIds = new Set(project.assignments.map((row) => row.tester.id))
   // `assertAssignable` on the API rejects a tester who is not ACTIVE or has not
@@ -225,6 +244,17 @@ export default async function ProjectDetailPage({
 
   const transitions = allowedTransitions(project.status)
   const priority = isProjectPriority(project.priority) ? project.priority : 'NORMAL'
+
+  /**
+   * Test reports only make sense for scripted testing — exploratory testing
+   * has no script to report against, just the bugs it turns up, which the
+   * Bugs tab already covers. `testType` is free text (matches legacy seed
+   * data like "Exploratory Testing"), so this is a contains check rather
+   * than an exact match against a fixed value.
+   */
+  const isExploratory = (buildDetail?.testType ?? '').toLowerCase().includes('exploratory')
+  const visibleSections = isExploratory ? SECTIONS.filter((s) => s.value !== 'testing') : SECTIONS
+  const section = resolveSection(visibleSections, resolvedSearchParams.section)
 
   const detailPath = `/app/admin/projects/${project.id}`
   const closedHref = (() => {
@@ -369,7 +399,7 @@ export default async function ProjectDetailPage({
         >
           <SectionTabs
             basePath={detailPath}
-            tabs={SECTIONS}
+            tabs={visibleSections}
             active={section}
             preserve={{ buildId }}
           />
@@ -398,7 +428,8 @@ export default async function ProjectDetailPage({
         </div>
       }
       aside={
-        <>
+        section === 'overview' ? (
+          <>
           <Panel
             title="Status"
             description={`Now ${titleCase(project.status).toLowerCase()}. Only legal moves are listed.`}
@@ -523,7 +554,8 @@ export default async function ProjectDetailPage({
               </ul>
             )}
           </Panel>
-        </>
+          </>
+        ) : undefined
       }
     >
       {section === 'overview' ? (
@@ -1638,9 +1670,19 @@ export default async function ProjectDetailPage({
 
       {capabilities.canUpdate ? (
         <Modal open={newBuildModalOpen} closedHref={closedHref} title="New build">
-          <form action={createBuild} style={stackStyle}>
+          {/*
+            Pre-filled from the project's default build ("Original build"),
+            the same field split `copyBuild`'s "Copy this build" already
+            uses: everything general about how to run the build (test type,
+            targets, instructions, scope...) carries over so a second test
+            cycle doesn't mean re-typing it. Name, status, and the window
+            dates are build-specific — they start fresh here rather than
+            inheriting the original's current name, status or dates.
+          */}
+          <TrackedForm action={createBuild} style={stackStyle}>
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="section" value={section} />
+
             <Field
               label="Name"
               htmlFor="new-build-name"
@@ -1648,10 +1690,139 @@ export default async function ProjectDetailPage({
             >
               <Input id="new-build-name" name="name" required maxLength={120} autoFocus />
             </Field>
-            <Button type="submit" variant="primary" fullWidth>
-              Create build
-            </Button>
-          </form>
+
+            <div style={fieldGridStyle}>
+              <Field label="Status" htmlFor="new-build-status">
+                <Select
+                  id="new-build-status"
+                  name="status"
+                  defaultValue="NEW"
+                  options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))}
+                />
+              </Field>
+              <Field label="Test type" htmlFor="new-build-testType" hint="Exploratory, regression, smoke, load...">
+                <Input
+                  id="new-build-testType"
+                  name="testType"
+                  maxLength={120}
+                  defaultValue={defaultBuildDetail?.testType ?? ''}
+                />
+              </Field>
+              <Field label="Start date" htmlFor="new-build-startDate">
+                <Input id="new-build-startDate" name="startDate" type="date" />
+              </Field>
+              <Field label="End date" htmlFor="new-build-endDate">
+                <Input id="new-build-endDate" name="endDate" type="date" />
+              </Field>
+              <Field label="Maximum testers" htmlFor="new-build-maxTesters" hint="Leave blank for no cap.">
+                <Input
+                  id="new-build-maxTesters"
+                  name="maxTesters"
+                  type="number"
+                  min={1}
+                  max={10000}
+                  defaultValue={defaultBuildDetail?.maxTesters ?? ''}
+                />
+              </Field>
+              <Field label="Application / website URL" htmlFor="new-build-appUrl">
+                <Input
+                  id="new-build-appUrl"
+                  name="appUrl"
+                  type="url"
+                  maxLength={2000}
+                  defaultValue={defaultBuildDetail?.appUrl ?? ''}
+                />
+              </Field>
+            </div>
+
+            <div style={fieldGridStyle}>
+              <Field label="Target countries" htmlFor="new-build-targetCountries" hint="Comma separated: IN, GB, US.">
+                <Input
+                  id="new-build-targetCountries"
+                  name="targetCountries"
+                  defaultValue={defaultBuildDetail?.targetCountries.join(', ') ?? ''}
+                />
+              </Field>
+              <Field label="Target languages" htmlFor="new-build-targetLanguages" hint="Comma separated: en, hi, ta.">
+                <Input
+                  id="new-build-targetLanguages"
+                  name="targetLanguages"
+                  defaultValue={defaultBuildDetail?.targetLanguages.join(', ') ?? ''}
+                />
+              </Field>
+              <Field label="Target devices" htmlFor="new-build-targetDevices" hint="Comma separated.">
+                <Input
+                  id="new-build-targetDevices"
+                  name="targetDevices"
+                  defaultValue={defaultBuildDetail?.targetDevices.join(', ') ?? ''}
+                />
+              </Field>
+              <Field label="Target browsers" htmlFor="new-build-targetBrowsers" hint="Comma separated.">
+                <Input
+                  id="new-build-targetBrowsers"
+                  name="targetBrowsers"
+                  defaultValue={defaultBuildDetail?.targetBrowsers.join(', ') ?? ''}
+                />
+              </Field>
+              <Field
+                label="Target operating systems"
+                htmlFor="new-build-targetOperatingSystems"
+                hint="Comma separated."
+              >
+                <Input
+                  id="new-build-targetOperatingSystems"
+                  name="targetOperatingSystems"
+                  defaultValue={defaultBuildDetail?.targetOperatingSystems.join(', ') ?? ''}
+                />
+              </Field>
+            </div>
+
+            <Field label="Features / scope" htmlFor="new-build-description">
+              <Textarea
+                id="new-build-description"
+                name="description"
+                rows={3}
+                defaultValue={defaultBuildDetail?.description ?? ''}
+              />
+            </Field>
+            <Field label="Testing instructions" htmlFor="new-build-instructions">
+              <Textarea
+                id="new-build-instructions"
+                name="instructions"
+                rows={6}
+                defaultValue={defaultBuildDetail?.instructions ?? ''}
+              />
+            </Field>
+            <Field label="Special requirements" htmlFor="new-build-specialRequirements">
+              <Textarea
+                id="new-build-specialRequirements"
+                name="specialRequirements"
+                rows={3}
+                defaultValue={defaultBuildDetail?.specialRequirements ?? ''}
+              />
+            </Field>
+            <Field label="Release notes" htmlFor="new-build-releaseNotes">
+              <Textarea
+                id="new-build-releaseNotes"
+                name="releaseNotes"
+                rows={3}
+                defaultValue={defaultBuildDetail?.releaseNotes ?? ''}
+              />
+            </Field>
+
+            <Checkbox
+              name="testersCanSeeOtherBugs"
+              defaultChecked={defaultBuildDetail?.testersCanSeeOtherBugs ?? false}
+              label="Testers can see bugs raised by others (this build)"
+              description="Overrides the project's own setting for this build only."
+            />
+
+            <div>
+              <Button type="submit" variant="primary">
+                Create build
+              </Button>
+            </div>
+          </TrackedForm>
         </Modal>
       ) : null}
 

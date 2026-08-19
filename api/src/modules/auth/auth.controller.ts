@@ -17,6 +17,7 @@ import {
   exchangeCodeForIdentity,
   verifyState,
 } from '../../lib/oauth/google.js'
+import { createHandoff, consumeHandoff } from '../../lib/oauth/handoff.js'
 import * as authService from './auth.service.js'
 import type { SessionTokens } from './auth.service.js'
 
@@ -252,6 +253,11 @@ const ROLE_HOME: Record<string, string> = {
  * account; `?next=` is the post-login destination. The role rides in a cookie
  * rather than in `state` because `state` is signed but readable, and it is not
  * worth publishing in a URL that lands in Google's request logs.
+ *
+ * `?intent=login|register` (default `register`) rides in `state` instead,
+ * since the callback needs it AFTER the redirect through Google, where the
+ * OAuth cookies below are still available but a caller-supplied query param
+ * would not be — `state` is the one thing Google hands back unmodified.
  */
 export function googleStart(req: Request, res: Response): void {
   if (!googleOAuthEnabled) {
@@ -260,8 +266,9 @@ export function googleStart(req: Request, res: Response): void {
 
   const role = req.query.role === 'tester' ? Role.TESTER : Role.CUSTOMER
   const next = typeof req.query.next === 'string' ? req.query.next : undefined
+  const intent = req.query.intent === 'login' ? 'login' : 'register'
 
-  const { state, nonce } = createState(next)
+  const { state, nonce } = createState(next, intent)
   res.cookie(OAUTH_NONCE_COOKIE, nonce, oauthCookieOptions())
   res.cookie(OAUTH_ROLE_COOKIE, role, oauthCookieOptions())
   res.redirect(buildAuthorizationUrl(state))
@@ -299,7 +306,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
   const state = typeof req.query.state === 'string' ? req.query.state : undefined
   if (!code || !state) return failTo('google_failed')
 
-  let payload: { next?: string }
+  let payload: { next?: string; intent?: 'login' | 'register' }
   try {
     payload = verifyState(state, nonce)
   } catch {
@@ -308,6 +315,24 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
 
   try {
     const identity = await exchangeCodeForIdentity(code)
+
+    /**
+     * A visitor who clicked "Continue with Google" on /login is expecting to
+     * reach an account that already exists — silently registering one for an
+     * identity nobody recognises would create it without the "I accept the
+     * Terms of Use" step /register requires, and without the visitor ever
+     * having chosen customer vs tester. Send them to /register instead, with
+     * their Google email pre-filled, so creating the account is a deliberate
+     * next step rather than a side effect of picking an account on Google's
+     * consent screen. /register's own Google button is unaffected — it
+     * passes `intent=register` (the default), which skips this gate.
+     */
+    if (payload.intent === 'login' && !(await authService.googleIdentityExists(identity))) {
+      return res.redirect(
+        `${env.WEB_PUBLIC_URL}/register?error=google_no_account&email=${encodeURIComponent(identity.email)}`,
+      )
+    }
+
     const signUpRole = roleCookie === Role.TESTER ? Role.TESTER : Role.CUSTOMER
 
     const { user, tokens, created } = await authService.signInWithGoogle(identity, signUpRole, {
@@ -348,7 +373,6 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
       }
     }
 
-    setAuthCookies(res, tokens)
     await recordAudit({
       req,
       action: created ? 'auth.google_register' : 'auth.google_login',
@@ -367,7 +391,20 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
         ? payload.next
         : (ROLE_HOME[user.role] ?? '/app')
 
-    res.redirect(`${env.WEB_PUBLIC_URL}${target}`)
+    /**
+     * NOT `setAuthCookies(res, tokens)` + a straight redirect. This response
+     * is served from THIS API's own origin — a cookie set on it can never be
+     * visible to the web app's origin, which is where the browser is about
+     * to be sent and where every subsequent page load actually checks for a
+     * session. See lib/oauth/handoff.ts for the full reasoning. The web app
+     * exchanges this code for the same tokens server-to-server and sets its
+     * own cookies from that response, exactly like password login does.
+     */
+    const handoffCode = createHandoff(tokens)
+    const completeUrl = new URL('/auth/google/complete', env.WEB_PUBLIC_URL)
+    completeUrl.searchParams.set('code', handoffCode)
+    completeUrl.searchParams.set('target', target)
+    res.redirect(completeUrl.toString())
   } catch (error) {
     const reason =
       error instanceof ForbiddenError
@@ -377,4 +414,21 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
           : 'google_failed'
     return failTo(reason)
   }
+}
+
+/**
+ * POST /v1/auth/google/exchange — the web app's server calls this, not the
+ * browser. It redeems the one-time code `googleCallback` minted (see
+ * lib/oauth/handoff.ts) for the same tokens a password login would have
+ * produced, in the exact same response shape `login` uses below, so the web
+ * app's existing cookie-bridging code needs no special case for "this one
+ * came from Google."
+ */
+export function googleExchange(req: Request, res: Response): void {
+  const code = req.body.code as string
+  const tokens = consumeHandoff(code)
+  if (!tokens) throw new UnauthorizedError('This sign-in link has expired or was already used')
+
+  setAuthCookies(res, tokens)
+  res.json({ data: { accessToken: tokens.accessToken } })
 }

@@ -12,6 +12,14 @@ export interface GoogleButtonProps {
   next?: string
   /** Button text. "Continue with" on sign-in, "Sign up with" on registration. */
   label?: string
+  /**
+   * 'login' (the /login page) means the visitor expects to reach an EXISTING
+   * account — the API will refuse to silently register one for a Google
+   * identity it has never seen, and sends them to /register instead.
+   * 'register' (default, the /register page) keeps the account-creation
+   * behaviour: sign in if the identity is known, create one if not.
+   */
+  intent?: 'login' | 'register'
 }
 
 /**
@@ -33,10 +41,16 @@ export interface GoogleButtonProps {
  * `GET /v1/auth/google/callback` route actually lives, which is the API's
  * origin, not the web app's.
  */
-export function GoogleButton({ role, next, label = 'Continue with Google' }: GoogleButtonProps) {
+export function GoogleButton({
+  role,
+  next,
+  label = 'Continue with Google',
+  intent,
+}: GoogleButtonProps) {
   const params = new URLSearchParams()
   if (role) params.set('role', role)
   if (next) params.set('next', next)
+  if (intent) params.set('intent', intent)
   const query = params.toString()
 
   const href = new URL(`/v1/auth/google${query ? `?${query}` : ''}`, env.API_ORIGIN).toString()

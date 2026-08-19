@@ -62,6 +62,14 @@ interface StatePayload {
   nonce: string
   issuedAt: number
   next?: string
+  /**
+   * 'login' means the visitor clicked "Continue with Google" expecting to
+   * reach an EXISTING account — the callback must not silently register a
+   * new one for an unrecognised identity. 'register' (the default, for
+   * backward compatibility with any caller that omits it) keeps today's
+   * behaviour: sign in if the identity is known, create an account if not.
+   */
+  intent?: 'login' | 'register'
 }
 
 function stateSecret(): Buffer {
@@ -71,9 +79,17 @@ function stateSecret(): Buffer {
   return createHmac('sha256', 'oauth-state').update(env.JWT_PRIVATE_KEY).digest()
 }
 
-export function createState(next?: string): { state: string; nonce: string } {
+export function createState(
+  next?: string,
+  intent?: 'login' | 'register',
+): { state: string; nonce: string } {
   const nonce = randomBytes(24).toString('base64url')
-  const payload: StatePayload = { nonce, issuedAt: Date.now(), ...(next ? { next } : {}) }
+  const payload: StatePayload = {
+    nonce,
+    issuedAt: Date.now(),
+    ...(next ? { next } : {}),
+    ...(intent ? { intent } : {}),
+  }
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const signature = createHmac('sha256', stateSecret()).update(body).digest('base64url')
   return { state: `${body}.${signature}`, nonce }

@@ -742,6 +742,28 @@ export interface GoogleSignInResult {
  * way in, not a replacement, so nobody is locked out if they later revoke access
  * on Google's side.
  */
+/**
+ * Whether this Google identity already maps to an account — the same two
+ * lookups `signInWithGoogle` does below (a linked `OAuthAccount`, or a local
+ * account with the same email), without creating anything. Used to gate the
+ * "Continue with Google" button on `/login`: that flow must not silently
+ * register a stranger just because they picked an account on Google's
+ * consent screen, unlike `/register`'s Google button, which SHOULD.
+ */
+export async function googleIdentityExists(identity: GoogleIdentity): Promise<boolean> {
+  const link = await prisma.oAuthAccount.findUnique({
+    where: { provider_providerSubject: { provider: 'google', providerSubject: identity.subject } },
+    select: { userId: true },
+  })
+  if (link) return true
+
+  const existing = await prisma.user.findUnique({
+    where: { email: identity.email },
+    select: { id: true },
+  })
+  return existing !== null
+}
+
 export async function signInWithGoogle(
   identity: GoogleIdentity,
   signUpRole: GoogleSignUpRole,

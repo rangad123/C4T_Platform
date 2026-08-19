@@ -117,7 +117,7 @@ export default async function LoginForm({
         action={loginAction}
         style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
       >
-        <GoogleButton next={params.next ?? undefined} label="Continue with Google" />
+        <GoogleButton next={params.next ?? undefined} label="Continue with Google" intent="login" />
         <AuthDivider />
 
         <input type="hidden" name="next" value={params.next ?? ''} />

@@ -249,6 +249,13 @@ export async function archiveProject(formData: FormData): Promise<void> {
  * looking at what they just created, not stay on whichever build they were
  * viewing before. `section` rides along as a hidden field so switching
  * builds does not also bounce back to the Overview tab.
+ *
+ * The API's create endpoint only ever accepts a name — every other field is
+ * an immediate follow-up PATCH, the same body `updateBuild` below sends.
+ * That second call is what actually lands the "copy general details from
+ * the original build" behaviour: the modal's fields arrive pre-filled from
+ * the project's default build (the page computes that, not this action),
+ * so whatever the admin leaves as-is or edits is what gets written here.
  */
 export async function createBuild(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
@@ -260,6 +267,29 @@ export async function createBuild(formData: FormData): Promise<void> {
   const build = await serverFetch<{ id: string }>(`projects/${id}/builds`, {
     method: 'POST',
     body: { name },
+  })
+
+  const maxTesters = formTrimmed(formData, 'maxTesters')
+  await serverFetch(`projects/${id}/builds/${build.id}`, {
+    method: 'PATCH',
+    body: {
+      status: formTrimmed(formData, 'status'),
+      testType: formTrimmed(formData, 'testType') || null,
+      description: formTrimmed(formData, 'description') || null,
+      appUrl: formTrimmed(formData, 'appUrl') || null,
+      releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
+      instructions: formTrimmed(formData, 'instructions') || null,
+      specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
+      targetDevices: parseList(formString(formData, 'targetDevices')),
+      targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
+      targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
+      targetCountries: parseList(formString(formData, 'targetCountries')).map((c) => c.toUpperCase()),
+      targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) => l.toLowerCase()),
+      startDate: formTrimmed(formData, 'startDate') || null,
+      endDate: formTrimmed(formData, 'endDate') || null,
+      maxTesters: maxTesters ? maxTesters : null,
+      testersCanSeeOtherBugs: formData.has('testersCanSeeOtherBugs'),
+    },
   })
   revalidateProject(id)
 

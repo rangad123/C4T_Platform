@@ -8,6 +8,7 @@ import {
   registerSchema,
   loginSchema,
   refreshSchema,
+  googleExchangeSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
@@ -33,6 +34,20 @@ authRouter.post('/logout', controller.logout)
  */
 authRouter.get('/google', controller.googleStart)
 authRouter.get('/google/callback', controller.googleCallback)
+
+/**
+ * Server-to-server: the web app's own server calls this to redeem the
+ * one-time code `googleCallback` put in its redirect (see lib/oauth/
+ * handoff.ts) — the browser never calls it directly. `authIpLimiter` alone,
+ * not `authLimiter`: there is no email to key a per-credential limit on, and
+ * a 256-bit random code makes guessing infeasible regardless.
+ */
+authRouter.post(
+  '/google/exchange',
+  authIpLimiter,
+  validate({ body: googleExchangeSchema }),
+  controller.googleExchange,
+)
 
 authRouter.post(
   '/forgot-password',

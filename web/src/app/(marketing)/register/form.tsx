@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -54,6 +55,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   network: 'Could not reach the sign-up service. Check your connection and retry.',
   validation_error: 'Some details need fixing. Check the form and try again.',
   failed: 'That did not work. Please try again.',
+  google_no_account:
+    "We don't have an account for that Google email yet. Choose an account type below to create one.",
 }
 
 export default async function RegisterForm({
@@ -85,7 +88,11 @@ export default async function RegisterForm({
 
   return (
     <div>
-      {role === null ? <RoleChooser /> : <SignUpForm role={role} message={message} params={params} />}
+      {role === null ? (
+        <RoleChooser message={message} email={params.email} />
+      ) : (
+        <SignUpForm role={role} message={message} params={params} />
+      )}
 
       <div
         style={{
@@ -115,7 +122,13 @@ export default async function RegisterForm({
 
 /* ─── Step 1: which kind of account ──────────────────────────────────────── */
 
-function RoleChooser() {
+function RoleChooser({ message, email }: { message: string | null; email?: string }) {
+  // Carries the Google email along so it survives into the form once a role
+  // is picked — RoleCard's href is a full navigation, so anything not in the
+  // query string here is lost, and re-typing an email you just signed into
+  // Google with would defeat the point of the button that got you here.
+  const carry = email ? `&email=${encodeURIComponent(email)}` : ''
+
   return (
     <>
       <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
@@ -131,16 +144,18 @@ function RoleChooser() {
         Tell us which describes you.
       </p>
 
+      {message ? <ErrorBanner>{message}</ErrorBanner> : null}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
         <RoleCard
-          href="/register?role=customer"
+          href={`/register?role=customer${carry}`}
           icon="building-2"
           title="I need testing done"
           body="Submit projects, track defects and work with our crowd and AI agents."
           note="Customer account"
         />
         <RoleCard
-          href="/register?role=tester"
+          href={`/register?role=tester${carry}`}
           icon="users"
           title="I want to test"
           /*
@@ -156,6 +171,30 @@ function RoleChooser() {
         />
       </div>
     </>
+  )
+}
+
+/** Shared error banner — used both before and after a role is picked. */
+function ErrorBanner({ children }: { children: ReactNode }) {
+  return (
+    <div
+      role="alert"
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 'var(--space-3)',
+        padding: 'var(--space-4) var(--space-5)',
+        marginBottom: 'var(--space-6)',
+        background: 'var(--status-error-bg)',
+        color: 'var(--status-error-fg)',
+        borderRadius: 'var(--radius-input)',
+        fontSize: 'var(--type-body-sm-size)',
+        lineHeight: 1.45,
+      }}
+    >
+      <Icon name="alert-triangle" size={18} style={{ flex: 'none', marginTop: 2 }} />
+      <span>{children}</span>
+    </div>
   )
 }
 
@@ -282,33 +321,14 @@ function SignUpForm({
         {copy.blurb}
       </p>
 
-      {message ? (
-        <div
-          role="alert"
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 'var(--space-3)',
-            padding: 'var(--space-4) var(--space-5)',
-            marginBottom: 'var(--space-6)',
-            background: 'var(--status-error-bg)',
-            color: 'var(--status-error-fg)',
-            borderRadius: 'var(--radius-input)',
-            fontSize: 'var(--type-body-sm-size)',
-            lineHeight: 1.45,
-          }}
-        >
-          <Icon name="alert-triangle" size={18} style={{ flex: 'none', marginTop: 2 }} />
-          <span>{message}</span>
-        </div>
-      ) : null}
+      {message ? <ErrorBanner>{message}</ErrorBanner> : null}
 
       {/*
         The role rides along so a new Google account is created as the right
         kind. An EXISTING Google account ignores it and signs into whatever it
         already is — the role only decides what to create.
       */}
-      <GoogleButton role={role} label="Sign up with Google" />
+      <GoogleButton role={role} label="Sign up with Google" intent="register" />
 
       <AuthDivider />
 
