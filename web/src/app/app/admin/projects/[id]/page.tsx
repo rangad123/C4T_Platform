@@ -11,6 +11,7 @@ import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -180,52 +181,82 @@ export default async function ProjectDetailPage({
   // default (shouldn't happen; every project gets one on creation).
   const defaultBuildId = project.builds.find((b) => b.isDefault)?.id ?? activeBuildId
 
-  // Both lists are read in parallel with each other; the project read above had
-  // to come first because a 404 there means there is no page to fill in.
-  const [
-    testerPool,
-    bugs,
-    features,
-    buildDetail,
-    buildSummaryData,
-    testCases,
-    projectReport,
-    defaultBuildDetailIfDifferent,
-  ] = await Promise.all([
-    capabilities.canAssignTesters
-      ? loadList<VerifiedTesterRow>('testers', {
-          page: 1,
-          limit: TESTER_POOL_SIZE,
-          query: { status: 'VERIFIED', sort: 'ratingAverage', order: 'desc' },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    loadList<ProjectBugRow>('bugs', {
-      page: 1,
-      limit: BUG_PREVIEW_SIZE,
-      query: { projectId: project.id, buildId: activeBuildId },
-    }),
-    serverFetchOrNull<readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]>(
-      `projects/${project.id}/features`,
-      { query: { buildId: activeBuildId } },
-    ),
-    serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${activeBuildId}`),
-    serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`),
-    loadList<TestCaseRow>('test-cases', {
-      page: 1,
-      limit: 50,
-      query: { buildId: activeBuildId },
-    }),
-    // Same by-project report the Reports module's "By project" section
-    // renders — reused for the Overview tab's summary rather than a second
-    // aggregation. Rolled up across every build, unlike `buildSummaryData`.
-    serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`),
-    // Most projects have exactly one build, so the active one already IS the
-    // default and `buildDetail` above already has what "New build" needs —
-    // no reason to fetch it twice.
-    defaultBuildId !== activeBuildId
-      ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
-      : Promise.resolve(null),
-  ])
+  // `buildDetail` decides which tabs even exist (exploratory builds hide the
+  // Test reports tab, below), so it has to resolve before `section` can be
+  // known — fetched alone, ahead of everything else that's actually scoped
+  // to a section.
+  const buildDetail = await serverFetchOrNull<BuildDetail>(
+    `projects/${project.id}/builds/${activeBuildId}`,
+  )
+
+  /**
+   * Test reports only make sense for scripted testing — exploratory testing
+   * has no script to report against, just the bugs it turns up, which the
+   * Bugs tab already covers. `testType` is free text (matches legacy seed
+   * data like "Exploratory Testing"), so this is a contains check rather
+   * than an exact match against a fixed value.
+   */
+  const isExploratory = (buildDetail?.testType ?? '').toLowerCase().includes('exploratory')
+  const visibleSections = isExploratory ? SECTIONS.filter((s) => s.value !== 'testing') : SECTIONS
+  const section = resolveSection(visibleSections, resolvedSearchParams.section)
+  const newBuildModalOpen = edit === 'new-build'
+
+  /**
+   * Each of these backs exactly one section (or, for the default-build
+   * lookup, one modal) — fetching all of them on every visit meant opening
+   * Materials waited on the tester pool, the bug list, the cross-build
+   * report aggregation and three other things Materials never renders.
+   * Gating each fetch on the section (or modal) that actually reads it means
+   * a visit only pays for the data it shows; `loading.tsx` already covers
+   * the brief gap while that narrower set of fetches resolves.
+   */
+  const [testerPool, bugs, features, buildSummaryData, testCases, projectReport, defaultBuildDetailIfDifferent] =
+    await Promise.all([
+      section === 'testers' && capabilities.canAssignTesters
+        ? loadList<VerifiedTesterRow>('testers', {
+            page: 1,
+            limit: TESTER_POOL_SIZE,
+            query: { status: 'VERIFIED', sort: 'ratingAverage', order: 'desc' },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      section === 'bugs'
+        ? loadList<ProjectBugRow>('bugs', {
+            page: 1,
+            limit: BUG_PREVIEW_SIZE,
+            query: { projectId: project.id, buildId: activeBuildId },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      section === 'features'
+        ? serverFetchOrNull<readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]>(
+            `projects/${project.id}/features`,
+            { query: { buildId: activeBuildId } },
+          )
+        : Promise.resolve(null),
+      section === 'build'
+        ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
+        : Promise.resolve(null),
+      section === 'testing'
+        ? loadList<TestCaseRow>('test-cases', {
+            page: 1,
+            limit: 50,
+            query: { buildId: activeBuildId },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      // Same by-project report the Reports module's "By project" section
+      // renders — reused for the Overview tab's summary rather than a second
+      // aggregation. Rolled up across every build, unlike `buildSummaryData`.
+      section === 'overview'
+        ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
+        : Promise.resolve(null),
+      // Only the New build modal reads this, and that modal opens from every
+      // section's tab bar (see the "New build" button below) — gated on the
+      // modal being open, not on `section`. Most projects have exactly one
+      // build, so the active one already IS the default and `buildDetail`
+      // above already has what the modal needs — no reason to fetch it twice.
+      newBuildModalOpen && defaultBuildId !== activeBuildId
+        ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
+        : Promise.resolve(null),
+    ])
   const defaultBuildDetail = defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
 
   const assignedTesterIds = new Set(project.assignments.map((row) => row.tester.id))
@@ -245,17 +276,6 @@ export default async function ProjectDetailPage({
   const transitions = allowedTransitions(project.status)
   const priority = isProjectPriority(project.priority) ? project.priority : 'NORMAL'
 
-  /**
-   * Test reports only make sense for scripted testing — exploratory testing
-   * has no script to report against, just the bugs it turns up, which the
-   * Bugs tab already covers. `testType` is free text (matches legacy seed
-   * data like "Exploratory Testing"), so this is a contains check rather
-   * than an exact match against a fixed value.
-   */
-  const isExploratory = (buildDetail?.testType ?? '').toLowerCase().includes('exploratory')
-  const visibleSections = isExploratory ? SECTIONS.filter((s) => s.value !== 'testing') : SECTIONS
-  const section = resolveSection(visibleSections, resolvedSearchParams.section)
-
   const detailPath = `/app/admin/projects/${project.id}`
   const closedHref = (() => {
     const sp = new URLSearchParams()
@@ -265,7 +285,6 @@ export default async function ProjectDetailPage({
     return qs ? `${detailPath}?${qs}` : detailPath
   })()
   const briefModalOpen = edit === 'brief'
-  const newBuildModalOpen = edit === 'new-build'
   const renameBuildModalOpen = edit === 'rename-build'
   const buildDetailsModalOpen = edit === 'build-details'
   const activeBuild = project.builds.find((b) => b.id === activeBuildId)
@@ -468,9 +487,9 @@ export default async function ProjectDetailPage({
                     maxLength={1000}
                   />
                 </Field>
-                <Button type="submit" variant="primary" fullWidth>
+                <SubmitButton variant="primary" fullWidth pendingLabel="Changing status…">
                   Change status
-                </Button>
+                </SubmitButton>
               </form>
             )}
           </Panel>
@@ -505,9 +524,9 @@ export default async function ProjectDetailPage({
                   />
                 </Field>
                 <ProgressBar percent={project.progressPercent} />
-                <Button type="submit" variant="secondary" fullWidth>
+                <SubmitButton variant="secondary" fullWidth pendingLabel="Saving…">
                   Save priority and progress
-                </Button>
+                </SubmitButton>
               </form>
             ) : (
               <div style={stackStyle}>
@@ -795,9 +814,9 @@ export default async function ProjectDetailPage({
             />
 
             <div>
-              <Button type="submit" variant="primary">
+              <SubmitButton variant="primary" pendingLabel="Saving…">
                 Save the brief
-              </Button>
+              </SubmitButton>
             </div>
           </TrackedForm>
         </Modal>
@@ -909,9 +928,9 @@ export default async function ProjectDetailPage({
               <form action={copyBuild}>
                 <input type="hidden" name="id" value={project.id} />
                 <input type="hidden" name="buildId" value={activeBuildId} />
-                <Button type="submit" variant="secondary" iconLeft="repeat">
+                <SubmitButton variant="secondary" iconLeft="repeat" pendingLabel="Copying…">
                   Copy this build
-                </Button>
+                </SubmitButton>
               </form>
               <Button
                 href={`/app/admin/export/reports/by-build/${activeBuildId}/export.csv`}
@@ -1122,9 +1141,9 @@ export default async function ProjectDetailPage({
             />
 
             <div>
-              <Button type="submit" variant="primary">
+              <SubmitButton variant="primary" pendingLabel="Saving…">
                 Save build details
-              </Button>
+              </SubmitButton>
             </div>
           </TrackedForm>
         </Modal>
@@ -1217,9 +1236,9 @@ export default async function ProjectDetailPage({
                   />
                 </Field>
                 <div>
-                  <Button type="submit" variant="primary" iconLeft="user-check">
+                  <SubmitButton variant="primary" iconLeft="user-check" pendingLabel="Inviting…">
                     Invite selected testers
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
             )}
@@ -1265,9 +1284,9 @@ export default async function ProjectDetailPage({
                   <Textarea id="assignment-notes" name="notes" rows={3} maxLength={1000} />
                 </Field>
                 <div>
-                  <Button type="submit" variant="secondary">
+                  <SubmitButton variant="secondary" pendingLabel="Updating…">
                     Update assignment
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
             </Panel>
@@ -1308,9 +1327,9 @@ export default async function ProjectDetailPage({
                   <form action={removeMaterial}>
                     <input type="hidden" name="id" value={project.id} />
                     <input type="hidden" name="materialId" value={material.id} />
-                    <Button type="submit" variant="ghost" size="sm" iconLeft="x">
+                    <SubmitButton variant="ghost" size="sm" iconLeft="x" pendingLabel="Removing…">
                       Remove
-                    </Button>
+                    </SubmitButton>
                   </form>
                 ) : null}
               </li>
@@ -1362,9 +1381,9 @@ export default async function ProjectDetailPage({
               <Textarea id="material-description" name="description" rows={3} maxLength={2000} />
             </Field>
             <div>
-              <Button type="submit" variant="secondary" iconLeft="plus">
+              <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Attaching…">
                 Attach material
-              </Button>
+              </SubmitButton>
             </div>
           </form>
         </Panel>
@@ -1396,9 +1415,9 @@ export default async function ProjectDetailPage({
                   <form action={removeFeature}>
                     <input type="hidden" name="id" value={project.id} />
                     <input type="hidden" name="featureId" value={feature.id} />
-                    <Button type="submit" variant="ghost" size="sm" iconLeft="x">
+                    <SubmitButton variant="ghost" size="sm" iconLeft="x" pendingLabel="Removing…">
                       Remove
-                    </Button>
+                    </SubmitButton>
                   </form>
                 ) : null}
               </li>
@@ -1413,9 +1432,9 @@ export default async function ProjectDetailPage({
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="buildId" value={activeBuildId} />
             <Input name="name" required maxLength={120} placeholder="Checkout" />
-            <Button type="submit" variant="secondary" iconLeft="plus">
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
               Add feature
-            </Button>
+            </SubmitButton>
           </form>
         ) : null}
       </Panel>
@@ -1515,9 +1534,9 @@ export default async function ProjectDetailPage({
                                     label: personName(a.tester),
                                   }))}
                                 />
-                                <Button type="submit" variant="ghost" size="sm">
+                                <SubmitButton variant="ghost" size="sm" pendingLabel="Assigning…">
                                   Assign
-                                </Button>
+                                </SubmitButton>
                               </form>
                             ) : null}
                           </div>
@@ -1590,9 +1609,9 @@ export default async function ProjectDetailPage({
                   <Textarea id="tc-expectedResult" name="expectedResult" rows={2} required />
                 </Field>
                 <div>
-                  <Button type="submit" variant="primary" iconLeft="plus">
+                  <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
                     Add test case
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
             </Panel>
@@ -1658,9 +1677,9 @@ export default async function ProjectDetailPage({
               <Input id="confirm" name="confirm" required autoComplete="off" />
             </Field>
             <div>
-              <Button type="submit" variant="secondary" iconLeft="alert-triangle">
+              <SubmitButton variant="secondary" iconLeft="alert-triangle" pendingLabel="Archiving…">
                 Archive project
-              </Button>
+              </SubmitButton>
             </div>
           </form>
         </Panel>
@@ -1818,9 +1837,9 @@ export default async function ProjectDetailPage({
             />
 
             <div>
-              <Button type="submit" variant="primary">
+              <SubmitButton variant="primary" pendingLabel="Creating…">
                 Create build
-              </Button>
+              </SubmitButton>
             </div>
           </TrackedForm>
         </Modal>
@@ -1840,9 +1859,9 @@ export default async function ProjectDetailPage({
                 defaultValue={activeBuild.name}
               />
             </Field>
-            <Button type="submit" variant="primary" fullWidth>
+            <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">
               Save name
-            </Button>
+            </SubmitButton>
           </form>
         </Modal>
       ) : null}

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ds/core/Badge'
 import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { CountryLabel } from '@/components/admin/CountryFlag'
 import { requirePermission } from '@/lib/auth/session'
@@ -145,9 +146,9 @@ export default async function ManagerDetailPage({ params }: { params: Promise<{ 
         <form action={unassignProjectAction}>
           <input type="hidden" name="managerId" value={id} />
           <input type="hidden" name="projectId" value={row.project.id} />
-          <Button type="submit" variant="ghost" iconLeft="x" size="sm">
+          <SubmitButton variant="ghost" iconLeft="x" size="sm" pendingLabel="Unassigning…">
             Unassign
-          </Button>
+          </SubmitButton>
         </form>
       ),
     },
@@ -286,9 +287,9 @@ export default async function ManagerDetailPage({ params }: { params: Promise<{ 
             </Field>
             <input type="hidden" name="managerId" value={id} />
             <div>
-              <Button type="submit" variant="primary" iconLeft="check">
+              <SubmitButton variant="primary" iconLeft="check" pendingLabel="Assigning…">
                 Assign
-              </Button>
+              </SubmitButton>
             </div>
           </form>
         )}

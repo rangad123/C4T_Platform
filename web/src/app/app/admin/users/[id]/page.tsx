@@ -10,6 +10,7 @@ import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -299,9 +300,9 @@ export default async function UserDetailPage({
                 >
                   <Select id="role" name="role" defaultValue={user.role} options={ROLE_OPTIONS} />
                 </Field>
-                <Button type="submit" variant="secondary" fullWidth>
+                <SubmitButton variant="secondary" fullWidth pendingLabel="Changing role…">
                   Change role
-                </Button>
+                </SubmitButton>
               </form>
             ) : (
               <DescriptionList items={[{ label: 'Role', value: titleCase(user.role) }]} />
@@ -332,9 +333,9 @@ export default async function UserDetailPage({
                     placeholder="Why is this changing?"
                   />
                 </Field>
-                <Button type="submit" variant="secondary" fullWidth>
+                <SubmitButton variant="secondary" fullWidth pendingLabel="Updating status…">
                   Update status
-                </Button>
+                </SubmitButton>
               </form>
             ) : (
               <DescriptionList items={[{ label: 'Status', value: titleCase(user.status) }]} />
@@ -469,9 +470,9 @@ export default async function UserDetailPage({
                   </Field>
                 </div>
                 <div>
-                  <Button type="submit" variant="primary">
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
                     Save identity
-                  </Button>
+                  </SubmitButton>
                 </div>
               </TrackedForm>
             ) : (
@@ -578,9 +579,9 @@ export default async function UserDetailPage({
                       borderTop: '1px solid var(--border-subtle)',
                     }}
                   >
-                    <Button type="submit" variant="primary">
+                    <SubmitButton variant="primary" pendingLabel="Saving…">
                       Save permissions
-                    </Button>
+                    </SubmitButton>
                     <span style={noteStyle}>
                       This is a full replacement, not a change list. Every unticked box is revoked.
                     </span>

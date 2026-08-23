@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -365,16 +366,16 @@ export default async function OrganisationDetailPage({
               options={MEMBER_ROLE_OPTIONS}
               style={{ width: 150, minHeight: 44 }}
             />
-            <Button type="submit" variant="secondary">
+            <SubmitButton variant="secondary" pendingLabel="Saving…">
               Save role
-            </Button>
+            </SubmitButton>
           </form>
           <form action={removeOrganisationMember}>
             <input type="hidden" name="id" value={organisation.id} />
             <input type="hidden" name="userId" value={member.user.id} />
-            <Button type="submit" variant="ghost" style={{ color: 'var(--status-error-fg)' }}>
+            <SubmitButton variant="ghost" style={{ color: 'var(--status-error-fg)' }} pendingLabel="Removing…">
               Remove
-            </Button>
+            </SubmitButton>
           </form>
         </span>
       ),
@@ -429,9 +430,9 @@ export default async function OrganisationDetailPage({
                     options={STATUS_OPTIONS}
                   />
                 </Field>
-                <Button type="submit" variant="primary" fullWidth>
+                <SubmitButton variant="primary" fullWidth pendingLabel="Saving status…">
                   Save status
-                </Button>
+                </SubmitButton>
               </form>
             ) : (
               <ReadOnlyHint
@@ -631,9 +632,9 @@ export default async function OrganisationDetailPage({
                 </div>
 
                 <div>
-                  <Button type="submit" variant="primary">
+                  <SubmitButton variant="primary" pendingLabel="Saving profile…">
                     Save profile
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
         </Modal>
@@ -662,9 +663,9 @@ export default async function OrganisationDetailPage({
                   />
                 </Field>
                 <div>
-                  <Button type="submit" variant="secondary">
+                  <SubmitButton variant="secondary" pendingLabel="Saving notes…">
                     Save notes
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
             ) : (
@@ -781,9 +782,9 @@ export default async function OrganisationDetailPage({
                         style={{ width: 150 }}
                       />
                     </Field>
-                    <Button type="submit" variant="primary" iconLeft="plus">
+                    <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
                       Add member
-                    </Button>
+                    </SubmitButton>
                   </form>
                 </>
               ) : (
@@ -809,9 +810,9 @@ export default async function OrganisationDetailPage({
                       style={{ width: 150 }}
                     />
                   </Field>
-                  <Button type="submit" variant="primary" iconLeft="plus">
+                  <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
                     Add member
-                  </Button>
+                  </SubmitButton>
                 </form>
               )}
             </div>

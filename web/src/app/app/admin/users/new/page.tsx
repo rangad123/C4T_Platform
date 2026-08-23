@@ -4,6 +4,7 @@ import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -395,9 +396,9 @@ export default async function NewUserPage({
             flexWrap: 'wrap',
           }}
         >
-          <Button type="submit" variant="primary">
+          <SubmitButton variant="primary" pendingLabel="Creating account…">
             Create the account
-          </Button>
+          </SubmitButton>
           <Button href={BASE} variant="secondary" iconLeft="arrow-left">
             Back to users
           </Button>

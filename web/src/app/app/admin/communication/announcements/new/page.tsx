@@ -2,6 +2,7 @@ import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { TemplatePicker } from '@/components/admin/TemplatePicker'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -372,9 +373,9 @@ export default async function NewAnnouncementPage() {
         </Panel>
 
         <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-          <Button type="submit" variant="primary" iconLeft="radio-tower">
+          <SubmitButton variant="primary" iconLeft="radio-tower" pendingLabel="Saving announcement…">
             Save announcement
-          </Button>
+          </SubmitButton>
           <Button variant="secondary" href={LIST_PATH}>
             Back to announcements
           </Button>

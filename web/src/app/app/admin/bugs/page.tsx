@@ -3,6 +3,7 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { CountryFlag } from '@/components/admin/CountryFlag'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
 import { Select } from '@/components/ds/forms/Select'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
@@ -334,9 +335,9 @@ export default async function BugsPage({
               ]}
               aria-label="Bulk severity change"
             />
-            <Button type="submit" variant="secondary" iconLeft="check-check">
+            <SubmitButton variant="secondary" iconLeft="check-check" pendingLabel="Applying…">
               Apply to selected
-            </Button>
+            </SubmitButton>
             <p
               style={{
                 margin: 0,

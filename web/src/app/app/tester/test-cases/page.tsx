@@ -7,7 +7,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Input } from '@/components/ds/forms/Input'
-import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { formatDate } from '@/lib/admin/format'
 import { submitTestReport } from './actions'
 
@@ -200,9 +200,9 @@ export default async function TesterTestCasesPage({
                     <Textarea id={`notes-${tc.id}`} name="notes" rows={2} maxLength={4000} />
                   </Field>
                   <div>
-                    <Button type="submit" variant="primary" size="sm">
+                    <SubmitButton variant="primary" size="sm" pendingLabel="Submitting…">
                       Submit report
-                    </Button>
+                    </SubmitButton>
                   </div>
                 </form>
               </section>

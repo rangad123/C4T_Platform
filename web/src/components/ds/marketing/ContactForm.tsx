@@ -1,8 +1,7 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
-import { Button } from '../core/Button'
+import { SubmitButton } from '../core/SubmitButton'
 import { Icon } from '../core/Icon'
 import { Checkbox } from '../forms/Checkbox'
 import { Field } from '../forms/Field'
@@ -43,10 +42,11 @@ export interface ContactFormProps {
  *     had no error path at all.
  *  4. A honeypot field is included. See the action for why it is not a CAPTCHA.
  *
- * The submit button is disabled while pending via `useFormStatus`, which needs
- * to read the enclosing form — hence the small `Submit` component below rather
- * than reading `pending` from `useActionState` in the parent. Both work; this one
- * keeps the button's own state local to the button.
+ * The submit button's pending state comes from `SubmitButton` (`useFormStatus`
+ * under the hood, reading the enclosing form) rather than `pending` off
+ * `useActionState` here in the parent — both work; this one keeps the
+ * button's own state local to the button, and is the same shared component
+ * every other form's submit button in the app now uses.
  * ──────────────────────────────────────────────────────────────────────────
  */
 export function ContactForm({
@@ -222,7 +222,9 @@ export function ContactForm({
         <input id="hp" name="honeypot" type="text" tabIndex={-1} autoComplete="off" />
       </div>
 
-      <Submit label={submitLabel} />
+      <SubmitButton size="lg" fullWidth pendingLabel="Sending…">
+        {submitLabel}
+      </SubmitButton>
 
       <p
         style={{
@@ -237,17 +239,3 @@ export function ContactForm({
   )
 }
 
-/**
- * Split out so `useFormStatus` can read the enclosing form. It only reports
- * pending state for a form above it in the tree, so this cannot live in the
- * parent.
- */
-function Submit({ label }: { label: string }) {
-  const { pending } = useFormStatus()
-
-  return (
-    <Button type="submit" size="lg" fullWidth disabled={pending}>
-      {pending ? 'Sending…' : label}
-    </Button>
-  )
-}

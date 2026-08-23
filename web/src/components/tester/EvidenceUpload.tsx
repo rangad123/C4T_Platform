@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ds/core/Button'
 import { Icon } from '@/components/ds/core/Icon'
+import { Spinner } from '@/components/ds/core/Spinner'
 
 interface Attached {
   fileId: string
@@ -125,11 +126,18 @@ export function EvidenceUpload({ max = 10 }: { max?: number }) {
         <Button
           type="button"
           variant="secondary"
-          iconLeft="image"
+          iconLeft={busy ? undefined : 'image'}
           disabled={busy || attached.length >= max}
           onClick={() => inputRef.current?.click()}
         >
-          {busy ? 'Uploading…' : 'Attach a screenshot or recording'}
+          {busy ? (
+            <>
+              <Spinner size={18} />
+              Uploading…
+            </>
+          ) : (
+            'Attach a screenshot or recording'
+          )}
         </Button>
       </div>
     </div>

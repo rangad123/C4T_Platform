@@ -3,6 +3,7 @@ import { serverFetchOrNull } from '@/lib/api/server'
 import { Panel } from '@/components/admin/Panel'
 import { Card, CardGrid } from '@/components/admin/Card'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Textarea } from '@/components/ds/forms/Textarea'
@@ -99,9 +100,9 @@ export default async function TemplatesPage({
             <Textarea id="body" name="body" rows={6} required maxLength={10000} />
           </Field>
           <div>
-            <Button type="submit" variant="primary" iconLeft="plus">
+            <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Saving template…">
               Save template
-            </Button>
+            </SubmitButton>
           </div>
         </TrackedForm>
       </Panel>

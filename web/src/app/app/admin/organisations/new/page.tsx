@@ -1,6 +1,7 @@
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -169,9 +170,9 @@ export default async function NewOrganisationPage({
           </Field>
 
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-            <Button type="submit" variant="primary" iconLeft="check">
+            <SubmitButton variant="primary" iconLeft="check" pendingLabel="Creating organisation…">
               Create organisation
-            </Button>
+            </SubmitButton>
 
             <Button type="button" variant="ghost" href={backHref}>
               Cancel

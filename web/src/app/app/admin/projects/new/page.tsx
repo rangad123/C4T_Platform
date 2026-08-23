@@ -1,6 +1,7 @@
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -177,9 +178,9 @@ export default async function NewProjectPage() {
           </Panel>
 
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-            <Button type="submit" variant="primary" iconLeft="check">
+            <SubmitButton variant="primary" iconLeft="check" pendingLabel="Creating project…">
               Create project
-            </Button>
+            </SubmitButton>
             <Button href="/app/admin/projects" type="button" variant="ghost">
                 Cancel
               </Button>

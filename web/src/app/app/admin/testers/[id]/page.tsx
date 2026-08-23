@@ -13,6 +13,7 @@ import { Pagination } from '@/components/ds/admin/Pagination'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
@@ -431,48 +432,61 @@ export default async function TesterDetailPage({
   const verificationModalOpen = edit === 'verification'
   const canVerify = hasPermission(viewer, 'tester.verify')
   const canDecryptPayment = hasPermission(viewer, 'payment_account.decrypt')
-  const paymentAccount = await serverFetchOrNull<PaymentAccountDetail | null>(
-    `payment-accounts?userId=${tester.user.id}`,
-  )
-
-  // §23 "Account details" — payment HISTORY, not just the payout instrument
-  // above. Reuses the exact Transaction rows the Transactions module already
-  // tracks for this tester as counterparty.
   const canReadTransactions = hasPermission(viewer, 'transaction.read')
-  const paymentHistory = canReadTransactions
-    ? await loadList<PaymentHistoryRow>('transactions', {
-        page: 1,
-        limit: 10,
-        query: {
-          counterpartyId: tester.user.id,
-          type: 'TESTER_EARNING,TESTER_PAYOUT',
-          sort: 'createdAt',
-          order: 'desc',
-        },
-      })
-    : ({ error: 'forbidden' as const })
 
-  // Ratings are keyed by user id, not profile id.
-  const ratings = await loadList<RatingRow>('ratings', {
-    page: parsePage(ratingsPage),
-    limit: RATINGS_PAGE_SIZE,
-    query: { subjectUserId: tester.user.id },
-  })
-
-  // §23 "Work history" — actual platform activity, alongside the tester's
-  // own self-reported prior experience below. Both use tester.user.id: the
-  // projects/bugs relations key on User.id, not the tester profile's id.
-  const [platformProjects, reportedBugs] = await Promise.all([
-    loadList<PlatformProjectRow>('projects', {
-      page: 1,
-      limit: 25,
-      query: { testerId: tester.user.id, sort: 'createdAt', order: 'desc' },
-    }),
-    loadList<ReportedBugRow>('bugs', {
-      page: 1,
-      limit: 10,
-      query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
-    }),
+  /**
+   * Each pair here backs exactly one section — fetching all five on every
+   * visit meant opening Profile waited on the payout instrument, payment
+   * history, ratings (with pagination) and both work-history lists, none of
+   * which Profile renders. Gating each on the section that actually reads it
+   * means a visit only pays for the data it shows, and running the pair each
+   * section needs together (payment account + history, projects + bugs)
+   * instead of one after another cuts the round trips further.
+   */
+  const [paymentAccount, paymentHistory, ratings, platformProjects, reportedBugs] = await Promise.all([
+    section === 'payment'
+      ? serverFetchOrNull<PaymentAccountDetail | null>(`payment-accounts?userId=${tester.user.id}`)
+      : Promise.resolve(null),
+    // §23 "Account details" — payment HISTORY, not just the payout instrument
+    // above. Reuses the exact Transaction rows the Transactions module already
+    // tracks for this tester as counterparty.
+    section === 'payment' && canReadTransactions
+      ? loadList<PaymentHistoryRow>('transactions', {
+          page: 1,
+          limit: 10,
+          query: {
+            counterpartyId: tester.user.id,
+            type: 'TESTER_EARNING,TESTER_PAYOUT',
+            sort: 'createdAt',
+            order: 'desc',
+          },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    // Ratings are keyed by user id, not profile id.
+    section === 'ratings'
+      ? loadList<RatingRow>('ratings', {
+          page: parsePage(ratingsPage),
+          limit: RATINGS_PAGE_SIZE,
+          query: { subjectUserId: tester.user.id },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    // §23 "Work history" — actual platform activity, alongside the tester's
+    // own self-reported prior experience below. Both use tester.user.id: the
+    // projects/bugs relations key on User.id, not the tester profile's id.
+    section === 'work'
+      ? loadList<PlatformProjectRow>('projects', {
+          page: 1,
+          limit: 25,
+          query: { testerId: tester.user.id, sort: 'createdAt', order: 'desc' },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    section === 'work'
+      ? loadList<ReportedBugRow>('bugs', {
+          page: 1,
+          limit: 10,
+          query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
   ])
 
   const ratingRows = 'error' in ratings ? [] : ratings.items
@@ -581,9 +595,9 @@ export default async function TesterDetailPage({
                       placeholder="What changed, and what happens next"
                     />
                   </Field>
-                  <Button type="submit" variant="primary" fullWidth>
+                  <SubmitButton variant="primary" fullWidth pendingLabel="Saving status…">
                     Save status
-                  </Button>
+                  </SubmitButton>
                 </TrackedForm>
 
                 <form
@@ -611,9 +625,9 @@ export default async function TesterDetailPage({
                       placeholder="Which checks did not pass"
                     />
                   </Field>
-                  <Button type="submit" variant="secondary" fullWidth>
+                  <SubmitButton variant="secondary" fullWidth pendingLabel="Rejecting…">
                     Reject application
-                  </Button>
+                  </SubmitButton>
                 </form>
               </div>
             </Modal>

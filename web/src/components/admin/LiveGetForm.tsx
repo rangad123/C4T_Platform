@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useTransition } from 'react'
 import type { CSSProperties, FormEvent, ReactNode, SyntheticEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { Spinner } from '@/components/ds/core/Spinner'
 
 /** How long a text field waits after the last keystroke before it applies. */
 const DEBOUNCE_MS = 350
@@ -32,11 +33,15 @@ export function LiveFormStatus(): ReactNode {
       role="status"
       aria-live="polite"
       style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 'var(--space-2)',
         fontSize: 'var(--type-caption-size)',
         color: 'var(--text-muted)',
         whiteSpace: 'nowrap',
       }}
     >
+      <Spinner size={14} />
       Updating…
     </span>
   )

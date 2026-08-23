@@ -4,6 +4,7 @@ import { serverFetchOrNull } from '@/lib/api/server'
 import { Icon } from '@/components/ds/core/Icon'
 import { Logo } from '@/components/ds/core/Logo'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { logoutAction } from '@/lib/auth/actions'
@@ -175,9 +176,9 @@ export default async function TesterHomePage() {
             Your profile
           </Button>
           <form action={logoutAction}>
-            <Button type="submit" variant="secondary" iconLeft="log-out">
+            <SubmitButton variant="secondary" iconLeft="log-out" pendingLabel="Signing out…">
               Sign out
-            </Button>
+            </SubmitButton>
           </form>
         </div>
       </header>

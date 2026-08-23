@@ -5,7 +5,7 @@ import { Avatar } from '@/components/admin/Avatar'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Panel } from '@/components/admin/Panel'
 import { TemplatePicker } from '@/components/admin/TemplatePicker'
-import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Textarea } from '@/components/ds/forms/Textarea'
@@ -204,9 +204,9 @@ export default async function BroadcastPage({
             />
           </Field>
           <div>
-            <Button type="submit" variant="primary" iconLeft="message-square">
+            <SubmitButton variant="primary" iconLeft="message-square" pendingLabel="Sending…">
               Send to selected testers
-            </Button>
+            </SubmitButton>
           </div>
         </form>
       </Panel>

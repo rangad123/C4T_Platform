@@ -6,6 +6,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { requirePermission } from '@/lib/auth/session'
@@ -316,9 +317,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   options={STATUS_OPTIONS}
                 />
               </Field>
-              <Button type="submit" variant="primary" fullWidth>
+              <SubmitButton variant="primary" fullWidth pendingLabel="Saving status…">
                 Save status
-              </Button>
+              </SubmitButton>
             </form>
 
             <form
@@ -350,9 +351,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   placeholder="What did you discuss? When do you follow up?"
                 />
               </Field>
-              <Button type="submit" variant="secondary" fullWidth>
+              <SubmitButton variant="secondary" fullWidth pendingLabel="Saving notes…">
                 Save notes
-              </Button>
+              </SubmitButton>
             </form>
           </aside>
         </div>

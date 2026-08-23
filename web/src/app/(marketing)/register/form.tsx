@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
-import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { AuthDivider, GoogleButton } from '@/components/auth/GoogleButton'
 import { registerAction } from '@/lib/auth/register-actions'
@@ -31,17 +31,22 @@ import { registerAction } from '@/lib/auth/register-actions'
 
 type SignUpRole = 'customer' | 'tester'
 
-const ROLE_COPY: Record<SignUpRole, { title: string; blurb: string; cta: string }> = {
+const ROLE_COPY: Record<
+  SignUpRole,
+  { title: string; blurb: string; cta: string; pendingCta: string }
+> = {
   customer: {
     title: 'Create a customer account',
     blurb: 'Submit projects, track defects and work with our testers.',
     cta: 'Create customer account',
+    pendingCta: 'Creating account…',
   },
   tester: {
     title: 'Apply to test with us',
     blurb:
       'Join the tester community. Applications are reviewed before you are matched to projects.',
     cta: 'Submit application',
+    pendingCta: 'Submitting application…',
   },
 }
 
@@ -435,9 +440,15 @@ function SignUpForm({
           </span>
         </div>
 
-        <Button type="submit" variant="primary" size="lg" fullWidth iconRight="arrow-right">
+        <SubmitButton
+          variant="primary"
+          size="lg"
+          fullWidth
+          iconRight="arrow-right"
+          pendingLabel={copy.pendingCta}
+        >
           {copy.cta}
-        </Button>
+        </SubmitButton>
       </form>
     </>
   )

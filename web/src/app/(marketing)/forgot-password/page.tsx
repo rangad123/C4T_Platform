@@ -1,7 +1,7 @@
 import { Logo } from '@/components/ds/core/Logo'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
-import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { forgotPasswordAction } from '@/lib/auth/actions'
 
@@ -97,9 +97,9 @@ export default async function ForgotPasswordPage({
             />
           </Field>
 
-          <Button type="submit" variant="primary" size="lg" fullWidth iconRight="arrow-right">
+          <SubmitButton variant="primary" size="lg" fullWidth iconRight="arrow-right" pendingLabel="Sending…">
             Send reset link
-          </Button>
+          </SubmitButton>
         </form>
 
         <div

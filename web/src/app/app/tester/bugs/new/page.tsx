@@ -3,6 +3,7 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Panel } from '@/components/admin/Panel'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -272,9 +273,9 @@ export default async function NewTesterBugPage({
           </Panel>
 
           <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-            <Button type="submit" variant="primary" iconLeft="clipboard-check">
+            <SubmitButton variant="primary" iconLeft="clipboard-check" pendingLabel="Filing report…">
               File the report
-            </Button>
+            </SubmitButton>
             <Button variant="secondary" href="/app/tester/bugs">
               Cancel
             </Button>

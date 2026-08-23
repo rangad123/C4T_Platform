@@ -9,6 +9,7 @@ import { StatusBadge, SeverityBadge, RoleBadge } from '@/components/admin/Status
 import { Modal } from '@/components/admin/Modal'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Field } from '@/components/ds/forms/Field'
@@ -479,9 +480,9 @@ export default async function BugDetailPage({
                     options={SEVERITIES.map((value) => ({ value, label: titleCase(value) }))}
                   />
                 </Field>
-                <Button type="submit" variant="primary" fullWidth>
+                <SubmitButton variant="primary" fullWidth pendingLabel="Saving severity…">
                   Save severity
-                </Button>
+                </SubmitButton>
               </form>
             </Modal>
           ) : null}
@@ -542,9 +543,9 @@ export default async function BugDetailPage({
                     ]}
                   />
                 </Field>
-                <Button type="submit" variant="primary" fullWidth>
+                <SubmitButton variant="primary" fullWidth pendingLabel="Saving classification…">
                   Save classification
-                </Button>
+                </SubmitButton>
               </TrackedForm>
             </Modal>
           ) : null}
@@ -664,9 +665,9 @@ export default async function BugDetailPage({
                   />
                 </Field>
 
-                <Button type="submit" variant="primary" fullWidth>
+                <SubmitButton variant="primary" fullWidth pendingLabel="Saving status…">
                   Save status
-                </Button>
+                </SubmitButton>
               </TrackedForm>
             </Modal>
           ) : null}
@@ -700,9 +701,9 @@ export default async function BugDetailPage({
                     spellCheck={false}
                   />
                 </Field>
-                <Button type="submit" variant="secondary" fullWidth>
+                <SubmitButton variant="secondary" fullWidth pendingLabel="Withdrawing…">
                   Withdraw report
-                </Button>
+                </SubmitButton>
               </form>
             </Panel>
           ) : null}
@@ -824,9 +825,9 @@ export default async function BugDetailPage({
                         <form action={removeBugAttachment}>
                           <input type="hidden" name="id" value={bug.id} />
                           <input type="hidden" name="attachmentId" value={attachment.id} />
-                          <Button type="submit" variant="ghost" size="sm">
+                          <SubmitButton variant="ghost" size="sm" pendingLabel="Removing…">
                             Remove
-                          </Button>
+                          </SubmitButton>
                         </form>
                       ) : null}
                     </li>
@@ -930,9 +931,13 @@ export default async function BugDetailPage({
                   />
                 ) : null}
                 <div>
-                  <Button type="submit" variant="primary" disabled={!capabilities.canComment}>
+                  <SubmitButton
+                    variant="primary"
+                    disabled={!capabilities.canComment}
+                    pendingLabel="Posting…"
+                  >
                     Post comment
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
             </div>

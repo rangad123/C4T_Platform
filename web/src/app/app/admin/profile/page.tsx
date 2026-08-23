@@ -8,7 +8,7 @@ import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
-import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -257,9 +257,13 @@ const SESSION_COLUMNS: readonly TableColumn<ActiveSession>[] = [
        */
       <form action={revokeSession} style={{ display: 'inline-flex' }}>
         <input type="hidden" name="sessionId" value={session.id} />
-        <Button type="submit" variant="secondary" size="sm">
+        <SubmitButton
+          variant="secondary"
+          size="sm"
+          pendingLabel={session.isCurrent ? 'Signing out…' : 'Ending session…'}
+        >
           {session.isCurrent ? 'Sign out here' : 'End session'}
-        </Button>
+        </SubmitButton>
       </form>
     ),
   },
@@ -493,9 +497,9 @@ export default async function AdminProfilePage({
               </div>
 
               <div>
-                <Button type="submit" variant="primary">
+                <SubmitButton variant="primary" pendingLabel="Saving profile…">
                   Save profile
-                </Button>
+                </SubmitButton>
               </div>
             </TrackedForm>
           </Panel>
@@ -558,9 +562,9 @@ export default async function AdminProfilePage({
               </Field>
 
               <div style={{ marginTop: 'var(--space-1)' }}>
-                <Button type="submit" variant="secondary">
+                <SubmitButton variant="secondary" pendingLabel="Changing password…">
                   Change password
-                </Button>
+                </SubmitButton>
               </div>
             </TrackedForm>
           </Panel>
@@ -572,9 +576,9 @@ export default async function AdminProfilePage({
             description="Every device holding a live sign-in for your account."
             actions={
               <form action={signOutEverywhere}>
-                <Button type="submit" variant="secondary" size="sm" iconLeft="log-out">
+                <SubmitButton variant="secondary" size="sm" iconLeft="log-out" pendingLabel="Signing out everywhere…">
                   Sign out everywhere, including here
-                </Button>
+                </SubmitButton>
               </form>
             }
             flush={!sessionsFailed && sessions.length > 0}

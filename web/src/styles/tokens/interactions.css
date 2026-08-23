@@ -66,3 +66,12 @@
 .c4t-faq-trigger:hover { background: var(--surface-sunken); }
 .c4t-tab:hover { color: var(--text-primary) !important; }
 .c4t-page-btn:hover:not([aria-current="page"]):not(:disabled) { background: var(--surface-sunken) !important; }
+
+/* Spinner — the app's one loading-indicator animation. See ds/core/Spinner.tsx. */
+@keyframes c4t-spin { to { transform: rotate(360deg); } }
+.c4t-spin { animation: c4t-spin 700ms linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  /* Still reads as "busy" — a static ring next to changed button text —
+     just without the motion a reduced-motion user asked not to see. */
+  .c4t-spin { animation: none; }
+}

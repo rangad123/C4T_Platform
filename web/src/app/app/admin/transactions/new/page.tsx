@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -553,9 +554,9 @@ export default async function NewTransactionPage({
           </div>
 
           <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-            <Button type="submit" variant="primary">
+            <SubmitButton variant="primary" pendingLabel="Recording…">
               Record the transaction
-            </Button>
+            </SubmitButton>
             <Button href={BASE} variant="secondary">
               Cancel
             </Button>

@@ -5,6 +5,7 @@ import { DescriptionList } from '@/components/admin/DescriptionList'
 import { RoleBadge } from '@/components/admin/StatusBadge'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Field } from '@/components/ds/forms/Field'
@@ -266,9 +267,9 @@ export default async function ThreadDetailPage({ params }: { params: Promise<{ i
             >
               <form action={closeThread}>
                 <input type="hidden" name="id" value={thread.id} />
-                <Button type="submit" variant="secondary" iconLeft="lock" fullWidth>
+                <SubmitButton variant="secondary" iconLeft="lock" fullWidth pendingLabel="Closing…">
                   Close this conversation
-                </Button>
+                </SubmitButton>
               </form>
             </Panel>
           )}
@@ -437,9 +438,9 @@ export default async function ThreadDetailPage({ params }: { params: Promise<{ i
               />
             </Field>
             <div>
-              <Button type="submit" variant="primary" iconLeft="message-square">
+              <SubmitButton variant="primary" iconLeft="message-square" pendingLabel="Posting…">
                 Post message
-              </Button>
+              </SubmitButton>
             </div>
           </form>
         </Panel>

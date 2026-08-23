@@ -6,6 +6,7 @@ import { DescriptionList, type DescriptionItem } from '@/components/admin/Descri
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
@@ -273,9 +274,9 @@ export default async function TransactionDetailPage({
                   label="Clear the settlement date"
                   description="Takes precedence over the date above. Use it when a settlement is reversed."
                 />
-                <Button type="submit" variant="primary" fullWidth>
+                <SubmitButton variant="primary" fullWidth pendingLabel="Saving status…">
                   Save status
-                </Button>
+                </SubmitButton>
               </form>
             ) : (
               <p
@@ -429,9 +430,9 @@ export default async function TransactionDetailPage({
               />
             </Field>
             <div>
-              <Button type="submit" variant="secondary">
+              <SubmitButton variant="secondary" pendingLabel="Saving…">
                 Save reconciliation details
-              </Button>
+              </SubmitButton>
             </div>
           </form>
         </Panel>
@@ -484,9 +485,9 @@ export default async function TransactionDetailPage({
               </Field>
             </div>
             <div>
-              <Button type="submit" variant="secondary">
+              <SubmitButton variant="secondary" pendingLabel="Saving…">
                 Save payout details
-              </Button>
+              </SubmitButton>
             </div>
           </form>
         </Panel>

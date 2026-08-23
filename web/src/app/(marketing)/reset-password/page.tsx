@@ -1,7 +1,7 @@
 import { Logo } from '@/components/ds/core/Logo'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
-import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { resetPasswordAction } from '@/lib/auth/actions'
 
@@ -101,9 +101,9 @@ export default async function ResetPasswordPage({
               />
             </Field>
 
-            <Button type="submit" variant="primary" size="lg" fullWidth iconRight="arrow-right">
+            <SubmitButton variant="primary" size="lg" fullWidth iconRight="arrow-right" pendingLabel="Updating…">
               Update password
-            </Button>
+            </SubmitButton>
           </form>
         ) : (
           <p

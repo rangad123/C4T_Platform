@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ds/core/Button'
+import { Spinner } from '@/components/ds/core/Spinner'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import {
@@ -145,7 +146,14 @@ export function RevealPaymentDetails({ paymentAccountId }: RevealPaymentDetailsP
         </Field>
       </div>
       <Button type="submit" variant="primary" size="sm" disabled={pending || !password}>
-        {pending ? 'Checking…' : 'Reveal'}
+        {pending ? (
+          <>
+            <Spinner size={16} />
+            Checking…
+          </>
+        ) : (
+          'Reveal'
+        )}
       </Button>
       <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
         Cancel

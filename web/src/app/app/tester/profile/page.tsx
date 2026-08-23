@@ -8,6 +8,7 @@ import { Card, CardGrid } from '@/components/admin/Card'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -162,10 +163,19 @@ export default async function TesterProfilePage({
 
   const section = resolveSection(SECTIONS, (await searchParams).section)
 
+  // `profile` backs the header and the NDA banner on every section, so it
+  // stays eager. `catalog` (device/OS/skill options) and `paymentAccount`
+  // each back specific sections only — fetching them regardless of section
+  // meant opening About or Work history waited on the full device/skill
+  // catalog and the payout instrument for no reason.
   const [profile, catalog, paymentAccount] = await Promise.all([
     serverFetchOrNull<ProfileDetail>('testers/me'),
-    serverFetchOrNull<Catalog>('catalog'),
-    serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine'),
+    section === 'devices' || section === 'skills'
+      ? serverFetchOrNull<Catalog>('catalog')
+      : Promise.resolve(null),
+    section === 'payment'
+      ? serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine')
+      : Promise.resolve(null),
   ])
 
   if (!profile) {
@@ -224,9 +234,9 @@ export default async function TesterProfilePage({
           description="Required before you can be assigned to a project."
         >
           <form action={acceptNdaAction}>
-            <Button type="submit" variant="primary" iconLeft="check">
+            <SubmitButton variant="primary" iconLeft="check" pendingLabel="Accepting…">
               Accept the NDA
-            </Button>
+            </SubmitButton>
           </form>
         </Panel>
       ) : null}
@@ -268,9 +278,9 @@ export default async function TesterProfilePage({
                 </Field>
               </div>
               <div>
-                <Button type="submit" variant="primary">
+                <SubmitButton variant="primary" pendingLabel="Saving…">
                   Save
-                </Button>
+                </SubmitButton>
               </div>
             </TrackedForm>
           </Panel>
@@ -419,9 +429,9 @@ export default async function TesterProfilePage({
                 </div>
                 <Checkbox id="isPrimary" name="isPrimary" label="This is my primary device" />
                 <div>
-                  <Button type="submit" variant="secondary" iconLeft="plus">
+                  <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
                     Add device
-                  </Button>
+                  </SubmitButton>
                 </div>
               </TrackedForm>
             </div>
@@ -472,9 +482,9 @@ export default async function TesterProfilePage({
                   ))}
                 </div>
                 <div>
-                  <Button type="submit" variant="secondary">
+                  <SubmitButton variant="secondary" pendingLabel="Saving…">
                     Save skills
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
             ) : (
@@ -503,9 +513,14 @@ export default async function TesterProfilePage({
                       <form action={removeLanguageAction}>
                         <input type="hidden" name="code" value={language.code} />
                         <input type="hidden" name="current" value={languagesJson} />
-                        <Button type="submit" variant="ghost" size="sm" style={{ color: 'var(--status-error-fg)' }}>
+                        <SubmitButton
+                          variant="ghost"
+                          size="sm"
+                          style={{ color: 'var(--status-error-fg)' }}
+                          pendingLabel="Removing…"
+                        >
                           Remove
-                        </Button>
+                        </SubmitButton>
                       </form>
                     </li>
                   ))}
@@ -530,9 +545,9 @@ export default async function TesterProfilePage({
                     options={PROFICIENCIES.map((value) => ({ value, label: titleCase(value) }))}
                   />
                 </Field>
-                <Button type="submit" variant="secondary" iconLeft="plus">
+                <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
                   Add
-                </Button>
+                </SubmitButton>
               </form>
             </div>
           </Panel>
@@ -574,9 +589,14 @@ export default async function TesterProfilePage({
                       </div>
                       <form action={removeWorkHistoryAction}>
                         <input type="hidden" name="workHistoryId" value={entry.id} />
-                        <Button type="submit" variant="ghost" size="sm" style={{ color: 'var(--status-error-fg)' }}>
+                        <SubmitButton
+                          variant="ghost"
+                          size="sm"
+                          style={{ color: 'var(--status-error-fg)' }}
+                          pendingLabel="Removing…"
+                        >
                           Remove
-                        </Button>
+                        </SubmitButton>
                       </form>
                     </li>
                   ))}
@@ -611,9 +631,9 @@ export default async function TesterProfilePage({
                   <Textarea id="description" name="description" rows={3} maxLength={2000} />
                 </Field>
                 <div>
-                  <Button type="submit" variant="secondary" iconLeft="plus">
+                  <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
                     Add role
-                  </Button>
+                  </SubmitButton>
                 </div>
               </TrackedForm>
             </div>
@@ -722,9 +742,9 @@ export default async function TesterProfilePage({
                   </Field>
                 </div>
                 <div>
-                  <Button type="submit" variant="primary">
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
                     Save payment details
-                  </Button>
+                  </SubmitButton>
                 </div>
               </TrackedForm>
             </div>

@@ -4,6 +4,7 @@ import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -358,9 +359,9 @@ export default async function CatalogPage({
           <Field label="RAM (GB)" htmlFor="ramGb">
             <Input id="ramGb" name="ramGb" maxLength={20} style={{ width: 90 }} />
           </Field>
-          <Button type="submit" variant="secondary" iconLeft="plus">
+          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
             Add model
-          </Button>
+          </SubmitButton>
         </form>
       </Panel>
       ) : null}
@@ -381,9 +382,9 @@ export default async function CatalogPage({
           <Field label="Brand name" htmlFor="brandName">
             <Input id="brandName" name="name" required maxLength={120} placeholder="OnePlus" />
           </Field>
-          <Button type="submit" variant="secondary" iconLeft="plus">
+          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
             Add brand
-          </Button>
+          </SubmitButton>
         </form>
       </Panel>
       ) : null}
@@ -436,9 +437,9 @@ export default async function CatalogPage({
                         style={{ width: 130 }}
                         aria-label={`Add a version to ${o.name}`}
                       />
-                      <Button type="submit" variant="ghost" size="sm">
+                      <SubmitButton variant="ghost" size="sm" pendingLabel="Adding…">
                         Add
-                      </Button>
+                      </SubmitButton>
                     </form>
                   </li>
                 ))}
@@ -482,9 +483,9 @@ export default async function CatalogPage({
                   style={{ width: 130 }}
                   aria-label={`Add a version to ${b.name}`}
                 />
-                <Button type="submit" variant="ghost" size="sm">
+                <SubmitButton variant="ghost" size="sm" pendingLabel="Adding…">
                   Add
-                </Button>
+                </SubmitButton>
               </form>
             </li>
           ))}
@@ -493,9 +494,9 @@ export default async function CatalogPage({
           <Field label="Browser name" htmlFor="browserName">
             <Input id="browserName" name="name" required maxLength={120} placeholder="Opera" />
           </Field>
-          <Button type="submit" variant="secondary" iconLeft="plus">
+          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
             Add browser
-          </Button>
+          </SubmitButton>
         </form>
       </Panel>
       ) : null}
@@ -529,9 +530,9 @@ export default async function CatalogPage({
               style={{ width: 90, textTransform: 'uppercase' }}
             />
           </Field>
-          <Button type="submit" variant="secondary" iconLeft="plus">
+          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
             Add carrier
-          </Button>
+          </SubmitButton>
         </form>
       </Panel>
       ) : null}
@@ -574,9 +575,9 @@ export default async function CatalogPage({
               placeholder="Domain knowledge"
             />
           </Field>
-          <Button type="submit" variant="secondary" iconLeft="plus">
+          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
             Add category
-          </Button>
+          </SubmitButton>
         </form>
       </Panel>
       ) : null}
@@ -632,9 +633,9 @@ export default async function CatalogPage({
               options={catalog.skillCategories.map((c) => ({ value: c.id, label: c.name }))}
             />
           </Field>
-          <Button type="submit" variant="secondary" iconLeft="plus">
+          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
             Add skill
-          </Button>
+          </SubmitButton>
         </form>
       </Panel>
       ) : null}
