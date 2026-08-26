@@ -241,7 +241,7 @@ function oauthCookieOptions() {
 const ROLE_HOME: Record<string, string> = {
   ADMIN: '/app/admin',
   SUB_ADMIN: '/app/admin',
-  CUSTOMER: '/app',
+  CUSTOMER: '/app/customer',
   TESTER: '/app/tester',
   USER: '/app',
 }

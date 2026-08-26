@@ -1,0 +1,75 @@
+import type { Metadata } from 'next'
+import { requireRole } from '@/lib/auth/session'
+import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
+
+export const metadata: Metadata = {
+  title: 'Customer',
+  robots: { index: false, follow: false },
+}
+
+/**
+ * The customer area — `/app/customer/*`.
+ *
+ * Same shell as `admin/layout.tsx` and `tester/layout.tsx`: gates the route
+ * to CUSTOMER, then mounts the sidebar. Reports/Ratings/Transactions/
+ * Communication are real, ownership-scoped API surface (see `scopes.ts`/
+ * `policy.ts`) but don't have pages yet — they show as disabled "coming
+ * soon" links via `Sidebar`'s existing mechanism, rather than being silently
+ * missing from the nav.
+ */
+
+const CUSTOMER_SECTIONS: readonly SidebarSection[] = [
+  {
+    links: [{ href: '/app/customer', label: 'Dashboard', icon: 'layout-dashboard' }],
+  },
+  {
+    label: 'Delivery',
+    links: [
+      { href: '/app/customer/projects', label: 'Projects', icon: 'briefcase' },
+      { href: '/app/customer/bugs', label: 'Bugs', icon: 'clipboard-check' },
+    ],
+  },
+  {
+    label: 'Insights',
+    links: [
+      { href: '/app/customer/reports', label: 'Reports', icon: 'line-chart', disabled: true },
+      { href: '/app/customer/ratings', label: 'Ratings', icon: 'star', disabled: true },
+    ],
+  },
+  {
+    label: 'Operations',
+    links: [
+      { href: '/app/customer/transactions', label: 'Transactions', icon: 'credit-card', disabled: true },
+      { href: '/app/customer/communication', label: 'Communication', icon: 'message-square', disabled: true },
+    ],
+  },
+  {
+    label: 'Account',
+    links: [
+      { href: '/app/customer/organisation', label: 'Organisation', icon: 'building-2' },
+      { href: '/app/customer/profile', label: 'Your profile', icon: 'user-check' },
+    ],
+  },
+]
+
+export default async function CustomerLayout({ children }: { children: React.ReactNode }) {
+  const user = await requireRole(['CUSTOMER'])
+
+  const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100dvh', background: 'var(--surface-sunken)' }}>
+      <Sidebar
+        userName={displayName}
+        role={user.role}
+        sections={CUSTOMER_SECTIONS}
+        homeHref="/app/customer"
+        portalLabel="Customer"
+      />
+
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {children}
+      </div>
+    </div>
+  )
+}

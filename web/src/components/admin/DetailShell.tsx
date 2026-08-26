@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react'
-import { Topbar } from '@/components/admin/Topbar'
+import { Topbar, type RootCrumb } from '@/components/admin/Topbar'
 
 export interface DetailShellProps {
-  /** Breadcrumb trail after "Admin". Last entry is the current record. */
+  /** Breadcrumb trail after the portal root. Last entry is the current record. */
   crumbs: readonly { label: string; href?: string }[]
+  /** The portal's own home crumb. Default `{ label: 'Admin', href: '/app/admin' }`. */
+  root?: RootCrumb
   /** Sidebar group, shown as the eyebrow. */
   eyebrow: string
   /** The record's name. */
@@ -39,6 +41,7 @@ export interface DetailShellProps {
  */
 export function DetailShell({
   crumbs,
+  root,
   eyebrow,
   title,
   subtitle,
@@ -49,7 +52,7 @@ export function DetailShell({
 }: DetailShellProps) {
   return (
     <>
-      <Topbar crumbs={crumbs} />
+      <Topbar crumbs={crumbs} root={root} />
 
       <main
         id="main"

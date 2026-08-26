@@ -10,20 +10,31 @@ export interface AdminSectionNotReadyProps {
   description: string
   /** Icon shown next to the title. */
   icon?: IconName
+  /** The portal's own home route. Default `/app/admin`. */
+  homeHref?: string
+  /** Shown as the "what works today" link and the back button. Default `'Dashboard'`. */
+  homeLabel?: string
 }
 
 /**
- * Placeholder for admin sections that are linked from the sidebar but not yet
- * built. Lives inside the admin shell so the sidebar / topbar / sign-out
- * controls are all available — only the page contents are unfinished.
+ * Placeholder for a sidebar-linked section that is not yet built. Lives
+ * inside the portal shell so the sidebar / topbar / sign-out controls are
+ * all available — only the page contents are unfinished. Shared across
+ * portals (admin, customer, ...) via `homeHref`/`homeLabel`, same pattern as
+ * `Sidebar`/`Topbar`.
  *
  * Parallel to the portal-not-ready placeholder on the public side, but the
- * audience is different: an admin here is not a customer being told their
- * product is on the way. They are a builder being told which section still
- * needs work. The back-to-action is "back to the dashboard", not "back to the
- * site".
+ * audience is different: someone here is not a visitor being told the whole
+ * product is on the way. They are a user of an otherwise-working portal
+ * being told which one section still needs work.
  */
-export function AdminSectionNotReady({ section, description, icon }: AdminSectionNotReadyProps) {
+export function AdminSectionNotReady({
+  section,
+  description,
+  icon,
+  homeHref = '/app/admin',
+  homeLabel = 'Dashboard',
+}: AdminSectionNotReadyProps) {
   return (
     <main
       id="main"
@@ -85,20 +96,17 @@ export function AdminSectionNotReady({ section, description, icon }: AdminSectio
         <strong style={{ color: 'var(--text-primary)', fontWeight: 'var(--fw-semibold)' }}>
           What works today:
         </strong>{' '}
-        <Link href="/app/admin" style={{ color: 'var(--text-brand)' }}>
-          Dashboard
+        <Link href={homeHref} style={{ color: 'var(--text-brand)' }}>
+          {homeLabel}
         </Link>
-        {' '}and{' '}
-        <Link href="/app/admin/leads" style={{ color: 'var(--text-brand)' }}>
-          Leads
-        </Link>
-        . The other sections are coming in the next milestones.
+        {' '}and every other sidebar link that isn&rsquo;t marked coming soon. The rest arrive in
+        later milestones.
       </div>
 
       <div>
-        <Link href="/app/admin">
+        <Link href={homeHref}>
           <Button variant="secondary" iconLeft="arrow-left">
-            Back to dashboard
+            Back to {homeLabel.toLowerCase()}
           </Button>
         </Link>
       </div>

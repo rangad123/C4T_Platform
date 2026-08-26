@@ -31,6 +31,10 @@ export interface SidebarProps {
   /** Role of the signed-in user — used for the role chip and section gating. */
   role: Role
   sections: readonly SidebarSection[]
+  /** The portal's own home route. Default `/app/admin`. */
+  homeHref?: string
+  /** Shown in the brand-row and section `aria-label`s. Default `'Admin'`. */
+  portalLabel?: string
 }
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -129,21 +133,27 @@ function setCollapsedPreference(next: boolean): void {
  * deliberately NOT used here — there is no mismatch to suppress, because the
  * first render genuinely is the default on both sides.
  */
-export function Sidebar({ userName, role, sections }: SidebarProps) {
+export function Sidebar({
+  userName,
+  role,
+  sections,
+  homeHref = '/app/admin',
+  portalLabel = 'Admin',
+}: SidebarProps) {
   const collapsed = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
   const pathname = usePathname()
 
   return (
     <aside
       className={[styles.sidebar, collapsed ? styles.collapsed : null].filter(Boolean).join(' ')}
-      aria-label="Admin navigation"
+      aria-label={`${portalLabel} navigation`}
     >
       <div className={styles.brandRow}>
         {/* `href={null}` makes Logo render a plain <span>. Logo links to "/"
             by default, and an anchor inside this anchor is invalid HTML — it
             threw a hydration error and made the whole lockup unclickable. The
             wrapping Link owns the destination; Logo just draws the mark. */}
-        <Link href="/app/admin" aria-label="Crowd4Test admin home">
+        <Link href={homeHref} aria-label={`Crowd4Test ${portalLabel.toLowerCase()} home`}>
           <Logo size={28} wordmarkSize={14} withWordmark={!collapsed} href={null} />
         </Link>
 
@@ -173,7 +183,7 @@ export function Sidebar({ userName, role, sections }: SidebarProps) {
                 const isActive =
                   !link.disabled &&
                   (pathname === link.href ||
-                    (link.href !== '/app/admin' && pathname.startsWith(`${link.href}/`)))
+                    (link.href !== homeHref && pathname.startsWith(`${link.href}/`)))
 
                 const linkClass = [
                   styles.link,

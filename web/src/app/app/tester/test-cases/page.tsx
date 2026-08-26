@@ -1,6 +1,6 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchPage } from '@/lib/api/server'
+import { Topbar } from '@/components/admin/Topbar'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Field } from '@/components/ds/forms/Field'
@@ -60,17 +60,18 @@ export default async function TesterTestCasesPage({
   }
 
   return (
-    <main
-      id="main"
-      style={{
-        maxWidth: 960,
-        margin: '0 auto',
-        padding: 'var(--space-9) var(--space-7)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-6)',
-      }}
-    >
+    <>
+      <Topbar root={{ label: 'Tester', href: '/app/tester' }} crumbs={[{ label: 'Test cases' }]} />
+      <main
+        id="main"
+        style={{
+          padding: 'var(--space-9)',
+          maxWidth: 960,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-6)',
+        }}
+      >
       {justSubmitted ? (
         <div
           role="status"
@@ -86,12 +87,9 @@ export default async function TesterTestCasesPage({
       ) : null}
 
       <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <Link
-          href="/app/tester"
-          style={{ color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}
-        >
-          ← Back to your account
-        </Link>
+        <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+          Work
+        </span>
         <h1 className="c4t-display-md" style={{ margin: 0 }}>
           Test cases
         </h1>
@@ -210,7 +208,8 @@ export default async function TesterTestCasesPage({
           })}
         </div>
       )}
-    </main>
+      </main>
+    </>
   )
 }
 

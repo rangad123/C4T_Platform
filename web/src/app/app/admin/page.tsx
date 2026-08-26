@@ -1,9 +1,7 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Topbar } from '@/components/admin/Topbar'
-import { Icon } from '@/components/ds/core/Icon'
-import type { IconName } from '@/components/ds/core/icon-registry'
+import { KpiCard } from '@/components/admin/KpiCard'
 import { BarChart, type BarSegment } from '@/components/admin/charts/BarChart'
 import { DonutChart } from '@/components/admin/charts/DonutChart'
 import { statusTone, severityTone } from '@/components/admin/StatusBadge'
@@ -53,58 +51,6 @@ function segmentsFromCounts(
       value,
       tone: tone(key) as BarSegment['tone'],
     }))
-}
-
-function KpiCard({
-  icon,
-  label,
-  value,
-  href,
-}: {
-  icon: IconName
-  label: string
-  value: string | number
-  href: string
-}) {
-  return (
-    <Link
-      href={href}
-      className="c4t-card-hover"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-2)',
-        padding: 'var(--space-5)',
-        background: 'var(--surface-raised)',
-        border: '1px solid var(--border-default)',
-        borderRadius: 'var(--radius-card)',
-        textDecoration: 'none',
-        color: 'inherit',
-        transition: 'var(--transition-surface)',
-      }}
-    >
-      <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-        <Icon name={icon} size={16} style={{ color: 'var(--text-muted)' }} />
-        <span
-          className="c4t-eyebrow"
-          style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
-        >
-          {label}
-        </span>
-      </span>
-      <span
-        style={{
-          fontSize: 28,
-          fontWeight: 'var(--fw-semibold)',
-          letterSpacing: '-0.02em',
-          color: 'var(--text-primary)',
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {value}
-      </span>
-    </Link>
-  )
 }
 
 function ChartCard({ children }: { children: React.ReactNode }) {

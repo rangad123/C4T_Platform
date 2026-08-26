@@ -5,12 +5,12 @@ import { Button } from '@/components/ds/core/Button'
 import { Icon } from '@/components/ds/core/Icon'
 
 /**
- * Route-level error boundary for `/app/tester/*`. Renders INSIDE
- * `TesterLayout` — the sidebar is static nav data, not a likely failure
+ * Route-level error boundary for `/app/customer/*`. Renders INSIDE
+ * `CustomerLayout` — the sidebar is static nav data, not a likely failure
  * source, so keeping it up means one broken page doesn't read as "the whole
- * tester portal is down." Same rationale as `admin/error.tsx`.
+ * customer portal is down." Same rationale as `admin/error.tsx`.
  */
-export default function TesterError({
+export default function CustomerError({
   error,
   reset,
 }: {
@@ -18,7 +18,7 @@ export default function TesterError({
   reset: () => void
 }) {
   useEffect(() => {
-    console.error('Tester route error', { digest: error.digest, message: error.message })
+    console.error('Customer route error', { digest: error.digest, message: error.message })
   }, [error])
 
   return (

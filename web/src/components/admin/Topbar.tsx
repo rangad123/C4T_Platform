@@ -8,24 +8,33 @@ export interface Crumb {
   href?: string
 }
 
-export interface TopbarProps {
-  crumbs: readonly Crumb[]
+export interface RootCrumb {
+  label: string
+  href: string
 }
 
+export interface TopbarProps {
+  crumbs: readonly Crumb[]
+  /** The portal's own home crumb. Default `{ label: 'Admin', href: '/app/admin' }`. */
+  root?: RootCrumb
+}
+
+const DEFAULT_ROOT: RootCrumb = { label: 'Admin', href: '/app/admin' }
+
 /**
- * The admin topbar: breadcrumb on the left, sign-out on the right.
+ * The portal topbar: breadcrumb on the left, sign-out on the right.
  *
  * Sign-out is a real `<form action={logoutAction}>` — the action clears the
  * bridged cookies and calls the API's `/v1/auth/logout` to destroy the
  * server-side session row, then redirects to /login. The button is a submit,
  * not a client handler, so there is no `"use client"` here.
  */
-export function Topbar({ crumbs }: TopbarProps) {
+export function Topbar({ crumbs, root = DEFAULT_ROOT }: TopbarProps) {
   return (
     <header className={styles.topbar}>
       <nav aria-label="Breadcrumb" className={styles.breadcrumb}>
-        <Link href="/app/admin" style={{ color: 'inherit', textDecoration: 'none' }}>
-          Admin
+        <Link href={root.href} style={{ color: 'inherit', textDecoration: 'none' }}>
+          {root.label}
         </Link>
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1

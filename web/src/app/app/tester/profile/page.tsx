@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
+import { DetailShell } from '@/components/admin/DetailShell'
+import { Topbar } from '@/components/admin/Topbar'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Card, CardGrid } from '@/components/admin/Card'
@@ -180,11 +181,14 @@ export default async function TesterProfilePage({
 
   if (!profile) {
     return (
-      <main id="main" style={{ maxWidth: 720, margin: '0 auto', padding: 'var(--space-9)' }}>
-        <p style={{ color: 'var(--text-secondary)' }}>
-          Your profile could not be loaded. Refresh in a moment.
-        </p>
-      </main>
+      <>
+        <Topbar root={{ label: 'Tester', href: '/app/tester' }} crumbs={[{ label: 'Your profile' }]} />
+        <main id="main" style={{ padding: 'var(--space-9)', maxWidth: 720 }}>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            Your profile could not be loaded. Refresh in a moment.
+          </p>
+        </main>
+      </>
     )
   }
 
@@ -199,35 +203,15 @@ export default async function TesterProfilePage({
   }))
 
   return (
-    <main
-      id="main"
-      style={{
-        maxWidth: 840,
-        margin: '0 auto',
-        padding: 'var(--space-9) var(--space-7)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-7)',
-      }}
+    <DetailShell
+      root={{ label: 'Tester', href: '/app/tester' }}
+      crumbs={[{ label: 'Your profile' }]}
+      eyebrow="Account"
+      title="Your profile"
+      badges={<StatusBadge status={profile.status} />}
+      subtitle="What projects see when deciding whether to invite you, and how we reach you."
+      tabs={<SectionTabs basePath="/app/tester/profile" tabs={SECTIONS} active={section} />}
     >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-        <Link
-          href="/app/tester"
-          style={{ color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}
-        >
-          ← Back to your account
-        </Link>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-          <h1 className="c4t-display-md" style={{ margin: 0 }}>
-            Your profile
-          </h1>
-          <StatusBadge status={profile.status} />
-        </div>
-        <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-          What projects see when deciding whether to invite you, and how we reach you.
-        </p>
-      </header>
-
       {!profile.ndaAcceptedAt ? (
         <Panel
           title="Accept the NDA"
@@ -240,8 +224,6 @@ export default async function TesterProfilePage({
           </form>
         </Panel>
       ) : null}
-
-      <SectionTabs basePath="/app/tester/profile" tabs={SECTIONS} active={section} />
 
       {section === 'about' ? (
         <>
@@ -751,7 +733,6 @@ export default async function TesterProfilePage({
           </Panel>
         </>
       ) : null}
-
-    </main>
+    </DetailShell>
   )
 }

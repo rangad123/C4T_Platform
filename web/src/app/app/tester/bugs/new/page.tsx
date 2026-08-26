@@ -1,6 +1,6 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
+import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
@@ -83,33 +83,13 @@ export default async function NewTesterBugPage({
   )
 
   return (
-    <main
-      id="main"
-      style={{
-        maxWidth: 840,
-        margin: '0 auto',
-        padding: 'var(--space-9) var(--space-7)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-6)',
-      }}
+    <DetailShell
+      root={{ label: 'Tester', href: '/app/tester' }}
+      crumbs={[{ label: 'Bugs', href: '/app/tester/bugs' }, { label: 'Report a bug' }]}
+      eyebrow="Work"
+      title="Report a bug"
+      subtitle="Write the steps so someone who has never seen the problem can reproduce it. That is the difference between a report that gets fixed and one that gets sent back."
     >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <Link
-          href="/app/tester/bugs"
-          style={{ color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}
-        >
-          ← Back to bugs
-        </Link>
-        <h1 className="c4t-display-md" style={{ margin: 0 }}>
-          Report a bug
-        </h1>
-        <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '70ch' }}>
-          Write the steps so someone who has never seen the problem can reproduce it. That is
-          the difference between a report that gets fixed and one that gets sent back.
-        </p>
-      </header>
-
       {errorMessage ? (
         <p
           role="alert"
@@ -282,6 +262,6 @@ export default async function NewTesterBugPage({
           </div>
         </TrackedForm>
       )}
-    </main>
+    </DetailShell>
   )
 }

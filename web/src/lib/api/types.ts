@@ -74,7 +74,7 @@ export interface ActiveSession {
 export const ROLE_HOME: Readonly<Record<Role, string>> = {
   ADMIN: '/app/admin',
   SUB_ADMIN: '/app/admin',
-  CUSTOMER: '/app',
+  CUSTOMER: '/app/customer',
   TESTER: '/app/tester',
   USER: '/app/onboarding',
 }

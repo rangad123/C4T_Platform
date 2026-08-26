@@ -1,14 +1,13 @@
 import type { CSSProperties } from 'react'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
+import { Topbar } from '@/components/admin/Topbar'
 import { Icon } from '@/components/ds/core/Icon'
-import { Logo } from '@/components/ds/core/Logo'
-import { Button } from '@/components/ds/core/Button'
-import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
-import { logoutAction } from '@/lib/auth/actions'
 import { formatDate, formatMoney, titleCase } from '@/lib/admin/format'
+
+const ROOT = { label: 'Tester', href: '/app/tester' }
 
 interface EarningsSummary {
   currency: string
@@ -77,9 +76,9 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
  * `GET /v1/transactions`, both auto-scoped to the caller by
  * `transactionScope` — nothing on this page is mocked.
  *
- * The rest of the portal hangs off the buttons in the header: bug reporting
- * with evidence upload (`/bugs`), profile self-service (`/profile`), and the
- * announcements feed (`/announcements`).
+ * The rest of the portal hangs off the sidebar: bug reporting with evidence
+ * upload (`/bugs`), profile self-service (`/profile`), and the announcements
+ * feed (`/announcements`).
  *
  * What is deliberately NOT shown: a Credit Fund / Release Fund split, a
  * payment method, or a TDS figure. The schema has no two-stage credit/release
@@ -131,56 +130,25 @@ export default async function TesterHomePage() {
   ]
 
   return (
-    <main
-      id="main"
-      style={{
-        maxWidth: 960,
-        margin: '0 auto',
-        padding: 'var(--space-9) var(--space-7)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-8)',
-      }}
-    >
-      <header
+    <>
+      <Topbar root={ROOT} crumbs={[{ label: 'Dashboard' }]} />
+      <main
+        id="main"
         style={{
+          padding: 'var(--space-9)',
+          maxWidth: 960,
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 'var(--space-4)',
-          flexWrap: 'wrap',
+          flexDirection: 'column',
+          gap: 'var(--space-8)',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            <Logo size={24} withWordmark />
-          </div>
-          <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-            Tester
-          </span>
-          <h1 className="c4t-display-md" style={{ margin: 0 }}>
-            Welcome back{user.firstName ? `, ${user.firstName}` : ''}
-          </h1>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-          <Button href="/app/tester/bugs" variant="primary" iconLeft="clipboard-check">
-            Bugs
-          </Button>
-          <Button href="/app/tester/test-cases" variant="secondary" iconLeft="test-tube-diagonal">
-            Test cases
-          </Button>
-          <Button href="/app/tester/announcements" variant="secondary" iconLeft="message-square">
-            Announcements
-          </Button>
-          <Button href="/app/tester/profile" variant="secondary" iconLeft="user-check">
-            Your profile
-          </Button>
-          <form action={logoutAction}>
-            <SubmitButton variant="secondary" iconLeft="log-out" pendingLabel="Signing out…">
-              Sign out
-            </SubmitButton>
-          </form>
-        </div>
+      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+          Dashboard
+        </span>
+        <h1 className="c4t-display-md" style={{ margin: 0 }}>
+          Welcome back{user.firstName ? `, ${user.firstName}` : ''}
+        </h1>
       </header>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -280,6 +248,7 @@ export default async function TesterHomePage() {
           from the platform and from projects you are on.
         </p>
       </section>
-    </main>
+      </main>
+    </>
   )
 }

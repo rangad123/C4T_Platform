@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Topbar } from '@/components/admin/Topbar'
+import { Topbar, type RootCrumb } from '@/components/admin/Topbar'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { Pagination } from '@/components/ds/admin/Pagination'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
@@ -13,8 +13,10 @@ export interface AdminListPageProps<Row> {
   title: string
   /** One or two sentences on what the list holds and what to do with it. */
   description: string
-  /** Breadcrumb trail after "Admin". */
+  /** Breadcrumb trail after the portal root. */
   crumbs: readonly { label: string; href?: string }[]
+  /** The portal's own home crumb. Default `{ label: 'Admin', href: '/app/admin' }`. */
+  root?: RootCrumb
 
   /** The outcome of `loadList`. */
   result: ListResult<Row>
@@ -72,6 +74,7 @@ export function AdminListPage<Row>({
   title,
   description,
   crumbs,
+  root,
   result,
   columns,
   rowKey,
@@ -88,7 +91,7 @@ export function AdminListPage<Row>({
 }: AdminListPageProps<Row>) {
   return (
     <>
-      <Topbar crumbs={crumbs} />
+      <Topbar crumbs={crumbs} root={root} />
 
       <main
         id="main"
