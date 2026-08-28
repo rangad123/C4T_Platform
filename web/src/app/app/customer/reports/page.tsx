@@ -1,27 +1,395 @@
 import { requireRole } from '@/lib/auth/session'
-import { Topbar } from '@/components/admin/Topbar'
-import { AdminSectionNotReady } from '@/components/admin/AdminSectionNotReady'
+import { serverFetchOrNull } from '@/lib/api/server'
+import { loadList } from '@/lib/admin/list'
+import { DetailShell } from '@/components/admin/DetailShell'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
+import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
+import { Panel } from '@/components/admin/Panel'
+import { DescriptionList } from '@/components/admin/DescriptionList'
+import { BugBreakdownView, type BugBreakdown } from '@/components/admin/BugBreakdownView'
+import { EmptyState } from '@/components/ds/admin/EmptyState'
+import { Field } from '@/components/ds/forms/Field'
+import { Select } from '@/components/ds/forms/Select'
+import { Input } from '@/components/ds/forms/Input'
+import { formatDate } from '@/lib/admin/format'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
+const BASE = '/app/customer/reports'
+/** The customer's own export proxy, so the download link is same-origin. */
+const EXPORT = '/app/customer/export/reports'
+
+/** The API caps `limit` at 100; see the note where the picker is loaded. */
+const PROJECT_PICKER_LIMIT = 100
 
 /**
- * `/app/customer/reports` — linked from the sidebar, not built yet.
- * The API already supports it (`GET /reports/by-project`, `/by-build`,
- * `/by-build-range` all include `project:customer` in policy.ts) — this is
- * a UI gap, not a backend one.
+ * `/app/customer/reports` — the reference product's Report page.
+ *
+ * The reference offers a project, then either a run of builds ("By Build",
+ * with a start and an end) or a date range. Both already exist on the API as
+ * `/v1/reports/by-build-range` and `/v1/reports/by-date`. "By project" is
+ * added because the same module already serves it and it answers the most
+ * common question — how is this project doing overall — without making
+ * someone pick two builds first.
+ *
+ * Not a second report engine: every view calls `/v1/reports/*`, which are
+ * themselves thin wrappers over the bug data the Bugs module already tracks.
+ * Authorization is the API's — `report.generate` resolves through
+ * `projectRelations`, so a customer passing another organisation's project id
+ * gets a 404 rather than a report.
  */
-export default async function CustomerReportsPage() {
+
+const SECTIONS = [
+  { value: 'by-project', label: 'By project', icon: 'briefcase' },
+  { value: 'by-build', label: 'By build', icon: 'repeat' },
+  { value: 'by-date', label: 'By date', icon: 'clock' },
+] as const
+
+interface ProjectOption {
+  id: string
+  reference: string
+  title: string
+}
+
+interface BuildOption {
+  id: string
+  name: string
+  status?: string
+}
+
+interface ByProjectReport {
+  project: {
+    id: string
+    reference: string
+    title: string
+    status: string
+    organisation: { id: string; name: string }
+  }
+  builds: BuildOption[]
+  testerCount: number
+  testCaseCount: number
+  bugs: BugBreakdown
+  testersByCountry: Record<string, number>
+}
+
+interface RangeReport {
+  bugs: BugBreakdown
+  builds?: BuildOption[]
+}
+
+const FORM_STYLE = {
+  display: 'flex',
+  flexWrap: 'wrap' as const,
+  gap: 'var(--space-4)',
+  alignItems: 'flex-end',
+}
+
+export default async function CustomerReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    section?: string
+    projectId?: string
+    startBuildId?: string
+    endBuildId?: string
+    startDate?: string
+    endDate?: string
+  }>
+}) {
   await requireRole(['CUSTOMER'])
+  const params = await searchParams
+  const section = resolveSection(SECTIONS, params.section)
+
+  /**
+   * `GET /projects` is already organisation-scoped for a CUSTOMER caller, so
+   * this picker can only list their own projects. There is no client-side
+   * filtering here to get wrong.
+   */
+  const projectsResult = await loadList<ProjectOption>('projects', {
+    page: 1,
+    // 100 is the API's ceiling on `limit`. Asking for more is a 422, and
+    // `loadList` swallows that into `{ error }` — which rendered as an empty
+    // picker that looked like "you have no projects".
+    limit: PROJECT_PICKER_LIMIT,
+    query: { sort: 'title', order: 'asc' },
+  })
+  const projects = 'items' in projectsResult ? projectsResult.items : []
+  /** A failed read is not the same as an empty account — say which. */
+  const projectsFailed = 'error' in projectsResult
+  const projectsTruncated =
+    'meta' in projectsResult && projectsResult.meta.total > projects.length
+
+  const projectId = params.projectId ?? ''
+  const projectOptions = [
+    { value: '', label: 'Select a project' },
+    ...projects.map((p) => ({ value: p.id, label: `${p.reference} · ${p.title}` })),
+  ]
+
+  /**
+   * The build pickers need the chosen project's builds, and the by-project
+   * report already returns them — so one read serves both the project view and
+   * the build-range selectors rather than a second call for builds.
+   */
+  const projectReport = projectId
+    ? await serverFetchOrNull<ByProjectReport>(`reports/by-project/${projectId}`)
+    : null
+  const buildOptions = (projectReport?.builds ?? []).map((b) => ({ value: b.id, label: b.name }))
 
   return (
-    <>
-      <Topbar root={ROOT} crumbs={[{ label: 'Reports' }]} />
-      <AdminSectionNotReady
-        section="Insights"
-        icon="line-chart"
-        homeHref="/app/customer"
-        description="Report views by project, by build and across a build range — the same aggregations the project page's summary panel already uses, laid out for closer reading and CSV export."
-      />
-    </>
+    <DetailShell
+      root={ROOT}
+      crumbs={[{ label: 'Reports' }]}
+      eyebrow="Insights"
+      title="Reports"
+      subtitle="Bug distributions for a project, a run of builds, or a period, with a CSV of the underlying reports."
+      tabs={<SectionTabs basePath={BASE} tabs={SECTIONS} active={section} preserve={{ projectId }} />}
+    >
+      {projectsFailed ? (
+        <EmptyState
+          icon="alert-triangle"
+          title="Reports could not be loaded"
+          description="Your project list is unavailable right now. Refresh in a moment."
+        />
+      ) : projects.length === 0 ? (
+        <EmptyState
+          icon="briefcase"
+          title="No projects yet"
+          description="Reports are built from the testing on your projects. Create one and the reports follow."
+        />
+      ) : (
+        <>
+          {projectsTruncated ? (
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+              Showing your {projects.length} most recent projects. Older ones are not in this list
+              yet.
+            </p>
+          ) : null}
+
+          {section === 'by-project' ? (
+            <Panel
+              title="Project report"
+              description="Everything reported on one project, across every build."
+            >
+              <LiveGetForm action={BASE} style={FORM_STYLE}>
+                <input type="hidden" name="section" value="by-project" />
+                <Field label="Project" htmlFor="projectId" style={{ flex: '2 1 260px' }}>
+                  <Select
+                    id="projectId"
+                    name="projectId"
+                    defaultValue={projectId}
+                    options={projectOptions}
+                  />
+                </Field>
+                <LiveFormStatus />
+              </LiveGetForm>
+
+              {!projectId ? (
+                <p style={{ marginTop: 'var(--space-5)', color: 'var(--text-secondary)' }}>
+                  Choose a project to see its report.
+                </p>
+              ) : projectReport === null ? (
+                <p style={{ marginTop: 'var(--space-5)', color: 'var(--text-secondary)' }}>
+                  That report could not be loaded. Refresh in a moment.
+                </p>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--space-6)',
+                    marginTop: 'var(--space-5)',
+                  }}
+                >
+                  <DescriptionList
+                    items={[
+                      {
+                        label: 'Project',
+                        value: `${projectReport.project.reference} · ${projectReport.project.title}`,
+                      },
+                      { label: 'Builds', value: String(projectReport.builds.length) },
+                      { label: 'Testers', value: String(projectReport.testerCount) },
+                      { label: 'Test cases', value: String(projectReport.testCaseCount) },
+                    ]}
+                  />
+                  <BugBreakdownView
+                    bugs={projectReport.bugs}
+                    csvHref={`${EXPORT}/by-project/${projectId}/export.csv`}
+                  />
+                </div>
+              )}
+            </Panel>
+          ) : null}
+
+          {section === 'by-build' ? (
+            <BuildRangeReport
+              projectId={projectId}
+              projectOptions={projectOptions}
+              buildOptions={buildOptions}
+              startBuildId={params.startBuildId ?? ''}
+              endBuildId={params.endBuildId ?? ''}
+            />
+          ) : null}
+
+          {section === 'by-date' ? (
+            <DateRangeReport startDate={params.startDate ?? ''} endDate={params.endDate ?? ''} />
+          ) : null}
+        </>
+      )}
+    </DetailShell>
+  )
+}
+
+async function BuildRangeReport({
+  projectId,
+  projectOptions,
+  buildOptions,
+  startBuildId,
+  endBuildId,
+}: {
+  projectId: string
+  projectOptions: readonly { value: string; label: string }[]
+  buildOptions: readonly { value: string; label: string }[]
+  startBuildId: string
+  endBuildId: string
+}) {
+  const ready = Boolean(projectId && startBuildId && endBuildId)
+  const report = ready
+    ? await serverFetchOrNull<RangeReport>('reports/by-build-range', {
+        query: { projectId, startBuildId, endBuildId },
+      })
+    : null
+
+  return (
+    <Panel
+      title="Build range report"
+      description="Everything reported between two builds of one project, inclusive."
+    >
+      <LiveGetForm action={BASE} style={FORM_STYLE}>
+        <input type="hidden" name="section" value="by-build" />
+        <Field label="Project" htmlFor="projectId" style={{ flex: '2 1 240px' }}>
+          <Select
+            id="projectId"
+            name="projectId"
+            defaultValue={projectId}
+            options={projectOptions}
+          />
+        </Field>
+        {/*
+          Both build pickers stay disabled until a project is chosen: their
+          options come from that project, and offering them empty would read
+          as though the project had no builds.
+        */}
+        <Field label="Start build" htmlFor="startBuildId" style={{ flex: '1 1 180px' }}>
+          <Select
+            id="startBuildId"
+            name="startBuildId"
+            defaultValue={startBuildId}
+            disabled={!projectId}
+            options={[
+              { value: '', label: projectId ? 'Select a build' : 'Choose a project first' },
+              ...buildOptions,
+            ]}
+          />
+        </Field>
+        <Field label="End build" htmlFor="endBuildId" style={{ flex: '1 1 180px' }}>
+          <Select
+            id="endBuildId"
+            name="endBuildId"
+            defaultValue={endBuildId}
+            disabled={!projectId}
+            options={[
+              { value: '', label: projectId ? 'Select a build' : 'Choose a project first' },
+              ...buildOptions,
+            ]}
+          />
+        </Field>
+        <LiveFormStatus />
+      </LiveGetForm>
+
+      <div style={{ marginTop: 'var(--space-5)' }}>
+        {!ready ? (
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+            Choose a project and both ends of the build range.
+          </p>
+        ) : report === null ? (
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+            That range could not be reported on. Check that both builds belong to the project you
+            picked.
+          </p>
+        ) : (
+          <BugBreakdownView
+            bugs={report.bugs}
+            csvHref={`${EXPORT}/by-build-range/export.csv?projectId=${projectId}&startBuildId=${startBuildId}&endBuildId=${endBuildId}`}
+          />
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+async function DateRangeReport({
+  startDate,
+  endDate,
+}: {
+  startDate: string
+  endDate: string
+}) {
+  const ready = Boolean(startDate && endDate)
+  /**
+   * The API validates the ordering too, but catching it here means the user
+   * gets a sentence instead of a failed request — and no request is sent.
+   * Both values are `YYYY-MM-DD`, so a string compare is a date compare.
+   */
+  const inverted = ready && startDate > endDate
+  const report =
+    ready && !inverted
+      ? await serverFetchOrNull<RangeReport>('reports/by-date', { query: { startDate, endDate } })
+      : null
+
+  return (
+    <Panel
+      title="Period report"
+      description="Everything reported across your projects between two dates."
+    >
+      <LiveGetForm action={BASE} style={FORM_STYLE}>
+        <input type="hidden" name="section" value="by-date" />
+        <Field label="From" htmlFor="startDate" style={{ flex: '1 1 180px' }}>
+          <Input id="startDate" name="startDate" type="date" defaultValue={startDate} />
+        </Field>
+        <Field label="To" htmlFor="endDate" style={{ flex: '1 1 180px' }}>
+          <Input id="endDate" name="endDate" type="date" defaultValue={endDate} />
+        </Field>
+        <LiveFormStatus />
+      </LiveGetForm>
+
+      <div style={{ marginTop: 'var(--space-5)' }}>
+        {!ready ? (
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>Choose both ends of the period.</p>
+        ) : inverted ? (
+          <p role="alert" style={{ margin: 0, color: 'var(--status-error-fg)' }}>
+            The start date is after the end date.
+          </p>
+        ) : report === null ? (
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+            That period could not be reported on. Refresh in a moment.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-secondary)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
+              {formatDate(startDate)} – {formatDate(endDate)}
+            </p>
+            <BugBreakdownView
+              bugs={report.bugs}
+              csvHref={`${EXPORT}/by-date/export.csv?startDate=${startDate}&endDate=${endDate}`}
+            />
+          </div>
+        )}
+      </div>
+    </Panel>
   )
 }

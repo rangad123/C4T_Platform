@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { requireRole } from '@/lib/auth/session'
 import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
+import { AppShell } from '@/components/admin/AppShell'
 
 export const metadata: Metadata = {
   title: 'Customer',
@@ -32,7 +33,7 @@ const CUSTOMER_SECTIONS: readonly SidebarSection[] = [
   {
     label: 'Insights',
     links: [
-      { href: '/app/customer/reports', label: 'Reports', icon: 'line-chart', disabled: true },
+      { href: '/app/customer/reports', label: 'Reports', icon: 'line-chart' },
       { href: '/app/customer/ratings', label: 'Ratings', icon: 'star', disabled: true },
     ],
   },
@@ -58,18 +59,18 @@ export default async function CustomerLayout({ children }: { children: React.Rea
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
 
   return (
-    <div style={{ display: 'flex', minHeight: '100dvh', background: 'var(--surface-sunken)' }}>
-      <Sidebar
-        userName={displayName}
-        role={user.role}
-        sections={CUSTOMER_SECTIONS}
-        homeHref="/app/customer"
-        portalLabel="Customer"
-      />
-
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {children}
-      </div>
-    </div>
+    <AppShell
+      nav={
+        <Sidebar
+          userName={displayName}
+          role={user.role}
+          sections={CUSTOMER_SECTIONS}
+          homeHref="/app/customer"
+          portalLabel="Customer"
+        />
+      }
+    >
+      {children}
+    </AppShell>
   )
 }

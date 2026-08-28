@@ -21,6 +21,12 @@
   margin-bottom: var(--space-3);
 }
 
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
 .section {
   display: flex;
   flex-direction: column;
@@ -107,6 +113,12 @@
   min-width: 0;
 }
 
+/* The icon stands in for the name only on the collapsed desktop rail. Both are
+   always in the DOM — see the note at the markup. */
+.userIcon {
+  display: none;
+}
+
 .userName {
   font-size: var(--type-body-sm-size);
   font-weight: var(--fw-medium);
@@ -161,6 +173,10 @@
   padding-right: 0;
 }
 
+.sidebar.collapsed .userIcon {
+  display: inline-flex;
+}
+
 /* Collapsed rail has no room for the logo and the toggle side by side —
    stack them instead of hiding either one. */
 .sidebar.collapsed .brandRow {
@@ -193,10 +209,157 @@
   outline-offset: 2px;
 }
 
+/* The mobile menu button. Hidden on desktop, where `.toggle` (collapse) is
+   the control that makes sense. */
+.menuButton {
+  display: none;
+}
+
 /* Respect the platform-wide motion rule: transitions are opt-in, and
    prefers-reduced-motion zeroes them. */
 @media (prefers-reduced-motion: no-preference) {
   .sidebar {
     transition: width 200ms cubic-bezier(0.2, 0, 0, 1);
+  }
+}
+
+/* ── Mobile ──────────────────────────────────────────────────────────────────
+
+   Below 900px the rail becomes a full-width header bar: logo on the left, a
+   menu button on the right, and the nav revealed underneath when opened.
+
+   WHY NOT REUSE THE COLLAPSED RAIL. A 64px icon strip still permanently costs
+   17% of a 375px viewport, and the icons alone are not labelled enough to
+   navigate by on a phone. WHY NOT AN OFF-CANVAS DRAWER: it needs a scrim, a
+   focus trap and Escape handling to be correct, and a disclosure that pushes
+   the page down needs none of that — the nav is in DOM order right after the
+   button that opens it, so a screen reader and the tab order already agree.
+
+   The desktop collapse preference is deliberately NOT what opens this. That
+   value persists in localStorage, and a nav menu that reopens itself on every
+   page load would be wrong; `mobileOpen` is ephemeral component state that
+   always starts closed. */
+
+@media (max-width: 900px) {
+  .sidebar,
+  .sidebar.collapsed {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    width: 100%;
+    height: auto;
+    max-height: 100dvh;
+    padding: var(--space-3) var(--space-4);
+    gap: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  /* The rail's own width transition would animate the header bar on every
+     resize; there is nothing to animate here. */
+  .sidebar {
+    transition: none;
+  }
+
+  .sidebar .brandRow,
+  .sidebar.collapsed .brandRow {
+    flex-direction: row;
+    margin-bottom: 0;
+    padding: 0;
+  }
+
+  /* Restore what the collapsed rail hides — on mobile the open menu is the
+     full labelled list, not an icon strip. */
+  .sidebar.collapsed .sectionLabel,
+  .sidebar.collapsed .linkLabel {
+    display: initial;
+  }
+
+  .sidebar.collapsed .userMeta {
+    display: flex;
+  }
+
+  /* The name is shown here, so the stand-in icon is not needed. */
+  .sidebar.collapsed .userIcon {
+    display: none;
+  }
+
+  .sidebar.collapsed .link {
+    justify-content: flex-start;
+    padding: 0 var(--space-3);
+  }
+
+  .sidebar.collapsed .section + .section {
+    border-top: none;
+    padding-top: 0;
+  }
+
+  /* Alignment only — `display` is owned by the open/closed pair below, and
+     setting it here too would outrank them: `.sidebar.collapsed .user` scores
+     higher than `.sidebar .user`, so a collapsed rail would leak its user
+     block into the closed mobile bar. */
+  .sidebar.collapsed .user {
+    justify-content: flex-start;
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+
+  /* Closed: the bar is just the brand row. `display: none` rather than a
+     height animation, so nothing inside stays focusable while hidden.
+     Both selectors are written at matching specificity so the open rules
+     below win on source order alone rather than by out-scoring these. */
+  .sidebar.collapsed .nav,
+  .sidebar.collapsed .user,
+  .sidebar.collapsed .spacer,
+  .sidebar .nav,
+  .sidebar .user,
+  .sidebar .spacer {
+    display: none;
+  }
+
+  .sidebarMobileOpen.collapsed .nav,
+  .sidebarMobileOpen .nav {
+    display: flex;
+    gap: var(--space-5);
+    padding-top: var(--space-5);
+    overflow-y: auto;
+  }
+
+  .sidebarMobileOpen.collapsed .user,
+  .sidebarMobileOpen .user {
+    display: flex;
+  }
+
+  /* The collapse toggle is meaningless when the rail is a full-width bar. */
+  .toggle {
+    display: none;
+  }
+
+  .menuButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    height: 36px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-input);
+    background: var(--surface-canvas);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--type-body-sm-size);
+    font-weight: var(--fw-medium);
+    cursor: pointer;
+    transition: var(--transition-control);
+  }
+
+  .menuButton:hover {
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+  }
+
+  .menuButton:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
   }
 }

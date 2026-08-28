@@ -27,7 +27,7 @@ import { formString, formTrimmed } from '@/lib/form-data'
  * an ADJUSTMENT against it, which is what keeps the ledger auditable.
  */
 
-const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'] as const
+const STATUSES = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'] as const
 const PAYMENT_METHODS = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
 
 /**

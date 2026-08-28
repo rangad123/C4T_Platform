@@ -122,6 +122,14 @@ async function assertCanDownload(
 
   if (file.scope === FileScope.AVATAR || file.scope === FileScope.ORG_LOGO) return
 
+  /**
+   * Published BY the platform TO its users — the blank NDA, for instance. Any
+   * signed-in account may fetch one. This is why `PUT /settings/nda-template`
+   * refuses a file of any other scope: pointing a setting at, say, a
+   * TESTER_DOCUMENT would hand that private file to everyone.
+   */
+  if (file.scope === FileScope.PLATFORM_DOCUMENT) return
+
   if (file.scope === FileScope.BUG_ATTACHMENT) {
     const attachment = await prisma.bugAttachment.findFirst({
       where: { fileId: file.id },
@@ -131,6 +139,24 @@ async function assertCanDownload(
       const ctx = await bugRelations(user, attachment.bugId)
       if (!ctx) throw new NotFoundError('File')
       authorize(user, 'bug.read', ctx.relations)
+      return
+    }
+  }
+
+  /**
+   * A project's app logo. Resolved through the project rather than treated as
+   * open like AVATAR/ORG_LOGO: the app may be unreleased, so only people with
+   * read access to the project — its org and its assigned testers — see it.
+   */
+  if (file.scope === FileScope.PROJECT_LOGO) {
+    const project = await prisma.project.findFirst({
+      where: { logoFileId: file.id },
+      select: { id: true },
+    })
+    if (project) {
+      const ctx = await projectRelations(user, project.id)
+      if (!ctx) throw new NotFoundError('File')
+      authorize(user, 'project.read', ctx.relations)
       return
     }
   }

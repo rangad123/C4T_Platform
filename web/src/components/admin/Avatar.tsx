@@ -1,5 +1,4 @@
 import type { CSSProperties } from 'react'
-import { SiteImage } from '@/components/ds/marketing/SiteImage'
 
 export type AvatarSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -30,13 +29,23 @@ const SIZE_PX: Record<AvatarSize, number> = {
 /**
  * Avatar with a coloured-initials fallback.
  *
- * The picture is served via the SiteImage component (which already knows
- * how to hit `/api/v1/files/<id>/download-url`). When `fileId` is absent
- * the initials render over a deterministic background colour so two people
- * with the same initials do not collide visually.
- *
- * Two-line initials ("Alex Smith" → "AS") are kept short to fit a square
+ * When `fileId` is absent the initials render over a deterministic background
+ * colour, so two people with the same initials do not collide visually.
+ * Initials are kept to two characters ("Alex Smith" → "AS") to fit the square
  * without overflow at every size.
+ *
+ * ── WHY A PLAIN `<img>` AND NOT `SiteImage`
+ *
+ * `SiteImage` wraps `next/image`, and the image optimizer cannot fetch a
+ * private file. For a same-origin `src` it builds a mock request carrying no
+ * headers, so the signed-URL mint runs without the session cookie and 403s,
+ * and it does not follow the redirect that route returns. `SiteImage` exists
+ * for the marketing photography — remote, public, `remotePatterns`-listed URLs
+ * — which is a different problem from an authenticated per-user file. The
+ * route at `/app/files/[fileId]` explains the mechanics in full.
+ *
+ * Dimensions are explicit and the box is a fixed square, so there is no layout
+ * shift for the optimizer to have prevented.
  */
 export function Avatar({ name, fileId, size = 'md', style, tint }: AvatarProps) {
   const px = SIZE_PX[size]
@@ -67,12 +76,15 @@ export function Avatar({ name, fileId, size = 'md', style, tint }: AvatarProps) 
       }}
     >
       {fileId ? (
-        <SiteImage
-          src={`/api/v1/files/${fileId}/download-url`}
+        // eslint-disable-next-line @next/next/no-img-element -- see the note above
+        <img
+          src={`/app/files/${fileId}`}
           alt={name}
           width={px}
           height={px}
-          style={{ display: 'block', width: '100%', height: '100%' }}
+          loading="lazy"
+          decoding="async"
+          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
         />
       ) : (
         initials

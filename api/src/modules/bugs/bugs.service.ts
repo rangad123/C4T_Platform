@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, ForbiddenError, BadRequestError, ConflictError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import { bugScope } from '../../lib/access/scopes.js'
+import { isAdminSide } from '../../middleware/authorize.js'
 import { bugRelations, projectRelations, type RelationSet } from '../../lib/access/relations.js'
 import {
   authorize,
@@ -25,12 +26,16 @@ const bugSelect = {
   reference: true,
   title: true,
   description: true,
+  preCondition: true,
   stepsToReproduce: true,
   expectedResult: true,
   actualResult: true,
   severity: true,
   status: true,
   reproducibility: true,
+  occurrence: true,
+  outOf: true,
+  videoUrl: true,
   type: true,
   featureId: true,
   feature: { select: { id: true, name: true } },
@@ -82,6 +87,7 @@ export async function listBugs(user: Express.AuthenticatedUser, query: ListBugsQ
     ...(query.type ? { type: query.type } : {}),
     ...(query.featureId ? { featureId: query.featureId } : {}),
     ...(query.reportedById ? { reportedById: query.reportedById } : {}),
+    ...(query.excludeReportedById ? { reportedById: { not: query.excludeReportedById } } : {}),
     ...(query.startDate || query.endDate
       ? {
           createdAt: {
@@ -139,6 +145,7 @@ export async function exportBugsCSV(
     ...(query.type ? { type: query.type } : {}),
     ...(query.featureId ? { featureId: query.featureId } : {}),
     ...(query.reportedById ? { reportedById: query.reportedById } : {}),
+    ...(query.excludeReportedById ? { reportedById: { not: query.excludeReportedById } } : {}),
     ...(query.startDate || query.endDate
       ? {
           createdAt: {
@@ -164,6 +171,21 @@ export async function exportBugsCSV(
     orderBy: buildOrderBy(query.sort, query.order, BUG_SORT_FIELDS, 'createdAt'),
   })
 
+  /**
+   * Whether the reporter's email address is included.
+   *
+   * A CUSTOMER reaches this through the Reports module, and a tester's email
+   * is direct-contact PII that a bug report does not need — including it let a
+   * client download every tester's address and contact them off-platform. The
+   * display name and country stay: the client is paying for this testing and
+   * the reference product shows tester names to clients. The address is the
+   * part that has no reporting purpose.
+   *
+   * Row and header are built from the same flag so they cannot fall out of
+   * step and shift every column after "Reporter".
+   */
+  const includeReporterEmail = isAdminSide(user)
+
   const rows = items.map((b) => [
     b.reference,
     b.title,
@@ -179,7 +201,7 @@ export async function exportBugsCSV(
     ]
       .filter(Boolean)
       .join(' '),
-    b.reportedBy?.email ?? '',
+    ...(includeReporterEmail ? [b.reportedBy?.email ?? ''] : []),
     b.reportedBy?.testerProfile?.countryCode ?? '',
     b.deviceModel ?? '',
     b.osName ?? '',
@@ -208,7 +230,7 @@ export async function exportBugsCSV(
       'Project reference',
       'Project title',
       'Reporter',
-      'Reporter email',
+      ...(includeReporterEmail ? ['Reporter email'] : []),
       'Reporter country',
       'Device',
       'OS',

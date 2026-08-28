@@ -11,6 +11,11 @@ export const metadata: Metadata = {
  * land here. Client-side navigations from the login form's "Create an account"
  * link land on the intercepting route `app/(marketing)/@auth/(.)register/page.tsx`
  * instead, which renders the same form inside a modal over the login page.
+ *
+ * No `<main>` here: `MarketingShell` (via the route-group layout) already
+ * renders `<main id="main">`, and the skip link targets that id. A second one
+ * nested inside it made two `main` landmarks and two elements sharing one DOM
+ * id — the same mistake `app/not-found.tsx` calls out.
  */
 export default async function RegisterPage({
   searchParams,
@@ -29,8 +34,7 @@ export default async function RegisterPage({
   // path Next expects, and the form below receives the awaited value.
   const params = await searchParams
   return (
-    <main
-      id="main"
+    <div
       style={{
         padding: 'var(--space-11) var(--space-7)',
         display: 'flex',
@@ -50,6 +54,6 @@ export default async function RegisterPage({
       >
         <RegisterForm searchParams={Promise.resolve(params)} />
       </div>
-    </main>
+    </div>
   )
 }

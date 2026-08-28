@@ -16,7 +16,7 @@ const BASE = '/app/admin/transactions'
 // underlying TransactionType enum and every existing CUSTOMER_* row are
 // untouched on the API side; this is a UI scope, not a schema change).
 const TYPES = ['TESTER_EARNING', 'TESTER_PAYOUT', 'ADJUSTMENT'] as const
-const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'] as const
+const STATUSES = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'] as const
 const PAYMENT_METHODS = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
 const SORT_OPTIONS = [
   { value: 'occurredAt', label: 'Occurred' },

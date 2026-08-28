@@ -102,30 +102,33 @@ export function ListFilters({
     texts.some((t) => t.value) ||
     Boolean(sort?.value)
 
-  // One column per control, plus one that shrink-wraps the buttons.
-  const columns = [
-    ...(search ? ['minmax(220px, 1fr)'] : []),
-    ...selects.map(() => 'minmax(170px, 220px)'),
-    ...texts.map(() => 'minmax(140px, 170px)'),
-    ...(sort ? ['minmax(150px, 190px)', 'minmax(130px, 150px)'] : []),
-    'auto',
-  ].join(' ')
-
   return (
+    /**
+     * A wrapping flex row, not a grid with one column per control.
+     *
+     * The grid this replaced built an explicit `grid-template-columns` from
+     * the filter list — `minmax(170px, 220px)` each. An explicit track list
+     * cannot wrap, so five filters demanded ~1000px and the whole page
+     * scrolled sideways on a phone. `flex-wrap` lets each control keep its
+     * preferred width and drop to the next line when there is no room.
+     *
+     * The `flex` bases below preserve the old proportions: search grows at
+     * twice the rate of a select, and the short code inputs stay narrow.
+     */
     <LiveGetForm
       action={action}
       style={{
-        display: 'grid',
-        gridTemplateColumns: columns,
+        display: 'flex',
+        flexWrap: 'wrap',
         gap: 'var(--space-4)',
-        alignItems: 'end',
+        alignItems: 'flex-end',
       }}
     >
       {Object.entries(hidden ?? {}).map(([name, value]) =>
         value ? <input key={name} type="hidden" name={name} value={value} /> : null,
       )}
       {search ? (
-        <Field label="Search" htmlFor="search">
+        <Field label="Search" htmlFor="search" style={{ flex: '2 1 220px' }}>
           <Input
             id="search"
             name="search"
@@ -138,7 +141,12 @@ export function ListFilters({
       ) : null}
 
       {selects.map((filter) => (
-        <Field key={filter.name} label={filter.label} htmlFor={filter.name}>
+        <Field
+          key={filter.name}
+          label={filter.label}
+          htmlFor={filter.name}
+          style={{ flex: '1 1 170px', maxWidth: 220 }}
+        >
           <Select
             id={filter.name}
             name={filter.name}
@@ -152,7 +160,12 @@ export function ListFilters({
       ))}
 
       {texts.map((filter) => (
-        <Field key={filter.name} label={filter.label} htmlFor={filter.name}>
+        <Field
+          key={filter.name}
+          label={filter.label}
+          htmlFor={filter.name}
+          style={{ flex: '1 1 140px', maxWidth: 170 }}
+        >
           <Input
             id={filter.name}
             name={filter.name}
@@ -166,7 +179,7 @@ export function ListFilters({
 
       {sort ? (
         <>
-          <Field label="Sort by" htmlFor={sort.name}>
+          <Field label="Sort by" htmlFor={sort.name} style={{ flex: '1 1 150px', maxWidth: 190 }}>
             <Select
               id={sort.name}
               name={sort.name}
@@ -174,7 +187,7 @@ export function ListFilters({
               options={[{ value: '', label: 'Default' }, ...sort.options]}
             />
           </Field>
-          <Field label="Order" htmlFor={sort.orderName}>
+          <Field label="Order" htmlFor={sort.orderName} style={{ flex: '1 1 130px', maxWidth: 150 }}>
             <Select
               id={sort.orderName}
               name={sort.orderName}
@@ -188,7 +201,15 @@ export function ListFilters({
         </>
       ) : null}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-3)',
+          flex: '0 0 auto',
+          marginLeft: 'auto',
+        }}
+      >
         <LiveFormStatus />
         {hasApplied ? (
           <Button href={action} type="button" variant="ghost">

@@ -46,8 +46,21 @@ interface Assignment {
   } | null
 }
 
+/** A row of `GET /v1/catalog/me/browsers` — what this tester actually runs. */
+interface TesterBrowser {
+  id: string
+  browser: { id: string; name: string }
+  browserVersion: { id: string; version: string } | null
+  operatingSystem: { id: string; name: string; kind: string } | null
+}
+
 const ERROR_MESSAGES: Record<string, string> = {
   invalid: 'Some fields were missing or too short. Check the title, description and steps.',
+  evidence:
+    'Attach a screenshot or recording, or paste a video link, before filing. A report nobody can see is a report nobody can act on.',
+  'occurrence-pair':
+    'Give both how many times it happened and how many attempts you made, or leave both blank.',
+  'occurrence-range': 'It cannot have happened more times than you tried.',
   forbidden: 'You are not assigned to that project, so you cannot report against it.',
   missing: 'That project no longer exists.',
   closed: 'That project is not currently accepting bug reports.',
@@ -66,7 +79,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 export default async function NewTesterBugPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>
+  searchParams: Promise<{ error?: string; projectId?: string; buildId?: string }>
 }) {
   await requireRole(['TESTER'])
   const params = await searchParams
@@ -81,6 +94,48 @@ export default async function NewTesterBugPage({
       a.project !== null &&
       !CLOSED_TO_REPORTS.includes(a.project.status),
   )
+
+  /**
+   * Arriving from a build workspace ("Report a bug" on the project page)
+   * carries the project and build in the URL, so the form opens already
+   * pointed at what the tester was looking at. Landing here cold from the
+   * sidebar leaves the picker on the first reportable project.
+   *
+   * The preselection is only honoured when it matches a project the tester
+   * can actually report against — a hand-edited `?projectId=` for someone
+   * else's project falls back rather than pre-filling a value the API will
+   * refuse.
+   */
+  const preselected = reportable.find((a) => a.project?.id === params.projectId) ?? null
+  const activeProjectId = preselected?.project?.id ?? reportable[0]?.project?.id ?? ''
+
+  /**
+   * Features and the tester's registered browsers make the report specific:
+   * "sign up, on Chrome 128 / Windows 11" beats free-typed guesses. Both are
+   * best-effort — a failure leaves the fields as plain inputs rather than
+   * blocking the report, because an unfiled bug is worse than an unlabelled
+   * one.
+   */
+  const [features, myBrowsers] = await Promise.all([
+    activeProjectId
+      ? serverFetchOrNull<readonly { id: string; name: string }[]>(
+          `projects/${activeProjectId}/features`,
+          params.buildId ? { query: { buildId: params.buildId } } : undefined,
+        )
+      : Promise.resolve(null),
+    serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers'),
+  ])
+
+  const browserOptions = (myBrowsers ?? []).map((b) => {
+    const label = [
+      b.operatingSystem?.name,
+      b.browser.name,
+      b.browserVersion?.version,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    return { value: label, label }
+  })
 
   return (
     <DetailShell
@@ -119,18 +174,45 @@ export default async function NewTesterBugPage({
         >
           <Panel title="What and where">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              {/*
+                Carried through untouched when the form was opened from a
+                build workspace, so the report lands on the build the tester
+                was actually looking at rather than the project's default.
+                The API re-resolves it and refuses a build that isn't on the
+                named project.
+              */}
+              {params.buildId ? <input type="hidden" name="buildId" value={params.buildId} /> : null}
+
               <Field label="Project" htmlFor="projectId" required>
                 <Select
                   id="projectId"
                   name="projectId"
                   required
-                  defaultValue={reportable[0]?.project?.id ?? ''}
+                  defaultValue={activeProjectId}
                   options={reportable.map((a) => ({
                     value: a.project!.id,
                     label: `${a.project!.reference} — ${a.project!.title}`,
                   }))}
                 />
               </Field>
+
+              {features && features.length > 0 ? (
+                <Field
+                  label="Feature"
+                  htmlFor="featureId"
+                  hint="Which part of the product this is in. Tagging it means the team can see where defects cluster."
+                >
+                  <Select
+                    id="featureId"
+                    name="featureId"
+                    defaultValue=""
+                    options={[
+                      { value: '', label: 'Not sure' },
+                      ...features.map((f) => ({ value: f.id, label: f.name })),
+                    ]}
+                  />
+                </Field>
+              ) : null}
 
               <Field
                 label="Title"
@@ -155,6 +237,14 @@ export default async function NewTesterBugPage({
                 hint="At least 10 characters."
               >
                 <Textarea id="description" name="description" rows={4} required minLength={10} maxLength={10000} />
+              </Field>
+
+              <Field
+                label="Pre-condition"
+                htmlFor="preCondition"
+                hint="The state the app had to be in before your steps begin — signed in as a returning customer, one item already in the cart. Setup, not a step."
+              >
+                <Textarea id="preCondition" name="preCondition" rows={2} maxLength={4000} />
               </Field>
 
               <Field
@@ -205,6 +295,19 @@ export default async function NewTesterBugPage({
                   options={REPRODUCIBILITIES.map((value) => ({ value, label: titleCase(value) }))}
                 />
               </Field>
+              {/*
+                The evidence behind the summary above. "Sometimes" tells a
+                triager very little; "3 out of 5" tells them how hard it will
+                be to see for themselves. Both optional — but the API refuses
+                one without the other, and refuses an occurrence larger than
+                the attempts.
+              */}
+              <Field label="Times it happened" htmlFor="occurrence" hint="Optional. Leave both blank if you didn't count.">
+                <Input id="occurrence" name="occurrence" type="number" min={0} max={10000} placeholder="3" />
+              </Field>
+              <Field label="Out of attempts" htmlFor="outOf" hint="Optional, but required if you filled the field to the left.">
+                <Input id="outOf" name="outOf" type="number" min={1} max={10000} placeholder="5" />
+              </Field>
               <Field label="Type" htmlFor="type" hint="Optional.">
                 <Select
                   id="type"
@@ -233,8 +336,28 @@ export default async function NewTesterBugPage({
               <Field label="OS version" htmlFor="osVersion">
                 <Input id="osVersion" name="osVersion" maxLength={40} placeholder="14" />
               </Field>
-              <Field label="Browser" htmlFor="browser">
-                <Input id="browser" name="browser" maxLength={80} placeholder="Chrome 128" />
+              {/*
+                A tester who registered their browsers under Assets picks one
+                instead of retyping it — the string that reaches the API is
+                the same either way, so nothing downstream has to know which
+                path produced it. With no registered browsers this stays the
+                plain input it always was rather than an empty dropdown.
+              */}
+              <Field
+                label="Browser"
+                htmlFor="browser"
+                hint={browserOptions.length > 0 ? 'From the browsers on your profile.' : undefined}
+              >
+                {browserOptions.length > 0 ? (
+                  <Select
+                    id="browser"
+                    name="browser"
+                    defaultValue=""
+                    options={[{ value: '', label: 'Not applicable' }, ...browserOptions]}
+                  />
+                ) : (
+                  <Input id="browser" name="browser" maxLength={80} placeholder="Chrome 128" />
+                )}
               </Field>
               <Field label="App version" htmlFor="appVersion">
                 <Input id="appVersion" name="appVersion" maxLength={60} placeholder="4.3.1" />
@@ -247,9 +370,24 @@ export default async function NewTesterBugPage({
 
           <Panel
             title="Evidence"
-            description="A screenshot or short recording is the fastest way to get a report reproduced. Optional, but it makes a real difference."
+            description="Attach a screenshot or recording, or paste a link to one. This is what turns a description into something the team can act on, so at least one is required."
           >
-            <EvidenceUpload />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <Field
+                label="Video link"
+                htmlFor="videoUrl"
+                hint="A publicly reachable recording — Loom, Drive, anything the team can open without an account."
+              >
+                <Input
+                  id="videoUrl"
+                  name="videoUrl"
+                  type="url"
+                  maxLength={2000}
+                  placeholder="https://…"
+                />
+              </Field>
+              <EvidenceUpload />
+            </div>
           </Panel>
 
           <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { requireRole } from '@/lib/auth/session'
 import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
+import { AppShell } from '@/components/admin/AppShell'
 
 export const metadata: Metadata = {
   title: 'Tester',
@@ -23,6 +24,7 @@ const TESTER_SECTIONS: readonly SidebarSection[] = [
   {
     label: 'Work',
     links: [
+      { href: '/app/tester/projects', label: 'Projects', icon: 'briefcase' },
       { href: '/app/tester/bugs', label: 'Bugs', icon: 'clipboard-check' },
       { href: '/app/tester/test-cases', label: 'Test cases', icon: 'test-tube-diagonal' },
     ],
@@ -33,7 +35,10 @@ const TESTER_SECTIONS: readonly SidebarSection[] = [
   },
   {
     label: 'Account',
-    links: [{ href: '/app/tester/profile', label: 'Your profile', icon: 'user-check' }],
+    links: [
+      { href: '/app/tester/profile', label: 'Your profile', icon: 'user-check' },
+      { href: '/app/tester/settings', label: 'Settings', icon: 'settings' },
+    ],
   },
 ]
 
@@ -43,18 +48,18 @@ export default async function TesterLayout({ children }: { children: React.React
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
 
   return (
-    <div style={{ display: 'flex', minHeight: '100dvh', background: 'var(--surface-sunken)' }}>
-      <Sidebar
-        userName={displayName}
-        role={user.role}
-        sections={TESTER_SECTIONS}
-        homeHref="/app/tester"
-        portalLabel="Tester"
-      />
-
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {children}
-      </div>
-    </div>
+    <AppShell
+      nav={
+        <Sidebar
+          userName={displayName}
+          role={user.role}
+          sections={TESTER_SECTIONS}
+          homeHref="/app/tester"
+          portalLabel="Tester"
+        />
+      }
+    >
+      {children}
+    </AppShell>
   )
 }

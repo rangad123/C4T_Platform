@@ -40,6 +40,8 @@ export const createProjectSchema = z
     testersCanSeeOtherBugs: z.boolean().optional(),
     startDate: z.coerce.date().optional(),
     endDate: z.coerce.date().optional(),
+    /** Logo of the app under test, uploaded under the PROJECT_LOGO scope. */
+    logoFileId: z.string().cuid().nullable().optional(),
   })
   .refine((d) => !d.startDate || !d.endDate || d.endDate >= d.startDate, {
     message: 'End date must be on or after the start date',
@@ -56,6 +58,7 @@ export const updateProjectSchema = z.object({
   targetLanguages: z.array(isoLanguage).max(40).optional(),
   maxTesters: z.coerce.number().int().min(1).max(10_000).nullable().optional(),
   testersCanSeeOtherBugs: z.boolean().optional(),
+  logoFileId: z.string().cuid().nullable().optional(),
   startDate: z.coerce.date().nullable().optional(),
   endDate: z.coerce.date().nullable().optional(),
   progressPercent: z.coerce.number().int().min(0).max(100).optional(),

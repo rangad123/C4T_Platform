@@ -287,11 +287,21 @@ function announcementAudienceFor(role: Role): AnnouncementAudience[] {
   return map[role]
 }
 
+/**
+ * `projectId` / `buildId` narrow the list to one project or build. Neither
+ * widens access: they are ANDed with the scope clause below, so a tester
+ * passing someone else's build id gets an empty list, not a leak.
+ */
+const listAnnouncementsQuery = paginationQuery.extend({
+  projectId: z.string().cuid().optional(),
+  buildId: z.string().cuid().optional(),
+})
+
 communicationRouter.get(
   '/announcements',
-  validate({ query: paginationQuery }),
+  validate({ query: listAnnouncementsQuery }),
   async (req, res) => {
-    const query = validatedQuery<z.infer<typeof paginationQuery>>(res)
+    const query = validatedQuery<z.infer<typeof listAnnouncementsQuery>>(res)
     const now = new Date()
 
     // Project-scoped announcements are only visible to users with a seat
@@ -302,16 +312,33 @@ communicationRouter.get(
       ? [{}]
       : [{ projectId: null }]
     if (req.user!.role === Role.TESTER) {
-      projectScopeOr.push({
-        project: {
-          assignments: {
-            some: {
-              testerId: req.user!.id,
-              status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] },
-            },
-          },
-        },
-      })
+      /**
+       * A live roster row for this tester. `ProjectAssignment` is unique on
+       * `[projectId, testerId]` and carries the ONE build they were invited
+       * under, so the same filter answers both "are they on this project"
+       * and "are they on this build" depending on where it is anchored.
+       */
+      const assignedToTester = {
+        testerId: req.user!.id,
+        status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] },
+      }
+
+      projectScopeOr.push(
+        // Project-wide: every tester with a live seat on the project.
+        { buildId: null, project: { assignments: { some: assignedToTester } } },
+        /**
+         * Build-narrowed: only the testers actually on that build.
+         *
+         * Anchoring on `build.assignments` rather than `project.assignments`
+         * is the whole point. The composer offers a build as an optional
+         * narrowing of a project announcement, and until now the read path
+         * ignored `buildId` entirely — so "iOS build 3 is paused" reached
+         * every tester on the project, including those on the Android build
+         * who then had nothing to act on. It also leaked build names to
+         * testers who were never given that build.
+         */
+        { build: { assignments: { some: assignedToTester } } },
+      )
     } else if (req.user!.role === Role.CUSTOMER) {
       projectScopeOr.push({
         project: {
@@ -323,11 +350,29 @@ communicationRouter.get(
     const where: Prisma.AnnouncementWhereInput = {
       audience: { in: announcementAudienceFor(req.user!.role) },
       publishedAt: { not: null, lte: now },
-      OR: [
-        { expiresAt: null },
-        { expiresAt: { gt: now } },
+      AND: [
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+        { OR: projectScopeOr },
+        /**
+         * `projectId` and `buildId` are CONTEXT filters, not equality filters:
+         * each keeps the broader-scope rows that also apply here. Asking for
+         * one build returns that build's announcements plus the project-wide
+         * ones; asking for a project returns its own plus the platform-wide
+         * ones.
+         *
+         * Strict equality would hide exactly the message a tester most needs
+         * in a build workspace — "the project is paused" is stored with a null
+         * `buildId`, so `buildId = Y` alone would drop it.
+         *
+         * Nothing needs strict equality yet. If an admin list ever wants
+         * "this project only", that is a separate parameter, not a change of
+         * meaning here.
+         */
+        ...(query.projectId
+          ? [{ OR: [{ projectId: query.projectId }, { projectId: null }] }]
+          : []),
+        ...(query.buildId ? [{ OR: [{ buildId: query.buildId }, { buildId: null }] }] : []),
       ],
-      AND: [{ OR: projectScopeOr }],
     }
 
     const [items, total] = await Promise.all([
@@ -340,6 +385,8 @@ communicationRouter.get(
           audience: true,
           projectId: true,
           project: { select: { id: true, reference: true, title: true } },
+          buildId: true,
+          build: { select: { id: true, name: true } },
           publishedAt: true,
           expiresAt: true,
           author: { select: { id: true, firstName: true, lastName: true } },

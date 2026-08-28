@@ -1,6 +1,8 @@
 import { DetailShell } from '@/components/admin/DetailShell'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Modal } from '@/components/admin/Modal'
+import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
@@ -10,7 +12,7 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
-import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
+import { serverFetchOrNull } from '@/lib/api/server'
 import { requireRole } from '@/lib/auth/session'
 import { CountryLabel } from '@/components/admin/CountryFlag'
 import { formatDate, personName, titleCase } from '@/lib/admin/format'
@@ -55,7 +57,7 @@ interface OrganisationDetail {
   _count: { projects: number; transactions: number }
 }
 
-const NOTICES: Record<string, { tone: 'success' | 'warning' | 'error'; message: string }> = {
+const NOTICES: Record<string, NoticeCopy> = {
   'profile-saved': { tone: 'success', message: 'Profile saved.' },
   'member-added': { tone: 'success', message: 'Member added.' },
   'member-role-saved': { tone: 'success', message: 'Member role updated.' },
@@ -76,30 +78,6 @@ const NOTICES: Record<string, { tone: 'success' | 'warning' | 'error'; message: 
   failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
 }
 
-const NOTICE_TONES = {
-  success: { background: 'var(--status-success-bg)', color: 'var(--status-success-fg)' },
-  warning: { background: 'var(--status-warning-bg)', color: 'var(--status-warning-fg)' },
-  error: { background: 'var(--status-error-bg)', color: 'var(--status-error-fg)' },
-} as const
-
-function Notice({ code }: { code: string | undefined }) {
-  const notice = code ? NOTICES[code] : undefined
-  if (!notice) return null
-  return (
-    <p
-      role={notice.tone === 'success' ? 'status' : 'alert'}
-      style={{
-        margin: 0,
-        padding: 'var(--space-4) var(--space-5)',
-        borderRadius: 'var(--radius-card)',
-        fontSize: 'var(--type-body-sm-size)',
-        ...NOTICE_TONES[notice.tone],
-      }}
-    >
-      {notice.message}
-    </p>
-  )
-}
 
 /**
  * `/app/customer/organisation` — the customer's own organisation.
@@ -203,9 +181,13 @@ export default async function CustomerOrganisationPage({
             <form action={removeOrgMemberAction}>
               <input type="hidden" name="id" value={organisation.id} />
               <input type="hidden" name="userId" value={member.user.id} />
-              <SubmitButton variant="ghost" style={{ color: 'var(--status-error-fg)' }} pendingLabel="Removing…">
+              <ConfirmSubmit
+                iconLeft=""
+                size="md"
+                question={`Remove ${personName(member.user)} from ${organisation.name}?`}
+              >
                 Remove
-              </SubmitButton>
+              </ConfirmSubmit>
             </form>
           </span>
         ) : (
@@ -224,7 +206,7 @@ export default async function CustomerOrganisationPage({
       subtitle={organisation.slug}
       tabs={<SectionTabs basePath={DETAIL_PATH} tabs={SECTIONS} active={section} />}
     >
-      <Notice code={notice} />
+      <Notice code={notice} notices={NOTICES} />
 
       {section === 'profile' ? (
         <>

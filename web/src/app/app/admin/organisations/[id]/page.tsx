@@ -1,8 +1,10 @@
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Modal } from '@/components/admin/Modal'
 import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
+import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
@@ -112,7 +114,7 @@ interface AccountOption {
  * front of an admin, and the API's own wording is not always the wording the
  * reader needs.
  */
-const NOTICES: Record<string, { tone: 'success' | 'warning' | 'error'; message: string }> = {
+const NOTICES: Record<string, NoticeCopy> = {
   created: { tone: 'success', message: 'Organisation created. Add its owner below.' },
   'profile-saved': { tone: 'success', message: 'Profile saved.' },
   'status-saved': { tone: 'success', message: 'Status updated.' },
@@ -161,32 +163,6 @@ const NOTICES: Record<string, { tone: 'success' | 'warning' | 'error'; message: 
     tone: 'error',
     message: 'The organisations service did not accept that change. Try again in a moment.',
   },
-}
-
-const NOTICE_TONES = {
-  success: { background: 'var(--status-success-bg)', color: 'var(--status-success-fg)' },
-  warning: { background: 'var(--status-warning-bg)', color: 'var(--status-warning-fg)' },
-  error: { background: 'var(--status-error-bg)', color: 'var(--status-error-fg)' },
-} as const
-
-function Notice({ code }: { code: string | undefined }) {
-  const notice = code ? NOTICES[code] : undefined
-  if (!notice) return null
-
-  return (
-    <p
-      role={notice.tone === 'success' ? 'status' : 'alert'}
-      style={{
-        margin: 0,
-        padding: 'var(--space-4) var(--space-5)',
-        borderRadius: 'var(--radius-card)',
-        fontSize: 'var(--type-body-sm-size)',
-        ...NOTICE_TONES[notice.tone],
-      }}
-    >
-      {notice.message}
-    </p>
-  )
 }
 
 function accountLabel(account: AccountOption): string {
@@ -373,9 +349,13 @@ export default async function OrganisationDetailPage({
           <form action={removeOrganisationMember}>
             <input type="hidden" name="id" value={organisation.id} />
             <input type="hidden" name="userId" value={member.user.id} />
-            <SubmitButton variant="ghost" style={{ color: 'var(--status-error-fg)' }} pendingLabel="Removing…">
+            <ConfirmSubmit
+              iconLeft=""
+              size="md"
+              question={`Remove ${personName(member.user)} from ${organisation.name}?`}
+            >
               Remove
-            </SubmitButton>
+            </ConfirmSubmit>
           </form>
         </span>
       ),
@@ -459,7 +439,7 @@ export default async function OrganisationDetailPage({
         </>
       }
     >
-      <Notice code={notice} />
+      <Notice code={notice} notices={NOTICES} />
 
       {section === 'profile' ? (
         <>

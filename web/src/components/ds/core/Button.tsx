@@ -22,6 +22,23 @@ export interface ButtonProps {
    */
   prefetch?: boolean
   type?: 'button' | 'submit' | 'reset'
+  /**
+   * Submit-button name/value, for a form with more than one outcome — an
+   * Accept/Decline pair, say, where both submits share one set of fields and
+   * only differ in which value they post.
+   *
+   * Without these the only way to express that is one `<form>` per button,
+   * which forces the shared fields to belong to just one of them. Ignored on
+   * a link (`href`), where a name/value pair means nothing.
+   */
+  name?: string
+  value?: string
+  /**
+   * Associates the control with a `<form>` elsewhere in the document by id —
+   * the standard HTML mechanism for submitting inputs that do not sit inside
+   * their own form. Used by the admin bulk-action bars.
+   */
+  form?: string
   onClick?: (e: MouseEvent) => void
   className?: string
   style?: CSSProperties
@@ -102,6 +119,9 @@ export function Button({
   href,
   prefetch,
   type = 'button',
+  name,
+  value,
+  form,
   onClick,
   className,
   style,
@@ -169,6 +189,9 @@ export function Button({
     <button
       className={classes}
       type={type}
+      name={name}
+      value={value}
+      form={form}
       disabled={disabled}
       aria-disabled={disabled ? true : undefined}
       onClick={disabled ? undefined : onClick}

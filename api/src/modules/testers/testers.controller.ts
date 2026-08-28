@@ -61,6 +61,10 @@ export async function addDevice(req: Request, res: Response): Promise<void> {
   res.status(201).json({ data: await service.addDevice(req.user!.id, req.body) })
 }
 
+export async function updateDevice(req: Request, res: Response): Promise<void> {
+  res.json({ data: await service.updateDevice(req.user!.id, param(req, 'deviceId'), req.body) })
+}
+
 export async function removeDevice(req: Request, res: Response): Promise<void> {
   await service.removeDevice(req.user!.id, param(req, 'deviceId'))
   res.status(204).send()
@@ -90,6 +94,22 @@ export async function acceptNda(req: Request, res: Response): Promise<void> {
     action: 'tester.nda_accepted',
     entityType: 'TesterProfile',
     entityId: result.id,
+  })
+  res.json({ data: result })
+}
+
+export async function setNdaDocument(req: Request, res: Response): Promise<void> {
+  const { fileId } = req.body as { fileId: string }
+  const result = await service.setNdaDocument(req.user!.id, fileId)
+  // Audited separately from the click-through acceptance: returning a signed
+  // document is a different legal act from ticking a box, and the trail has
+  // to be able to tell them apart.
+  await recordAudit({
+    req,
+    action: 'tester.nda_document_uploaded',
+    entityType: 'TesterProfile',
+    entityId: result.id,
+    after: { fileId },
   })
   res.json({ data: result })
 }

@@ -51,6 +51,8 @@ export async function reportBugAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const projectId = formTrimmed(formData, 'projectId')
+  const buildId = formTrimmed(formData, 'buildId')
+  const featureId = formTrimmed(formData, 'featureId')
   const title = formTrimmed(formData, 'title')
   const description = formTrimmed(formData, 'description')
   const stepsToReproduce = formTrimmed(formData, 'stepsToReproduce')
@@ -64,6 +66,10 @@ export async function reportBugAction(formData: FormData): Promise<void> {
   const typeInput = formTrimmed(formData, 'type')
   const type = BUG_TYPES.includes(typeInput) ? typeInput : undefined
 
+  const preCondition = formTrimmed(formData, 'preCondition')
+  const videoUrl = formTrimmed(formData, 'videoUrl')
+  const occurrenceRaw = formTrimmed(formData, 'occurrence')
+  const outOfRaw = formTrimmed(formData, 'outOf')
   const deviceModel = formTrimmed(formData, 'deviceModel')
   const osName = formTrimmed(formData, 'osName')
   const osVersion = formTrimmed(formData, 'osVersion')
@@ -80,10 +86,50 @@ export async function reportBugAction(formData: FormData): Promise<void> {
     .filter(Boolean)
 
   // The API's own minimums. Bailing here rather than posting a request we
+  /**
+   * Errors send the tester back to the form. Carrying the project and build
+   * along means the picker reopens on what they were reporting against —
+   * without it, a rejected submit silently reassigns the report to whichever
+   * project happens to sort first, which is a far worse outcome than the
+   * error itself.
+   */
+  const back = (code: string): string => {
+    const sp = new URLSearchParams({ error: code })
+    if (projectId) sp.set('projectId', projectId)
+    if (buildId) sp.set('buildId', buildId)
+    return `${NEW_PATH}?${sp.toString()}`
+  }
+
   // know will 422 — the fields carry the same limits as native constraints,
   // so this is only reachable from a hand-built post.
   if (!projectId || title.length < 5 || description.length < 10 || stepsToReproduce.length < 5) {
-    redirect(`${NEW_PATH}?error=invalid`)
+    redirect(back('invalid'))
+  }
+
+  /**
+   * A defect nobody can see is a defect nobody can fix. The legacy platform
+   * enforced this too ("Please enter Bug Video or Screenshots"), and it is a
+   * product rule rather than an API one — `createBugSchema` accepts a report
+   * with no attachments, because an admin filing on a tester's behalf may
+   * genuinely have none. So it is checked here, where the rule belongs.
+   */
+  if (attachmentFileIds.length === 0 && !videoUrl) {
+    redirect(back('evidence'))
+  }
+
+  /**
+   * The API refuses an occurrence without its denominator (and vice versa),
+   * and refuses one larger than the other. Catching the pairing here turns
+   * what would be an opaque 422 into the same inline message every other
+   * validation failure on this form produces.
+   */
+  const occurrence = occurrenceRaw ? Number(occurrenceRaw) : undefined
+  const outOf = outOfRaw ? Number(outOfRaw) : undefined
+  if ((occurrence === undefined) !== (outOf === undefined)) {
+    redirect(back('occurrence-pair'))
+  }
+  if (occurrence !== undefined && outOf !== undefined && occurrence > outOf) {
+    redirect(back('occurrence-range'))
   }
 
   let reason: string | null = null
@@ -97,6 +143,12 @@ export async function reportBugAction(formData: FormData): Promise<void> {
         stepsToReproduce,
         severity,
         reproducibility,
+        ...(buildId ? { buildId } : {}),
+        ...(featureId ? { featureId } : {}),
+        ...(preCondition ? { preCondition } : {}),
+        ...(videoUrl ? { videoUrl } : {}),
+        ...(occurrence !== undefined ? { occurrence } : {}),
+        ...(outOf !== undefined ? { outOf } : {}),
         ...(type ? { type } : {}),
         ...(expectedResult ? { expectedResult } : {}),
         ...(actualResult ? { actualResult } : {}),
@@ -115,5 +167,5 @@ export async function reportBugAction(formData: FormData): Promise<void> {
 
   revalidatePath(LIST_PATH)
   // Outside any try/catch on purpose — `redirect` works by throwing.
-  redirect(reason ? `${NEW_PATH}?error=${reason}` : `${LIST_PATH}?reported=1`)
+  redirect(reason ? back(reason) : `${LIST_PATH}?reported=1`)
 }

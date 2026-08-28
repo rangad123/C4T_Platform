@@ -29,6 +29,10 @@ a.wrapper:hover .ring {
   display: flex;
   align-items: center;
   gap: var(--space-6);
+  /* The ring is a fixed 116px and the legend has a text floor, so on a phone
+     the pair is wider than the panel. Wrapping drops the legend below the
+     ring rather than pushing the page sideways. */
+  flex-wrap: wrap;
 }
 
 .ring {
@@ -82,6 +86,10 @@ a.wrapper:hover .ring {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* Lets the legend shrink inside the flex row instead of forcing its
+     max-content width onto the parent. */
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .legendItem {
@@ -89,6 +97,9 @@ a.wrapper:hover .ring {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--type-caption-size);
+  /* Label, amount and percentage drop to a second line rather than overflow
+     when the currency string is long. */
+  flex-wrap: wrap;
 }
 
 .legendDot {

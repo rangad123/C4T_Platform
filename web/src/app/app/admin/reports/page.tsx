@@ -8,10 +8,9 @@ import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
 import { Input } from '@/components/ds/forms/Input'
-import { Button } from '@/components/ds/core/Button'
 import { BarChart } from '@/components/admin/charts/BarChart'
-import { statusTone, severityTone } from '@/components/admin/StatusBadge'
-import { formatDate, titleCase } from '@/lib/admin/format'
+import { BugBreakdownView, type BugBreakdown } from '@/components/admin/BugBreakdownView'
+import { formatDate } from '@/lib/admin/format'
 
 /**
  * `/app/admin/reports` — §15-21 of the platform UX brief.
@@ -36,14 +35,6 @@ const SECTIONS = [
   { value: 'by-build-range', label: 'By build range', icon: 'repeat' },
 ] as const
 
-interface BugBreakdown {
-  total: number
-  bySeverity: Record<string, number>
-  byStatus: Record<string, number>
-  byType: Record<string, number>
-  byReproducibility: Record<string, number>
-}
-
 interface ProjectOption {
   id: string
   reference: string
@@ -62,37 +53,6 @@ interface ByProjectReport {
   testerCount: number
   testCaseCount: number
   bugs: BugBreakdown
-}
-
-function BugBreakdownView({ bugs, csvHref }: { bugs: BugBreakdown; csvHref: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-          {bugs.total} bug{bugs.total === 1 ? '' : 's'} in this report.
-        </p>
-        <Button href={csvHref} prefetch={false} variant="secondary" size="sm" iconLeft="download">
-          Download CSV
-        </Button>
-      </div>
-      <BarChart
-        title="By severity"
-        segments={Object.entries(bugs.bySeverity).map(([label, value]) => ({
-          label: titleCase(label),
-          value,
-          tone: severityTone(label),
-        }))}
-      />
-      <BarChart
-        title="By status"
-        segments={Object.entries(bugs.byStatus).map(([label, value]) => ({
-          label: titleCase(label),
-          value,
-          tone: statusTone(label),
-        }))}
-      />
-    </div>
-  )
 }
 
 export default async function ReportsPage({
@@ -114,7 +74,10 @@ export default async function ReportsPage({
 
   const projectsResult = await loadList<ProjectOption>('projects', {
     page: 1,
-    limit: 200,
+    // 100 is the API's ceiling. `limit: 200` was a silent 422 here, which
+    // `loadList` turns into `{ error }` — the picker rendered with no options
+    // at all and looked like the platform had no projects.
+    limit: 100,
     query: { sort: 'title', order: 'asc' },
   })
   const projects = 'items' in projectsResult ? projectsResult.items : []

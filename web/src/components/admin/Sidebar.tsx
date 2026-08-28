@@ -1,6 +1,6 @@
 'use client'
 
-import { useSyncExternalStore } from 'react'
+import { useId, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Logo } from '@/components/ds/core/Logo'
@@ -143,9 +143,43 @@ export function Sidebar({
   const collapsed = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
   const pathname = usePathname()
 
+  /**
+   * The mobile menu, open/closed.
+   *
+   * Deliberately NOT the persisted `collapsed` preference. That one belongs to
+   * the desktop rail and survives reloads; a nav menu that reopened itself on
+   * every page load would be wrong. Plain state, always closed to begin with,
+   * and below 900px CSS is what makes it the control that matters.
+   */
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const navId = useId()
+
+  /**
+   * Close on navigation. This layout does not re-mount between pages, so
+   * without this the menu would stay open over the page just navigated to.
+   *
+   * Adjusted during render rather than in an effect. React re-runs the
+   * component immediately without committing the first pass, so there is no
+   * flash of the open menu and no cascading render — the pattern React's own
+   * docs give for "reset state when a value changes". An effect calling
+   * `setMobileOpen` would paint the open menu first and then close it, and
+   * `onClick` on each link would miss browser back/forward.
+   */
+  const [lastPathname, setLastPathname] = useState(pathname)
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname)
+    setMobileOpen(false)
+  }
+
   return (
     <aside
-      className={[styles.sidebar, collapsed ? styles.collapsed : null].filter(Boolean).join(' ')}
+      className={[
+        styles.sidebar,
+        collapsed ? styles.collapsed : null,
+        mobileOpen ? styles.sidebarMobileOpen : null,
+      ]
+        .filter(Boolean)
+        .join(' ')}
       aria-label={`${portalLabel} navigation`}
     >
       <div className={styles.brandRow}>
@@ -167,9 +201,32 @@ export function Sidebar({
         >
           <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={16} />
         </button>
+
+        {/*
+          The mobile control. Rendered always and shown by CSS below 900px,
+          rather than being conditional on a measured viewport — that would
+          need a media-query hook, and its first render on the server would
+          have to guess a width it cannot know.
+
+          `aria-controls` points at the nav it reveals, and the nav follows
+          immediately in DOM order, so tab order and screen-reader order both
+          match what the button does.
+        */}
+        <button
+          type="button"
+          className={styles.menuButton}
+          onClick={() => setMobileOpen((open) => !open)}
+          aria-expanded={mobileOpen}
+          aria-controls={navId}
+        >
+          <Icon name={mobileOpen ? 'x' : 'menu'} size={18} />
+          {mobileOpen ? 'Close' : 'Menu'}
+        </button>
       </div>
 
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      {/* Layout is in the stylesheet, not inline: the mobile rules need to
+          hide this, and an inline `display` would outrank them. */}
+      <nav id={navId} className={styles.nav}>
         {sections.map((section, sectionIndex) => {
           const visibleLinks = section.links.filter(
             (link) => !link.roles || link.roles.includes(role),
@@ -228,15 +285,22 @@ export function Sidebar({
 
       <div className={styles.spacer} />
 
+      {/*
+        Both the icon and the name are always rendered; CSS picks one.
+
+        This used to branch on `collapsed`, which meant the name simply was not
+        in the DOM whenever the rail was collapsed. That is fine on desktop,
+        where the icon is the point — but the mobile menu reuses this markup at
+        full width, and CSS cannot restore text that was never rendered. A
+        tester who had collapsed the rail on a laptop then got a nameless menu
+        on their phone.
+      */}
       <div className={styles.user} title={collapsed ? `${userName} — ${ROLE_LABEL[role]}` : undefined}>
-        {collapsed ? (
-          <Icon name="user-check" size={18} className={styles.icon} />
-        ) : (
-          <div className={styles.userMeta}>
-            <span className={styles.userName}>{userName}</span>
-            <span className={styles.userRole}>{ROLE_LABEL[role]}</span>
-          </div>
-        )}
+        <Icon name="user-check" size={18} className={[styles.icon, styles.userIcon].join(' ')} />
+        <div className={styles.userMeta}>
+          <span className={styles.userName}>{userName}</span>
+          <span className={styles.userRole}>{ROLE_LABEL[role]}</span>
+        </div>
       </div>
     </aside>
   )

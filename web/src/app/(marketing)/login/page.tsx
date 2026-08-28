@@ -19,6 +19,11 @@ export const metadata: Metadata = {
  * The page is "full" in the sense that it sits within the marketing layout
  * (top nav + footer); the modal is "full" in the sense that it covers the
  * entire viewport. Both share the same form content.
+ *
+ * No `<main>` here: `MarketingShell` (via the route-group layout) already
+ * renders `<main id="main">`, and the skip link targets that id. A second one
+ * nested inside it made two `main` landmarks and two elements sharing one DOM
+ * id — the same mistake `app/not-found.tsx` calls out.
  */
 export default async function LoginPage({
   searchParams,
@@ -51,8 +56,7 @@ export default async function LoginPage({
   if (user) redirect(safeNextOrHome(params.next, ROLE_HOME[user.role]))
 
   return (
-    <main
-      id="main"
+    <div
       style={{
         padding: 'var(--space-11) var(--space-7)',
         display: 'flex',
@@ -72,6 +76,6 @@ export default async function LoginPage({
       >
         <LoginForm searchParams={Promise.resolve(params)} />
       </div>
-    </main>
+    </div>
   )
 }

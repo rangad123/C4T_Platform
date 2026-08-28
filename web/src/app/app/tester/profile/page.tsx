@@ -3,10 +3,18 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Topbar } from '@/components/admin/Topbar'
+import { Modal } from '@/components/admin/Modal'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Card, CardGrid } from '@/components/admin/Card'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Avatar } from '@/components/admin/Avatar'
+import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
+import { DescriptionList } from '@/components/admin/DescriptionList'
+import { Table, type TableColumn } from '@/components/ds/admin/Table'
+import { EmptyState } from '@/components/ds/admin/EmptyState'
+import { SingleFileUpload } from '@/components/admin/SingleFileUpload'
+import { DownloadLink } from '@/components/tester/DownloadLink'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
@@ -16,11 +24,15 @@ import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
-import { formatDate, titleCase } from '@/lib/admin/format'
+import { formatDate, personName, titleCase } from '@/lib/admin/format'
 import {
   updateBasicInfoAction,
   addDeviceAction,
+  updateDeviceAction,
   removeDeviceAction,
+  addBrowserAction,
+  updateBrowserAction,
+  removeBrowserAction,
   setSkillsAction,
   addLanguageAction,
   removeLanguageAction,
@@ -28,8 +40,11 @@ import {
   removeWorkHistoryAction,
   acceptNdaAction,
   savePaymentAccountAction,
+  setNdaDocumentAction,
+  setAvatarAction,
 } from './actions'
 
+const PROFILE_PATH = '/app/tester/profile'
 const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
 const PAYMENT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const
 const PAYMENT_TYPES = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
@@ -40,6 +55,17 @@ const PAYMENT_TYPE_LABEL: Record<(typeof PAYMENT_TYPES)[number], string> = {
   PAYTM: 'Paytm',
 }
 const PROFICIENCIES = ['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC'] as const
+
+/**
+ * The three free-text-in-the-database fields the API stores verbatim.
+ *
+ * Offered as a fixed list here rather than an open input so the pool stays
+ * filterable — the API column is a plain string precisely so this list can
+ * grow without a migration, but a tester should not be inventing values.
+ */
+const AGE_GROUPS = ['18-24', '25-34', '35-44', '45-54', '55-64', '65+'] as const
+const GENDERS = ['Female', 'Male', 'Non-binary', 'Other'] as const
+const LOOKING_FOR = ['Part-time testing', 'Full-time testing', 'Freelance projects', 'Both'] as const
 
 interface TesterDevice {
   id: string
@@ -73,7 +99,22 @@ interface ProfileDetail {
   experienceYears: number | null
   city: string | null
   countryCode: string | null
+  gender: string | null
+  ageGroup: string | null
+  lookingFor: string | null
+  skype: string | null
+  linkedinUrl: string | null
+  profession: string | null
   ndaAcceptedAt: string | null
+  ndaFile: { id: string; originalName: string } | null
+  user: {
+    id: string
+    email: string
+    firstName: string | null
+    lastName: string | null
+    phone: string | null
+    avatarFileId: string | null
+  }
   devices: readonly TesterDevice[]
   skills: readonly { skill: { id: string; name: string } }[]
   languages: readonly { code: string; proficiency: string }[]
@@ -92,6 +133,21 @@ interface PaymentAccount {
   paytmNumberLast4: string | null
 }
 
+/** `GET /v1/settings/nda-template` — null until an admin uploads one. */
+interface NdaTemplate {
+  fileId: string
+  name: string
+}
+
+/** A row of `GET /v1/catalog/me/browsers`. */
+interface TesterBrowser {
+  id: string
+  createdAt: string
+  browser: { id: string; name: string }
+  browserVersion: { id: string; version: string } | null
+  operatingSystem: { id: string; name: string; kind: string } | null
+}
+
 interface Catalog {
   brands: readonly { id: string; name: string }[]
   deviceModels: readonly {
@@ -104,6 +160,11 @@ interface Catalog {
     id: string
     name: string
     kind: string
+    versions: readonly { id: string; version: string }[]
+  }[]
+  browsers: readonly {
+    id: string
+    name: string
     versions: readonly { id: string; version: string }[]
   }[]
   networks: readonly { id: string; name: string; countryCode: string | null }[]
@@ -123,6 +184,13 @@ function Muted({ children }: { children: ReactNode }) {
 }
 
 const FORM_STYLE = { display: 'flex', flexDirection: 'column' as const, gap: 'var(--space-5)' }
+
+/** Fields that read as a row on a wide screen and stack on a narrow one. */
+const FIELD_GRID = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+  gap: 'var(--space-5)',
+}
 
 /**
  * `/app/tester/profile` — the tester's own self-service profile.
@@ -149,33 +217,134 @@ const FORM_STYLE = { display: 'flex', flexDirection: 'column' as const, gap: 'va
  */
 const SECTIONS = [
   { value: 'about', label: 'About you', icon: 'user-check' },
-  { value: 'devices', label: 'Devices', icon: 'smartphone' },
+  { value: 'assets', label: 'Assets', icon: 'smartphone' },
   { value: 'skills', label: 'Skills and languages', icon: 'briefcase' },
   { value: 'work', label: 'Work history', icon: 'clipboard-check' },
   { value: 'payment', label: 'Payment details', icon: 'credit-card' },
 ] as const
 
+/**
+ * Work history has two halves and they are different kinds of thing: what you
+ * have done ON this platform, and the CV you brought to it. They were one
+ * undifferentiated list, which made the employment entries look like
+ * Crowd4Test work.
+ *
+ * The reference design splits this Projects | Contests. Contests has no
+ * backend — it is an out-of-scope module (see `api/docs/LEGACY-FEATURE-MAP.md`)
+ * — so that tab is absent rather than present and empty.
+ */
+const WORK_VIEWS = [
+  { value: 'projects', label: 'Projects' },
+  { value: 'employment', label: 'Employment' },
+] as const
+
+type WorkView = (typeof WORK_VIEWS)[number]['value']
+
+/** A row of `GET /v1/projects/my-assignments`, with this tester's own counts. */
+interface AssignmentRow {
+  status: string
+  invitedAt: string
+  respondedAt: string | null
+  completedAt: string | null
+  bugsReported: number
+  bugsAccepted: number
+  build: { id: string; name: string } | null
+  project: {
+    id: string
+    reference: string
+    title: string
+    status: string
+    startDate: string | null
+    endDate: string | null
+    organisation: { id: string; name: string } | null
+  } | null
+}
+
 export default async function TesterProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ section?: string }>
+  searchParams: Promise<{ section?: string; edit?: string; view?: string }>
 }) {
   await requireRole(['TESTER'])
 
-  const section = resolveSection(SECTIONS, (await searchParams).section)
+  const resolvedParams = await searchParams
+  const section = resolveSection(SECTIONS, resolvedParams.section)
+  /** Which half of Work history is showing. Defaults to platform projects. */
+  const workView: WorkView = WORK_VIEWS.some((v) => v.value === resolvedParams.view)
+    ? (resolvedParams.view as WorkView)
+    : 'projects'
+
+  const assignmentColumns: readonly TableColumn<AssignmentRow>[] = [
+    {
+      key: 'project',
+      header: 'Project',
+      render: (row) => row.project?.title ?? '—',
+      renderSecondary: (row) =>
+        [row.project?.reference, row.project?.organisation?.name, row.build?.name]
+          .filter(Boolean)
+          .join(' · '),
+    },
+    {
+      key: 'assignment',
+      header: 'Your standing',
+      render: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      key: 'bugs',
+      header: 'Bugs filed',
+      align: 'right',
+      /**
+       * Accepted over reported, not a bare total: a tester's record is what
+       * stood up to triage, and the two numbers together say more than either
+       * alone. `ACCEPTED_BUG_STATUSES` on the API is the same definition the
+       * profile header's own counter uses.
+       */
+      render: (row) => `${row.bugsAccepted} / ${row.bugsReported}`,
+      renderSecondary: () => 'accepted / filed',
+    },
+    {
+      key: 'joined',
+      header: 'Joined',
+      align: 'right',
+      render: (row) => formatDate(row.respondedAt ?? row.invitedAt),
+      renderSecondary: (row) => (row.completedAt ? `Finished ${formatDate(row.completedAt)}` : undefined),
+    },
+  ]
+  /**
+   * Which row's edit dialog is open, as `device:<id>` or `browser:<id>`.
+   * URL-driven like every other modal in this app, so the open state
+   * survives a refresh and a rejected save can reopen the same row.
+   */
+  const edit = resolvedParams.edit ?? ''
 
   // `profile` backs the header and the NDA banner on every section, so it
   // stays eager. `catalog` (device/OS/skill options) and `paymentAccount`
   // each back specific sections only — fetching them regardless of section
   // meant opening About or Work history waited on the full device/skill
   // catalog and the payout instrument for no reason.
-  const [profile, catalog, paymentAccount] = await Promise.all([
+  const [profile, catalog, paymentAccount, myBrowsers, ndaTemplate, assignments] = await Promise.all([
     serverFetchOrNull<ProfileDetail>('testers/me'),
-    section === 'devices' || section === 'skills'
+    section === 'assets' || section === 'skills'
       ? serverFetchOrNull<Catalog>('catalog')
       : Promise.resolve(null),
     section === 'payment'
       ? serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine')
+      : Promise.resolve(null),
+    // The tester's registered browsers. Same tab as devices, so it is gated
+    // on the same section — and it is what populates the browser picker on
+    // the bug-report form.
+    section === 'assets'
+      ? serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers')
+      : Promise.resolve(null),
+    // The blank NDA an admin has published, if any. Same tab as the NDA panel.
+    section === 'about'
+      ? serverFetchOrNull<NdaTemplate | null>('settings/nda-template')
+      : Promise.resolve(null),
+    // Platform work history. Only the Projects half of the Work tab needs it.
+    section === 'work' && workView === 'projects'
+      ? serverFetchOrNull<readonly AssignmentRow[]>('projects/my-assignments', {
+          query: { limit: 100 },
+        })
       : Promise.resolve(null),
   ])
 
@@ -200,6 +369,22 @@ export default async function TesterProfilePage({
   const deviceModelOptions = (catalog?.deviceModels ?? []).map((m) => ({
     value: m.id,
     label: `${m.brand.name} ${m.name}`,
+  }))
+  const browserOptions = (catalog?.browsers ?? []).map((b) => ({ value: b.id, label: b.name }))
+  /**
+   * Every version across every browser, one flat list.
+   *
+   * A cascading "pick a browser, then its versions" needs client state, and
+   * this page is deliberately server-rendered throughout. Prefixing each
+   * version with its browser name keeps the flat list unambiguous — "Chrome
+   * 128" reads correctly even sitting next to "Firefox 128".
+   */
+  const browserVersionOptions = (catalog?.browsers ?? []).flatMap((b) =>
+    b.versions.map((v) => ({ value: v.id, label: `${b.name} ${v.version}` })),
+  )
+  const osOptions = (catalog?.operatingSystems ?? []).map((os) => ({
+    value: os.id,
+    label: os.name,
   }))
 
   return (
@@ -227,23 +412,72 @@ export default async function TesterProfilePage({
 
       {section === 'about' ? (
         <>
+          <Panel
+            title="Profile picture"
+            description="Shown next to your name on projects you work on."
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-5)', flexWrap: 'wrap' }}>
+              <Avatar
+                name={personName(profile.user)}
+                fileId={profile.user.avatarFileId}
+                size="xl"
+              />
+              <SingleFileUpload
+                endpoint="/app/tester/upload"
+                scope="avatar"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                label="Upload a picture"
+                onUploaded={setAvatarAction}
+              />
+            </div>
+          </Panel>
+
           <Panel title="About you" description="Shown to project owners considering you for an invite.">
             <TrackedForm action={updateBasicInfoAction} style={FORM_STYLE}>
+              <div style={FIELD_GRID}>
+                <Field label="First name" htmlFor="firstName" required>
+                  <Input
+                    id="firstName"
+                    name="firstName"
+                    required
+                    maxLength={80}
+                    autoComplete="given-name"
+                    defaultValue={profile.user.firstName ?? ''}
+                  />
+                </Field>
+                <Field label="Last name" htmlFor="lastName">
+                  <Input
+                    id="lastName"
+                    name="lastName"
+                    maxLength={80}
+                    autoComplete="family-name"
+                    defaultValue={profile.user.lastName ?? ''}
+                  />
+                </Field>
+              </div>
+
               <Field label="Headline" htmlFor="headline" hint="A one-line summary, up to 160 characters.">
                 <Input id="headline" name="headline" maxLength={160} defaultValue={profile.headline ?? ''} />
               </Field>
               <Field label="Bio" htmlFor="bio">
                 <Textarea id="bio" name="bio" rows={5} maxLength={4000} defaultValue={profile.bio ?? ''} />
               </Field>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-5)' }}>
-                <Field label="Years of experience" htmlFor="experienceYears">
-                  <Input
-                    id="experienceYears"
-                    name="experienceYears"
-                    type="number"
-                    min={0}
-                    max={60}
-                    defaultValue={profile.experienceYears ?? ''}
+
+              <div style={FIELD_GRID}>
+                <Field label="Age group" htmlFor="ageGroup">
+                  <Select
+                    id="ageGroup"
+                    name="ageGroup"
+                    defaultValue={profile.ageGroup ?? ''}
+                    options={[{ value: '', label: 'Prefer not to say' }, ...AGE_GROUPS.map((v) => ({ value: v, label: v }))]}
+                  />
+                </Field>
+                <Field label="Gender" htmlFor="gender">
+                  <Select
+                    id="gender"
+                    name="gender"
+                    defaultValue={profile.gender ?? ''}
+                    options={[{ value: '', label: 'Prefer not to say' }, ...GENDERS.map((v) => ({ value: v, label: v }))]}
                   />
                 </Field>
                 <Field label="City" htmlFor="city">
@@ -259,17 +493,133 @@ export default async function TesterProfilePage({
                   />
                 </Field>
               </div>
+
+              <div style={FIELD_GRID}>
+                <Field label="Email" htmlFor="email" hint="Changing this is not self-service — contact support.">
+                  <Input id="email" name="email" defaultValue={profile.user.email} disabled />
+                </Field>
+                <Field label="Phone" htmlFor="phone">
+                  <Input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    maxLength={32}
+                    autoComplete="tel"
+                    defaultValue={profile.user.phone ?? ''}
+                  />
+                </Field>
+                <Field label="Skype" htmlFor="skype">
+                  <Input id="skype" name="skype" maxLength={120} defaultValue={profile.skype ?? ''} />
+                </Field>
+                <Field label="LinkedIn" htmlFor="linkedinUrl" hint="Full URL, or leave blank.">
+                  <Input
+                    id="linkedinUrl"
+                    name="linkedinUrl"
+                    type="url"
+                    maxLength={255}
+                    placeholder="https://www.linkedin.com/in/…"
+                    defaultValue={profile.linkedinUrl ?? ''}
+                  />
+                </Field>
+              </div>
+
+              <div style={FIELD_GRID}>
+                <Field label="Profession" htmlFor="profession">
+                  <Input
+                    id="profession"
+                    name="profession"
+                    maxLength={120}
+                    placeholder="Software tester"
+                    defaultValue={profile.profession ?? ''}
+                  />
+                </Field>
+                <Field label="Years of experience" htmlFor="experienceYears">
+                  <Input
+                    id="experienceYears"
+                    name="experienceYears"
+                    type="number"
+                    min={0}
+                    max={60}
+                    defaultValue={profile.experienceYears ?? ''}
+                  />
+                </Field>
+                <Field label="Looking for" htmlFor="lookingFor">
+                  <Select
+                    id="lookingFor"
+                    name="lookingFor"
+                    defaultValue={profile.lookingFor ?? ''}
+                    options={[{ value: '', label: 'Not saying' }, ...LOOKING_FOR.map((v) => ({ value: v, label: v }))]}
+                  />
+                </Field>
+              </div>
+
               <div>
                 <SubmitButton variant="primary" pendingLabel="Saving…">
-                  Save
+                  Save changes
                 </SubmitButton>
               </div>
             </TrackedForm>
           </Panel>
+
+          <Panel
+            title="Non-disclosure agreement"
+            description="Projects share unreleased builds with you. The NDA is what makes that possible."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <DescriptionList
+                items={[
+                  {
+                    label: 'Status',
+                    value: profile.ndaAcceptedAt ? (
+                      <Badge tone="success" uppercase={false}>
+                        Accepted {formatDate(profile.ndaAcceptedAt)}
+                      </Badge>
+                    ) : (
+                      <Badge tone="warning" uppercase={false}>
+                        Not accepted
+                      </Badge>
+                    ),
+                  },
+                  {
+                    label: 'Signed copy',
+                    value: profile.ndaFile ? (
+                      <DownloadLink fileId={profile.ndaFile.id} name={profile.ndaFile.originalName} />
+                    ) : (
+                      'Not uploaded'
+                    ),
+                  },
+                ]}
+              />
+
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)', maxWidth: '70ch' }}>
+                Accepting online is enough to be assigned to a project. Uploading a signed PDF is
+                only needed when a project asks for a countersigned copy.
+              </p>
+
+              {/* Only rendered once an operator has published a blank NDA. No
+                  placeholder when there is none: a link that downloads nothing
+                  is worse than no link. */}
+              {ndaTemplate ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                  <Muted>Blank copy to print and sign</Muted>
+                  <DownloadLink fileId={ndaTemplate.fileId} name={ndaTemplate.name} />
+                </div>
+              ) : null}
+
+              <SingleFileUpload
+                endpoint="/app/tester/upload"
+                scope="nda"
+                accept="application/pdf"
+                label={profile.ndaFile ? 'Replace signed NDA' : 'Upload signed NDA'}
+                onUploaded={setNdaDocumentAction}
+                currentName={profile.ndaFile?.originalName ?? null}
+              />
+            </div>
+          </Panel>
         </>
       ) : null}
 
-      {section === 'devices' ? (
+      {section === 'assets' ? (
         <>
           <Panel title="Devices" description="What you can test on. Projects match testers by device coverage.">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
@@ -301,17 +651,22 @@ export default async function TesterProfilePage({
                         .filter(Boolean)
                         .join(' · ')}
                       actions={
-                        <form action={removeDeviceAction}>
-                          <input type="hidden" name="deviceId" value={device.id} />
+                        <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
                           <Button
-                            type="submit"
+                            href={`${PROFILE_PATH}?section=assets&edit=device:${device.id}`}
                             variant="ghost"
                             size="sm"
-                            style={{ color: 'var(--status-error-fg)' }}
+                            iconLeft="pencil"
                           >
-                            Remove
+                            Edit
                           </Button>
-                        </form>
+                          <form action={removeDeviceAction}>
+                            <input type="hidden" name="deviceId" value={device.id} />
+                            <ConfirmSubmit question={`Remove ${device.model}?`}>
+                              Remove
+                            </ConfirmSubmit>
+                          </form>
+                        </span>
                       }
                     />
                   ))}
@@ -418,6 +773,241 @@ export default async function TesterProfilePage({
               </TrackedForm>
             </div>
           </Panel>
+
+          {/* One dialog per device, opened by `?edit=device:<id>`. */}
+          {profile.devices.map((device) => (
+            <Modal
+              key={`edit-${device.id}`}
+              open={edit === `device:${device.id}`}
+              closedHref={`${PROFILE_PATH}?section=assets`}
+              title="Edit device"
+            >
+              <TrackedForm action={updateDeviceAction} style={FORM_STYLE}>
+                <input type="hidden" name="deviceId" value={device.id} />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
+                  <Field label="Type" htmlFor={`type-${device.id}`}>
+                    <Select
+                      id={`type-${device.id}`}
+                      name="type"
+                      defaultValue={device.type}
+                      options={DEVICE_TYPES.map((value) => ({ value, label: titleCase(value) }))}
+                    />
+                  </Field>
+                  <Field label="Brand" htmlFor={`manufacturer-${device.id}`}>
+                    <Input
+                      id={`manufacturer-${device.id}`}
+                      name="manufacturer"
+                      maxLength={80}
+                      defaultValue={device.manufacturer ?? ''}
+                    />
+                  </Field>
+                  <Field label="Model" htmlFor={`model-${device.id}`} required>
+                    <Input
+                      id={`model-${device.id}`}
+                      name="model"
+                      required
+                      maxLength={120}
+                      defaultValue={device.model}
+                    />
+                  </Field>
+                  <Field label="Screen size" htmlFor={`screenSize-${device.id}`}>
+                    <Input
+                      id={`screenSize-${device.id}`}
+                      name="screenSize"
+                      maxLength={40}
+                      defaultValue={device.screenSize ?? ''}
+                    />
+                  </Field>
+                  <Field label="RAM" htmlFor={`ramGb-${device.id}`}>
+                    <Input
+                      id={`ramGb-${device.id}`}
+                      name="ramGb"
+                      maxLength={20}
+                      defaultValue={device.ramGb ?? ''}
+                    />
+                  </Field>
+                  <Field label="Storage" htmlFor={`storageGb-${device.id}`}>
+                    <Input
+                      id={`storageGb-${device.id}`}
+                      name="storageGb"
+                      maxLength={20}
+                      defaultValue={device.storageGb ?? ''}
+                    />
+                  </Field>
+                  <Field label="OS name" htmlFor={`osName-${device.id}`}>
+                    <Input
+                      id={`osName-${device.id}`}
+                      name="osName"
+                      maxLength={60}
+                      defaultValue={device.osName ?? ''}
+                    />
+                  </Field>
+                  <Field label="OS version" htmlFor={`osVersion-${device.id}`}>
+                    <Input
+                      id={`osVersion-${device.id}`}
+                      name="osVersion"
+                      maxLength={40}
+                      defaultValue={device.osVersion ?? ''}
+                    />
+                  </Field>
+                  <Field label="Network" htmlFor={`network-${device.id}`}>
+                    <Input
+                      id={`network-${device.id}`}
+                      name="network"
+                      maxLength={80}
+                      defaultValue={device.network ?? ''}
+                    />
+                  </Field>
+                  <Field label="Browser" htmlFor={`browser-${device.id}`}>
+                    <Input
+                      id={`browser-${device.id}`}
+                      name="browser"
+                      maxLength={80}
+                      defaultValue={device.browser ?? ''}
+                    />
+                  </Field>
+                </div>
+                <Checkbox
+                  id={`isPrimary-${device.id}`}
+                  name="isPrimary"
+                  defaultChecked={device.isPrimary}
+                  label="This is my primary device"
+                />
+                <div>
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
+                    Save device
+                  </SubmitButton>
+                </div>
+              </TrackedForm>
+            </Modal>
+          ))}
+
+          {/* ── Browsers ──────────────────────────────────────────────── */}
+          <Panel
+            title="Browsers"
+            description="The browsers you can test on. These are what the bug-report form offers you when recording where you saw a defect."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              {myBrowsers === null ? (
+                <Muted>Your browsers could not be loaded. Refresh in a moment.</Muted>
+              ) : myBrowsers.length > 0 ? (
+                <CardGrid min={240}>
+                  {myBrowsers.map((row) => (
+                    <Card
+                      key={row.id}
+                      title={[row.browser.name, row.browserVersion?.version].filter(Boolean).join(' ')}
+                      meta={row.operatingSystem?.name ?? 'Any operating system'}
+                      actions={
+                        <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
+                          <Button
+                            href={`${PROFILE_PATH}?section=assets&edit=browser:${row.id}`}
+                            variant="ghost"
+                            size="sm"
+                            iconLeft="pencil"
+                          >
+                            Edit
+                          </Button>
+                          <form action={removeBrowserAction}>
+                            <input type="hidden" name="browserRowId" value={row.id} />
+                            <ConfirmSubmit
+                              question={`Remove ${row.browser.name}${row.browserVersion ? ` ${row.browserVersion.version}` : ''}?`}
+                            >
+                              Remove
+                            </ConfirmSubmit>
+                          </form>
+                        </span>
+                      }
+                    />
+                  ))}
+                </CardGrid>
+              ) : (
+                <Muted>No browsers added yet.</Muted>
+              )}
+
+              {browserOptions.length === 0 ? (
+                <Muted>The browser catalog is not reachable right now. Refresh in a moment.</Muted>
+              ) : (
+                <TrackedForm
+                  action={addBrowserAction}
+                  style={{
+                    ...FORM_STYLE,
+                    paddingTop: 'var(--space-5)',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-4)' }}>
+                    <Field label="Browser" htmlFor="browserId" required>
+                      <Select id="browserId" name="browserId" required placeholder="Choose a browser" options={browserOptions} />
+                    </Field>
+                    <Field label="Version" htmlFor="browserVersionId" hint="Optional.">
+                      <Select
+                        id="browserVersionId"
+                        name="browserVersionId"
+                        defaultValue=""
+                        options={[{ value: '', label: 'Any version' }, ...browserVersionOptions]}
+                      />
+                    </Field>
+                    <Field label="Operating system" htmlFor="operatingSystemId" hint="Optional.">
+                      <Select
+                        id="operatingSystemId"
+                        name="operatingSystemId"
+                        defaultValue=""
+                        options={[{ value: '', label: 'Any operating system' }, ...osOptions]}
+                      />
+                    </Field>
+                  </div>
+                  <div>
+                    <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+                      Add browser
+                    </SubmitButton>
+                  </div>
+                </TrackedForm>
+              )}
+            </div>
+          </Panel>
+
+          {(myBrowsers ?? []).map((row) => (
+            <Modal
+              key={`edit-browser-${row.id}`}
+              open={edit === `browser:${row.id}`}
+              closedHref={`${PROFILE_PATH}?section=assets`}
+              title="Edit browser"
+            >
+              <TrackedForm action={updateBrowserAction} style={FORM_STYLE}>
+                <input type="hidden" name="browserRowId" value={row.id} />
+                <Field label="Browser" htmlFor={`browserId-${row.id}`} required>
+                  <Select
+                    id={`browserId-${row.id}`}
+                    name="browserId"
+                    required
+                    defaultValue={row.browser.id}
+                    options={browserOptions}
+                  />
+                </Field>
+                <Field label="Version" htmlFor={`browserVersionId-${row.id}`} hint="Optional.">
+                  <Select
+                    id={`browserVersionId-${row.id}`}
+                    name="browserVersionId"
+                    defaultValue={row.browserVersion?.id ?? ''}
+                    options={[{ value: '', label: 'Any version' }, ...browserVersionOptions]}
+                  />
+                </Field>
+                <Field label="Operating system" htmlFor={`operatingSystemId-${row.id}`} hint="Optional.">
+                  <Select
+                    id={`operatingSystemId-${row.id}`}
+                    name="operatingSystemId"
+                    defaultValue={row.operatingSystem?.id ?? ''}
+                    options={[{ value: '', label: 'Any operating system' }, ...osOptions]}
+                  />
+                </Field>
+                <div>
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
+                    Save browser
+                  </SubmitButton>
+                </div>
+              </TrackedForm>
+            </Modal>
+          ))}
         </>
       ) : null}
 
@@ -495,14 +1085,12 @@ export default async function TesterProfilePage({
                       <form action={removeLanguageAction}>
                         <input type="hidden" name="code" value={language.code} />
                         <input type="hidden" name="current" value={languagesJson} />
-                        <SubmitButton
-                          variant="ghost"
-                          size="sm"
-                          style={{ color: 'var(--status-error-fg)' }}
-                          pendingLabel="Removing…"
+                        <ConfirmSubmit
+                          iconLeft=""
+                          question={`Remove ${language.code.toUpperCase()}?`}
                         >
                           Remove
-                        </SubmitButton>
+                        </ConfirmSubmit>
                       </form>
                     </li>
                   ))}
@@ -538,7 +1126,55 @@ export default async function TesterProfilePage({
 
       {section === 'work' ? (
         <>
-          <Panel title="Work history">
+          {/* Sub-tabs, not a second SectionTabs strip: this is a switch inside
+              one tab, so it is styled as a segmented control rather than
+              competing with the tab row above it. */}
+          <nav
+            aria-label="Work history view"
+            style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+          >
+            {WORK_VIEWS.map((view) => {
+              const active = view.value === workView
+              return (
+                <Button
+                  key={view.value}
+                  href={`${PROFILE_PATH}?section=work&view=${view.value}`}
+                  variant={active ? 'secondary' : 'ghost'}
+                  size="sm"
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {view.label}
+                </Button>
+              )
+            })}
+          </nav>
+
+          {workView === 'projects' ? (
+            <Panel
+              title="Projects you have worked on"
+              description="Every project you were invited to, and what you filed on it."
+            >
+              {assignments === null ? (
+                <Muted>Your project history could not be loaded. Refresh in a moment.</Muted>
+              ) : assignments.length === 0 ? (
+                <EmptyState
+                  icon="briefcase"
+                  title="No project work yet"
+                  description="Once you are invited to a project it will appear here with what you reported on it."
+                />
+              ) : (
+                <Table
+                  columns={assignmentColumns}
+                  rows={[...assignments].filter((a) => a.project !== null)}
+                  rowKey={(row) => row.project!.id}
+                  rowHref={(row) => `/app/tester/projects/${row.project!.id}`}
+                />
+              )}
+            </Panel>
+          ) : null}
+
+          {workView !== 'employment' ? null : (
+          <Panel title="Employment history" description="The roles you brought with you.">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
               {profile.workHistory.length > 0 ? (
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
@@ -571,14 +1207,12 @@ export default async function TesterProfilePage({
                       </div>
                       <form action={removeWorkHistoryAction}>
                         <input type="hidden" name="workHistoryId" value={entry.id} />
-                        <SubmitButton
-                          variant="ghost"
-                          size="sm"
-                          style={{ color: 'var(--status-error-fg)' }}
-                          pendingLabel="Removing…"
+                        <ConfirmSubmit
+                          iconLeft=""
+                          question={`Remove ${entry.jobTitle} at ${entry.company}?`}
                         >
                           Remove
-                        </SubmitButton>
+                        </ConfirmSubmit>
                       </form>
                     </li>
                   ))}
@@ -620,6 +1254,7 @@ export default async function TesterProfilePage({
               </TrackedForm>
             </div>
           </Panel>
+          )}
         </>
       ) : null}
 

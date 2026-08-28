@@ -41,7 +41,7 @@ const BASE = '/app/admin/transactions'
  * because every export of a `'use server'` module must be an async function —
  * exporting this array from there would unregister both actions.
  */
-const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'].map((status) => ({
+const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'].map((status) => ({
   value: status,
   label: titleCase(status),
 }))

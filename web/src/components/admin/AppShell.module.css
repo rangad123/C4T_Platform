@@ -1,0 +1,31 @@
+/* The portal frame: nav rail beside a content column.
+   Shared by the admin, tester and customer layouts — all three had the same
+   inline styles, which meant a responsive fix had to be made three times. */
+
+.shell {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--surface-sunken);
+}
+
+.content {
+  flex: 1;
+  /* Without this a wide table inside the column sets the flex base size and
+     pushes the whole shell past the viewport instead of scrolling itself. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Mobile ──────────────────────────────────────────────────────────────────
+   Below 900px the rail stacks above the content instead of beside it. Side by
+   side, a 256px rail left 119px of a 375px viewport for the page — the shell
+   itself was twice the viewport width and the whole document scrolled
+   sideways. Sidebar.module.css turns the rail into a collapsed header bar at
+   the same breakpoint. */
+
+@media (max-width: 900px) {
+  .shell {
+    flex-direction: column;
+  }
+}

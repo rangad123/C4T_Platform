@@ -6,7 +6,7 @@ import { isAdminSide } from '../../middleware/authorize.js'
 import { projectScope } from '../../lib/access/scopes.js'
 import { projectRelations } from '../../lib/access/relations.js'
 import { authorize, can } from '../../lib/access/policy.js'
-import { assertAssignable } from '../testers/testers.service.js'
+import { assertAssignable, ACCEPTED_BUG_STATUSES } from '../testers/testers.service.js'
 import { createNotification, createNotifications } from '../notifications/notifications.service.js'
 import { nextReference } from '../../lib/reference.js'
 import { PROJECT_SORT_FIELDS, type ListProjectsQuery } from './projects.schema.js'
@@ -23,6 +23,8 @@ const projectSelect = {
   targetLanguages: true,
   maxTesters: true,
   testersCanSeeOtherBugs: true,
+  logoFileId: true,
+  logo: { select: { id: true, originalName: true, mimeType: true } },
   startDate: true,
   endDate: true,
   submittedAt: true,
@@ -906,6 +908,7 @@ export async function listMyAssignments(
         respondedAt: true,
         completedAt: true,
         notes: true,
+        build: { select: { id: true, name: true } },
         project: {
           select: {
             id: true,
@@ -927,7 +930,50 @@ export async function listMyAssignments(
     prisma.projectAssignment.count({ where }),
   ])
 
-  return { items, meta: buildMeta(query, total) }
+  /**
+   * What the tester actually did on each project, for the work-history view.
+   *
+   * Two grouped counts rather than a per-row subquery: one round trip each
+   * regardless of how many assignments come back, instead of 2N. Both are
+   * scoped to `reportedById: testerId`, so this can only ever count the
+   * caller's own bugs — a tester never learns how many defects anyone else
+   * filed.
+   *
+   * "Accepted" reuses `ACCEPTED_BUG_STATUSES` from the testers service, which
+   * is what the profile header's own counter uses.
+   */
+  const projectIds = items.map((a) => a.project.id)
+  const [reported, accepted] = projectIds.length
+    ? await Promise.all([
+        prisma.bug.groupBy({
+          by: ['projectId'],
+          where: { reportedById: testerId, deletedAt: null, projectId: { in: projectIds } },
+          _count: { _all: true },
+        }),
+        prisma.bug.groupBy({
+          by: ['projectId'],
+          where: {
+            reportedById: testerId,
+            deletedAt: null,
+            projectId: { in: projectIds },
+            status: { in: ACCEPTED_BUG_STATUSES },
+          },
+          _count: { _all: true },
+        }),
+      ])
+    : [[], []]
+
+  const reportedBy = new Map(reported.map((r) => [r.projectId, r._count._all]))
+  const acceptedBy = new Map(accepted.map((r) => [r.projectId, r._count._all]))
+
+  return {
+    items: items.map((a) => ({
+      ...a,
+      bugsReported: reportedBy.get(a.project.id) ?? 0,
+      bugsAccepted: acceptedBy.get(a.project.id) ?? 0,
+    })),
+    meta: buildMeta(query, total),
+  }
 }
 
 // ─── Builds (§6-9 of the platform UX brief — a project may span several) ─────

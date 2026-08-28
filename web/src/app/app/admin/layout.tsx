@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { requireRole } from '@/lib/auth/session'
 import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
+import { AppShell } from '@/components/admin/AppShell'
 
 export const metadata: Metadata = {
   title: 'Admin',
@@ -79,7 +80,10 @@ const SECTIONS: readonly SidebarSection[] = [
   },
   {
     label: 'Account',
-    links: [{ href: '/app/admin/profile', label: 'Your profile', icon: 'user-check' }],
+    links: [
+      { href: '/app/admin/profile', label: 'Your profile', icon: 'user-check' },
+      { href: '/app/admin/settings', label: 'Settings', icon: 'settings' },
+    ],
   },
 ]
 
@@ -89,16 +93,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
 
   return (
-    <div style={{ display: 'flex', minHeight: '100dvh', background: 'var(--surface-sunken)' }}>
-      <Sidebar userName={displayName} role={user.role} sections={SECTIONS} />
-
+    <AppShell
+      nav={<Sidebar userName={displayName} role={user.role} sections={SECTIONS} />}
+    >
       {/* Each page renders its own <Topbar> (so the breadcrumb reflects the
           route) followed by its own <main id="main">. The landmark is NOT
           here: the Topbar carries a nav and the sign-out control, neither of
           which belongs inside main. See the note in app/layout.tsx. */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {children}
-      </div>
-    </div>
+      {children}
+    </AppShell>
   )
 }

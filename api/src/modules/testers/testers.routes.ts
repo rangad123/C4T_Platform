@@ -13,6 +13,7 @@ import {
   skillsSchema,
   languagesSchema,
   acceptNdaSchema,
+  ndaDocumentSchema,
   workHistorySchema,
   listGlobalDevicesQuery,
   testerIdParam,
@@ -32,6 +33,11 @@ me.use(requireRole(Role.TESTER))
 me.get('/', controller.getMine)
 me.patch('/', validate({ body: updateTesterProfileSchema }), controller.updateMine)
 me.post('/devices', validate({ body: deviceSchema }), controller.addDevice)
+me.patch(
+  '/devices/:deviceId',
+  validate({ params: deviceIdParam, body: deviceSchema }),
+  controller.updateDevice,
+)
 me.delete('/devices/:deviceId', validate({ params: deviceIdParam }), controller.removeDevice)
 me.post('/work-history', validate({ body: workHistorySchema }), controller.addWorkHistory)
 me.delete(
@@ -42,6 +48,7 @@ me.delete(
 me.put('/skills', validate({ body: skillsSchema }), controller.setSkills)
 me.put('/languages', validate({ body: languagesSchema }), controller.setLanguages)
 me.post('/nda', validate({ body: acceptNdaSchema }), controller.acceptNda)
+me.post('/nda/document', validate({ body: ndaDocumentSchema }), controller.setNdaDocument)
 
 testersRouter.use('/me', me)
 

@@ -101,7 +101,17 @@ const TRANSACTION_SORT_FIELDS = [
  * `paymentMethod`, falling back to `currency` for rows recorded before a
  * payment method was attached to the ledger (see §Phase-C migration note).
  */
-const PENDING_STATUSES: TransactionStatus[] = [TransactionStatus.PENDING, TransactionStatus.APPROVED]
+/**
+ * RELEASED belongs here with PENDING and APPROVED: the category means "money
+ * not yet paid out", and releasing funds authorises a payment without making
+ * one. Omitting it would push released-but-unpaid rows into the
+ * Indian/International buckets, which are explicitly for settled rows only.
+ */
+const PENDING_STATUSES: TransactionStatus[] = [
+  TransactionStatus.PENDING,
+  TransactionStatus.APPROVED,
+  TransactionStatus.RELEASED,
+]
 const INDIAN_METHODS: PaymentMethod[] = [PaymentMethod.IND_BANK_ACCOUNT, PaymentMethod.PAYTM]
 const INTERNATIONAL_METHODS: PaymentMethod[] = [PaymentMethod.NON_IND_BANK_ACCOUNT, PaymentMethod.PAYPAL]
 
@@ -496,14 +506,285 @@ transactionsRouter.patch(
   },
 )
 
+/**
+ * The smallest payout a tester may ask for, in minor units. ₹500.00.
+ *
+ * A floor exists because settling a payout costs the same in effort whatever
+ * the amount, and a queue of ₹20 requests helps nobody. Exported so the
+ * frontend can state the threshold rather than discovering it by being
+ * rejected.
+ */
+export const PAYOUT_MINIMUM_MINOR = 50_000n
+
+/**
+ * An earning that counts as CREDITED — money the tester has been told is
+ * theirs. It may or may not be withdrawable yet.
+ */
+const CREDITED_EARNING_STATUSES: TransactionStatus[] = [
+  TransactionStatus.APPROVED,
+  TransactionStatus.RELEASED,
+  TransactionStatus.PAID,
+]
+
+/**
+ * An earning that has been RELEASED — withdrawable.
+ *
+ * `PAID` is included because releasing is a precondition of paying: a row that
+ * reached PAID was necessarily released, and older rows recorded before this
+ * stage existed went straight from APPROVED to PAID. Excluding PAID would make
+ * every historical payout look unreleased and drop the balance below what was
+ * actually settled.
+ */
+const RELEASED_EARNING_STATUSES: TransactionStatus[] = [
+  TransactionStatus.RELEASED,
+  TransactionStatus.PAID,
+]
+
+/**
+ * A payout the tester has raised that has not finished.
+ *
+ * RELEASED counts: the funds were authorised but not paid, so the request is
+ * very much still live and a second one would double-claim the same balance.
+ * Shared by the read and the write below so the two cannot disagree about what
+ * "already in progress" means.
+ */
+const OPEN_PAYOUT_STATUSES: TransactionStatus[] = [
+  TransactionStatus.PENDING,
+  TransactionStatus.APPROVED,
+  TransactionStatus.RELEASED,
+]
+
+/**
+ * The tester's money, at all three stages.
+ *
+ *   credited          every APPROVED / RELEASED / PAID earning
+ *   released          the RELEASED / PAID subset — withdrawable
+ *   awaiting release  credited − released, held back by an operator
+ *   available         released − everything already requested
+ *
+ * A PENDING earning counts as nothing: an admin has not confirmed it, and
+ * paying it would be paying for work that might still be rejected.
+ *
+ * Withdrawal keys off RELEASED, not APPROVED. That is the whole point of the
+ * stage — approving an earning says the work was accepted, releasing it says
+ * the money can leave. Before the stage existed APPROVED had to mean both,
+ * which overstated what a tester could actually take.
+ *
+ * On the other side every payout that has not been CANCELLED or FAILED counts
+ * against the balance, including ones still PENDING — otherwise a tester could
+ * submit the same balance twice before the first was settled.
+ */
+async function payoutBalance(testerId: string): Promise<{
+  /** Released, minus everything already requested. What may be withdrawn now. */
+  availableMinor: bigint
+  /** Every credited earning, released or not. */
+  creditedMinor: bigint
+  /** The released subset of the above. */
+  releasedMinor: bigint
+  /** Credited but still held back. */
+  awaitingReleaseMinor: bigint
+  /** Payouts already raised and not cancelled or failed. */
+  requestedMinor: bigint
+}> {
+  const [credited, released, requested] = await Promise.all([
+    prisma.transaction.aggregate({
+      where: {
+        counterpartyId: testerId,
+        type: TransactionType.TESTER_EARNING,
+        status: { in: CREDITED_EARNING_STATUSES },
+      },
+      _sum: { amountMinor: true },
+    }),
+    prisma.transaction.aggregate({
+      where: {
+        counterpartyId: testerId,
+        type: TransactionType.TESTER_EARNING,
+        status: { in: RELEASED_EARNING_STATUSES },
+      },
+      _sum: { amountMinor: true },
+    }),
+    prisma.transaction.aggregate({
+      where: {
+        counterpartyId: testerId,
+        type: TransactionType.TESTER_PAYOUT,
+        status: { notIn: [TransactionStatus.CANCELLED, TransactionStatus.FAILED] },
+      },
+      _sum: { amountMinor: true },
+    }),
+  ])
+
+  const creditedMinor = credited._sum.amountMinor ?? 0n
+  const releasedMinor = released._sum.amountMinor ?? 0n
+  const requestedMinor = requested._sum.amountMinor ?? 0n
+  const availableMinor = releasedMinor - requestedMinor
+  const awaitingReleaseMinor = creditedMinor - releasedMinor
+
+  return {
+    creditedMinor,
+    releasedMinor,
+    requestedMinor,
+    awaitingReleaseMinor: awaitingReleaseMinor > 0n ? awaitingReleaseMinor : 0n,
+    availableMinor: availableMinor > 0n ? availableMinor : 0n,
+  }
+}
+
+/**
+ * §2.3 — what the tester can request right now, and whether they can.
+ *
+ * Returns the reasons as flags rather than prose so the frontend owns the
+ * wording. `canRequest` is the single answer the button should key off; the
+ * individual flags explain it.
+ */
+transactionsRouter.get('/payouts/mine', async (req, res) => {
+  if (req.user!.role !== Role.TESTER) throw new BadRequestError('Only a tester has a payout balance')
+
+  const [balance, account, openRequest] = await Promise.all([
+    payoutBalance(req.user!.id),
+    prisma.paymentAccount.findFirst({
+      where: { userId: req.user!.id, status: 'ACTIVE' },
+      select: { id: true, paymentType: true },
+    }),
+    prisma.transaction.findFirst({
+      where: {
+        counterpartyId: req.user!.id,
+        type: TransactionType.TESTER_PAYOUT,
+        status: { in: OPEN_PAYOUT_STATUSES },
+      },
+      select: { id: true, reference: true, amountMinor: true, status: true, occurredAt: true },
+      orderBy: { occurredAt: 'desc' },
+    }),
+  ])
+
+  const meetsMinimum = balance.availableMinor >= PAYOUT_MINIMUM_MINOR
+
+  res.json({
+    data: {
+      currency: 'INR',
+      availableMinor: balance.availableMinor.toString(),
+      /** Everything credited, released or not — legacy "Credit Fund". */
+      creditedMinor: balance.creditedMinor.toString(),
+      /** The released subset — legacy "Release Fund". */
+      releasedMinor: balance.releasedMinor.toString(),
+      /** Credited but not yet released, so not yet withdrawable. */
+      awaitingReleaseMinor: balance.awaitingReleaseMinor.toString(),
+      requestedMinor: balance.requestedMinor.toString(),
+      minimumMinor: PAYOUT_MINIMUM_MINOR.toString(),
+      hasPaymentAccount: Boolean(account),
+      meetsMinimum,
+      openRequest: openRequest
+        ? { ...openRequest, amountMinor: openRequest.amountMinor.toString() }
+        : null,
+      canRequest: Boolean(account) && meetsMinimum && !openRequest,
+    },
+  })
+})
+
+const requestPayoutSchema = z.object({
+  /**
+   * Minor units. Omit to request the whole available balance — the common
+   * case, and the one that cannot go stale between reading the page and
+   * submitting it.
+   */
+  amountMinor: z.coerce.bigint().positive().optional(),
+  note: z.string().trim().max(500).optional(),
+})
+
+/**
+ * §2.3 — a tester asks to be paid.
+ *
+ * Creates a PENDING `TESTER_PAYOUT` that an admin then approves and settles
+ * through the existing PATCH route. Nothing here moves money; see the module
+ * note. The tester is the only one who can call this for themselves —
+ * `counterpartyId` comes from the session and is never read from the body, so
+ * a tester cannot request a payout against someone else's balance.
+ */
+transactionsRouter.post(
+  '/payouts/request',
+  validate({ body: requestPayoutSchema }),
+  async (req, res) => {
+    if (req.user!.role !== Role.TESTER) {
+      throw new BadRequestError('Only a tester can request a payout')
+    }
+    const input = req.body as z.infer<typeof requestPayoutSchema>
+
+    const account = await prisma.paymentAccount.findFirst({
+      where: { userId: req.user!.id, status: 'ACTIVE' },
+      select: { id: true, paymentType: true },
+    })
+    if (!account) {
+      throw new BadRequestError('Add your payment details before requesting a payout')
+    }
+
+    // One open request at a time. Without this, two submits seconds apart both
+    // pass the balance check and the ledger owes twice what it should.
+    const openRequest = await prisma.transaction.findFirst({
+      where: {
+        counterpartyId: req.user!.id,
+        type: TransactionType.TESTER_PAYOUT,
+        status: { in: OPEN_PAYOUT_STATUSES },
+      },
+      select: { id: true, reference: true },
+    })
+    if (openRequest) {
+      throw new BadRequestError('You already have a payout request in progress')
+    }
+
+    const balance = await payoutBalance(req.user!.id)
+    const amountMinor = input.amountMinor ?? balance.availableMinor
+
+    if (amountMinor > balance.availableMinor) {
+      throw new BadRequestError('That is more than your available balance')
+    }
+    if (amountMinor < PAYOUT_MINIMUM_MINOR) {
+      throw new BadRequestError('That is below the minimum payout amount')
+    }
+
+    const tx = await prisma.transaction.create({
+      data: {
+        type: TransactionType.TESTER_PAYOUT,
+        status: TransactionStatus.PENDING,
+        amountMinor,
+        currency: 'INR',
+        counterpartyId: req.user!.id,
+        paymentAccountId: account.id,
+        paymentMethod: account.paymentType,
+        description: input.note,
+        occurredAt: new Date(),
+        reference: await nextReference('transaction'),
+        // The tester raised it themselves — there is no admin to credit.
+        recordedById: req.user!.id,
+      },
+      select: txSelect,
+    })
+
+    await recordAudit({
+      req,
+      action: 'transaction.payout_requested',
+      entityType: 'Transaction',
+      entityId: tx.id,
+      after: { reference: tx.reference, amountMinor: tx.amountMinor.toString() },
+    })
+
+    res.status(201).json({ data: withOutstanding(tx) })
+  },
+)
+
 /** §2.3 — a tester's own earnings summary. */
 transactionsRouter.get('/summary/mine', async (req, res) => {
-  const grouped = await prisma.transaction.groupBy({
-    by: ['type', 'status'],
-    where: { counterpartyId: req.user!.id },
-    _sum: { amountMinor: true },
-    _count: true,
-  })
+  const [grouped, tds] = await Promise.all([
+    prisma.transaction.groupBy({
+      by: ['type', 'status'],
+      where: { counterpartyId: req.user!.id },
+      _sum: { amountMinor: true },
+      _count: true,
+    }),
+    // A separate aggregate: the groupBy above sums `amountMinor` only, so TDS
+    // cannot be derived from it.
+    prisma.transaction.aggregate({
+      where: { counterpartyId: req.user!.id },
+      _sum: { tdsAmountMinor: true },
+    }),
+  ])
 
   const sum = (type: TransactionType, status?: TransactionStatus) =>
     grouped
@@ -516,8 +797,15 @@ transactionsRouter.get('/summary/mine', async (req, res) => {
       currency: 'INR',
       earnedTotalMinor: sum(TransactionType.TESTER_EARNING),
       earnedApprovedMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.APPROVED),
+      earnedReleasedMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.RELEASED),
       earnedPendingMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.PENDING),
       paidOutMinor: sum(TransactionType.TESTER_PAYOUT, TransactionStatus.PAID),
+      /**
+       * TDS withheld across every row that recorded it. The column has existed
+       * since the payout-accounts pass but nothing surfaced it, so a tester
+       * could not see what had been deducted on their behalf.
+       */
+      tdsWithheldMinor: (tds._sum.tdsAmountMinor ?? 0n).toString(),
     },
   })
 })

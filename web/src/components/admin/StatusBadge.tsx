@@ -22,6 +22,9 @@ const TONES: Record<string, Tone> = {
   ACTIVE: 'success',
   VERIFIED: 'success',
   APPROVED: 'success',
+  // Funds authorised to leave but not yet paid — a real state of its own, so
+  // it must not fall through to the neutral default and read as unremarkable.
+  RELEASED: 'success',
   PAID: 'success',
   COMPLETED: 'success',
   FIXED: 'success',

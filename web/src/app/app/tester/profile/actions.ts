@@ -1,11 +1,14 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { serverFetch } from '@/lib/api/server'
+import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed, formStringArray } from '@/lib/form-data'
 
 const PROFILE_PATH = '/app/tester/profile'
+
 
 /**
  * Server Actions for the tester's own profile self-service (§2.3).
@@ -26,36 +29,109 @@ const PROFILE_PATH = '/app/tester/profile'
 const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
 const PROFICIENCIES = ['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC'] as const
 
+/**
+ * Saves the whole "About you" form.
+ *
+ * A tester's profile is split across two records: name, phone and avatar are
+ * on `User` (they belong to the account, and an admin or a customer has them
+ * too), while everything testing-specific is on `TesterProfile`. One form,
+ * two PATCHes — the split is the API's, and hiding it behind a single save
+ * button is the right call for the person filling the form in.
+ *
+ * Sent sequentially rather than in parallel: if the account PATCH fails
+ * there is no point writing the profile half, and a partial save is easier
+ * to reason about when the first half is the one that succeeded.
+ *
+ * Every text field is sent even when blank. The API maps `''` to null on the
+ * clearable columns, which is what lets a tester actually erase a value —
+ * omitting the key would silently leave the old one in place.
+ */
 export async function updateBasicInfoAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
-  const headline = formTrimmed(formData, 'headline')
-  const bio = formTrimmed(formData, 'bio')
+  const firstName = formTrimmed(formData, 'firstName')
+  const lastName = formTrimmed(formData, 'lastName')
+  const phone = formTrimmed(formData, 'phone')
+
+  if (firstName) {
+    await serverFetch('users/me', {
+      method: 'PATCH',
+      body: { firstName, lastName, phone },
+    })
+  }
+
   const experienceYears = formTrimmed(formData, 'experienceYears')
-  const city = formTrimmed(formData, 'city')
   const countryCode = formTrimmed(formData, 'countryCode')
 
   await serverFetch('testers/me', {
     method: 'PATCH',
     body: {
-      ...(headline ? { headline } : {}),
-      ...(bio ? { bio } : {}),
+      headline: formTrimmed(formData, 'headline'),
+      bio: formTrimmed(formData, 'bio'),
+      city: formTrimmed(formData, 'city'),
+      gender: formTrimmed(formData, 'gender'),
+      ageGroup: formTrimmed(formData, 'ageGroup'),
+      lookingFor: formTrimmed(formData, 'lookingFor'),
+      skype: formTrimmed(formData, 'skype'),
+      linkedinUrl: formTrimmed(formData, 'linkedinUrl'),
+      profession: formTrimmed(formData, 'profession'),
+      countryCode: countryCode ? countryCode.toUpperCase() : '',
+      // Numeric, so an empty box means "not stated" rather than zero — and
+      // the API's schema rejects a bare '' for a number, so it is omitted
+      // entirely rather than cleared.
       ...(experienceYears ? { experienceYears: Number(experienceYears) } : {}),
-      ...(city ? { city } : {}),
-      ...(countryCode ? { countryCode: countryCode.toUpperCase() } : {}),
     },
   })
 
   revalidatePath(PROFILE_PATH)
 }
 
-export async function addDeviceAction(formData: FormData): Promise<void> {
+/**
+ * Attaches an already-uploaded file as the tester's signed NDA.
+ *
+ * The upload itself happens through the Route Handler at
+ * `/app/tester/upload`; this only records the resulting file id against the
+ * profile. Splitting it that way means the bytes never pass through a Server
+ * Action, which has a much smaller body limit than a file upload needs.
+ */
+export async function setNdaDocumentAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
+  const fileId = formTrimmed(formData, 'fileId')
+  if (!fileId) return
+
+  await serverFetch('testers/me/nda/document', { method: 'POST', body: { fileId } })
+  revalidatePath(PROFILE_PATH)
+}
+
+/** Sets the account avatar from an already-uploaded file. */
+export async function setAvatarAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const fileId = formTrimmed(formData, 'fileId')
+  if (!fileId) return
+
+  await serverFetch('users/me', { method: 'PATCH', body: { avatarFileId: fileId } })
+  revalidatePath(PROFILE_PATH)
+}
+
+/**
+ * The device body, shared by add and edit.
+ *
+ * `deviceSchema` on the API is the same for POST and PATCH, so building the
+ * body in one place is what stops the two paths drifting — an edit that
+ * silently dropped a field the create path sends would be a data-loss bug
+ * that only shows up after someone edits an existing row.
+ *
+ * Returns null when the one genuinely required field is missing.
+ */
+function deviceBody(formData: FormData): Record<string, unknown> | null {
   const typeInput = formTrimmed(formData, 'type')
   const type = (DEVICE_TYPES as readonly string[]).includes(typeInput) ? typeInput : 'MOBILE'
-  const manufacturer = formTrimmed(formData, 'manufacturer')
   const model = formTrimmed(formData, 'model')
+  if (!model) return null
+
+  const manufacturer = formTrimmed(formData, 'manufacturer')
   const osName = formTrimmed(formData, 'osName')
   const osVersion = formTrimmed(formData, 'osVersion')
   const screenSize = formTrimmed(formData, 'screenSize')
@@ -69,29 +145,45 @@ export async function addDeviceAction(formData: FormData): Promise<void> {
   const deviceModelId = formTrimmed(formData, 'deviceModelId')
   const osVersionRefId = formTrimmed(formData, 'osVersionRefId')
   const primaryNetworkId = formTrimmed(formData, 'primaryNetworkId')
-  if (!model) return
 
-  await serverFetch('testers/me/devices', {
-    method: 'POST',
-    body: {
-      type,
-      model,
-      ...(manufacturer ? { manufacturer } : {}),
-      ...(osName ? { osName } : {}),
-      ...(osVersion ? { osVersion } : {}),
-      ...(screenSize ? { screenSize } : {}),
-      ...(ramGb ? { ramGb } : {}),
-      ...(storageGb ? { storageGb } : {}),
-      ...(network ? { network } : {}),
-      ...(browser ? { browser } : {}),
-      ...(deviceModelId ? { deviceModelId } : {}),
-      ...(osVersionRefId ? { osVersionRefId } : {}),
-      ...(primaryNetworkId ? { primaryNetworkId } : {}),
-      isPrimary: formData.has('isPrimary'),
-    },
-  })
+  return {
+    type,
+    model,
+    ...(manufacturer ? { manufacturer } : {}),
+    ...(osName ? { osName } : {}),
+    ...(osVersion ? { osVersion } : {}),
+    ...(screenSize ? { screenSize } : {}),
+    ...(ramGb ? { ramGb } : {}),
+    ...(storageGb ? { storageGb } : {}),
+    ...(network ? { network } : {}),
+    ...(browser ? { browser } : {}),
+    ...(deviceModelId ? { deviceModelId } : {}),
+    ...(osVersionRefId ? { osVersionRefId } : {}),
+    ...(primaryNetworkId ? { primaryNetworkId } : {}),
+    isPrimary: formData.has('isPrimary'),
+  }
+}
 
+export async function addDeviceAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const body = deviceBody(formData)
+  if (!body) return
+
+  await serverFetch('testers/me/devices', { method: 'POST', body })
   revalidatePath(PROFILE_PATH)
+}
+
+export async function updateDeviceAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const deviceId = formTrimmed(formData, 'deviceId')
+  const body = deviceBody(formData)
+  if (!deviceId || !body) return
+
+  await serverFetch(`testers/me/devices/${deviceId}`, { method: 'PATCH', body })
+  revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?section=assets`)
 }
 
 export async function removeDeviceAction(formData: FormData): Promise<void> {
@@ -101,6 +193,68 @@ export async function removeDeviceAction(formData: FormData): Promise<void> {
   if (!deviceId) return
 
   await serverFetch(`testers/me/devices/${deviceId}`, { method: 'DELETE' })
+  revalidatePath(PROFILE_PATH)
+}
+
+// ─── Browsers ────────────────────────────────────────────────────────────────
+//
+// These live on the CATALOG module, not on `testers/me` — `TesterBrowser` is
+// a join onto the catalog's Browser/BrowserVersion/OperatingSystem rows, so
+// the endpoints sit next to the tables they reference.
+
+/** Shared by add and edit, for the same reason `deviceBody` is. */
+function browserBody(formData: FormData): Record<string, unknown> | null {
+  const browserId = formTrimmed(formData, 'browserId')
+  if (!browserId) return null
+
+  const browserVersionId = formTrimmed(formData, 'browserVersionId')
+  const operatingSystemId = formTrimmed(formData, 'operatingSystemId')
+
+  return {
+    browserId,
+    // Explicit null, not omission: the API treats these as nullable columns,
+    // and clearing a version has to actually clear it rather than leave the
+    // old one in place.
+    browserVersionId: browserVersionId || null,
+    operatingSystemId: operatingSystemId || null,
+  }
+}
+
+export async function addBrowserAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const body = browserBody(formData)
+  if (!body) return
+
+  try {
+    await serverFetch('catalog/me/browsers', { method: 'POST', body })
+  } catch (error) {
+    // A 409 means this exact browser+version is already listed — a duplicate
+    // click, not a failure worth shouting about. Anything else is real.
+    if (!(error instanceof ApiError) || error.status !== 409) throw error
+  }
+  revalidatePath(PROFILE_PATH)
+}
+
+export async function updateBrowserAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const browserRowId = formTrimmed(formData, 'browserRowId')
+  const body = browserBody(formData)
+  if (!browserRowId || !body) return
+
+  await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'PATCH', body })
+  revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?section=assets`)
+}
+
+export async function removeBrowserAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const browserRowId = formTrimmed(formData, 'browserRowId')
+  if (!browserRowId) return
+
+  await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'DELETE' })
   revalidatePath(PROFILE_PATH)
 }
 

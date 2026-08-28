@@ -1,4 +1,4 @@
-import { type Prisma, TesterStatus, Role, UserStatus } from '@prisma/client'
+import { type Prisma, BugStatus, TesterStatus, Role, UserStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
@@ -9,6 +9,19 @@ import {
   type ListGlobalDevicesQuery,
 } from './testers.schema.js'
 import { createNotification } from '../notifications/notifications.service.js'
+
+/**
+ * A bug that "counts" for the tester who reported it.
+ *
+ * Exported because the per-project work history reuses it: two definitions of
+ * "accepted" that could drift would put a different number on the profile
+ * header than on the project row underneath it.
+ */
+export const ACCEPTED_BUG_STATUSES: BugStatus[] = [
+  BugStatus.CONFIRMED,
+  BugStatus.FIXED,
+  BugStatus.VERIFIED,
+]
 
 const profileSelect = {
   id: true,
@@ -23,9 +36,17 @@ const profileSelect = {
   bugsReportedCount: true,
   bugsAcceptedCount: true,
   projectsCompletedCount: true,
+  gender: true,
+  ageGroup: true,
+  lookingFor: true,
+  skype: true,
+  linkedinUrl: true,
+  profession: true,
   verifiedAt: true,
   rejectionReason: true,
   ndaAcceptedAt: true,
+  ndaFileId: true,
+  ndaFile: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true } },
   createdAt: true,
   user: {
     select: {
@@ -258,17 +279,77 @@ export async function getMyProfile(userId: string) {
 async function requireOwnProfile(userId: string) {
   const profile = await prisma.testerProfile.findUnique({
     where: { userId },
-    select: { id: true, status: true },
+    // `ndaAcceptedAt` is here so `setNdaDocument` can preserve an existing
+    // acceptance timestamp rather than overwriting it with today's date.
+    select: { id: true, status: true, ndaAcceptedAt: true },
   })
   if (!profile) throw new NotFoundError('Tester profile')
   return profile
 }
 
+/**
+ * Free-text profile columns a tester may blank out.
+ *
+ * The schema lets these through as `''`; the column is nullable. Writing the
+ * empty string instead of null would leave the field "set to nothing", which
+ * then renders as an empty value rather than the em dash every other unset
+ * field shows — so the two representations are collapsed here, once, rather
+ * than at each of the half-dozen read sites.
+ */
+const CLEARABLE_PROFILE_FIELDS = [
+  'headline',
+  'bio',
+  'city',
+  'countryCode',
+  'gender',
+  'ageGroup',
+  'lookingFor',
+  'skype',
+  'linkedinUrl',
+  'profession',
+] as const
+
 export async function updateMyProfile(userId: string, input: Record<string, unknown>) {
   const profile = await requireOwnProfile(userId)
+
+  const data: Record<string, unknown> = { ...input }
+  for (const field of CLEARABLE_PROFILE_FIELDS) {
+    if (data[field] === '') data[field] = null
+  }
+
   return prisma.testerProfile.update({
     where: { id: profile.id },
-    data: input,
+    data,
+    select: profileSelect,
+  })
+}
+
+/**
+ * Attach the tester's signed NDA.
+ *
+ * The file must be one this tester uploaded and finished — the same rule bug
+ * attachments enforce. Without that check a tester could point their profile
+ * at any file id in the system and have the admin NDA panel serve it back.
+ */
+export async function setNdaDocument(userId: string, fileId: string) {
+  const profile = await requireOwnProfile(userId)
+
+  const file = await prisma.fileObject.findUnique({
+    where: { id: fileId },
+    select: { id: true, uploadedById: true, isComplete: true },
+  })
+  if (!file?.isComplete) throw new NotFoundError('File')
+  if (file.uploadedById !== userId) {
+    throw new ForbiddenError('That file belongs to someone else')
+  }
+
+  return prisma.testerProfile.update({
+    where: { id: profile.id },
+    // Returning the NDA document also counts as accepting it — a tester who
+    // signed and returned the paper has done strictly more than clicking the
+    // online acceptance, so recording only the file would leave the profile
+    // reading "NDA not accepted" while holding a signed copy.
+    data: { ndaFileId: fileId, ndaAcceptedAt: profile.ndaAcceptedAt ?? new Date() },
     select: profileSelect,
   })
 }
@@ -394,6 +475,49 @@ export async function addDevice(
     }
     return tx.testerDevice.create({
       data: { ...input, ...mirror, testerProfileId: profile.id },
+    })
+  })
+}
+
+/**
+ * Correct an existing device.
+ *
+ * Previously the only way to fix a typo was delete-and-re-add, which throws
+ * away `createdAt` and reads as destructive for what is really an edit.
+ *
+ * The catalog mirror runs again on the submitted values, matching `addDevice`
+ * — a caller who switches the brand pick and clears the free-text field gets
+ * the new brand mirrored in, and one who typed their own value keeps it.
+ */
+export async function updateDevice(
+  userId: string,
+  deviceId: string,
+  input: Omit<Prisma.TesterDeviceUncheckedCreateInput, 'id' | 'testerProfileId' | 'createdAt'>,
+) {
+  const profile = await requireOwnProfile(userId)
+  const device = await prisma.testerDevice.findUnique({
+    where: { id: deviceId },
+    select: { testerProfileId: true },
+  })
+  if (!device) throw new NotFoundError('Device')
+  if (device.testerProfileId !== profile.id) {
+    throw new ForbiddenError('That device belongs to another tester')
+  }
+
+  const mirror = await resolveDeviceCatalogMirror(input as Prisma.TesterDeviceUncheckedCreateInput)
+
+  return prisma.$transaction(async (tx) => {
+    // Only one device can be primary, so clear the flag elsewhere before
+    // setting it here — same rule the create path enforces.
+    if (input.isPrimary === true) {
+      await tx.testerDevice.updateMany({
+        where: { testerProfileId: profile.id, id: { not: deviceId } },
+        data: { isPrimary: false },
+      })
+    }
+    return tx.testerDevice.update({
+      where: { id: deviceId },
+      data: { ...input, ...mirror },
     })
   })
 }
@@ -525,7 +649,7 @@ export async function refreshTesterAggregates(userId: string): Promise<void> {
       where: {
         reportedById: userId,
         deletedAt: null,
-        status: { in: ['CONFIRMED', 'FIXED', 'VERIFIED'] },
+        status: { in: ACCEPTED_BUG_STATUSES },
       },
     }),
     prisma.rating.aggregate({

@@ -206,9 +206,16 @@ enum TransactionType {
   REFUND
 }
 
+/// Legacy `payment_history.pmt_type` was `credit | debit | release` — a
+/// three-stage model where funds are credited, then RELEASED, then paid.
+/// `RELEASED` is that middle stage: an APPROVED earning is money the tester has
+/// earned but cannot yet withdraw; releasing it makes it withdrawable. Without
+/// this stage the "Credit Fund / Release Fund" split has nothing to key off and
+/// APPROVED has to stand in for both, which overstates what a tester can take.
 enum TransactionStatus {
   PENDING
   APPROVED
+  RELEASED
   PAID
   FAILED
   CANCELLED
@@ -241,6 +248,16 @@ enum FileScope {
   TESTER_DOCUMENT
   AVATAR
   ORG_LOGO
+  /// A document the platform publishes TO its users — the blank NDA a tester
+  /// downloads to sign, for instance. Readable by any signed-in account, so
+  /// never use it for anything belonging to one person: TESTER_DOCUMENT is
+  /// the uploader-only scope.
+  PLATFORM_DOCUMENT
+  /// The logo of the application under test. Deliberately NOT reused from
+  /// ORG_LOGO: an org logo is public-facing branding, whereas this belongs to
+  /// a product that may be unreleased, so it resolves through `project.read`
+  /// rather than being readable by every signed-in account.
+  PROJECT_LOGO
   OTHER
 }
 
@@ -335,6 +352,7 @@ model User {
   auditLogs                AuditLog[]
   filesUploaded            FileObject[]      @relation("FileUploader")
   messageTemplatesAuthored MessageTemplate[] @relation("MessageTemplateAuthor")
+  platformSettingsEdited   PlatformSetting[] @relation("PlatformSettingEditor")
 
   @@index([role, status])
   @@index([createdAt])
@@ -560,6 +578,29 @@ model TesterProfile {
   city            String?
   countryCode     String? @map("country_code")
 
+  /// Self-declared profile fields, all optional and all free-form strings
+  /// rather than enums: these are demographic/preference answers whose valid
+  /// sets differ by market and change without a deploy. The portal renders a
+  /// fixed list of options for each; storing the chosen label keeps a value
+  /// from a retired option readable instead of failing to parse.
+  ///
+  /// `gender` deliberately allows any stored string — the UI offers a
+  /// prefer-not-to-say option, and constraining the column to a closed enum
+  /// would make that a schema decision rather than a product one.
+  gender      String?
+  ageGroup    String? @map("age_group")
+  /// What kind of engagement the tester wants, e.g. "Full time job".
+  lookingFor  String? @map("looking_for")
+  skype       String?
+  linkedinUrl String? @map("linkedin_url")
+  profession  String?
+
+  /// The tester's signed NDA, once uploaded. `ndaAcceptedAt` below records
+  /// the click-through acceptance; this is the countersigned document, which
+  /// is a separate step and may never happen for a tester who only accepted
+  /// online. Scope on the FileObject is TESTER_DOCUMENT.
+  ndaFileId String? @map("nda_file_id")
+
   /// Denormalised aggregates, recomputed on rating/bug write. Kept on the row
   /// because the admin tester list sorts and filters on them.
   ratingAverage          Decimal? @map("rating_average") @db.Decimal(3, 2)
@@ -577,6 +618,7 @@ model TesterProfile {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ndaFile     FileObject?         @relation("TesterNda", fields: [ndaFileId], references: [id], onDelete: SetNull)
   devices     TesterDevice[]
   browsers    TesterBrowser[]
   skills      TesterSkill[]
@@ -1094,6 +1136,10 @@ model Project {
   /// an active assignment on this project can read every bug on it, not only
   /// their own reports.
   testersCanSeeOtherBugs Boolean @default(false) @map("testers_can_see_other_bugs")
+  /// Logo of the application under test, shown on the project card and to
+  /// assigned testers. On the project rather than the build: the app's
+  /// identity does not change between versions of it.
+  logoFileId             String? @map("logo_file_id")
 
   startDate   DateTime? @map("start_date")
   endDate     DateTime? @map("end_date")
@@ -1108,6 +1154,7 @@ model Project {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
+  logo         FileObject?  @relation("ProjectLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
   createdBy    User         @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
@@ -1228,6 +1275,12 @@ model Bug {
 
   title            String
   description      String
+  /// The state the app had to be in before the steps below make sense —
+  /// "logged in as a returning customer with one item already in the cart".
+  /// Separate from `stepsToReproduce` because a precondition is setup, not a
+  /// step, and folding it into the steps is what makes a report ambiguous
+  /// about where reproduction actually begins.
+  preCondition     String? @map("pre_condition")
   stepsToReproduce String  @map("steps_to_reproduce")
   expectedResult   String? @map("expected_result")
   actualResult     String? @map("actual_result")
@@ -1235,8 +1288,24 @@ model Bug {
   severity        BugSeverity
   status          BugStatus          @default(NEW)
   reproducibility BugReproducibility @default(ALWAYS)
+  /// How often it actually happened, as a fraction of attempts: 3 out of 5.
+  ///
+  /// This is the evidence; `reproducibility` above is the tester's summary of
+  /// it. Both are kept because they answer different questions — a triager
+  /// reading "SOMETIMES" wants to know whether that meant 4/5 or 1/20, and a
+  /// bare enum cannot say.
+  occurrence      Int?
+  outOf           Int?               @map("out_of")
   type            BugType?
   featureId       String?            @map("feature_id")
+
+  /// A link to a screen recording hosted elsewhere.
+  ///
+  /// Distinct from an uploaded attachment: testers routinely record to a tool
+  /// that already has a shareable link, and forcing a re-upload of a file
+  /// they cannot easily export is how evidence stops getting attached at all.
+  /// Attachments remain the primary path; this is the escape hatch.
+  videoUrl String? @map("video_url")
 
   // Environment captured at report time
   deviceModel String? @map("device_model")
@@ -1445,6 +1514,23 @@ model MessageTemplate {
   createdBy User @relation("MessageTemplateAuthor", fields: [createdById], references: [id], onDelete: Restrict)
 
   @@map("message_templates")
+}
+
+/// Platform-wide settings an admin controls, as a small key/value store.
+///
+/// Deliberately not a column-per-setting table: these are a handful of
+/// operator-set values with no relational meaning, and each new one would
+/// otherwise be a migration. Values are stored as strings; the reader knows
+/// what shape its own key holds.
+model PlatformSetting {
+  key         String   @id
+  value       String
+  updatedById String?  @map("updated_by_id")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  updatedBy User? @relation("PlatformSettingEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("platform_settings")
 }
 
 // ─── Ratings ─────────────────────────────────────────────────────────────────
@@ -1657,7 +1743,9 @@ model FileObject {
   uploadedBy User @relation("FileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
 
   userAvatars        User[]              @relation("UserAvatar")
+  testerNdas         TesterProfile[]     @relation("TesterNda")
   orgLogos           Organisation[]      @relation("OrgLogo")
+  projectLogos       Project[]           @relation("ProjectLogo")
   projectMaterials   ProjectMaterial[]   @relation("MaterialFile")
   bugAttachments     BugAttachment[]     @relation("BugFile")
   messageAttachments MessageAttachment[] @relation("MessageFile")

@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
+import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
 import { StatusBadge, SeverityBadge, RoleBadge } from '@/components/admin/StatusBadge'
@@ -825,9 +826,12 @@ export default async function BugDetailPage({
                         <form action={removeBugAttachment}>
                           <input type="hidden" name="id" value={bug.id} />
                           <input type="hidden" name="attachmentId" value={attachment.id} />
-                          <SubmitButton variant="ghost" size="sm" pendingLabel="Removing…">
+                          <ConfirmSubmit
+                            iconLeft=""
+                            question={`Remove ${attachment.file?.originalName ?? 'this file'}?`}
+                          >
                             Remove
-                          </SubmitButton>
+                          </ConfirmSubmit>
                         </form>
                       ) : null}
                     </li>

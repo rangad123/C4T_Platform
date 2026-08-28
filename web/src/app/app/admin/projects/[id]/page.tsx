@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Modal } from '@/components/admin/Modal'
+import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
@@ -422,7 +423,16 @@ export default async function ProjectDetailPage({
             active={section}
             preserve={{ buildId }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          {/* Wraps: the build name is user-supplied and unbounded, and beside
+              two buttons it pushed this row past a phone viewport. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-3)',
+              flexWrap: 'wrap',
+            }}
+          >
             <BuildSwitcher basePath={detailPath} builds={project.builds} activeBuildId={activeBuildId} />
             {capabilities.canUpdate ? (
               <>
@@ -1327,9 +1337,9 @@ export default async function ProjectDetailPage({
                   <form action={removeMaterial}>
                     <input type="hidden" name="id" value={project.id} />
                     <input type="hidden" name="materialId" value={material.id} />
-                    <SubmitButton variant="ghost" size="sm" iconLeft="x" pendingLabel="Removing…">
+                    <ConfirmSubmit iconLeft="x" question={`Remove ${material.title}?`}>
                       Remove
-                    </SubmitButton>
+                    </ConfirmSubmit>
                   </form>
                 ) : null}
               </li>
@@ -1415,9 +1425,14 @@ export default async function ProjectDetailPage({
                   <form action={removeFeature}>
                     <input type="hidden" name="id" value={project.id} />
                     <input type="hidden" name="featureId" value={feature.id} />
-                    <SubmitButton variant="ghost" size="sm" iconLeft="x" pendingLabel="Removing…">
+                    <ConfirmSubmit
+                      iconLeft="x"
+                      question={`Remove ${feature.name}?${feature._count.bugs > 0
+                        ? ` ${feature._count.bugs} bug${feature._count.bugs === 1 ? '' : 's'} will be left without a feature.`
+                        : ''}`}
+                    >
                       Remove
-                    </SubmitButton>
+                    </ConfirmSubmit>
                   </form>
                 ) : null}
               </li>

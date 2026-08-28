@@ -88,6 +88,10 @@ import {
   Menu,
   Plus,
   Minus,
+  Settings,
+  Pencil,
+  Trash2,
+  Upload,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -200,6 +204,10 @@ export const ICON_REGISTRY = {
   // FaqAccordion's open/closed affordance.
   plus: Plus,
   minus: Minus,
+  settings: Settings,
+  pencil: Pencil,
+  'trash-2': Trash2,
+  upload: Upload,
 } as const satisfies Record<string, LucideIcon>
 
 /** The kebab-case names this site can render. */

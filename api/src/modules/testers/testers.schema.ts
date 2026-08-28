@@ -43,12 +43,45 @@ export const listTestersQuery = paginationQuery.extend({
   sort: z.enum(TESTER_SORT_FIELDS).optional(),
 })
 
+/**
+ * A short profile string that the tester is allowed to clear.
+ *
+ * `.optional()` alone cannot express "set this back to empty" — an omitted
+ * key and a cleared field are indistinguishable once the body is parsed. So
+ * these accept `''` and the service maps it to null, which is what makes a
+ * blank input in the portal actually erase the stored value.
+ */
+const clearableText = (max: number) => z.string().trim().max(max).optional()
+
 export const updateTesterProfileSchema = z.object({
-  headline: z.string().trim().max(160).optional(),
-  bio: z.string().trim().max(4000).optional(),
+  headline: clearableText(160),
+  bio: clearableText(4000),
   experienceYears: z.coerce.number().int().min(0).max(60).optional(),
-  city: z.string().trim().max(120).optional(),
-  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  city: clearableText(120),
+  /**
+   * Two letters, or empty to clear. `.length(2)` rejects `''`, so the union
+   * is what allows the field to be blanked at all — the same problem
+   * `updateOwnOrganisationSchema` has with its own country code.
+   */
+  countryCode: z.union([z.string().trim().length(2).toUpperCase(), z.literal('')]).optional(),
+  gender: clearableText(40),
+  ageGroup: clearableText(40),
+  lookingFor: clearableText(60),
+  skype: clearableText(120),
+  linkedinUrl: z.union([z.string().trim().url().max(255), z.literal('')]).optional(),
+  profession: clearableText(120),
+})
+
+/**
+ * Attaching the signed NDA document.
+ *
+ * Separate from `POST /testers/me/nda`, which records the click-through
+ * acceptance. A tester may do either, both, or neither, and conflating them
+ * would make "accepted online" indistinguishable from "returned a signed
+ * copy" — which is exactly the distinction legal cares about.
+ */
+export const ndaDocumentSchema = z.object({
+  fileId: z.string().cuid(),
 })
 
 /** §2.2 — Admin verifies, rejects or suspends a tester. */

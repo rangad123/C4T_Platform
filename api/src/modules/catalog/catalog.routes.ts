@@ -604,6 +604,62 @@ catalogRouter.post(
   },
 )
 
+/**
+ * Correct an existing row.
+ *
+ * Without this the only way to fix a mistyped version was delete-and-re-add,
+ * which loses `createdAt` and reads as destructive for what is really an
+ * edit. Scoped the same way as the delete below: the row is located by
+ * (id AND owner), so a guessed id belonging to another tester resolves to
+ * nothing rather than to their record.
+ */
+catalogRouter.patch(
+  '/me/browsers/:id',
+  requireRole(Role.TESTER),
+  validate({ params: idParam, body: testerBrowserBody }),
+  async (req, res) => {
+    const testerProfileId = await ownProfileId(req.user!.id)
+    const id = param(req, 'id')
+    const input = req.body as z.infer<typeof testerBrowserBody>
+
+    const existing = await prisma.testerBrowser.findFirst({
+      where: { id, testerProfileId },
+      select: { id: true },
+    })
+    if (!existing) throw new NotFoundError('Browser')
+
+    const browser = await prisma.browser.findUnique({
+      where: { id: input.browserId },
+      select: { id: true },
+    })
+    if (!browser) throw new NotFoundError('Browser')
+
+    // Same NULL-version caveat as the create path — and `id: { not }` so
+    // saving a row without changing it is not a clash with itself.
+    const clash = await prisma.testerBrowser.findFirst({
+      where: {
+        testerProfileId,
+        browserId: input.browserId,
+        browserVersionId: input.browserVersionId ?? null,
+        id: { not: id },
+      },
+      select: { id: true },
+    })
+    if (clash) throw new ConflictError('That browser and version is already on your profile')
+
+    const row = await prisma.testerBrowser.update({
+      where: { id },
+      data: {
+        browserId: input.browserId,
+        browserVersionId: input.browserVersionId ?? null,
+        operatingSystemId: input.operatingSystemId ?? null,
+      },
+      select: testerBrowserSelect,
+    })
+    res.json({ data: row })
+  },
+)
+
 catalogRouter.delete(
   '/me/browsers/:id',
   requireRole(Role.TESTER),

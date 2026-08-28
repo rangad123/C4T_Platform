@@ -54,6 +54,10 @@ export function BuildSwitcher({ basePath, builds, activeBuildId }: BuildSwitcher
         aria-label="Active build"
         style={{
           width: 'auto',
+          // Build names are free text. Without a ceiling the control sizes to
+          // the longest one and overflows a narrow viewport.
+          maxWidth: '100%',
+          minWidth: 0,
           height: 32,
           padding: '0 var(--space-6) 0 var(--space-3)',
           fontSize: 'var(--type-body-sm-size)',
