@@ -1,10 +1,79 @@
 import type { Request, Response } from 'express'
+import { sendMail, teamInvitationEmail } from '../../lib/mailer.js'
 import { param } from '../../lib/http.js'
 import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
 import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './organisations.service.js'
 import type { ListOrganisationsQuery } from './organisations.schema.js'
+
+export async function listInvitations(req: Request, res: Response): Promise<void> {
+  res.json({ data: await service.listInvitations(req.user!, param(req, 'id')) })
+}
+
+export async function inviteMember(req: Request, res: Response): Promise<void> {
+  const { invitation, token, organisationName, invitedByName } = await service.inviteMember(
+    req.user!,
+    param(req, 'id'),
+    req.body,
+  )
+
+  /**
+   * The email is sent here rather than in the service so a mail failure never
+   * rolls back the invitation — the row is the record, and the owner can
+   * resend. The raw token exists only in this scope and in the message.
+   */
+  await sendMail(
+    teamInvitationEmail(
+      invitation.email,
+      token,
+      organisationName,
+      invitedByName,
+      invitation.message,
+    ),
+  ).catch(() => {
+    // Logged by the mailer. The invitation stands; the owner can resend it.
+  })
+
+  await recordAudit({
+    req,
+    action: 'organisation.member_invited',
+    entityType: 'Organisation',
+    entityId: param(req, 'id'),
+    // Deliberately no token in the audit trail.
+    after: { email: invitation.email, orgRole: invitation.orgRole },
+  })
+
+  res.status(201).json({ data: invitation })
+}
+
+export async function revokeInvitation(req: Request, res: Response): Promise<void> {
+  const invitation = await service.revokeInvitation(
+    req.user!,
+    param(req, 'id'),
+    param(req, 'invitationId'),
+  )
+  await recordAudit({
+    req,
+    action: 'organisation.invitation_revoked',
+    entityType: 'Organisation',
+    entityId: param(req, 'id'),
+    after: { email: invitation.email },
+  })
+  res.json({ data: invitation })
+}
+
+export async function acceptInvitation(req: Request, res: Response): Promise<void> {
+  const result = await service.acceptInvitation(req.user!, req.body.token)
+  await recordAudit({
+    req,
+    action: 'organisation.invitation_accepted',
+    entityType: 'Organisation',
+    entityId: result.organisation.id,
+    after: { orgRole: result.orgRole },
+  })
+  res.json({ data: result })
+}
 
 export async function list(req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListOrganisationsQuery>(res)

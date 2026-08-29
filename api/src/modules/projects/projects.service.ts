@@ -1,4 +1,10 @@
-import { type Prisma, ProjectStatus, AssignmentStatus, OrgMemberRole } from '@prisma/client'
+import {
+  type Prisma,
+  ProjectStatus,
+  AssignmentStatus,
+  OrgMemberRole,
+  BugFieldType,
+} from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, ForbiddenError, BadRequestError, ConflictError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
@@ -68,6 +74,7 @@ const buildSelect = {
   testersCanSeeOtherBugs: true,
   startDate: true,
   endDate: true,
+  bugCustomizationEnabled: true,
   testDocumentFileId: true,
   testDocument: {
     select: { id: true, originalName: true, mimeType: true, sizeBytes: true },
@@ -367,11 +374,30 @@ export async function getProject(
     // A tester sees only their own assignment row, never the rest of the
     // crowd — and never filtered by build, since it is their one row
     // regardless of which build it belongs to.
-    assignments: seesTeam
+    /**
+     * A tester sees only their own assignment row, never the rest of the
+     * crowd — and never filtered by build, since it is their one row
+     * regardless of which build it belongs to.
+     *
+     * The roster is stripped of tester email addresses for anyone who is not
+     * admin-side. A customer needs to know WHO is on their build — name,
+     * country, rating — but a direct address serves no purpose in the product
+     * and lets a client contact the crowd off-platform. This mirrors
+     * `projectContacts` below, which already gates email by audience for the
+     * same reason, and the bug CSV export, which does the same.
+     */
+    assignments: (seesTeam
       ? project.assignments.filter((a) => a.buildId === activeBuildId)
       : myAssignment
         ? [myAssignment]
-        : [],
+        : []
+    ).map((a) => {
+      if (isAdminSide(user)) return a
+      // Omit the key rather than blanking it, so no caller can mistake an
+      // empty string for a real address.
+      const { email: _omit, ...tester } = a.tester
+      return { ...a, tester }
+    }),
     managers: seesTeam ? project.managers : [],
     contacts,
     capabilities: {
@@ -711,6 +737,137 @@ export async function addFeature(
     data: { projectId, buildId, name },
     select: { id: true, name: true, createdAt: true },
   })
+}
+
+// ─── Custom bug fields (§37-39 of the client brief) ──────────────────────────
+
+const customFieldSelect = {
+  id: true,
+  name: true,
+  type: true,
+  options: true,
+  isRequired: true,
+  position: true,
+  createdAt: true,
+  _count: { select: { values: true } },
+} satisfies Prisma.BugCustomFieldSelect
+
+/** Types whose answer is chosen from `options` rather than typed. */
+const CHOICE_TYPES: BugFieldType[] = [
+  BugFieldType.SELECT,
+  BugFieldType.RADIO,
+  BugFieldType.CHECKBOX,
+]
+
+/**
+ * The extra questions this build's bug form asks.
+ *
+ * Readable by anyone who can read the project — a tester needs them to fill
+ * the form in, the customer to read the answers back.
+ */
+export async function listBugCustomFields(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  requestedBuildId?: string,
+) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  const buildId = await resolveBuildId(projectId, requestedBuildId)
+  return prisma.bugCustomField.findMany({
+    where: { buildId },
+    select: customFieldSelect,
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+  })
+}
+
+export async function addBugCustomField(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  input: {
+    name: string
+    type: BugFieldType
+    options?: string[]
+    isRequired?: boolean
+    buildId?: string
+  },
+) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.manage_materials', resolved.relations)
+
+  const buildId = await resolveBuildId(projectId, input.buildId)
+
+  /**
+   * A choice field with no options is a question a tester cannot answer, so
+   * it is refused rather than stored. Conversely options on a free-text field
+   * would never be rendered, so they are dropped rather than silently kept.
+   */
+  const isChoice = CHOICE_TYPES.includes(input.type)
+  const options = isChoice ? (input.options ?? []).map((o) => o.trim()).filter(Boolean) : []
+  if (isChoice && options.length === 0) {
+    throw new BadRequestError('This field type needs at least one option')
+  }
+  if (new Set(options).size !== options.length) {
+    throw new BadRequestError('Options must be different from each other')
+  }
+
+  const existing = await prisma.bugCustomField.findUnique({
+    where: { buildId_name: { buildId, name: input.name } },
+    select: { id: true },
+  })
+  if (existing) throw new ConflictError('A field with this name already exists on this build')
+
+  // Append. `position` is only a render order, so the next integer is enough.
+  const last = await prisma.bugCustomField.findFirst({
+    where: { buildId },
+    select: { position: true },
+    orderBy: { position: 'desc' },
+  })
+
+  return prisma.bugCustomField.create({
+    data: {
+      buildId,
+      name: input.name,
+      type: input.type,
+      options,
+      isRequired: input.isRequired ?? false,
+      position: (last?.position ?? -1) + 1,
+    },
+    select: customFieldSelect,
+  })
+}
+
+/**
+ * Removes a field definition.
+ *
+ * The answers go with it (`onDelete: Cascade` on `BugCustomValue.field`), and
+ * that is the honest behaviour: a value has no meaning without the question,
+ * and keeping orphaned strings would show up in reports as unlabelled data.
+ * The count of affected answers is returned so the UI can warn first.
+ */
+export async function removeBugCustomField(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  fieldId: string,
+) {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved || !can(user, 'project.read', resolved.relations)) {
+    throw new NotFoundError('Project')
+  }
+  authorize(user, 'project.manage_materials', resolved.relations)
+
+  const field = await prisma.bugCustomField.findFirst({
+    where: { id: fieldId, build: { projectId } },
+    select: { id: true, _count: { select: { values: true } } },
+  })
+  if (!field) throw new NotFoundError('Field')
+
+  await prisma.bugCustomField.delete({ where: { id: field.id } })
+  return { id: field.id, removedAnswers: field._count.values }
 }
 
 export async function removeFeature(

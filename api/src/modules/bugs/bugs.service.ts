@@ -22,6 +22,20 @@ import { resolveBuildId } from '../projects/projects.service.js'
 import { BUG_SORT_FIELDS, type ListBugsQuery } from './bugs.schema.js'
 
 const bugSelect = {
+  /**
+   * The client's own extra answers (§39), ordered as the form asked them.
+   *
+   * In `bugSelect` rather than only the detail read, so the create response,
+   * the list and the detail all carry them — a caller should never have to
+   * know which read happens to include the answers.
+   */
+  customValues: {
+    select: {
+      value: true,
+      field: { select: { id: true, name: true, type: true, options: true, position: true } },
+    },
+    orderBy: { field: { position: 'asc' } },
+  },
   id: true,
   reference: true,
   title: true,
@@ -75,6 +89,24 @@ function isReporterOnly(relations: RelationSet): boolean {
 
 // ─── Read ────────────────────────────────────────────────────────────────────
 
+/**
+ * Removes the reporter's email address for anyone who is not admin-side.
+ *
+ * A customer needs to know WHO filed a bug — the name and country are on the
+ * row — but a direct address serves no reporting purpose and lets a client
+ * contact the crowd off-platform. Applied at every read that returns a bug so
+ * the list, the detail and the create response cannot disagree; the CSV export
+ * drops the same column for the same reason.
+ */
+function maskReporter<T extends { reportedBy: { email: string } | null }>(
+  user: Express.AuthenticatedUser,
+  bug: T,
+): T {
+  if (isAdminSide(user) || !bug.reportedBy) return bug
+  const { email: _omit, ...reportedBy } = bug.reportedBy
+  return { ...bug, reportedBy }
+}
+
 export async function listBugs(user: Express.AuthenticatedUser, query: ListBugsQuery) {
   const where: Prisma.BugWhereInput = {
     deletedAt: null,
@@ -117,7 +149,7 @@ export async function listBugs(user: Express.AuthenticatedUser, query: ListBugsQ
     prisma.bug.count({ where }),
   ])
 
-  return { items, meta: buildMeta(query, total) }
+  return { items: items.map((bug) => maskReporter(user, bug)), meta: buildMeta(query, total) }
 }
 
 /**
@@ -172,6 +204,26 @@ export async function exportBugsCSV(
   })
 
   /**
+   * The client's extra questions become extra columns — but only when the
+   * export covers exactly ONE build (§39, "where appropriate").
+   *
+   * Custom fields are defined per build, so a project-wide or date-range
+   * export spanning several builds would need a column for the union of every
+   * build's fields, most of them blank on most rows. That is a worse table
+   * than leaving them out. A single-build export is the case where the
+   * columns are meaningful for every row in the file.
+   */
+  const singleBuildId =
+    query.buildId ?? (query.buildIds?.length === 1 ? query.buildIds[0] : undefined)
+  const customFields = singleBuildId
+    ? await prisma.bugCustomField.findMany({
+        where: { buildId: singleBuildId },
+        select: { id: true, name: true },
+        orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      })
+    : []
+
+  /**
    * Whether the reporter's email address is included.
    *
    * A CUSTOMER reaches this through the Reports module, and a tester's email
@@ -216,6 +268,17 @@ export async function exportBugsCSV(
     b.resolvedAt,
     b.createdAt,
     b.updatedAt,
+    /**
+     * One cell per custom field, in the same order as the header. A bug with
+     * no answer for a field gets an empty cell rather than the column
+     * shifting — the row must line up with the header whatever was answered.
+     * Multi-choice values are stored newline-joined; they are re-joined with
+     * a comma so a cell stays on one line in a spreadsheet.
+     */
+    ...customFields.map((field) => {
+      const answer = b.customValues.find((v) => v.field.id === field.id)
+      return answer ? answer.value.split(NEWLINE).join(', ') : ''
+    }),
   ])
 
   const { toCsv } = await import('../../lib/csv.js')
@@ -245,6 +308,7 @@ export async function exportBugsCSV(
       'Resolved at',
       'Created at',
       'Updated at',
+      ...customFields.map((field) => field.name),
     ],
     rows,
   )
@@ -334,7 +398,7 @@ export async function getBug(user: Express.AuthenticatedUser, id: string) {
   const reporterOnly = isReporterOnly(relations)
 
   return {
-    ...bug,
+    ...maskReporter(user, bug),
     attachments,
     capabilities: {
       canEdit: can(user, 'bug.update', relations) && (!reporterOnly || canReporterEdit(bug.status)),
@@ -353,11 +417,83 @@ export async function getBug(user: Express.AuthenticatedUser, id: string) {
 
 // ─── Create ──────────────────────────────────────────────────────────────────
 
+/**
+ * How a CHECKBOX answer packs several choices into one string.
+ *
+ * A newline, because no option label can contain one — the API caps an option
+ * at 120 trimmed characters of single-line text. A comma would collide with
+ * option labels that legitimately contain commas.
+ */
+const NEWLINE = String.fromCharCode(10)
+
+/**
+ * Turns submitted answers into rows, or refuses them.
+ *
+ * Everything is checked against the build's own field list: an id that is not
+ * one of this build's fields is rejected outright, a required field with no
+ * answer is rejected, and a choice field's answer must be one of its options.
+ * CHECKBOX answers arrive newline-joined (see the schema note) so each part is
+ * checked separately.
+ */
+async function resolveCustomValues(
+  buildId: string,
+  answers: { fieldId: string; value: string }[] | undefined,
+): Promise<{ fieldId: string; value: string }[]> {
+  const build = await prisma.build.findUnique({
+    where: { id: buildId },
+    select: { bugCustomizationEnabled: true },
+  })
+  if (!build?.bugCustomizationEnabled) return []
+
+  const fields = await prisma.bugCustomField.findMany({
+    where: { buildId },
+    select: { id: true, name: true, type: true, options: true, isRequired: true },
+  })
+  if (fields.length === 0) return []
+
+  const submitted = new Map((answers ?? []).map((a) => [a.fieldId, a.value.trim()]))
+
+  // An answer for a field that is not on this build is a malformed request,
+  // not something to quietly drop.
+  for (const fieldId of submitted.keys()) {
+    if (!fields.some((f) => f.id === fieldId)) {
+      throw new BadRequestError('One or more answers do not belong to this build')
+    }
+  }
+
+  const rows: { fieldId: string; value: string }[] = []
+  for (const field of fields) {
+    const value = submitted.get(field.id) ?? ''
+    if (!value) {
+      if (field.isRequired) throw new BadRequestError(`"${field.name}" is required`)
+      continue
+    }
+    if (field.options.length > 0) {
+      const parts = value.split(NEWLINE).map((v) => v.trim()).filter(Boolean)
+      const unknown = parts.find((v) => !field.options.includes(v))
+      if (unknown) throw new BadRequestError(`"${unknown}" is not an option for "${field.name}"`)
+    }
+    rows.push({ fieldId: field.id, value })
+  }
+  return rows
+}
+
 export async function createBug(
   user: Express.AuthenticatedUser,
-  input: Record<string, unknown> & { projectId: string; buildId?: string; attachmentFileIds: string[] },
+  input: Record<string, unknown> & {
+    projectId: string
+    buildId?: string
+    attachmentFileIds: string[]
+    customAnswers?: { fieldId: string; value: string }[]
+  },
 ) {
-  const { projectId, buildId: requestedBuildId, attachmentFileIds, ...data } = input
+  const {
+    projectId,
+    buildId: requestedBuildId,
+    attachmentFileIds,
+    customAnswers,
+    ...data
+  } = input
 
   const resolved = await projectRelations(user, projectId)
   if (!resolved) throw new NotFoundError('Project')
@@ -392,9 +528,21 @@ export async function createBug(
     if (!feature) throw new BadRequestError('That feature does not belong to this build')
   }
 
+  /**
+   * The client's own extra questions for this build (§39).
+   *
+   * Validated against the build's field definitions rather than trusted: a
+   * hand-built request could otherwise answer a field belonging to another
+   * build, invent a field id, or put a value outside a dropdown's options.
+   * Skipped entirely when the build has customisation switched off, so
+   * turning it off really does stop new answers being recorded.
+   */
+  const customValues = await resolveCustomValues(buildId, customAnswers)
+
   const bug = await prisma.bug.create({
     data: {
       ...(data as Prisma.BugCreateInput),
+      ...(customValues.length > 0 ? { customValues: { create: customValues } } : {}),
       reference: await nextReference('bug'),
       project: { connect: { id: projectId } },
       build: { connect: { id: buildId } },
@@ -423,7 +571,7 @@ export async function createBug(
     link: `/app/bugs/${bug.id}`,
   })
 
-  return bug
+  return maskReporter(user, bug)
 }
 
 /** Fan-out to the customer's owners and the project's managers. */

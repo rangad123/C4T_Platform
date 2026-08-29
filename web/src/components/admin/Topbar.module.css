@@ -42,6 +42,10 @@
   gap: 6px;
   height: 36px;
   padding: 0 var(--space-4);
+  /* A fixed-height control cannot absorb a second line: without this the
+     label wraps to "Sign / out" and spills out of the button on a narrow
+     top bar. */
+  white-space: nowrap;
   border: 1px solid var(--border-default);
   background: var(--surface-canvas);
   color: var(--text-secondary);

@@ -16,7 +16,17 @@ import { serverFetchOrNull } from '@/lib/api/server'
 import { requireRole } from '@/lib/auth/session'
 import { CountryLabel } from '@/components/admin/CountryFlag'
 import { formatDate, personName, titleCase } from '@/lib/admin/format'
-import { addOrgMemberAction, removeOrgMemberAction, updateOrgMemberAction, updateOrgProfileAction } from './actions'
+import { Textarea } from '@/components/ds/forms/Textarea'
+import { EmptyState } from '@/components/ds/admin/EmptyState'
+import { Badge } from '@/components/ds/core/Badge'
+import {
+  addOrgMemberAction,
+  removeOrgMemberAction,
+  updateOrgMemberAction,
+  updateOrgProfileAction,
+  inviteTeamMemberAction,
+  revokeInvitationAction,
+} from './actions'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const DETAIL_PATH = '/app/customer/organisation'
@@ -76,6 +86,35 @@ const NOTICES: Record<string, NoticeCopy> = {
   'forbidden-write': { tone: 'error', message: 'Only an owner can make that change.' },
   missing: { tone: 'error', message: 'That record is no longer there. Reload the page.' },
   failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
+  'invite-sent': {
+    tone: 'success',
+    message: 'The invitation is on its way. It expires in 14 days if it is not used.',
+  },
+  'invite-revoked': { tone: 'success', message: 'That invitation has been withdrawn.' },
+  'invite-email': { tone: 'warning', message: 'Enter a valid email address to invite someone.' },
+  'invite-exists': { tone: 'warning', message: 'That person is already on your team.' },
+  'invite-forbidden': { tone: 'error', message: 'Only an owner can invite people.' },
+  'invite-failed': { tone: 'error', message: 'That invitation could not be sent. Try again in a moment.' },
+}
+
+/** A row of `GET /v1/organisations/:id/invitations`. */
+interface InvitationRow {
+  id: string
+  email: string
+  orgRole: string
+  message: string | null
+  expiresAt: string
+  createdAt: string
+  state: 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED'
+  invitedBy: { id: string; firstName: string | null; lastName: string | null } | null
+}
+
+/** Tone per invitation state, so the table reads at a glance. */
+const INVITATION_TONE: Record<InvitationRow['state'], 'success' | 'warning' | 'neutral'> = {
+  ACCEPTED: 'success',
+  PENDING: 'warning',
+  EXPIRED: 'neutral',
+  REVOKED: 'neutral',
 }
 
 
@@ -124,7 +163,14 @@ export default async function CustomerOrganisationPage({
   const closedHref = section === SECTIONS[0].value ? DETAIL_PATH : `${DETAIL_PATH}?section=${section}`
   const profileModalOpen = edit === 'profile'
 
-  const detail = await serverFetchOrNull<OrganisationDetail>(`organisations/${organisation.id}`)
+  const [detail, invitations] = await Promise.all([
+    serverFetchOrNull<OrganisationDetail>(`organisations/${organisation.id}`),
+    // Only an owner can act on these, but everyone on the team can see who is
+    // pending — it stops two owners inviting the same person twice.
+    section === 'members'
+      ? serverFetchOrNull<readonly InvitationRow[]>(`organisations/${organisation.id}/invitations`)
+      : Promise.resolve(null),
+  ])
   const members = detail?.members ?? []
   const owners = members.filter((m) => m.orgRole === 'OWNER')
 
@@ -144,6 +190,54 @@ export default async function CustomerOrganisationPage({
       value: organisation.countryCode ? <CountryLabel countryCode={organisation.countryCode} /> : null,
     },
     { label: 'Tax id', value: organisation.taxId },
+  ]
+
+  const invitationColumns: readonly TableColumn<InvitationRow>[] = [
+    {
+      key: 'email',
+      header: 'Invited',
+      render: (row) => row.email,
+      renderSecondary: (row) =>
+        row.invitedBy
+          ? `by ${personName(row.invitedBy)} on ${formatDate(row.createdAt)}`
+          : formatDate(row.createdAt),
+    },
+    { key: 'role', header: 'Org role', render: (row) => titleCase(row.orgRole) },
+    {
+      key: 'state',
+      header: 'Status',
+      render: (row) => (
+        <Badge tone={INVITATION_TONE[row.state]} uppercase={false}>
+          {titleCase(row.state)}
+        </Badge>
+      ),
+      /* An expiry only means something while the invitation could still be
+         used, so it is shown for pending rows and nothing else. */
+      renderSecondary: (row) =>
+        row.state === 'PENDING' ? `Expires ${formatDate(row.expiresAt)}` : undefined,
+    },
+    {
+      key: 'action',
+      header: 'Action',
+      align: 'right',
+      render: (row) =>
+        isOwner && row.state === 'PENDING' ? (
+          <form action={revokeInvitationAction}>
+            <input type="hidden" name="id" value={organisation.id} />
+            <input type="hidden" name="invitationId" value={row.id} />
+            <ConfirmSubmit
+              iconLeft=""
+              question={`Withdraw the invitation to ${row.email}?`}
+              confirmLabel="Yes, withdraw"
+              pendingLabel="Withdrawing…"
+            >
+              Withdraw
+            </ConfirmSubmit>
+          </form>
+        ) : (
+          '—'
+        ),
+    },
   ]
 
   const memberColumns: readonly TableColumn<OrganisationMember>[] = [
@@ -317,28 +411,99 @@ export default async function CustomerOrganisationPage({
                 background: 'var(--surface-sunken)',
               }}
             >
+              {/*
+                §42 — invite by EMAIL, which is what the reference does and
+                what actually works for someone with no account yet. The
+                account-id form below it stays for adding a colleague who has
+                already signed up, where an email round trip is needless.
+              */}
               <h3 style={{ margin: 0, fontSize: 'var(--type-body-md-size)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
-                Add a member
+                Invite a new team member
               </h3>
-              <form action={addOrgMemberAction} style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}>
+              <form action={inviteTeamMemberAction} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
                 <input type="hidden" name="id" value={organisation.id} />
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+                  <Field
+                    label="Email address"
+                    htmlFor="inviteEmail"
+                    hint="They do not need an account yet — the invitation walks them through it."
+                    style={{ flex: '2 1 240px' }}
+                  >
+                    <Input id="inviteEmail" name="email" type="email" required placeholder="colleague@example.com" />
+                  </Field>
+                  <Field label="Org role" htmlFor="inviteRole">
+                    <Select id="inviteRole" name="orgRole" defaultValue="MEMBER" options={MEMBER_ROLE_OPTIONS} style={{ width: 150 }} />
+                  </Field>
+                </div>
                 <Field
-                  label="Account id"
-                  htmlFor="userId"
-                  hint="The id of an existing account — ask them to sign up first if they don't have one."
-                  style={{ flex: 1 }}
+                  label="Invitation message"
+                  htmlFor="inviteMessage"
+                  hint="Optional. Included in the email so they know why they are being added."
                 >
-                  <Input id="userId" name="userId" required placeholder="Account id" />
+                  <Textarea id="inviteMessage" name="message" rows={3} maxLength={1000} />
                 </Field>
-                <Field label="Org role" htmlFor="orgRole">
-                  <Select id="orgRole" name="orgRole" defaultValue="MEMBER" options={MEMBER_ROLE_OPTIONS} style={{ width: 150 }} />
-                </Field>
-                <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
-                  Add member
-                </SubmitButton>
+                <div>
+                  <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Sending the invitation…">
+                    Send invitation
+                  </SubmitButton>
+                </div>
               </form>
+
+              <details style={{ marginTop: 'var(--space-2)' }}>
+                <summary style={{ cursor: 'pointer', fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
+                  Add someone who already has an account
+                </summary>
+                <form action={addOrgMemberAction} style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)', marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
+                  <input type="hidden" name="id" value={organisation.id} />
+                  <Field
+                    label="Account id"
+                    htmlFor="userId"
+                    hint="Adds them straight away, with no email."
+                    style={{ flex: '1 1 240px' }}
+                  >
+                    <Input id="userId" name="userId" required placeholder="Account id" />
+                  </Field>
+                  <Field label="Org role" htmlFor="orgRole">
+                    <Select id="orgRole" name="orgRole" defaultValue="MEMBER" options={MEMBER_ROLE_OPTIONS} style={{ width: 150 }} />
+                  </Field>
+                  <SubmitButton variant="secondary" pendingLabel="Adding…">
+                    Add member
+                  </SubmitButton>
+                </form>
+              </details>
             </div>
           ) : null}
+        </Panel>
+      ) : null}
+
+      {/* ── Pending and past invitations (§41) ──────────────────────────── */}
+      {section === 'members' ? (
+        <Panel
+          title="Invitations"
+          description="People invited by email who have not joined yet, and the ones who have."
+          flush
+        >
+          {invitations === null ? (
+            <p style={{ margin: 0, padding: 'var(--space-6)', color: 'var(--text-secondary)' }}>
+              Invitations could not be loaded. Refresh in a moment.
+            </p>
+          ) : invitations.length === 0 ? (
+            <div style={{ padding: 'var(--space-6)' }}>
+              <EmptyState
+                icon="message-square"
+                title="No invitations yet"
+                description="Invite a colleague by email above and it appears here until they join."
+              />
+            </div>
+          ) : (
+            <Table
+              ariaLabel="Team invitations"
+              columns={invitationColumns}
+              rows={[...invitations]}
+              rowKey={(row) => row.id}
+              style={{ border: 'none', borderRadius: 0 }}
+            />
+          )}
         </Panel>
       ) : null}
     </DetailShell>

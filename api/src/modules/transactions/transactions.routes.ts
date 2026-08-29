@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { TransactionType, TransactionStatus, PaymentMethod, Role, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
-import { requirePermission } from '../../middleware/authorize.js'
+import { requirePermission, isAdminSide } from '../../middleware/authorize.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
 import { buildMeta, buildOrderBy, paginationQuery, toSkipTake } from '../../lib/pagination.js'
 import { NotFoundError, BadRequestError } from '../../lib/errors.js'
@@ -66,11 +66,34 @@ const txSelect = {
   },
 } satisfies Prisma.TransactionSelect
 
-/** `amountMinor - paidAmountMinor` — computed here, not stored (see schema comment). */
-function withOutstanding<T extends { amountMinor: bigint; paidAmountMinor: bigint }>(
-  tx: T,
-): T & { outstandingMinor: string } {
-  return { ...tx, outstandingMinor: (tx.amountMinor - tx.paidAmountMinor).toString() }
+/**
+ * Shapes one transaction for the caller: adds the computed outstanding amount,
+ * and removes the counterparty's email address for anyone who is not
+ * admin-side.
+ *
+ * ── WHY THE EMAIL GOES
+ *
+ * A tester payout names the tester as the counterparty. A customer can
+ * legitimately see their own ledger — including that a payout went to a named
+ * tester — but the tester's email address is direct-contact PII with no
+ * accounting purpose, and it let a client harvest addresses from the payments
+ * list. The CSV export already only ever carried name and role; this brings
+ * the JSON in line.
+ *
+ * `user` is a required parameter rather than an option so no call site can
+ * quietly return an unmasked row by forgetting it.
+ */
+function withOutstanding<
+  T extends {
+    amountMinor: bigint
+    paidAmountMinor: bigint
+    counterparty?: { email: string } | null
+  },
+>(user: Express.AuthenticatedUser, tx: T) {
+  const outstandingMinor = (tx.amountMinor - tx.paidAmountMinor).toString()
+  if (isAdminSide(user) || !tx.counterparty) return { ...tx, outstandingMinor }
+  const { email: _omit, ...counterparty } = tx.counterparty
+  return { ...tx, counterparty, outstandingMinor }
 }
 
 /**
@@ -260,7 +283,7 @@ transactionsRouter.get('/', validate({ query: listQuery }), async (req, res) => 
   ])
 
   res.json({
-    data: items.map(withOutstanding),
+    data: items.map((tx) => withOutstanding(req.user!, tx)),
     meta: {
       ...buildMeta(query, total),
       totalsByType: totals.map((t) => ({
@@ -350,7 +373,7 @@ transactionsRouter.get(
       select: txSelect,
     })
     if (!tx) throw new NotFoundError('Transaction')
-    res.json({ data: withOutstanding(tx) })
+    res.json({ data: withOutstanding(req.user!, tx) })
   },
 )
 
@@ -441,7 +464,7 @@ transactionsRouter.post(
       after: { reference: tx.reference, type: tx.type, amountMinor: tx.amountMinor.toString() },
     })
 
-    res.status(201).json({ data: withOutstanding(tx) })
+    res.status(201).json({ data: withOutstanding(req.user!, tx) })
   },
 )
 
@@ -502,7 +525,7 @@ transactionsRouter.patch(
       after: input,
     })
 
-    res.json({ data: withOutstanding(tx) })
+    res.json({ data: withOutstanding(req.user!, tx) })
   },
 )
 
@@ -765,7 +788,7 @@ transactionsRouter.post(
       after: { reference: tx.reference, amountMinor: tx.amountMinor.toString() },
     })
 
-    res.status(201).json({ data: withOutstanding(tx) })
+    res.status(201).json({ data: withOutstanding(req.user!, tx) })
   },
 )
 

@@ -29,13 +29,20 @@ import {
   PROJECT_PRIORITIES,
   allowedTransitions,
   isProjectPriority,
+  type AnnouncementRow,
+  type BugCustomFieldRow,
   type BuildDetail,
+  type BuildReport,
   type BuildSummary,
   type ProjectBugRow,
   type ProjectDetail,
   type ProjectMaterial,
   type ProjectReportSummary,
+  BUG_FIELD_TYPE_LABEL,
 } from './constants'
+import { BugBreakdownView } from '@/components/admin/BugBreakdownView'
+import { CustomFieldForm } from '@/components/admin/CustomFieldForm'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { BarChart } from '@/components/admin/charts/BarChart'
 import { DonutChart } from '@/components/admin/charts/DonutChart'
 import {
@@ -50,6 +57,9 @@ import {
   copyBuild,
   updateProjectBrief,
   updateProjectDelivery,
+  setBugCustomization,
+  addBugCustomField,
+  removeBugCustomField,
 } from './actions'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
@@ -67,12 +77,45 @@ const BUG_PREVIEW_SIZE = 10
  * (`project.delete` never applies either).
  */
 
+/**
+ * Strips zero-count categories out of a distribution.
+ *
+ * `reports/by-build` returns every enum member, including the ones with no
+ * bugs — so a status chart would draw ten bars, eight of them empty. The
+ * project-level endpoint already omits zeros, so dropping them here makes the
+ * two views read the same.
+ */
+function dropZeros(counts: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(Object.entries(counts).filter(([, value]) => value > 0))
+}
+
+const NOTICES: Record<string, NoticeCopy> = {
+  created: { tone: 'success', message: 'Your project is set up. Testing can begin once it is approved.' },
+  'build-incomplete': {
+    tone: 'warning',
+    message:
+      'The project was created, but its first build still needs its details. Open Build details to finish it.',
+  },
+  'field-added': { tone: 'success', message: 'That field is now on the bug form for this build.' },
+  'field-removed': { tone: 'success', message: 'That field has been removed.' },
+  'field-exists': { tone: 'warning', message: 'A field with that name is already on this build.' },
+  'field-invalid': {
+    tone: 'error',
+    message: 'That field could not be added. A choice field needs at least one option, and options must differ.',
+  },
+  'field-failed': { tone: 'error', message: 'That field could not be added. Try again in a moment.' },
+}
+
 const SECTIONS = [
   { value: 'overview', label: 'Overview', icon: 'file-text' },
   { value: 'build', label: 'Build details', icon: 'clock' },
+  { value: 'summary', label: 'Summary', icon: 'line-chart' },
+  { value: 'testers', label: 'Testers', icon: 'users' },
   { value: 'materials', label: 'Materials', icon: 'book-open' },
   { value: 'features', label: 'Features', icon: 'layout-grid' },
   { value: 'bugs', label: 'Bugs', icon: 'clipboard-check' },
+  { value: 'announcements', label: 'Announcements', icon: 'message-square' },
+  { value: 'settings', label: 'Settings', icon: 'settings' },
 ] as const
 
 export default async function CustomerProjectDetailPage({
@@ -80,7 +123,7 @@ export default async function CustomerProjectDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string; edit?: string; buildId?: string }>
+  searchParams: Promise<{ section?: string; edit?: string; buildId?: string; notice?: string }>
 }) {
   await requireRole(['CUSTOMER'])
   const { id } = await params
@@ -134,7 +177,16 @@ export default async function CustomerProjectDetailPage({
   const section = resolveSection(SECTIONS, resolvedSearchParams.section)
   const newBuildModalOpen = edit === 'new-build'
 
-  const [buildSummaryData, features, bugs, projectReport, defaultBuildDetailIfDifferent] = await Promise.all([
+  const [
+    buildSummaryData,
+    features,
+    bugs,
+    projectReport,
+    defaultBuildDetailIfDifferent,
+    buildReport,
+    announcements,
+    customFields,
+  ] = await Promise.all([
     section === 'build' ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`) : Promise.resolve(null),
     section === 'features'
       ? serverFetchOrNull<readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]>(
@@ -148,6 +200,30 @@ export default async function CustomerProjectDetailPage({
     section === 'overview' ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`) : Promise.resolve(null),
     newBuildModalOpen && defaultBuildId !== activeBuildId
       ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
+      : Promise.resolve(null),
+    /**
+     * Build-level bug distributions — the reference's Summary tab. Reuses the
+     * reports module rather than aggregating here; it is the same endpoint the
+     * Reports page calls, scoped to one build.
+     */
+    section === 'summary'
+      ? serverFetchOrNull<BuildReport>(`reports/by-build/${activeBuildId}`)
+      : Promise.resolve(null),
+    /**
+     * Announcements for this project and build. The context filters are the
+     * API's, so this cannot show another organisation's notices — and a
+     * build-scoped announcement only appears on the build it was written for.
+     */
+    section === 'announcements'
+      ? serverFetchOrNull<readonly AnnouncementRow[]>('communication/announcements', {
+          query: { projectId: project.id, buildId: activeBuildId, limit: 50 },
+        })
+      : Promise.resolve(null),
+    // The build's own extra bug questions (§37).
+    section === 'settings'
+      ? serverFetchOrNull<readonly BugCustomFieldRow[]>(`projects/${project.id}/custom-fields`, {
+          query: { buildId: activeBuildId },
+        })
       : Promise.resolve(null),
   ])
   const defaultBuildDetail = defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
@@ -165,6 +241,99 @@ export default async function CustomerProjectDetailPage({
   const briefModalOpen = edit === 'brief'
   const buildDetailsModalOpen = edit === 'build-details'
   const activeBuild = project.builds.find((b) => b.id === activeBuildId)
+
+  /**
+   * The roster, as the customer is allowed to see it.
+   *
+   * No email column: the API stops sending tester addresses to a customer, so
+   * there is nothing to render even if this asked for one. Rating and country
+   * come from the tester's profile and are what a client actually uses to
+   * judge coverage.
+   */
+  const testerColumns: readonly TableColumn<ProjectDetail['assignments'][number]>[] = [
+    {
+      key: 'tester',
+      header: 'Tester',
+      render: (row) =>
+        [row.tester.firstName, row.tester.lastName].filter(Boolean).join(' ') || 'Tester',
+      renderSecondary: (row) =>
+        row.tester.testerProfile?.countryCode
+          ? `From ${row.tester.testerProfile.countryCode}`
+          : undefined,
+    },
+    {
+      key: 'status',
+      header: 'Standing',
+      render: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      key: 'rating',
+      header: 'Rating',
+      align: 'right',
+      render: (row) => {
+        const raw = row.tester.testerProfile?.ratingAverage
+        if (raw == null) return '—'
+        const value = Number(raw)
+        return Number.isFinite(value) ? value.toFixed(1) : '—'
+      },
+    },
+    {
+      key: 'invited',
+      header: 'Invited',
+      align: 'right',
+      render: (row) => formatDate(row.invitedAt),
+      renderSecondary: (row) =>
+        row.completedAt
+          ? `Finished ${formatDate(row.completedAt)}`
+          : row.respondedAt
+            ? `Responded ${formatDate(row.respondedAt)}`
+            : undefined,
+    },
+  ]
+
+  const customFieldColumns: readonly TableColumn<BugCustomFieldRow>[] = [
+    { key: 'name', header: 'Field', render: (row) => row.name },
+    {
+      key: 'type',
+      header: 'Type',
+      render: (row) => BUG_FIELD_TYPE_LABEL[row.type] ?? titleCase(row.type),
+      renderSecondary: (row) => (row.isRequired ? 'Required' : undefined),
+    },
+    {
+      key: 'options',
+      header: 'Options',
+      render: (row) => (row.options.length > 0 ? row.options.join(', ') : '—'),
+    },
+    {
+      key: 'action',
+      header: 'Action',
+      align: 'right',
+      render: (row) =>
+        capabilities.canManageMaterials ? (
+          <form action={removeBugCustomField}>
+            <input type="hidden" name="id" value={project.id} />
+            <input type="hidden" name="buildId" value={activeBuildId} />
+            <input type="hidden" name="fieldId" value={row.id} />
+            {/*
+              The answer count is in the question because deleting a field
+              deletes its answers — a client should know they are discarding
+              data, not just a label.
+            */}
+            <ConfirmSubmit
+              question={
+                row._count.values > 0
+                  ? `Remove ${row.name}? ${row._count.values} answer${row._count.values === 1 ? '' : 's'} already given will go with it.`
+                  : `Remove ${row.name}?`
+              }
+            >
+              Remove
+            </ConfirmSubmit>
+          </form>
+        ) : (
+          '—'
+        ),
+    },
+  ]
 
   const overview: DescriptionItem[] = [
     { label: 'Reference', value: <Mono>{project.reference}</Mono> },
@@ -283,6 +452,8 @@ export default async function CustomerProjectDetailPage({
         ) : undefined
       }
     >
+      <Notice code={resolvedSearchParams.notice} notices={NOTICES} />
+
       {section === 'overview' ? (
         <>
           <Panel
@@ -688,6 +859,228 @@ export default async function CustomerProjectDetailPage({
             />
           )}
         </Panel>
+      ) : null}
+
+      {/* ── Summary: this build's bug distributions ───────────────────── */}
+      {section === 'summary' ? (
+        <Panel
+          title={`Summary — ${activeBuild?.name ?? 'this build'}`}
+          description="How the reports on this build break down."
+        >
+          {buildReport === null ? (
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              This summary could not be loaded. Refresh in a moment.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              <DescriptionList
+                items={[
+                  { label: 'Build', value: activeBuild?.name ?? '—' },
+                  { label: 'Testers on it', value: String(buildReport.testerCount) },
+                  { label: 'Reports', value: String(buildReport.bugCount) },
+                  {
+                    label: 'Test cases',
+                    value: `${buildReport.testCaseCount} · ${buildReport.testCaseCompletion}% done`,
+                  },
+                ]}
+              />
+              <BugBreakdownView
+                bugs={{
+                  total: buildReport.bugCount,
+                  bySeverity: dropZeros(buildReport.bugsBySeverity),
+                  byStatus: dropZeros(buildReport.bugsByStatus),
+                  byType: dropZeros(buildReport.bugsByType),
+                  byReproducibility: dropZeros(buildReport.bugsByReproducibility),
+                }}
+                csvHref={`/app/customer/export/reports/by-build/${activeBuildId}/export.csv`}
+              />
+            </div>
+          )}
+        </Panel>
+      ) : null}
+
+      {/* ── Testers on this build ─────────────────────────────────────────
+          Read-only by design. `project.assign_testers` does not include
+          `project:customer` — the API reports `canAssignTesters: false` — so
+          the crowd is allocated by the platform, not the client. Rendering
+          assignment controls here would be a button that 403s.
+
+          Tester email addresses are not shown because the API no longer sends
+          them to a customer at all: a client needs to know who is on the
+          build, not how to contact them off-platform. */}
+      {section === 'testers' ? (
+        <Panel
+          title="Testers"
+          description={`Who is working on ${activeBuild?.name ?? 'this build'}.`}
+          flush
+        >
+          {project.assignments.length === 0 ? (
+            <div style={{ padding: 'var(--space-6)' }}>
+              <EmptyState
+                icon="users"
+                title="No testers on this build yet"
+                description="Once the platform assigns testers to this build they appear here with their standing."
+              />
+            </div>
+          ) : (
+            <Table
+              columns={testerColumns}
+              rows={[...project.assignments]}
+              rowKey={(row) => row.tester.id}
+            />
+          )}
+        </Panel>
+      ) : null}
+
+      {/* ── Announcements ────────────────────────────────────────────────
+          Read-only: posting one needs the `announcement.write` permission,
+          which is admin-side. Notices to the crowd go out through the
+          platform, so there is no compose form here — see the note in the
+          page docblock. */}
+      {section === 'announcements' ? (
+        <Panel
+          title="Announcements"
+          description="Notices posted to the testers on this project."
+        >
+          {announcements === null ? (
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              Announcements could not be loaded. Refresh in a moment.
+            </p>
+          ) : announcements.length === 0 ? (
+            <EmptyState
+              icon="message-square"
+              title="Nothing posted yet"
+              description="Announcements for this project and build will appear here. Ask your Crowd4Test contact to post one."
+            />
+          ) : (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              {announcements.map((row) => (
+                <li
+                  key={row.id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-5)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-card)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                    <h3 style={{ margin: 0, fontSize: 'var(--type-body-md-size)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                      {row.title}
+                    </h3>
+                    {/* Which scope a notice has changes who acted on it. */}
+                    <Badge tone={row.buildId ? 'warning' : row.projectId ? 'info' : 'neutral'} uppercase={false}>
+                      {row.buildId
+                        ? (row.build?.name ?? 'This build')
+                        : row.projectId
+                          ? 'This project'
+                          : titleCase(row.audience)}
+                    </Badge>
+                  </div>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{row.body}</p>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}>
+                    {formatDate(row.publishedAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      ) : null}
+
+      {/* ── Build settings: the client's own bug form (§36-38) ─────────── */}
+      {section === 'settings' ? (
+        <>
+          <Panel
+            title="Extra bug questions"
+            description={`Ask testers on ${activeBuild?.name ?? 'this build'} for more than the standard bug form collects.`}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <DescriptionList
+                items={[
+                  {
+                    label: 'Currently',
+                    value: buildDetail?.bugCustomizationEnabled ? (
+                      <Badge tone="success" uppercase={false}>On</Badge>
+                    ) : (
+                      <Badge tone="neutral" uppercase={false}>Off</Badge>
+                    ),
+                  },
+                  {
+                    label: 'Fields configured',
+                    value: String(customFields?.length ?? 0),
+                  },
+                ]}
+              />
+
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)', maxWidth: '70ch' }}>
+                Turning this off hides the extra questions from the tester form without deleting
+                them, or the answers already given.
+              </p>
+
+              {capabilities.canManageMaterials ? (
+                <form action={setBugCustomization} style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                  <input type="hidden" name="id" value={project.id} />
+                  <input type="hidden" name="buildId" value={activeBuildId} />
+                  <input
+                    type="hidden"
+                    name="enabled"
+                    value={buildDetail?.bugCustomizationEnabled ? 'no' : 'yes'}
+                  />
+                  <SubmitButton
+                    variant={buildDetail?.bugCustomizationEnabled ? 'secondary' : 'primary'}
+                    pendingLabel="Saving…"
+                  >
+                    {buildDetail?.bugCustomizationEnabled
+                      ? 'Turn the extra questions off'
+                      : 'Turn the extra questions on'}
+                  </SubmitButton>
+                </form>
+              ) : null}
+            </div>
+          </Panel>
+
+          <Panel
+            title="Fields"
+            description="Shown on the bug form in this order."
+            flush
+          >
+            {customFields === null ? (
+              <div style={{ padding: 'var(--space-6)' }}>
+                <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                  These could not be loaded. Refresh in a moment.
+                </p>
+              </div>
+            ) : customFields.length === 0 ? (
+              <div style={{ padding: 'var(--space-6)' }}>
+                <EmptyState
+                  icon="layout-grid"
+                  title="No extra fields yet"
+                  description="Add one below and it appears on the bug form for this build."
+                />
+              </div>
+            ) : (
+              <Table
+                columns={customFieldColumns}
+                rows={[...customFields]}
+                rowKey={(row) => row.id}
+              />
+            )}
+          </Panel>
+
+          {capabilities.canManageMaterials ? (
+            <Panel title="Add a field" description="It appears on the bug form straight away.">
+              <CustomFieldForm
+                action={addBugCustomField}
+                projectId={project.id}
+                buildId={activeBuildId}
+                section="settings"
+              />
+            </Panel>
+          ) : null}
+        </>
       ) : null}
 
       {capabilities.canUpdate ? (

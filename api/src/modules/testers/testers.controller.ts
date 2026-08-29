@@ -6,6 +6,14 @@ import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './testers.service.js'
 import type { ListTestersQuery, ListGlobalDevicesQuery } from './testers.schema.js'
 
+export async function discover(req: Request, res: Response): Promise<void> {
+  const result = await service.discoverTesters(
+    req.user!,
+    validatedQuery<{ page: number; limit: number; search?: string; countryCode?: string; skills?: string[] }>(res),
+  )
+  res.json({ data: result.items, meta: result.meta })
+}
+
 export async function list(_req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListTestersQuery>(res)
   const { items, meta } = await service.listTesters(query)

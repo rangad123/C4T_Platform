@@ -56,6 +56,23 @@ export const updateMemberSchema = z.object({
 })
 
 export const orgIdParam = z.object({ id: z.string().cuid() })
+
+/** §42 — the Invite New Team Member modal. */
+export const inviteMemberSchema = z.object({
+  email: z.string().trim().email().max(255),
+  orgRole: z.nativeEnum(OrgMemberRole).optional(),
+  /** The inviter's personal note, shown in the email. */
+  message: z.string().trim().max(1000).optional(),
+})
+
+export const orgInvitationParam = z.object({
+  id: z.string().cuid(),
+  invitationId: z.string().cuid(),
+})
+
+export const acceptInvitationSchema = z.object({
+  token: z.string().trim().min(10).max(500),
+})
 export const orgMemberParam = z.object({ id: z.string().cuid(), userId: z.string().cuid() })
 
 export type ListOrganisationsQuery = z.infer<typeof listOrganisationsQuery>

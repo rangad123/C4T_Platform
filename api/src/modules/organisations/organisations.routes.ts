@@ -14,6 +14,9 @@ import {
   updateMemberSchema,
   orgIdParam,
   orgMemberParam,
+  inviteMemberSchema,
+  orgInvitationParam,
+  acceptInvitationSchema,
 } from './organisations.schema.js'
 
 export const organisationsRouter = Router()
@@ -77,6 +80,34 @@ organisationsRouter.patch(
   requireRole(Role.CUSTOMER),
   validate({ params: orgIdParam, body: updateOwnOrganisationSchema }),
   controller.update,
+)
+
+/**
+ * §42 — team invitations. Accepting is declared before the `/:id/...` routes
+ * so "invitations" is never read as an organisation id.
+ */
+organisationsRouter.post(
+  '/invitations/accept',
+  validate({ body: acceptInvitationSchema }),
+  controller.acceptInvitation,
+)
+
+organisationsRouter.get(
+  '/:id/invitations',
+  validate({ params: orgIdParam }),
+  controller.listInvitations,
+)
+
+organisationsRouter.post(
+  '/:id/invitations',
+  validate({ params: orgIdParam, body: inviteMemberSchema }),
+  controller.inviteMember,
+)
+
+organisationsRouter.delete(
+  '/:id/invitations/:invitationId',
+  validate({ params: orgInvitationParam }),
+  controller.revokeInvitation,
 )
 
 organisationsRouter.post(

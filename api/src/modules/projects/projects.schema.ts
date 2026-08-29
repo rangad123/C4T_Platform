@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ProjectStatus, ProjectPriority, AssignmentStatus, BuildStatus } from '@prisma/client'
+import { ProjectStatus, ProjectPriority, AssignmentStatus, BuildStatus, BugFieldType } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
 export const PROJECT_SORT_FIELDS = [
@@ -133,6 +133,8 @@ export const updateBuildSchema = z.object({
   startDate: z.coerce.date().nullable().optional(),
   endDate: z.coerce.date().nullable().optional(),
   testDocumentFileId: z.string().cuid().nullable().optional(),
+  /** §36 — whether this build's bug form carries the client's extra fields. */
+  bugCustomizationEnabled: z.boolean().optional(),
 })
 
 /** Tester responding to an invitation (§2.3). */
@@ -149,6 +151,25 @@ export const updateAssignmentSchema = z.object({
 export const projectIdParam = z.object({ id: z.string().cuid() })
 export const materialParam = z.object({ id: z.string().cuid(), materialId: z.string().cuid() })
 export const featureParam = z.object({ id: z.string().cuid(), featureId: z.string().cuid() })
+
+/** §38 — the Add Custom Bug Field modal. */
+export const addBugCustomFieldSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  type: z.nativeEnum(BugFieldType),
+  /**
+   * Only meaningful for SELECT / RADIO / CHECKBOX. The service drops them for
+   * other types and refuses a choice field with none, so this only bounds the
+   * size.
+   */
+  options: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+  isRequired: z.boolean().optional(),
+  buildId: z.string().cuid().optional(),
+})
+
+export const bugCustomFieldParam = z.object({
+  id: z.string().cuid(),
+  fieldId: z.string().cuid(),
+})
 export const assignmentParam = z.object({ id: z.string().cuid(), testerId: z.string().cuid() })
 export const buildParam = z.object({ id: z.string().cuid(), buildId: z.string().cuid() })
 

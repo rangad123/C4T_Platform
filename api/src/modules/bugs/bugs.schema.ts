@@ -119,6 +119,14 @@ export const createBugSchema = z.object({
   networkType: z.string().trim().max(40).optional(),
 
   /** Ids of already-uploaded files (see the uploads module). */
+  /**
+   * Answers to the build's own extra questions (§39). Validated against that
+   * build's field definitions in the service — this only bounds the shape.
+   */
+  customAnswers: z
+    .array(z.object({ fieldId: z.string().cuid(), value: z.string().max(4000) }))
+    .max(50)
+    .optional(),
   attachmentFileIds: z.array(z.string().cuid()).max(20).default([]),
 }).superRefine(refineOccurrence)
 

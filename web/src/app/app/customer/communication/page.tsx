@@ -1,27 +1,375 @@
 import { requireRole } from '@/lib/auth/session'
-import { Topbar } from '@/components/admin/Topbar'
-import { AdminSectionNotReady } from '@/components/admin/AdminSectionNotReady'
+import { serverFetchOrNull } from '@/lib/api/server'
+import { loadList } from '@/lib/admin/list'
+import { DetailShell } from '@/components/admin/DetailShell'
+import { Panel } from '@/components/admin/Panel'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
+import { EmptyState } from '@/components/ds/admin/EmptyState'
+import { Badge } from '@/components/ds/core/Badge'
+import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
+import { Field } from '@/components/ds/forms/Field'
+import { Input } from '@/components/ds/forms/Input'
+import { Select } from '@/components/ds/forms/Select'
+import { Textarea } from '@/components/ds/forms/Textarea'
+import { formatDateTime, personName, titleCase } from '@/lib/admin/format'
+import { postMessageAction, startThreadAction } from './actions'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
+const BASE = '/app/customer/communication'
 
 /**
- * `/app/customer/communication` — linked from the sidebar, not built yet.
- * Threads are already participant-scoped and reachable, and announcements
- * are already role-aware (`[Role.CUSTOMER]: [ALL, CUSTOMERS]` in the API's
- * audience filter) — this is a UI gap, not a backend one.
+ * `/app/customer/communication` — message threads with the platform (§2.2).
+ *
+ * Unlike announcements, this IS two-way for a customer: `thread.read` and
+ * `thread.post` both grant to `thread:participant`, and a customer may start a
+ * thread on any project they can already see. So the page reads and writes.
+ *
+ * ── ON PARTICIPANTS
+ *
+ * Starting a thread needs participant ids, and a client has no way to know
+ * them — nor should they be able to type arbitrary ids and learn which exist.
+ * They come from the chosen project's own `contacts`, which the API decides:
+ * its managers and the organisation's owners. When a project has none, the
+ * form says so rather than failing on submit.
  */
-export default async function CustomerCommunicationPage() {
+
+const NOTICES: Record<string, NoticeCopy> = {
+  sent: { tone: 'success', message: 'Your reply has been posted.' },
+  started: { tone: 'success', message: 'Your conversation has been started.' },
+  empty: { tone: 'warning', message: 'Write a message before sending.' },
+  'need-project': { tone: 'warning', message: 'Choose which project this is about.' },
+  'no-contacts': {
+    tone: 'warning',
+    message: 'That project has nobody assigned to talk to yet. Try another, or contact support.',
+  },
+  'no-access': { tone: 'error', message: 'You are not part of that conversation.' },
+  failed: { tone: 'error', message: 'That could not be sent. Try again in a moment.' },
+}
+
+interface ThreadRow {
+  id: string
+  type: string
+  subject: string | null
+  isClosed: boolean
+  lastMessageAt: string | null
+  createdAt: string
+  project: { id: string; reference: string; title: string } | null
+  createdBy: { id: string; firstName: string | null; lastName: string | null; role: string } | null
+  participants: readonly {
+    user: { id: string; firstName: string | null; lastName: string | null; role: string }
+  }[]
+  _count: { messages: number }
+}
+
+interface ThreadDetail extends ThreadRow {
+  messages: readonly {
+    id: string
+    body: string
+    createdAt: string
+    sender: { id: string; firstName: string | null; lastName: string | null; role: string } | null
+  }[]
+}
+
+interface ProjectOption {
+  id: string
+  reference: string
+  title: string
+}
+
+interface ProjectDetailContacts {
+  contacts: readonly {
+    id: string
+    firstName: string | null
+    lastName: string | null
+    role: string
+  }[]
+}
+
+export default async function CustomerCommunicationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ thread?: string; projectId?: string; notice?: string }>
+}) {
   await requireRole(['CUSTOMER'])
+  const { thread: threadId, projectId, notice } = await searchParams
+
+  const [threadsResult, projectsResult] = await Promise.all([
+    loadList<ThreadRow>('communication/threads', {
+      page: 1,
+      limit: 50,
+      query: { includeClosed: 'true' },
+    }),
+    loadList<ProjectOption>('projects', {
+      page: 1,
+      limit: 100,
+      query: { sort: 'title', order: 'asc' },
+    }),
+  ])
+
+  const threads = 'items' in threadsResult ? threadsResult.items : []
+  const projects = 'items' in projectsResult ? projectsResult.items : []
+
+  /**
+   * The open thread, and the contacts for whichever project a new thread would
+   * be about. Both are only read when they are actually needed.
+   */
+  const [openThread, projectContacts] = await Promise.all([
+    threadId
+      ? serverFetchOrNull<ThreadDetail>(`communication/threads/${threadId}`)
+      : Promise.resolve(null),
+    projectId
+      ? serverFetchOrNull<ProjectDetailContacts>(`projects/${projectId}`)
+      : Promise.resolve(null),
+  ])
+
+  const contacts = projectContacts?.contacts ?? []
 
   return (
-    <>
-      <Topbar root={ROOT} crumbs={[{ label: 'Communication' }]} />
-      <AdminSectionNotReady
-        section="Operations"
-        icon="message-square"
-        homeHref="/app/customer"
-        description="Threads with the team on your projects, and announcements from the platform."
-      />
-    </>
+    <DetailShell
+      root={ROOT}
+      crumbs={[{ label: 'Communication' }]}
+      eyebrow="Operations"
+      title="Communication"
+      subtitle="Conversations with the Crowd4Test team about your projects."
+    >
+      <Notice code={notice} notices={NOTICES} />
+
+      {/* ── An open conversation ──────────────────────────────────────── */}
+      {threadId ? (
+        openThread === null ? (
+          <Panel title="Conversation">
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              That conversation could not be opened. It may not be one you are part of.
+            </p>
+          </Panel>
+        ) : (
+          <Panel
+            title={openThread.subject ?? 'Conversation'}
+            description={
+              openThread.project
+                ? `${openThread.project.reference} · ${openThread.project.title}`
+                : titleCase(openThread.type)
+            }
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <div>
+                <Button href={BASE} variant="ghost" size="sm" iconLeft="arrow-left">
+                  All conversations
+                </Button>
+              </div>
+
+              <ul
+                style={{
+                  listStyle: 'none',
+                  margin: 0,
+                  padding: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                {openThread.messages.map((message) => (
+                  <li
+                    key={message.id}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-2)',
+                      padding: 'var(--space-4)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-card)',
+                      background: 'var(--surface-canvas)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 'var(--space-3)',
+                        flexWrap: 'wrap',
+                        fontSize: 'var(--type-body-sm-size)',
+                      }}
+                    >
+                      <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                        {message.sender ? personName(message.sender) : 'Crowd4Test'}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {formatDateTime(message.createdAt)}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
+                      {message.body}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+
+              {openThread.isClosed ? (
+                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                  This conversation has been closed. Start a new one if you need to follow up.
+                </p>
+              ) : (
+                <form
+                  action={postMessageAction}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
+                >
+                  <input type="hidden" name="threadId" value={openThread.id} />
+                  <Field label="Reply" htmlFor="body" required>
+                    <Textarea id="body" name="body" rows={4} required maxLength={5000} />
+                  </Field>
+                  <div>
+                    <SubmitButton variant="primary" pendingLabel="Sending…">
+                      Send reply
+                    </SubmitButton>
+                  </div>
+                </form>
+              )}
+            </div>
+          </Panel>
+        )
+      ) : (
+        <>
+          {/* ── The list ───────────────────────────────────────────────── */}
+          <Panel title="Conversations" description="Most recently active first.">
+            {threads.length === 0 ? (
+              <EmptyState
+                icon="message-square"
+                title="No conversations yet"
+                description="Start one below when you need to reach the team about a project."
+              />
+            ) : (
+              <ul
+                style={{
+                  listStyle: 'none',
+                  margin: 0,
+                  padding: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-3)',
+                }}
+              >
+                {threads.map((row) => (
+                  <li key={row.id}>
+                    <a
+                      href={`${BASE}?thread=${row.id}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 'var(--space-4)',
+                        flexWrap: 'wrap',
+                        padding: 'var(--space-4)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-card)',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                      }}
+                    >
+                      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                          {row.subject ?? titleCase(row.type)}
+                        </span>
+                        <span style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
+                          {row.project ? `${row.project.reference} · ` : ''}
+                          {row._count.messages} message{row._count.messages === 1 ? '' : 's'}
+                          {row.lastMessageAt ? ` · ${formatDateTime(row.lastMessageAt)}` : ''}
+                        </span>
+                      </span>
+                      {row.isClosed ? (
+                        <Badge tone="neutral" uppercase={false}>
+                          Closed
+                        </Badge>
+                      ) : (
+                        <Badge tone="success" uppercase={false}>
+                          Open
+                        </Badge>
+                      )}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          {/* ── Starting one ───────────────────────────────────────────── */}
+          <Panel
+            title="Start a conversation"
+            description="Pick the project it is about, and the team working on it is included automatically."
+          >
+            {projects.length === 0 ? (
+              <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                You need a project before you can start a conversation about one.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                {/* Choosing the project is its own GET so the contacts can be
+                    loaded before the message is written — a form that only
+                    discovered "nobody to send this to" on submit would lose
+                    what the person had typed. */}
+                <form
+                  method="get"
+                  action={BASE}
+                  style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'flex-end', flexWrap: 'wrap' }}
+                >
+                  <Field label="About which project?" htmlFor="projectId" style={{ flex: '2 1 260px' }}>
+                    <Select
+                      id="projectId"
+                      name="projectId"
+                      defaultValue={projectId ?? ''}
+                      options={[
+                        { value: '', label: 'Select a project' },
+                        ...projects.map((p) => ({
+                          value: p.id,
+                          label: `${p.reference} · ${p.title}`,
+                        })),
+                      ]}
+                    />
+                  </Field>
+                  <SubmitButton variant="secondary" pendingLabel="Loading…">
+                    Continue
+                  </SubmitButton>
+                </form>
+
+                {projectId ? (
+                  contacts.length === 0 ? (
+                    <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                      That project has nobody assigned to talk to yet. Choose another, or contact
+                      support directly.
+                    </p>
+                  ) : (
+                    <form
+                      action={startThreadAction}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
+                    >
+                      <input type="hidden" name="projectId" value={projectId} />
+                      {contacts.map((c) => (
+                        <input key={c.id} type="hidden" name="participantIds" value={c.id} />
+                      ))}
+
+                      <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                        Goes to {contacts.map((c) => personName(c)).join(', ')}.
+                      </p>
+
+                      <Field label="Subject" htmlFor="subject">
+                        <Input id="subject" name="subject" maxLength={200} placeholder="Optional" />
+                      </Field>
+                      <Field label="Message" htmlFor="message" required>
+                        <Textarea id="message" name="message" rows={5} required maxLength={5000} />
+                      </Field>
+                      <div>
+                        <SubmitButton variant="primary" pendingLabel="Starting…">
+                          Start the conversation
+                        </SubmitButton>
+                      </div>
+                    </form>
+                  )
+                ) : null}
+              </div>
+            )}
+          </Panel>
+        </>
+      )}
+    </DetailShell>
   )
 }

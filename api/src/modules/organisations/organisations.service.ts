@@ -1,4 +1,5 @@
 import { type Prisma, OrganisationStatus, OrgMemberRole, Role } from '@prisma/client'
+import { generateOpaqueToken, hashToken } from '../../lib/tokens.js'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, ForbiddenError, ConflictError, BadRequestError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
@@ -403,4 +404,227 @@ async function assertNotLastOwner(
   if (ownerCount <= 1) {
     throw new ConflictError('An organisation must have at least one owner')
   }
+}
+
+// ─── Team invitations (§40-43) ───────────────────────────────────────────────
+
+/**
+ * Trims a note and turns an empty one into null.
+ *
+ * Written out rather than `x?.trim() || null` because `??` — which the lint
+ * rule prefers — would keep an empty string, and "the inviter wrote nothing"
+ * should be null in the column, not "".
+ */
+function blankToNull(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return trimmed
+}
+
+/** Fourteen days. Long enough to survive a holiday, short enough to expire. */
+const INVITATION_TTL_MS = 14 * 24 * 60 * 60 * 1000
+
+const invitationSelect = {
+  id: true,
+  email: true,
+  orgRole: true,
+  message: true,
+  expiresAt: true,
+  acceptedAt: true,
+  revokedAt: true,
+  createdAt: true,
+  invitedBy: { select: { id: true, firstName: true, lastName: true } },
+} satisfies Prisma.OrganisationInvitationSelect
+
+/** Open = not accepted, not revoked, not expired. */
+function invitationState(row: {
+  acceptedAt: Date | null
+  revokedAt: Date | null
+  expiresAt: Date
+}): 'ACCEPTED' | 'REVOKED' | 'EXPIRED' | 'PENDING' {
+  if (row.acceptedAt) return 'ACCEPTED'
+  if (row.revokedAt) return 'REVOKED'
+  if (row.expiresAt.getTime() < Date.now()) return 'EXPIRED'
+  return 'PENDING'
+}
+
+export async function listInvitations(user: Express.AuthenticatedUser, organisationId: string) {
+  await assertOrgAccess(user, organisationId)
+  const rows = await prisma.organisationInvitation.findMany({
+    where: { organisationId },
+    select: invitationSelect,
+    orderBy: { createdAt: 'desc' },
+  })
+  return rows.map((row) => ({ ...row, state: invitationState(row) }))
+}
+
+/**
+ * §42 — invite someone to the team by email address.
+ *
+ * Owner-only, like every other membership change here. Re-inviting an address
+ * that already has an open invitation refreshes it (new token, new expiry,
+ * new note) rather than stacking duplicates — which is also why the unique
+ * constraint is on `[organisationId, email]`.
+ *
+ * The raw token is returned to the CALLER, never stored: only its hash goes to
+ * the database, exactly as password-reset tokens work. The caller's only use
+ * for it is putting it in the email.
+ */
+export async function inviteMember(
+  user: Express.AuthenticatedUser,
+  organisationId: string,
+  input: { email: string; orgRole?: OrgMemberRole; message?: string },
+) {
+  await assertOrgAccess(user, organisationId, { requireOwner: !isAdminSide(user) })
+
+  const email = input.email.trim().toLowerCase()
+
+  /**
+   * Someone already on the team does not need an invitation. Checked by
+   * email against the user table rather than by membership alone, because the
+   * person may have an account under that address without being a member yet.
+   */
+  const existingUser = await prisma.user.findFirst({
+    where: { email, deletedAt: null },
+    select: { id: true },
+  })
+  if (existingUser) {
+    const alreadyMember = await prisma.organisationMember.findUnique({
+      where: { organisationId_userId: { organisationId, userId: existingUser.id } },
+      select: { id: true },
+    })
+    if (alreadyMember) throw new ConflictError('That person is already on your team')
+  }
+
+  const { raw, hash } = generateOpaqueToken()
+  const expiresAt = new Date(Date.now() + INVITATION_TTL_MS)
+
+  const invitation = await prisma.organisationInvitation.upsert({
+    where: { organisationId_email: { organisationId, email } },
+    create: {
+      organisationId,
+      email,
+      orgRole: input.orgRole ?? OrgMemberRole.MEMBER,
+      message: blankToNull(input.message),
+      tokenHash: hash,
+      invitedById: user.id,
+      expiresAt,
+    },
+    update: {
+      orgRole: input.orgRole ?? OrgMemberRole.MEMBER,
+      message: blankToNull(input.message),
+      tokenHash: hash,
+      invitedById: user.id,
+      expiresAt,
+      // Re-inviting revives a revoked or expired row rather than leaving it
+      // dead alongside a new one.
+      acceptedAt: null,
+      revokedAt: null,
+    },
+    select: invitationSelect,
+  })
+
+  /**
+   * The organisation and inviter names come back with the token because the
+   * caller needs them for the email and has no other cheap way to get them —
+   * `AuthenticatedUser` carries an id and a role, not a display name.
+   */
+  const [organisation, inviter] = await Promise.all([
+    prisma.organisation.findUnique({
+      where: { id: organisationId },
+      select: { name: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: user.id },
+      select: { firstName: true, lastName: true },
+    }),
+  ])
+
+  return {
+    invitation: { ...invitation, state: invitationState(invitation) },
+    token: raw,
+    organisationName: organisation?.name ?? 'your team',
+    invitedByName:
+      [inviter?.firstName, inviter?.lastName].filter(Boolean).join(' ') || 'A teammate',
+  }
+}
+
+export async function revokeInvitation(
+  user: Express.AuthenticatedUser,
+  organisationId: string,
+  invitationId: string,
+) {
+  await assertOrgAccess(user, organisationId, { requireOwner: !isAdminSide(user) })
+
+  const row = await prisma.organisationInvitation.findFirst({
+    where: { id: invitationId, organisationId },
+    select: { id: true, acceptedAt: true },
+  })
+  if (!row) throw new NotFoundError('Invitation')
+  if (row.acceptedAt) throw new ConflictError('That invitation has already been accepted')
+
+  const updated = await prisma.organisationInvitation.update({
+    where: { id: row.id },
+    data: { revokedAt: new Date() },
+    select: invitationSelect,
+  })
+  return { ...updated, state: invitationState(updated) }
+}
+
+/**
+ * §42 — the invited person accepts.
+ *
+ * Looked up by token hash, so the raw token in the link is never compared
+ * against anything stored. The signed-in account's email must match the one
+ * invited: without that check, anyone holding the link could join a team they
+ * were never invited to.
+ */
+export async function acceptInvitation(user: Express.AuthenticatedUser, rawToken: string) {
+  const row = await prisma.organisationInvitation.findUnique({
+    where: { tokenHash: hashToken(rawToken) },
+    select: {
+      id: true,
+      organisationId: true,
+      email: true,
+      orgRole: true,
+      acceptedAt: true,
+      revokedAt: true,
+      expiresAt: true,
+      organisation: { select: { id: true, name: true } },
+    },
+  })
+  if (!row) throw new NotFoundError('Invitation')
+
+  const state = invitationState(row)
+  if (state === 'ACCEPTED') throw new ConflictError('That invitation has already been used')
+  if (state === 'REVOKED') throw new ConflictError('That invitation was withdrawn')
+  if (state === 'EXPIRED') throw new ConflictError('That invitation has expired')
+
+  const account = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { email: true },
+  })
+  if (account?.email.toLowerCase() !== row.email.toLowerCase()) {
+    throw new ForbiddenError('This invitation was sent to a different email address')
+  }
+
+  await prisma.$transaction([
+    prisma.organisationMember.upsert({
+      where: { organisationId_userId: { organisationId: row.organisationId, userId: user.id } },
+      create: {
+        organisationId: row.organisationId,
+        userId: user.id,
+        orgRole: row.orgRole,
+        invitedAt: new Date(),
+        joinedAt: new Date(),
+      },
+      update: { joinedAt: new Date() },
+    }),
+    prisma.organisationInvitation.update({
+      where: { id: row.id },
+      data: { acceptedAt: new Date() },
+    }),
+  ])
+
+  return { organisation: row.organisation, orgRole: row.orgRole }
 }

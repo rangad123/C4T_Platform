@@ -100,6 +100,29 @@ export async function addFeature(req: Request, res: Response): Promise<void> {
   res.status(201).json({ data: feature })
 }
 
+export async function listBugCustomFields(req: Request, res: Response): Promise<void> {
+  const fields = await service.listBugCustomFields(
+    req.user!,
+    param(req, 'id'),
+    validatedQuery<{ buildId?: string }>(res).buildId,
+  )
+  res.json({ data: fields })
+}
+
+export async function addBugCustomField(req: Request, res: Response): Promise<void> {
+  const field = await service.addBugCustomField(req.user!, param(req, 'id'), req.body)
+  res.status(201).json({ data: field })
+}
+
+export async function removeBugCustomField(req: Request, res: Response): Promise<void> {
+  const result = await service.removeBugCustomField(
+    req.user!,
+    param(req, 'id'),
+    param(req, 'fieldId'),
+  )
+  res.json({ data: result })
+}
+
 export async function removeFeature(req: Request, res: Response): Promise<void> {
   await service.removeFeature(req.user!, param(req, 'id'), param(req, 'featureId'))
   res.status(204).send()

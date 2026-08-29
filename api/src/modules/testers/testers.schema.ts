@@ -187,5 +187,29 @@ export const testerIdParam = z.object({ id: z.string().cuid() })
 export const deviceIdParam = z.object({ deviceId: z.string().cuid() })
 export const workHistoryIdParam = z.object({ workHistoryId: z.string().cuid() })
 
+/**
+ * §44 — the customer-facing crowd browser.
+ *
+ * Deliberately narrower than `listTestersQuery`: no status filter (only
+ * verified testers are discoverable at all) and no free-text name search, so a
+ * client cannot use it to confirm whether a specific person is on the
+ * platform. See `discoverTesters` for the full reasoning.
+ */
+export const discoverTestersQuery = paginationQuery.extend({
+  search: z.string().trim().max(120).optional(),
+  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  skills: z
+    .string()
+    .optional()
+    .transform((v) =>
+      v
+        ? v
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean)
+        : undefined,
+    ),
+})
+
 export type ListTestersQuery = z.infer<typeof listTestersQuery>
 export type ListGlobalDevicesQuery = z.infer<typeof listGlobalDevicesQuery>

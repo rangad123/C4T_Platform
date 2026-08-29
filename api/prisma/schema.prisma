@@ -147,6 +147,21 @@ enum BugSeverity {
   LOW
 }
 
+/// Input kinds a client can add to their build's bug form (§37 of the client
+/// brief). Deliberately a closed enum rather than free text: the tester form
+/// has to render each one, so an unknown type would be a field nobody can
+/// fill in.
+enum BugFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  SELECT
+  RADIO
+  CHECKBOX
+  DATE
+  URL
+}
+
 enum BugStatus {
   NEW
   TRIAGED
@@ -348,11 +363,12 @@ model User {
   paymentAccount             PaymentAccount?
 
   notifications            Notification[]
-  announcements            Announcement[]    @relation("AnnouncementAuthor")
+  announcements            Announcement[]           @relation("AnnouncementAuthor")
   auditLogs                AuditLog[]
-  filesUploaded            FileObject[]      @relation("FileUploader")
-  messageTemplatesAuthored MessageTemplate[] @relation("MessageTemplateAuthor")
-  platformSettingsEdited   PlatformSetting[] @relation("PlatformSettingEditor")
+  filesUploaded            FileObject[]             @relation("FileUploader")
+  messageTemplatesAuthored MessageTemplate[]        @relation("MessageTemplateAuthor")
+  orgInvitationsSent       OrganisationInvitation[] @relation("OrgInvitationAuthor")
+  platformSettingsEdited   PlatformSetting[]        @relation("PlatformSettingEditor")
 
   @@index([role, status])
   @@index([createdAt])
@@ -534,7 +550,8 @@ model Organisation {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  logo         FileObject?          @relation("OrgLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
+  logo         FileObject?              @relation("OrgLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
+  invitations  OrganisationInvitation[]
   members      OrganisationMember[]
   projects     Project[]
   transactions Transaction[]
@@ -544,6 +561,41 @@ model Organisation {
   @@index([status])
   @@index([name])
   @@map("organisations")
+}
+
+/// §42 — an invitation to join an organisation's team.
+///
+/// Separate from `OrganisationMember` because that row needs a `userId`, and
+/// the whole point of inviting by email is that the person may not have an
+/// account yet. The membership is created when the invitation is accepted;
+/// until then this is the only record that it exists.
+model OrganisationInvitation {
+  id             String        @id @default(cuid())
+  organisationId String        @map("organisation_id")
+  /// Lowercased on write, so one address cannot hold two open invitations to
+  /// the same organisation under different casing.
+  email          String
+  orgRole        OrgMemberRole @default(MEMBER) @map("org_role")
+  /// The personal note the inviter wrote (§42). Shown in the email.
+  message        String?
+  /// Only the HASH is stored, exactly as password-reset tokens are — a leaked
+  /// database row must not be a usable invitation link.
+  tokenHash      String        @unique @map("token_hash")
+  invitedById    String        @map("invited_by_id")
+  expiresAt      DateTime      @map("expires_at")
+  acceptedAt     DateTime?     @map("accepted_at")
+  revokedAt      DateTime?     @map("revoked_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("OrgInvitationAuthor", fields: [invitedById], references: [id], onDelete: Restrict)
+
+  /// One open invitation per address per organisation. Re-inviting someone
+  /// updates the existing row rather than stacking duplicates.
+  @@unique([organisationId, email])
+  @@index([email])
+  @@map("organisation_invitations")
 }
 
 model OrganisationMember {
@@ -969,10 +1021,15 @@ model Build {
   targetLanguages        String[] @map("target_languages")
 
   /// Per-build override of `Project.maxTesters`. Null defers to the project.
-  maxTesters             Int?     @map("max_testers")
+  maxTesters              Int?     @map("max_testers")
   /// Per-build override of `Project.testersCanSeeOtherBugs`. Null defers to
   /// the project.
-  testersCanSeeOtherBugs Boolean? @map("testers_can_see_other_bugs")
+  /// Whether this build's bug form carries the client's own extra fields.
+  /// Separate from "are there any fields": turning it off hides them from the
+  /// tester form without deleting the definitions or the values already
+  /// captured against earlier bugs.
+  bugCustomizationEnabled Boolean  @default(false) @map("bug_customization_enabled")
+  testersCanSeeOtherBugs  Boolean? @map("testers_can_see_other_bugs")
 
   startDate DateTime? @map("start_date")
   endDate   DateTime? @map("end_date")
@@ -986,6 +1043,7 @@ model Build {
   project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   testDocument FileObject? @relation("BuildTestDocument", fields: [testDocumentFileId], references: [id], onDelete: SetNull)
 
+  customFields  BugCustomField[]
   features      Feature[]
   materials     ProjectMaterial[]
   assignments   ProjectAssignment[]
@@ -1332,6 +1390,7 @@ model Bug {
   duplicates  Bug[]    @relation("BugDuplicates")
   feature     Feature? @relation(fields: [featureId], references: [id], onDelete: SetNull)
 
+  customValues  BugCustomValue[]
   attachments   BugAttachment[]
   comments      BugComment[]
   statusHistory BugStatusHistory[]
@@ -1493,6 +1552,56 @@ model Announcement {
   @@index([audience, publishedAt])
   @@index([projectId])
   @@map("announcements")
+}
+
+/// §37 — an extra field a client adds to their build's bug form.
+///
+/// Scoped to a BUILD, not a project: the reference product's modal is titled
+/// with the build version, and two builds of the same app legitimately want
+/// different questions asked.
+model BugCustomField {
+  id         String       @id @default(cuid())
+  buildId    String       @map("build_id")
+  name       String
+  type       BugFieldType
+  /// Choices for SELECT / RADIO / CHECKBOX. Empty for the other types — the
+  /// API rejects a choice-type field with no options rather than storing one
+  /// a tester could never answer.
+  options    String[]     @default([])
+  isRequired Boolean      @default(false) @map("is_required")
+  /// Render order on the tester form. Ties break on `createdAt`.
+  position   Int          @default(0)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  build  Build            @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  values BugCustomValue[]
+
+  /// One field per name per build, so the tester form cannot show two
+  /// identically-labelled inputs.
+  @@unique([buildId, name])
+  @@index([buildId, position])
+  @@map("bug_custom_fields")
+}
+
+/// §39 — what a tester answered for one custom field on one bug.
+///
+/// Stored as text whatever the field type is. The type lives on the field
+/// definition, which is what the reader uses to interpret this; duplicating it
+/// per value would let the two disagree. CHECKBOX stores the chosen options
+/// joined by a newline, which no option label can contain.
+model BugCustomValue {
+  id      String @id @default(cuid())
+  bugId   String @map("bug_id")
+  fieldId String @map("field_id")
+  value   String
+
+  bug   Bug            @relation(fields: [bugId], references: [id], onDelete: Cascade)
+  field BugCustomField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([bugId, fieldId])
+  @@index([fieldId])
+  @@map("bug_custom_values")
 }
 
 /// §2.2 Communication — reusable message text for the announcement composer

@@ -47,6 +47,18 @@ function reasonFor(error: unknown): string {
  * unknown value past the page's own `<select>` options, and converts a
  * failure into a reason code the form can render inline.
  */
+/** Prefix every custom-field control posts under — see `CustomFieldInput`. */
+const CUSTOM_PREFIX = 'custom:'
+
+/**
+ * How several CHECKBOX choices pack into one stored value.
+ *
+ * Must match the API's separator (see `BugCustomValue` in the schema): a
+ * newline, because an option label is capped single-line text and cannot
+ * contain one, whereas a comma would collide with labels containing commas.
+ */
+const CUSTOM_ANSWER_SEPARATOR = String.fromCharCode(10)
+
 export async function reportBugAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
@@ -132,6 +144,30 @@ export async function reportBugAction(formData: FormData): Promise<void> {
     redirect(back('occurrence-range'))
   }
 
+  /**
+   * The client's extra answers for this build (§72).
+   *
+   * Each control posts under `custom:<fieldId>`, so the field id travels with
+   * its own value — no parallel list of ids, no JSON blob. `getAll` is what
+   * makes CHECKBOX work: the browser sends one entry per ticked box under the
+   * same name, joined here with the separator the API expects.
+   *
+   * Nothing is validated here. Which field is required, and whether a value is
+   * one of a dropdown's options, is the API's to decide against the build's own
+   * definitions — an unknown id is rejected there rather than dropped here.
+   */
+  const customAnswers = [
+    ...new Set([...formData.keys()].filter((key) => key.startsWith(CUSTOM_PREFIX))),
+  ].flatMap((key) => {
+    const value = formData
+      .getAll(key)
+      .map(String)
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .join(CUSTOM_ANSWER_SEPARATOR)
+    return value ? [{ fieldId: key.slice(CUSTOM_PREFIX.length), value }] : []
+  })
+
   let reason: string | null = null
   try {
     await serverFetch<{ id: string }>('bugs', {
@@ -159,6 +195,7 @@ export async function reportBugAction(formData: FormData): Promise<void> {
         ...(appVersion ? { appVersion } : {}),
         ...(networkType ? { networkType } : {}),
         ...(attachmentFileIds.length > 0 ? { attachmentFileIds } : {}),
+        ...(customAnswers.length > 0 ? { customAnswers } : {}),
       },
     })
   } catch (error) {

@@ -57,7 +57,15 @@ interface BugPerson {
   email?: string | null
 }
 
+/** Matches the API's CHECKBOX separator — see `BugCustomValue` in the schema. */
+const CUSTOM_ANSWER_SEPARATOR = String.fromCharCode(10)
+
 interface BugDetail {
+  /** The client's extra questions for this build, as answered (§39). */
+  customValues?: readonly {
+    value: string
+    field: { id: string; name: string; type: string; position: number }
+  }[]
   id: string
   reference: string
   title: string
@@ -320,6 +328,37 @@ export default async function CustomerBugDetailPage({
             <h3 className="c4t-heading-sm" style={{ margin: 0 }}>Captured environment</h3>
             <DescriptionList items={environmentItems} />
           </div>
+          {/* The client's own extra questions, as the tester answered them.
+              Rendered only when there are answers: a build with no extra
+              fields should not grow an empty heading. */}
+          {bug.customValues && bug.customValues.length > 0 ? (
+            <div
+              style={{
+                marginTop: 'var(--space-6)',
+                paddingTop: 'var(--space-6)',
+                borderTop: '1px solid var(--border-subtle)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-5)',
+              }}
+            >
+              <h3 className="c4t-heading-sm" style={{ margin: 0 }}>
+                Extra details for this build
+              </h3>
+              <DescriptionList
+                items={bug.customValues.map((entry) => ({
+                  label: entry.field.name,
+                  /* A multiple-choice answer is stored newline-joined, so it
+                     is split back out rather than shown as one run-on line. */
+                  value: entry.value.includes(CUSTOM_ANSWER_SEPARATOR)
+                    ? entry.value.split(CUSTOM_ANSWER_SEPARATOR).join(', ')
+                    : entry.value,
+                  wide: entry.field.type === 'TEXTAREA',
+                }))}
+              />
+            </div>
+          ) : null}
+
         </Panel>
       ) : null}
 

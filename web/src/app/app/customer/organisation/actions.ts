@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { requireRole } from '@/lib/auth/session'
 import { redirect } from 'next/navigation'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
@@ -155,4 +156,65 @@ export async function removeOrgMemberAction(formData: FormData): Promise<void> {
   }
 
   redirect(`${DETAIL_PATH}?section=members&notice=${notice}`, 'replace')
+}
+
+// ─── Team invitations (§42) ──────────────────────────────────────────────────
+
+/**
+ * Invites someone to the team by email address.
+ *
+ * The API owns every rule — owner-only, already-a-member, re-invite refreshes
+ * rather than duplicates — so this maps its failures to codes the page turns
+ * into sentences, and never forwards the API's own wording.
+ */
+export async function inviteTeamMemberAction(formData: FormData): Promise<void> {
+  await requireRole(['CUSTOMER'])
+
+  const id = formTrimmed(formData, 'id')
+  const email = formTrimmed(formData, 'email')
+  if (!id) return
+  if (!email) redirect(`${DETAIL_PATH}?section=members&notice=invite-email`)
+
+  try {
+    await serverFetch(`organisations/${id}/invitations`, {
+      method: 'POST',
+      body: {
+        email,
+        orgRole: formTrimmed(formData, 'orgRole') || 'MEMBER',
+        message: formTrimmed(formData, 'message') || undefined,
+      },
+    })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    const code =
+      status === 409
+        ? 'invite-exists'
+        : status === 403
+          ? 'invite-forbidden'
+          : status === 422
+            ? 'invite-email'
+            : 'invite-failed'
+    redirect(`${DETAIL_PATH}?section=members&notice=${code}`)
+  }
+
+  revalidatePath(DETAIL_PATH)
+  redirect(`${DETAIL_PATH}?section=members&notice=invite-sent`)
+}
+
+/** Withdraws an invitation that has not been accepted. */
+export async function revokeInvitationAction(formData: FormData): Promise<void> {
+  await requireRole(['CUSTOMER'])
+
+  const id = formTrimmed(formData, 'id')
+  const invitationId = formTrimmed(formData, 'invitationId')
+  if (!id || !invitationId) return
+
+  try {
+    await serverFetch(`organisations/${id}/invitations/${invitationId}`, { method: 'DELETE' })
+  } catch {
+    redirect(`${DETAIL_PATH}?section=members&notice=invite-failed`)
+  }
+
+  revalidatePath(DETAIL_PATH)
+  redirect(`${DETAIL_PATH}?section=members&notice=invite-revoked`)
 }

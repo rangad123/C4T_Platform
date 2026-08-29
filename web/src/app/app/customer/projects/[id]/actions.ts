@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { serverFetch } from '@/lib/api/server'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { ApiError } from '@/lib/api/types'
 import { isProjectPriority, isProjectStatus } from './constants'
 
 /**
@@ -232,4 +233,85 @@ export async function copyBuild(formData: FormData): Promise<void> {
   })
   revalidateProject(id)
   redirect(`/app/customer/projects/${id}?section=build&buildId=${copy.id}`)
+}
+
+// ─── Custom bug fields (§36-38) ──────────────────────────────────────────────
+
+/**
+ * Turns the build's extra bug questions on or off.
+ *
+ * Separate from adding fields: switching it off hides them from the tester
+ * form without deleting the definitions, so a client can pause the extra
+ * questions without losing what they configured or what testers already
+ * answered.
+ */
+export async function setBugCustomization(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  if (!id || !buildId) return
+
+  await serverFetch(`projects/${id}/builds/${buildId}`, {
+    method: 'PATCH',
+    body: { bugCustomizationEnabled: formTrimmed(formData, 'enabled') === 'yes' },
+  })
+  revalidateProject(id)
+}
+
+export async function addBugCustomField(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  const name = formTrimmed(formData, 'name')
+  const type = formTrimmed(formData, 'type')
+  if (!id || !buildId || !name || !type) return
+
+  /**
+   * Options arrive as repeated `option` inputs, one per row the user added.
+   * Blank rows are dropped here so an empty extra row does not become an
+   * empty choice — the API would reject the whole field for it.
+   */
+  const options = formData
+    .getAll('option')
+    .map(String)
+    .map((o) => o.trim())
+    .filter(Boolean)
+
+  const section = formTrimmed(formData, 'section') || 'settings'
+
+  try {
+    await serverFetch(`projects/${id}/custom-fields`, {
+      method: 'POST',
+      body: {
+        buildId,
+        name,
+        type,
+        isRequired: formData.has('isRequired'),
+        ...(options.length > 0 ? { options } : {}),
+      },
+    })
+  } catch (error) {
+    /**
+     * The API's rules are the real ones — a duplicate name, a choice type
+     * with no options, repeated options. Each maps to a code the page turns
+     * into a sentence rather than forwarding the API's own wording.
+     */
+    const status = error instanceof ApiError ? error.status : 0
+    const code = status === 409 ? 'field-exists' : status === 400 ? 'field-invalid' : 'field-failed'
+    redirect(`/app/customer/projects/${id}?section=${section}&buildId=${buildId}&notice=${code}`)
+  }
+
+  revalidateProject(id)
+  redirect(`/app/customer/projects/${id}?section=${section}&buildId=${buildId}&notice=field-added`)
+}
+
+export async function removeBugCustomField(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const fieldId = formTrimmed(formData, 'fieldId')
+  const buildId = formTrimmed(formData, 'buildId')
+  if (!id || !fieldId) return
+
+  await serverFetch(`projects/${id}/custom-fields/${fieldId}`, { method: 'DELETE' })
+  revalidateProject(id)
+  redirect(
+    `/app/customer/projects/${id}?section=settings${buildId ? `&buildId=${buildId}` : ''}&notice=field-removed`,
+  )
 }

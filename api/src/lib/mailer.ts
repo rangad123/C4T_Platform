@@ -90,3 +90,25 @@ export function projectAssignedEmail(
     text: `You have a new project invitation on Crowd4Test.\n\nProject: ${projectTitle}\n\nReview the scope and respond here:\n${url}`,
   }
 }
+
+/**
+ * §42 — an invitation to join an organisation's team.
+ *
+ * The inviter's own note is passed through verbatim when they wrote one. It is
+ * plain text in a plain-text email, so there is no markup for it to escape.
+ */
+export function teamInvitationEmail(
+  to: string,
+  token: string,
+  organisationName: string,
+  invitedByName: string,
+  message?: string | null,
+): MailMessage {
+  const url = `${env.WEB_PUBLIC_URL}/invitations/${encodeURIComponent(token)}`
+  const note = message?.trim() ? `\n\n${invitedByName} wrote:\n"${message.trim()}"\n` : '\n'
+  return {
+    to,
+    subject: `${invitedByName} invited you to join ${organisationName} on Crowd4Test`,
+    text: `You have been invited to join ${organisationName} on Crowd4Test.${note}\nAccept the invitation here:\n${url}\n\nThe link expires in 14 days. If you were not expecting this, you can ignore it.`,
+  }
+}

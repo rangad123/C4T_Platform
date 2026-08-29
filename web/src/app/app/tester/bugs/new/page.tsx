@@ -1,9 +1,9 @@
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
+import { CustomFieldInput } from '@/components/tester/CustomFieldInput'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { Button } from '@/components/ds/core/Button'
-import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { EvidenceUpload } from '@/components/tester/EvidenceUpload'
+import { EvidenceGuardedSubmit } from '@/components/tester/EvidenceGuardedSubmit'
 import { titleCase } from '@/lib/admin/format'
 import { reportBugAction } from '../actions'
 
@@ -76,6 +77,15 @@ const ERROR_MESSAGES: Record<string, string> = {
  * not the security boundary — the API re-checks the relation on every
  * submit, which is what actually stops a hand-built post.
  */
+/** A row of `GET /v1/projects/:id/custom-fields` — the client's extra questions. */
+interface BugCustomField {
+  id: string
+  name: string
+  type: string
+  options: readonly string[]
+  isRequired: boolean
+}
+
 export default async function NewTesterBugPage({
   searchParams,
 }: {
@@ -116,7 +126,7 @@ export default async function NewTesterBugPage({
    * blocking the report, because an unfiled bug is worse than an unlabelled
    * one.
    */
-  const [features, myBrowsers] = await Promise.all([
+  const [features, myBrowsers, customFields] = await Promise.all([
     activeProjectId
       ? serverFetchOrNull<readonly { id: string; name: string }[]>(
           `projects/${activeProjectId}/features`,
@@ -124,6 +134,20 @@ export default async function NewTesterBugPage({
         )
       : Promise.resolve(null),
     serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers'),
+    /**
+     * The client's own extra questions for this build (§72).
+     *
+     * Best-effort like the rest of this block: if it fails the form still
+     * submits, because the API re-checks required answers against the build's
+     * definitions anyway and an unfiled bug is worse than one missing an
+     * optional field. Returns nothing when customisation is switched off.
+     */
+    activeProjectId
+      ? serverFetchOrNull<readonly BugCustomField[]>(
+          `projects/${activeProjectId}/custom-fields`,
+          params.buildId ? { query: { buildId: params.buildId } } : undefined,
+        )
+      : Promise.resolve(null),
   ])
 
   const browserOptions = (myBrowsers ?? []).map((b) => {
@@ -368,6 +392,24 @@ export default async function NewTesterBugPage({
             </div>
           </Panel>
 
+          {/* ── The client's own questions for this build (§72) ────────────
+              Rendered between the standard form and Evidence, so the report
+              reads in the order the client asked for it. Absent entirely when
+              the build has no extra fields or has them switched off — the API
+              returns nothing in either case. */}
+          {customFields && customFields.length > 0 ? (
+            <Panel
+              title="Extra details for this build"
+              description="Questions the client added to this build's bug form."
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                {customFields.map((field) => (
+                  <CustomFieldInput key={field.id} field={field} />
+                ))}
+              </div>
+            </Panel>
+          ) : null}
+
           <Panel
             title="Evidence"
             description="Attach a screenshot or recording, or paste a link to one. This is what turns a description into something the team can act on, so at least one is required."
@@ -391,9 +433,9 @@ export default async function NewTesterBugPage({
           </Panel>
 
           <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-            <SubmitButton variant="primary" iconLeft="clipboard-check" pendingLabel="Filing report…">
+            <EvidenceGuardedSubmit pendingLabel="Filing report…">
               File the report
-            </SubmitButton>
+            </EvidenceGuardedSubmit>
             <Button variant="secondary" href="/app/tester/bugs">
               Cancel
             </Button>

@@ -66,7 +66,31 @@ export interface ProjectMaterial {
 export interface ProjectAssignmentRow {
   buildId: string
   status: string
-  tester: ProjectPerson
+  invitedAt: string
+  respondedAt: string | null
+  completedAt: string | null
+  notes: string | null
+  tester: {
+    id: string
+    firstName: string | null
+    lastName: string | null
+    /**
+     * Absent for a customer caller. The API omits tester email addresses for
+     * anyone who is not admin-side, so this is genuinely optional here rather
+     * than a string the UI has to remember not to render.
+     */
+    email?: string
+    testerProfile: {
+      id: string
+      /**
+       * A Prisma Decimal — JSON serialises it as a STRING, not a number.
+       * Typing it as a number is what made `.toFixed()` blow up at runtime
+       * with the typecheck perfectly happy.
+       */
+      ratingAverage: string | null
+      countryCode: string | null
+    } | null
+  }
 }
 
 export interface ProjectBuild {
@@ -146,6 +170,8 @@ export interface BuildDetail {
   startDate: string | null
   endDate: string | null
   testDocumentFileId: string | null
+  /** §36 — whether this build's bug form carries the client's extra fields. */
+  bugCustomizationEnabled: boolean
   testDocument: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
   createdAt: string
   updatedAt: string
@@ -193,4 +219,66 @@ export interface ProjectBugRow {
   status: string
   createdAt: string
   reportedBy: ProjectPerson | null
+}
+
+/**
+ * `GET /v1/reports/by-build/:buildId`.
+ *
+ * A FLAT shape, deliberately typed as the endpoint actually returns it rather
+ * than reshaped to match `by-project`. The two differ — by-project nests
+ * counts under `bugs`, this one does not — and pretending otherwise is how a
+ * `buildReport.build.name` read ends up undefined at runtime while the
+ * typecheck passes.
+ */
+export interface BuildReport {
+  testerCount: number
+  bugCount: number
+  bugsBySeverity: Record<string, number>
+  bugsByStatus: Record<string, number>
+  bugsByType: Record<string, number>
+  bugsByReproducibility: Record<string, number>
+  testCaseCount: number
+  testCaseCompletion: number
+  reviewCount: number
+  /** A Prisma Decimal, so JSON gives a string. Never assume a number. */
+  averageRating: string | null
+}
+
+/** A row of `GET /v1/communication/announcements`. */
+export interface AnnouncementRow {
+  id: string
+  title: string
+  body: string
+  audience: string
+  projectId: string | null
+  buildId: string | null
+  build: { id: string; name: string } | null
+  publishedAt: string | null
+  expiresAt: string | null
+  author: { id: string; firstName: string | null; lastName: string | null } | null
+}
+
+/** A row of `GET /v1/projects/:id/custom-fields` (§37). */
+export interface BugCustomFieldRow {
+  id: string
+  name: string
+  type: string
+  options: readonly string[]
+  isRequired: boolean
+  position: number
+  createdAt: string
+  /** How many bugs already answered it — the delete warning needs this. */
+  _count: { values: number }
+}
+
+/** Human labels for `BugFieldType`, so the table does not show enum names. */
+export const BUG_FIELD_TYPE_LABEL: Record<string, string> = {
+  TEXT: 'Short text',
+  TEXTAREA: 'Long text',
+  NUMBER: 'Number',
+  DATE: 'Date',
+  URL: 'Link',
+  SELECT: 'Dropdown',
+  RADIO: 'Single choice',
+  CHECKBOX: 'Multiple choice',
 }

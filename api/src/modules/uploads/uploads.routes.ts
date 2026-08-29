@@ -161,6 +161,27 @@ async function assertCanDownload(
     }
   }
 
+  /**
+   * A build's test document — the spec testers work from.
+   *
+   * Keyed on the join rather than on a scope: the field accepts a file
+   * whatever scope it was uploaded under, and every scope-specific branch
+   * here would otherwise fall through to uploader-only. That is exactly what
+   * used to happen — the tester project workspace renders a download link for
+   * this file, but nothing could fetch it except the customer who uploaded
+   * it, so the link was dead for its entire intended audience.
+   */
+  const testDocumentBuild = await prisma.build.findFirst({
+    where: { testDocumentFileId: file.id, deletedAt: null },
+    select: { projectId: true },
+  })
+  if (testDocumentBuild) {
+    const ctx = await projectRelations(user, testDocumentBuild.projectId)
+    if (!ctx) throw new NotFoundError('File')
+    authorize(user, 'project.read', ctx.relations)
+    return
+  }
+
   if (file.scope === FileScope.PROJECT_MATERIAL) {
     const material = await prisma.projectMaterial.findFirst({
       where: { fileId: file.id },

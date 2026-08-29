@@ -19,11 +19,25 @@ import {
   testerIdParam,
   deviceIdParam,
   workHistoryIdParam,
+  discoverTestersQuery,
 } from './testers.schema.js'
 
 export const testersRouter = Router()
 
 testersRouter.use(authenticate)
+
+/**
+ * §44 — customers browse the crowd. Declared before the admin-gated `/:id`
+ * routes so "discover" is never read as a tester id, and role-gated rather
+ * than permission-gated because a customer holds no permissions.
+ */
+testersRouter.get(
+  '/discover',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ query: discoverTestersQuery }),
+  controller.discover,
+)
+
 
 // ─── Tester self-service (§2.3 "Manage their tester profile") ────────────────
 // Declared before "/:id" so "me" is never parsed as an id.

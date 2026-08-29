@@ -25,6 +25,8 @@ import {
   projectBuildQuery,
   createBuildSchema,
   updateBuildSchema,
+  addBugCustomFieldSchema,
+  bugCustomFieldParam,
 } from './projects.schema.js'
 
 export const projectsRouter = Router()
@@ -128,6 +130,28 @@ projectsRouter.delete(
   requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
   validate({ params: featureParam }),
   controller.removeFeature,
+)
+
+// ─── Custom bug fields ───────────────────────────────────────────────────────
+
+projectsRouter.get(
+  '/:id/custom-fields',
+  validate({ params: projectIdParam, query: projectBuildQuery }),
+  controller.listBugCustomFields,
+)
+
+projectsRouter.post(
+  '/:id/custom-fields',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: projectIdParam, body: addBugCustomFieldSchema }),
+  controller.addBugCustomField,
+)
+
+projectsRouter.delete(
+  '/:id/custom-fields/:fieldId',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: bugCustomFieldParam }),
+  controller.removeBugCustomField,
 )
 
 // ─── Assignments ─────────────────────────────────────────────────────────────
