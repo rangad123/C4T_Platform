@@ -1,0 +1,37 @@
+name: Deploy API
+
+# Fires once "API CI" finishes on main, not on every push directly — a push
+# that fails lint/typecheck/build should never reach the EC2 box. See
+# `workflow_dispatch` below for a manual redeploy with no code change (e.g.
+# after fixing something by hand on the box and wanting a clean re-sync).
+on:
+  workflow_run:
+    workflows: [API CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Shared with web-deploy.yml on purpose: both SSH into the same EC2
+  # checkout, and only one `git reset --hard` against it may run at a time.
+  group: c4t-ec2-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /var/www/c4t
+            bash scripts/deploy-pull.sh
+            bash api/scripts/deploy.sh

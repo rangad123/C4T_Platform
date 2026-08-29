@@ -1,0 +1,34 @@
+name: Deploy Web
+
+# Fires once "Web CI" finishes on main — see api-deploy.yml's comment for why
+# this isn't a plain `on: push`.
+on:
+  workflow_run:
+    workflows: [Web CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Shared with api-deploy.yml on purpose — see that file's comment.
+  group: c4t-ec2-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /var/www/c4t
+            bash scripts/deploy-pull.sh
+            bash web/scripts/deploy.sh
