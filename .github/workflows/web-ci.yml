@@ -1,0 +1,67 @@
+name: Web CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['web/**', '.github/workflows/web-ci.yml']
+  pull_request:
+    paths: ['web/**', '.github/workflows/web-ci.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  quality:
+    name: Lint, typecheck, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # The build prerenders every route, so metadata needs a real base URL.
+      NEXT_PUBLIC_SITE_URL: https://www.crowd4test.com
+      NEXT_PUBLIC_API_BASE: /api/v1
+      NEXT_PUBLIC_ENVIRONMENT: preview
+      API_ORIGIN: http://localhost:4000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Check formatting
+        run: npx prettier --check .
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify every registry route was prerendered
+        # Catches a route added to the registry with no page.tsx behind it —
+        # which would otherwise ship as a live 404 on a URL in the sitemap.
+        run: npx tsx scripts/verify-build.ts
+
+      - name: Upload build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build-log
+          path: web/.next/build-manifest.json
+          retention-days: 3
+          if-no-files-found: ignore
