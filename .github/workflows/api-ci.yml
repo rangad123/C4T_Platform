@@ -73,6 +73,9 @@ jobs:
           # Both are required because env validation runs at import time.
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          # Throwaway — never used to encrypt anything real. Just needs to be
+          # valid base64 decoding to exactly 32 bytes, which env.ts requires.
+          PAYMENT_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
   test:
     name: Tests
