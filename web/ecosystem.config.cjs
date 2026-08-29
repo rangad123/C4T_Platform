@@ -6,16 +6,21 @@
  *   pm2 logs c4t-web
  *   pm2 reload c4t-web           # zero-downtime restart
  *
- * Runs the built `next start` server directly (not through `npm run start`)
- * so PM2 manages the actual Node process instead of an intermediate npm
- * shell — the same reasoning as most Next.js-under-PM2 setups.
+ * Runs through `npm start` (→ `next start`), matching how this box already
+ * ran it before this file existed. Invoking the `next` binary directly was
+ * tried first and broke: PM2 has no file extension to detect an interpreter
+ * from, ran it through a bare shell, and lost the executable's own node
+ * shebang — "next: not found", then once the args shifted, "start" saw a
+ * bare positional "3000" and read it as `next start <directory>` instead of
+ * a port. Port comes from PORT below rather than a `-p` flag for the same
+ * reason: one less place for an argument to get mis-split.
  */
 module.exports = {
   apps: [
     {
       name: 'c4t-web',
-      script: 'node_modules/next/dist/bin/next',
-      args: 'start -p 3000',
+      script: 'npm',
+      args: 'start',
       cwd: __dirname,
 
       // A single Next.js server process. Nginx sits in front of it; there is
@@ -26,6 +31,7 @@ module.exports = {
 
       env_production: {
         NODE_ENV: 'production',
+        PORT: '3000',
       },
 
       kill_timeout: 20000,
