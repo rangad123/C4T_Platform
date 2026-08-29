@@ -3,11 +3,13 @@ import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
+import { Modal } from '@/components/admin/Modal'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
+import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -16,7 +18,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
-import { personName } from '@/lib/admin/format'
+import { orDash, personName } from '@/lib/admin/format'
 import { saveProfile, changePassword, revokeSession, signOutEverywhere } from './actions'
 
 export const metadata: Metadata = {
@@ -65,7 +67,10 @@ const NOTICES: Record<string, Notice> = {
   session_revoked: { tone: 'success', text: 'That session has been signed out.' },
 
   name_required: { tone: 'error', text: 'Enter a first name — it cannot be blank.' },
-  country_code: { tone: 'error', text: 'Give the country as a two-letter code, for example IN or US.' },
+  country_code: {
+    tone: 'error',
+    text: 'Give the country as a two-letter code, for example IN or US.',
+  },
   profile_invalid: {
     tone: 'error',
     text: 'The API rejected those details. Check the lengths: 80 characters for each name, 32 for the phone number.',
@@ -77,9 +82,15 @@ const NOTICES: Record<string, Notice> = {
   profile_failed: { tone: 'error', text: 'We could not save your profile. Try again in a moment.' },
 
   password_missing: { tone: 'error', text: 'Fill in your current password and the new one.' },
-  password_mismatch: { tone: 'error', text: 'The two new passwords do not match. Retype them and submit again.' },
+  password_mismatch: {
+    tone: 'error',
+    text: 'The two new passwords do not match. Retype them and submit again.',
+  },
   password_short: { tone: 'error', text: 'Your new password must be at least 12 characters.' },
-  password_reused: { tone: 'error', text: 'The new password is the same as your current one. Choose a different one.' },
+  password_reused: {
+    tone: 'error',
+    text: 'The new password is the same as your current one. Choose a different one.',
+  },
   password_wrong: { tone: 'error', text: 'That is not your current password.' },
   password_weak: {
     tone: 'error',
@@ -89,7 +100,10 @@ const NOTICES: Record<string, Notice> = {
     tone: 'error',
     text: 'This account signs in with Google and has no password to replace. Use the reset link on the sign-in page to set one.',
   },
-  password_failed: { tone: 'error', text: 'We could not change your password. Try again in a moment.' },
+  password_failed: {
+    tone: 'error',
+    text: 'We could not change your password. Try again in a moment.',
+  },
 
   session_missing: { tone: 'error', text: 'That session has already ended.' },
   session_forbidden: { tone: 'error', text: 'You can only end your own sessions.' },
@@ -149,7 +163,14 @@ const SESSION_COLUMNS: readonly TableColumn<ActiveSession>[] = [
     key: 'device',
     header: 'Device',
     render: (session) => (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 'var(--space-3)',
+          flexWrap: 'wrap',
+        }}
+      >
         {deviceLabel(session.userAgent)}
         {session.isCurrent ? (
           <Badge tone="accent" uppercase={false}>
@@ -185,7 +206,11 @@ const SESSION_COLUMNS: readonly TableColumn<ActiveSession>[] = [
     render: (session) => (
       <form action={revokeSession} style={{ display: 'inline-flex' }}>
         <input type="hidden" name="sessionId" value={session.id} />
-        <SubmitButton variant="secondary" size="sm" pendingLabel={session.isCurrent ? 'Signing out…' : 'Ending session…'}>
+        <SubmitButton
+          variant="secondary"
+          size="sm"
+          pendingLabel={session.isCurrent ? 'Signing out…' : 'Ending session…'}
+        >
           {session.isCurrent ? 'Sign out here' : 'End session'}
         </SubmitButton>
       </form>
@@ -204,12 +229,13 @@ const SECTIONS = [
 export default async function CustomerProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; error?: string; section?: string }>
+  searchParams: Promise<{ ok?: string; error?: string; section?: string; edit?: string }>
 }) {
   await requireRole(['CUSTOMER'], PROFILE_PATH)
 
   const params = await searchParams
   const section = resolveSection(SECTIONS, params.section)
+  const edit = params.edit ?? ''
   const notice = NOTICES[params.error ?? ''] ?? NOTICES[params.ok ?? ''] ?? null
 
   let profile: OwnProfile | null = null
@@ -225,10 +251,19 @@ export default async function CustomerProfilePage({
 
   if (!profile) {
     return (
-      <DetailShell root={ROOT} crumbs={[{ label: 'Your profile' }]} eyebrow="Account" title="Your profile">
+      <DetailShell
+        root={ROOT}
+        crumbs={[{ label: 'Your profile' }]}
+        eyebrow="Account"
+        title="Your profile"
+      >
         <EmptyState
           icon={profileError === 'forbidden' ? 'lock' : 'alert-triangle'}
-          title={profileError === 'forbidden' ? 'Your account cannot read its own profile' : "We couldn't load your profile"}
+          title={
+            profileError === 'forbidden'
+              ? 'Your account cannot read its own profile'
+              : "We couldn't load your profile"
+          }
           description={
             profileError === 'forbidden'
               ? 'The API refused the request.'
@@ -249,7 +284,9 @@ export default async function CustomerProfilePage({
 
   const displayName = personName(profile)
   const zoneOptions =
-    profile.timezone && !TIMEZONES.includes(profile.timezone) ? [profile.timezone, ...TIMEZONES] : TIMEZONES
+    profile.timezone && !TIMEZONES.includes(profile.timezone)
+      ? [profile.timezone, ...TIMEZONES]
+      : TIMEZONES
 
   return (
     <DetailShell
@@ -274,7 +311,9 @@ export default async function CustomerProfilePage({
               { label: 'Status', value: <StatusBadge status={profile.status} /> },
               {
                 label: 'Email verified',
-                value: profile.emailVerifiedAt ? formatDateTime(profile.emailVerifiedAt) : 'Not verified',
+                value: profile.emailVerifiedAt
+                  ? formatDateTime(profile.emailVerifiedAt)
+                  : 'Not verified',
                 wide: true,
               },
               { label: 'Last sign-in', value: formatDateTime(profile.lastLoginAt), wide: true },
@@ -291,7 +330,8 @@ export default async function CustomerProfilePage({
             padding: 'var(--space-4) var(--space-5)',
             borderRadius: 'var(--radius-md)',
             border: '1px solid var(--border-default)',
-            background: notice.tone === 'error' ? 'var(--status-error-bg)' : 'var(--status-success-bg)',
+            background:
+              notice.tone === 'error' ? 'var(--status-error-bg)' : 'var(--status-success-bg)',
             color: notice.tone === 'error' ? 'var(--status-error-fg)' : 'var(--status-success-fg)',
             fontSize: 'var(--type-body-sm-size)',
             lineHeight: 1.5,
@@ -302,64 +342,209 @@ export default async function CustomerProfilePage({
       ) : null}
 
       {section === 'profile' ? (
-        <Panel title="Profile" description="How your name and contact details appear across the portal.">
-          <TrackedForm action={saveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-5)' }}>
-              <Field label="First name" htmlFor="firstName" required>
-                <Input id="firstName" name="firstName" defaultValue={profile.firstName ?? ''} maxLength={80} autoComplete="given-name" required />
-              </Field>
-              <Field label="Last name" htmlFor="lastName">
-                <Input id="lastName" name="lastName" defaultValue={profile.lastName ?? ''} maxLength={80} autoComplete="family-name" />
-              </Field>
-              <Field label="Phone" htmlFor="phone" hint="Up to 32 characters, including the code.">
-                <Input id="phone" name="phone" type="tel" defaultValue={profile.phone ?? ''} maxLength={32} autoComplete="tel" />
-              </Field>
-              <Field label="Country" htmlFor="countryCode" hint="Two-letter code, for example IN or US.">
-                <Input
-                  id="countryCode"
-                  name="countryCode"
-                  defaultValue={profile.countryCode ?? ''}
-                  maxLength={2}
-                  pattern="[A-Za-z]{2}"
-                  autoComplete="country"
-                  style={{ textTransform: 'uppercase' }}
-                />
-              </Field>
-              <Field label="Timezone" htmlFor="timezone" hint="Used for the dates and times shown to you.">
-                <Select id="timezone" name="timezone" defaultValue={profile.timezone ?? ''} placeholder="Not set" options={zoneOptions} />
-              </Field>
-            </div>
-            <div>
-              <SubmitButton variant="primary" pendingLabel="Saving profile…">
-                Save profile
-              </SubmitButton>
-            </div>
-          </TrackedForm>
-        </Panel>
+        <>
+          <Panel
+            title="Profile"
+            description="How your name and contact details appear across the portal."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=profile&edit=profile`}
+                variant="primary"
+                size="sm"
+                iconLeft="pencil"
+              >
+                Edit
+              </Button>
+            }
+          >
+            <DescriptionList
+              items={[
+                { label: 'First name', value: orDash(profile.firstName) },
+                { label: 'Last name', value: orDash(profile.lastName) },
+                { label: 'Phone', value: orDash(profile.phone) },
+                { label: 'Country', value: orDash(profile.countryCode) },
+                { label: 'Timezone', value: profile.timezone ?? 'Not set', wide: true },
+              ]}
+            />
+          </Panel>
+
+          <Modal
+            open={edit === 'profile'}
+            closedHref={`${PROFILE_PATH}?section=profile`}
+            title="Edit profile"
+          >
+            <TrackedForm
+              action={saveProfile}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 'var(--space-5)',
+                }}
+              >
+                <Field label="First name" htmlFor="firstName" required>
+                  <Input
+                    id="firstName"
+                    name="firstName"
+                    defaultValue={profile.firstName ?? ''}
+                    maxLength={80}
+                    autoComplete="given-name"
+                    required
+                  />
+                </Field>
+                <Field label="Last name" htmlFor="lastName">
+                  <Input
+                    id="lastName"
+                    name="lastName"
+                    defaultValue={profile.lastName ?? ''}
+                    maxLength={80}
+                    autoComplete="family-name"
+                  />
+                </Field>
+                <Field
+                  label="Phone"
+                  htmlFor="phone"
+                  hint="Up to 32 characters, including the code."
+                >
+                  <Input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    defaultValue={profile.phone ?? ''}
+                    maxLength={32}
+                    autoComplete="tel"
+                  />
+                </Field>
+                <Field
+                  label="Country"
+                  htmlFor="countryCode"
+                  hint="Two-letter code, for example IN or US."
+                >
+                  <Input
+                    id="countryCode"
+                    name="countryCode"
+                    defaultValue={profile.countryCode ?? ''}
+                    maxLength={2}
+                    pattern="[A-Za-z]{2}"
+                    autoComplete="country"
+                    style={{ textTransform: 'uppercase' }}
+                  />
+                </Field>
+                <Field
+                  label="Timezone"
+                  htmlFor="timezone"
+                  hint="Used for the dates and times shown to you."
+                >
+                  <Select
+                    id="timezone"
+                    name="timezone"
+                    defaultValue={profile.timezone ?? ''}
+                    placeholder="Not set"
+                    options={zoneOptions}
+                  />
+                </Field>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                <SubmitButton variant="primary" pendingLabel="Saving profile…">
+                  Save profile
+                </SubmitButton>
+                <Button href={`${PROFILE_PATH}?section=profile`} variant="ghost">
+                  Cancel
+                </Button>
+              </div>
+            </TrackedForm>
+          </Modal>
+        </>
       ) : null}
 
       {section === 'password' ? (
-        <Panel title="Password" description="Changing it keeps you signed in here and signs you out on every other device.">
-          <TrackedForm
-            action={changePassword}
-            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', maxWidth: 'var(--container-form)' }}
-          >
-            <Field label="Current password" htmlFor="currentPassword" required>
-              <Input id="currentPassword" name="currentPassword" type="password" autoComplete="current-password" required showPasswordToggle />
-            </Field>
-            <Field label="New password" htmlFor="newPassword" hint="At least 12 characters." required>
-              <Input id="newPassword" name="newPassword" type="password" minLength={12} maxLength={200} autoComplete="new-password" required showPasswordToggle />
-            </Field>
-            <Field label="Confirm new password" htmlFor="confirmPassword" required>
-              <Input id="confirmPassword" name="confirmPassword" type="password" minLength={12} maxLength={200} autoComplete="new-password" required showPasswordToggle />
-            </Field>
-            <div style={{ marginTop: 'var(--space-1)' }}>
-              <SubmitButton variant="secondary" pendingLabel="Changing password…">
+        <>
+          <Panel
+            title="Password"
+            description="Changing it keeps you signed in here and signs you out on every other device."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=password&edit=password`}
+                variant="primary"
+                size="sm"
+                iconLeft="lock"
+              >
                 Change password
-              </SubmitButton>
-            </div>
-          </TrackedForm>
-        </Panel>
+              </Button>
+            }
+          >
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-muted)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
+              Not shown here for your own protection — use Change password to set a new one.
+            </p>
+          </Panel>
+
+          <Modal
+            open={edit === 'password'}
+            closedHref={`${PROFILE_PATH}?section=password`}
+            title="Change password"
+          >
+            <TrackedForm
+              action={changePassword}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+            >
+              <Field label="Current password" htmlFor="currentPassword" required>
+                <Input
+                  id="currentPassword"
+                  name="currentPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
+              <Field
+                label="New password"
+                htmlFor="newPassword"
+                hint="At least 12 characters."
+                required
+              >
+                <Input
+                  id="newPassword"
+                  name="newPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={200}
+                  autoComplete="new-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
+              <Field label="Confirm new password" htmlFor="confirmPassword" required>
+                <Input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={200}
+                  autoComplete="new-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
+              <div style={{ display: 'flex', gap: 'var(--space-4)', marginTop: 'var(--space-1)' }}>
+                <SubmitButton variant="primary" pendingLabel="Changing password…">
+                  Update password
+                </SubmitButton>
+                <Button href={`${PROFILE_PATH}?section=password`} variant="ghost">
+                  Cancel
+                </Button>
+              </div>
+            </TrackedForm>
+          </Modal>
+        </>
       ) : null}
 
       {section === 'sessions' ? (
@@ -368,7 +553,12 @@ export default async function CustomerProfilePage({
           description="Every device holding a live sign-in for your account."
           actions={
             <form action={signOutEverywhere}>
-              <SubmitButton variant="secondary" size="sm" iconLeft="log-out" pendingLabel="Signing out everywhere…">
+              <SubmitButton
+                variant="secondary"
+                size="sm"
+                iconLeft="log-out"
+                pendingLabel="Signing out everywhere…"
+              >
                 Sign out everywhere, including here
               </SubmitButton>
             </form>
@@ -376,7 +566,11 @@ export default async function CustomerProfilePage({
           flush={!sessionsFailed && sessions.length > 0}
         >
           {sessionsFailed ? (
-            <EmptyState icon="alert-triangle" title="We couldn't read your sessions" description="The sign-in service did not answer. Refresh in a moment." />
+            <EmptyState
+              icon="alert-triangle"
+              title="We couldn't read your sessions"
+              description="The sign-in service did not answer. Refresh in a moment."
+            />
           ) : sessions.length === 0 ? (
             <EmptyState
               icon="shield-check"
@@ -389,7 +583,11 @@ export default async function CustomerProfilePage({
               rows={sessions}
               rowKey={(session) => session.id}
               ariaLabel="Devices where you are signed in"
-              style={{ border: 'none', borderRadius: 'var(--radius-none)', background: 'transparent' }}
+              style={{
+                border: 'none',
+                borderRadius: 'var(--radius-none)',
+                background: 'transparent',
+              }}
             />
           )}
         </Panel>

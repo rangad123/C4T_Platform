@@ -20,10 +20,11 @@ import { formTrimmed } from '@/lib/form-data'
  * holds none of those, so no action exists to attempt them.
  */
 
-const LIST_PATH = '/app/tester/bugs'
+const DETAIL_BASE = '/app/tester/bugs'
+const PROJECTS_PATH = '/app/tester/projects'
 
 function detailPath(id: string): string {
-  return `${LIST_PATH}/${id}`
+  return `${DETAIL_BASE}/${id}`
 }
 
 function failurePath(id: string, panel: string, reason: string): string {
@@ -45,7 +46,7 @@ export async function addBugComment(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const id = formTrimmed(formData, 'id')
-  if (!id) redirect(LIST_PATH)
+  if (!id) redirect(PROJECTS_PATH)
 
   const body = formTrimmed(formData, 'body')
   if (!body) redirect(failurePath(id, 'comment', 'empty'))
@@ -58,7 +59,7 @@ export async function addBugComment(formData: FormData): Promise<void> {
   }
   if (reason) redirect(failurePath(id, 'comment', reason))
 
-  revalidatePath(LIST_PATH)
+  revalidatePath(`${DETAIL_BASE}/${id}`)
   revalidatePath(detailPath(id))
   redirect(`${detailPath(id)}?section=comments`)
 }
@@ -76,7 +77,7 @@ export async function moveBugStatus(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const id = formTrimmed(formData, 'id')
-  if (!id) redirect(LIST_PATH)
+  if (!id) redirect(PROJECTS_PATH)
 
   const status = formTrimmed(formData, 'status')
   if (!status) redirect(failurePath(id, 'status', 'no-change'))
@@ -94,7 +95,7 @@ export async function moveBugStatus(formData: FormData): Promise<void> {
   }
   if (reason) redirect(failurePath(id, 'status', reason))
 
-  revalidatePath(LIST_PATH)
+  revalidatePath(`${DETAIL_BASE}/${id}`)
   revalidatePath(detailPath(id))
   redirect(detailPath(id))
 }

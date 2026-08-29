@@ -57,13 +57,22 @@ export function Card({ title, meta, actions, children, href, style }: CardProps)
     <>
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: actions ? '1fr auto' : '1fr',
-          gap: 'var(--space-4)',
-          alignItems: 'start',
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 'var(--space-3)',
         }}
       >
-        <div style={{ minWidth: 0 }}>
+        {/*
+         * A hard `minWidth` floor, not `minWidth: 0` — a title sharing this
+         * row with one or two action buttons must not be squeezed toward
+         * zero to make room for them. `flexWrap` on the row above is what
+         * makes that floor safe: once the title block hits its floor, the
+         * actions wrap onto their own line below instead of the title
+         * shrinking further and breaking mid-word.
+         */}
+        <div style={{ minWidth: 180, flex: '1 1 180px' }}>
           <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
             {title}
           </div>

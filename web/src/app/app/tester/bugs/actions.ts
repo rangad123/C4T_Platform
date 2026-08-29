@@ -7,8 +7,10 @@ import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 
-const LIST_PATH = '/app/tester/bugs'
 const NEW_PATH = '/app/tester/bugs/new'
+
+/** Where a report returns to: the project it was filed against. */
+const projectPath = (projectId: string): string => `/app/tester/projects/${projectId}?section=bugs`
 
 const SEVERITIES: readonly string[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
 const REPRODUCIBILITIES: readonly string[] = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE']
@@ -202,7 +204,7 @@ export async function reportBugAction(formData: FormData): Promise<void> {
     reason = reasonFor(error)
   }
 
-  revalidatePath(LIST_PATH)
+  revalidatePath(`/app/tester/projects/${projectId}`)
   // Outside any try/catch on purpose — `redirect` works by throwing.
-  redirect(reason ? back(reason) : `${LIST_PATH}?reported=1`)
+  redirect(reason ? back(reason) : `${projectPath(projectId)}&notice=reported`)
 }

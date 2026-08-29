@@ -9,6 +9,7 @@ import { validate, validatedQuery } from '../../middleware/validate.js'
 import { NotFoundError, ConflictError } from '../../lib/errors.js'
 import { recordAudit } from '../../lib/audit.js'
 import { Role } from '@prisma/client'
+import { ISO_639_1_LANGUAGES } from '../../lib/languages.js'
 
 /**
  * §18 Global Assets — the device / browser reference catalog.
@@ -140,7 +141,16 @@ catalogRouter.get('/', validate({ query: listQuery }), async (_req, res) => {
     ])
 
   res.json({
-    data: { brands, deviceModels, operatingSystems, browsers, networks, skillCategories },
+    data: {
+      brands,
+      deviceModels,
+      operatingSystems,
+      browsers,
+      networks,
+      skillCategories,
+      // Static, not queried — see the doc comment on `ISO_639_1_LANGUAGES`.
+      languages: ISO_639_1_LANGUAGES,
+    },
   })
 })
 
@@ -282,24 +292,29 @@ const osBody = z.object({
   kind: z.nativeEnum(OsKind),
 })
 
-catalogRouter.post('/operating-systems', adminOnly, validate({ body: osBody }), async (req, res) => {
-  const input = req.body as z.infer<typeof osBody>
-  const clash = await prisma.operatingSystem.findUnique({
-    where: { name_kind: { name: input.name, kind: input.kind } },
-    select: { id: true },
-  })
-  if (clash) throw new ConflictError('That operating system already exists for this kind')
+catalogRouter.post(
+  '/operating-systems',
+  adminOnly,
+  validate({ body: osBody }),
+  async (req, res) => {
+    const input = req.body as z.infer<typeof osBody>
+    const clash = await prisma.operatingSystem.findUnique({
+      where: { name_kind: { name: input.name, kind: input.kind } },
+      select: { id: true },
+    })
+    if (clash) throw new ConflictError('That operating system already exists for this kind')
 
-  const os = await prisma.operatingSystem.create({ data: input })
-  await recordAudit({
-    req,
-    action: 'catalog.os_created',
-    entityType: 'OperatingSystem',
-    entityId: os.id,
-    after: { name: os.name, kind: os.kind },
-  })
-  res.status(201).json({ data: os })
-})
+    const os = await prisma.operatingSystem.create({ data: input })
+    await recordAudit({
+      req,
+      action: 'catalog.os_created',
+      entityType: 'OperatingSystem',
+      entityId: os.id,
+      after: { name: os.name, kind: os.kind },
+    })
+    res.status(201).json({ data: os })
+  },
+)
 
 const versionBody = z.object({ version: z.string().trim().min(1).max(60) })
 
@@ -309,7 +324,10 @@ catalogRouter.post(
   validate({ params: idParam, body: versionBody }),
   async (req, res) => {
     const osId = param(req, 'id')
-    const os = await prisma.operatingSystem.findUnique({ where: { id: osId }, select: { id: true } })
+    const os = await prisma.operatingSystem.findUnique({
+      where: { id: osId },
+      select: { id: true },
+    })
     if (!os) throw new NotFoundError('Operating system')
 
     const { version } = req.body as z.infer<typeof versionBody>
@@ -501,29 +519,34 @@ const skillUpdateBody = z.object({
   isActive: z.boolean().optional(),
 })
 
-catalogRouter.patch('/skills/:id', adminOnly, validate({ params: idParam, body: skillUpdateBody }), async (req, res) => {
-  const input = req.body as z.infer<typeof skillUpdateBody>
-  if (input.categoryId) {
-    const category = await prisma.skillCategory.findUnique({
-      where: { id: input.categoryId },
-      select: { id: true },
-    })
-    if (!category) throw new NotFoundError('Skill category')
-  }
+catalogRouter.patch(
+  '/skills/:id',
+  adminOnly,
+  validate({ params: idParam, body: skillUpdateBody }),
+  async (req, res) => {
+    const input = req.body as z.infer<typeof skillUpdateBody>
+    if (input.categoryId) {
+      const category = await prisma.skillCategory.findUnique({
+        where: { id: input.categoryId },
+        select: { id: true },
+      })
+      if (!category) throw new NotFoundError('Skill category')
+    }
 
-  const row = await prisma.skill
-    .update({ where: { id: param(req, 'id') }, data: input })
-    .catch(() => null)
-  if (!row) throw new NotFoundError('Skill')
-  await recordAudit({
-    req,
-    action: 'catalog.skill_updated',
-    entityType: 'Skill',
-    entityId: row.id,
-    after: input,
-  })
-  res.json({ data: row })
-})
+    const row = await prisma.skill
+      .update({ where: { id: param(req, 'id') }, data: input })
+      .catch(() => null)
+    if (!row) throw new NotFoundError('Skill')
+    await recordAudit({
+      req,
+      action: 'catalog.skill_updated',
+      entityType: 'Skill',
+      entityId: row.id,
+      after: input,
+    })
+    res.json({ data: row })
+  },
+)
 
 // ─── Tester's own browsers (legacy `user_browsers`) ──────────────────────────
 

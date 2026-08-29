@@ -110,10 +110,18 @@ export default async function CrowdtestersPage({
         meta ? `${meta.total} verified tester${meta.total === 1 ? '' : 's'} available.` : undefined
       }
     >
-      <Panel title="Find testers" description="Filter the crowd by where they are and what they do.">
+      <Panel
+        title="Find testers"
+        description="Filter the crowd by where they are and what they do."
+      >
         <LiveGetForm
           action={BASE}
-          style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-4)', alignItems: 'flex-end' }}
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 'var(--space-4)',
+            alignItems: 'flex-start',
+          }}
         >
           <Field
             label="Search"
@@ -203,11 +211,7 @@ export default async function CrowdtestersPage({
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                    <Avatar
-                      name={tester.displayName}
-                      fileId={tester.avatarFileId}
-                      size="md"
-                    />
+                    <Avatar name={tester.displayName} fileId={tester.avatarFileId} size="md" />
                     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                       <span
                         style={{

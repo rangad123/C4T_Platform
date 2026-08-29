@@ -3,11 +3,13 @@ import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
+import { Modal } from '@/components/admin/Modal'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
+import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -16,7 +18,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
-import { personName } from '@/lib/admin/format'
+import { orDash, personName } from '@/lib/admin/format'
 import { saveProfile, changePassword, revokeSession, signOutEverywhere } from './actions'
 
 export const metadata: Metadata = {
@@ -290,12 +292,13 @@ const SECTIONS = [
 export default async function AdminProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; error?: string; section?: string }>
+  searchParams: Promise<{ ok?: string; error?: string; section?: string; edit?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'], PROFILE_PATH)
 
   const params = await searchParams
   const section = resolveSection(SECTIONS, params.section)
+  const edit = params.edit ?? ''
   const notice = NOTICES[params.error ?? ''] ?? NOTICES[params.ok ?? ''] ?? null
 
   let profile: OwnProfile | null = null
@@ -359,10 +362,7 @@ export default async function AdminProfilePage({
       }
       tabs={<SectionTabs basePath="/app/admin/profile" tabs={SECTIONS} active={section} />}
       aside={
-        <Panel
-          title="Account"
-          description="Set by the platform, not editable from this page."
-        >
+        <Panel title="Account" description="Set by the platform, not editable from this page.">
           <DescriptionList
             items={[
               { label: 'Email', value: profile.email, wide: true },
@@ -392,8 +392,8 @@ export default async function AdminProfilePage({
               lineHeight: 1.5,
             }}
           >
-            Role and status are changed on your record under Users, by another administrator —
-            never here. Editing your own would let you lock yourself out of the panel.
+            Role and status are changed on your record under Users, by another administrator — never
+            here. Editing your own would let you lock yourself out of the panel.
           </p>
         </Panel>
       }
@@ -418,9 +418,36 @@ export default async function AdminProfilePage({
       ) : null}
 
       {section === 'profile' ? (
+        <>
           <Panel
             title="Profile"
             description="How your name and contact details appear across the panel."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=profile&edit=profile`}
+                variant="primary"
+                size="sm"
+                iconLeft="pencil"
+              >
+                Edit
+              </Button>
+            }
+          >
+            <DescriptionList
+              items={[
+                { label: 'First name', value: orDash(profile.firstName) },
+                { label: 'Last name', value: orDash(profile.lastName) },
+                { label: 'Phone', value: orDash(profile.phone) },
+                { label: 'Country', value: orDash(profile.countryCode) },
+                { label: 'Timezone', value: profile.timezone ?? 'Not set', wide: true },
+              ]}
+            />
+          </Panel>
+
+          <Modal
+            open={edit === 'profile'}
+            closedHref={`${PROFILE_PATH}?section=profile`}
+            title="Edit profile"
           >
             <TrackedForm
               action={saveProfile}
@@ -454,7 +481,11 @@ export default async function AdminProfilePage({
                   />
                 </Field>
 
-                <Field label="Phone" htmlFor="phone" hint="Up to 32 characters, including the code.">
+                <Field
+                  label="Phone"
+                  htmlFor="phone"
+                  hint="Up to 32 characters, including the code."
+                >
                   <Input
                     id="phone"
                     name="phone"
@@ -496,28 +527,54 @@ export default async function AdminProfilePage({
                 </Field>
               </div>
 
-              <div>
+              <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
                 <SubmitButton variant="primary" pendingLabel="Saving profile…">
                   Save profile
                 </SubmitButton>
+                <Button href={`${PROFILE_PATH}?section=profile`} variant="ghost">
+                  Cancel
+                </Button>
               </div>
             </TrackedForm>
-          </Panel>
+          </Modal>
+        </>
       ) : null}
 
       {section === 'password' ? (
+        <>
           <Panel
             title="Password"
             description="Changing it keeps you signed in here and signs you out on every other device."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=password&edit=password`}
+                variant="primary"
+                size="sm"
+                iconLeft="lock"
+              >
+                Change password
+              </Button>
+            }
+          >
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-muted)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
+              Not shown here for your own protection — use Change password to set a new one.
+            </p>
+          </Panel>
+
+          <Modal
+            open={edit === 'password'}
+            closedHref={`${PROFILE_PATH}?section=password`}
+            title="Change password"
           >
             <TrackedForm
               action={changePassword}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-5)',
-                maxWidth: 'var(--container-form)',
-              }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
             >
               <Field label="Current password" htmlFor="currentPassword" required>
                 <Input
@@ -561,58 +618,66 @@ export default async function AdminProfilePage({
                 />
               </Field>
 
-              <div style={{ marginTop: 'var(--space-1)' }}>
-                <SubmitButton variant="secondary" pendingLabel="Changing password…">
-                  Change password
+              <div style={{ display: 'flex', gap: 'var(--space-4)', marginTop: 'var(--space-1)' }}>
+                <SubmitButton variant="primary" pendingLabel="Changing password…">
+                  Update password
                 </SubmitButton>
+                <Button href={`${PROFILE_PATH}?section=password`} variant="ghost">
+                  Cancel
+                </Button>
               </div>
             </TrackedForm>
-          </Panel>
+          </Modal>
+        </>
       ) : null}
 
       {section === 'sessions' ? (
-          <Panel
-            title="Active sessions"
-            description="Every device holding a live sign-in for your account."
-            actions={
-              <form action={signOutEverywhere}>
-                <SubmitButton variant="secondary" size="sm" iconLeft="log-out" pendingLabel="Signing out everywhere…">
-                  Sign out everywhere, including here
-                </SubmitButton>
-              </form>
-            }
-            flush={!sessionsFailed && sessions.length > 0}
-          >
-            {sessionsFailed ? (
-              <EmptyState
-                icon="alert-triangle"
-                title="We couldn't read your sessions"
-                description="The sign-in service did not answer. Refresh in a moment."
-              />
-            ) : sessions.length === 0 ? (
-              <EmptyState
-                icon="shield-check"
-                title="No live sessions are recorded"
-                description="Your current sign-in should appear here. If it does not, the session store is out of step with your cookies — sign out and back in."
-              />
-            ) : (
-              <Table
-                columns={SESSION_COLUMNS}
-                rows={sessions}
-                rowKey={(session) => session.id}
-                ariaLabel="Devices where you are signed in"
-                /* The panel already draws the frame — drop the table's own so the
+        <Panel
+          title="Active sessions"
+          description="Every device holding a live sign-in for your account."
+          actions={
+            <form action={signOutEverywhere}>
+              <SubmitButton
+                variant="secondary"
+                size="sm"
+                iconLeft="log-out"
+                pendingLabel="Signing out everywhere…"
+              >
+                Sign out everywhere, including here
+              </SubmitButton>
+            </form>
+          }
+          flush={!sessionsFailed && sessions.length > 0}
+        >
+          {sessionsFailed ? (
+            <EmptyState
+              icon="alert-triangle"
+              title="We couldn't read your sessions"
+              description="The sign-in service did not answer. Refresh in a moment."
+            />
+          ) : sessions.length === 0 ? (
+            <EmptyState
+              icon="shield-check"
+              title="No live sessions are recorded"
+              description="Your current sign-in should appear here. If it does not, the session store is out of step with your cookies — sign out and back in."
+            />
+          ) : (
+            <Table
+              columns={SESSION_COLUMNS}
+              rows={sessions}
+              rowKey={(session) => session.id}
+              ariaLabel="Devices where you are signed in"
+              /* The panel already draws the frame — drop the table's own so the
                    two hairlines do not stack into one heavy 2px rule. */
-                style={{
-                  border: 'none',
-                  borderRadius: 'var(--radius-none)',
-                  background: 'transparent',
-                }}
-              />
-            )}
-          </Panel>
+              style={{
+                border: 'none',
+                borderRadius: 'var(--radius-none)',
+                background: 'transparent',
+              }}
+            />
+          )}
+        </Panel>
       ) : null}
-
     </DetailShell>
   )
 }

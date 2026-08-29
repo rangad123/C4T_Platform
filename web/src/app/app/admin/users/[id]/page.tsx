@@ -3,6 +3,9 @@ import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { SectionTabs, resolveSection, type SectionTab } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
+import { Modal } from '@/components/admin/Modal'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
+import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { CountryLabel } from '@/components/admin/CountryFlag'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
@@ -50,6 +53,24 @@ import {
  */
 
 const BASE = '/app/admin/users'
+
+const NOTICES: Record<string, NoticeCopy> = {
+  'identity-saved': { tone: 'success', message: 'Identity updated.' },
+  'role-saved': { tone: 'success', message: 'Role updated.' },
+  'status-saved': { tone: 'success', message: 'Status updated.' },
+  'permissions-saved': { tone: 'success', message: 'Permissions updated.' },
+  forbidden: { tone: 'error', message: 'You are not able to change that right now.' },
+  invalid: {
+    tone: 'error',
+    message: 'Something on that form was not valid. Check it and try again.',
+  },
+  conflict: { tone: 'error', message: 'That could not be changed in its current state.' },
+  'last-admin': {
+    tone: 'error',
+    message: 'This is the last active administrator — the account must keep this status.',
+  },
+  failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
+}
 
 const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
 const STATUSES = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED'] as const
@@ -148,7 +169,7 @@ export default async function UserDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string }>
+  searchParams: Promise<{ section?: string; edit?: string; notice?: string }>
 }) {
   const { id } = await params
   const viewer = await requirePermission('user.read', `${BASE}/${id}`)
@@ -255,11 +276,27 @@ export default async function UserDetailPage({
   */
   const sections: SectionTab[] = [
     { value: 'identity', label: 'Identity', icon: 'user-check' },
-    ...(isSubAdmin ? [{ value: 'permissions', label: 'Permissions', icon: 'shield-check' as const, count: grantedCodes.size }] : []),
-    { value: 'organisations', label: 'Organisations', icon: 'building-2', count: membershipRows.length },
+    ...(isSubAdmin
+      ? [
+          {
+            value: 'permissions',
+            label: 'Permissions',
+            icon: 'shield-check' as const,
+            count: grantedCodes.size,
+          },
+        ]
+      : []),
+    {
+      value: 'organisations',
+      label: 'Organisations',
+      icon: 'building-2',
+      count: membershipRows.length,
+    },
     ...(canWrite ? [{ value: 'danger', label: 'Danger zone', icon: 'shield-alert' as const }] : []),
   ]
-  const section = resolveSection(sections, (await searchParams).section)
+  const resolvedParams = await searchParams
+  const section = resolveSection(sections, resolvedParams.section)
+  const edit = resolvedParams.edit ?? ''
 
   return (
     <DetailShell
@@ -289,8 +326,28 @@ export default async function UserDetailPage({
           <Panel
             title="Role"
             description="What this account can sign in as."
+            actions={
+              canWrite ? (
+                <Button
+                  href={`${BASE}/${user.id}?section=${section}&edit=role`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="pencil"
+                >
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
-            {canWrite ? (
+            <DescriptionList items={[{ label: 'Role', value: titleCase(user.role) }]} />
+          </Panel>
+
+          {canWrite ? (
+            <Modal
+              open={edit === 'role'}
+              closedHref={`${BASE}/${user.id}?section=${section}`}
+              title="Change role"
+            >
               <form action={changeUserRole} style={formStyle}>
                 <input type="hidden" name="id" value={user.id} />
                 <Field
@@ -300,20 +357,43 @@ export default async function UserDetailPage({
                 >
                   <Select id="role" name="role" defaultValue={user.role} options={ROLE_OPTIONS} />
                 </Field>
-                <SubmitButton variant="secondary" fullWidth pendingLabel="Changing role…">
-                  Change role
-                </SubmitButton>
+                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                  <SubmitButton variant="primary" pendingLabel="Changing role…">
+                    Save changes
+                  </SubmitButton>
+                  <Button href={`${BASE}/${user.id}?section=${section}`} variant="ghost">
+                    Cancel
+                  </Button>
+                </div>
               </form>
-            ) : (
-              <DescriptionList items={[{ label: 'Role', value: titleCase(user.role) }]} />
-            )}
-          </Panel>
+            </Modal>
+          ) : null}
 
           <Panel
             title="Status"
             description="Anything other than active ends every live session for this account."
+            actions={
+              canWrite ? (
+                <Button
+                  href={`${BASE}/${user.id}?section=${section}&edit=status`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="pencil"
+                >
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
-            {canWrite ? (
+            <DescriptionList items={[{ label: 'Status', value: titleCase(user.status) }]} />
+          </Panel>
+
+          {canWrite ? (
+            <Modal
+              open={edit === 'status'}
+              closedHref={`${BASE}/${user.id}?section=${section}`}
+              title="Update status"
+            >
               <form action={changeUserStatus} style={formStyle}>
                 <input type="hidden" name="id" value={user.id} />
                 <Field label="Status" htmlFor="status">
@@ -333,14 +413,17 @@ export default async function UserDetailPage({
                     placeholder="Why is this changing?"
                   />
                 </Field>
-                <SubmitButton variant="secondary" fullWidth pendingLabel="Updating status…">
-                  Update status
-                </SubmitButton>
+                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                  <SubmitButton variant="primary" pendingLabel="Updating status…">
+                    Save changes
+                  </SubmitButton>
+                  <Button href={`${BASE}/${user.id}?section=${section}`} variant="ghost">
+                    Cancel
+                  </Button>
+                </div>
               </form>
-            ) : (
-              <DescriptionList items={[{ label: 'Status', value: titleCase(user.status) }]} />
-            )}
-          </Panel>
+            </Modal>
+          ) : null}
 
           <Panel title="Account">
             <DescriptionList
@@ -359,9 +442,7 @@ export default async function UserDetailPage({
                 { label: 'Timezone', value: user.timezone ?? '' },
                 {
                   label: 'Account id',
-                  value: (
-                    <span style={{ fontFamily: 'var(--font-mono)' }}>{user.id}</span>
-                  ),
+                  value: <span style={{ fontFamily: 'var(--font-mono)' }}>{user.id}</span>,
                 },
               ]}
             />
@@ -402,13 +483,54 @@ export default async function UserDetailPage({
         </>
       }
     >
+      <Notice code={resolvedParams.notice} notices={NOTICES} />
+
       {section === 'identity' ? (
         <>
           <Panel
             title="Identity"
             description="The name, phone and locale on the account. Email addresses change through account recovery, not here."
+            actions={
+              canWrite ? (
+                <Button
+                  href={`${BASE}/${user.id}?section=identity&edit=identity`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="pencil"
+                >
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
-            {canWrite ? (
+            <div style={formStyle}>
+              <DescriptionList
+                items={[
+                  { label: 'First name', value: user.firstName ?? '' },
+                  { label: 'Last name', value: user.lastName ?? '' },
+                  { label: 'Phone', value: user.phone ?? '' },
+                  {
+                    label: 'Country',
+                    value: user.countryCode ? <CountryLabel countryCode={user.countryCode} /> : '',
+                  },
+                  { label: 'Timezone', value: user.timezone ?? '' },
+                ]}
+              />
+              {!canWrite ? (
+                <p style={noteStyle}>
+                  You can read this account but not change it. Editing needs the user.write
+                  permission.
+                </p>
+              ) : null}
+            </div>
+          </Panel>
+
+          {canWrite ? (
+            <Modal
+              open={edit === 'identity'}
+              closedHref={`${BASE}/${user.id}?section=identity`}
+              title="Edit identity"
+            >
               <TrackedForm action={updateUserIdentity} style={formStyle}>
                 <input type="hidden" name="id" value={user.id} />
                 <div style={fieldGridStyle}>
@@ -469,67 +591,93 @@ export default async function UserDetailPage({
                     />
                   </Field>
                 </div>
-                <div>
+                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
                   <SubmitButton variant="primary" pendingLabel="Saving…">
-                    Save identity
+                    Save changes
                   </SubmitButton>
+                  <Button href={`${BASE}/${user.id}?section=identity`} variant="ghost">
+                    Cancel
+                  </Button>
                 </div>
               </TrackedForm>
-            ) : (
-              <div style={formStyle}>
-                <DescriptionList
-                  items={[
-                    { label: 'First name', value: user.firstName ?? '' },
-                    { label: 'Last name', value: user.lastName ?? '' },
-                    { label: 'Phone', value: user.phone ?? '' },
-                    {
-                      label: 'Country',
-                      value: user.countryCode ? <CountryLabel countryCode={user.countryCode} /> : '',
-                    },
-                    { label: 'Timezone', value: user.timezone ?? '' },
-                  ]}
-                />
-                <p style={noteStyle}>
-                  You can read this account but not change it. Editing needs the user.write permission.
-                </p>
-              </div>
-            )}
-          </Panel>
+            </Modal>
+          ) : null}
         </>
       ) : null}
 
       {/* The tab only exists for a sub-admin, so `section` can never resolve
           here for anyone else — the second test is belt and braces. */}
       {section === 'permissions' && isSubAdmin ? (
-            <Panel
-              title="Sub-admin permissions"
-              description="What this sub-admin can do in the back office. Saving replaces the whole grant set, so anything left unticked is revoked."
-              actions={
+        <>
+          <Panel
+            title="Sub-admin permissions"
+            description="What this sub-admin can do in the back office."
+            actions={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
                 <Badge tone="accent" uppercase={false}>
                   {grantedCodes.size} granted
                 </Badge>
-              }
+                {permissionsError === null && permissionsEditable ? (
+                  <Button
+                    href={`${BASE}/${user.id}?section=permissions&edit=permissions`}
+                    variant="primary"
+                    size="sm"
+                    iconLeft="pencil"
+                  >
+                    Edit
+                  </Button>
+                ) : null}
+              </span>
+            }
+          >
+            {permissionsError !== null ? (
+              <div style={formStyle}>
+                <EmptyState
+                  icon={permissionsError === 'forbidden' ? 'lock' : 'alert-triangle'}
+                  title={
+                    permissionsError === 'forbidden'
+                      ? "You can't edit these permissions"
+                      : "Couldn't load the permission catalogue"
+                  }
+                  description={
+                    permissionsError === 'forbidden'
+                      ? "Editing a sub-admin's access needs the subadmin.manage permission. Ask an administrator to grant it."
+                      : 'The users service is unreachable. Refresh in a moment.'
+                  }
+                />
+                <GrantSummary grants={embeddedGrants} />
+              </div>
+            ) : (
+              <div style={formStyle}>
+                {!permissionsEditable ? (
+                  <p style={noteStyle}>
+                    {isSelf
+                      ? 'These are your own permissions, and the API refuses to let anyone edit their own grants. Ask another administrator to change them.'
+                      : 'The permission catalogue came back empty, so there is nothing to grant. Seed the permissions table on the API and reload.'}
+                  </p>
+                ) : null}
+                <GrantSummary grants={grants} />
+              </div>
+            )}
+          </Panel>
+
+          {permissionsError === null && permissionsEditable ? (
+            <Modal
+              open={edit === 'permissions'}
+              closedHref={`${BASE}/${user.id}?section=permissions`}
+              title="Edit permissions"
             >
-              {permissionsError !== null ? (
-                <div style={formStyle}>
-                  <EmptyState
-                    icon={permissionsError === 'forbidden' ? 'lock' : 'alert-triangle'}
-                    title={
-                      permissionsError === 'forbidden'
-                        ? "You can't edit these permissions"
-                        : "Couldn't load the permission catalogue"
-                    }
-                    description={
-                      permissionsError === 'forbidden'
-                        ? "Editing a sub-admin's access needs the subadmin.manage permission. Ask an administrator to grant it."
-                        : 'The users service is unreachable. Refresh in a moment.'
-                    }
-                  />
-                  <GrantSummary grants={embeddedGrants} />
-                </div>
-              ) : permissionsEditable ? (
-                <TrackedForm action={setSubAdminPermissions} style={formStyle}>
-                  <input type="hidden" name="id" value={user.id} />
+              <TrackedForm action={setSubAdminPermissions} style={formStyle}>
+                <input type="hidden" name="id" value={user.id} />
+                <div
+                  style={{
+                    maxHeight: '55vh',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--space-6)',
+                  }}
+                >
                   {permissionGroups.map((group) => (
                     <fieldset
                       key={group.group}
@@ -569,35 +717,31 @@ export default async function UserDetailPage({
                       </div>
                     </fieldset>
                   ))}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 'var(--space-5)',
-                      flexWrap: 'wrap',
-                      paddingTop: 'var(--space-6)',
-                      borderTop: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    <SubmitButton variant="primary" pendingLabel="Saving…">
-                      Save permissions
-                    </SubmitButton>
-                    <span style={noteStyle}>
-                      This is a full replacement, not a change list. Every unticked box is revoked.
-                    </span>
-                  </div>
-                </TrackedForm>
-              ) : (
-                <div style={formStyle}>
-                  <p style={noteStyle}>
-                    {isSelf
-                      ? 'These are your own permissions, and the API refuses to let anyone edit their own grants. Ask another administrator to change them.'
-                      : 'The permission catalogue came back empty, so there is nothing to grant. Seed the permissions table on the API and reload.'}
-                  </p>
-                  <GrantSummary grants={grants} />
                 </div>
-              )}
-            </Panel>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-5)',
+                    flexWrap: 'wrap',
+                    paddingTop: 'var(--space-6)',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
+                    Save changes
+                  </SubmitButton>
+                  <Button href={`${BASE}/${user.id}?section=permissions`} variant="ghost">
+                    Cancel
+                  </Button>
+                  <span style={noteStyle}>
+                    This is a full replacement, not a change list. Every unticked box is revoked.
+                  </span>
+                </div>
+              </TrackedForm>
+            </Modal>
+          ) : null}
+        </>
       ) : null}
 
       {section === 'organisations' ? (
@@ -616,8 +760,8 @@ export default async function UserDetailPage({
               />
             ) : (
               <p style={noteStyle}>
-                This account is not a member of any organisation. Administrators, sub-admins and testers
-                normally are not.
+                This account is not a member of any organisation. Administrators, sub-admins and
+                testers normally are not.
               </p>
             )}
           </Panel>
@@ -625,41 +769,39 @@ export default async function UserDetailPage({
       ) : null}
 
       {section === 'danger' && canWrite ? (
-            <Panel
-              title="Danger zone"
-              description="Archiving is the only removal the platform offers, and it cannot be undone from here."
+        <Panel
+          title="Danger zone"
+          description="Archiving is the only removal the platform offers, and it cannot be undone from here."
+        >
+          <form action={archiveUserAccount} style={formStyle}>
+            <input type="hidden" name="id" value={user.id} />
+            <div
+              style={{
+                padding: 'var(--space-5)',
+                borderRadius: 'var(--radius-card)',
+                background: 'var(--status-error-bg)',
+                color: 'var(--status-error-fg)',
+                fontSize: 'var(--type-body-sm-size)',
+                lineHeight: 1.55,
+              }}
             >
-              <form action={archiveUserAccount} style={formStyle}>
-                <input type="hidden" name="id" value={user.id} />
-                <div
-                  style={{
-                    padding: 'var(--space-5)',
-                    borderRadius: 'var(--radius-card)',
-                    background: 'var(--status-error-bg)',
-                    color: 'var(--status-error-fg)',
-                    fontSize: 'var(--type-body-sm-size)',
-                    lineHeight: 1.55,
-                  }}
-                >
-                  The record is kept for audit and marked deactivated, every live session is revoked, and
-                  the email address is released so it can be used again. The account then drops out of
-                  the users list. The last active administrator cannot be archived.
-                </div>
-                <div>
-                  <Button
-                    type="submit"
-                    variant="secondary"
-                    iconLeft="shield-alert"
-                    style={{
-                      color: 'var(--status-error-fg)',
-                      borderColor: 'var(--status-error-fg)',
-                    }}
-                  >
-                    Deactivate and archive this account
-                  </Button>
-                </div>
-              </form>
-            </Panel>
+              The record is kept for audit and marked deactivated, every live session is revoked,
+              and the email address is released so it can be used again. The account then drops out
+              of the users list. The last active administrator cannot be archived.
+            </div>
+            <div>
+              <ConfirmSubmit
+                iconLeft="shield-alert"
+                size="md"
+                question={`Deactivate and archive ${displayName}? This cannot be undone from here.`}
+                confirmLabel="Yes, archive this account"
+                pendingLabel="Archiving…"
+              >
+                Deactivate and archive this account
+              </ConfirmSubmit>
+            </div>
+          </form>
+        </Panel>
       ) : null}
     </DetailShell>
   )

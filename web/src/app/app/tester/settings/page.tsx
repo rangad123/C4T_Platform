@@ -3,9 +3,11 @@ import { DetailShell } from '@/components/admin/DetailShell'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
+import { Modal } from '@/components/admin/Modal'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
+import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
@@ -56,17 +58,25 @@ const NOTICES: Record<string, NoticeCopy> = {
   password_wrong: { tone: 'error', message: 'That is not your current password.' },
   password_weak: {
     tone: 'error',
-    message: 'That password was rejected. It must be 12 to 200 characters and not a commonly used string.',
+    message:
+      'That password was rejected. It must be 12 to 200 characters and not a commonly used string.',
   },
   password_google: {
     tone: 'error',
-    message: 'This account signs in with Google and has no password to replace. Use the reset link on the sign-in page to set one.',
+    message:
+      'This account signs in with Google and has no password to replace. Use the reset link on the sign-in page to set one.',
   },
-  password_failed: { tone: 'error', message: 'We could not change your password. Try again in a moment.' },
+  password_failed: {
+    tone: 'error',
+    message: 'We could not change your password. Try again in a moment.',
+  },
 
   session_missing: { tone: 'error', message: 'That session has already ended.' },
   session_forbidden: { tone: 'error', message: 'You can only end your own sessions.' },
-  session_failed: { tone: 'error', message: 'We could not end that session. Try again in a moment.' },
+  session_failed: {
+    tone: 'error',
+    message: 'We could not end that session. Try again in a moment.',
+  },
 }
 
 /**
@@ -118,7 +128,12 @@ const SESSION_COLUMNS: readonly TableColumn<ActiveSession>[] = [
     header: 'Device',
     render: (session) => (
       <span
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 'var(--space-3)',
+          flexWrap: 'wrap',
+        }}
       >
         {deviceLabel(session.userAgent)}
         {session.isCurrent ? (
@@ -175,12 +190,13 @@ const SECTIONS = [
 export default async function TesterSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; error?: string; section?: string }>
+  searchParams: Promise<{ ok?: string; error?: string; section?: string; edit?: string }>
 }) {
   await requireRole(['TESTER'], SETTINGS_PATH)
 
   const params = await searchParams
   const section = resolveSection(SECTIONS, params.section)
+  const edit = params.edit ?? ''
   /**
    * Two parameters carry a result here — `?error=` and `?ok=` — so the code
    * and the parameter it arrived on are resolved together. `Notice` needs the
@@ -213,65 +229,91 @@ export default async function TesterSettingsPage({
       <Notice code={noticeCode} notices={NOTICES} param={noticeParam} />
 
       {section === 'password' ? (
-        <Panel
-          title="Password"
-          description="Changing it keeps you signed in here and signs you out on every other device."
-        >
-          <TrackedForm
-            action={changePassword}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-5)',
-              maxWidth: 'var(--container-form)',
-            }}
-          >
-            <Field label="Current password" htmlFor="currentPassword" required>
-              <Input
-                id="currentPassword"
-                name="currentPassword"
-                type="password"
-                autoComplete="current-password"
-                required
-                showPasswordToggle
-              />
-            </Field>
-            <Field
-              label="New password"
-              htmlFor="newPassword"
-              hint="At least 12 characters. Length is what actually matters, so a long phrase beats a short scramble."
-              required
-            >
-              <Input
-                id="newPassword"
-                name="newPassword"
-                type="password"
-                minLength={12}
-                maxLength={200}
-                autoComplete="new-password"
-                required
-                showPasswordToggle
-              />
-            </Field>
-            <Field label="Confirm new password" htmlFor="confirmPassword" required>
-              <Input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                minLength={12}
-                maxLength={200}
-                autoComplete="new-password"
-                required
-                showPasswordToggle
-              />
-            </Field>
-            <div style={{ marginTop: 'var(--space-1)' }}>
-              <SubmitButton variant="primary" pendingLabel="Changing password…">
+        <>
+          <Panel
+            title="Password"
+            description="Changing it keeps you signed in here and signs you out on every other device."
+            actions={
+              <Button
+                href={`${SETTINGS_PATH}?section=password&edit=password`}
+                variant="primary"
+                size="sm"
+                iconLeft="lock"
+              >
                 Change password
-              </SubmitButton>
-            </div>
-          </TrackedForm>
-        </Panel>
+              </Button>
+            }
+          >
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-muted)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
+              Not shown here for your own protection — use Change password to set a new one.
+            </p>
+          </Panel>
+
+          <Modal
+            open={edit === 'password'}
+            closedHref={`${SETTINGS_PATH}?section=password`}
+            title="Change password"
+          >
+            <TrackedForm
+              action={changePassword}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+            >
+              <Field label="Current password" htmlFor="currentPassword" required>
+                <Input
+                  id="currentPassword"
+                  name="currentPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
+              <Field
+                label="New password"
+                htmlFor="newPassword"
+                hint="At least 12 characters. Length is what actually matters, so a long phrase beats a short scramble."
+                required
+              >
+                <Input
+                  id="newPassword"
+                  name="newPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={200}
+                  autoComplete="new-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
+              <Field label="Confirm new password" htmlFor="confirmPassword" required>
+                <Input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type="password"
+                  minLength={12}
+                  maxLength={200}
+                  autoComplete="new-password"
+                  required
+                  showPasswordToggle
+                />
+              </Field>
+              <div style={{ display: 'flex', gap: 'var(--space-4)', marginTop: 'var(--space-1)' }}>
+                <SubmitButton variant="primary" pendingLabel="Changing password…">
+                  Update password
+                </SubmitButton>
+                <Button href={`${SETTINGS_PATH}?section=password`} variant="ghost">
+                  Cancel
+                </Button>
+              </div>
+            </TrackedForm>
+          </Modal>
+        </>
       ) : null}
 
       {section === 'sessions' ? (
@@ -310,7 +352,11 @@ export default async function TesterSettingsPage({
               rows={sessions}
               rowKey={(session) => session.id}
               ariaLabel="Devices where you are signed in"
-              style={{ border: 'none', borderRadius: 'var(--radius-none)', background: 'transparent' }}
+              style={{
+                border: 'none',
+                borderRadius: 'var(--radius-none)',
+                background: 'transparent',
+              }}
             />
           )}
         </Panel>

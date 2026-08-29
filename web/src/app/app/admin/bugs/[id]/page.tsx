@@ -49,7 +49,15 @@ import {
 const LIST_PATH = '/app/admin/bugs'
 
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
-const BUG_TYPES = ['CRASH', 'APP_FREEZE', 'FUNCTIONAL', 'UI', 'UX', 'SECURITY', 'PERFORMANCE'] as const
+const BUG_TYPES = [
+  'CRASH',
+  'APP_FREEZE',
+  'FUNCTIONAL',
+  'UI',
+  'UX',
+  'SECURITY',
+  'PERFORMANCE',
+] as const
 
 /** Fixed copy for every reason code `./actions.ts` can redirect with. */
 const REASON_COPY: Record<string, string> = {
@@ -292,7 +300,10 @@ export default async function BugDetailPage({
 
     return (
       <DetailShell
-        crumbs={[{ label: 'Bugs', href: LIST_PATH }, { label: status === 403 ? 'Restricted' : 'Error' }]}
+        crumbs={[
+          { label: 'Bugs', href: LIST_PATH },
+          { label: status === 403 ? 'Restricted' : 'Error' },
+        ]}
         eyebrow="Delivery"
         title={status === 403 ? 'Restricted' : 'Bug unavailable'}
       >
@@ -447,7 +458,11 @@ export default async function BugDetailPage({
             description="Severity is the platform's judgement, not the customer's."
             actions={
               capabilities.canChangeSeverity ? (
-                <Button href={`${detailPath}?section=${section}&edit=triage`} variant="secondary" size="sm">
+                <Button
+                  href={`${detailPath}?section=${section}&edit=triage`}
+                  variant="primary"
+                  size="sm"
+                >
                   Edit
                 </Button>
               ) : undefined
@@ -496,7 +511,7 @@ export default async function BugDetailPage({
               capabilities.canChangeSeverity ? (
                 <Button
                   href={`${detailPath}?section=${section}&edit=classification`}
-                  variant="secondary"
+                  variant="primary"
                   size="sm"
                 >
                   Edit
@@ -505,9 +520,16 @@ export default async function BugDetailPage({
             }
           >
             {capabilities.canChangeSeverity ? (
-              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-                {[bug.type ? titleCase(bug.type) : null, bug.feature?.name].filter(Boolean).join(' · ') ||
-                  'Not classified yet.'}
+              <p
+                style={{
+                  margin: 0,
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                {[bug.type ? titleCase(bug.type) : null, bug.feature?.name]
+                  .filter(Boolean)
+                  .join(' · ') || 'Not classified yet.'}
               </p>
             ) : (
               <Note>
@@ -539,7 +561,10 @@ export default async function BugDetailPage({
                     name="featureId"
                     defaultValue={bug.featureId ?? ''}
                     options={[
-                      { value: '', label: features && features.length > 0 ? 'None' : 'No features yet' },
+                      {
+                        value: '',
+                        label: features && features.length > 0 ? 'None' : 'No features yet',
+                      },
                       ...(features ?? []).map((f) => ({ value: f.id, label: f.name })),
                     ]}
                   />
@@ -557,7 +582,11 @@ export default async function BugDetailPage({
             description="Only the moves the API will accept from this status are listed."
             actions={
               transitions.length > 0 ? (
-                <Button href={`${detailPath}?section=${section}&edit=status`} variant="secondary" size="sm">
+                <Button
+                  href={`${detailPath}?section=${section}&edit=status`}
+                  variant="primary"
+                  size="sm"
+                >
                   Edit
                 </Button>
               ) : undefined
@@ -787,7 +816,9 @@ export default async function BugDetailPage({
                         }}
                       >
                         <Icon
-                          name={attachment.file.mimeType.startsWith('image/') ? 'image' : 'file-text'}
+                          name={
+                            attachment.file.mimeType.startsWith('image/') ? 'image' : 'file-text'
+                          }
                           size={20}
                           style={{ color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}
                         />
@@ -852,7 +883,9 @@ export default async function BugDetailPage({
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
               {bug.comments.length === 0 ? (
-                <Note>No comments yet. Say what you found, or what you need from the reporter.</Note>
+                <Note>
+                  No comments yet. Say what you found, or what you need from the reporter.
+                </Note>
               ) : (
                 <ul
                   style={{
@@ -985,7 +1018,11 @@ export default async function BugDetailPage({
                       {entry.fromStatus ? (
                         <>
                           <StatusBadge status={entry.fromStatus} />
-                          <Icon name="arrow-right" size={16} style={{ color: 'var(--text-muted)' }} />
+                          <Icon
+                            name="arrow-right"
+                            size={16}
+                            style={{ color: 'var(--text-muted)' }}
+                          />
                         </>
                       ) : null}
                       <StatusBadge status={entry.toStatus} />
@@ -1016,7 +1053,6 @@ export default async function BugDetailPage({
           </Panel>
         </>
       ) : null}
-
     </DetailShell>
   )
 }

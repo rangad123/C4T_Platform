@@ -63,7 +63,10 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'success',
     message: 'You are on the project. The brief and the full build details are open to you now.',
   },
-  declined: { tone: 'success', message: 'You declined the invitation. Nothing further is expected.' },
+  declined: {
+    tone: 'success',
+    message: 'You declined the invitation. Nothing further is expected.',
+  },
   answered: {
     tone: 'warning',
     message: 'That invitation was already answered — this page has the current state.',
@@ -72,8 +75,11 @@ const NOTICES: Record<string, NoticeCopy> = {
   forbidden: { tone: 'error', message: 'You are not able to answer this invitation.' },
   missing: { tone: 'error', message: 'That invitation is no longer there. Reload the page.' },
   failed: { tone: 'error', message: 'That did not go through. Try again in a moment.' },
+  reported: {
+    tone: 'success',
+    message: 'Your report is filed. It appears under Bugs below.',
+  },
 }
-
 
 export default async function TesterProjectWorkspacePage({
   params,
@@ -215,16 +221,30 @@ export default async function TesterProjectWorkspacePage({
       render: (row) => row.title,
       renderSecondary: (row) => [row.reference, row.feature?.name].filter(Boolean).join(' · '),
     },
-    { key: 'severity', header: 'Severity', render: (row) => <SeverityBadge severity={row.severity} /> },
+    {
+      key: 'severity',
+      header: 'Severity',
+      render: (row) => <SeverityBadge severity={row.severity} />,
+    },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     { key: 'type', header: 'Type', render: (row) => (row.type ? titleCase(row.type) : '—') },
-    { key: 'logged', header: 'Reported', align: 'right', render: (row) => formatDate(row.createdAt) },
+    {
+      key: 'logged',
+      header: 'Reported',
+      align: 'right',
+      render: (row) => formatDate(row.createdAt),
+    },
   ]
 
   const otherBugColumns: readonly TableColumn<BugRow>[] = [
     ...bugColumns.slice(0, 4),
     { key: 'reporter', header: 'Reported by', render: (row) => personName(row.reportedBy) },
-    { key: 'logged', header: 'Reported', align: 'right', render: (row) => formatDate(row.createdAt) },
+    {
+      key: 'logged',
+      header: 'Reported',
+      align: 'right',
+      render: (row) => formatDate(row.createdAt),
+    },
   ]
 
   return (
@@ -245,14 +265,21 @@ export default async function TesterProjectWorkspacePage({
           {activeBuild ? ` · ${activeBuild.name}` : ''}
         </>
       }
-      tabs={isInvited ? undefined : <SectionTabs basePath={detailPath} tabs={SECTIONS} active={section} />}
-      aside={
+      tabs={
         isInvited ? undefined : (
+          <SectionTabs basePath={detailPath} tabs={SECTIONS} active={section} />
+        )
+      }
+      aside={
+        isInvited || section !== 'build' ? undefined : (
           <>
             <Panel title="Your assignment" description="Where you stand on this project.">
               <DescriptionList
                 items={[
-                  { label: 'Status', value: assignmentStatus ? <StatusBadge status={assignmentStatus} /> : '—' },
+                  {
+                    label: 'Status',
+                    value: assignmentStatus ? <StatusBadge status={assignmentStatus} /> : '—',
+                  },
                   { label: 'Invited', value: formatDate(myAssignment?.invitedAt ?? null) },
                   { label: 'Responded', value: formatDate(myAssignment?.respondedAt ?? null) },
                   { label: 'Completed', value: formatDate(myAssignment?.completedAt ?? null) },
@@ -276,7 +303,10 @@ export default async function TesterProjectWorkspacePage({
             </Panel>
 
             {capabilities.canReportBug ? (
-              <Panel title="Found something?" description="File it against this build while it is fresh.">
+              <Panel
+                title="Found something?"
+                description="File it against this build while it is fresh."
+              >
                 <Button
                   href={`/app/tester/bugs/new?projectId=${project.id}&buildId=${activeBuildId}`}
                   variant="primary"
@@ -314,7 +344,10 @@ export default async function TesterProjectWorkspacePage({
               ]}
             />
 
-            <form action={respondToInvitation} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <form
+              action={respondToInvitation}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
+            >
               <input type="hidden" name="id" value={project.id} />
               <Field
                 label="Note"
@@ -437,7 +470,9 @@ export default async function TesterProjectWorkspacePage({
                   },
                   {
                     label: 'Operating systems',
-                    value: <TokenList values={buildDetail.targetOperatingSystems} uppercase={false} />,
+                    value: (
+                      <TokenList values={buildDetail.targetOperatingSystems} uppercase={false} />
+                    ),
                   },
                   {
                     label: 'Browsers',
@@ -480,7 +515,9 @@ export default async function TesterProjectWorkspacePage({
               <ul style={listResetStyle}>
                 {project.materials.map((material) => (
                   <li key={material.id} style={rowStyle}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                    <div
+                      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+                    >
                       <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{material.title}</span>
                       {material.description ? <Caption>{material.description}</Caption> : null}
                       <MaterialTarget material={material} />
@@ -657,7 +694,10 @@ const bareTableStyle = { border: 'none', borderRadius: 0, background: 'transpare
 
 function Muted({ children }: { children: ReactNode }) {
   return (
-    <p className="c4t-body-sm" style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}>
+    <p
+      className="c4t-body-sm"
+      style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}
+    >
       {children}
     </p>
   )
@@ -665,7 +705,9 @@ function Muted({ children }: { children: ReactNode }) {
 
 function Caption({ children }: { children: ReactNode }) {
   return (
-    <span style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}>{children}</span>
+    <span style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}>
+      {children}
+    </span>
   )
 }
 
@@ -678,7 +720,13 @@ function Prose({ children }: { children: ReactNode }) {
   )
 }
 
-function TokenList({ values, uppercase = true }: { values: readonly string[]; uppercase?: boolean }) {
+function TokenList({
+  values,
+  uppercase = true,
+}: {
+  values: readonly string[]
+  uppercase?: boolean
+}) {
   if (values.length === 0) return <span style={{ color: 'var(--text-muted)' }}>—</span>
   return (
     <span style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>

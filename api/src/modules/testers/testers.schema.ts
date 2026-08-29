@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { TesterStatus, DeviceType } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
+import { ISO_639_1_CODES } from '../../lib/languages.js'
 
 export const TESTER_SORT_FIELDS = [
   'createdAt',
@@ -156,7 +157,17 @@ export const languagesSchema = z.object({
   languages: z
     .array(
       z.object({
-        code: z.string().trim().length(2).toLowerCase(),
+        // Picked from the ISO 639-1 list (`GET /catalog`), not typed —
+        // rejecting anything outside it here is what actually stops that,
+        // the same reasoning as `skillIds` below.
+        code: z
+          .string()
+          .trim()
+          .length(2)
+          .toLowerCase()
+          .refine((code) => ISO_639_1_CODES.has(code), {
+            message: 'Not a recognised language code',
+          }),
         proficiency: z.enum(['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC']),
       }),
     )

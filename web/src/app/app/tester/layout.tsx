@@ -23,11 +23,7 @@ const TESTER_SECTIONS: readonly SidebarSection[] = [
   },
   {
     label: 'Work',
-    links: [
-      { href: '/app/tester/projects', label: 'Projects', icon: 'briefcase' },
-      { href: '/app/tester/bugs', label: 'Bugs', icon: 'clipboard-check' },
-      { href: '/app/tester/test-cases', label: 'Test cases', icon: 'test-tube-diagonal' },
-    ],
+    links: [{ href: '/app/tester/projects', label: 'Projects', icon: 'briefcase' }],
   },
   {
     label: 'Updates',

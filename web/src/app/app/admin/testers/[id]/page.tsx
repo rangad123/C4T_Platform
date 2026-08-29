@@ -215,8 +215,9 @@ const deviceColumns: readonly TableColumn<TesterDevice>[] = [
   {
     key: 'specs',
     header: 'Hardware',
-    render: (device) => device.ramGb ? `${device.ramGb} GB` : '—',
-    renderSecondary: (device) => [device.network, device.browser].filter(Boolean).join(' · ') || undefined,
+    render: (device) => (device.ramGb ? `${device.ramGb} GB` : '—'),
+    renderSecondary: (device) =>
+      [device.network, device.browser].filter(Boolean).join(' · ') || undefined,
   },
   {
     key: 'primary',
@@ -270,9 +271,18 @@ const reportedBugColumns: readonly TableColumn<ReportedBugRow>[] = [
     render: (row) => row.title,
     renderSecondary: (row) => [row.reference, row.project?.reference].filter(Boolean).join(' · '),
   },
-  { key: 'severity', header: 'Severity', render: (row) => <SeverityBadge severity={row.severity} /> },
+  {
+    key: 'severity',
+    header: 'Severity',
+    render: (row) => <SeverityBadge severity={row.severity} />,
+  },
   { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
-  { key: 'reported', header: 'Reported', align: 'right', render: (row) => formatDate(row.createdAt) },
+  {
+    key: 'reported',
+    header: 'Reported',
+    align: 'right',
+    render: (row) => formatDate(row.createdAt),
+  },
 ]
 
 const paymentHistoryColumns: readonly TableColumn<PaymentHistoryRow>[] = [
@@ -443,51 +453,54 @@ export default async function TesterDetailPage({
    * section needs together (payment account + history, projects + bugs)
    * instead of one after another cuts the round trips further.
    */
-  const [paymentAccount, paymentHistory, ratings, platformProjects, reportedBugs] = await Promise.all([
-    section === 'payment'
-      ? serverFetchOrNull<PaymentAccountDetail | null>(`payment-accounts?userId=${tester.user.id}`)
-      : Promise.resolve(null),
-    // §23 "Account details" — payment HISTORY, not just the payout instrument
-    // above. Reuses the exact Transaction rows the Transactions module already
-    // tracks for this tester as counterparty.
-    section === 'payment' && canReadTransactions
-      ? loadList<PaymentHistoryRow>('transactions', {
-          page: 1,
-          limit: 10,
-          query: {
-            counterpartyId: tester.user.id,
-            type: 'TESTER_EARNING,TESTER_PAYOUT',
-            sort: 'createdAt',
-            order: 'desc',
-          },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    // Ratings are keyed by user id, not profile id.
-    section === 'ratings'
-      ? loadList<RatingRow>('ratings', {
-          page: parsePage(ratingsPage),
-          limit: RATINGS_PAGE_SIZE,
-          query: { subjectUserId: tester.user.id },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    // §23 "Work history" — actual platform activity, alongside the tester's
-    // own self-reported prior experience below. Both use tester.user.id: the
-    // projects/bugs relations key on User.id, not the tester profile's id.
-    section === 'work'
-      ? loadList<PlatformProjectRow>('projects', {
-          page: 1,
-          limit: 25,
-          query: { testerId: tester.user.id, sort: 'createdAt', order: 'desc' },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    section === 'work'
-      ? loadList<ReportedBugRow>('bugs', {
-          page: 1,
-          limit: 10,
-          query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-  ])
+  const [paymentAccount, paymentHistory, ratings, platformProjects, reportedBugs] =
+    await Promise.all([
+      section === 'payment'
+        ? serverFetchOrNull<PaymentAccountDetail | null>(
+            `payment-accounts?userId=${tester.user.id}`,
+          )
+        : Promise.resolve(null),
+      // §23 "Account details" — payment HISTORY, not just the payout instrument
+      // above. Reuses the exact Transaction rows the Transactions module already
+      // tracks for this tester as counterparty.
+      section === 'payment' && canReadTransactions
+        ? loadList<PaymentHistoryRow>('transactions', {
+            page: 1,
+            limit: 10,
+            query: {
+              counterpartyId: tester.user.id,
+              type: 'TESTER_EARNING,TESTER_PAYOUT',
+              sort: 'createdAt',
+              order: 'desc',
+            },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      // Ratings are keyed by user id, not profile id.
+      section === 'ratings'
+        ? loadList<RatingRow>('ratings', {
+            page: parsePage(ratingsPage),
+            limit: RATINGS_PAGE_SIZE,
+            query: { subjectUserId: tester.user.id },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      // §23 "Work history" — actual platform activity, alongside the tester's
+      // own self-reported prior experience below. Both use tester.user.id: the
+      // projects/bugs relations key on User.id, not the tester profile's id.
+      section === 'work'
+        ? loadList<PlatformProjectRow>('projects', {
+            page: 1,
+            limit: 25,
+            query: { testerId: tester.user.id, sort: 'createdAt', order: 'desc' },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      section === 'work'
+        ? loadList<ReportedBugRow>('bugs', {
+            page: 1,
+            limit: 10,
+            query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+    ])
 
   const ratingRows = 'error' in ratings ? [] : ratings.items
   const average = toRating(tester.ratingAverage)
@@ -531,7 +544,11 @@ export default async function TesterDetailPage({
             description="Where this application sits in review. We notify the tester on every change."
             actions={
               canVerify ? (
-                <Button href={`${detailPath}?section=${section}&edit=verification`} variant="secondary" size="sm">
+                <Button
+                  href={`${detailPath}?section=${section}&edit=verification`}
+                  variant="primary"
+                  size="sm"
+                >
                   Edit
                 </Button>
               ) : undefined
@@ -541,7 +558,13 @@ export default async function TesterDetailPage({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <StatusBadge status={tester.status} />
                 {tester.rejectionReason ? (
-                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
                     {tester.rejectionReason}
                   </p>
                 ) : null}
@@ -661,13 +684,18 @@ export default async function TesterDetailPage({
                 { label: 'Headline', value: tester.headline },
                 {
                   label: 'Experience',
-                  value: tester.experienceYears === null ? null : yearsLabel(tester.experienceYears),
+                  value:
+                    tester.experienceYears === null ? null : yearsLabel(tester.experienceYears),
                 },
                 {
                   label: 'Location',
                   value: location ? (
                     <span
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-2)',
+                      }}
                     >
                       <CountryFlag countryCode={tester.countryCode} size={16} />
                       <span>{location}</span>
@@ -679,7 +707,10 @@ export default async function TesterDetailPage({
                   label: 'NDA accepted',
                   value: tester.ndaAcceptedAt ? formatDate(tester.ndaAcceptedAt) : null,
                 },
-                { label: 'Verified', value: tester.verifiedAt ? formatDate(tester.verifiedAt) : null },
+                {
+                  label: 'Verified',
+                  value: tester.verifiedAt ? formatDate(tester.verifiedAt) : null,
+                },
                 { label: 'Bio', value: tester.bio, wide: true },
                 { label: 'Rejection reason', value: tester.rejectionReason, wide: true },
               ]}
@@ -695,7 +726,10 @@ export default async function TesterDetailPage({
             />
           </Panel>
 
-          <Panel title="Account details" description="The account this tester profile is attached to.">
+          <Panel
+            title="Account details"
+            description="The account this tester profile is attached to."
+          >
             <DescriptionList
               items={[
                 { label: 'Role', value: titleCase(tester.user.role) },
@@ -808,7 +842,10 @@ export default async function TesterDetailPage({
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
               <div>
-                <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}>
+                <p
+                  className="c4t-eyebrow"
+                  style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
+                >
                   Skills
                 </p>
                 {tester.skills.length > 0 ? (
@@ -836,7 +873,10 @@ export default async function TesterDetailPage({
               </div>
 
               <div>
-                <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}>
+                <p
+                  className="c4t-eyebrow"
+                  style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
+                >
                   Languages
                 </p>
                 {tester.languages.length > 0 ? (
@@ -901,7 +941,12 @@ export default async function TesterDetailPage({
                       ? [{ label: 'Branch', value: paymentAccount.branchName }]
                       : []),
                     ...(paymentAccount.accountNumberLast4
-                      ? [{ label: 'Account number', value: `•••• ${paymentAccount.accountNumberLast4}` }]
+                      ? [
+                          {
+                            label: 'Account number',
+                            value: `•••• ${paymentAccount.accountNumberLast4}`,
+                          },
+                        ]
                       : []),
                     ...(paymentAccount.paypalEmailMasked
                       ? [{ label: 'PayPal', value: paymentAccount.paypalEmailMasked }]
@@ -984,8 +1029,8 @@ export default async function TesterDetailPage({
               </Muted>
             ) : ratingRows.length === 0 ? (
               <Muted>
-                No ratings yet. One appears here when a customer reviews this tester on a project they
-                worked on together.
+                No ratings yet. One appears here when a customer reviews this tester on a project
+                they worked on together.
               </Muted>
             ) : (
               <>
@@ -1018,7 +1063,6 @@ export default async function TesterDetailPage({
           </Panel>
         </>
       ) : null}
-
     </DetailShell>
   )
 }

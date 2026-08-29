@@ -11,10 +11,12 @@ import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Avatar } from '@/components/admin/Avatar'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { DescriptionList } from '@/components/admin/DescriptionList'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { SingleFileUpload } from '@/components/admin/SingleFileUpload'
 import { DownloadLink } from '@/components/tester/DownloadLink'
+import { PaymentMethodFields, type PaymentType } from '@/components/tester/PaymentMethodFields'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
@@ -24,7 +26,7 @@ import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
-import { formatDate, personName, titleCase } from '@/lib/admin/format'
+import { formatDate, orDash, personName, titleCase } from '@/lib/admin/format'
 import {
   updateBasicInfoAction,
   addDeviceAction,
@@ -65,7 +67,12 @@ const PROFICIENCIES = ['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC'] as const
  */
 const AGE_GROUPS = ['18-24', '25-34', '35-44', '45-54', '55-64', '65+'] as const
 const GENDERS = ['Female', 'Male', 'Non-binary', 'Other'] as const
-const LOOKING_FOR = ['Part-time testing', 'Full-time testing', 'Freelance projects', 'Both'] as const
+const LOOKING_FOR = [
+  'Part-time testing',
+  'Full-time testing',
+  'Freelance projects',
+  'Both',
+] as const
 
 interface TesterDevice {
   id: string
@@ -173,6 +180,8 @@ interface Catalog {
     name: string
     skills: readonly { id: string; name: string }[]
   }[]
+  /** ISO 639-1 — the full fixed list, not scoped to what this tester already speaks. */
+  languages: readonly { code: string; name: string }[]
 }
 
 function Muted({ children }: { children: ReactNode }) {
@@ -190,6 +199,26 @@ const FIELD_GRID = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
   gap: 'var(--space-5)',
+}
+
+/** The view-mode reading for a picked-from-a-list value — skills, here. */
+const CHIP_LIST = {
+  listStyle: 'none' as const,
+  margin: 0,
+  padding: 0,
+  display: 'flex' as const,
+  flexWrap: 'wrap' as const,
+  gap: 'var(--space-2)',
+}
+const CHIP = {
+  display: 'inline-flex' as const,
+  alignItems: 'center' as const,
+  padding: 'var(--space-1) var(--space-3)',
+  background: 'var(--surface-canvas)',
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-full)',
+  fontSize: 'var(--type-body-sm-size)',
+  color: 'var(--text-primary)',
 }
 
 /**
@@ -215,6 +244,28 @@ const FIELD_GRID = {
  * The NDA prompt stays above the tabs: it blocks assignment entirely, so it
  * is not something to find under a tab.
  */
+const NOTICES: Record<string, NoticeCopy> = {
+  'about-saved': { tone: 'success', message: 'Your profile is up to date.' },
+  'skills-saved': { tone: 'success', message: 'Your skills are up to date.' },
+  'payment-saved': { tone: 'success', message: 'Your payment details are on file.' },
+  'device-added': { tone: 'success', message: 'Device added.' },
+  'device-saved': { tone: 'success', message: 'Device updated.' },
+  'device-removed': { tone: 'success', message: 'Device removed.' },
+  'browser-added': { tone: 'success', message: 'Browser added.' },
+  'browser-saved': { tone: 'success', message: 'Browser updated.' },
+  'browser-removed': { tone: 'success', message: 'Browser removed.' },
+  'language-added': { tone: 'success', message: 'Language added.' },
+  'language-removed': { tone: 'success', message: 'Language removed.' },
+  'work-added': { tone: 'success', message: 'Role added.' },
+  'work-removed': { tone: 'success', message: 'Role removed.' },
+  forbidden: { tone: 'error', message: 'You are not able to change that right now.' },
+  invalid: {
+    tone: 'error',
+    message: 'Something on that form was not valid. Check it and try again.',
+  },
+  failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
+}
+
 const SECTIONS = [
   { value: 'about', label: 'About you', icon: 'user-check' },
   { value: 'assets', label: 'Assets', icon: 'smartphone' },
@@ -263,7 +314,7 @@ interface AssignmentRow {
 export default async function TesterProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ section?: string; edit?: string; view?: string }>
+  searchParams: Promise<{ section?: string; edit?: string; view?: string; notice?: string }>
 }) {
   await requireRole(['TESTER'])
 
@@ -307,7 +358,8 @@ export default async function TesterProfilePage({
       header: 'Joined',
       align: 'right',
       render: (row) => formatDate(row.respondedAt ?? row.invitedAt),
-      renderSecondary: (row) => (row.completedAt ? `Finished ${formatDate(row.completedAt)}` : undefined),
+      renderSecondary: (row) =>
+        row.completedAt ? `Finished ${formatDate(row.completedAt)}` : undefined,
     },
   ]
   /**
@@ -322,36 +374,40 @@ export default async function TesterProfilePage({
   // each back specific sections only — fetching them regardless of section
   // meant opening About or Work history waited on the full device/skill
   // catalog and the payout instrument for no reason.
-  const [profile, catalog, paymentAccount, myBrowsers, ndaTemplate, assignments] = await Promise.all([
-    serverFetchOrNull<ProfileDetail>('testers/me'),
-    section === 'assets' || section === 'skills'
-      ? serverFetchOrNull<Catalog>('catalog')
-      : Promise.resolve(null),
-    section === 'payment'
-      ? serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine')
-      : Promise.resolve(null),
-    // The tester's registered browsers. Same tab as devices, so it is gated
-    // on the same section — and it is what populates the browser picker on
-    // the bug-report form.
-    section === 'assets'
-      ? serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers')
-      : Promise.resolve(null),
-    // The blank NDA an admin has published, if any. Same tab as the NDA panel.
-    section === 'about'
-      ? serverFetchOrNull<NdaTemplate | null>('settings/nda-template')
-      : Promise.resolve(null),
-    // Platform work history. Only the Projects half of the Work tab needs it.
-    section === 'work' && workView === 'projects'
-      ? serverFetchOrNull<readonly AssignmentRow[]>('projects/my-assignments', {
-          query: { limit: 100 },
-        })
-      : Promise.resolve(null),
-  ])
+  const [profile, catalog, paymentAccount, myBrowsers, ndaTemplate, assignments] =
+    await Promise.all([
+      serverFetchOrNull<ProfileDetail>('testers/me'),
+      section === 'assets' || section === 'skills'
+        ? serverFetchOrNull<Catalog>('catalog')
+        : Promise.resolve(null),
+      section === 'payment'
+        ? serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine')
+        : Promise.resolve(null),
+      // The tester's registered browsers. Same tab as devices, so it is gated
+      // on the same section — and it is what populates the browser picker on
+      // the bug-report form.
+      section === 'assets'
+        ? serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers')
+        : Promise.resolve(null),
+      // The blank NDA an admin has published, if any. Same tab as the NDA panel.
+      section === 'about'
+        ? serverFetchOrNull<NdaTemplate | null>('settings/nda-template')
+        : Promise.resolve(null),
+      // Platform work history. Only the Projects half of the Work tab needs it.
+      section === 'work' && workView === 'projects'
+        ? serverFetchOrNull<readonly AssignmentRow[]>('projects/my-assignments', {
+            query: { limit: 100 },
+          })
+        : Promise.resolve(null),
+    ])
 
   if (!profile) {
     return (
       <>
-        <Topbar root={{ label: 'Tester', href: '/app/tester' }} crumbs={[{ label: 'Your profile' }]} />
+        <Topbar
+          root={{ label: 'Tester', href: '/app/tester' }}
+          crumbs={[{ label: 'Your profile' }]}
+        />
         <main id="main" style={{ padding: 'var(--space-9)', maxWidth: 720 }}>
           <p style={{ color: 'var(--text-secondary)' }}>
             Your profile could not be loaded. Refresh in a moment.
@@ -361,7 +417,9 @@ export default async function TesterProfilePage({
     )
   }
 
-  const languagesJson = JSON.stringify(profile.languages.map((l) => ({ code: l.code, proficiency: l.proficiency })))
+  const languagesJson = JSON.stringify(
+    profile.languages.map((l) => ({ code: l.code, proficiency: l.proficiency })),
+  )
   const mySkillIds = new Set(profile.skills.map((s) => s.skill.id))
   const osVersionOptions = (catalog?.operatingSystems ?? []).flatMap((os) =>
     os.versions.map((v) => ({ value: v.id, label: `${os.name} ${v.version}` })),
@@ -386,6 +444,12 @@ export default async function TesterProfilePage({
     value: os.id,
     label: os.name,
   }))
+  const languageNameByCode = new Map((catalog?.languages ?? []).map((l) => [l.code, l.name]))
+  const myLanguageCodes = new Set(profile.languages.map((l) => l.code))
+  /** Excludes languages already on the profile — the API rejects a repeated code as a duplicate. */
+  const languageOptions = (catalog?.languages ?? [])
+    .filter((l) => !myLanguageCodes.has(l.code))
+    .map((l) => ({ value: l.code, label: l.name }))
 
   return (
     <DetailShell
@@ -397,6 +461,8 @@ export default async function TesterProfilePage({
       subtitle="What projects see when deciding whether to invite you, and how we reach you."
       tabs={<SectionTabs basePath="/app/tester/profile" tabs={SECTIONS} active={section} />}
     >
+      <Notice code={resolvedParams.notice} notices={NOTICES} />
+
       {!profile.ndaAcceptedAt ? (
         <Panel
           title="Accept the NDA"
@@ -415,24 +481,98 @@ export default async function TesterProfilePage({
           <Panel
             title="Profile picture"
             description="Shown next to your name on projects you work on."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=about&edit=photo`}
+                variant="primary"
+                size="sm"
+                iconLeft="image"
+              >
+                Change photo
+              </Button>
+            }
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-5)', flexWrap: 'wrap' }}>
-              <Avatar
-                name={personName(profile.user)}
-                fileId={profile.user.avatarFileId}
-                size="xl"
-              />
-              <SingleFileUpload
-                endpoint="/app/tester/upload"
-                scope="avatar"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                label="Upload a picture"
-                onUploaded={setAvatarAction}
-              />
-            </div>
+            <Avatar name={personName(profile.user)} fileId={profile.user.avatarFileId} size="xl" />
           </Panel>
 
-          <Panel title="About you" description="Shown to project owners considering you for an invite.">
+          <Modal
+            open={edit === 'photo'}
+            closedHref={`${PROFILE_PATH}?section=about`}
+            title="Change photo"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-5)',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Avatar
+                  name={personName(profile.user)}
+                  fileId={profile.user.avatarFileId}
+                  size="xl"
+                />
+                <SingleFileUpload
+                  endpoint="/app/tester/upload"
+                  scope="avatar"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  label="Upload a picture"
+                  onUploaded={setAvatarAction}
+                />
+              </div>
+              {/* No Save button: picking a file uploads and applies it
+                  immediately (`SingleFileUpload`'s own contract), so the only
+                  thing left to do here is leave. */}
+              <div>
+                <Button href={`${PROFILE_PATH}?section=about`} variant="ghost">
+                  Done
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          <Panel
+            title="About you"
+            description="Shown to project owners considering you for an invite."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=about&edit=about`}
+                variant="primary"
+                size="sm"
+                iconLeft="pencil"
+              >
+                Edit
+              </Button>
+            }
+          >
+            <DescriptionList
+              items={[
+                { label: 'First name', value: orDash(profile.user.firstName) },
+                { label: 'Last name', value: orDash(profile.user.lastName) },
+                { label: 'Headline', value: orDash(profile.headline), wide: true },
+                { label: 'Bio', value: orDash(profile.bio), wide: true },
+                { label: 'Age group', value: profile.ageGroup ?? 'Prefer not to say' },
+                { label: 'Gender', value: profile.gender ?? 'Prefer not to say' },
+                { label: 'City', value: orDash(profile.city) },
+                { label: 'Country', value: orDash(profile.countryCode) },
+                { label: 'Email', value: profile.user.email },
+                { label: 'Phone', value: orDash(profile.user.phone) },
+                { label: 'Skype', value: orDash(profile.skype) },
+                { label: 'LinkedIn', value: orDash(profile.linkedinUrl) },
+                { label: 'Profession', value: orDash(profile.profession) },
+                { label: 'Years of experience', value: orDash(profile.experienceYears) },
+                { label: 'Looking for', value: profile.lookingFor ?? 'Not saying' },
+              ]}
+            />
+          </Panel>
+
+          <Modal
+            open={edit === 'about'}
+            closedHref={`${PROFILE_PATH}?section=about`}
+            title="Edit personal information"
+          >
             <TrackedForm action={updateBasicInfoAction} style={FORM_STYLE}>
               <div style={FIELD_GRID}>
                 <Field label="First name" htmlFor="firstName" required>
@@ -456,11 +596,26 @@ export default async function TesterProfilePage({
                 </Field>
               </div>
 
-              <Field label="Headline" htmlFor="headline" hint="A one-line summary, up to 160 characters.">
-                <Input id="headline" name="headline" maxLength={160} defaultValue={profile.headline ?? ''} />
+              <Field
+                label="Headline"
+                htmlFor="headline"
+                hint="A one-line summary, up to 160 characters."
+              >
+                <Input
+                  id="headline"
+                  name="headline"
+                  maxLength={160}
+                  defaultValue={profile.headline ?? ''}
+                />
               </Field>
               <Field label="Bio" htmlFor="bio">
-                <Textarea id="bio" name="bio" rows={5} maxLength={4000} defaultValue={profile.bio ?? ''} />
+                <Textarea
+                  id="bio"
+                  name="bio"
+                  rows={5}
+                  maxLength={4000}
+                  defaultValue={profile.bio ?? ''}
+                />
               </Field>
 
               <div style={FIELD_GRID}>
@@ -469,7 +624,10 @@ export default async function TesterProfilePage({
                     id="ageGroup"
                     name="ageGroup"
                     defaultValue={profile.ageGroup ?? ''}
-                    options={[{ value: '', label: 'Prefer not to say' }, ...AGE_GROUPS.map((v) => ({ value: v, label: v }))]}
+                    options={[
+                      { value: '', label: 'Prefer not to say' },
+                      ...AGE_GROUPS.map((v) => ({ value: v, label: v })),
+                    ]}
                   />
                 </Field>
                 <Field label="Gender" htmlFor="gender">
@@ -477,7 +635,10 @@ export default async function TesterProfilePage({
                     id="gender"
                     name="gender"
                     defaultValue={profile.gender ?? ''}
-                    options={[{ value: '', label: 'Prefer not to say' }, ...GENDERS.map((v) => ({ value: v, label: v }))]}
+                    options={[
+                      { value: '', label: 'Prefer not to say' },
+                      ...GENDERS.map((v) => ({ value: v, label: v })),
+                    ]}
                   />
                 </Field>
                 <Field label="City" htmlFor="city">
@@ -495,7 +656,11 @@ export default async function TesterProfilePage({
               </div>
 
               <div style={FIELD_GRID}>
-                <Field label="Email" htmlFor="email" hint="Changing this is not self-service — contact support.">
+                <Field
+                  label="Email"
+                  htmlFor="email"
+                  hint="Changing this is not self-service — contact support."
+                >
                   <Input id="email" name="email" defaultValue={profile.user.email} disabled />
                 </Field>
                 <Field label="Phone" htmlFor="phone">
@@ -509,7 +674,12 @@ export default async function TesterProfilePage({
                   />
                 </Field>
                 <Field label="Skype" htmlFor="skype">
-                  <Input id="skype" name="skype" maxLength={120} defaultValue={profile.skype ?? ''} />
+                  <Input
+                    id="skype"
+                    name="skype"
+                    maxLength={120}
+                    defaultValue={profile.skype ?? ''}
+                  />
                 </Field>
                 <Field label="LinkedIn" htmlFor="linkedinUrl" hint="Full URL, or leave blank.">
                   <Input
@@ -548,22 +718,38 @@ export default async function TesterProfilePage({
                     id="lookingFor"
                     name="lookingFor"
                     defaultValue={profile.lookingFor ?? ''}
-                    options={[{ value: '', label: 'Not saying' }, ...LOOKING_FOR.map((v) => ({ value: v, label: v }))]}
+                    options={[
+                      { value: '', label: 'Not saying' },
+                      ...LOOKING_FOR.map((v) => ({ value: v, label: v })),
+                    ]}
                   />
                 </Field>
               </div>
 
-              <div>
+              <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
                 <SubmitButton variant="primary" pendingLabel="Saving…">
                   Save changes
                 </SubmitButton>
+                <Button href={`${PROFILE_PATH}?section=about`} variant="ghost">
+                  Cancel
+                </Button>
               </div>
             </TrackedForm>
-          </Panel>
+          </Modal>
 
           <Panel
             title="Non-disclosure agreement"
             description="Projects share unreleased builds with you. The NDA is what makes that possible."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=about&edit=nda`}
+                variant="primary"
+                size="sm"
+                iconLeft="upload"
+              >
+                {profile.ndaFile ? 'Replace document' : 'Upload document'}
+              </Button>
+            }
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               <DescriptionList
@@ -583,7 +769,10 @@ export default async function TesterProfilePage({
                   {
                     label: 'Signed copy',
                     value: profile.ndaFile ? (
-                      <DownloadLink fileId={profile.ndaFile.id} name={profile.ndaFile.originalName} />
+                      <DownloadLink
+                        fileId={profile.ndaFile.id}
+                        name={profile.ndaFile.originalName}
+                      />
                     ) : (
                       'Not uploaded'
                     ),
@@ -591,7 +780,14 @@ export default async function TesterProfilePage({
                 ]}
               />
 
-              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)', maxWidth: '70ch' }}>
+              <p
+                style={{
+                  margin: 0,
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--type-body-sm-size)',
+                  maxWidth: '70ch',
+                }}
+              >
                 Accepting online is enough to be assigned to a project. Uploading a signed PDF is
                 only needed when a project asks for a countersigned copy.
               </p>
@@ -605,7 +801,15 @@ export default async function TesterProfilePage({
                   <DownloadLink fileId={ndaTemplate.fileId} name={ndaTemplate.name} />
                 </div>
               ) : null}
+            </div>
+          </Panel>
 
+          <Modal
+            open={edit === 'nda'}
+            closedHref={`${PROFILE_PATH}?section=about`}
+            title={profile.ndaFile ? 'Replace signed NDA' : 'Upload signed NDA'}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               <SingleFileUpload
                 endpoint="/app/tester/upload"
                 scope="nda"
@@ -614,14 +818,34 @@ export default async function TesterProfilePage({
                 onUploaded={setNdaDocumentAction}
                 currentName={profile.ndaFile?.originalName ?? null}
               />
+              {/* No Save button here either, for the same reason as the photo
+                  modal — the upload itself is the save. */}
+              <div>
+                <Button href={`${PROFILE_PATH}?section=about`} variant="ghost">
+                  Done
+                </Button>
+              </div>
             </div>
-          </Panel>
+          </Modal>
         </>
       ) : null}
 
       {section === 'assets' ? (
         <>
-          <Panel title="Devices" description="What you can test on. Projects match testers by device coverage.">
+          <Panel
+            title="Devices"
+            description="What you can test on. Projects match testers by device coverage."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=assets&edit=add-device`}
+                variant="primary"
+                size="sm"
+                iconLeft="plus"
+              >
+                Add device
+              </Button>
+            }
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
               {profile.devices.length > 0 ? (
                 <CardGrid min={260}>
@@ -632,7 +856,11 @@ export default async function TesterProfilePage({
                         <>
                           {[device.manufacturer, device.model].filter(Boolean).join(' ')}
                           {device.isPrimary ? (
-                            <Badge tone="accent" uppercase={false} style={{ marginLeft: 'var(--space-2)' }}>
+                            <Badge
+                              tone="accent"
+                              uppercase={false}
+                              style={{ marginLeft: 'var(--space-2)' }}
+                            >
                               Primary
                             </Badge>
                           ) : null}
@@ -654,7 +882,7 @@ export default async function TesterProfilePage({
                         <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
                           <Button
                             href={`${PROFILE_PATH}?section=assets&edit=device:${device.id}`}
-                            variant="ghost"
+                            variant="primary"
                             size="sm"
                             iconLeft="pencil"
                           >
@@ -674,105 +902,125 @@ export default async function TesterProfilePage({
               ) : (
                 <Muted>No devices added yet.</Muted>
               )}
-
-              <TrackedForm
-                action={addDeviceAction}
-                style={{
-                  ...FORM_STYLE,
-                  paddingTop: 'var(--space-5)',
-                  borderTop: '1px solid var(--border-subtle)',
-                }}
-              >
-                {deviceModelOptions.length > 0 ? (
-                  <Field
-                    label="Known device model"
-                    htmlFor="deviceModelId"
-                    hint="Pick yours if it's listed — fills the brand in below. Not listed? Skip this and type the brand and model directly."
-                  >
-                    <Select
-                      id="deviceModelId"
-                      name="deviceModelId"
-                      defaultValue=""
-                      options={[{ value: '', label: "Not listed / I'll type it below" }, ...deviceModelOptions]}
-                    />
-                  </Field>
-                ) : null}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
-                  <Field label="Type" htmlFor="type">
-                    <Select
-                      id="type"
-                      name="type"
-                      defaultValue="MOBILE"
-                      options={DEVICE_TYPES.map((value) => ({ value, label: titleCase(value) }))}
-                    />
-                  </Field>
-                  <Field label="Brand" htmlFor="manufacturer">
-                    <Input id="manufacturer" name="manufacturer" maxLength={80} />
-                  </Field>
-                  <Field label="Model" htmlFor="model" required>
-                    <Input id="model" name="model" required maxLength={120} placeholder="Pixel 7a" />
-                  </Field>
-                  <Field label="Screen size" htmlFor="screenSize">
-                    <Input id="screenSize" name="screenSize" maxLength={40} placeholder="6.1 inch" />
-                  </Field>
-                  <Field label="RAM" htmlFor="ramGb">
-                    <Input id="ramGb" name="ramGb" maxLength={20} placeholder="8 GB" />
-                  </Field>
-                  <Field label="Storage" htmlFor="storageGb">
-                    <Input id="storageGb" name="storageGb" maxLength={20} placeholder="256 GB" />
-                  </Field>
-                </div>
-                {osVersionOptions.length > 0 ? (
-                  <Field
-                    label="OS version"
-                    htmlFor="osVersionRefId"
-                    hint="Pick yours if it's listed. Not listed? Skip this and type it below instead."
-                  >
-                    <Select
-                      id="osVersionRefId"
-                      name="osVersionRefId"
-                      defaultValue=""
-                      options={[{ value: '', label: "Not listed / I'll type it below" }, ...osVersionOptions]}
-                    />
-                  </Field>
-                ) : null}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
-                  <Field label="OS name" htmlFor="osName">
-                    <Input id="osName" name="osName" maxLength={60} placeholder="Android" />
-                  </Field>
-                  <Field label="OS version (typed)" htmlFor="osVersion">
-                    <Input id="osVersion" name="osVersion" maxLength={40} placeholder="14" />
-                  </Field>
-                  <Field label="Network provider" htmlFor="primaryNetworkId">
-                    <Select
-                      id="primaryNetworkId"
-                      name="primaryNetworkId"
-                      defaultValue=""
-                      options={[
-                        { value: '', label: "Not listed" },
-                        ...(catalog?.networks ?? []).map((n) => ({
-                          value: n.id,
-                          label: n.countryCode ? `${n.name} (${n.countryCode})` : n.name,
-                        })),
-                      ]}
-                    />
-                  </Field>
-                  <Field label="Network (typed)" htmlFor="network">
-                    <Input id="network" name="network" maxLength={80} placeholder="5G" />
-                  </Field>
-                  <Field label="Browser" htmlFor="browser">
-                    <Input id="browser" name="browser" maxLength={80} placeholder="Chrome 128" />
-                  </Field>
-                </div>
-                <Checkbox id="isPrimary" name="isPrimary" label="This is my primary device" />
-                <div>
-                  <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-                    Add device
-                  </SubmitButton>
-                </div>
-              </TrackedForm>
             </div>
           </Panel>
+
+          <Modal
+            open={edit === 'add-device'}
+            closedHref={`${PROFILE_PATH}?section=assets`}
+            title="Add device"
+          >
+            <TrackedForm action={addDeviceAction} style={FORM_STYLE}>
+              {deviceModelOptions.length > 0 ? (
+                <Field
+                  label="Known device model"
+                  htmlFor="deviceModelId"
+                  hint="Pick yours if it's listed — fills the brand in below. Not listed? Skip this and type the brand and model directly."
+                >
+                  <Select
+                    id="deviceModelId"
+                    name="deviceModelId"
+                    defaultValue=""
+                    options={[
+                      { value: '', label: "Not listed / I'll type it below" },
+                      ...deviceModelOptions,
+                    ]}
+                  />
+                </Field>
+              ) : null}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                <Field label="Type" htmlFor="type">
+                  <Select
+                    id="type"
+                    name="type"
+                    defaultValue="MOBILE"
+                    options={DEVICE_TYPES.map((value) => ({ value, label: titleCase(value) }))}
+                  />
+                </Field>
+                <Field label="Brand" htmlFor="manufacturer">
+                  <Input id="manufacturer" name="manufacturer" maxLength={80} />
+                </Field>
+                <Field label="Model" htmlFor="model" required>
+                  <Input id="model" name="model" required maxLength={120} placeholder="Pixel 7a" />
+                </Field>
+                <Field label="Screen size" htmlFor="screenSize">
+                  <Input id="screenSize" name="screenSize" maxLength={40} placeholder="6.1 inch" />
+                </Field>
+                <Field label="RAM" htmlFor="ramGb">
+                  <Input id="ramGb" name="ramGb" maxLength={20} placeholder="8 GB" />
+                </Field>
+                <Field label="Storage" htmlFor="storageGb">
+                  <Input id="storageGb" name="storageGb" maxLength={20} placeholder="256 GB" />
+                </Field>
+              </div>
+              {osVersionOptions.length > 0 ? (
+                <Field
+                  label="OS version"
+                  htmlFor="osVersionRefId"
+                  hint="Pick yours if it's listed. Not listed? Skip this and type it below instead."
+                >
+                  <Select
+                    id="osVersionRefId"
+                    name="osVersionRefId"
+                    defaultValue=""
+                    options={[
+                      { value: '', label: "Not listed / I'll type it below" },
+                      ...osVersionOptions,
+                    ]}
+                  />
+                </Field>
+              ) : null}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                <Field label="OS name" htmlFor="osName">
+                  <Input id="osName" name="osName" maxLength={60} placeholder="Android" />
+                </Field>
+                <Field label="OS version (typed)" htmlFor="osVersion">
+                  <Input id="osVersion" name="osVersion" maxLength={40} placeholder="14" />
+                </Field>
+                <Field label="Network provider" htmlFor="primaryNetworkId">
+                  <Select
+                    id="primaryNetworkId"
+                    name="primaryNetworkId"
+                    defaultValue=""
+                    options={[
+                      { value: '', label: 'Not listed' },
+                      ...(catalog?.networks ?? []).map((n) => ({
+                        value: n.id,
+                        label: n.countryCode ? `${n.name} (${n.countryCode})` : n.name,
+                      })),
+                    ]}
+                  />
+                </Field>
+                <Field label="Network (typed)" htmlFor="network">
+                  <Input id="network" name="network" maxLength={80} placeholder="5G" />
+                </Field>
+                <Field label="Browser" htmlFor="browser">
+                  <Input id="browser" name="browser" maxLength={80} placeholder="Chrome 128" />
+                </Field>
+              </div>
+              <Checkbox id="isPrimary" name="isPrimary" label="This is my primary device" />
+              <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
+                  Add device
+                </SubmitButton>
+                <Button href={`${PROFILE_PATH}?section=assets`} variant="ghost">
+                  Cancel
+                </Button>
+              </div>
+            </TrackedForm>
+          </Modal>
 
           {/* One dialog per device, opened by `?edit=device:<id>`. */}
           {profile.devices.map((device) => (
@@ -784,7 +1032,13 @@ export default async function TesterProfilePage({
             >
               <TrackedForm action={updateDeviceAction} style={FORM_STYLE}>
                 <input type="hidden" name="deviceId" value={device.id} />
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                    gap: 'var(--space-4)',
+                  }}
+                >
                   <Field label="Type" htmlFor={`type-${device.id}`}>
                     <Select
                       id={`type-${device.id}`}
@@ -886,6 +1140,18 @@ export default async function TesterProfilePage({
           <Panel
             title="Browsers"
             description="The browsers you can test on. These are what the bug-report form offers you when recording where you saw a defect."
+            actions={
+              browserOptions.length > 0 ? (
+                <Button
+                  href={`${PROFILE_PATH}?section=assets&edit=add-browser`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="plus"
+                >
+                  Add browser
+                </Button>
+              ) : undefined
+            }
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
               {myBrowsers === null ? (
@@ -895,13 +1161,15 @@ export default async function TesterProfilePage({
                   {myBrowsers.map((row) => (
                     <Card
                       key={row.id}
-                      title={[row.browser.name, row.browserVersion?.version].filter(Boolean).join(' ')}
+                      title={[row.browser.name, row.browserVersion?.version]
+                        .filter(Boolean)
+                        .join(' ')}
                       meta={row.operatingSystem?.name ?? 'Any operating system'}
                       actions={
                         <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
                           <Button
                             href={`${PROFILE_PATH}?section=assets&edit=browser:${row.id}`}
-                            variant="ghost"
+                            variant="primary"
                             size="sm"
                             iconLeft="pencil"
                           >
@@ -923,48 +1191,63 @@ export default async function TesterProfilePage({
               ) : (
                 <Muted>No browsers added yet.</Muted>
               )}
-
               {browserOptions.length === 0 ? (
                 <Muted>The browser catalog is not reachable right now. Refresh in a moment.</Muted>
-              ) : (
-                <TrackedForm
-                  action={addBrowserAction}
-                  style={{
-                    ...FORM_STYLE,
-                    paddingTop: 'var(--space-5)',
-                    borderTop: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-4)' }}>
-                    <Field label="Browser" htmlFor="browserId" required>
-                      <Select id="browserId" name="browserId" required placeholder="Choose a browser" options={browserOptions} />
-                    </Field>
-                    <Field label="Version" htmlFor="browserVersionId" hint="Optional.">
-                      <Select
-                        id="browserVersionId"
-                        name="browserVersionId"
-                        defaultValue=""
-                        options={[{ value: '', label: 'Any version' }, ...browserVersionOptions]}
-                      />
-                    </Field>
-                    <Field label="Operating system" htmlFor="operatingSystemId" hint="Optional.">
-                      <Select
-                        id="operatingSystemId"
-                        name="operatingSystemId"
-                        defaultValue=""
-                        options={[{ value: '', label: 'Any operating system' }, ...osOptions]}
-                      />
-                    </Field>
-                  </div>
-                  <div>
-                    <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-                      Add browser
-                    </SubmitButton>
-                  </div>
-                </TrackedForm>
-              )}
+              ) : null}
             </div>
           </Panel>
+
+          {browserOptions.length > 0 ? (
+            <Modal
+              open={edit === 'add-browser'}
+              closedHref={`${PROFILE_PATH}?section=assets`}
+              title="Add browser"
+            >
+              <TrackedForm action={addBrowserAction} style={FORM_STYLE}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: 'var(--space-4)',
+                  }}
+                >
+                  <Field label="Browser" htmlFor="browserId" required>
+                    <Select
+                      id="browserId"
+                      name="browserId"
+                      required
+                      placeholder="Choose a browser"
+                      options={browserOptions}
+                    />
+                  </Field>
+                  <Field label="Version" htmlFor="browserVersionId" hint="Optional.">
+                    <Select
+                      id="browserVersionId"
+                      name="browserVersionId"
+                      defaultValue=""
+                      options={[{ value: '', label: 'Any version' }, ...browserVersionOptions]}
+                    />
+                  </Field>
+                  <Field label="Operating system" htmlFor="operatingSystemId" hint="Optional.">
+                    <Select
+                      id="operatingSystemId"
+                      name="operatingSystemId"
+                      defaultValue=""
+                      options={[{ value: '', label: 'Any operating system' }, ...osOptions]}
+                    />
+                  </Field>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                  <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
+                    Add browser
+                  </SubmitButton>
+                  <Button href={`${PROFILE_PATH}?section=assets`} variant="ghost">
+                    Cancel
+                  </Button>
+                </div>
+              </TrackedForm>
+            </Modal>
+          ) : null}
 
           {(myBrowsers ?? []).map((row) => (
             <Modal
@@ -992,7 +1275,11 @@ export default async function TesterProfilePage({
                     options={[{ value: '', label: 'Any version' }, ...browserVersionOptions]}
                   />
                 </Field>
-                <Field label="Operating system" htmlFor={`operatingSystemId-${row.id}`} hint="Optional.">
+                <Field
+                  label="Operating system"
+                  htmlFor={`operatingSystemId-${row.id}`}
+                  hint="Optional."
+                >
                   <Select
                     id={`operatingSystemId-${row.id}`}
                     name="operatingSystemId"
@@ -1015,11 +1302,47 @@ export default async function TesterProfilePage({
         <>
           <Panel
             title="Skills"
-            description="Picked from the platform's skill catalog — saving replaces the full list. Don't see a skill you have? Ask an administrator to add it."
+            description="What projects see when matching you to a build."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=skills&edit=skills`}
+                variant="primary"
+                size="sm"
+                iconLeft="pencil"
+              >
+                Edit
+              </Button>
+            }
+          >
+            {profile.skills.length === 0 ? (
+              <Muted>No skills added yet.</Muted>
+            ) : (
+              <ul style={CHIP_LIST}>
+                {profile.skills.map((s) => (
+                  <li key={s.skill.id} style={CHIP}>
+                    {s.skill.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Modal
+            open={edit === 'skills'}
+            closedHref={`${PROFILE_PATH}?section=skills`}
+            title="Edit skills"
           >
             {catalog && catalog.skillCategories.length > 0 ? (
               <form action={setSkillsAction} style={FORM_STYLE}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--space-5)',
+                    maxHeight: '55vh',
+                    overflowY: 'auto',
+                  }}
+                >
                   {catalog.skillCategories.map((category) => (
                     <div key={category.id}>
                       <p
@@ -1053,74 +1376,123 @@ export default async function TesterProfilePage({
                     </div>
                   ))}
                 </div>
-                <div>
-                  <SubmitButton variant="secondary" pendingLabel="Saving…">
-                    Save skills
+                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
+                    Save changes
                   </SubmitButton>
+                  <Button href={`${PROFILE_PATH}?section=skills`} variant="ghost">
+                    Cancel
+                  </Button>
                 </div>
               </form>
             ) : (
               <Muted>The skill catalog is not reachable right now. Refresh in a moment.</Muted>
             )}
-          </Panel>
+          </Modal>
 
-          <Panel title="Languages">
+          <Panel
+            title="Languages"
+            actions={
+              languageOptions.length > 0 ? (
+                <Button
+                  href={`${PROFILE_PATH}?section=skills&edit=add-language`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="plus"
+                >
+                  Add language
+                </Button>
+              ) : undefined
+            }
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               {profile.languages.length > 0 ? (
-                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', maxWidth: '40ch' }}>
-                  {profile.languages.map((language) => (
-                    <li
-                      key={language.code}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        gap: 'var(--space-4)',
-                        fontSize: 'var(--type-body-sm-size)',
-                      }}
-                    >
-                      <span>
-                        {language.code.toUpperCase()} · {titleCase(language.proficiency)}
-                      </span>
-                      <form action={removeLanguageAction}>
-                        <input type="hidden" name="code" value={language.code} />
-                        <input type="hidden" name="current" value={languagesJson} />
-                        <ConfirmSubmit
-                          iconLeft=""
-                          question={`Remove ${language.code.toUpperCase()}?`}
-                        >
-                          Remove
-                        </ConfirmSubmit>
-                      </form>
-                    </li>
-                  ))}
+                <ul
+                  style={{
+                    listStyle: 'none',
+                    margin: 0,
+                    padding: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--space-2)',
+                    maxWidth: '40ch',
+                  }}
+                >
+                  {profile.languages.map((language) => {
+                    const name =
+                      languageNameByCode.get(language.code) ?? language.code.toUpperCase()
+                    return (
+                      <li
+                        key={language.code}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 'var(--space-4)',
+                          fontSize: 'var(--type-body-sm-size)',
+                        }}
+                      >
+                        <span>
+                          {name} · {titleCase(language.proficiency)}
+                        </span>
+                        <form action={removeLanguageAction}>
+                          <input type="hidden" name="code" value={language.code} />
+                          <input type="hidden" name="current" value={languagesJson} />
+                          <ConfirmSubmit iconLeft="" question={`Remove ${name}?`}>
+                            Remove
+                          </ConfirmSubmit>
+                        </form>
+                      </li>
+                    )
+                  })}
                 </ul>
               ) : (
                 <Muted>No languages added yet.</Muted>
               )}
-
-              <form
-                action={addLanguageAction}
-                style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
-              >
-                <input type="hidden" name="current" value={languagesJson} />
-                <Field label="Language code" htmlFor="code" hint="Two letters, e.g. en.">
-                  <Input id="code" name="code" maxLength={2} style={{ width: 100 }} />
-                </Field>
-                <Field label="Proficiency" htmlFor="proficiency">
-                  <Select
-                    id="proficiency"
-                    name="proficiency"
-                    defaultValue="FLUENT"
-                    options={PROFICIENCIES.map((value) => ({ value, label: titleCase(value) }))}
-                  />
-                </Field>
-                <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-                  Add
-                </SubmitButton>
-              </form>
+              {catalog === null ? (
+                <Muted>The language catalog is not reachable right now. Refresh in a moment.</Muted>
+              ) : null}
             </div>
           </Panel>
+
+          {languageOptions.length > 0 ? (
+            <Modal
+              open={edit === 'add-language'}
+              closedHref={`${PROFILE_PATH}?section=skills`}
+              title="Add language"
+            >
+              <TrackedForm action={addLanguageAction} style={FORM_STYLE}>
+                <input type="hidden" name="current" value={languagesJson} />
+                <div style={FIELD_GRID}>
+                  <Field label="Language" htmlFor="code" required>
+                    <Select
+                      id="code"
+                      name="code"
+                      required
+                      placeholder="Choose a language"
+                      options={languageOptions}
+                    />
+                  </Field>
+                  <Field label="Proficiency" htmlFor="proficiency">
+                    <Select
+                      id="proficiency"
+                      name="proficiency"
+                      defaultValue="FLUENT"
+                      options={PROFICIENCIES.map((value) => ({ value, label: titleCase(value) }))}
+                    />
+                  </Field>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                  <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
+                    Add
+                  </SubmitButton>
+                  <Button href={`${PROFILE_PATH}?section=skills`} variant="ghost">
+                    Cancel
+                  </Button>
+                </div>
+              </TrackedForm>
+            </Modal>
+          ) : null}
         </>
       ) : null}
 
@@ -1174,86 +1546,130 @@ export default async function TesterProfilePage({
           ) : null}
 
           {workView !== 'employment' ? null : (
-          <Panel title="Employment history" description="The roles you brought with you.">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-              {profile.workHistory.length > 0 ? (
-                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                  {profile.workHistory.map((entry) => (
-                    <li
-                      key={entry.id}
+            <>
+              <Panel
+                title="Employment history"
+                description="The roles you brought with you."
+                actions={
+                  <Button
+                    href={`${PROFILE_PATH}?section=work&view=employment&edit=add-role`}
+                    variant="primary"
+                    size="sm"
+                    iconLeft="plus"
+                  >
+                    Add role
+                  </Button>
+                }
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                  {profile.workHistory.length > 0 ? (
+                    <ul
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr auto',
-                        gap: 'var(--space-4)',
-                        alignItems: 'center',
-                        padding: 'var(--space-4)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-card)',
-                        background: 'var(--surface-canvas)',
+                        listStyle: 'none',
+                        margin: 0,
+                        padding: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 'var(--space-3)',
                       }}
                     >
-                      <div>
-                        <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
-                          {entry.jobTitle} · {entry.company}
-                        </div>
-                        <Muted>
-                          {formatDate(entry.startDate)} – {entry.endDate ? formatDate(entry.endDate) : 'Present'}
-                        </Muted>
-                        {entry.description ? (
-                          <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
-                            {entry.description}
-                          </p>
-                        ) : null}
-                      </div>
-                      <form action={removeWorkHistoryAction}>
-                        <input type="hidden" name="workHistoryId" value={entry.id} />
-                        <ConfirmSubmit
-                          iconLeft=""
-                          question={`Remove ${entry.jobTitle} at ${entry.company}?`}
+                      {profile.workHistory.map((entry) => (
+                        <li
+                          key={entry.id}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr auto',
+                            gap: 'var(--space-4)',
+                            alignItems: 'center',
+                            padding: 'var(--space-4)',
+                            border: '1px solid var(--border-subtle)',
+                            borderRadius: 'var(--radius-card)',
+                            background: 'var(--surface-canvas)',
+                          }}
                         >
-                          Remove
-                        </ConfirmSubmit>
-                      </form>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <Muted>No work history added yet.</Muted>
-              )}
+                          <div>
+                            <div
+                              style={{
+                                fontWeight: 'var(--fw-semibold)',
+                                color: 'var(--text-primary)',
+                              }}
+                            >
+                              {entry.jobTitle} · {entry.company}
+                            </div>
+                            <Muted>
+                              {formatDate(entry.startDate)} –{' '}
+                              {entry.endDate ? formatDate(entry.endDate) : 'Present'}
+                            </Muted>
+                            {entry.description ? (
+                              <p
+                                style={{
+                                  margin: 'var(--space-2) 0 0',
+                                  fontSize: 'var(--type-body-sm-size)',
+                                  color: 'var(--text-secondary)',
+                                }}
+                              >
+                                {entry.description}
+                              </p>
+                            ) : null}
+                          </div>
+                          <form action={removeWorkHistoryAction}>
+                            <input type="hidden" name="workHistoryId" value={entry.id} />
+                            <ConfirmSubmit
+                              iconLeft=""
+                              question={`Remove ${entry.jobTitle} at ${entry.company}?`}
+                            >
+                              Remove
+                            </ConfirmSubmit>
+                          </form>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <Muted>No work history added yet.</Muted>
+                  )}
+                </div>
+              </Panel>
 
-              <TrackedForm
-                action={addWorkHistoryAction}
-                style={{
-                  ...FORM_STYLE,
-                  paddingTop: 'var(--space-5)',
-                  borderTop: '1px solid var(--border-subtle)',
-                }}
+              <Modal
+                open={edit === 'add-role'}
+                closedHref={`${PROFILE_PATH}?section=work&view=employment`}
+                title="Add role"
               >
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
-                  <Field label="Company" htmlFor="company" required>
-                    <Input id="company" name="company" required maxLength={160} />
+                <TrackedForm action={addWorkHistoryAction} style={FORM_STYLE}>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                      gap: 'var(--space-4)',
+                    }}
+                  >
+                    <Field label="Company" htmlFor="company" required>
+                      <Input id="company" name="company" required maxLength={160} />
+                    </Field>
+                    <Field label="Job title" htmlFor="jobTitle" required>
+                      <Input id="jobTitle" name="jobTitle" required maxLength={160} />
+                    </Field>
+                    <Field label="Start date" htmlFor="startDate" required>
+                      <Input id="startDate" name="startDate" type="date" required />
+                    </Field>
+                    <Field label="End date" htmlFor="endDate" hint="Leave blank if current.">
+                      <Input id="endDate" name="endDate" type="date" />
+                    </Field>
+                  </div>
+                  <Field label="Description" htmlFor="description">
+                    <Textarea id="description" name="description" rows={3} maxLength={2000} />
                   </Field>
-                  <Field label="Job title" htmlFor="jobTitle" required>
-                    <Input id="jobTitle" name="jobTitle" required maxLength={160} />
-                  </Field>
-                  <Field label="Start date" htmlFor="startDate" required>
-                    <Input id="startDate" name="startDate" type="date" required />
-                  </Field>
-                  <Field label="End date" htmlFor="endDate" hint="Leave blank if current.">
-                    <Input id="endDate" name="endDate" type="date" />
-                  </Field>
-                </div>
-                <Field label="Description" htmlFor="description">
-                  <Textarea id="description" name="description" rows={3} maxLength={2000} />
-                </Field>
-                <div>
-                  <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-                    Add role
-                  </SubmitButton>
-                </div>
-              </TrackedForm>
-            </div>
-          </Panel>
+                  <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                    <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
+                      Add role
+                    </SubmitButton>
+                    <Button href={`${PROFILE_PATH}?section=work&view=employment`} variant="ghost">
+                      Cancel
+                    </Button>
+                  </div>
+                </TrackedForm>
+              </Modal>
+            </>
           )}
         </>
       ) : null}
@@ -1263,109 +1679,104 @@ export default async function TesterProfilePage({
           <Panel
             title="Payment details"
             description="Where your earnings get paid out. Sensitive fields are encrypted — this page never shows the full account number back to you either, only what you'd need to confirm it's the right account."
+            actions={
+              <Button
+                href={`${PROFILE_PATH}?section=payment&edit=payment`}
+                variant="primary"
+                size="sm"
+                iconLeft="pencil"
+              >
+                Update
+              </Button>
+            }
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-              {paymentAccount ? (
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-1)',
-                    padding: 'var(--space-4)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-card)',
-                    background: 'var(--surface-canvas)',
-                  }}
-                >
-                  <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
-                    {PAYMENT_TYPE_LABEL[paymentAccount.paymentType as (typeof PAYMENT_TYPES)[number]] ??
-                      titleCase(paymentAccount.paymentType)}
-                  </div>
-                  <Muted>
-                    {[
-                      paymentAccount.bankName,
-                      paymentAccount.accountNumberLast4 ? `Account ending ${paymentAccount.accountNumberLast4}` : null,
-                      paymentAccount.paypalEmailMasked,
-                      paymentAccount.paytmNumberLast4 ? `Paytm ending ${paymentAccount.paytmNumberLast4}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ') || 'Saved — details on file.'}
-                  </Muted>
-                </div>
-              ) : (
-                <Muted>No payment details on file yet.</Muted>
-              )}
-
-              <TrackedForm
-                action={savePaymentAccountAction}
+            {paymentAccount ? (
+              <div
                 style={{
-                  ...FORM_STYLE,
-                  paddingTop: 'var(--space-5)',
-                  borderTop: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-1)',
+                  padding: 'var(--space-4)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-card)',
+                  background: 'var(--surface-canvas)',
                 }}
               >
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
-                  <Field label="Country" htmlFor="country">
-                    <Select
-                      id="country"
-                      name="country"
-                      defaultValue={paymentAccount?.country ?? 'INDIAN'}
-                      options={PAYMENT_COUNTRIES.map((value) => ({
-                        value,
-                        label: value === 'INDIAN' ? 'India' : 'Outside India',
-                      }))}
-                    />
-                  </Field>
-                  <Field label="Payout method" htmlFor="paymentType">
-                    <Select
-                      id="paymentType"
-                      name="paymentType"
-                      defaultValue={paymentAccount?.paymentType ?? 'IND_BANK_ACCOUNT'}
-                      options={PAYMENT_TYPES.map((value) => ({
-                        value,
-                        label: PAYMENT_TYPE_LABEL[value],
-                      }))}
-                    />
-                  </Field>
+                <div style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                  {PAYMENT_TYPE_LABEL[
+                    paymentAccount.paymentType as (typeof PAYMENT_TYPES)[number]
+                  ] ?? titleCase(paymentAccount.paymentType)}
                 </div>
+                <Muted>
+                  {[
+                    paymentAccount.bankName,
+                    paymentAccount.accountNumberLast4
+                      ? `Account ending ${paymentAccount.accountNumberLast4}`
+                      : null,
+                    paymentAccount.paypalEmailMasked,
+                    paymentAccount.paytmNumberLast4
+                      ? `Paytm ending ${paymentAccount.paytmNumberLast4}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || 'Saved — details on file.'}
+                </Muted>
+              </div>
+            ) : (
+              <Muted>No payment details on file yet.</Muted>
+            )}
+          </Panel>
 
-                <p style={{ margin: 0, fontSize: 'var(--type-body-sm-size)', color: 'var(--text-muted)' }}>
-                  Fill in the section below that matches your payout method above. Saving replaces
-                  everything below in full, so re-enter every field even if you&rsquo;re only
-                  changing one.
+          <Modal
+            open={edit === 'payment'}
+            closedHref={`${PROFILE_PATH}?section=payment`}
+            title={paymentAccount ? 'Update payment details' : 'Add payment details'}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              <TrackedForm action={savePaymentAccountAction} style={FORM_STYLE}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 'var(--type-body-sm-size)',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  Saving replaces your payout details in full, so re-enter every field below even if
+                  you&rsquo;re only changing one.
                 </p>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
-                  <Field label="Account holder name" htmlFor="accountName">
-                    <Input id="accountName" name="accountName" maxLength={255} />
-                  </Field>
-                  <Field label="Account number" htmlFor="accountNumber">
-                    <Input id="accountNumber" name="accountNumber" maxLength={25} />
-                  </Field>
-                  <Field label="Bank name" htmlFor="bankName">
-                    <Input id="bankName" name="bankName" maxLength={255} />
-                  </Field>
-                  <Field label="Branch name" htmlFor="branchName">
-                    <Input id="branchName" name="branchName" maxLength={255} />
-                  </Field>
-                  <Field label="IFSC code" htmlFor="ifscCode" hint="Indian bank accounts only.">
-                    <Input id="ifscCode" name="ifscCode" maxLength={25} style={{ textTransform: 'uppercase' }} />
-                  </Field>
-                  <Field label="PayPal email" htmlFor="paypalEmail">
-                    <Input id="paypalEmail" name="paypalEmail" type="email" maxLength={255} />
-                  </Field>
-                  <Field label="Paytm number" htmlFor="paytmNumber">
-                    <Input id="paytmNumber" name="paytmNumber" maxLength={10} />
-                  </Field>
-                </div>
-                <div>
+                <PaymentMethodFields
+                  defaultPaymentType={
+                    (paymentAccount?.paymentType as PaymentType | undefined) ?? 'IND_BANK_ACCOUNT'
+                  }
+                  typeOptions={PAYMENT_TYPES.map((value) => ({
+                    value,
+                    label: PAYMENT_TYPE_LABEL[value],
+                  }))}
+                  countryField={
+                    <Field label="Country" htmlFor="country">
+                      <Select
+                        id="country"
+                        name="country"
+                        defaultValue={paymentAccount?.country ?? 'INDIAN'}
+                        options={PAYMENT_COUNTRIES.map((value) => ({
+                          value,
+                          label: value === 'INDIAN' ? 'India' : 'Outside India',
+                        }))}
+                      />
+                    </Field>
+                  }
+                />
+                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
                   <SubmitButton variant="primary" pendingLabel="Saving…">
                     Save payment details
                   </SubmitButton>
+                  <Button href={`${PROFILE_PATH}?section=payment`} variant="ghost">
+                    Cancel
+                  </Button>
                 </div>
               </TrackedForm>
             </div>
-          </Panel>
+          </Modal>
         </>
       ) : null}
     </DetailShell>

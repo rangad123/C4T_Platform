@@ -22,7 +22,8 @@ import { titleCase, formatDate, formatDateTime, personName } from '@/lib/admin/f
 import { addBugComment, moveBugStatus } from './actions'
 
 const ROOT = { label: 'Tester', href: '/app/tester' }
-const LIST_PATH = '/app/tester/bugs'
+const DETAIL_BASE = '/app/tester/bugs'
+const PROJECTS_PATH = '/app/tester/projects'
 
 /**
  * `/app/tester/bugs/[id]` — one defect, as its reporter sees it.
@@ -102,7 +103,13 @@ interface BugDetail {
     id: string
     caption: string | null
     createdAt: string
-    file: { id: string; originalName: string; mimeType: string; sizeBytes: number; downloadUrl: string }
+    file: {
+      id: string
+      originalName: string
+      mimeType: string
+      sizeBytes: number
+      downloadUrl: string
+    }
   }[]
   comments: readonly {
     id: string
@@ -231,7 +238,10 @@ export default async function TesterBugDetailPage({
     return (
       <DetailShell
         root={ROOT}
-        crumbs={[{ label: 'Bugs', href: LIST_PATH }, { label: status === 403 ? 'Restricted' : 'Error' }]}
+        crumbs={[
+          { label: 'Projects', href: PROJECTS_PATH },
+          { label: status === 403 ? 'Restricted' : 'Error' },
+        ]}
         eyebrow="Work"
         title={status === 403 ? 'Restricted' : 'Bug unavailable'}
       >
@@ -244,7 +254,7 @@ export default async function TesterBugDetailPage({
               : 'The bugs service is unreachable. Refresh in a moment.'
           }
           action={
-            <Button href={LIST_PATH} variant="secondary" iconLeft="arrow-left">
+            <Button href={PROJECTS_PATH} variant="secondary" iconLeft="arrow-left">
               Back to bugs
             </Button>
           }
@@ -256,7 +266,7 @@ export default async function TesterBugDetailPage({
   const { capabilities } = bug
   const transitions = capabilities.availableTransitions
   const isDuplicate = bug.status === 'DUPLICATE' || bug.duplicateOfId !== null
-  const detailPath = `${LIST_PATH}/${bug.id}`
+  const detailPath = `${DETAIL_BASE}/${bug.id}`
   const closedHref = section === SECTIONS[0].value ? detailPath : `${detailPath}?section=${section}`
   const statusModalOpen = edit === 'status' || Boolean(error?.startsWith('status:'))
   const projectHref = `/app/tester/projects/${bug.project.id}`
@@ -266,7 +276,10 @@ export default async function TesterBugDetailPage({
   const visibleComments = bug.comments.filter((c) => !c.isInternal)
 
   const reportItems: DescriptionItem[] = [
-    { label: 'Reference', value: <span style={{ fontFamily: 'var(--font-mono)' }}>{bug.reference}</span> },
+    {
+      label: 'Reference',
+      value: <span style={{ fontFamily: 'var(--font-mono)' }}>{bug.reference}</span>,
+    },
     { label: 'Severity', value: <SeverityBadge severity={bug.severity} /> },
     { label: 'Type', value: bug.type ? titleCase(bug.type) : null },
     { label: 'Feature', value: bug.feature?.name ?? null },
@@ -310,7 +323,10 @@ export default async function TesterBugDetailPage({
   return (
     <DetailShell
       root={ROOT}
-      crumbs={[{ label: 'Bugs', href: LIST_PATH }, { label: bug.reference }]}
+      crumbs={[
+        { label: bug.project.title, href: `${projectHref}?section=bugs` },
+        { label: bug.reference },
+      ]}
       eyebrow="Work"
       title={bug.title}
       badges={
@@ -348,7 +364,11 @@ export default async function TesterBugDetailPage({
             description="Where this report sits in the workflow."
             actions={
               transitions.length > 0 ? (
-                <Button href={`${detailPath}?section=${section}&edit=status`} variant="secondary" size="sm">
+                <Button
+                  href={`${detailPath}?section=${section}&edit=status`}
+                  variant="primary"
+                  size="sm"
+                >
                   Change
                 </Button>
               ) : undefined
@@ -371,7 +391,7 @@ export default async function TesterBugDetailPage({
                   </span>
                   {bug.duplicateOf ? (
                     <Link
-                      href={`${LIST_PATH}/${bug.duplicateOf.id}`}
+                      href={`${DETAIL_BASE}/${bug.duplicateOf.id}`}
                       style={{ ...LINK_STYLE, fontSize: 'var(--type-body-sm-size)' }}
                     >
                       {bug.duplicateOf.reference} — {bug.duplicateOf.title}
@@ -412,7 +432,11 @@ export default async function TesterBugDetailPage({
                     options={transitions.map((value) => ({ value, label: titleCase(value) }))}
                   />
                 </Field>
-                <Field label="Note" htmlFor="note" hint="Recorded against the move. Say what you saw.">
+                <Field
+                  label="Note"
+                  htmlFor="note"
+                  hint="Recorded against the move. Say what you saw."
+                >
                   <Textarea id="note" name="note" rows={4} maxLength={1000} />
                 </Field>
                 <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">
@@ -435,7 +459,9 @@ export default async function TesterBugDetailPage({
                 },
                 {
                   label: 'Project reference',
-                  value: <span style={{ fontFamily: 'var(--font-mono)' }}>{bug.project.reference}</span>,
+                  value: (
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{bug.project.reference}</span>
+                  ),
                 },
                 { label: 'Reported by', value: personName(bug.reportedBy) },
                 { label: 'Reported', value: formatDate(bug.createdAt) },
@@ -496,7 +522,6 @@ export default async function TesterBugDetailPage({
               />
             </div>
           ) : null}
-
         </Panel>
       ) : null}
 
@@ -511,7 +536,12 @@ export default async function TesterBugDetailPage({
                 href={bug.videoUrl}
                 target="_blank"
                 rel="noreferrer noopener"
-                style={{ ...LINK_STYLE, display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+                style={{
+                  ...LINK_STYLE,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                }}
               >
                 <Icon name="video" size={16} />
                 Watch the recording
@@ -551,7 +581,11 @@ export default async function TesterBugDetailPage({
                   <Icon
                     name={attachment.file.mimeType.startsWith('image/') ? 'image' : 'file-text'}
                     size={20}
-                    style={{ color: 'var(--text-muted)', marginTop: 'var(--space-1)', flex: 'none' }}
+                    style={{
+                      color: 'var(--text-muted)',
+                      marginTop: 'var(--space-1)',
+                      flex: 'none',
+                    }}
                   />
                   <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                     <a
@@ -562,12 +596,19 @@ export default async function TesterBugDetailPage({
                     >
                       {attachment.file.originalName}
                     </a>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                    <span
+                      style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}
+                    >
                       {formatBytes(attachment.file.sizeBytes)} · {attachment.file.mimeType} · added{' '}
                       {formatDate(attachment.createdAt)}
                     </span>
                     {attachment.caption ? (
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+                      <span
+                        style={{
+                          color: 'var(--text-secondary)',
+                          fontSize: 'var(--type-body-sm-size)',
+                        }}
+                      >
                         {attachment.caption}
                       </span>
                     ) : null}
@@ -616,9 +657,13 @@ export default async function TesterBugDetailPage({
                         flexWrap: 'wrap',
                       }}
                     >
-                      <span style={{ fontWeight: 'var(--fw-semibold)' }}>{personName(comment.author)}</span>
+                      <span style={{ fontWeight: 'var(--fw-semibold)' }}>
+                        {personName(comment.author)}
+                      </span>
                       <RoleBadge role={comment.author?.role} />
-                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                      <span
+                        style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}
+                      >
                         {formatDateTime(comment.createdAt)}
                       </span>
                     </div>
@@ -649,7 +694,11 @@ export default async function TesterBugDetailPage({
                 />
               </Field>
               <div>
-                <SubmitButton variant="primary" disabled={!capabilities.canComment} pendingLabel="Posting…">
+                <SubmitButton
+                  variant="primary"
+                  disabled={!capabilities.canComment}
+                  pendingLabel="Posting…"
+                >
                   Post comment
                 </SubmitButton>
               </div>
@@ -674,9 +723,17 @@ export default async function TesterBugDetailPage({
               }}
             >
               {bug.statusHistory.map((entry) => (
-                <li key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                <li
+                  key={entry.id}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+                >
                   <div
-                    style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-3)',
+                      flexWrap: 'wrap',
+                    }}
                   >
                     {entry.fromStatus ? (
                       <>
@@ -685,7 +742,9 @@ export default async function TesterBugDetailPage({
                       </>
                     ) : null}
                     <StatusBadge status={entry.toStatus} />
-                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                    <span
+                      style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}
+                    >
                       {personName(entry.changedBy)} · {formatDateTime(entry.createdAt)}
                     </span>
                   </div>

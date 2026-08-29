@@ -93,9 +93,7 @@ export default async function NewTesterBugPage({
 }) {
   await requireRole(['TESTER'])
   const params = await searchParams
-  const errorMessage = params.error
-    ? (ERROR_MESSAGES[params.error] ?? ERROR_MESSAGES.failed)
-    : null
+  const errorMessage = params.error ? (ERROR_MESSAGES[params.error] ?? ERROR_MESSAGES.failed) : null
 
   const assignments = await serverFetchOrNull<readonly Assignment[]>('projects/my-assignments')
   const reportable = (assignments ?? []).filter(
@@ -151,11 +149,7 @@ export default async function NewTesterBugPage({
   ])
 
   const browserOptions = (myBrowsers ?? []).map((b) => {
-    const label = [
-      b.operatingSystem?.name,
-      b.browser.name,
-      b.browserVersion?.version,
-    ]
+    const label = [b.operatingSystem?.name, b.browser.name, b.browserVersion?.version]
       .filter(Boolean)
       .join(' · ')
     return { value: label, label }
@@ -164,7 +158,15 @@ export default async function NewTesterBugPage({
   return (
     <DetailShell
       root={{ label: 'Tester', href: '/app/tester' }}
-      crumbs={[{ label: 'Bugs', href: '/app/tester/bugs' }, { label: 'Report a bug' }]}
+      crumbs={[
+        preselected?.project
+          ? {
+              label: preselected.project.title,
+              href: `/app/tester/projects/${preselected.project.id}?section=bugs`,
+            }
+          : { label: 'Projects', href: '/app/tester/projects' },
+        { label: 'Report a bug' },
+      ]}
       eyebrow="Work"
       title="Report a bug"
       subtitle="Write the steps so someone who has never seen the problem can reproduce it. That is the difference between a report that gets fixed and one that gets sent back."
@@ -205,7 +207,9 @@ export default async function NewTesterBugPage({
                 The API re-resolves it and refuses a build that isn't on the
                 named project.
               */}
-              {params.buildId ? <input type="hidden" name="buildId" value={params.buildId} /> : null}
+              {params.buildId ? (
+                <input type="hidden" name="buildId" value={params.buildId} />
+              ) : null}
 
               <Field label="Project" htmlFor="projectId" required>
                 <Select
@@ -260,7 +264,14 @@ export default async function NewTesterBugPage({
                 required
                 hint="At least 10 characters."
               >
-                <Textarea id="description" name="description" rows={4} required minLength={10} maxLength={10000} />
+                <Textarea
+                  id="description"
+                  name="description"
+                  rows={4}
+                  required
+                  minLength={10}
+                  maxLength={10000}
+                />
               </Field>
 
               <Field
@@ -284,11 +295,19 @@ export default async function NewTesterBugPage({
                   required
                   minLength={5}
                   maxLength={10000}
-                  placeholder={'1. Add an item to the cart\n2. Choose UPI at checkout\n3. Enter the PIN\n4. Return to the app'}
+                  placeholder={
+                    '1. Add an item to the cart\n2. Choose UPI at checkout\n3. Enter the PIN\n4. Return to the app'
+                  }
                 />
               </Field>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-5)' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  gap: 'var(--space-5)',
+                }}
+              >
                 <Field label="Expected result" htmlFor="expectedResult">
                   <Textarea id="expectedResult" name="expectedResult" rows={3} maxLength={4000} />
                 </Field>
@@ -300,7 +319,13 @@ export default async function NewTesterBugPage({
           </Panel>
 
           <Panel title="How bad and how often">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-5)' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: 'var(--space-5)',
+              }}
+            >
               <Field label="Severity" htmlFor="severity" required>
                 <Select
                   id="severity"
@@ -326,10 +351,25 @@ export default async function NewTesterBugPage({
                 one without the other, and refuses an occurrence larger than
                 the attempts.
               */}
-              <Field label="Times it happened" htmlFor="occurrence" hint="Optional. Leave both blank if you didn't count.">
-                <Input id="occurrence" name="occurrence" type="number" min={0} max={10000} placeholder="3" />
+              <Field
+                label="Times it happened"
+                htmlFor="occurrence"
+                hint="Optional. Leave both blank if you didn't count."
+              >
+                <Input
+                  id="occurrence"
+                  name="occurrence"
+                  type="number"
+                  min={0}
+                  max={10000}
+                  placeholder="3"
+                />
               </Field>
-              <Field label="Out of attempts" htmlFor="outOf" hint="Optional, but required if you filled the field to the left.">
+              <Field
+                label="Out of attempts"
+                htmlFor="outOf"
+                hint="Optional, but required if you filled the field to the left."
+              >
                 <Input id="outOf" name="outOf" type="number" min={1} max={10000} placeholder="5" />
               </Field>
               <Field label="Type" htmlFor="type" hint="Optional.">
@@ -350,7 +390,13 @@ export default async function NewTesterBugPage({
             title="Where you saw it"
             description="Optional, but a report without an environment is much harder to reproduce."
           >
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-5)' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 'var(--space-5)',
+              }}
+            >
               <Field label="Device" htmlFor="deviceModel">
                 <Input id="deviceModel" name="deviceModel" maxLength={120} placeholder="Pixel 7a" />
               </Field>
@@ -436,7 +482,14 @@ export default async function NewTesterBugPage({
             <EvidenceGuardedSubmit pendingLabel="Filing report…">
               File the report
             </EvidenceGuardedSubmit>
-            <Button variant="secondary" href="/app/tester/bugs">
+            <Button
+              variant="secondary"
+              href={
+                preselected?.project
+                  ? `/app/tester/projects/${preselected.project.id}?section=bugs`
+                  : '/app/tester/projects'
+              }
+            >
               Cancel
             </Button>
           </div>

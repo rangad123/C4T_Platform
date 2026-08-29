@@ -295,7 +295,9 @@ export default async function OrganisationDetailPage({
     { label: 'Postal code', value: organisation.postalCode },
     {
       label: 'Country',
-      value: organisation.countryCode ? <CountryLabel countryCode={organisation.countryCode} /> : null,
+      value: organisation.countryCode ? (
+        <CountryLabel countryCode={organisation.countryCode} />
+      ) : null,
     },
     { label: 'Tax id', value: organisation.taxId },
   ]
@@ -379,13 +381,7 @@ export default async function OrganisationDetailPage({
           </span>
         </span>
       }
-      tabs={
-        <SectionTabs
-          basePath={detailHref}
-          tabs={SECTIONS}
-          active={section}
-        />
-      }
+      tabs={<SectionTabs basePath={detailHref} tabs={SECTIONS} active={section} />}
       aside={
         <>
           <Panel
@@ -448,7 +444,11 @@ export default async function OrganisationDetailPage({
             description="The billing and contact details we hold for this organisation."
             actions={
               canWrite ? (
-                <Button href={`${detailHref}?section=${section}&edit=profile`} variant="secondary" size="sm">
+                <Button
+                  href={`${detailHref}?section=${section}&edit=profile`}
+                  variant="primary"
+                  size="sm"
+                >
                   Edit
                 </Button>
               ) : undefined
@@ -471,152 +471,152 @@ export default async function OrganisationDetailPage({
           >
             <input type="hidden" name="id" value={organisation.id} />
 
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    gap: 'var(--space-5)',
-                  }}
-                >
-                  <Field label="Name" htmlFor="name" required>
-                    <Input
-                      id="name"
-                      name="name"
-                      defaultValue={organisation.name}
-                      required
-                      minLength={2}
-                      maxLength={160}
-                    />
-                  </Field>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 'var(--space-5)',
+              }}
+            >
+              <Field label="Name" htmlFor="name" required>
+                <Input
+                  id="name"
+                  name="name"
+                  defaultValue={organisation.name}
+                  required
+                  minLength={2}
+                  maxLength={160}
+                />
+              </Field>
 
-                  <Field
-                    label="Slug"
-                    htmlFor="slug"
-                    hint="Derived from the name when the record was created. The API does not accept changes."
-                  >
-                    <Input id="slug" name="slug" defaultValue={organisation.slug} disabled />
-                  </Field>
+              <Field
+                label="Slug"
+                htmlFor="slug"
+                hint="Derived from the name when the record was created. The API does not accept changes."
+              >
+                <Input id="slug" name="slug" defaultValue={organisation.slug} disabled />
+              </Field>
 
-                  <Field label="Website" htmlFor="website" hint="Include https://. Blank clears it.">
-                    <Input
-                      id="website"
-                      name="website"
-                      type="url"
-                      defaultValue={organisation.website ?? ''}
-                      maxLength={255}
-                      placeholder="https://example.com"
-                    />
-                  </Field>
+              <Field label="Website" htmlFor="website" hint="Include https://. Blank clears it.">
+                <Input
+                  id="website"
+                  name="website"
+                  type="url"
+                  defaultValue={organisation.website ?? ''}
+                  maxLength={255}
+                  placeholder="https://example.com"
+                />
+              </Field>
 
-                  <Field label="Industry" htmlFor="industry">
-                    <Input
-                      id="industry"
-                      name="industry"
-                      defaultValue={organisation.industry ?? ''}
-                      maxLength={120}
-                    />
-                  </Field>
+              <Field label="Industry" htmlFor="industry">
+                <Input
+                  id="industry"
+                  name="industry"
+                  defaultValue={organisation.industry ?? ''}
+                  maxLength={120}
+                />
+              </Field>
 
-                  <Field
-                    label="Contact email"
-                    htmlFor="contactEmail"
-                    hint="Blank keeps the address on file — the API cannot clear this field."
-                  >
-                    <Input
-                      id="contactEmail"
-                      name="contactEmail"
-                      type="email"
-                      defaultValue={organisation.contactEmail ?? ''}
-                      maxLength={255}
-                    />
-                  </Field>
+              <Field
+                label="Contact email"
+                htmlFor="contactEmail"
+                hint="Blank keeps the address on file — the API cannot clear this field."
+              >
+                <Input
+                  id="contactEmail"
+                  name="contactEmail"
+                  type="email"
+                  defaultValue={organisation.contactEmail ?? ''}
+                  maxLength={255}
+                />
+              </Field>
 
-                  <Field label="Contact phone" htmlFor="contactPhone">
-                    <Input
-                      id="contactPhone"
-                      name="contactPhone"
-                      type="tel"
-                      defaultValue={organisation.contactPhone ?? ''}
-                      maxLength={32}
-                    />
-                  </Field>
+              <Field label="Contact phone" htmlFor="contactPhone">
+                <Input
+                  id="contactPhone"
+                  name="contactPhone"
+                  type="tel"
+                  defaultValue={organisation.contactPhone ?? ''}
+                  maxLength={32}
+                />
+              </Field>
 
-                  <Field label="Address line 1" htmlFor="addressLine1" style={{ gridColumn: '1 / -1' }}>
-                    <Input
-                      id="addressLine1"
-                      name="addressLine1"
-                      defaultValue={organisation.addressLine1 ?? ''}
-                      maxLength={255}
-                    />
-                  </Field>
+              <Field label="Address line 1" htmlFor="addressLine1" style={{ gridColumn: '1 / -1' }}>
+                <Input
+                  id="addressLine1"
+                  name="addressLine1"
+                  defaultValue={organisation.addressLine1 ?? ''}
+                  maxLength={255}
+                />
+              </Field>
 
-                  <Field label="Address line 2" htmlFor="addressLine2" style={{ gridColumn: '1 / -1' }}>
-                    <Input
-                      id="addressLine2"
-                      name="addressLine2"
-                      defaultValue={organisation.addressLine2 ?? ''}
-                      maxLength={255}
-                    />
-                  </Field>
+              <Field label="Address line 2" htmlFor="addressLine2" style={{ gridColumn: '1 / -1' }}>
+                <Input
+                  id="addressLine2"
+                  name="addressLine2"
+                  defaultValue={organisation.addressLine2 ?? ''}
+                  maxLength={255}
+                />
+              </Field>
 
-                  <Field label="City" htmlFor="city">
-                    <Input
-                      id="city"
-                      name="city"
-                      defaultValue={organisation.city ?? ''}
-                      maxLength={120}
-                    />
-                  </Field>
+              <Field label="City" htmlFor="city">
+                <Input
+                  id="city"
+                  name="city"
+                  defaultValue={organisation.city ?? ''}
+                  maxLength={120}
+                />
+              </Field>
 
-                  <Field label="State" htmlFor="state">
-                    <Input
-                      id="state"
-                      name="state"
-                      defaultValue={organisation.state ?? ''}
-                      maxLength={120}
-                    />
-                  </Field>
+              <Field label="State" htmlFor="state">
+                <Input
+                  id="state"
+                  name="state"
+                  defaultValue={organisation.state ?? ''}
+                  maxLength={120}
+                />
+              </Field>
 
-                  <Field label="Postal code" htmlFor="postalCode">
-                    <Input
-                      id="postalCode"
-                      name="postalCode"
-                      defaultValue={organisation.postalCode ?? ''}
-                      maxLength={20}
-                    />
-                  </Field>
+              <Field label="Postal code" htmlFor="postalCode">
+                <Input
+                  id="postalCode"
+                  name="postalCode"
+                  defaultValue={organisation.postalCode ?? ''}
+                  maxLength={20}
+                />
+              </Field>
 
-                  <Field
-                    label="Country"
-                    htmlFor="countryCode"
-                    hint="Two-letter code, such as IN. Blank keeps the current code."
-                  >
-                    <Input
-                      id="countryCode"
-                      name="countryCode"
-                      defaultValue={organisation.countryCode ?? ''}
-                      minLength={2}
-                      maxLength={2}
-                      placeholder="IN"
-                    />
-                  </Field>
+              <Field
+                label="Country"
+                htmlFor="countryCode"
+                hint="Two-letter code, such as IN. Blank keeps the current code."
+              >
+                <Input
+                  id="countryCode"
+                  name="countryCode"
+                  defaultValue={organisation.countryCode ?? ''}
+                  minLength={2}
+                  maxLength={2}
+                  placeholder="IN"
+                />
+              </Field>
 
-                  <Field label="Tax id" htmlFor="taxId" hint="GSTIN or the local equivalent.">
-                    <Input
-                      id="taxId"
-                      name="taxId"
-                      defaultValue={organisation.taxId ?? ''}
-                      maxLength={40}
-                    />
-                  </Field>
-                </div>
+              <Field label="Tax id" htmlFor="taxId" hint="GSTIN or the local equivalent.">
+                <Input
+                  id="taxId"
+                  name="taxId"
+                  defaultValue={organisation.taxId ?? ''}
+                  maxLength={40}
+                />
+              </Field>
+            </div>
 
-                <div>
-                  <SubmitButton variant="primary" pendingLabel="Saving profile…">
-                    Save profile
-                  </SubmitButton>
-                </div>
-              </form>
+            <div>
+              <SubmitButton variant="primary" pendingLabel="Saving profile…">
+                Save profile
+              </SubmitButton>
+            </div>
+          </form>
         </Modal>
       ) : null}
 
@@ -710,7 +710,10 @@ export default async function OrganisationDetailPage({
 
               {accountsAvailable ? (
                 <>
-                  <LiveGetForm action={detailHref} style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}>
+                  <LiveGetForm
+                    action={detailHref}
+                    style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)' }}
+                  >
                     <Field
                       label="Find an account"
                       htmlFor="q"
@@ -841,13 +844,13 @@ export default async function OrganisationDetailPage({
                   fontSize: 'var(--type-body-sm-size)',
                 }}
               >
-                Archiving needs the organisation.delete permission. Ask an administrator to grant it.
+                Archiving needs the organisation.delete permission. Ask an administrator to grant
+                it.
               </p>
             )}
           </Panel>
         </>
       ) : null}
-
     </DetailShell>
   )
 }
@@ -903,7 +906,13 @@ async function WorkHistory({ organisationId }: { organisationId: string }) {
     >
       {failed ? (
         <div style={{ padding: 'var(--space-6)' }}>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+          <p
+            style={{
+              margin: 0,
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--type-body-sm-size)',
+            }}
+          >
             The projects service is unreachable. Refresh in a moment.
           </p>
         </div>
@@ -988,7 +997,13 @@ async function BillingSettings({ organisationId }: { organisationId: string }) {
     >
       {failed ? (
         <div style={{ padding: 'var(--space-6)' }}>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+          <p
+            style={{
+              margin: 0,
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--type-body-sm-size)',
+            }}
+          >
             The transactions service is unreachable. Refresh in a moment.
           </p>
         </div>

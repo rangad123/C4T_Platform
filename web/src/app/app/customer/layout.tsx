@@ -27,22 +27,16 @@ const CUSTOMER_SECTIONS: readonly SidebarSection[] = [
     label: 'Delivery',
     links: [
       { href: '/app/customer/projects', label: 'Projects', icon: 'briefcase' },
-      { href: '/app/customer/bugs', label: 'Bugs', icon: 'clipboard-check' },
       { href: '/app/customer/crowdtesters', label: 'Crowdtesters', icon: 'users' },
-      { href: '/app/customer/remote-qa', label: 'Remote QA', icon: 'monitor' },
     ],
   },
   {
     label: 'Insights',
-    links: [
-      { href: '/app/customer/reports', label: 'Reports', icon: 'line-chart' },
-      { href: '/app/customer/ratings', label: 'Ratings', icon: 'star' },
-    ],
+    links: [{ href: '/app/customer/reports', label: 'Reports', icon: 'line-chart' }],
   },
   {
     label: 'Operations',
     links: [
-      { href: '/app/customer/transactions', label: 'Transactions', icon: 'credit-card' },
       { href: '/app/customer/communication', label: 'Communication', icon: 'message-square' },
     ],
   },

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { Topbar } from '@/components/admin/Topbar'
 import { LeadStatusBadge, type LeadStatusValue } from '@/components/admin/LeadStatusBadge'
 import { Field } from '@/components/ds/forms/Field'
@@ -9,10 +9,12 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
-import { requirePermission } from '@/lib/auth/session'
+import { hasPermission, requirePermission } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { updateLeadStatus, updateLeadNotes } from '@/lib/leads/actions'
 import { formString } from '@/lib/form-data'
+import { Modal } from '@/components/admin/Modal'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 
 /**
  * The lead detail page. `/app/admin/leads/[id]`.
@@ -79,12 +81,36 @@ function formatDateTime(iso: string): string {
   })
 }
 
+const NOTICES: Record<string, NoticeCopy> = {
+  'status-saved': { tone: 'success', message: 'Status updated.' },
+  'notes-saved': { tone: 'success', message: 'Notes updated.' },
+  forbidden: { tone: 'error', message: 'You are not able to change that right now.' },
+  invalid: { tone: 'error', message: 'That status was not recognised.' },
+  failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
+}
+
+function leadFailureNotice(error: unknown): string {
+  const status =
+    error instanceof Error && 'status' in error ? (error as { status?: number }).status : undefined
+  if (status === 403) return 'forbidden'
+  if (status === 400 || status === 422) return 'invalid'
+  return 'failed'
+}
+
 async function saveStatus(formData: FormData): Promise<void> {
   'use server'
   const id = formString(formData, 'id')
   const status = formString(formData, 'status')
   if (!id) return
-  await updateLeadStatus(id, status)
+
+  let notice = 'status-saved'
+  try {
+    await updateLeadStatus(id, status)
+  } catch (error) {
+    notice = leadFailureNotice(error)
+  }
+
+  redirect(`/app/admin/leads/${id}?notice=${notice}`)
 }
 
 async function saveNotes(formData: FormData): Promise<void> {
@@ -92,13 +118,29 @@ async function saveNotes(formData: FormData): Promise<void> {
   const id = formString(formData, 'id')
   const notes = formString(formData, 'notes')
   if (!id) return
-  await updateLeadNotes(id, notes)
+
+  let notice = 'notes-saved'
+  try {
+    await updateLeadNotes(id, notes)
+  } catch (error) {
+    notice = leadFailureNotice(error)
+  }
+
+  redirect(`/app/admin/leads/${id}?notice=${notice}`)
 }
 
-export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission('lead.read')
+export default async function LeadDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ edit?: string; notice?: string }>
+}) {
+  const viewer = await requirePermission('lead.read')
+  const canWrite = hasPermission(viewer, 'lead.write')
 
   const { id } = await params
+  const { edit, notice } = await searchParams
 
   let lead: LeadDetail | null = null
   let loadError: 'forbidden' | 'not_found' | 'unknown' | null = null
@@ -188,6 +230,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <Icon name="arrow-left" size={16} />
             Back to leads
           </Link>
+
+          <Notice code={notice} notices={NOTICES} />
 
           <header
             style={{
@@ -289,8 +333,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
           {/* RIGHT — triage: status + notes */}
           <aside style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-            <form
-              action={saveStatus}
+            <div
               style={{
                 padding: 'var(--space-7)',
                 background: 'var(--surface-canvas)',
@@ -301,60 +344,158 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 gap: 'var(--space-5)',
               }}
             >
-              <input type="hidden" name="id" value={lead.id} />
-              <h2 className="c4t-heading-md" style={{ margin: 0 }}>
-                Triage
-              </h2>
-              <Field label="Status" htmlFor="status">
-                <Select
-                  id="status"
-                  name="status"
-                  defaultValue={
-                    LEAD_STATUS_VALUES.includes(lead.status as LeadStatusValue)
-                      ? lead.status
-                      : 'NEW'
-                  }
-                  options={STATUS_OPTIONS}
-                />
-              </Field>
-              <SubmitButton variant="primary" fullWidth pendingLabel="Saving status…">
-                Save status
-              </SubmitButton>
-            </form>
-
-            <form
-              action={saveNotes}
-              style={{
-                padding: 'var(--space-7)',
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-card)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-5)',
-              }}
-            >
-              <input type="hidden" name="id" value={lead.id} />
-              <h2 className="c4t-heading-md" style={{ margin: 0 }}>
-                Internal notes
-              </h2>
-              <Field
-                label="Notes"
-                htmlFor="notes"
-                hint="Visible to admins only. Never shown to the submitter."
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 'var(--space-4)',
+                }}
               >
-                <Textarea
-                  id="notes"
-                  name="notes"
-                  defaultValue={lead.notes ?? ''}
-                  rows={6}
-                  placeholder="What did you discuss? When do you follow up?"
-                />
-              </Field>
-              <SubmitButton variant="secondary" fullWidth pendingLabel="Saving notes…">
-                Save notes
-              </SubmitButton>
-            </form>
+                <h2 className="c4t-heading-md" style={{ margin: 0 }}>
+                  Triage
+                </h2>
+                {canWrite ? (
+                  <Button
+                    href={`/app/admin/leads/${lead.id}?edit=status`}
+                    variant="primary"
+                    size="sm"
+                    iconLeft="pencil"
+                  >
+                    Edit
+                  </Button>
+                ) : null}
+              </div>
+              <DetailRow label="Status" value={<LeadStatusBadge status={lead.status} />} />
+            </div>
+
+            {canWrite ? (
+              <Modal
+                open={edit === 'status'}
+                closedHref={`/app/admin/leads/${lead.id}`}
+                title="Update status"
+              >
+                <form
+                  action={saveStatus}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+                >
+                  <input type="hidden" name="id" value={lead.id} />
+                  <Field label="Status" htmlFor="status">
+                    <Select
+                      id="status"
+                      name="status"
+                      defaultValue={
+                        LEAD_STATUS_VALUES.includes(lead.status as LeadStatusValue)
+                          ? lead.status
+                          : 'NEW'
+                      }
+                      options={STATUS_OPTIONS}
+                    />
+                  </Field>
+                  <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                    <SubmitButton variant="primary" pendingLabel="Saving status…">
+                      Save changes
+                    </SubmitButton>
+                    <Button href={`/app/admin/leads/${lead.id}`} variant="ghost">
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </Modal>
+            ) : null}
+
+            <div
+              style={{
+                padding: 'var(--space-7)',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-card)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-5)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                <h2 className="c4t-heading-md" style={{ margin: 0 }}>
+                  Internal notes
+                </h2>
+                {canWrite ? (
+                  <Button
+                    href={`/app/admin/leads/${lead.id}?edit=notes`}
+                    variant="primary"
+                    size="sm"
+                    iconLeft="pencil"
+                  >
+                    Edit
+                  </Button>
+                ) : null}
+              </div>
+              {lead.notes ? (
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-primary)',
+                    fontSize: 'var(--type-body-sm-size)',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {lead.notes}
+                </p>
+              ) : (
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-muted)',
+                    fontSize: 'var(--type-body-sm-size)',
+                  }}
+                >
+                  No notes yet.
+                </p>
+              )}
+            </div>
+
+            {canWrite ? (
+              <Modal
+                open={edit === 'notes'}
+                closedHref={`/app/admin/leads/${lead.id}`}
+                title="Edit internal notes"
+              >
+                <form
+                  action={saveNotes}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+                >
+                  <input type="hidden" name="id" value={lead.id} />
+                  <Field
+                    label="Notes"
+                    htmlFor="notes"
+                    hint="Visible to admins only. Never shown to the submitter."
+                  >
+                    <Textarea
+                      id="notes"
+                      name="notes"
+                      defaultValue={lead.notes ?? ''}
+                      rows={6}
+                      placeholder="What did you discuss? When do you follow up?"
+                    />
+                  </Field>
+                  <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                    <SubmitButton variant="primary" pendingLabel="Saving notes…">
+                      Save changes
+                    </SubmitButton>
+                    <Button href={`/app/admin/leads/${lead.id}`} variant="ghost">
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </Modal>
+            ) : null}
           </aside>
         </div>
       </main>

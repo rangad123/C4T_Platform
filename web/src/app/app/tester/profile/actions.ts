@@ -9,6 +9,21 @@ import { formTrimmed, formStringArray } from '@/lib/form-data'
 
 const PROFILE_PATH = '/app/tester/profile'
 
+/**
+ * Turns a thrown `ApiError` into a notice code the page's `NOTICES` map
+ * knows how to word. Anything else (a network drop, a bug) becomes the
+ * generic `failed` — never the raw error text (§11: no stack traces, no
+ * technical detail reaches this screen).
+ */
+function failureNotice(error: unknown, overrides: Record<number, string> = {}): string {
+  if (error instanceof ApiError) {
+    const override = overrides[error.status]
+    if (override) return override
+    if (error.status === 403) return 'forbidden'
+    if (error.status === 400 || error.status === 422) return 'invalid'
+  }
+  return 'failed'
+}
 
 /**
  * Server Actions for the tester's own profile self-service (§2.3).
@@ -52,38 +67,49 @@ export async function updateBasicInfoAction(formData: FormData): Promise<void> {
   const firstName = formTrimmed(formData, 'firstName')
   const lastName = formTrimmed(formData, 'lastName')
   const phone = formTrimmed(formData, 'phone')
-
-  if (firstName) {
-    await serverFetch('users/me', {
-      method: 'PATCH',
-      body: { firstName, lastName, phone },
-    })
-  }
-
   const experienceYears = formTrimmed(formData, 'experienceYears')
   const countryCode = formTrimmed(formData, 'countryCode')
 
-  await serverFetch('testers/me', {
-    method: 'PATCH',
-    body: {
-      headline: formTrimmed(formData, 'headline'),
-      bio: formTrimmed(formData, 'bio'),
-      city: formTrimmed(formData, 'city'),
-      gender: formTrimmed(formData, 'gender'),
-      ageGroup: formTrimmed(formData, 'ageGroup'),
-      lookingFor: formTrimmed(formData, 'lookingFor'),
-      skype: formTrimmed(formData, 'skype'),
-      linkedinUrl: formTrimmed(formData, 'linkedinUrl'),
-      profession: formTrimmed(formData, 'profession'),
-      countryCode: countryCode ? countryCode.toUpperCase() : '',
-      // Numeric, so an empty box means "not stated" rather than zero — and
-      // the API's schema rejects a bare '' for a number, so it is omitted
-      // entirely rather than cleared.
-      ...(experienceYears ? { experienceYears: Number(experienceYears) } : {}),
-    },
-  })
+  let notice = 'about-saved'
+  try {
+    if (firstName) {
+      await serverFetch('users/me', {
+        method: 'PATCH',
+        body: { firstName, lastName, phone },
+      })
+    }
 
-  revalidatePath(PROFILE_PATH)
+    await serverFetch('testers/me', {
+      method: 'PATCH',
+      body: {
+        headline: formTrimmed(formData, 'headline'),
+        bio: formTrimmed(formData, 'bio'),
+        city: formTrimmed(formData, 'city'),
+        gender: formTrimmed(formData, 'gender'),
+        ageGroup: formTrimmed(formData, 'ageGroup'),
+        lookingFor: formTrimmed(formData, 'lookingFor'),
+        skype: formTrimmed(formData, 'skype'),
+        linkedinUrl: formTrimmed(formData, 'linkedinUrl'),
+        profession: formTrimmed(formData, 'profession'),
+        countryCode: countryCode ? countryCode.toUpperCase() : '',
+        // Numeric, so an empty box means "not stated" rather than zero — and
+        // the API's schema rejects a bare '' for a number, so it is omitted
+        // entirely rather than cleared.
+        ...(experienceYears ? { experienceYears: Number(experienceYears) } : {}),
+      },
+    })
+
+    revalidatePath(PROFILE_PATH)
+  } catch (error) {
+    notice = failureNotice(error)
+  }
+
+  // No `edit=` param — this is what closes the modal. See `failureNotice`'s
+  // doc comment on why a failure does not stay open with the typed values
+  // echoed back: nothing here is sensitive, but the codebase does not yet
+  // have that mechanism, and re-entering an aborted profile edit is a small
+  // ask next to inventing a new pattern for one form.
+  redirect(`${PROFILE_PATH}?section=about&notice=${notice}`)
 }
 
 /**
@@ -168,10 +194,19 @@ export async function addDeviceAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const body = deviceBody(formData)
-  if (!body) return
+  let notice = 'device-added'
+  if (!body) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch('testers/me/devices', { method: 'POST', body })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
 
-  await serverFetch('testers/me/devices', { method: 'POST', body })
-  revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
 }
 
 export async function updateDeviceAction(formData: FormData): Promise<void> {
@@ -179,21 +214,38 @@ export async function updateDeviceAction(formData: FormData): Promise<void> {
 
   const deviceId = formTrimmed(formData, 'deviceId')
   const body = deviceBody(formData)
-  if (!deviceId || !body) return
+  let notice = 'device-saved'
+  if (!deviceId || !body) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch(`testers/me/devices/${deviceId}`, { method: 'PATCH', body })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
 
-  await serverFetch(`testers/me/devices/${deviceId}`, { method: 'PATCH', body })
-  revalidatePath(PROFILE_PATH)
-  redirect(`${PROFILE_PATH}?section=assets`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
 }
 
 export async function removeDeviceAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const deviceId = formTrimmed(formData, 'deviceId')
-  if (!deviceId) return
+  let notice = 'device-removed'
+  if (!deviceId) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch(`testers/me/devices/${deviceId}`, { method: 'DELETE' })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
 
-  await serverFetch(`testers/me/devices/${deviceId}`, { method: 'DELETE' })
-  revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
 }
 
 // ─── Browsers ────────────────────────────────────────────────────────────────
@@ -224,16 +276,25 @@ export async function addBrowserAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const body = browserBody(formData)
-  if (!body) return
-
-  try {
-    await serverFetch('catalog/me/browsers', { method: 'POST', body })
-  } catch (error) {
-    // A 409 means this exact browser+version is already listed — a duplicate
-    // click, not a failure worth shouting about. Anything else is real.
-    if (!(error instanceof ApiError) || error.status !== 409) throw error
+  let notice = 'browser-added'
+  if (!body) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch('catalog/me/browsers', { method: 'POST', body })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      // A 409 means this exact browser+version is already listed — a
+      // duplicate click, not a failure worth shouting about.
+      if (error instanceof ApiError && error.status === 409) {
+        notice = 'browser-added'
+      } else {
+        notice = failureNotice(error)
+      }
+    }
   }
-  revalidatePath(PROFILE_PATH)
+
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
 }
 
 export async function updateBrowserAction(formData: FormData): Promise<void> {
@@ -241,21 +302,38 @@ export async function updateBrowserAction(formData: FormData): Promise<void> {
 
   const browserRowId = formTrimmed(formData, 'browserRowId')
   const body = browserBody(formData)
-  if (!browserRowId || !body) return
+  let notice = 'browser-saved'
+  if (!browserRowId || !body) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'PATCH', body })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
 
-  await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'PATCH', body })
-  revalidatePath(PROFILE_PATH)
-  redirect(`${PROFILE_PATH}?section=assets`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
 }
 
 export async function removeBrowserAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const browserRowId = formTrimmed(formData, 'browserRowId')
-  if (!browserRowId) return
+  let notice = 'browser-removed'
+  if (!browserRowId) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'DELETE' })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
 
-  await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'DELETE' })
-  revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
 }
 
 /**
@@ -269,8 +347,26 @@ export async function setSkillsAction(formData: FormData): Promise<void> {
 
   const skillIds = formStringArray(formData, 'skillIds')
 
-  await serverFetch('testers/me/skills', { method: 'PUT', body: { skillIds } })
-  revalidatePath(PROFILE_PATH)
+  let notice = 'skills-saved'
+  try {
+    await serverFetch('testers/me/skills', { method: 'PUT', body: { skillIds } })
+    revalidatePath(PROFILE_PATH)
+  } catch (error) {
+    notice = failureNotice(error)
+  }
+
+  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`)
+}
+
+/** Parses the hidden `current` snapshot shared by add/remove — see the doc comment above. */
+function parseCurrentLanguages(formData: FormData): { code: string; proficiency: string }[] {
+  const currentJson = formTrimmed(formData, 'current')
+  try {
+    const parsed: unknown = JSON.parse(currentJson || '[]')
+    return Array.isArray(parsed) ? (parsed as { code: string; proficiency: string }[]) : []
+  } catch {
+    return []
+  }
 }
 
 export async function addLanguageAction(formData: FormData): Promise<void> {
@@ -281,44 +377,46 @@ export async function addLanguageAction(formData: FormData): Promise<void> {
   const proficiency = (PROFICIENCIES as readonly string[]).includes(proficiencyInput)
     ? proficiencyInput
     : 'BASIC'
-  const currentJson = formTrimmed(formData, 'current')
-  // `formTrimmed` always returns a string (never null/undefined), so the
-  // length check alone is enough to reject a missing or malformed code.
-  if (code.length !== 2) return
+  let notice = 'language-added'
 
-  let current: { code: string; proficiency: string }[] = []
-  try {
-    const parsed: unknown = JSON.parse(currentJson || '[]')
-    if (Array.isArray(parsed)) current = parsed
-  } catch {
-    current = []
+  // `formTrimmed` always returns a string (never null/undefined), so the
+  // length check alone is enough to reject a missing or malformed code —
+  // the API itself rejects anything not in the ISO 639-1 list either way.
+  if (code.length !== 2) {
+    notice = 'invalid'
+  } else {
+    const current = parseCurrentLanguages(formData)
+    const next = [...current.filter((l) => l.code !== code), { code, proficiency }]
+    try {
+      await serverFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
   }
 
-  const next = [...current.filter((l) => l.code !== code), { code, proficiency }]
-
-  await serverFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
-  revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`)
 }
 
 export async function removeLanguageAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const code = formTrimmed(formData, 'code')
-  const currentJson = formTrimmed(formData, 'current')
+  const current = parseCurrentLanguages(formData)
+  const next = current.filter((l) => l.code !== code)
+  let notice = 'language-removed'
 
-  let current: { code: string; proficiency: string }[] = []
   try {
-    const parsed: unknown = JSON.parse(currentJson || '[]')
-    if (Array.isArray(parsed)) current = parsed
-  } catch {
-    current = []
+    await serverFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
+    revalidatePath(PROFILE_PATH)
+  } catch (error) {
+    notice = failureNotice(error)
   }
 
-  const next = current.filter((l) => l.code !== code)
-
-  await serverFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
-  revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`)
 }
+
+const WORK_HISTORY_PATH = `${PROFILE_PATH}?section=work&view=employment`
 
 export async function addWorkHistoryAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
@@ -328,30 +426,49 @@ export async function addWorkHistoryAction(formData: FormData): Promise<void> {
   const startDate = formTrimmed(formData, 'startDate')
   const endDate = formTrimmed(formData, 'endDate')
   const description = formTrimmed(formData, 'description')
-  if (!company || !jobTitle || !startDate) return
+  let notice = 'work-added'
 
-  await serverFetch('testers/me/work-history', {
-    method: 'POST',
-    body: {
-      company,
-      jobTitle,
-      startDate,
-      ...(endDate ? { endDate } : {}),
-      ...(description ? { description } : {}),
-    },
-  })
+  if (!company || !jobTitle || !startDate) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch('testers/me/work-history', {
+        method: 'POST',
+        body: {
+          company,
+          jobTitle,
+          startDate,
+          ...(endDate ? { endDate } : {}),
+          ...(description ? { description } : {}),
+        },
+      })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
 
-  revalidatePath(PROFILE_PATH)
+  redirect(`${WORK_HISTORY_PATH}&notice=${notice}`)
 }
 
 export async function removeWorkHistoryAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
   const workHistoryId = formTrimmed(formData, 'workHistoryId')
-  if (!workHistoryId) return
+  let notice = 'work-removed'
 
-  await serverFetch(`testers/me/work-history/${workHistoryId}`, { method: 'DELETE' })
-  revalidatePath(PROFILE_PATH)
+  if (!workHistoryId) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch(`testers/me/work-history/${workHistoryId}`, { method: 'DELETE' })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
+
+  redirect(`${WORK_HISTORY_PATH}&notice=${notice}`)
 }
 
 export async function acceptNdaAction(_formData: FormData): Promise<void> {
@@ -389,20 +506,32 @@ export async function savePaymentAccountAction(formData: FormData): Promise<void
   const paypalEmail = formTrimmed(formData, 'paypalEmail')
   const paytmNumber = formTrimmed(formData, 'paytmNumber')
 
-  await serverFetch('payment-accounts/mine', {
-    method: 'PUT',
-    body: {
-      country,
-      paymentType,
-      ...(accountName ? { accountName } : {}),
-      ...(accountNumber ? { accountNumber } : {}),
-      ...(bankName ? { bankName } : {}),
-      ...(branchName ? { branchName } : {}),
-      ...(ifscCode ? { ifscCode: ifscCode.toUpperCase() } : {}),
-      ...(paypalEmail ? { paypalEmail } : {}),
-      ...(paytmNumber ? { paytmNumber } : {}),
-    },
-  })
+  let notice = 'payment-saved'
+  try {
+    await serverFetch('payment-accounts/mine', {
+      method: 'PUT',
+      body: {
+        country,
+        paymentType,
+        ...(accountName ? { accountName } : {}),
+        ...(accountNumber ? { accountNumber } : {}),
+        ...(bankName ? { bankName } : {}),
+        ...(branchName ? { branchName } : {}),
+        ...(ifscCode ? { ifscCode: ifscCode.toUpperCase() } : {}),
+        ...(paypalEmail ? { paypalEmail } : {}),
+        ...(paytmNumber ? { paytmNumber } : {}),
+      },
+    })
+    revalidatePath(PROFILE_PATH)
+  } catch (error) {
+    notice = failureNotice(error)
+  }
 
-  revalidatePath(PROFILE_PATH)
+  // On failure this deliberately does NOT echo the typed fields back —
+  // unlike `updateBasicInfoAction`, re-populating this form from query
+  // params would put a bank account number or PayPal address in the URL,
+  // server logs and browser history. The user re-enters payment details
+  // from a blank form either way; nothing here was ever pre-filled with the
+  // real saved values (§20).
+  redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`)
 }

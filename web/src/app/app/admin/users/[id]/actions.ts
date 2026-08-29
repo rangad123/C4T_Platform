@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { serverFetch } from '@/lib/api/server'
+import { ApiError } from '@/lib/api/types'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -49,6 +50,24 @@ function revalidateUser(id: string): void {
 }
 
 /**
+ * Turns a thrown `ApiError` into a notice code the page's `NOTICES` map
+ * knows how to word — never the raw message (§11: no backend detail reaches
+ * this screen), even though a 409 here is often something specific like "the
+ * last active administrator". `overrides` lets one call site supply its own
+ * wording for a status it wants to name precisely.
+ */
+function failureNotice(error: unknown, overrides: Record<number, string> = {}): string {
+  if (error instanceof ApiError) {
+    const override = overrides[error.status]
+    if (override) return override
+    if (error.status === 403) return 'forbidden'
+    if (error.status === 409) return 'conflict'
+    if (error.status === 400 || error.status === 422) return 'invalid'
+  }
+  return 'failed'
+}
+
+/**
  * PATCH users/:id over the writable profile fields.
  *
  * `firstName` and `countryCode` are omitted when blank rather than sent empty,
@@ -65,18 +84,24 @@ export async function updateUserIdentity(formData: FormData): Promise<void> {
   const firstName = formTrimmed(formData, 'firstName')
   const countryCode = formTrimmed(formData, 'countryCode').toUpperCase()
 
-  await serverFetch<unknown>(`users/${id}`, {
-    method: 'PATCH',
-    body: {
-      ...(firstName ? { firstName } : {}),
-      lastName: formTrimmed(formData, 'lastName'),
-      phone: formTrimmed(formData, 'phone'),
-      timezone: formTrimmed(formData, 'timezone'),
-      ...(countryCode.length === 2 ? { countryCode } : {}),
-    },
-  })
+  let notice = 'identity-saved'
+  try {
+    await serverFetch<unknown>(`users/${id}`, {
+      method: 'PATCH',
+      body: {
+        ...(firstName ? { firstName } : {}),
+        lastName: formTrimmed(formData, 'lastName'),
+        phone: formTrimmed(formData, 'phone'),
+        timezone: formTrimmed(formData, 'timezone'),
+        ...(countryCode.length === 2 ? { countryCode } : {}),
+      },
+    })
+    revalidateUser(id)
+  } catch (error) {
+    notice = failureNotice(error)
+  }
 
-  revalidateUser(id)
+  redirect(`${LIST_PATH}/${id}?section=identity&notice=${notice}`)
 }
 
 /**
@@ -92,11 +117,21 @@ export async function changeUserRole(formData: FormData): Promise<void> {
 
   const id = formTrimmed(formData, 'id')
   const role = formTrimmed(formData, 'role')
-  if (!id || !isRole(role)) return
+  if (!id) return
 
-  await serverFetch<unknown>(`users/${id}/role`, { method: 'POST', body: { role } })
+  let notice = 'role-saved'
+  if (!isRole(role)) {
+    notice = 'invalid'
+  } else {
+    try {
+      await serverFetch<unknown>(`users/${id}/role`, { method: 'POST', body: { role } })
+      revalidateUser(id)
+    } catch (error) {
+      notice = failureNotice(error)
+    }
+  }
 
-  revalidateUser(id)
+  redirect(`${LIST_PATH}/${id}?notice=${notice}`)
 }
 
 /**
@@ -108,16 +143,25 @@ export async function changeUserStatus(formData: FormData): Promise<void> {
 
   const id = formTrimmed(formData, 'id')
   const status = formTrimmed(formData, 'status')
-  if (!id || !isStatus(status)) return
+  if (!id) return
 
-  const reason = formTrimmed(formData, 'reason')
+  let notice = 'status-saved'
+  if (!isStatus(status)) {
+    notice = 'invalid'
+  } else {
+    const reason = formTrimmed(formData, 'reason')
+    try {
+      await serverFetch<unknown>(`users/${id}/status`, {
+        method: 'POST',
+        body: { status, ...(reason ? { reason } : {}) },
+      })
+      revalidateUser(id)
+    } catch (error) {
+      notice = failureNotice(error, { 409: 'last-admin' })
+    }
+  }
 
-  await serverFetch<unknown>(`users/${id}/status`, {
-    method: 'POST',
-    body: { status, ...(reason ? { reason } : {}) },
-  })
-
-  revalidateUser(id)
+  redirect(`${LIST_PATH}/${id}?notice=${notice}`)
 }
 
 /**
@@ -147,12 +191,18 @@ export async function setSubAdminPermissions(formData: FormData): Promise<void> 
     ),
   ]
 
-  await serverFetch<unknown>(`users/${id}/permissions`, {
-    method: 'PUT',
-    body: { permissionCodes },
-  })
+  let notice = 'permissions-saved'
+  try {
+    await serverFetch<unknown>(`users/${id}/permissions`, {
+      method: 'PUT',
+      body: { permissionCodes },
+    })
+    revalidateUser(id)
+  } catch (error) {
+    notice = failureNotice(error)
+  }
 
-  revalidateUser(id)
+  redirect(`${LIST_PATH}/${id}?section=permissions&notice=${notice}`)
 }
 
 /**

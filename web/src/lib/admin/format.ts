@@ -9,6 +9,23 @@
  * negative numbers, never a hyphen.
  */
 
+/**
+ * A view-mode reading for an optional field: the value if there is one,
+ * `—` (em dash) if it's null, undefined, or empty.
+ *
+ * Written as a named function rather than `value || '—'` at each call site —
+ * `||` and `??` both read as "probably a mistake" here to a reviewer used to
+ * this codebase's convention of `??` for null-safety, and `??` alone does not
+ * catch an empty string, which is the actual common case for an unset text
+ * field. Naming the check once says plainly that the empty-string case is
+ * deliberate, not overlooked.
+ */
+export function orDash(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'string' && value.trim() === '') return '—'
+  return String(value)
+}
+
 /** `IN_PROGRESS` → `In progress`. Leaves already-cased text alone. */
 export function titleCase(value: string): string {
   if (!value) return value

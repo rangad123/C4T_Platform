@@ -6,7 +6,13 @@ import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
-import { StatusBadge, SeverityBadge, statusTone, severityTone, bugTypeTone } from '@/components/admin/StatusBadge'
+import {
+  StatusBadge,
+  SeverityBadge,
+  statusTone,
+  severityTone,
+  bugTypeTone,
+} from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
@@ -90,7 +96,10 @@ function dropZeros(counts: Record<string, number>): Record<string, number> {
 }
 
 const NOTICES: Record<string, NoticeCopy> = {
-  created: { tone: 'success', message: 'Your project is set up. Testing can begin once it is approved.' },
+  created: {
+    tone: 'success',
+    message: 'Your project is set up. Testing can begin once it is approved.',
+  },
   'build-incomplete': {
     tone: 'warning',
     message:
@@ -101,9 +110,13 @@ const NOTICES: Record<string, NoticeCopy> = {
   'field-exists': { tone: 'warning', message: 'A field with that name is already on this build.' },
   'field-invalid': {
     tone: 'error',
-    message: 'That field could not be added. A choice field needs at least one option, and options must differ.',
+    message:
+      'That field could not be added. A choice field needs at least one option, and options must differ.',
   },
-  'field-failed': { tone: 'error', message: 'That field could not be added. Try again in a moment.' },
+  'field-failed': {
+    tone: 'error',
+    message: 'That field could not be added. Try again in a moment.',
+  },
 }
 
 const SECTIONS = [
@@ -146,7 +159,10 @@ export default async function CustomerProjectDetailPage({
     return (
       <DetailShell
         root={ROOT}
-        crumbs={[{ label: 'Projects', href: '/app/customer/projects' }, { label: loadError === 'forbidden' ? 'Restricted' : 'Unavailable' }]}
+        crumbs={[
+          { label: 'Projects', href: '/app/customer/projects' },
+          { label: loadError === 'forbidden' ? 'Restricted' : 'Unavailable' },
+        ]}
         eyebrow="Delivery"
         title={loadError === 'forbidden' ? 'Restricted' : 'Unavailable'}
       >
@@ -155,14 +171,22 @@ export default async function CustomerProjectDetailPage({
             icon="lock"
             title="You don't have access to this project"
             description="This project doesn't belong to your organisation."
-            action={<Button variant="secondary" href="/app/customer/projects">Back to projects</Button>}
+            action={
+              <Button variant="secondary" href="/app/customer/projects">
+                Back to projects
+              </Button>
+            }
           />
         ) : (
           <EmptyState
             icon="alert-triangle"
             title="Couldn't load this project"
             description="The projects service is unreachable. Refresh in a moment."
-            action={<Button variant="secondary" href="/app/customer/projects">Back to projects</Button>}
+            action={
+              <Button variant="secondary" href="/app/customer/projects">
+                Back to projects
+              </Button>
+            }
           />
         )}
       </DetailShell>
@@ -173,7 +197,9 @@ export default async function CustomerProjectDetailPage({
   const activeBuildId = project.activeBuildId
   const defaultBuildId = project.builds.find((b) => b.isDefault)?.id ?? activeBuildId
 
-  const buildDetail = await serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${activeBuildId}`)
+  const buildDetail = await serverFetchOrNull<BuildDetail>(
+    `projects/${project.id}/builds/${activeBuildId}`,
+  )
   const section = resolveSection(SECTIONS, resolvedSearchParams.section)
   const newBuildModalOpen = edit === 'new-build'
 
@@ -187,17 +213,22 @@ export default async function CustomerProjectDetailPage({
     announcements,
     customFields,
   ] = await Promise.all([
-    section === 'build' ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`) : Promise.resolve(null),
+    section === 'build'
+      ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
+      : Promise.resolve(null),
     section === 'features'
-      ? serverFetchOrNull<readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]>(
-          `projects/${project.id}/features`,
-          { query: { buildId: activeBuildId } },
-        )
+      ? serverFetchOrNull<
+          readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
+        >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
       : Promise.resolve(null),
     section === 'bugs'
-      ? serverFetchOrNull<ProjectBugRow[]>('bugs', { query: { projectId: project.id, buildId: activeBuildId, limit: BUG_PREVIEW_SIZE } })
+      ? serverFetchOrNull<ProjectBugRow[]>('bugs', {
+          query: { projectId: project.id, buildId: activeBuildId, limit: BUG_PREVIEW_SIZE },
+        })
       : Promise.resolve(null),
-    section === 'overview' ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`) : Promise.resolve(null),
+    section === 'overview'
+      ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
+      : Promise.resolve(null),
     newBuildModalOpen && defaultBuildId !== activeBuildId
       ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
       : Promise.resolve(null),
@@ -226,7 +257,8 @@ export default async function CustomerProjectDetailPage({
         })
       : Promise.resolve(null),
   ])
-  const defaultBuildDetail = defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
+  const defaultBuildDetail =
+    defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
 
   const priority = isProjectPriority(project.priority) ? project.priority : 'NORMAL'
   const transitions = allowedTransitions(project.status)
@@ -343,17 +375,40 @@ export default async function CustomerProjectDetailPage({
     { label: 'Submitted', value: formatDate(project.submittedAt) },
     { label: 'Approved', value: formatDate(project.approvedAt) },
     { label: 'Completed', value: formatDate(project.completedAt) },
-    { label: 'Window', value: `${formatDate(project.startDate)} to ${formatDate(project.endDate)}` },
+    {
+      label: 'Window',
+      value: `${formatDate(project.startDate)} to ${formatDate(project.endDate)}`,
+    },
     { label: 'Platform targets', value: <TokenList values={project.platformTargets} /> },
     { label: 'Target countries', value: <TokenList values={project.targetCountries} /> },
-    { label: 'Target languages', value: <TokenList values={project.targetLanguages} uppercase={false} /> },
-    { label: 'Summary', wide: true, value: project.summary ? <Prose>{project.summary}</Prose> : '' },
-    { label: 'Testing instructions', wide: true, value: project.instructions ? <Prose>{project.instructions}</Prose> : '' },
+    {
+      label: 'Target languages',
+      value: <TokenList values={project.targetLanguages} uppercase={false} />,
+    },
+    {
+      label: 'Summary',
+      wide: true,
+      value: project.summary ? <Prose>{project.summary}</Prose> : '',
+    },
+    {
+      label: 'Testing instructions',
+      wide: true,
+      value: project.instructions ? <Prose>{project.instructions}</Prose> : '',
+    },
   ]
 
   const bugColumns: readonly TableColumn<ProjectBugRow>[] = [
-    { key: 'title', header: 'Bug', render: (row) => row.title, renderSecondary: (row) => row.reference },
-    { key: 'severity', header: 'Severity', render: (row) => <SeverityBadge severity={row.severity} /> },
+    {
+      key: 'title',
+      header: 'Bug',
+      render: (row) => row.title,
+      renderSecondary: (row) => row.reference,
+    },
+    {
+      key: 'severity',
+      header: 'Severity',
+      render: (row) => <SeverityBadge severity={row.severity} />,
+    },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     { key: 'logged', header: 'Logged', align: 'right', render: (row) => formatDate(row.createdAt) },
   ]
@@ -367,8 +422,21 @@ export default async function CustomerProjectDetailPage({
       badges={<StatusBadge status={project.status} />}
       subtitle={`${project.reference} · created ${formatDate(project.createdAt)}`}
       tabs={
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-          <SectionTabs basePath={detailPath} tabs={SECTIONS} active={section} preserve={{ buildId }} />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 'var(--space-4)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <SectionTabs
+            basePath={detailPath}
+            tabs={SECTIONS}
+            active={section}
+            preserve={{ buildId }}
+          />
           {/* Wraps: the build name is user-supplied and unbounded, and beside
               the buttons it pushed this row past a phone viewport. */}
           <div
@@ -379,13 +447,26 @@ export default async function CustomerProjectDetailPage({
               flexWrap: 'wrap',
             }}
           >
-            <BuildSwitcher basePath={detailPath} builds={project.builds} activeBuildId={activeBuildId} />
+            <BuildSwitcher
+              basePath={detailPath}
+              builds={project.builds}
+              activeBuildId={activeBuildId}
+            />
             {capabilities.canUpdate ? (
               <>
-                <Button href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=rename-build`} variant="ghost" size="sm">
+                <Button
+                  href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=rename-build`}
+                  variant="primary"
+                  size="sm"
+                >
                   Rename
                 </Button>
-                <Button href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=new-build`} variant="secondary" size="sm" iconLeft="plus">
+                <Button
+                  href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=new-build`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="plus"
+                >
                   New build
                 </Button>
               </>
@@ -396,19 +477,36 @@ export default async function CustomerProjectDetailPage({
       aside={
         section === 'overview' ? (
           <>
-            <Panel title="Status" description={`Now ${titleCase(project.status).toLowerCase()}. Only legal moves are listed.`}>
+            <Panel
+              title="Status"
+              description={`Now ${titleCase(project.status).toLowerCase()}. Only legal moves are listed.`}
+            >
               {!capabilities.canChangeStatus ? (
                 <Muted>You can read this project but not move it.</Muted>
               ) : transitions.length === 0 ? (
-                <Muted>A cancelled project is closed for good. Raise a new one to run this scope again.</Muted>
+                <Muted>
+                  A cancelled project is closed for good. Raise a new one to run this scope again.
+                </Muted>
               ) : (
                 <form action={changeProjectStatus} style={stackStyle}>
                   <input type="hidden" name="id" value={project.id} />
                   <Field label="Move to" htmlFor="status-next">
-                    <Select id="status-next" name="status" required defaultValue={transitions[0]} options={transitions.map((value) => ({ value, label: titleCase(value) }))} />
+                    <Select
+                      id="status-next"
+                      name="status"
+                      required
+                      defaultValue={transitions[0]}
+                      options={transitions.map((value) => ({ value, label: titleCase(value) }))}
+                    />
                   </Field>
                   <Field label="Note" htmlFor="status-note" hint="Recorded on the audit trail.">
-                    <Textarea id="status-note" name="note" rows={3} placeholder="Why is it moving?" maxLength={1000} />
+                    <Textarea
+                      id="status-note"
+                      name="note"
+                      rows={3}
+                      placeholder="Why is it moving?"
+                      maxLength={1000}
+                    />
                   </Field>
                   <SubmitButton variant="primary" fullWidth pendingLabel="Changing status…">
                     Change status
@@ -417,15 +515,34 @@ export default async function CustomerProjectDetailPage({
               )}
             </Panel>
 
-            <Panel title="Priority and progress" description="Progress is the figure your delivery team reports, not a computed one.">
+            <Panel
+              title="Priority and progress"
+              description="Progress is the figure your delivery team reports, not a computed one."
+            >
               {capabilities.canUpdate ? (
                 <form action={updateProjectDelivery} style={stackStyle}>
                   <input type="hidden" name="id" value={project.id} />
                   <Field label="Priority" htmlFor="priority">
-                    <Select id="priority" name="priority" defaultValue={priority} options={PROJECT_PRIORITIES.map((value) => ({ value, label: titleCase(value) }))} />
+                    <Select
+                      id="priority"
+                      name="priority"
+                      defaultValue={priority}
+                      options={PROJECT_PRIORITIES.map((value) => ({
+                        value,
+                        label: titleCase(value),
+                      }))}
+                    />
                   </Field>
                   <Field label="Progress" htmlFor="progress" hint="A whole percentage, 0 to 100.">
-                    <Input id="progress" name="progressPercent" type="number" min={0} max={100} step={1} defaultValue={project.progressPercent} />
+                    <Input
+                      id="progress"
+                      name="progressPercent"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      defaultValue={project.progressPercent}
+                    />
                   </Field>
                   <ProgressBar percent={project.progressPercent} />
                   <SubmitButton variant="secondary" fullWidth pendingLabel="Saving…">
@@ -459,53 +576,115 @@ export default async function CustomerProjectDetailPage({
           <Panel
             title="Overview"
             description="What you asked for and where it stands."
-            actions={capabilities.canUpdate ? <Button href={`${detailPath}?section=${section}&edit=brief`} variant="secondary" size="sm">Edit</Button> : undefined}
+            actions={
+              capabilities.canUpdate ? (
+                <Button
+                  href={`${detailPath}?section=${section}&edit=brief`}
+                  variant="primary"
+                  size="sm"
+                >
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
             <DescriptionList items={overview} />
           </Panel>
 
-          <Panel title="Project summary" description="Real-time metrics across every build on this project — testers, bugs and test cases.">
+          <Panel
+            title="Project summary"
+            description="Real-time metrics across every build on this project — testers, bugs and test cases."
+          >
             {!projectReport ? (
               <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                    gap: 'var(--space-4)',
+                  }}
+                >
                   {[
                     { label: 'Testers', value: projectReport.testerCount },
                     { label: 'Bugs', value: projectReport.bugs.total },
                     { label: 'Test cases', value: projectReport.testCaseCount },
                     { label: 'Builds', value: project.builds.length },
                   ].map((kpi) => (
-                    <div key={kpi.label} style={{ padding: 'var(--space-5)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-card)', background: 'var(--surface-raised)' }}>
-                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>{kpi.label}</p>
-                      <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--type-display-sm-size)', fontWeight: 'var(--fw-semibold)', fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</p>
+                    <div
+                      key={kpi.label}
+                      style={{
+                        padding: 'var(--space-5)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-card)',
+                        background: 'var(--surface-raised)',
+                      }}
+                    >
+                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
+                        {kpi.label}
+                      </p>
+                      <p
+                        style={{
+                          margin: 'var(--space-2) 0 0',
+                          fontSize: 'var(--type-display-sm-size)',
+                          fontWeight: 'var(--fw-semibold)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {kpi.value}
+                      </p>
                     </div>
                   ))}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-6)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                    gap: 'var(--space-6)',
+                  }}
+                >
                   <DonutChart
                     title="Bugs by severity"
                     href={`/app/customer/bugs?projectId=${project.id}`}
                     centerLabel={String(projectReport.bugs.total)}
-                    segments={Object.entries(projectReport.bugs.bySeverity).map(([label, value]) => ({ label: titleCase(label), value, tone: severityTone(label) }))}
+                    segments={Object.entries(projectReport.bugs.bySeverity).map(
+                      ([label, value]) => ({
+                        label: titleCase(label),
+                        value,
+                        tone: severityTone(label),
+                      }),
+                    )}
                   />
                   <DonutChart
                     title="Bugs by type"
                     href={`/app/customer/bugs?projectId=${project.id}`}
-                    centerLabel={String(Object.values(projectReport.bugs.byType).reduce((a, b) => a + b, 0))}
-                    segments={Object.entries(projectReport.bugs.byType).map(([label, value]) => ({ label: titleCase(label), value, tone: bugTypeTone(label) }))}
+                    centerLabel={String(
+                      Object.values(projectReport.bugs.byType).reduce((a, b) => a + b, 0),
+                    )}
+                    segments={Object.entries(projectReport.bugs.byType).map(([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone: bugTypeTone(label),
+                    }))}
                   />
                 </div>
 
                 <BarChart
                   title="Bugs by status"
                   href={`/app/customer/bugs?projectId=${project.id}`}
-                  segments={Object.entries(projectReport.bugs.byStatus).map(([label, value]) => ({ label: titleCase(label), value, tone: statusTone(label) }))}
+                  segments={Object.entries(projectReport.bugs.byStatus).map(([label, value]) => ({
+                    label: titleCase(label),
+                    value,
+                    tone: statusTone(label),
+                  }))}
                 />
                 <BarChart
                   title="Testers by country"
-                  segments={Object.entries(projectReport.testersByCountry).map(([label, value]) => ({ label, value, tone: 'info' as const }))}
+                  segments={Object.entries(projectReport.testersByCountry).map(
+                    ([label, value]) => ({ label, value, tone: 'info' as const }),
+                  )}
                 />
               </div>
             )}
@@ -516,32 +695,104 @@ export default async function CustomerProjectDetailPage({
               <TrackedForm action={updateProjectBrief} style={stackStyle}>
                 <input type="hidden" name="id" value={project.id} />
                 <Field label="Title" htmlFor="title" required>
-                  <Input id="title" name="title" required minLength={3} maxLength={200} defaultValue={project.title} />
+                  <Input
+                    id="title"
+                    name="title"
+                    required
+                    minLength={3}
+                    maxLength={200}
+                    defaultValue={project.title}
+                  />
                 </Field>
                 <Field label="Summary" htmlFor="summary" hint="One or two sentences on the scope.">
-                  <Textarea id="summary" name="summary" rows={3} maxLength={2000} defaultValue={project.summary ?? ''} />
+                  <Textarea
+                    id="summary"
+                    name="summary"
+                    rows={3}
+                    maxLength={2000}
+                    defaultValue={project.summary ?? ''}
+                  />
                 </Field>
-                <Field label="Testing instructions" htmlFor="instructions" hint="What a tester needs to follow. Only visible to accepted testers.">
-                  <Textarea id="instructions" name="instructions" rows={10} maxLength={20000} defaultValue={project.instructions ?? ''} />
+                <Field
+                  label="Testing instructions"
+                  htmlFor="instructions"
+                  hint="What a tester needs to follow. Only visible to accepted testers."
+                >
+                  <Textarea
+                    id="instructions"
+                    name="instructions"
+                    rows={10}
+                    maxLength={20000}
+                    defaultValue={project.instructions ?? ''}
+                  />
                 </Field>
                 <div style={fieldGridStyle}>
-                  <Field label="Platform targets" htmlFor="platformTargets" hint="Comma separated, for example: Android, iOS, Web.">
-                    <Input id="platformTargets" name="platformTargets" defaultValue={project.platformTargets.join(', ')} />
+                  <Field
+                    label="Platform targets"
+                    htmlFor="platformTargets"
+                    hint="Comma separated, for example: Android, iOS, Web."
+                  >
+                    <Input
+                      id="platformTargets"
+                      name="platformTargets"
+                      defaultValue={project.platformTargets.join(', ')}
+                    />
                   </Field>
-                  <Field label="Target countries" htmlFor="targetCountries" hint="Two-letter ISO codes, comma separated: IN, GB, US.">
-                    <Input id="targetCountries" name="targetCountries" defaultValue={project.targetCountries.join(', ')} />
+                  <Field
+                    label="Target countries"
+                    htmlFor="targetCountries"
+                    hint="Two-letter ISO codes, comma separated: IN, GB, US."
+                  >
+                    <Input
+                      id="targetCountries"
+                      name="targetCountries"
+                      defaultValue={project.targetCountries.join(', ')}
+                    />
                   </Field>
-                  <Field label="Target languages" htmlFor="targetLanguages" hint="Two-letter ISO codes, comma separated: en, hi, ta.">
-                    <Input id="targetLanguages" name="targetLanguages" defaultValue={project.targetLanguages.join(', ')} />
+                  <Field
+                    label="Target languages"
+                    htmlFor="targetLanguages"
+                    hint="Two-letter ISO codes, comma separated: en, hi, ta."
+                  >
+                    <Input
+                      id="targetLanguages"
+                      name="targetLanguages"
+                      defaultValue={project.targetLanguages.join(', ')}
+                    />
                   </Field>
                   <Field label="Start date" htmlFor="startDate">
-                    <Input id="startDate" name="startDate" type="date" defaultValue={toDateInput(project.startDate)} />
+                    <Input
+                      id="startDate"
+                      name="startDate"
+                      type="date"
+                      defaultValue={toDateInput(project.startDate)}
+                    />
                   </Field>
-                  <Field label="End date" htmlFor="endDate" hint="Must not fall before the start date.">
-                    <Input id="endDate" name="endDate" type="date" defaultValue={toDateInput(project.endDate)} />
+                  <Field
+                    label="End date"
+                    htmlFor="endDate"
+                    hint="Must not fall before the start date."
+                  >
+                    <Input
+                      id="endDate"
+                      name="endDate"
+                      type="date"
+                      defaultValue={toDateInput(project.endDate)}
+                    />
                   </Field>
-                  <Field label="Maximum testers" htmlFor="maxTesters" hint="Leave blank for no cap.">
-                    <Input id="maxTesters" name="maxTesters" type="number" min={1} max={10000} defaultValue={project.maxTesters ?? ''} />
+                  <Field
+                    label="Maximum testers"
+                    htmlFor="maxTesters"
+                    hint="Leave blank for no cap."
+                  >
+                    <Input
+                      id="maxTesters"
+                      name="maxTesters"
+                      type="number"
+                      min={1}
+                      max={10000}
+                      defaultValue={project.maxTesters ?? ''}
+                    />
                   </Field>
                 </div>
                 <Checkbox
@@ -552,7 +803,9 @@ export default async function CustomerProjectDetailPage({
                   description="Off by default. When on, any tester with an accepted assignment on this project can read every bug logged against it, not just their own reports."
                 />
                 <div>
-                  <SubmitButton variant="primary" pendingLabel="Saving…">Save the brief</SubmitButton>
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
+                    Save the brief
+                  </SubmitButton>
                 </div>
               </TrackedForm>
             </Modal>
@@ -565,7 +818,17 @@ export default async function CustomerProjectDetailPage({
           <Panel
             title={`Build details — ${activeBuild?.name ?? 'this build'}`}
             description="Everything specific to this test cycle. Switch builds above to see another cycle's own details."
-            actions={capabilities.canUpdate ? <Button href={`${detailPath}?section=build&buildId=${activeBuildId}&edit=build-details`} variant="secondary" size="sm">Edit</Button> : undefined}
+            actions={
+              capabilities.canUpdate ? (
+                <Button
+                  href={`${detailPath}?section=build&buildId=${activeBuildId}&edit=build-details`}
+                  variant="primary"
+                  size="sm"
+                >
+                  Edit
+                </Button>
+              ) : undefined
+            }
           >
             {!buildDetail ? (
               <Muted>Build details could not be loaded. Refresh in a moment.</Muted>
@@ -574,30 +837,100 @@ export default async function CustomerProjectDetailPage({
                 items={[
                   { label: 'Status', value: <StatusBadge status={buildDetail.status} /> },
                   { label: 'Test type', value: buildDetail.testType ?? '—' },
-                  { label: 'Window', value: `${formatDate(buildDetail.startDate)} to ${formatDate(buildDetail.endDate)}` },
-                  { label: 'Maximum testers', value: buildDetail.maxTesters ? String(buildDetail.maxTesters) : 'No cap' },
+                  {
+                    label: 'Window',
+                    value: `${formatDate(buildDetail.startDate)} to ${formatDate(buildDetail.endDate)}`,
+                  },
+                  {
+                    label: 'Maximum testers',
+                    value: buildDetail.maxTesters ? String(buildDetail.maxTesters) : 'No cap',
+                  },
                   {
                     label: 'Testers can see others’ bugs',
-                    value: buildDetail.testersCanSeeOtherBugs === null ? 'Inherits from the project' : buildDetail.testersCanSeeOtherBugs ? 'Yes' : 'No',
+                    value:
+                      buildDetail.testersCanSeeOtherBugs === null
+                        ? 'Inherits from the project'
+                        : buildDetail.testersCanSeeOtherBugs
+                          ? 'Yes'
+                          : 'No',
                   },
                   {
                     label: 'Application / website URL',
                     value: buildDetail.appUrl ? (
-                      <a href={buildDetail.appUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--text-brand)', textDecoration: 'underline', textUnderlineOffset: 3 }}>
+                      <a
+                        href={buildDetail.appUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          color: 'var(--text-brand)',
+                          textDecoration: 'underline',
+                          textUnderlineOffset: 3,
+                        }}
+                      >
                         {buildDetail.appUrl}
                       </a>
-                    ) : '—',
+                    ) : (
+                      '—'
+                    ),
                   },
-                  { label: 'Test document', value: buildDetail.testDocument ? buildDetail.testDocument.originalName : '—' },
-                  { label: 'Target countries', value: <TokenList values={buildDetail.targetCountries} /> },
-                  { label: 'Target languages', value: <TokenList values={buildDetail.targetLanguages} uppercase={false} /> },
-                  { label: 'Target devices', value: <TokenList values={buildDetail.targetDevices} uppercase={false} /> },
-                  { label: 'Target browsers', value: <TokenList values={buildDetail.targetBrowsers} uppercase={false} /> },
-                  { label: 'Target operating systems', value: <TokenList values={buildDetail.targetOperatingSystems} uppercase={false} /> },
-                  { label: 'Features', wide: true, value: buildDetail.description ? <Prose>{buildDetail.description}</Prose> : '' },
-                  { label: 'Testing instructions', wide: true, value: buildDetail.instructions ? <Prose>{buildDetail.instructions}</Prose> : '' },
-                  { label: 'Special requirements', wide: true, value: buildDetail.specialRequirements ? <Prose>{buildDetail.specialRequirements}</Prose> : '' },
-                  { label: 'Release notes', wide: true, value: buildDetail.releaseNotes ? <Prose>{buildDetail.releaseNotes}</Prose> : '' },
+                  {
+                    label: 'Test document',
+                    value: buildDetail.testDocument ? buildDetail.testDocument.originalName : '—',
+                  },
+                  {
+                    label: 'Target countries',
+                    value: <TokenList values={buildDetail.targetCountries} />,
+                  },
+                  {
+                    label: 'Target languages',
+                    value: <TokenList values={buildDetail.targetLanguages} uppercase={false} />,
+                  },
+                  {
+                    label: 'Target devices',
+                    value: <TokenList values={buildDetail.targetDevices} uppercase={false} />,
+                  },
+                  {
+                    label: 'Target browsers',
+                    value: <TokenList values={buildDetail.targetBrowsers} uppercase={false} />,
+                  },
+                  {
+                    label: 'Target operating systems',
+                    value: (
+                      <TokenList values={buildDetail.targetOperatingSystems} uppercase={false} />
+                    ),
+                  },
+                  {
+                    label: 'Features',
+                    wide: true,
+                    value: buildDetail.description ? <Prose>{buildDetail.description}</Prose> : '',
+                  },
+                  {
+                    label: 'Testing instructions',
+                    wide: true,
+                    value: buildDetail.instructions ? (
+                      <Prose>{buildDetail.instructions}</Prose>
+                    ) : (
+                      ''
+                    ),
+                  },
+                  {
+                    label: 'Special requirements',
+                    wide: true,
+                    value: buildDetail.specialRequirements ? (
+                      <Prose>{buildDetail.specialRequirements}</Prose>
+                    ) : (
+                      ''
+                    ),
+                  },
+                  {
+                    label: 'Release notes',
+                    wide: true,
+                    value: buildDetail.releaseNotes ? (
+                      <Prose>{buildDetail.releaseNotes}</Prose>
+                    ) : (
+                      ''
+                    ),
+                  },
                 ]}
               />
             )}
@@ -608,44 +941,116 @@ export default async function CustomerProjectDetailPage({
               <form action={copyBuild}>
                 <input type="hidden" name="id" value={project.id} />
                 <input type="hidden" name="buildId" value={activeBuildId} />
-                <SubmitButton variant="secondary" iconLeft="repeat" pendingLabel="Copying…">Copy this build</SubmitButton>
+                <SubmitButton variant="secondary" iconLeft="repeat" pendingLabel="Copying…">
+                  Copy this build
+                </SubmitButton>
               </form>
             </div>
           ) : null}
 
-          <Panel title="Summary" description="Real-time metrics for this build — testers, bugs and test-case execution.">
+          <Panel
+            title="Summary"
+            description="Real-time metrics for this build — testers, bugs and test-case execution."
+          >
             {!buildSummaryData ? (
               <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                    gap: 'var(--space-4)',
+                  }}
+                >
                   {[
                     { label: 'Testers', value: buildSummaryData.testerCount },
                     { label: 'Bugs', value: buildSummaryData.bugCount },
                     { label: 'Test cases', value: buildSummaryData.testCaseCount },
-                    { label: 'Test completion', value: buildSummaryData.testCaseCompletion === null ? '—' : `${buildSummaryData.testCaseCompletion}%` },
+                    {
+                      label: 'Test completion',
+                      value:
+                        buildSummaryData.testCaseCompletion === null
+                          ? '—'
+                          : `${buildSummaryData.testCaseCompletion}%`,
+                    },
                   ].map((kpi) => (
-                    <div key={kpi.label} style={{ padding: 'var(--space-5)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-card)', background: 'var(--surface-raised)' }}>
-                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>{kpi.label}</p>
-                      <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--type-display-sm-size)', fontWeight: 'var(--fw-semibold)', fontVariantNumeric: 'tabular-nums' }}>{kpi.value}</p>
+                    <div
+                      key={kpi.label}
+                      style={{
+                        padding: 'var(--space-5)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-card)',
+                        background: 'var(--surface-raised)',
+                      }}
+                    >
+                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
+                        {kpi.label}
+                      </p>
+                      <p
+                        style={{
+                          margin: 'var(--space-2) 0 0',
+                          fontSize: 'var(--type-display-sm-size)',
+                          fontWeight: 'var(--fw-semibold)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {kpi.value}
+                      </p>
                     </div>
                   ))}
                 </div>
-                <BarChart title="Bugs by severity" segments={Object.entries(buildSummaryData.bugsBySeverity).map(([label, value]) => ({ label: titleCase(label), value, tone: severityTone(label) }))} />
-                <BarChart title="Bugs by status" segments={Object.entries(buildSummaryData.bugsByStatus).map(([label, value]) => ({ label: titleCase(label), value, tone: statusTone(label) }))} />
-                <DonutChart
-                  title="Test reports by result"
-                  centerLabel={String(Object.values(buildSummaryData.testReportsByResult).reduce((a, b) => a + b, 0))}
-                  segments={Object.entries(buildSummaryData.testReportsByResult).map(([label, value]) => ({
+                <BarChart
+                  title="Bugs by severity"
+                  segments={Object.entries(buildSummaryData.bugsBySeverity).map(
+                    ([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone: severityTone(label),
+                    }),
+                  )}
+                />
+                <BarChart
+                  title="Bugs by status"
+                  segments={Object.entries(buildSummaryData.bugsByStatus).map(([label, value]) => ({
                     label: titleCase(label),
                     value,
-                    tone: label === 'PASS' ? 'success' : label === 'FAIL' ? 'error' : label === 'BLOCKED' ? 'warning' : 'neutral',
+                    tone: statusTone(label),
                   }))}
                 />
+                <DonutChart
+                  title="Test reports by result"
+                  centerLabel={String(
+                    Object.values(buildSummaryData.testReportsByResult).reduce((a, b) => a + b, 0),
+                  )}
+                  segments={Object.entries(buildSummaryData.testReportsByResult).map(
+                    ([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone:
+                        label === 'PASS'
+                          ? 'success'
+                          : label === 'FAIL'
+                            ? 'error'
+                            : label === 'BLOCKED'
+                              ? 'warning'
+                              : 'neutral',
+                    }),
+                  )}
+                />
                 {buildSummaryData.reviewCount > 0 ? (
-                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-                    {buildSummaryData.reviewCount} review{buildSummaryData.reviewCount === 1 ? '' : 's'}
-                    {buildSummaryData.averageRating !== null ? ` · average rating ${buildSummaryData.averageRating.toFixed(1)} / 5` : ''}
+                  <p
+                    style={{
+                      margin: 0,
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
+                    {buildSummaryData.reviewCount} review
+                    {buildSummaryData.reviewCount === 1 ? '' : 's'}
+                    {buildSummaryData.averageRating !== null
+                      ? ` · average rating ${buildSummaryData.averageRating.toFixed(1)} / 5`
+                      : ''}
                   </p>
                 ) : null}
               </div>
@@ -664,52 +1069,145 @@ export default async function CustomerProjectDetailPage({
             </Field>
             <div style={fieldGridStyle}>
               <Field label="Status" htmlFor="build-status">
-                <Select id="build-status" name="status" defaultValue={buildDetail.status} options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))} />
+                <Select
+                  id="build-status"
+                  name="status"
+                  defaultValue={buildDetail.status}
+                  options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))}
+                />
               </Field>
-              <Field label="Test type" htmlFor="build-testType" hint="Exploratory, regression, smoke, load...">
-                <Input id="build-testType" name="testType" maxLength={120} defaultValue={buildDetail.testType ?? ''} />
+              <Field
+                label="Test type"
+                htmlFor="build-testType"
+                hint="Exploratory, regression, smoke, load..."
+              >
+                <Input
+                  id="build-testType"
+                  name="testType"
+                  maxLength={120}
+                  defaultValue={buildDetail.testType ?? ''}
+                />
               </Field>
               <Field label="Start date" htmlFor="build-startDate">
-                <Input id="build-startDate" name="startDate" type="date" defaultValue={toDateInput(buildDetail.startDate)} />
+                <Input
+                  id="build-startDate"
+                  name="startDate"
+                  type="date"
+                  defaultValue={toDateInput(buildDetail.startDate)}
+                />
               </Field>
               <Field label="End date" htmlFor="build-endDate">
-                <Input id="build-endDate" name="endDate" type="date" defaultValue={toDateInput(buildDetail.endDate)} />
+                <Input
+                  id="build-endDate"
+                  name="endDate"
+                  type="date"
+                  defaultValue={toDateInput(buildDetail.endDate)}
+                />
               </Field>
-              <Field label="Maximum testers" htmlFor="build-maxTesters" hint="Leave blank for no cap.">
-                <Input id="build-maxTesters" name="maxTesters" type="number" min={1} max={10000} defaultValue={buildDetail.maxTesters ?? ''} />
+              <Field
+                label="Maximum testers"
+                htmlFor="build-maxTesters"
+                hint="Leave blank for no cap."
+              >
+                <Input
+                  id="build-maxTesters"
+                  name="maxTesters"
+                  type="number"
+                  min={1}
+                  max={10000}
+                  defaultValue={buildDetail.maxTesters ?? ''}
+                />
               </Field>
               <Field label="Application / website URL" htmlFor="build-appUrl">
-                <Input id="build-appUrl" name="appUrl" type="url" maxLength={2000} defaultValue={buildDetail.appUrl ?? ''} />
+                <Input
+                  id="build-appUrl"
+                  name="appUrl"
+                  type="url"
+                  maxLength={2000}
+                  defaultValue={buildDetail.appUrl ?? ''}
+                />
               </Field>
             </div>
             <div style={fieldGridStyle}>
-              <Field label="Target countries" htmlFor="build-targetCountries" hint="Comma separated: IN, GB, US.">
-                <Input id="build-targetCountries" name="targetCountries" defaultValue={buildDetail.targetCountries.join(', ')} />
+              <Field
+                label="Target countries"
+                htmlFor="build-targetCountries"
+                hint="Comma separated: IN, GB, US."
+              >
+                <Input
+                  id="build-targetCountries"
+                  name="targetCountries"
+                  defaultValue={buildDetail.targetCountries.join(', ')}
+                />
               </Field>
-              <Field label="Target languages" htmlFor="build-targetLanguages" hint="Comma separated: en, hi, ta.">
-                <Input id="build-targetLanguages" name="targetLanguages" defaultValue={buildDetail.targetLanguages.join(', ')} />
+              <Field
+                label="Target languages"
+                htmlFor="build-targetLanguages"
+                hint="Comma separated: en, hi, ta."
+              >
+                <Input
+                  id="build-targetLanguages"
+                  name="targetLanguages"
+                  defaultValue={buildDetail.targetLanguages.join(', ')}
+                />
               </Field>
               <Field label="Target devices" htmlFor="build-targetDevices" hint="Comma separated.">
-                <Input id="build-targetDevices" name="targetDevices" defaultValue={buildDetail.targetDevices.join(', ')} />
+                <Input
+                  id="build-targetDevices"
+                  name="targetDevices"
+                  defaultValue={buildDetail.targetDevices.join(', ')}
+                />
               </Field>
               <Field label="Target browsers" htmlFor="build-targetBrowsers" hint="Comma separated.">
-                <Input id="build-targetBrowsers" name="targetBrowsers" defaultValue={buildDetail.targetBrowsers.join(', ')} />
+                <Input
+                  id="build-targetBrowsers"
+                  name="targetBrowsers"
+                  defaultValue={buildDetail.targetBrowsers.join(', ')}
+                />
               </Field>
-              <Field label="Target operating systems" htmlFor="build-targetOperatingSystems" hint="Comma separated.">
-                <Input id="build-targetOperatingSystems" name="targetOperatingSystems" defaultValue={buildDetail.targetOperatingSystems.join(', ')} />
+              <Field
+                label="Target operating systems"
+                htmlFor="build-targetOperatingSystems"
+                hint="Comma separated."
+              >
+                <Input
+                  id="build-targetOperatingSystems"
+                  name="targetOperatingSystems"
+                  defaultValue={buildDetail.targetOperatingSystems.join(', ')}
+                />
               </Field>
             </div>
             <Field label="Features / scope" htmlFor="build-description">
-              <Textarea id="build-description" name="description" rows={3} defaultValue={buildDetail.description ?? ''} />
+              <Textarea
+                id="build-description"
+                name="description"
+                rows={3}
+                defaultValue={buildDetail.description ?? ''}
+              />
             </Field>
             <Field label="Testing instructions" htmlFor="build-instructions">
-              <Textarea id="build-instructions" name="instructions" rows={6} defaultValue={buildDetail.instructions ?? ''} />
+              <Textarea
+                id="build-instructions"
+                name="instructions"
+                rows={6}
+                defaultValue={buildDetail.instructions ?? ''}
+              />
             </Field>
             <Field label="Special requirements" htmlFor="build-specialRequirements">
-              <Textarea id="build-specialRequirements" name="specialRequirements" rows={3} defaultValue={buildDetail.specialRequirements ?? ''} />
+              <Textarea
+                id="build-specialRequirements"
+                name="specialRequirements"
+                rows={3}
+                defaultValue={buildDetail.specialRequirements ?? ''}
+              />
             </Field>
             <Field label="Release notes" htmlFor="build-releaseNotes">
-              <Textarea id="build-releaseNotes" name="releaseNotes" rows={3} defaultValue={buildDetail.releaseNotes ?? ''} />
+              <Textarea
+                id="build-releaseNotes"
+                name="releaseNotes"
+                rows={3}
+                defaultValue={buildDetail.releaseNotes ?? ''}
+              />
             </Field>
             <Checkbox
               name="testersCanSeeOtherBugs"
@@ -718,7 +1216,9 @@ export default async function CustomerProjectDetailPage({
               description="Overrides the project's own setting for this build only."
             />
             <div>
-              <SubmitButton variant="primary" pendingLabel="Saving…">Save build details</SubmitButton>
+              <SubmitButton variant="primary" pendingLabel="Saving…">
+                Save build details
+              </SubmitButton>
             </div>
           </TrackedForm>
         </Modal>
@@ -726,7 +1226,10 @@ export default async function CustomerProjectDetailPage({
 
       {section === 'materials' ? (
         <>
-          <Panel title="Materials" description="Builds, credentials and reference documents an accepted tester can open.">
+          <Panel
+            title="Materials"
+            description="Builds, credentials and reference documents an accepted tester can open."
+          >
             {!capabilities.canReadBrief ? (
               <Muted>The brief and its materials are not visible to you on this project.</Muted>
             ) : project.materials.length === 0 ? (
@@ -735,7 +1238,9 @@ export default async function CustomerProjectDetailPage({
               <ul style={listResetStyle}>
                 {project.materials.map((material) => (
                   <li key={material.id} style={rowStyle}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                    <div
+                      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+                    >
                       <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{material.title}</span>
                       {material.description ? <Caption>{material.description}</Caption> : null}
                       <MaterialTarget material={material} />
@@ -757,26 +1262,56 @@ export default async function CustomerProjectDetailPage({
           </Panel>
 
           {capabilities.canManageMaterials ? (
-            <Panel title="Attach a material" description="Give it a title and either a link or the id of a file already uploaded.">
+            <Panel
+              title="Attach a material"
+              description="Give it a title and either a link or the id of a file already uploaded."
+            >
               <form action={addMaterial} style={stackStyle}>
                 <input type="hidden" name="id" value={project.id} />
                 <input type="hidden" name="buildId" value={activeBuildId} />
                 <div style={fieldGridStyle}>
                   <Field label="Title" htmlFor="material-title" required>
-                    <Input id="material-title" name="title" required maxLength={200} placeholder="Android build 4.2.1" />
+                    <Input
+                      id="material-title"
+                      name="title"
+                      required
+                      maxLength={200}
+                      placeholder="Android build 4.2.1"
+                    />
                   </Field>
                   <Field label="Link" htmlFor="material-url" hint="A full https:// URL.">
-                    <Input id="material-url" name="url" type="url" maxLength={2000} placeholder="https://builds.example.com/4.2.1.apk" />
+                    <Input
+                      id="material-url"
+                      name="url"
+                      type="url"
+                      maxLength={2000}
+                      placeholder="https://builds.example.com/4.2.1.apk"
+                    />
                   </Field>
-                  <Field label="Uploaded file id" htmlFor="material-file" hint="Use instead of a link when the file came through the uploads endpoint.">
+                  <Field
+                    label="Uploaded file id"
+                    htmlFor="material-file"
+                    hint="Use instead of a link when the file came through the uploads endpoint."
+                  >
                     <Input id="material-file" name="fileId" placeholder="cl…" />
                   </Field>
                 </div>
-                <Field label="Description" htmlFor="material-description" hint="What it is and what to do with it.">
-                  <Textarea id="material-description" name="description" rows={3} maxLength={2000} />
+                <Field
+                  label="Description"
+                  htmlFor="material-description"
+                  hint="What it is and what to do with it."
+                >
+                  <Textarea
+                    id="material-description"
+                    name="description"
+                    rows={3}
+                    maxLength={2000}
+                  />
                 </Field>
                 <div>
-                  <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Attaching…">Attach material</SubmitButton>
+                  <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Attaching…">
+                    Attach material
+                  </SubmitButton>
                 </div>
               </form>
             </Panel>
@@ -785,7 +1320,10 @@ export default async function CustomerProjectDetailPage({
       ) : null}
 
       {section === 'features' ? (
-        <Panel title="Features" description="The tags a bug can be filed against. Delete one and any bug already carrying it just loses the tag — the report stays.">
+        <Panel
+          title="Features"
+          description="The tags a bug can be filed against. Delete one and any bug already carrying it just loses the tag — the report stays."
+        >
           {!features ? (
             <Muted>Features could not be read.</Muted>
           ) : features.length === 0 ? (
@@ -796,7 +1334,9 @@ export default async function CustomerProjectDetailPage({
                 <li key={feature.id} style={rowStyle}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
                     <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{feature.name}</span>
-                    <Caption>{feature._count.bugs} bug{feature._count.bugs === 1 ? '' : 's'}</Caption>
+                    <Caption>
+                      {feature._count.bugs} bug{feature._count.bugs === 1 ? '' : 's'}
+                    </Caption>
                   </div>
                   {capabilities.canManageMaterials ? (
                     <form action={removeFeature}>
@@ -804,9 +1344,11 @@ export default async function CustomerProjectDetailPage({
                       <input type="hidden" name="featureId" value={feature.id} />
                       <ConfirmSubmit
                         iconLeft="x"
-                        question={`Remove ${feature.name}?${feature._count.bugs > 0
-                          ? ` ${feature._count.bugs} bug${feature._count.bugs === 1 ? '' : 's'} will be left without a feature.`
-                          : ''}`}
+                        question={`Remove ${feature.name}?${
+                          feature._count.bugs > 0
+                            ? ` ${feature._count.bugs} bug${feature._count.bugs === 1 ? '' : 's'} will be left without a feature.`
+                            : ''
+                        }`}
                       >
                         Remove
                       </ConfirmSubmit>
@@ -817,11 +1359,16 @@ export default async function CustomerProjectDetailPage({
             </ul>
           )}
           {capabilities.canManageMaterials ? (
-            <form action={addFeature} style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-5)' }}>
+            <form
+              action={addFeature}
+              style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-5)' }}
+            >
               <input type="hidden" name="id" value={project.id} />
               <input type="hidden" name="buildId" value={activeBuildId} />
               <Input name="name" required maxLength={120} placeholder="Checkout" />
-              <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">Add feature</SubmitButton>
+              <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+                Add feature
+              </SubmitButton>
             </form>
           ) : null}
         </Panel>
@@ -938,10 +1485,7 @@ export default async function CustomerProjectDetailPage({
           platform, so there is no compose form here — see the note in the
           page docblock. */}
       {section === 'announcements' ? (
-        <Panel
-          title="Announcements"
-          description="Notices posted to the testers on this project."
-        >
+        <Panel title="Announcements" description="Notices posted to the testers on this project.">
           {announcements === null ? (
             <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
               Announcements could not be loaded. Refresh in a moment.
@@ -953,7 +1497,16 @@ export default async function CustomerProjectDetailPage({
               description="Announcements for this project and build will appear here. Ask your Crowd4Test contact to post one."
             />
           ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <ul
+              style={{
+                listStyle: 'none',
+                margin: 0,
+                padding: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-4)',
+              }}
+            >
               {announcements.map((row) => (
                 <li
                   key={row.id}
@@ -966,12 +1519,30 @@ export default async function CustomerProjectDetailPage({
                     borderRadius: 'var(--radius-card)',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-                    <h3 style={{ margin: 0, fontSize: 'var(--type-body-md-size)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: 'var(--space-3)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <h3
+                      style={{
+                        margin: 0,
+                        fontSize: 'var(--type-body-md-size)',
+                        fontWeight: 'var(--fw-semibold)',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
                       {row.title}
                     </h3>
                     {/* Which scope a notice has changes who acted on it. */}
-                    <Badge tone={row.buildId ? 'warning' : row.projectId ? 'info' : 'neutral'} uppercase={false}>
+                    <Badge
+                      tone={row.buildId ? 'warning' : row.projectId ? 'info' : 'neutral'}
+                      uppercase={false}
+                    >
                       {row.buildId
                         ? (row.build?.name ?? 'This build')
                         : row.projectId
@@ -979,8 +1550,12 @@ export default async function CustomerProjectDetailPage({
                           : titleCase(row.audience)}
                     </Badge>
                   </div>
-                  <p style={{ margin: 0, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{row.body}</p>
-                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
+                    {row.body}
+                  </p>
+                  <span
+                    style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
+                  >
                     {formatDate(row.publishedAt)}
                   </span>
                 </li>
@@ -1003,9 +1578,13 @@ export default async function CustomerProjectDetailPage({
                   {
                     label: 'Currently',
                     value: buildDetail?.bugCustomizationEnabled ? (
-                      <Badge tone="success" uppercase={false}>On</Badge>
+                      <Badge tone="success" uppercase={false}>
+                        On
+                      </Badge>
                     ) : (
-                      <Badge tone="neutral" uppercase={false}>Off</Badge>
+                      <Badge tone="neutral" uppercase={false}>
+                        Off
+                      </Badge>
                     ),
                   },
                   {
@@ -1015,13 +1594,23 @@ export default async function CustomerProjectDetailPage({
                 ]}
               />
 
-              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)', maxWidth: '70ch' }}>
+              <p
+                style={{
+                  margin: 0,
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--type-body-sm-size)',
+                  maxWidth: '70ch',
+                }}
+              >
                 Turning this off hides the extra questions from the tester form without deleting
                 them, or the answers already given.
               </p>
 
               {capabilities.canManageMaterials ? (
-                <form action={setBugCustomization} style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                <form
+                  action={setBugCustomization}
+                  style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}
+                >
                   <input type="hidden" name="id" value={project.id} />
                   <input type="hidden" name="buildId" value={activeBuildId} />
                   <input
@@ -1042,11 +1631,7 @@ export default async function CustomerProjectDetailPage({
             </div>
           </Panel>
 
-          <Panel
-            title="Fields"
-            description="Shown on the bug form in this order."
-            flush
-          >
+          <Panel title="Fields" description="Shown on the bug form in this order." flush>
             {customFields === null ? (
               <div style={{ padding: 'var(--space-6)' }}>
                 <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
@@ -1088,15 +1673,33 @@ export default async function CustomerProjectDetailPage({
           <TrackedForm action={createBuild} style={stackStyle}>
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="section" value={section} />
-            <Field label="Name" htmlFor="new-build-name" hint="For example: Build 1.2, or Release candidate 3.">
+            <Field
+              label="Name"
+              htmlFor="new-build-name"
+              hint="For example: Build 1.2, or Release candidate 3."
+            >
               <Input id="new-build-name" name="name" required maxLength={120} autoFocus />
             </Field>
             <div style={fieldGridStyle}>
               <Field label="Status" htmlFor="new-build-status">
-                <Select id="new-build-status" name="status" defaultValue="NEW" options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))} />
+                <Select
+                  id="new-build-status"
+                  name="status"
+                  defaultValue="NEW"
+                  options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))}
+                />
               </Field>
-              <Field label="Test type" htmlFor="new-build-testType" hint="Exploratory, regression, smoke, load...">
-                <Input id="new-build-testType" name="testType" maxLength={120} defaultValue={defaultBuildDetail?.testType ?? ''} />
+              <Field
+                label="Test type"
+                htmlFor="new-build-testType"
+                hint="Exploratory, regression, smoke, load..."
+              >
+                <Input
+                  id="new-build-testType"
+                  name="testType"
+                  maxLength={120}
+                  defaultValue={defaultBuildDetail?.testType ?? ''}
+                />
               </Field>
               <Field label="Start date" htmlFor="new-build-startDate">
                 <Input id="new-build-startDate" name="startDate" type="date" />
@@ -1104,41 +1707,118 @@ export default async function CustomerProjectDetailPage({
               <Field label="End date" htmlFor="new-build-endDate">
                 <Input id="new-build-endDate" name="endDate" type="date" />
               </Field>
-              <Field label="Maximum testers" htmlFor="new-build-maxTesters" hint="Leave blank for no cap.">
-                <Input id="new-build-maxTesters" name="maxTesters" type="number" min={1} max={10000} defaultValue={defaultBuildDetail?.maxTesters ?? ''} />
+              <Field
+                label="Maximum testers"
+                htmlFor="new-build-maxTesters"
+                hint="Leave blank for no cap."
+              >
+                <Input
+                  id="new-build-maxTesters"
+                  name="maxTesters"
+                  type="number"
+                  min={1}
+                  max={10000}
+                  defaultValue={defaultBuildDetail?.maxTesters ?? ''}
+                />
               </Field>
               <Field label="Application / website URL" htmlFor="new-build-appUrl">
-                <Input id="new-build-appUrl" name="appUrl" type="url" maxLength={2000} defaultValue={defaultBuildDetail?.appUrl ?? ''} />
+                <Input
+                  id="new-build-appUrl"
+                  name="appUrl"
+                  type="url"
+                  maxLength={2000}
+                  defaultValue={defaultBuildDetail?.appUrl ?? ''}
+                />
               </Field>
             </div>
             <div style={fieldGridStyle}>
-              <Field label="Target countries" htmlFor="new-build-targetCountries" hint="Comma separated: IN, GB, US.">
-                <Input id="new-build-targetCountries" name="targetCountries" defaultValue={defaultBuildDetail?.targetCountries.join(', ') ?? ''} />
+              <Field
+                label="Target countries"
+                htmlFor="new-build-targetCountries"
+                hint="Comma separated: IN, GB, US."
+              >
+                <Input
+                  id="new-build-targetCountries"
+                  name="targetCountries"
+                  defaultValue={defaultBuildDetail?.targetCountries.join(', ') ?? ''}
+                />
               </Field>
-              <Field label="Target languages" htmlFor="new-build-targetLanguages" hint="Comma separated: en, hi, ta.">
-                <Input id="new-build-targetLanguages" name="targetLanguages" defaultValue={defaultBuildDetail?.targetLanguages.join(', ') ?? ''} />
+              <Field
+                label="Target languages"
+                htmlFor="new-build-targetLanguages"
+                hint="Comma separated: en, hi, ta."
+              >
+                <Input
+                  id="new-build-targetLanguages"
+                  name="targetLanguages"
+                  defaultValue={defaultBuildDetail?.targetLanguages.join(', ') ?? ''}
+                />
               </Field>
-              <Field label="Target devices" htmlFor="new-build-targetDevices" hint="Comma separated.">
-                <Input id="new-build-targetDevices" name="targetDevices" defaultValue={defaultBuildDetail?.targetDevices.join(', ') ?? ''} />
+              <Field
+                label="Target devices"
+                htmlFor="new-build-targetDevices"
+                hint="Comma separated."
+              >
+                <Input
+                  id="new-build-targetDevices"
+                  name="targetDevices"
+                  defaultValue={defaultBuildDetail?.targetDevices.join(', ') ?? ''}
+                />
               </Field>
-              <Field label="Target browsers" htmlFor="new-build-targetBrowsers" hint="Comma separated.">
-                <Input id="new-build-targetBrowsers" name="targetBrowsers" defaultValue={defaultBuildDetail?.targetBrowsers.join(', ') ?? ''} />
+              <Field
+                label="Target browsers"
+                htmlFor="new-build-targetBrowsers"
+                hint="Comma separated."
+              >
+                <Input
+                  id="new-build-targetBrowsers"
+                  name="targetBrowsers"
+                  defaultValue={defaultBuildDetail?.targetBrowsers.join(', ') ?? ''}
+                />
               </Field>
-              <Field label="Target operating systems" htmlFor="new-build-targetOperatingSystems" hint="Comma separated.">
-                <Input id="new-build-targetOperatingSystems" name="targetOperatingSystems" defaultValue={defaultBuildDetail?.targetOperatingSystems.join(', ') ?? ''} />
+              <Field
+                label="Target operating systems"
+                htmlFor="new-build-targetOperatingSystems"
+                hint="Comma separated."
+              >
+                <Input
+                  id="new-build-targetOperatingSystems"
+                  name="targetOperatingSystems"
+                  defaultValue={defaultBuildDetail?.targetOperatingSystems.join(', ') ?? ''}
+                />
               </Field>
             </div>
             <Field label="Features / scope" htmlFor="new-build-description">
-              <Textarea id="new-build-description" name="description" rows={3} defaultValue={defaultBuildDetail?.description ?? ''} />
+              <Textarea
+                id="new-build-description"
+                name="description"
+                rows={3}
+                defaultValue={defaultBuildDetail?.description ?? ''}
+              />
             </Field>
             <Field label="Testing instructions" htmlFor="new-build-instructions">
-              <Textarea id="new-build-instructions" name="instructions" rows={6} defaultValue={defaultBuildDetail?.instructions ?? ''} />
+              <Textarea
+                id="new-build-instructions"
+                name="instructions"
+                rows={6}
+                defaultValue={defaultBuildDetail?.instructions ?? ''}
+              />
             </Field>
             <Field label="Special requirements" htmlFor="new-build-specialRequirements">
-              <Textarea id="new-build-specialRequirements" name="specialRequirements" rows={3} defaultValue={defaultBuildDetail?.specialRequirements ?? ''} />
+              <Textarea
+                id="new-build-specialRequirements"
+                name="specialRequirements"
+                rows={3}
+                defaultValue={defaultBuildDetail?.specialRequirements ?? ''}
+              />
             </Field>
             <Field label="Release notes" htmlFor="new-build-releaseNotes">
-              <Textarea id="new-build-releaseNotes" name="releaseNotes" rows={3} defaultValue={defaultBuildDetail?.releaseNotes ?? ''} />
+              <Textarea
+                id="new-build-releaseNotes"
+                name="releaseNotes"
+                rows={3}
+                defaultValue={defaultBuildDetail?.releaseNotes ?? ''}
+              />
             </Field>
             <Checkbox
               name="testersCanSeeOtherBugs"
@@ -1147,7 +1827,9 @@ export default async function CustomerProjectDetailPage({
               description="Overrides the project's own setting for this build only."
             />
             <div>
-              <SubmitButton variant="primary" pendingLabel="Creating…">Create build</SubmitButton>
+              <SubmitButton variant="primary" pendingLabel="Creating…">
+                Create build
+              </SubmitButton>
             </div>
           </TrackedForm>
         </Modal>
@@ -1159,10 +1841,19 @@ export default async function CustomerProjectDetailPage({
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="buildId" value={activeBuildId} />
             <Field label="Name" htmlFor="rename-build-name">
-              <Input id="rename-build-name" name="name" required maxLength={120} defaultValue={activeBuild?.name} autoFocus />
+              <Input
+                id="rename-build-name"
+                name="name"
+                required
+                maxLength={120}
+                defaultValue={activeBuild?.name}
+                autoFocus
+              />
             </Field>
             <div>
-              <SubmitButton variant="primary" pendingLabel="Saving…">Save name</SubmitButton>
+              <SubmitButton variant="primary" pendingLabel="Saving…">
+                Save name
+              </SubmitButton>
             </div>
           </form>
         </Modal>
@@ -1172,29 +1863,61 @@ export default async function CustomerProjectDetailPage({
 }
 
 const stackStyle = { display: 'flex', flexDirection: 'column' as const, gap: 'var(--space-5)' }
-const fieldGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-5)' }
-const listResetStyle = { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' as const }
-const rowStyle = { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-5)', paddingBlock: 'var(--space-4)', borderBottom: '1px solid var(--border-subtle)' }
+const fieldGridStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+  gap: 'var(--space-5)',
+}
+const listResetStyle = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+  display: 'flex',
+  flexDirection: 'column' as const,
+}
+const rowStyle = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 'var(--space-5)',
+  paddingBlock: 'var(--space-4)',
+  borderBottom: '1px solid var(--border-subtle)',
+}
 const bareTableStyle = { border: 'none', borderRadius: 0, background: 'transparent' }
 
 function Muted({ children }: { children: ReactNode }) {
-  return <p className="c4t-body-sm" style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}>{children}</p>
+  return (
+    <p
+      className="c4t-body-sm"
+      style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}
+    >
+      {children}
+    </p>
+  )
 }
 function Caption({ children }: { children: ReactNode }) {
-  return <span style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}>{children}</span>
+  return (
+    <span style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}>
+      {children}
+    </span>
+  )
 }
 function Mono({ children }: { children: ReactNode }) {
   return <span style={{ fontFamily: 'var(--font-mono)' }}>{children}</span>
 }
 function Prose({ children }: { children: ReactNode }) {
-  return <span style={{ display: 'block', whiteSpace: 'pre-wrap', maxWidth: '75ch' }}>{children}</span>
+  return (
+    <span style={{ display: 'block', whiteSpace: 'pre-wrap', maxWidth: '75ch' }}>{children}</span>
+  )
 }
 function TokenList({ values, uppercase = true }: { values: string[]; uppercase?: boolean }) {
   if (values.length === 0) return <span style={{ color: 'var(--text-muted)' }}>—</span>
   return (
     <span style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
       {values.map((value) => (
-        <Badge key={value} tone="neutral" uppercase={uppercase}>{value}</Badge>
+        <Badge key={value} tone="neutral" uppercase={uppercase}>
+          {value}
+        </Badge>
       ))}
     </span>
   )
@@ -1202,21 +1925,69 @@ function TokenList({ values, uppercase = true }: { values: string[]; uppercase?:
 function ProgressBar({ percent }: { percent: number }) {
   const clamped = Math.max(0, Math.min(100, percent))
   return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }} role="img" aria-label={`${clamped}% complete`}>
-      <span aria-hidden="true" style={{ flex: 1, height: 'var(--space-3)', borderRadius: 'var(--radius-full)', background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
-        <span style={{ display: 'block', height: '100%', width: `${clamped}%`, background: 'var(--accent-base)' }} />
+    <span
+      style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}
+      role="img"
+      aria-label={`${clamped}% complete`}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          flex: 1,
+          height: 'var(--space-3)',
+          borderRadius: 'var(--radius-full)',
+          background: 'var(--surface-sunken)',
+          border: '1px solid var(--border-subtle)',
+          overflow: 'hidden',
+        }}
+      >
+        <span
+          style={{
+            display: 'block',
+            height: '100%',
+            width: `${clamped}%`,
+            background: 'var(--accent-base)',
+          }}
+        />
       </span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>{clamped}%</span>
+      <span
+        style={{
+          fontVariantNumeric: 'tabular-nums',
+          fontSize: 'var(--type-body-sm-size)',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        {clamped}%
+      </span>
     </span>
   )
 }
 function MaterialTarget({ material }: { material: ProjectMaterial }) {
   if (material.file) {
-    return <Caption>{material.file.originalName} · {material.file.mimeType} · {formatBytes(material.file.sizeBytes)}</Caption>
+    return (
+      <Caption>
+        {material.file.originalName} · {material.file.mimeType} ·{' '}
+        {formatBytes(material.file.sizeBytes)}
+      </Caption>
+    )
   }
   if (material.url) {
     return (
-      <a href={material.url} rel="noreferrer noopener" target="_blank" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-brand)', fontSize: 'var(--type-body-sm-size)', textDecoration: 'underline', textUnderlineOffset: 3, wordBreak: 'break-all' }}>
+      <a
+        href={material.url}
+        rel="noreferrer noopener"
+        target="_blank"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          color: 'var(--text-brand)',
+          fontSize: 'var(--type-body-sm-size)',
+          textDecoration: 'underline',
+          textUnderlineOffset: 3,
+          wordBreak: 'break-all',
+        }}
+      >
         <Icon name="share-2" size={16} />
         {material.url}
       </a>

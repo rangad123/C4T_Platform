@@ -59,7 +59,13 @@ interface MyOrganisation {
 interface OrganisationMember {
   orgRole: string
   joinedAt: string | null
-  user: { id: string; email: string; firstName: string | null; lastName: string | null; status: string }
+  user: {
+    id: string
+    email: string
+    firstName: string | null
+    lastName: string | null
+    status: string
+  }
 }
 
 interface OrganisationDetail {
@@ -72,7 +78,10 @@ const NOTICES: Record<string, NoticeCopy> = {
   'member-added': { tone: 'success', message: 'Member added.' },
   'member-role-saved': { tone: 'success', message: 'Member role updated.' },
   'member-removed': { tone: 'success', message: 'Member removed.' },
-  'member-missing-account': { tone: 'warning', message: 'Enter an account id before adding a member.' },
+  'member-missing-account': {
+    tone: 'warning',
+    message: 'Enter an account id before adding a member.',
+  },
   'member-exists': { tone: 'warning', message: 'That account is already a member here.' },
   'member-invalid': {
     tone: 'error',
@@ -82,7 +91,10 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'warning',
     message: 'Your organisation needs at least one owner. Promote another member first.',
   },
-  invalid: { tone: 'error', message: 'Those values were not accepted. Check the highlighted fields.' },
+  invalid: {
+    tone: 'error',
+    message: 'Those values were not accepted. Check the highlighted fields.',
+  },
   'forbidden-write': { tone: 'error', message: 'Only an owner can make that change.' },
   missing: { tone: 'error', message: 'That record is no longer there. Reload the page.' },
   failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
@@ -94,7 +106,10 @@ const NOTICES: Record<string, NoticeCopy> = {
   'invite-email': { tone: 'warning', message: 'Enter a valid email address to invite someone.' },
   'invite-exists': { tone: 'warning', message: 'That person is already on your team.' },
   'invite-forbidden': { tone: 'error', message: 'Only an owner can invite people.' },
-  'invite-failed': { tone: 'error', message: 'That invitation could not be sent. Try again in a moment.' },
+  'invite-failed': {
+    tone: 'error',
+    message: 'That invitation could not be sent. Try again in a moment.',
+  },
 }
 
 /** A row of `GET /v1/organisations/:id/invitations`. */
@@ -116,7 +131,6 @@ const INVITATION_TONE: Record<InvitationRow['state'], 'success' | 'warning' | 'n
   EXPIRED: 'neutral',
   REVOKED: 'neutral',
 }
-
 
 /**
  * `/app/customer/organisation` — the customer's own organisation.
@@ -150,7 +164,12 @@ export default async function CustomerOrganisationPage({
   if (!organisation) {
     return (
       <>
-        <DetailShell root={ROOT} crumbs={[{ label: 'Organisation' }]} eyebrow="Account" title="Organisation">
+        <DetailShell
+          root={ROOT}
+          crumbs={[{ label: 'Organisation' }]}
+          eyebrow="Account"
+          title="Organisation"
+        >
           <p style={{ color: 'var(--text-secondary)' }}>
             You are not attached to an organisation yet. Contact support if this looks wrong.
           </p>
@@ -160,7 +179,8 @@ export default async function CustomerOrganisationPage({
   }
 
   const isOwner = organisation.orgRole === 'OWNER'
-  const closedHref = section === SECTIONS[0].value ? DETAIL_PATH : `${DETAIL_PATH}?section=${section}`
+  const closedHref =
+    section === SECTIONS[0].value ? DETAIL_PATH : `${DETAIL_PATH}?section=${section}`
   const profileModalOpen = edit === 'profile'
 
   const [detail, invitations] = await Promise.all([
@@ -187,7 +207,9 @@ export default async function CustomerOrganisationPage({
     { label: 'Postal code', value: organisation.postalCode },
     {
       label: 'Country',
-      value: organisation.countryCode ? <CountryLabel countryCode={organisation.countryCode} /> : null,
+      value: organisation.countryCode ? (
+        <CountryLabel countryCode={organisation.countryCode} />
+      ) : null,
     },
     { label: 'Tax id', value: organisation.taxId },
   ]
@@ -247,7 +269,11 @@ export default async function CustomerOrganisationPage({
       render: (member) => personName(member.user),
       renderSecondary: (member) => member.user.email,
     },
-    { key: 'account', header: 'Account', render: (member) => <StatusBadge status={member.user.status} /> },
+    {
+      key: 'account',
+      header: 'Account',
+      render: (member) => <StatusBadge status={member.user.status} />,
+    },
     { key: 'joined', header: 'Joined', render: (member) => formatDate(member.joinedAt) },
     {
       key: 'manage',
@@ -255,23 +281,15 @@ export default async function CustomerOrganisationPage({
       render: (member) =>
         isOwner ? (
           <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            <form action={updateOrgMemberAction} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-              <input type="hidden" name="id" value={organisation.id} />
-              <input type="hidden" name="userId" value={member.user.id} />
-              <label className="c4t-visually-hidden" htmlFor={`role-${member.user.id}`}>
-                Organisation role for {personName(member.user)}
-              </label>
-              <Select
-                id={`role-${member.user.id}`}
-                name="orgRole"
-                defaultValue={member.orgRole}
-                options={MEMBER_ROLE_OPTIONS}
-                style={{ width: 150, minHeight: 44 }}
-              />
-              <SubmitButton variant="secondary" pendingLabel="Saving…">
-                Save role
-              </SubmitButton>
-            </form>
+            {titleCase(member.orgRole)}
+            <Button
+              href={`${DETAIL_PATH}?section=members&edit=member:${member.user.id}`}
+              variant="primary"
+              size="sm"
+              iconLeft="pencil"
+            >
+              Edit role
+            </Button>
             <form action={removeOrgMemberAction}>
               <input type="hidden" name="id" value={organisation.id} />
               <input type="hidden" name="userId" value={member.user.id} />
@@ -309,7 +327,11 @@ export default async function CustomerOrganisationPage({
             description="The billing and contact details we hold for your organisation."
             actions={
               isOwner ? (
-                <Button href={`${DETAIL_PATH}?section=profile&edit=profile`} variant="secondary" size="sm">
+                <Button
+                  href={`${DETAIL_PATH}?section=profile&edit=profile`}
+                  variant="primary"
+                  size="sm"
+                >
                   Edit
                 </Button>
               ) : undefined
@@ -331,44 +353,127 @@ export default async function CustomerOrganisationPage({
 
       {section === 'profile' && isOwner ? (
         <Modal open={profileModalOpen} closedHref={closedHref} title="Edit profile">
-          <form action={updateOrgProfileAction} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+          <form
+            action={updateOrgProfileAction}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+          >
             <input type="hidden" name="id" value={organisation.id} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-5)' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 'var(--space-5)',
+              }}
+            >
               <Field label="Name" htmlFor="name" required>
-                <Input id="name" name="name" defaultValue={organisation.name} required minLength={2} maxLength={160} />
+                <Input
+                  id="name"
+                  name="name"
+                  defaultValue={organisation.name}
+                  required
+                  minLength={2}
+                  maxLength={160}
+                />
               </Field>
               <Field label="Website" htmlFor="website" hint="Include https://. Blank clears it.">
-                <Input id="website" name="website" type="url" defaultValue={organisation.website ?? ''} maxLength={255} placeholder="https://example.com" />
+                <Input
+                  id="website"
+                  name="website"
+                  type="url"
+                  defaultValue={organisation.website ?? ''}
+                  maxLength={255}
+                  placeholder="https://example.com"
+                />
               </Field>
               <Field label="Industry" htmlFor="industry">
-                <Input id="industry" name="industry" defaultValue={organisation.industry ?? ''} maxLength={120} />
+                <Input
+                  id="industry"
+                  name="industry"
+                  defaultValue={organisation.industry ?? ''}
+                  maxLength={120}
+                />
               </Field>
-              <Field label="Contact email" htmlFor="contactEmail" hint="Cannot be cleared once set.">
-                <Input id="contactEmail" name="contactEmail" type="email" defaultValue={organisation.contactEmail ?? ''} maxLength={255} />
+              <Field
+                label="Contact email"
+                htmlFor="contactEmail"
+                hint="Cannot be cleared once set."
+              >
+                <Input
+                  id="contactEmail"
+                  name="contactEmail"
+                  type="email"
+                  defaultValue={organisation.contactEmail ?? ''}
+                  maxLength={255}
+                />
               </Field>
               <Field label="Contact phone" htmlFor="contactPhone">
-                <Input id="contactPhone" name="contactPhone" defaultValue={organisation.contactPhone ?? ''} maxLength={32} />
+                <Input
+                  id="contactPhone"
+                  name="contactPhone"
+                  defaultValue={organisation.contactPhone ?? ''}
+                  maxLength={32}
+                />
               </Field>
-              <Field label="Country" htmlFor="countryCode" hint="Two-letter code. Cannot be cleared once set.">
-                <Input id="countryCode" name="countryCode" defaultValue={organisation.countryCode ?? ''} maxLength={2} style={{ textTransform: 'uppercase' }} />
+              <Field
+                label="Country"
+                htmlFor="countryCode"
+                hint="Two-letter code. Cannot be cleared once set."
+              >
+                <Input
+                  id="countryCode"
+                  name="countryCode"
+                  defaultValue={organisation.countryCode ?? ''}
+                  maxLength={2}
+                  style={{ textTransform: 'uppercase' }}
+                />
               </Field>
               <Field label="Address line 1" htmlFor="addressLine1">
-                <Input id="addressLine1" name="addressLine1" defaultValue={organisation.addressLine1 ?? ''} maxLength={255} />
+                <Input
+                  id="addressLine1"
+                  name="addressLine1"
+                  defaultValue={organisation.addressLine1 ?? ''}
+                  maxLength={255}
+                />
               </Field>
               <Field label="Address line 2" htmlFor="addressLine2">
-                <Input id="addressLine2" name="addressLine2" defaultValue={organisation.addressLine2 ?? ''} maxLength={255} />
+                <Input
+                  id="addressLine2"
+                  name="addressLine2"
+                  defaultValue={organisation.addressLine2 ?? ''}
+                  maxLength={255}
+                />
               </Field>
               <Field label="City" htmlFor="city">
-                <Input id="city" name="city" defaultValue={organisation.city ?? ''} maxLength={120} />
+                <Input
+                  id="city"
+                  name="city"
+                  defaultValue={organisation.city ?? ''}
+                  maxLength={120}
+                />
               </Field>
               <Field label="State" htmlFor="state">
-                <Input id="state" name="state" defaultValue={organisation.state ?? ''} maxLength={120} />
+                <Input
+                  id="state"
+                  name="state"
+                  defaultValue={organisation.state ?? ''}
+                  maxLength={120}
+                />
               </Field>
               <Field label="Postal code" htmlFor="postalCode">
-                <Input id="postalCode" name="postalCode" defaultValue={organisation.postalCode ?? ''} maxLength={20} />
+                <Input
+                  id="postalCode"
+                  name="postalCode"
+                  defaultValue={organisation.postalCode ?? ''}
+                  maxLength={20}
+                />
               </Field>
               <Field label="Tax id" htmlFor="taxId">
-                <Input id="taxId" name="taxId" defaultValue={organisation.taxId ?? ''} maxLength={40} />
+                <Input
+                  id="taxId"
+                  name="taxId"
+                  defaultValue={organisation.taxId ?? ''}
+                  maxLength={40}
+                />
               </Field>
             </div>
             <div>
@@ -381,99 +486,212 @@ export default async function CustomerOrganisationPage({
       ) : null}
 
       {section === 'members' ? (
-        <Panel
-          title="Members"
-          description="Who can sign in for your organisation. An owner can edit the profile and submit projects; a member can only work inside them."
-          flush
-        >
-          {members.length > 0 ? (
-            <Table
-              ariaLabel="Organisation members"
-              columns={memberColumns}
-              rows={members}
-              rowKey={(member) => member.user.id}
-              style={{ border: 'none', borderRadius: 0 }}
-            />
-          ) : (
-            <p style={{ margin: 0, padding: 'var(--space-6)', color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-              No members yet.
-            </p>
-          )}
+        <>
+          <Panel
+            title="Members"
+            description="Who can sign in for your organisation. An owner can edit the profile and submit projects; a member can only work inside them."
+            flush
+            actions={
+              isOwner ? (
+                <Button
+                  href={`${DETAIL_PATH}?section=members&edit=add-member`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="user-plus"
+                >
+                  Add member
+                </Button>
+              ) : undefined
+            }
+          >
+            {members.length > 0 ? (
+              <Table
+                ariaLabel="Organisation members"
+                columns={memberColumns}
+                rows={members}
+                rowKey={(member) => member.user.id}
+                style={{ border: 'none', borderRadius: 0 }}
+              />
+            ) : (
+              <p
+                style={{
+                  margin: 0,
+                  padding: 'var(--space-6)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                No members yet.
+              </p>
+            )}
+          </Panel>
 
           {isOwner ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-5)',
-                padding: 'var(--space-6)',
-                borderTop: '1px solid var(--border-subtle)',
-                background: 'var(--surface-sunken)',
-              }}
+            <Modal
+              open={edit === 'add-member'}
+              closedHref={`${DETAIL_PATH}?section=members`}
+              title="Add member"
             >
-              {/*
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                {/*
                 §42 — invite by EMAIL, which is what the reference does and
                 what actually works for someone with no account yet. The
                 account-id form below it stays for adding a colleague who has
                 already signed up, where an email round trip is needless.
               */}
-              <h3 style={{ margin: 0, fontSize: 'var(--type-body-md-size)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
-                Invite a new team member
-              </h3>
-              <form action={inviteTeamMemberAction} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                <input type="hidden" name="id" value={organisation.id} />
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-                  <Field
-                    label="Email address"
-                    htmlFor="inviteEmail"
-                    hint="They do not need an account yet — the invitation walks them through it."
-                    style={{ flex: '2 1 240px' }}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: 'var(--type-body-md-size)',
+                      fontWeight: 'var(--fw-semibold)',
+                      color: 'var(--text-primary)',
+                    }}
                   >
-                    <Input id="inviteEmail" name="email" type="email" required placeholder="colleague@example.com" />
-                  </Field>
-                  <Field label="Org role" htmlFor="inviteRole">
-                    <Select id="inviteRole" name="orgRole" defaultValue="MEMBER" options={MEMBER_ROLE_OPTIONS} style={{ width: 150 }} />
-                  </Field>
+                    Invite a new team member
+                  </h3>
+                  <form
+                    action={inviteTeamMemberAction}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
+                  >
+                    <input type="hidden" name="id" value={organisation.id} />
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-end',
+                        gap: 'var(--space-4)',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <Field
+                        label="Email address"
+                        htmlFor="inviteEmail"
+                        hint="They do not need an account yet — the invitation walks them through it."
+                        style={{ flex: '2 1 240px' }}
+                      >
+                        <Input
+                          id="inviteEmail"
+                          name="email"
+                          type="email"
+                          required
+                          placeholder="colleague@example.com"
+                        />
+                      </Field>
+                      <Field label="Org role" htmlFor="inviteRole">
+                        <Select
+                          id="inviteRole"
+                          name="orgRole"
+                          defaultValue="MEMBER"
+                          options={MEMBER_ROLE_OPTIONS}
+                          style={{ width: 150 }}
+                        />
+                      </Field>
+                    </div>
+                    <Field
+                      label="Invitation message"
+                      htmlFor="inviteMessage"
+                      hint="Optional. Included in the email so they know why they are being added."
+                    >
+                      <Textarea id="inviteMessage" name="message" rows={3} maxLength={1000} />
+                    </Field>
+                    <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                      <SubmitButton
+                        variant="primary"
+                        iconLeft="plus"
+                        pendingLabel="Sending the invitation…"
+                      >
+                        Send invitation
+                      </SubmitButton>
+                      <Button href={`${DETAIL_PATH}?section=members`} variant="ghost">
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
                 </div>
-                <Field
-                  label="Invitation message"
-                  htmlFor="inviteMessage"
-                  hint="Optional. Included in the email so they know why they are being added."
-                >
-                  <Textarea id="inviteMessage" name="message" rows={3} maxLength={1000} />
-                </Field>
-                <div>
-                  <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Sending the invitation…">
-                    Send invitation
-                  </SubmitButton>
-                </div>
-              </form>
 
-              <details style={{ marginTop: 'var(--space-2)' }}>
-                <summary style={{ cursor: 'pointer', fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
-                  Add someone who already has an account
-                </summary>
-                <form action={addOrgMemberAction} style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-4)', marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
-                  <input type="hidden" name="id" value={organisation.id} />
-                  <Field
-                    label="Account id"
-                    htmlFor="userId"
-                    hint="Adds them straight away, with no email."
-                    style={{ flex: '1 1 240px' }}
+                <details>
+                  <summary
+                    style={{
+                      cursor: 'pointer',
+                      fontSize: 'var(--type-body-sm-size)',
+                      color: 'var(--text-secondary)',
+                    }}
                   >
-                    <Input id="userId" name="userId" required placeholder="Account id" />
-                  </Field>
-                  <Field label="Org role" htmlFor="orgRole">
-                    <Select id="orgRole" name="orgRole" defaultValue="MEMBER" options={MEMBER_ROLE_OPTIONS} style={{ width: 150 }} />
-                  </Field>
-                  <SubmitButton variant="secondary" pendingLabel="Adding…">
-                    Add member
-                  </SubmitButton>
-                </form>
-              </details>
-            </div>
+                    Add someone who already has an account
+                  </summary>
+                  <form
+                    action={addOrgMemberAction}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-end',
+                      gap: 'var(--space-4)',
+                      marginTop: 'var(--space-4)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <input type="hidden" name="id" value={organisation.id} />
+                    <Field
+                      label="Account id"
+                      htmlFor="userId"
+                      hint="Adds them straight away, with no email."
+                      style={{ flex: '1 1 240px' }}
+                    >
+                      <Input id="userId" name="userId" required placeholder="Account id" />
+                    </Field>
+                    <Field label="Org role" htmlFor="orgRole">
+                      <Select
+                        id="orgRole"
+                        name="orgRole"
+                        defaultValue="MEMBER"
+                        options={MEMBER_ROLE_OPTIONS}
+                        style={{ width: 150 }}
+                      />
+                    </Field>
+                    <SubmitButton variant="secondary" pendingLabel="Adding…">
+                      Add member
+                    </SubmitButton>
+                  </form>
+                </details>
+              </div>
+            </Modal>
           ) : null}
-        </Panel>
+
+          {/* One dialog per member, opened by `?edit=member:<userId>`. */}
+          {isOwner
+            ? members.map((member) => (
+                <Modal
+                  key={`edit-role-${member.user.id}`}
+                  open={edit === `member:${member.user.id}`}
+                  closedHref={`${DETAIL_PATH}?section=members`}
+                  title={`Edit role — ${personName(member.user)}`}
+                >
+                  <form
+                    action={updateOrgMemberAction}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+                  >
+                    <input type="hidden" name="id" value={organisation.id} />
+                    <input type="hidden" name="userId" value={member.user.id} />
+                    <Field label="Organisation role" htmlFor={`role-${member.user.id}`}>
+                      <Select
+                        id={`role-${member.user.id}`}
+                        name="orgRole"
+                        defaultValue={member.orgRole}
+                        options={MEMBER_ROLE_OPTIONS}
+                      />
+                    </Field>
+                    <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
+                      <SubmitButton variant="primary" pendingLabel="Saving…">
+                        Save changes
+                      </SubmitButton>
+                      <Button href={`${DETAIL_PATH}?section=members`} variant="ghost">
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                </Modal>
+              ))
+            : null}
+        </>
       ) : null}
 
       {/* ── Pending and past invitations (§41) ──────────────────────────── */}

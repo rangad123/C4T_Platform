@@ -7,7 +7,14 @@ import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
-import { StatusBadge, SeverityBadge, RoleBadge, statusTone, severityTone, bugTypeTone } from '@/components/admin/StatusBadge'
+import {
+  StatusBadge,
+  SeverityBadge,
+  RoleBadge,
+  statusTone,
+  severityTone,
+  bugTypeTone,
+} from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
@@ -211,54 +218,61 @@ export default async function ProjectDetailPage({
    * a visit only pays for the data it shows; `loading.tsx` already covers
    * the brief gap while that narrower set of fetches resolves.
    */
-  const [testerPool, bugs, features, buildSummaryData, testCases, projectReport, defaultBuildDetailIfDifferent] =
-    await Promise.all([
-      section === 'testers' && capabilities.canAssignTesters
-        ? loadList<VerifiedTesterRow>('testers', {
-            page: 1,
-            limit: TESTER_POOL_SIZE,
-            query: { status: 'VERIFIED', sort: 'ratingAverage', order: 'desc' },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      section === 'bugs'
-        ? loadList<ProjectBugRow>('bugs', {
-            page: 1,
-            limit: BUG_PREVIEW_SIZE,
-            query: { projectId: project.id, buildId: activeBuildId },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      section === 'features'
-        ? serverFetchOrNull<readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]>(
-            `projects/${project.id}/features`,
-            { query: { buildId: activeBuildId } },
-          )
-        : Promise.resolve(null),
-      section === 'build'
-        ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
-        : Promise.resolve(null),
-      section === 'testing'
-        ? loadList<TestCaseRow>('test-cases', {
-            page: 1,
-            limit: 50,
-            query: { buildId: activeBuildId },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      // Same by-project report the Reports module's "By project" section
-      // renders — reused for the Overview tab's summary rather than a second
-      // aggregation. Rolled up across every build, unlike `buildSummaryData`.
-      section === 'overview'
-        ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
-        : Promise.resolve(null),
-      // Only the New build modal reads this, and that modal opens from every
-      // section's tab bar (see the "New build" button below) — gated on the
-      // modal being open, not on `section`. Most projects have exactly one
-      // build, so the active one already IS the default and `buildDetail`
-      // above already has what the modal needs — no reason to fetch it twice.
-      newBuildModalOpen && defaultBuildId !== activeBuildId
-        ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
-        : Promise.resolve(null),
-    ])
-  const defaultBuildDetail = defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
+  const [
+    testerPool,
+    bugs,
+    features,
+    buildSummaryData,
+    testCases,
+    projectReport,
+    defaultBuildDetailIfDifferent,
+  ] = await Promise.all([
+    section === 'testers' && capabilities.canAssignTesters
+      ? loadList<VerifiedTesterRow>('testers', {
+          page: 1,
+          limit: TESTER_POOL_SIZE,
+          query: { status: 'VERIFIED', sort: 'ratingAverage', order: 'desc' },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    section === 'bugs'
+      ? loadList<ProjectBugRow>('bugs', {
+          page: 1,
+          limit: BUG_PREVIEW_SIZE,
+          query: { projectId: project.id, buildId: activeBuildId },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    section === 'features'
+      ? serverFetchOrNull<
+          readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
+        >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
+      : Promise.resolve(null),
+    section === 'build'
+      ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
+      : Promise.resolve(null),
+    section === 'testing'
+      ? loadList<TestCaseRow>('test-cases', {
+          page: 1,
+          limit: 50,
+          query: { buildId: activeBuildId },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    // Same by-project report the Reports module's "By project" section
+    // renders — reused for the Overview tab's summary rather than a second
+    // aggregation. Rolled up across every build, unlike `buildSummaryData`.
+    section === 'overview'
+      ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
+      : Promise.resolve(null),
+    // Only the New build modal reads this, and that modal opens from every
+    // section's tab bar (see the "New build" button below) — gated on the
+    // modal being open, not on `section`. Most projects have exactly one
+    // build, so the active one already IS the default and `buildDetail`
+    // above already has what the modal needs — no reason to fetch it twice.
+    newBuildModalOpen && defaultBuildId !== activeBuildId
+      ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
+      : Promise.resolve(null),
+  ])
+  const defaultBuildDetail =
+    defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
 
   const assignedTesterIds = new Set(project.assignments.map((row) => row.tester.id))
   // `assertAssignable` on the API rejects a tester who is not ACTIVE or has not
@@ -324,7 +338,10 @@ export default async function ProjectDetailPage({
     { label: 'Submitted', value: formatDate(project.submittedAt) },
     { label: 'Approved', value: formatDate(project.approvedAt) },
     { label: 'Completed', value: formatDate(project.completedAt) },
-    { label: 'Window', value: `${formatDate(project.startDate)} to ${formatDate(project.endDate)}` },
+    {
+      label: 'Window',
+      value: `${formatDate(project.startDate)} to ${formatDate(project.endDate)}`,
+    },
     { label: 'Platform targets', value: <TokenList values={project.platformTargets} /> },
     { label: 'Target countries', value: <TokenList values={project.targetCountries} /> },
     {
@@ -366,7 +383,12 @@ export default async function ProjectDetailPage({
       align: 'right',
       render: (row) => formatRating(row.tester.testerProfile?.ratingAverage),
     },
-    { key: 'invited', header: 'Invited', align: 'right', render: (row) => formatDate(row.invitedAt) },
+    {
+      key: 'invited',
+      header: 'Invited',
+      align: 'right',
+      render: (row) => formatDate(row.invitedAt),
+    },
     {
       key: 'responded',
       header: 'Responded',
@@ -382,7 +404,11 @@ export default async function ProjectDetailPage({
       render: (row) => row.title,
       renderSecondary: (row) => row.reference,
     },
-    { key: 'severity', header: 'Severity', render: (row) => <SeverityBadge severity={row.severity} /> },
+    {
+      key: 'severity',
+      header: 'Severity',
+      render: (row) => <SeverityBadge severity={row.severity} />,
+    },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     { key: 'reporter', header: 'Reported by', render: (row) => personName(row.reportedBy) },
     { key: 'logged', header: 'Logged', align: 'right', render: (row) => formatDate(row.createdAt) },
@@ -433,19 +459,23 @@ export default async function ProjectDetailPage({
               flexWrap: 'wrap',
             }}
           >
-            <BuildSwitcher basePath={detailPath} builds={project.builds} activeBuildId={activeBuildId} />
+            <BuildSwitcher
+              basePath={detailPath}
+              builds={project.builds}
+              activeBuildId={activeBuildId}
+            />
             {capabilities.canUpdate ? (
               <>
                 <Button
                   href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=rename-build`}
-                  variant="ghost"
+                  variant="primary"
                   size="sm"
                 >
                   Rename
                 </Button>
                 <Button
                   href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=new-build`}
-                  variant="secondary"
+                  variant="primary"
                   size="sm"
                   iconLeft="plus"
                 >
@@ -459,378 +489,396 @@ export default async function ProjectDetailPage({
       aside={
         section === 'overview' ? (
           <>
-          <Panel
-            title="Status"
-            description={`Now ${titleCase(project.status).toLowerCase()}. Only legal moves are listed.`}
-          >
-            {!capabilities.canChangeStatus ? (
-              <Muted>
-                You can read this project but not move it. That needs the project.write
-                permission.
-              </Muted>
-            ) : transitions.length === 0 ? (
-              <Muted>
-                A cancelled project is closed for good. Raise a new one to run this scope again.
-              </Muted>
-            ) : (
-              <form action={changeProjectStatus} style={stackStyle}>
-                <input type="hidden" name="id" value={project.id} />
-                <Field label="Move to" htmlFor="status-next">
-                  <Select
-                    id="status-next"
-                    name="status"
-                    required
-                    defaultValue={transitions[0]}
-                    options={transitions.map((value) => ({ value, label: titleCase(value) }))}
-                  />
-                </Field>
-                <Field
-                  label="Note"
-                  htmlFor="status-note"
-                  hint="Recorded on the audit trail. Not sent to the customer."
-                >
-                  <Textarea
-                    id="status-note"
-                    name="note"
-                    rows={3}
-                    placeholder="Why is it moving?"
-                    maxLength={1000}
-                  />
-                </Field>
-                <SubmitButton variant="primary" fullWidth pendingLabel="Changing status…">
-                  Change status
-                </SubmitButton>
-              </form>
-            )}
-          </Panel>
+            <Panel
+              title="Status"
+              description={`Now ${titleCase(project.status).toLowerCase()}. Only legal moves are listed.`}
+            >
+              {!capabilities.canChangeStatus ? (
+                <Muted>
+                  You can read this project but not move it. That needs the project.write
+                  permission.
+                </Muted>
+              ) : transitions.length === 0 ? (
+                <Muted>
+                  A cancelled project is closed for good. Raise a new one to run this scope again.
+                </Muted>
+              ) : (
+                <form action={changeProjectStatus} style={stackStyle}>
+                  <input type="hidden" name="id" value={project.id} />
+                  <Field label="Move to" htmlFor="status-next">
+                    <Select
+                      id="status-next"
+                      name="status"
+                      required
+                      defaultValue={transitions[0]}
+                      options={transitions.map((value) => ({ value, label: titleCase(value) }))}
+                    />
+                  </Field>
+                  <Field
+                    label="Note"
+                    htmlFor="status-note"
+                    hint="Recorded on the audit trail. Not sent to the customer."
+                  >
+                    <Textarea
+                      id="status-note"
+                      name="note"
+                      rows={3}
+                      placeholder="Why is it moving?"
+                      maxLength={1000}
+                    />
+                  </Field>
+                  <SubmitButton variant="primary" fullWidth pendingLabel="Changing status…">
+                    Change status
+                  </SubmitButton>
+                </form>
+              )}
+            </Panel>
 
-          <Panel
-            title="Priority and progress"
-            description="Progress is the figure the delivery team reports, not a computed one."
-          >
-            {capabilities.canUpdate ? (
-              <form action={updateProjectDelivery} style={stackStyle}>
-                <input type="hidden" name="id" value={project.id} />
-                <Field label="Priority" htmlFor="priority">
-                  <Select
-                    id="priority"
-                    name="priority"
-                    defaultValue={priority}
-                    options={PROJECT_PRIORITIES.map((value) => ({
-                      value,
-                      label: titleCase(value),
-                    }))}
-                  />
-                </Field>
-                <Field label="Progress" htmlFor="progress" hint="A whole percentage, 0 to 100.">
-                  <Input
-                    id="progress"
-                    name="progressPercent"
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={1}
-                    defaultValue={project.progressPercent}
-                  />
-                </Field>
-                <ProgressBar percent={project.progressPercent} />
-                <SubmitButton variant="secondary" fullWidth pendingLabel="Saving…">
-                  Save priority and progress
-                </SubmitButton>
-              </form>
-            ) : (
-              <div style={stackStyle}>
-                <ProgressBar percent={project.progressPercent} />
-                <Muted>Editing needs the project.write permission.</Muted>
-              </div>
-            )}
-          </Panel>
+            <Panel
+              title="Priority and progress"
+              description="Progress is the figure the delivery team reports, not a computed one."
+            >
+              {capabilities.canUpdate ? (
+                <form action={updateProjectDelivery} style={stackStyle}>
+                  <input type="hidden" name="id" value={project.id} />
+                  <Field label="Priority" htmlFor="priority">
+                    <Select
+                      id="priority"
+                      name="priority"
+                      defaultValue={priority}
+                      options={PROJECT_PRIORITIES.map((value) => ({
+                        value,
+                        label: titleCase(value),
+                      }))}
+                    />
+                  </Field>
+                  <Field label="Progress" htmlFor="progress" hint="A whole percentage, 0 to 100.">
+                    <Input
+                      id="progress"
+                      name="progressPercent"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      defaultValue={project.progressPercent}
+                    />
+                  </Field>
+                  <ProgressBar percent={project.progressPercent} />
+                  <SubmitButton variant="secondary" fullWidth pendingLabel="Saving…">
+                    Save priority and progress
+                  </SubmitButton>
+                </form>
+              ) : (
+                <div style={stackStyle}>
+                  <ProgressBar percent={project.progressPercent} />
+                  <Muted>Editing needs the project.write permission.</Muted>
+                </div>
+              )}
+            </Panel>
 
-          <Panel title="At a glance">
-            <DescriptionList
-              items={[
-                {
-                  label: 'Testers on the roster',
-                  value: project.maxTesters
-                    ? `${project._count.assignments} / ${project.maxTesters}`
-                    : String(project._count.assignments),
-                },
-                { label: 'Bugs logged', value: String(project._count.bugs) },
-                { label: 'Materials attached', value: String(project._count.materials) },
-              ]}
-            />
-          </Panel>
+            <Panel title="At a glance">
+              <DescriptionList
+                items={[
+                  {
+                    label: 'Testers on the roster',
+                    value: project.maxTesters
+                      ? `${project._count.assignments} / ${project.maxTesters}`
+                      : String(project._count.assignments),
+                  },
+                  { label: 'Bugs logged', value: String(project._count.bugs) },
+                  { label: 'Materials attached', value: String(project._count.materials) },
+                ]}
+              />
+            </Panel>
 
-          <Panel
-            title="Managers"
-            description="Internal owners. Assigned from the managers section."
-          >
-            {project.managers.length === 0 ? (
-              <Muted>No manager oversees this project yet.</Muted>
-            ) : (
-              <ul style={listResetStyle}>
-                {project.managers.map((row) => (
-                  <li key={row.manager.id} style={rowStyle}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                      <span style={{ fontSize: 'var(--type-body-sm-size)' }}>
-                        {personName(row.manager)}
-                      </span>
-                      <Caption>Since {formatDate(row.assignedAt)}</Caption>
-                    </div>
-                    <RoleBadge role={row.manager.role} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
+            <Panel
+              title="Managers"
+              description="Internal owners. Assigned from the managers section."
+            >
+              {project.managers.length === 0 ? (
+                <Muted>No manager oversees this project yet.</Muted>
+              ) : (
+                <ul style={listResetStyle}>
+                  {project.managers.map((row) => (
+                    <li key={row.manager.id} style={rowStyle}>
+                      <div
+                        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}
+                      >
+                        <span style={{ fontSize: 'var(--type-body-sm-size)' }}>
+                          {personName(row.manager)}
+                        </span>
+                        <Caption>Since {formatDate(row.assignedAt)}</Caption>
+                      </div>
+                      <RoleBadge role={row.manager.role} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
           </>
         ) : undefined
       }
     >
       {section === 'overview' ? (
         <>
-      <Panel
-        title="Overview"
-        description="What the customer asked for and where it stands."
-        actions={
-          capabilities.canUpdate ? (
-            <Button href={`${detailPath}?section=${section}&edit=brief`} variant="secondary" size="sm">
-              Edit
-            </Button>
-          ) : undefined
-        }
-      >
-        <DescriptionList items={overview} />
-      </Panel>
+          <Panel
+            title="Overview"
+            description="What the customer asked for and where it stands."
+            actions={
+              capabilities.canUpdate ? (
+                <Button
+                  href={`${detailPath}?section=${section}&edit=brief`}
+                  variant="primary"
+                  size="sm"
+                >
+                  Edit
+                </Button>
+              ) : undefined
+            }
+          >
+            <DescriptionList items={overview} />
+          </Panel>
 
-      <Panel
-        title="Project summary"
-        description="Real-time metrics across every build on this project — testers, bugs and test cases."
-      >
-        {!projectReport ? (
-          <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                gap: 'var(--space-4)',
-              }}
-            >
-              {[
-                { label: 'Testers', value: projectReport.testerCount },
-                { label: 'Bugs', value: projectReport.bugs.total },
-                { label: 'Test cases', value: projectReport.testCaseCount },
-                { label: 'Builds', value: project.builds.length },
-              ].map((kpi) => (
+          <Panel
+            title="Project summary"
+            description="Real-time metrics across every build on this project — testers, bugs and test cases."
+          >
+            {!projectReport ? (
+              <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
                 <div
-                  key={kpi.label}
                   style={{
-                    padding: 'var(--space-5)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 'var(--radius-card)',
-                    background: 'var(--surface-raised)',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                    gap: 'var(--space-4)',
                   }}
                 >
-                  <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
-                    {kpi.label}
-                  </p>
-                  <p
-                    style={{
-                      margin: 'var(--space-2) 0 0',
-                      fontSize: 'var(--type-display-sm-size)',
-                      fontWeight: 'var(--fw-semibold)',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {kpi.value}
-                  </p>
+                  {[
+                    { label: 'Testers', value: projectReport.testerCount },
+                    { label: 'Bugs', value: projectReport.bugs.total },
+                    { label: 'Test cases', value: projectReport.testCaseCount },
+                    { label: 'Builds', value: project.builds.length },
+                  ].map((kpi) => (
+                    <div
+                      key={kpi.label}
+                      style={{
+                        padding: 'var(--space-5)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-card)',
+                        background: 'var(--surface-raised)',
+                      }}
+                    >
+                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
+                        {kpi.label}
+                      </p>
+                      <p
+                        style={{
+                          margin: 'var(--space-2) 0 0',
+                          fontSize: 'var(--type-display-sm-size)',
+                          fontWeight: 'var(--fw-semibold)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {kpi.value}
+                      </p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                gap: 'var(--space-6)',
-              }}
-            >
-              <DonutChart
-                title="Bugs by severity"
-                href={`/app/admin/bugs?projectId=${project.id}`}
-                centerLabel={String(projectReport.bugs.total)}
-                segments={Object.entries(projectReport.bugs.bySeverity).map(([label, value]) => ({
-                  label: titleCase(label),
-                  value,
-                  tone: severityTone(label),
-                }))}
-              />
-              <DonutChart
-                title="Bugs by type"
-                href={`/app/admin/bugs?projectId=${project.id}`}
-                centerLabel={String(
-                  Object.values(projectReport.bugs.byType).reduce((a, b) => a + b, 0),
-                )}
-                segments={Object.entries(projectReport.bugs.byType).map(([label, value]) => ({
-                  label: titleCase(label),
-                  value,
-                  tone: bugTypeTone(label),
-                }))}
-              />
-            </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                    gap: 'var(--space-6)',
+                  }}
+                >
+                  <DonutChart
+                    title="Bugs by severity"
+                    href={`/app/admin/bugs?projectId=${project.id}`}
+                    centerLabel={String(projectReport.bugs.total)}
+                    segments={Object.entries(projectReport.bugs.bySeverity).map(
+                      ([label, value]) => ({
+                        label: titleCase(label),
+                        value,
+                        tone: severityTone(label),
+                      }),
+                    )}
+                  />
+                  <DonutChart
+                    title="Bugs by type"
+                    href={`/app/admin/bugs?projectId=${project.id}`}
+                    centerLabel={String(
+                      Object.values(projectReport.bugs.byType).reduce((a, b) => a + b, 0),
+                    )}
+                    segments={Object.entries(projectReport.bugs.byType).map(([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone: bugTypeTone(label),
+                    }))}
+                  />
+                </div>
 
-            <BarChart
-              title="Bugs by status"
-              href={`/app/admin/bugs?projectId=${project.id}`}
-              segments={Object.entries(projectReport.bugs.byStatus).map(([label, value]) => ({
-                label: titleCase(label),
-                value,
-                tone: statusTone(label),
-              }))}
-            />
-
-            <BarChart
-              title="Testers by country"
-              href={`${detailPath}?section=testers`}
-              segments={Object.entries(projectReport.testersByCountry).map(([label, value]) => ({
-                label,
-                value,
-                tone: 'info' as const,
-              }))}
-            />
-          </div>
-        )}
-      </Panel>
-
-      {capabilities.canUpdate ? (
-        <Modal open={briefModalOpen} closedHref={closedHref} title="Edit the brief">
-          <TrackedForm action={updateProjectBrief} style={stackStyle}>
-            <input type="hidden" name="id" value={project.id} />
-
-            <Field label="Title" htmlFor="title" required>
-              <Input
-                id="title"
-                name="title"
-                required
-                minLength={3}
-                maxLength={200}
-                defaultValue={project.title}
-              />
-            </Field>
-
-            <Field label="Summary" htmlFor="summary" hint="One or two sentences on the scope.">
-              <Textarea
-                id="summary"
-                name="summary"
-                rows={3}
-                maxLength={2000}
-                defaultValue={project.summary ?? ''}
-              />
-            </Field>
-
-            <Field
-              label="Testing instructions"
-              htmlFor="instructions"
-              hint="What a tester needs to follow. Only visible to accepted testers."
-            >
-              <Textarea
-                id="instructions"
-                name="instructions"
-                rows={10}
-                maxLength={20000}
-                defaultValue={project.instructions ?? ''}
-              />
-            </Field>
-
-            <div style={fieldGridStyle}>
-              <Field
-                label="Platform targets"
-                htmlFor="platformTargets"
-                hint="Comma separated, for example: Android, iOS, Web."
-              >
-                <Input
-                  id="platformTargets"
-                  name="platformTargets"
-                  defaultValue={project.platformTargets.join(', ')}
+                <BarChart
+                  title="Bugs by status"
+                  href={`/app/admin/bugs?projectId=${project.id}`}
+                  segments={Object.entries(projectReport.bugs.byStatus).map(([label, value]) => ({
+                    label: titleCase(label),
+                    value,
+                    tone: statusTone(label),
+                  }))}
                 />
-              </Field>
 
-              <Field
-                label="Target countries"
-                htmlFor="targetCountries"
-                hint="Two-letter ISO codes, comma separated: IN, GB, US."
-              >
-                <Input
-                  id="targetCountries"
-                  name="targetCountries"
-                  pattern="\s*[A-Za-z]{2}\s*(,\s*[A-Za-z]{2}\s*)*"
-                  title="Two-letter country codes separated by commas"
-                  defaultValue={project.targetCountries.join(', ')}
+                <BarChart
+                  title="Testers by country"
+                  href={`${detailPath}?section=testers`}
+                  segments={Object.entries(projectReport.testersByCountry).map(
+                    ([label, value]) => ({
+                      label,
+                      value,
+                      tone: 'info' as const,
+                    }),
+                  )}
                 />
-              </Field>
+              </div>
+            )}
+          </Panel>
 
-              <Field
-                label="Target languages"
-                htmlFor="targetLanguages"
-                hint="Two-letter ISO codes, comma separated: en, hi, ta."
-              >
-                <Input
-                  id="targetLanguages"
-                  name="targetLanguages"
-                  pattern="\s*[A-Za-z]{2}\s*(,\s*[A-Za-z]{2}\s*)*"
-                  title="Two-letter language codes separated by commas"
-                  defaultValue={project.targetLanguages.join(', ')}
+          {capabilities.canUpdate ? (
+            <Modal open={briefModalOpen} closedHref={closedHref} title="Edit the brief">
+              <TrackedForm action={updateProjectBrief} style={stackStyle}>
+                <input type="hidden" name="id" value={project.id} />
+
+                <Field label="Title" htmlFor="title" required>
+                  <Input
+                    id="title"
+                    name="title"
+                    required
+                    minLength={3}
+                    maxLength={200}
+                    defaultValue={project.title}
+                  />
+                </Field>
+
+                <Field label="Summary" htmlFor="summary" hint="One or two sentences on the scope.">
+                  <Textarea
+                    id="summary"
+                    name="summary"
+                    rows={3}
+                    maxLength={2000}
+                    defaultValue={project.summary ?? ''}
+                  />
+                </Field>
+
+                <Field
+                  label="Testing instructions"
+                  htmlFor="instructions"
+                  hint="What a tester needs to follow. Only visible to accepted testers."
+                >
+                  <Textarea
+                    id="instructions"
+                    name="instructions"
+                    rows={10}
+                    maxLength={20000}
+                    defaultValue={project.instructions ?? ''}
+                  />
+                </Field>
+
+                <div style={fieldGridStyle}>
+                  <Field
+                    label="Platform targets"
+                    htmlFor="platformTargets"
+                    hint="Comma separated, for example: Android, iOS, Web."
+                  >
+                    <Input
+                      id="platformTargets"
+                      name="platformTargets"
+                      defaultValue={project.platformTargets.join(', ')}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Target countries"
+                    htmlFor="targetCountries"
+                    hint="Two-letter ISO codes, comma separated: IN, GB, US."
+                  >
+                    <Input
+                      id="targetCountries"
+                      name="targetCountries"
+                      pattern="\s*[A-Za-z]{2}\s*(,\s*[A-Za-z]{2}\s*)*"
+                      title="Two-letter country codes separated by commas"
+                      defaultValue={project.targetCountries.join(', ')}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Target languages"
+                    htmlFor="targetLanguages"
+                    hint="Two-letter ISO codes, comma separated: en, hi, ta."
+                  >
+                    <Input
+                      id="targetLanguages"
+                      name="targetLanguages"
+                      pattern="\s*[A-Za-z]{2}\s*(,\s*[A-Za-z]{2}\s*)*"
+                      title="Two-letter language codes separated by commas"
+                      defaultValue={project.targetLanguages.join(', ')}
+                    />
+                  </Field>
+
+                  <Field label="Start date" htmlFor="startDate">
+                    <Input
+                      id="startDate"
+                      name="startDate"
+                      type="date"
+                      defaultValue={toDateInput(project.startDate)}
+                    />
+                  </Field>
+
+                  <Field
+                    label="End date"
+                    htmlFor="endDate"
+                    hint="Must not fall before the start date."
+                  >
+                    <Input
+                      id="endDate"
+                      name="endDate"
+                      type="date"
+                      defaultValue={toDateInput(project.endDate)}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Maximum testers"
+                    htmlFor="maxTesters"
+                    hint="Leave blank for no cap."
+                  >
+                    <Input
+                      id="maxTesters"
+                      name="maxTesters"
+                      type="number"
+                      min={1}
+                      max={10000}
+                      defaultValue={project.maxTesters ?? ''}
+                    />
+                  </Field>
+                </div>
+
+                <Checkbox
+                  id="testersCanSeeOtherBugs"
+                  name="testersCanSeeOtherBugs"
+                  defaultChecked={project.testersCanSeeOtherBugs}
+                  label="Testers can see bugs raised by others"
+                  description="Off by default. When on, any tester with an accepted assignment on this project can read every bug logged against it, not just their own reports."
                 />
-              </Field>
 
-              <Field label="Start date" htmlFor="startDate">
-                <Input
-                  id="startDate"
-                  name="startDate"
-                  type="date"
-                  defaultValue={toDateInput(project.startDate)}
-                />
-              </Field>
-
-              <Field label="End date" htmlFor="endDate" hint="Must not fall before the start date.">
-                <Input
-                  id="endDate"
-                  name="endDate"
-                  type="date"
-                  defaultValue={toDateInput(project.endDate)}
-                />
-              </Field>
-
-              <Field label="Maximum testers" htmlFor="maxTesters" hint="Leave blank for no cap.">
-                <Input
-                  id="maxTesters"
-                  name="maxTesters"
-                  type="number"
-                  min={1}
-                  max={10000}
-                  defaultValue={project.maxTesters ?? ''}
-                />
-              </Field>
-            </div>
-
-            <Checkbox
-              id="testersCanSeeOtherBugs"
-              name="testersCanSeeOtherBugs"
-              defaultChecked={project.testersCanSeeOtherBugs}
-              label="Testers can see bugs raised by others"
-              description="Off by default. When on, any tester with an accepted assignment on this project can read every bug logged against it, not just their own reports."
-            />
-
-            <div>
-              <SubmitButton variant="primary" pendingLabel="Saving…">
-                Save the brief
-              </SubmitButton>
-            </div>
-          </TrackedForm>
-        </Modal>
-      ) : null}
+                <div>
+                  <SubmitButton variant="primary" pendingLabel="Saving…">
+                    Save the brief
+                  </SubmitButton>
+                </div>
+              </TrackedForm>
+            </Modal>
+          ) : null}
         </>
       ) : null}
 
@@ -843,7 +891,7 @@ export default async function ProjectDetailPage({
               capabilities.canUpdate ? (
                 <Button
                   href={`${detailPath}?section=build&buildId=${activeBuildId}&edit=build-details`}
-                  variant="secondary"
+                  variant="primary"
                   size="sm"
                 >
                   Edit
@@ -882,7 +930,11 @@ export default async function ProjectDetailPage({
                         href={buildDetail.appUrl}
                         target="_blank"
                         rel="noreferrer"
-                        style={{ color: 'var(--text-brand)', textDecoration: 'underline', textUnderlineOffset: 3 }}
+                        style={{
+                          color: 'var(--text-brand)',
+                          textDecoration: 'underline',
+                          textUnderlineOffset: 3,
+                        }}
                       >
                         {buildDetail.appUrl}
                       </a>
@@ -894,19 +946,27 @@ export default async function ProjectDetailPage({
                     label: 'Test document',
                     value: buildDetail.testDocument ? buildDetail.testDocument.originalName : '—',
                   },
-                  { label: 'Target countries', value: <TokenList values={buildDetail.targetCountries} /> },
+                  {
+                    label: 'Target countries',
+                    value: <TokenList values={buildDetail.targetCountries} />,
+                  },
                   {
                     label: 'Target languages',
                     value: <TokenList values={buildDetail.targetLanguages} uppercase={false} />,
                   },
-                  { label: 'Target devices', value: <TokenList values={buildDetail.targetDevices} uppercase={false} /> },
+                  {
+                    label: 'Target devices',
+                    value: <TokenList values={buildDetail.targetDevices} uppercase={false} />,
+                  },
                   {
                     label: 'Target browsers',
                     value: <TokenList values={buildDetail.targetBrowsers} uppercase={false} />,
                   },
                   {
                     label: 'Target operating systems',
-                    value: <TokenList values={buildDetail.targetOperatingSystems} uppercase={false} />,
+                    value: (
+                      <TokenList values={buildDetail.targetOperatingSystems} uppercase={false} />
+                    ),
                   },
                   {
                     label: 'Features',
@@ -916,17 +976,29 @@ export default async function ProjectDetailPage({
                   {
                     label: 'Testing instructions',
                     wide: true,
-                    value: buildDetail.instructions ? <Prose>{buildDetail.instructions}</Prose> : '',
+                    value: buildDetail.instructions ? (
+                      <Prose>{buildDetail.instructions}</Prose>
+                    ) : (
+                      ''
+                    ),
                   },
                   {
                     label: 'Special requirements',
                     wide: true,
-                    value: buildDetail.specialRequirements ? <Prose>{buildDetail.specialRequirements}</Prose> : '',
+                    value: buildDetail.specialRequirements ? (
+                      <Prose>{buildDetail.specialRequirements}</Prose>
+                    ) : (
+                      ''
+                    ),
                   },
                   {
                     label: 'Release notes',
                     wide: true,
-                    value: buildDetail.releaseNotes ? <Prose>{buildDetail.releaseNotes}</Prose> : '',
+                    value: buildDetail.releaseNotes ? (
+                      <Prose>{buildDetail.releaseNotes}</Prose>
+                    ) : (
+                      ''
+                    ),
                   },
                 ]}
               />
@@ -961,14 +1033,23 @@ export default async function ProjectDetailPage({
               <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-4)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                    gap: 'var(--space-4)',
+                  }}
+                >
                   {[
                     { label: 'Testers', value: buildSummaryData.testerCount },
                     { label: 'Bugs', value: buildSummaryData.bugCount },
                     { label: 'Test cases', value: buildSummaryData.testCaseCount },
                     {
                       label: 'Test completion',
-                      value: buildSummaryData.testCaseCompletion === null ? '—' : `${buildSummaryData.testCaseCompletion}%`,
+                      value:
+                        buildSummaryData.testCaseCompletion === null
+                          ? '—'
+                          : `${buildSummaryData.testCaseCompletion}%`,
                     },
                   ].map((kpi) => (
                     <div
@@ -999,11 +1080,13 @@ export default async function ProjectDetailPage({
 
                 <BarChart
                   title="Bugs by severity"
-                  segments={Object.entries(buildSummaryData.bugsBySeverity).map(([label, value]) => ({
-                    label: titleCase(label),
-                    value,
-                    tone: severityTone(label),
-                  }))}
+                  segments={Object.entries(buildSummaryData.bugsBySeverity).map(
+                    ([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone: severityTone(label),
+                    }),
+                  )}
                 />
                 <BarChart
                   title="Bugs by status"
@@ -1018,17 +1101,32 @@ export default async function ProjectDetailPage({
                   centerLabel={String(
                     Object.values(buildSummaryData.testReportsByResult).reduce((a, b) => a + b, 0),
                   )}
-                  segments={Object.entries(buildSummaryData.testReportsByResult).map(([label, value]) => ({
-                    label: titleCase(label),
-                    value,
-                    tone:
-                      label === 'PASS' ? 'success' : label === 'FAIL' ? 'error' : label === 'BLOCKED' ? 'warning' : 'neutral',
-                  }))}
+                  segments={Object.entries(buildSummaryData.testReportsByResult).map(
+                    ([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone:
+                        label === 'PASS'
+                          ? 'success'
+                          : label === 'FAIL'
+                            ? 'error'
+                            : label === 'BLOCKED'
+                              ? 'warning'
+                              : 'neutral',
+                    }),
+                  )}
                 />
 
                 {buildSummaryData.reviewCount > 0 ? (
-                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-                    {buildSummaryData.reviewCount} review{buildSummaryData.reviewCount === 1 ? '' : 's'}
+                  <p
+                    style={{
+                      margin: 0,
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
+                    {buildSummaryData.reviewCount} review
+                    {buildSummaryData.reviewCount === 1 ? '' : 's'}
                     {buildSummaryData.averageRating !== null
                       ? ` · average rating ${buildSummaryData.averageRating.toFixed(1)} / 5`
                       : ''}
@@ -1059,16 +1157,39 @@ export default async function ProjectDetailPage({
                   options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))}
                 />
               </Field>
-              <Field label="Test type" htmlFor="build-testType" hint="Exploratory, regression, smoke, load...">
-                <Input id="build-testType" name="testType" maxLength={120} defaultValue={buildDetail.testType ?? ''} />
+              <Field
+                label="Test type"
+                htmlFor="build-testType"
+                hint="Exploratory, regression, smoke, load..."
+              >
+                <Input
+                  id="build-testType"
+                  name="testType"
+                  maxLength={120}
+                  defaultValue={buildDetail.testType ?? ''}
+                />
               </Field>
               <Field label="Start date" htmlFor="build-startDate">
-                <Input id="build-startDate" name="startDate" type="date" defaultValue={toDateInput(buildDetail.startDate)} />
+                <Input
+                  id="build-startDate"
+                  name="startDate"
+                  type="date"
+                  defaultValue={toDateInput(buildDetail.startDate)}
+                />
               </Field>
               <Field label="End date" htmlFor="build-endDate">
-                <Input id="build-endDate" name="endDate" type="date" defaultValue={toDateInput(buildDetail.endDate)} />
+                <Input
+                  id="build-endDate"
+                  name="endDate"
+                  type="date"
+                  defaultValue={toDateInput(buildDetail.endDate)}
+                />
               </Field>
-              <Field label="Maximum testers" htmlFor="build-maxTesters" hint="Leave blank for no cap.">
+              <Field
+                label="Maximum testers"
+                htmlFor="build-maxTesters"
+                hint="Leave blank for no cap."
+              >
                 <Input
                   id="build-maxTesters"
                   name="maxTesters"
@@ -1079,19 +1200,33 @@ export default async function ProjectDetailPage({
                 />
               </Field>
               <Field label="Application / website URL" htmlFor="build-appUrl">
-                <Input id="build-appUrl" name="appUrl" type="url" maxLength={2000} defaultValue={buildDetail.appUrl ?? ''} />
+                <Input
+                  id="build-appUrl"
+                  name="appUrl"
+                  type="url"
+                  maxLength={2000}
+                  defaultValue={buildDetail.appUrl ?? ''}
+                />
               </Field>
             </div>
 
             <div style={fieldGridStyle}>
-              <Field label="Target countries" htmlFor="build-targetCountries" hint="Comma separated: IN, GB, US.">
+              <Field
+                label="Target countries"
+                htmlFor="build-targetCountries"
+                hint="Comma separated: IN, GB, US."
+              >
                 <Input
                   id="build-targetCountries"
                   name="targetCountries"
                   defaultValue={buildDetail.targetCountries.join(', ')}
                 />
               </Field>
-              <Field label="Target languages" htmlFor="build-targetLanguages" hint="Comma separated: en, hi, ta.">
+              <Field
+                label="Target languages"
+                htmlFor="build-targetLanguages"
+                hint="Comma separated: en, hi, ta."
+              >
                 <Input
                   id="build-targetLanguages"
                   name="targetLanguages"
@@ -1126,10 +1261,20 @@ export default async function ProjectDetailPage({
             </div>
 
             <Field label="Features / scope" htmlFor="build-description">
-              <Textarea id="build-description" name="description" rows={3} defaultValue={buildDetail.description ?? ''} />
+              <Textarea
+                id="build-description"
+                name="description"
+                rows={3}
+                defaultValue={buildDetail.description ?? ''}
+              />
             </Field>
             <Field label="Testing instructions" htmlFor="build-instructions">
-              <Textarea id="build-instructions" name="instructions" rows={6} defaultValue={buildDetail.instructions ?? ''} />
+              <Textarea
+                id="build-instructions"
+                name="instructions"
+                rows={6}
+                defaultValue={buildDetail.instructions ?? ''}
+              />
             </Field>
             <Field label="Special requirements" htmlFor="build-specialRequirements">
               <Textarea
@@ -1140,7 +1285,12 @@ export default async function ProjectDetailPage({
               />
             </Field>
             <Field label="Release notes" htmlFor="build-releaseNotes">
-              <Textarea id="build-releaseNotes" name="releaseNotes" rows={3} defaultValue={buildDetail.releaseNotes ?? ''} />
+              <Textarea
+                id="build-releaseNotes"
+                name="releaseNotes"
+                rows={3}
+                defaultValue={buildDetail.releaseNotes ?? ''}
+              />
             </Field>
 
             <Checkbox
@@ -1161,298 +1311,313 @@ export default async function ProjectDetailPage({
 
       {section === 'testers' ? (
         <>
-      <Panel
-        title="Tester roster"
-        description={`${project.assignments.length} tester${
-          project.assignments.length === 1 ? '' : 's'
-        } invited to ${activeBuild?.name ?? 'this build'}.`}
-        flush
-      >
-        <Table
-          ariaLabel="Tester roster"
-          columns={assignmentColumns}
-          rows={project.assignments}
-          rowKey={(row) => row.tester.id}
-          style={bareTableStyle}
-          emptyState={
-            <div style={{ padding: 'var(--space-6)' }}>
-              <Muted>
-                Nobody is on this project yet. Invite verified testers below and they will be asked
-                to accept.
-              </Muted>
-            </div>
-          }
-        />
-      </Panel>
+          <Panel
+            title="Tester roster"
+            description={`${project.assignments.length} tester${
+              project.assignments.length === 1 ? '' : 's'
+            } invited to ${activeBuild?.name ?? 'this build'}.`}
+            flush
+          >
+            <Table
+              ariaLabel="Tester roster"
+              columns={assignmentColumns}
+              rows={project.assignments}
+              rowKey={(row) => row.tester.id}
+              style={bareTableStyle}
+              emptyState={
+                <div style={{ padding: 'var(--space-6)' }}>
+                  <Muted>
+                    Nobody is on this project yet. Invite verified testers below and they will be
+                    asked to accept.
+                  </Muted>
+                </div>
+              }
+            />
+          </Panel>
 
-      {capabilities.canAssignTesters ? (
+          {capabilities.canAssignTesters ? (
+            <>
+              <Panel
+                title="Invite testers"
+                description="Verified testers who have accepted the NDA and are not already on the roster."
+              >
+                {'error' in testerPool ? (
+                  <Muted>
+                    The tester pool could not be read. Inviting from here needs the tester.read
+                    permission as well as project.assign.
+                  </Muted>
+                ) : invitable.length === 0 ? (
+                  <Muted>
+                    Every verified tester in the top {TESTER_POOL_SIZE} by rating is already on this
+                    roster. Verify more testers to widen the pool.
+                  </Muted>
+                ) : (
+                  <form action={inviteTesters} style={stackStyle}>
+                    <input type="hidden" name="id" value={project.id} />
+                    <input type="hidden" name="buildId" value={activeBuildId} />
+                    <fieldset style={fieldsetStyle}>
+                      <legend
+                        className="c4t-eyebrow"
+                        style={{ color: 'var(--text-muted)', padding: 0 }}
+                      >
+                        Choose testers
+                      </legend>
+                      <div style={checkboxGridStyle}>
+                        {invitable.map((tester) => {
+                          const fit = deviceFitsTargets(tester.devices, project.platformTargets)
+                          return (
+                            <Checkbox
+                              key={tester.user.id}
+                              id={`tester-${tester.user.id}`}
+                              name="testerIds"
+                              value={tester.user.id}
+                              label={personName(tester.user)}
+                              description={`${tester.user.email} · ${
+                                tester.countryCode ?? 'no country'
+                              } · ${formatRating(tester.ratingAverage)}${
+                                fit === 'mismatch' ? ' · no device on this platform' : ''
+                              }`}
+                            />
+                          )
+                        })}
+                      </div>
+                    </fieldset>
+                    <Field
+                      label="Note to the testers"
+                      htmlFor="invite-notes"
+                      hint="Sent with the invitation. Keep it to what they need to decide."
+                    >
+                      <Textarea
+                        id="invite-notes"
+                        name="notes"
+                        rows={3}
+                        maxLength={1000}
+                        placeholder="What is the ask, and by when?"
+                      />
+                    </Field>
+                    <div>
+                      <SubmitButton
+                        variant="primary"
+                        iconLeft="user-check"
+                        pendingLabel="Inviting…"
+                      >
+                        Invite selected testers
+                      </SubmitButton>
+                    </div>
+                  </form>
+                )}
+              </Panel>
+
+              {project.assignments.length > 0 ? (
+                <Panel
+                  title="Update an assignment"
+                  description="Activate a tester who accepted, mark their work complete, or take them off."
+                >
+                  <form action={updateAssignment} style={stackStyle}>
+                    <input type="hidden" name="id" value={project.id} />
+                    <div style={fieldGridStyle}>
+                      <Field label="Tester" htmlFor="assignment-tester" required>
+                        <Select
+                          id="assignment-tester"
+                          name="testerId"
+                          required
+                          options={project.assignments.map((row) => ({
+                            value: row.tester.id,
+                            label: `${personName(row.tester)} · ${titleCase(row.status)}`,
+                          }))}
+                        />
+                      </Field>
+                      <Field label="New assignment status" htmlFor="assignment-status" required>
+                        <Select
+                          id="assignment-status"
+                          name="status"
+                          required
+                          options={ASSIGNMENT_STATUSES.map((value) => ({
+                            value,
+                            label: titleCase(value),
+                          }))}
+                          defaultValue="ACTIVE"
+                        />
+                      </Field>
+                    </div>
+                    <Field
+                      label="Note"
+                      htmlFor="assignment-notes"
+                      hint="Replaces the note on that assignment. Leave blank to keep the current one."
+                    >
+                      <Textarea id="assignment-notes" name="notes" rows={3} maxLength={1000} />
+                    </Field>
+                    <div>
+                      <SubmitButton variant="secondary" pendingLabel="Updating…">
+                        Update assignment
+                      </SubmitButton>
+                    </div>
+                  </form>
+                </Panel>
+              ) : null}
+            </>
+          ) : (
+            <Panel title="Invite testers">
+              <Muted>
+                Staffing this project needs the project.assign permission. Ask an administrator to
+                grant it.
+              </Muted>
+            </Panel>
+          )}
+        </>
+      ) : null}
+
+      {section === 'materials' ? (
         <>
           <Panel
-            title="Invite testers"
-            description="Verified testers who have accepted the NDA and are not already on the roster."
+            title="Materials"
+            description="Builds, credentials and reference documents an accepted tester can open."
           >
-            {'error' in testerPool ? (
-              <Muted>
-                The tester pool could not be read. Inviting from here needs the tester.read
-                permission as well as project.assign.
-              </Muted>
-            ) : invitable.length === 0 ? (
-              <Muted>
-                Every verified tester in the top {TESTER_POOL_SIZE} by rating is already on this
-                roster. Verify more testers to widen the pool.
-              </Muted>
+            {!capabilities.canReadBrief ? (
+              <Muted>The brief and its materials are not visible to you on this project.</Muted>
+            ) : project.materials.length === 0 ? (
+              <Muted>No material is attached yet.</Muted>
             ) : (
-              <form action={inviteTesters} style={stackStyle}>
-                <input type="hidden" name="id" value={project.id} />
-                <input type="hidden" name="buildId" value={activeBuildId} />
-                <fieldset style={fieldsetStyle}>
-                  <legend
-                    className="c4t-eyebrow"
-                    style={{ color: 'var(--text-muted)', padding: 0 }}
-                  >
-                    Choose testers
-                  </legend>
-                  <div style={checkboxGridStyle}>
-                    {invitable.map((tester) => {
-                      const fit = deviceFitsTargets(tester.devices, project.platformTargets)
-                      return (
-                        <Checkbox
-                          key={tester.user.id}
-                          id={`tester-${tester.user.id}`}
-                          name="testerIds"
-                          value={tester.user.id}
-                          label={personName(tester.user)}
-                          description={`${tester.user.email} · ${
-                            tester.countryCode ?? 'no country'
-                          } · ${formatRating(tester.ratingAverage)}${
-                            fit === 'mismatch' ? ' · no device on this platform' : ''
-                          }`}
-                        />
-                      )
-                    })}
-                  </div>
-                </fieldset>
-                <Field
-                  label="Note to the testers"
-                  htmlFor="invite-notes"
-                  hint="Sent with the invitation. Keep it to what they need to decide."
-                >
-                  <Textarea
-                    id="invite-notes"
-                    name="notes"
-                    rows={3}
-                    maxLength={1000}
-                    placeholder="What is the ask, and by when?"
-                  />
-                </Field>
-                <div>
-                  <SubmitButton variant="primary" iconLeft="user-check" pendingLabel="Inviting…">
-                    Invite selected testers
-                  </SubmitButton>
-                </div>
-              </form>
+              <ul style={listResetStyle}>
+                {project.materials.map((material) => (
+                  <li key={material.id} style={rowStyle}>
+                    <div
+                      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+                    >
+                      <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{material.title}</span>
+                      {material.description ? <Caption>{material.description}</Caption> : null}
+                      <MaterialTarget material={material} />
+                      <Caption>Added {formatDate(material.createdAt)}</Caption>
+                    </div>
+                    {capabilities.canManageMaterials ? (
+                      <form action={removeMaterial}>
+                        <input type="hidden" name="id" value={project.id} />
+                        <input type="hidden" name="materialId" value={material.id} />
+                        <ConfirmSubmit iconLeft="x" question={`Remove ${material.title}?`}>
+                          Remove
+                        </ConfirmSubmit>
+                      </form>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             )}
           </Panel>
 
-          {project.assignments.length > 0 ? (
+          {capabilities.canManageMaterials ? (
             <Panel
-              title="Update an assignment"
-              description="Activate a tester who accepted, mark their work complete, or take them off."
+              title="Attach a material"
+              description="Give it a title and either a link or the id of a file already uploaded."
             >
-              <form action={updateAssignment} style={stackStyle}>
+              <form action={addMaterial} style={stackStyle}>
                 <input type="hidden" name="id" value={project.id} />
+                <input type="hidden" name="buildId" value={activeBuildId} />
                 <div style={fieldGridStyle}>
-                  <Field label="Tester" htmlFor="assignment-tester" required>
-                    <Select
-                      id="assignment-tester"
-                      name="testerId"
+                  <Field label="Title" htmlFor="material-title" required>
+                    <Input
+                      id="material-title"
+                      name="title"
                       required
-                      options={project.assignments.map((row) => ({
-                        value: row.tester.id,
-                        label: `${personName(row.tester)} · ${titleCase(row.status)}`,
-                      }))}
+                      maxLength={200}
+                      placeholder="Android build 4.2.1"
                     />
                   </Field>
-                  <Field label="New assignment status" htmlFor="assignment-status" required>
-                    <Select
-                      id="assignment-status"
-                      name="status"
-                      required
-                      options={ASSIGNMENT_STATUSES.map((value) => ({
-                        value,
-                        label: titleCase(value),
-                      }))}
-                      defaultValue="ACTIVE"
+                  <Field label="Link" htmlFor="material-url" hint="A full https:// URL.">
+                    <Input
+                      id="material-url"
+                      name="url"
+                      type="url"
+                      maxLength={2000}
+                      placeholder="https://builds.example.com/4.2.1.apk"
                     />
+                  </Field>
+                  <Field
+                    label="Uploaded file id"
+                    htmlFor="material-file"
+                    hint="Use instead of a link when the file came through the uploads endpoint."
+                  >
+                    <Input id="material-file" name="fileId" placeholder="cl…" />
                   </Field>
                 </div>
                 <Field
-                  label="Note"
-                  htmlFor="assignment-notes"
-                  hint="Replaces the note on that assignment. Leave blank to keep the current one."
+                  label="Description"
+                  htmlFor="material-description"
+                  hint="What it is and what to do with it."
                 >
-                  <Textarea id="assignment-notes" name="notes" rows={3} maxLength={1000} />
+                  <Textarea
+                    id="material-description"
+                    name="description"
+                    rows={3}
+                    maxLength={2000}
+                  />
                 </Field>
                 <div>
-                  <SubmitButton variant="secondary" pendingLabel="Updating…">
-                    Update assignment
+                  <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Attaching…">
+                    Attach material
                   </SubmitButton>
                 </div>
               </form>
             </Panel>
           ) : null}
         </>
-      ) : (
-        <Panel title="Invite testers">
-          <Muted>
-            Staffing this project needs the project.assign permission. Ask an administrator to
-            grant it.
-          </Muted>
-        </Panel>
-      )}
-        </>
-      ) : null}
-
-      {section === 'materials' ? (
-        <>
-      <Panel
-        title="Materials"
-        description="Builds, credentials and reference documents an accepted tester can open."
-      >
-        {!capabilities.canReadBrief ? (
-          <Muted>The brief and its materials are not visible to you on this project.</Muted>
-        ) : project.materials.length === 0 ? (
-          <Muted>No material is attached yet.</Muted>
-        ) : (
-          <ul style={listResetStyle}>
-            {project.materials.map((material) => (
-              <li key={material.id} style={rowStyle}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                  <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{material.title}</span>
-                  {material.description ? <Caption>{material.description}</Caption> : null}
-                  <MaterialTarget material={material} />
-                  <Caption>Added {formatDate(material.createdAt)}</Caption>
-                </div>
-                {capabilities.canManageMaterials ? (
-                  <form action={removeMaterial}>
-                    <input type="hidden" name="id" value={project.id} />
-                    <input type="hidden" name="materialId" value={material.id} />
-                    <ConfirmSubmit iconLeft="x" question={`Remove ${material.title}?`}>
-                      Remove
-                    </ConfirmSubmit>
-                  </form>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
-
-      {capabilities.canManageMaterials ? (
-        <Panel
-          title="Attach a material"
-          description="Give it a title and either a link or the id of a file already uploaded."
-        >
-          <form action={addMaterial} style={stackStyle}>
-            <input type="hidden" name="id" value={project.id} />
-            <input type="hidden" name="buildId" value={activeBuildId} />
-            <div style={fieldGridStyle}>
-              <Field label="Title" htmlFor="material-title" required>
-                <Input
-                  id="material-title"
-                  name="title"
-                  required
-                  maxLength={200}
-                  placeholder="Android build 4.2.1"
-                />
-              </Field>
-              <Field label="Link" htmlFor="material-url" hint="A full https:// URL.">
-                <Input
-                  id="material-url"
-                  name="url"
-                  type="url"
-                  maxLength={2000}
-                  placeholder="https://builds.example.com/4.2.1.apk"
-                />
-              </Field>
-              <Field
-                label="Uploaded file id"
-                htmlFor="material-file"
-                hint="Use instead of a link when the file came through the uploads endpoint."
-              >
-                <Input id="material-file" name="fileId" placeholder="cl…" />
-              </Field>
-            </div>
-            <Field
-              label="Description"
-              htmlFor="material-description"
-              hint="What it is and what to do with it."
-            >
-              <Textarea id="material-description" name="description" rows={3} maxLength={2000} />
-            </Field>
-            <div>
-              <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Attaching…">
-                Attach material
-              </SubmitButton>
-            </div>
-          </form>
-        </Panel>
-      ) : null}
-        </>
       ) : null}
 
       {section === 'features' ? (
         <>
-      <Panel
-        title="Features"
-        description="The tags a bug can be filed against. Delete one and any bug already carrying it just loses the tag — the report stays."
-      >
-        {!features ? (
-          <Muted>Features could not be read.</Muted>
-        ) : features.length === 0 ? (
-          <Muted>No features listed yet.</Muted>
-        ) : (
-          <ul style={listResetStyle}>
-            {features.map((feature) => (
-              <li key={feature.id} style={rowStyle}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                  <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{feature.name}</span>
-                  <Caption>
-                    {feature._count.bugs} bug{feature._count.bugs === 1 ? '' : 's'}
-                  </Caption>
-                </div>
-                {capabilities.canManageMaterials ? (
-                  <form action={removeFeature}>
-                    <input type="hidden" name="id" value={project.id} />
-                    <input type="hidden" name="featureId" value={feature.id} />
-                    <ConfirmSubmit
-                      iconLeft="x"
-                      question={`Remove ${feature.name}?${feature._count.bugs > 0
-                        ? ` ${feature._count.bugs} bug${feature._count.bugs === 1 ? '' : 's'} will be left without a feature.`
-                        : ''}`}
-                    >
-                      Remove
-                    </ConfirmSubmit>
-                  </form>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-        {capabilities.canManageMaterials ? (
-          <form
-            action={addFeature}
-            style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-5)' }}
+          <Panel
+            title="Features"
+            description="The tags a bug can be filed against. Delete one and any bug already carrying it just loses the tag — the report stays."
           >
-            <input type="hidden" name="id" value={project.id} />
-            <input type="hidden" name="buildId" value={activeBuildId} />
-            <Input name="name" required maxLength={120} placeholder="Checkout" />
-            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-              Add feature
-            </SubmitButton>
-          </form>
-        ) : null}
-      </Panel>
+            {!features ? (
+              <Muted>Features could not be read.</Muted>
+            ) : features.length === 0 ? (
+              <Muted>No features listed yet.</Muted>
+            ) : (
+              <ul style={listResetStyle}>
+                {features.map((feature) => (
+                  <li key={feature.id} style={rowStyle}>
+                    <div
+                      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}
+                    >
+                      <span style={{ fontSize: 'var(--type-body-sm-size)' }}>{feature.name}</span>
+                      <Caption>
+                        {feature._count.bugs} bug{feature._count.bugs === 1 ? '' : 's'}
+                      </Caption>
+                    </div>
+                    {capabilities.canManageMaterials ? (
+                      <form action={removeFeature}>
+                        <input type="hidden" name="id" value={project.id} />
+                        <input type="hidden" name="featureId" value={feature.id} />
+                        <ConfirmSubmit
+                          iconLeft="x"
+                          question={`Remove ${feature.name}?${
+                            feature._count.bugs > 0
+                              ? ` ${feature._count.bugs} bug${feature._count.bugs === 1 ? '' : 's'} will be left without a feature.`
+                              : ''
+                          }`}
+                        >
+                          Remove
+                        </ConfirmSubmit>
+                      </form>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {capabilities.canManageMaterials ? (
+              <form
+                action={addFeature}
+                style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-5)' }}
+              >
+                <input type="hidden" name="id" value={project.id} />
+                <input type="hidden" name="buildId" value={activeBuildId} />
+                <Input name="name" required maxLength={120} placeholder="Checkout" />
+                <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+                  Add feature
+                </SubmitButton>
+              </form>
+            ) : null}
+          </Panel>
         </>
       ) : null}
 
@@ -1482,7 +1647,10 @@ export default async function ProjectDetailPage({
                     (a) => !assignedIds.has(a.tester.id),
                   )
                   return (
-                    <li key={tc.id} style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch' }}>
+                    <li
+                      key={tc.id}
+                      style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch' }}
+                    >
                       <details>
                         <summary
                           style={{
@@ -1493,7 +1661,9 @@ export default async function ProjectDetailPage({
                             listStyle: 'none',
                           }}
                         >
-                          <strong style={{ color: 'var(--text-primary)', flex: 1 }}>{tc.title}</strong>
+                          <strong style={{ color: 'var(--text-primary)', flex: 1 }}>
+                            {tc.title}
+                          </strong>
                           {tc.feature ? <Badge tone="neutral">{tc.feature}</Badge> : null}
                           <Caption>
                             {tc.assignments.length} assigned · {tc._count.reports} report
@@ -1512,14 +1682,25 @@ export default async function ProjectDetailPage({
                         >
                           <DescriptionList
                             items={[
-                              { label: 'Description', wide: true, value: <Prose>{tc.description}</Prose> },
+                              {
+                                label: 'Description',
+                                wide: true,
+                                value: <Prose>{tc.description}</Prose>,
+                              },
                               { label: 'Steps', wide: true, value: <Prose>{tc.steps}</Prose> },
-                              { label: 'Expected result', wide: true, value: <Prose>{tc.expectedResult}</Prose> },
+                              {
+                                label: 'Expected result',
+                                wide: true,
+                                value: <Prose>{tc.expectedResult}</Prose>,
+                              },
                             ]}
                           />
 
                           <div>
-                            <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-2)' }}>
+                            <p
+                              className="c4t-eyebrow"
+                              style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-2)' }}
+                            >
                               Assigned testers
                             </p>
                             {tc.assignments.length === 0 ? (
@@ -1536,7 +1717,11 @@ export default async function ProjectDetailPage({
                             {capabilities.canAssignTesters && assignableTesters.length > 0 ? (
                               <form
                                 action={assignTestCase}
-                                style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}
+                                style={{
+                                  display: 'flex',
+                                  gap: 'var(--space-2)',
+                                  marginTop: 'var(--space-3)',
+                                }}
                               >
                                 <input type="hidden" name="id" value={project.id} />
                                 <input type="hidden" name="testCaseId" value={tc.id} />
@@ -1557,7 +1742,10 @@ export default async function ProjectDetailPage({
                           </div>
 
                           <div>
-                            <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-2)' }}>
+                            <p
+                              className="c4t-eyebrow"
+                              style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-2)' }}
+                            >
                               Test reports
                             </p>
                             {tc.reports.length === 0 ? (
@@ -1566,20 +1754,35 @@ export default async function ProjectDetailPage({
                               <ul style={{ ...listResetStyle, gap: 'var(--space-3)' }}>
                                 {tc.reports.map((r) => (
                                   <li key={r.id} style={{ fontSize: 'var(--type-body-sm-size)' }}>
-                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 'var(--space-2)',
+                                      }}
+                                    >
                                       <StatusBadge status={r.result} />
                                       <span>{personName(r.tester)}</span>
                                       <Caption>{formatDate(r.createdAt)}</Caption>
                                     </span>
                                     {r.notes ? (
-                                      <p style={{ margin: 'var(--space-1) 0 0', color: 'var(--text-secondary)' }}>
+                                      <p
+                                        style={{
+                                          margin: 'var(--space-1) 0 0',
+                                          color: 'var(--text-secondary)',
+                                        }}
+                                      >
                                         {r.notes}
                                       </p>
                                     ) : null}
                                     {r.linkedBug ? (
                                       <Link
                                         href={`/app/admin/bugs/${r.linkedBug.id}`}
-                                        style={{ color: 'var(--text-brand)', textDecoration: 'underline', textUnderlineOffset: 3 }}
+                                        style={{
+                                          color: 'var(--text-brand)',
+                                          textDecoration: 'underline',
+                                          textUnderlineOffset: 3,
+                                        }}
                                       >
                                         {r.linkedBug.reference} — {r.linkedBug.title}
                                       </Link>
@@ -1615,7 +1818,13 @@ export default async function ProjectDetailPage({
                   </Field>
                 </div>
                 <Field label="Description" htmlFor="tc-description" required>
-                  <Textarea id="tc-description" name="description" rows={3} required minLength={5} />
+                  <Textarea
+                    id="tc-description"
+                    name="description"
+                    rows={3}
+                    required
+                    minLength={5}
+                  />
                 </Field>
                 <Field label="Steps" htmlFor="tc-steps" required>
                   <Textarea id="tc-steps" name="steps" rows={4} required minLength={5} />
@@ -1636,69 +1845,73 @@ export default async function ProjectDetailPage({
 
       {section === 'bugs' ? (
         <>
-      <Panel
-        title="Bugs"
-        description={
-          'error' in bugs
-            ? 'This build’s reports.'
-            : bugs.meta.total > BUG_PREVIEW_SIZE
-              ? `The ${BUG_PREVIEW_SIZE} most recent of ${bugs.meta.total} reports on ${activeBuild?.name ?? 'this build'}.`
-              : `${bugs.meta.total} report${bugs.meta.total === 1 ? '' : 's'} on ${activeBuild?.name ?? 'this build'}.`
-        }
-        flush
-      >
-        {'error' in bugs ? (
-          <div style={{ padding: 'var(--space-6)' }}>
-            <Muted>
-              {bugs.error === 'forbidden'
-                ? 'Reading defects needs the bug.read permission.'
-                : 'The bugs service is unreachable. Refresh in a moment.'}
-            </Muted>
-          </div>
-        ) : (
-          <Table
-            ariaLabel="Bugs on this project"
-            columns={bugColumns}
-            rows={bugs.items}
-            rowKey={(row) => row.id}
-            rowHref={(row) => `/app/admin/bugs/${row.id}`}
-            style={bareTableStyle}
-            emptyState={
-              <div style={{ padding: 'var(--space-6)' }}>
-                <Muted>No defect has been logged against this project yet.</Muted>
-              </div>
+          <Panel
+            title="Bugs"
+            description={
+              'error' in bugs
+                ? 'This build’s reports.'
+                : bugs.meta.total > BUG_PREVIEW_SIZE
+                  ? `The ${BUG_PREVIEW_SIZE} most recent of ${bugs.meta.total} reports on ${activeBuild?.name ?? 'this build'}.`
+                  : `${bugs.meta.total} report${bugs.meta.total === 1 ? '' : 's'} on ${activeBuild?.name ?? 'this build'}.`
             }
-          />
-        )}
-      </Panel>
+            flush
+          >
+            {'error' in bugs ? (
+              <div style={{ padding: 'var(--space-6)' }}>
+                <Muted>
+                  {bugs.error === 'forbidden'
+                    ? 'Reading defects needs the bug.read permission.'
+                    : 'The bugs service is unreachable. Refresh in a moment.'}
+                </Muted>
+              </div>
+            ) : (
+              <Table
+                ariaLabel="Bugs on this project"
+                columns={bugColumns}
+                rows={bugs.items}
+                rowKey={(row) => row.id}
+                rowHref={(row) => `/app/admin/bugs/${row.id}`}
+                style={bareTableStyle}
+                emptyState={
+                  <div style={{ padding: 'var(--space-6)' }}>
+                    <Muted>No defect has been logged against this project yet.</Muted>
+                  </div>
+                }
+              />
+            )}
+          </Panel>
         </>
       ) : null}
 
       {section === 'settings' ? (
         <>
-      {canDelete ? (
-        <Panel
-          title="Archive this project"
-          description="The project is soft-deleted and its status set to cancelled. Bugs, materials and the roster are kept."
-        >
-          <form action={archiveProject} style={stackStyle}>
-            <input type="hidden" name="id" value={project.id} />
-            <input type="hidden" name="reference" value={project.reference} />
-            <Field
-              label={`Type ${project.reference} to confirm`}
-              htmlFor="confirm"
-              hint="Nothing happens unless the reference matches."
+          {canDelete ? (
+            <Panel
+              title="Archive this project"
+              description="The project is soft-deleted and its status set to cancelled. Bugs, materials and the roster are kept."
             >
-              <Input id="confirm" name="confirm" required autoComplete="off" />
-            </Field>
-            <div>
-              <SubmitButton variant="secondary" iconLeft="alert-triangle" pendingLabel="Archiving…">
-                Archive project
-              </SubmitButton>
-            </div>
-          </form>
-        </Panel>
-      ) : null}
+              <form action={archiveProject} style={stackStyle}>
+                <input type="hidden" name="id" value={project.id} />
+                <input type="hidden" name="reference" value={project.reference} />
+                <Field
+                  label={`Type ${project.reference} to confirm`}
+                  htmlFor="confirm"
+                  hint="Nothing happens unless the reference matches."
+                >
+                  <Input id="confirm" name="confirm" required autoComplete="off" />
+                </Field>
+                <div>
+                  <SubmitButton
+                    variant="secondary"
+                    iconLeft="alert-triangle"
+                    pendingLabel="Archiving…"
+                  >
+                    Archive project
+                  </SubmitButton>
+                </div>
+              </form>
+            </Panel>
+          ) : null}
         </>
       ) : null}
 
@@ -1734,7 +1947,11 @@ export default async function ProjectDetailPage({
                   options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))}
                 />
               </Field>
-              <Field label="Test type" htmlFor="new-build-testType" hint="Exploratory, regression, smoke, load...">
+              <Field
+                label="Test type"
+                htmlFor="new-build-testType"
+                hint="Exploratory, regression, smoke, load..."
+              >
                 <Input
                   id="new-build-testType"
                   name="testType"
@@ -1748,7 +1965,11 @@ export default async function ProjectDetailPage({
               <Field label="End date" htmlFor="new-build-endDate">
                 <Input id="new-build-endDate" name="endDate" type="date" />
               </Field>
-              <Field label="Maximum testers" htmlFor="new-build-maxTesters" hint="Leave blank for no cap.">
+              <Field
+                label="Maximum testers"
+                htmlFor="new-build-maxTesters"
+                hint="Leave blank for no cap."
+              >
                 <Input
                   id="new-build-maxTesters"
                   name="maxTesters"
@@ -1770,28 +1991,44 @@ export default async function ProjectDetailPage({
             </div>
 
             <div style={fieldGridStyle}>
-              <Field label="Target countries" htmlFor="new-build-targetCountries" hint="Comma separated: IN, GB, US.">
+              <Field
+                label="Target countries"
+                htmlFor="new-build-targetCountries"
+                hint="Comma separated: IN, GB, US."
+              >
                 <Input
                   id="new-build-targetCountries"
                   name="targetCountries"
                   defaultValue={defaultBuildDetail?.targetCountries.join(', ') ?? ''}
                 />
               </Field>
-              <Field label="Target languages" htmlFor="new-build-targetLanguages" hint="Comma separated: en, hi, ta.">
+              <Field
+                label="Target languages"
+                htmlFor="new-build-targetLanguages"
+                hint="Comma separated: en, hi, ta."
+              >
                 <Input
                   id="new-build-targetLanguages"
                   name="targetLanguages"
                   defaultValue={defaultBuildDetail?.targetLanguages.join(', ') ?? ''}
                 />
               </Field>
-              <Field label="Target devices" htmlFor="new-build-targetDevices" hint="Comma separated.">
+              <Field
+                label="Target devices"
+                htmlFor="new-build-targetDevices"
+                hint="Comma separated."
+              >
                 <Input
                   id="new-build-targetDevices"
                   name="targetDevices"
                   defaultValue={defaultBuildDetail?.targetDevices.join(', ') ?? ''}
                 />
               </Field>
-              <Field label="Target browsers" htmlFor="new-build-targetBrowsers" hint="Comma separated.">
+              <Field
+                label="Target browsers"
+                htmlFor="new-build-targetBrowsers"
+                hint="Comma separated."
+              >
                 <Input
                   id="new-build-targetBrowsers"
                   name="targetBrowsers"
