@@ -68,7 +68,3 @@ export function hasPermission(user: SessionUser, code: string): boolean {
   if (user.role !== 'SUB_ADMIN') return false
   return user.permissions.includes(code)
 }
-
-export function isAdminSide(user: SessionUser): boolean {
-  return user.role === 'ADMIN' || user.role === 'SUB_ADMIN'
-}

@@ -213,10 +213,6 @@ export function deviceFitsTargets(
 
 export const BUILD_STATUSES = ['NEW', 'ASSIGNED', 'TESTED', 'REVIEWED', 'CLOSED'] as const
 export type BuildStatusValue = (typeof BUILD_STATUSES)[number]
-export function isBuildStatus(value: string): value is BuildStatusValue {
-  return (BUILD_STATUSES as readonly string[]).includes(value)
-}
-
 export interface BuildDetail {
   id: string
   projectId: string

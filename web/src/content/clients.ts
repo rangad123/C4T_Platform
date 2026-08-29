@@ -67,7 +67,7 @@ export const CLIENTS: readonly Client[] = [
   {
     name: 'Airmeet',
     slug: 'airmeet',
-    logo: '/clients/airmeet.svg',
+    logo: '/images/clients/airmeet.svg',
     logoWidth: 802,
     logoHeight: 200,
     website: 'https://www.airmeet.com',
@@ -95,7 +95,7 @@ export const CLIENTS: readonly Client[] = [
     // Supplied as "Rewrdz" — the company spells it Rewardz.
     name: 'Rewardz',
     slug: 'rewardz',
-    logo: '/clients/rewardz.svg',
+    logo: '/images/clients/rewardz.svg',
     logoWidth: 221,
     logoHeight: 66,
     website: 'https://rewardz.sg',
@@ -104,7 +104,7 @@ export const CLIENTS: readonly Client[] = [
   {
     name: 'Exotel',
     slug: 'exotel',
-    logo: '/clients/exotel.png',
+    logo: '/images/clients/exotel.png',
     logoWidth: 120,
     logoHeight: 36,
     website: 'https://exotel.com',
@@ -122,7 +122,7 @@ export const CLIENTS: readonly Client[] = [
   {
     name: 'OnMobile',
     slug: 'onmobile',
-    logo: '/clients/onmobile.svg',
+    logo: '/images/clients/onmobile.svg',
     logoWidth: 576,
     logoHeight: 93,
     website: 'https://www.onmobile.com',
@@ -140,7 +140,7 @@ export const CLIENTS: readonly Client[] = [
   {
     name: 'Ulatus',
     slug: 'ulatus',
-    logo: '/clients/ulatus.png',
+    logo: '/images/clients/ulatus.png',
     logoWidth: 1200,
     logoHeight: 363,
     website: 'https://www.ulatus.com',
@@ -149,13 +149,10 @@ export const CLIENTS: readonly Client[] = [
   {
     name: 'DotPe',
     slug: 'dotpe',
-    logo: '/clients/dotpe.svg',
+    logo: '/images/clients/dotpe.svg',
     logoWidth: 103,
     logoHeight: 26,
     website: 'https://dotpe.in',
     permission: false,
   },
 ] as const
-
-/** True once every client has written permission recorded. */
-export const ALL_CLIENTS_PERMITTED = CLIENTS.every((c) => c.permission)

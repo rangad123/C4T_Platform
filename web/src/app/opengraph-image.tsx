@@ -48,18 +48,20 @@ export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
 async function loadMarkDataUrl(): Promise<string> {
-  // live edit: the raster sits in `public/og-mark.png` next to the other
-  // brand assets. fs.readFile runs at build time, so the data URL is baked
-  // into the prerendered HTML rather than fetched at request time.
+  // The raster sits with the other brand assets under
+  // `public/images/logos/`. fs.readFile runs at build time, so the data URL
+  // is baked into the prerendered HTML rather than fetched at request time.
   try {
-    const path = join(process.cwd(), 'public', 'og-mark.png')
+    const path = join(process.cwd(), 'public', 'images', 'logos', 'logo-without-text-og-mark.png')
     const bytes = await fs.readFile(path)
     return `data:image/png;base64,${bytes.toString('base64')}`
   } catch {
     // The card still renders if the raster is missing — the mark just doesn't
     // appear. Failing silently here would be wrong (no loud signal that the
     // brand asset is broken), so we surface it in the build log instead.
-    console.warn('[opengraph-image] public/og-mark.png not found; the card will omit the mark')
+    console.warn(
+      '[opengraph-image] public/images/logos/logo-without-text-og-mark.png not found; the card will omit the mark',
+    )
     return ''
   }
 }

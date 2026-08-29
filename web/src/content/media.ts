@@ -123,16 +123,6 @@ export const PHOTOS = {
     alt: 'A sculpted head in profile, the letters AI glowing among drifting particles inside its open cranium',
   },
 
-  /**
-   * ⚠ CURRENTLY UNUSED. It held the homepage platform section until `ai` took
-   * that slot. The entry and `public/images/pages/robot.jpg` (1.16 MB — the
-   * largest image in the repo) are both still here; if no slot is found for it,
-   * delete both rather than shipping an asset nothing points at.
-   */
-  robot: {
-    src: '/images/pages/robot.jpg',
-    alt: 'A small white robot with an LED dot-matrix face, marked Bot across its chest',
-  },
 } as const satisfies Record<string, Photo>
 
 export type PhotoKey = keyof typeof PHOTOS

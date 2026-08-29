@@ -89,20 +89,3 @@ export async function createAnnouncement(formData: FormData): Promise<void> {
   // Outside any try/catch on purpose — `redirect` works by throwing.
   redirect(LIST_PATH)
 }
-
-/**
- * Deletes an announcement outright.
- *
- * The API has no update route, so deletion is the only correction available:
- * a published announcement cannot be edited, unpublished or re-dated.
- */
-export async function deleteAnnouncement(formData: FormData): Promise<void> {
-  await requirePermission('announcement.write')
-
-  const id = formTrimmed(formData, 'id')
-  if (!id) return
-
-  await serverFetch<void>(`communication/announcements/${id}`, { method: 'DELETE' })
-
-  revalidatePath(LIST_PATH)
-}
