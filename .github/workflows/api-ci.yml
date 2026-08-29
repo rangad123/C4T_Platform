@@ -52,6 +52,9 @@ jobs:
 
       - name: Validate Prisma schema
         run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
 
       - name: Build
         run: npm run build
