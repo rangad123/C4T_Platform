@@ -10,7 +10,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-npm ci --omit=dev
+# Full install, not --omit=dev: the @types/* packages tsc needs to compile
+# are dev dependencies. They're erased from the compiled dist/ output anyway,
+# so leaving them installed at runtime costs disk, not correctness.
+npm ci
 npx prisma generate
 npm run build
 pm2 startOrReload ecosystem.config.cjs --env production
