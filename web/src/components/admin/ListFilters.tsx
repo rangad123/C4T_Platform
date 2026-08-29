@@ -187,7 +187,11 @@ export function ListFilters({
               options={[{ value: '', label: 'Default' }, ...sort.options]}
             />
           </Field>
-          <Field label="Order" htmlFor={sort.orderName} style={{ flex: '1 1 130px', maxWidth: 150 }}>
+          <Field
+            label="Order"
+            htmlFor={sort.orderName}
+            style={{ flex: '1 1 130px', maxWidth: 150 }}
+          >
             <Select
               id={sort.orderName}
               name={sort.orderName}

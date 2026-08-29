@@ -78,7 +78,11 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
       _sum: { amountMinor: true },
     }),
     canReadLeads
-      ? prisma.lead.groupBy({ by: ['status'], where: { status: { not: LeadStatus.SPAM } }, _count: true })
+      ? prisma.lead.groupBy({
+          by: ['status'],
+          where: { status: { not: LeadStatus.SPAM } },
+          _count: true,
+        })
       : Promise.resolve(null),
     prisma.transaction.aggregate({
       where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('indian') },

@@ -132,9 +132,7 @@ export async function savePayoutDetails(formData: FormData): Promise<void> {
   await serverFetch<{ id: string }>(`transactions/${id}`, {
     method: 'PATCH',
     body: {
-      ...((PAYMENT_METHODS as readonly string[]).includes(paymentMethod)
-        ? { paymentMethod }
-        : {}),
+      ...((PAYMENT_METHODS as readonly string[]).includes(paymentMethod) ? { paymentMethod } : {}),
       ...(paidAmountMinor ? { paidAmountMinor } : {}),
       ...(tdsAmountMinor ? { tdsAmountMinor } : {}),
       buildOrContestRef: buildOrContestRef.slice(0, 160),

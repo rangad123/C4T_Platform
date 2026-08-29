@@ -80,9 +80,9 @@ export default async function AdminSettingsPage({
               maxWidth: '70ch',
             }}
           >
-            Until one is published, no download link appears on the tester profile — an empty
-            link is worse than none. Replacing this document does not re-open NDAs testers have
-            already accepted.
+            Until one is published, no download link appears on the tester profile — an empty link
+            is worse than none. Replacing this document does not re-open NDAs testers have already
+            accepted.
           </p>
 
           <SingleFileUpload

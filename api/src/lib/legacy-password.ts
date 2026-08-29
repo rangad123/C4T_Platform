@@ -99,7 +99,8 @@ export function verifyLegacyPassword(
   storedHash: string,
   plain: string,
 ): boolean {
-  const node = algo === PasswordAlgo.LEGACY_MD5 ? 'md5' : algo === PasswordAlgo.LEGACY_SHA1 ? 'sha1' : null
+  const node =
+    algo === PasswordAlgo.LEGACY_MD5 ? 'md5' : algo === PasswordAlgo.LEGACY_SHA1 ? 'sha1' : null
   if (!node) return false
 
   const pepper = env.LEGACY_PASSWORD_PEPPER ?? ''

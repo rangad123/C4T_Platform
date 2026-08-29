@@ -1,7 +1,13 @@
 import { Router } from 'express'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
-import { TransactionType, TransactionStatus, PaymentMethod, Role, type Prisma } from '@prisma/client'
+import {
+  TransactionType,
+  TransactionStatus,
+  PaymentMethod,
+  Role,
+  type Prisma,
+} from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission, isAdminSide } from '../../middleware/authorize.js'
@@ -136,7 +142,10 @@ const PENDING_STATUSES: TransactionStatus[] = [
   TransactionStatus.RELEASED,
 ]
 const INDIAN_METHODS: PaymentMethod[] = [PaymentMethod.IND_BANK_ACCOUNT, PaymentMethod.PAYTM]
-const INTERNATIONAL_METHODS: PaymentMethod[] = [PaymentMethod.NON_IND_BANK_ACCOUNT, PaymentMethod.PAYPAL]
+const INTERNATIONAL_METHODS: PaymentMethod[] = [
+  PaymentMethod.NON_IND_BANK_ACCOUNT,
+  PaymentMethod.PAYPAL,
+]
 
 export const TRANSACTION_CATEGORIES = ['indian', 'international', 'pending'] as const
 export type TransactionCategory = (typeof TRANSACTION_CATEGORIES)[number]
@@ -147,10 +156,7 @@ export function categoryFilter(category?: TransactionCategory): Prisma.Transacti
   if (category === 'indian') {
     return {
       status: { notIn: PENDING_STATUSES },
-      OR: [
-        { paymentMethod: { in: INDIAN_METHODS } },
-        { paymentMethod: null, currency: 'INR' },
-      ],
+      OR: [{ paymentMethod: { in: INDIAN_METHODS } }, { paymentMethod: null, currency: 'INR' }],
     }
   }
   if (category === 'international') {
@@ -261,8 +267,11 @@ function transactionWhere(
   // `occurredAt`, which `base` may already set too — composed as separate AND
   // branches instead of spread into `base` so neither can silently overwrite
   // the other's key.
-  const extra = [categoryFilter(query.category), financeYearRange(query.financeYear), monthRange(query.month)]
-    .filter((clause) => Object.keys(clause).length > 0)
+  const extra = [
+    categoryFilter(query.category),
+    financeYearRange(query.financeYear),
+    monthRange(query.month),
+  ].filter((clause) => Object.keys(clause).length > 0)
 
   return extra.length > 0 ? { AND: [base, ...extra] } : base
 }
@@ -360,7 +369,10 @@ transactionsRouter.get('/export.csv', validate({ query: listQuery }), async (req
   )
 
   res.setHeader('content-type', 'text/csv; charset=utf-8')
-  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('transactions')}"`)
+  res.setHeader(
+    'content-disposition',
+    `attachment; filename="${timestampedFilename('transactions')}"`,
+  )
   res.send(csv)
 })
 
@@ -431,10 +443,14 @@ transactionsRouter.post(
     }
     if (input.paymentAccountId) {
       const account = await prisma.paymentAccount.findFirst({
-        where: { id: input.paymentAccountId, ...(input.counterpartyId ? { userId: input.counterpartyId } : {}) },
+        where: {
+          id: input.paymentAccountId,
+          ...(input.counterpartyId ? { userId: input.counterpartyId } : {}),
+        },
         select: { id: true },
       })
-      if (!account) throw new BadRequestError('paymentAccountId does not belong to the counterparty')
+      if (!account)
+        throw new BadRequestError('paymentAccountId does not belong to the counterparty')
     }
 
     const tx = await prisma.transaction.create({
@@ -659,7 +675,8 @@ async function payoutBalance(testerId: string): Promise<{
  * individual flags explain it.
  */
 transactionsRouter.get('/payouts/mine', async (req, res) => {
-  if (req.user!.role !== Role.TESTER) throw new BadRequestError('Only a tester has a payout balance')
+  if (req.user!.role !== Role.TESTER)
+    throw new BadRequestError('Only a tester has a payout balance')
 
   const [balance, account, openRequest] = await Promise.all([
     payoutBalance(req.user!.id),

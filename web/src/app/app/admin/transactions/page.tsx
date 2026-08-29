@@ -170,7 +170,16 @@ export default async function TransactionsPage({
   // matching what `resolveSection` reads back above. These are deliberately
   // two different keys for the same value: `category` only means something
   // to the API query; the page itself only ever reads `section` from the URL.
-  const pageParams = { section: category, type: selectedType, status, paymentMethod, financeYear, month, sort, order }
+  const pageParams = {
+    section: category,
+    type: selectedType,
+    status,
+    paymentMethod,
+    financeYear,
+    month,
+    sort,
+    order,
+  }
 
   const result = await loadList<TransactionRow>('transactions', {
     page,
@@ -178,8 +187,7 @@ export default async function TransactionsPage({
     query: apiQuery,
   })
 
-  const totals =
-    'items' in result ? ((result.meta as TransactionMeta).totalsByType ?? []) : []
+  const totals = 'items' in result ? ((result.meta as TransactionMeta).totalsByType ?? []) : []
 
   const columns: readonly TableColumn<TransactionRow>[] = [
     {
@@ -263,14 +271,14 @@ export default async function TransactionsPage({
             render: (row) => (row.paymentMethod ? titleCase(row.paymentMethod) : '—'),
             renderSecondary: (row) =>
               row.paymentAccount
-                ? row.paymentAccount.bankName ??
+                ? (row.paymentAccount.bankName ??
                   row.paymentAccount.paypalEmailMasked ??
                   (row.paymentAccount.accountNumberLast4
                     ? `•••• ${row.paymentAccount.accountNumberLast4}`
                     : undefined) ??
                   (row.paymentAccount.paytmNumberLast4
                     ? `•••• ${row.paymentAccount.paytmNumberLast4}`
-                    : undefined)
+                    : undefined))
                 : undefined,
           },
         ] satisfies TableColumn<TransactionRow>[])
@@ -280,7 +288,8 @@ export default async function TransactionsPage({
       header: 'Occurred',
       align: 'right',
       render: (row) => formatDate(row.occurredAt),
-      renderSecondary: (row) => (row.settledAt ? `Settled ${formatDate(row.settledAt)}` : undefined),
+      renderSecondary: (row) =>
+        row.settledAt ? `Settled ${formatDate(row.settledAt)}` : undefined,
     },
   ]
 
@@ -320,13 +329,26 @@ export default async function TransactionsPage({
       emptyDescription="Record an invoice or a payout and it appears here."
       tabs={<SectionTabs basePath={BASE} tabs={SECTIONS} active={section} />}
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}
               hidden={{ section: category }}
               selects={[
-                { name: 'type', label: 'Type', options: TYPES, value: selectedType, allLabel: 'All types' },
+                {
+                  name: 'type',
+                  label: 'Type',
+                  options: TYPES,
+                  value: selectedType,
+                  allLabel: 'All types',
+                },
                 {
                   name: 'status',
                   label: 'Status',

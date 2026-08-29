@@ -23,7 +23,14 @@ export const managersRouter = Router()
 managersRouter.use(authenticate)
 managersRouter.use(requirePermission(PERMISSIONS.MANAGER_READ))
 
-const MANAGER_SORT_FIELDS = ['createdAt', 'firstName', 'lastName', 'email', 'role', 'status'] as const
+const MANAGER_SORT_FIELDS = [
+  'createdAt',
+  'firstName',
+  'lastName',
+  'email',
+  'role',
+  'status',
+] as const
 
 const listQuery = paginationQuery.extend({
   search: z.string().trim().max(120).optional(),

@@ -105,7 +105,9 @@ export default async function TesterProjectsPage({
       header: 'Window',
       align: 'right',
       render: (row) =>
-        row.project ? `${formatDate(row.project.startDate)} to ${formatDate(row.project.endDate)}` : '—',
+        row.project
+          ? `${formatDate(row.project.startDate)} to ${formatDate(row.project.endDate)}`
+          : '—',
     },
     {
       key: 'invited',
@@ -136,7 +138,14 @@ export default async function TesterProjectsPage({
       emptyTitle="No projects yet"
       emptyDescription="When a project invites you to test, it appears here."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}

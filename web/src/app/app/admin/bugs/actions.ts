@@ -45,7 +45,10 @@ export async function bulkChangeBugStatusAction(formData: FormData): Promise<voi
   // FormData.getAll('ids') returns every checkbox value in submission order,
   // so duplicates (a row selected twice somehow) are kept as-is — the API
   // dedupes via the per-row check anyway.
-  const ids = formData.getAll('ids').map((v) => (typeof v === 'string' ? v : '')).filter(Boolean)
+  const ids = formData
+    .getAll('ids')
+    .map((v) => (typeof v === 'string' ? v : ''))
+    .filter(Boolean)
   const statusInput = formTrimmed(formData, 'status')
   const severityInput = formTrimmed(formData, 'severity')
   const note = formTrimmed(formData, 'note')

@@ -247,12 +247,7 @@ export async function exportBugsCSV(
     b.feature?.name ?? '',
     b.project?.reference ?? '',
     b.project?.title ?? '',
-    [
-      b.reportedBy?.firstName,
-      b.reportedBy?.lastName,
-    ]
-      .filter(Boolean)
-      .join(' '),
+    [b.reportedBy?.firstName, b.reportedBy?.lastName].filter(Boolean).join(' '),
     ...(includeReporterEmail ? [b.reportedBy?.email ?? ''] : []),
     b.reportedBy?.testerProfile?.countryCode ?? '',
     b.deviceModel ?? '',
@@ -469,7 +464,10 @@ async function resolveCustomValues(
       continue
     }
     if (field.options.length > 0) {
-      const parts = value.split(NEWLINE).map((v) => v.trim()).filter(Boolean)
+      const parts = value
+        .split(NEWLINE)
+        .map((v) => v.trim())
+        .filter(Boolean)
       const unknown = parts.find((v) => !field.options.includes(v))
       if (unknown) throw new BadRequestError(`"${unknown}" is not an option for "${field.name}"`)
     }
@@ -487,13 +485,7 @@ export async function createBug(
     customAnswers?: { fieldId: string; value: string }[]
   },
 ) {
-  const {
-    projectId,
-    buildId: requestedBuildId,
-    attachmentFileIds,
-    customAnswers,
-    ...data
-  } = input
+  const { projectId, buildId: requestedBuildId, attachmentFileIds, customAnswers, ...data } = input
 
   const resolved = await projectRelations(user, projectId)
   if (!resolved) throw new NotFoundError('Project')

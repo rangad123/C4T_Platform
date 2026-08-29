@@ -163,7 +163,14 @@ export async function getTestCase(user: Express.AuthenticatedUser, id: string) {
 
 export async function createTestCase(
   user: Express.AuthenticatedUser,
-  input: { buildId: string; feature?: string; title: string; description: string; steps: string; expectedResult: string },
+  input: {
+    buildId: string
+    feature?: string
+    title: string
+    description: string
+    steps: string
+    expectedResult: string
+  },
 ) {
   const { projectId } = await projectIdForBuild(input.buildId)
   const resolved = await projectRelations(user, projectId)
@@ -241,7 +248,9 @@ export async function assignTesters(
   const eligibleIds = new Set(eligible.map((e) => e.testerId))
   const ineligible = testerIds.filter((id) => !eligibleIds.has(id))
   if (ineligible.length > 0) {
-    throw new BadRequestError('Every tester must have an accepted or active assignment on this project')
+    throw new BadRequestError(
+      'Every tester must have an accepted or active assignment on this project',
+    )
   }
 
   await prisma.testCaseAssignment.createMany({
@@ -325,14 +334,11 @@ export async function createTestReport(
     }),
     prisma.managerAssignment.findMany({ where: { projectId }, select: { managerId: true } }),
   ])
-  await createNotifications(
-    [...owners.map((o) => o.userId), ...managers.map((m) => m.managerId)],
-    {
-      type: 'BUG_REPORTED',
-      title: `A test report (${input.result.toLowerCase()}) was filed`,
-      link: `/app/admin/projects/${projectId}?section=testing`,
-    },
-  )
+  await createNotifications([...owners.map((o) => o.userId), ...managers.map((m) => m.managerId)], {
+    type: 'BUG_REPORTED',
+    title: `A test report (${input.result.toLowerCase()}) was filed`,
+    link: `/app/admin/projects/${projectId}?section=testing`,
+  })
 
   return report
 }
@@ -410,12 +416,25 @@ export async function buildSummary(user: Express.AuthenticatedUser, buildId: str
     reviews,
   ] = await Promise.all([
     prisma.projectAssignment.count({
-      where: { buildId, status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED] } },
+      where: {
+        buildId,
+        status: {
+          in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED],
+        },
+      },
     }),
     prisma.bug.groupBy({ by: ['severity'], where: { buildId, deletedAt: null }, _count: true }),
     prisma.bug.groupBy({ by: ['status'], where: { buildId, deletedAt: null }, _count: true }),
-    prisma.bug.groupBy({ by: ['type'], where: { buildId, deletedAt: null, type: { not: null } }, _count: true }),
-    prisma.bug.groupBy({ by: ['reproducibility'], where: { buildId, deletedAt: null }, _count: true }),
+    prisma.bug.groupBy({
+      by: ['type'],
+      where: { buildId, deletedAt: null, type: { not: null } },
+      _count: true,
+    }),
+    prisma.bug.groupBy({
+      by: ['reproducibility'],
+      where: { buildId, deletedAt: null },
+      _count: true,
+    }),
     prisma.testCase.count({ where: { buildId, deletedAt: null } }),
     prisma.testReport.groupBy({ by: ['result'], where: { buildId }, _count: true }),
     prisma.testReview.findMany({
@@ -436,17 +455,33 @@ export async function buildSummary(user: Express.AuthenticatedUser, buildId: str
   }
 
   const ratings = reviews.map((r) => r.rating).filter((r): r is number => r !== null)
-  const averageRating = ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null
+  const averageRating =
+    ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null
 
   const testedCaseCount = reportsByResult.reduce((sum, r) => sum + r._count, 0)
 
   return {
     testerCount,
     bugCount: bugsByStatus.reduce((sum, r) => sum + r._count, 0),
-    bugsBySeverity: tally(bugsBySeverity, ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const, (r) => r.severity),
+    bugsBySeverity: tally(
+      bugsBySeverity,
+      ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const,
+      (r) => r.severity,
+    ),
     bugsByStatus: tally(
       bugsByStatus,
-      ['NEW', 'TRIAGED', 'CONFIRMED', 'IN_PROGRESS', 'FIXED', 'VERIFIED', 'REOPENED', 'REJECTED', 'WONT_FIX', 'DUPLICATE'] as const,
+      [
+        'NEW',
+        'TRIAGED',
+        'CONFIRMED',
+        'IN_PROGRESS',
+        'FIXED',
+        'VERIFIED',
+        'REOPENED',
+        'REJECTED',
+        'WONT_FIX',
+        'DUPLICATE',
+      ] as const,
       (r) => r.status,
     ),
     bugsByType: Object.fromEntries(bugsByType.map((r) => [r.type as string, r._count])),
@@ -456,8 +491,13 @@ export async function buildSummary(user: Express.AuthenticatedUser, buildId: str
       (r) => r.reproducibility,
     ),
     testCaseCount,
-    testCaseCompletion: testCaseCount > 0 ? Math.round((testedCaseCount / testCaseCount) * 100) : null,
-    testReportsByResult: tally(reportsByResult, ['NOT_TESTED', 'PASS', 'FAIL', 'BLOCKED'] as const, (r) => r.result),
+    testCaseCompletion:
+      testCaseCount > 0 ? Math.round((testedCaseCount / testCaseCount) * 100) : null,
+    testReportsByResult: tally(
+      reportsByResult,
+      ['NOT_TESTED', 'PASS', 'FAIL', 'BLOCKED'] as const,
+      (r) => r.result,
+    ),
     reviewCount: reviews.length,
     averageRating,
   }

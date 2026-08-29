@@ -241,35 +241,83 @@ async function main() {
       brand: 'Google',
       models: [
         { name: 'Pixel 7a', type: DeviceType.MOBILE, os: 'Android', ramGb: '8', screenSize: '6.1' },
-        { name: 'Pixel 8 Pro', type: DeviceType.MOBILE, os: 'Android', ramGb: '12', screenSize: '6.7' },
+        {
+          name: 'Pixel 8 Pro',
+          type: DeviceType.MOBILE,
+          os: 'Android',
+          ramGb: '12',
+          screenSize: '6.7',
+        },
       ],
     },
     {
       brand: 'Apple',
       models: [
         { name: 'iPhone 13', type: DeviceType.MOBILE, os: 'iOS', ramGb: '4', screenSize: '6.1' },
-        { name: 'iPhone 15 Pro', type: DeviceType.MOBILE, os: 'iOS', ramGb: '8', screenSize: '6.1' },
-        { name: 'iPad Air (M2)', type: DeviceType.TABLET, os: 'iPadOS', ramGb: '8', screenSize: '11' },
-        { name: 'MacBook Pro 14"', type: DeviceType.DESKTOP, os: 'Mac IOS', ramGb: '18', screenSize: '14.2' },
+        {
+          name: 'iPhone 15 Pro',
+          type: DeviceType.MOBILE,
+          os: 'iOS',
+          ramGb: '8',
+          screenSize: '6.1',
+        },
+        {
+          name: 'iPad Air (M2)',
+          type: DeviceType.TABLET,
+          os: 'iPadOS',
+          ramGb: '8',
+          screenSize: '11',
+        },
+        {
+          name: 'MacBook Pro 14"',
+          type: DeviceType.DESKTOP,
+          os: 'Mac IOS',
+          ramGb: '18',
+          screenSize: '14.2',
+        },
       ],
     },
     {
       brand: 'Samsung',
       models: [
-        { name: 'Galaxy S24', type: DeviceType.MOBILE, os: 'Android', ramGb: '8', screenSize: '6.2' },
-        { name: 'Galaxy Tab S9', type: DeviceType.TABLET, os: 'Android', ramGb: '8', screenSize: '11' },
+        {
+          name: 'Galaxy S24',
+          type: DeviceType.MOBILE,
+          os: 'Android',
+          ramGb: '8',
+          screenSize: '6.2',
+        },
+        {
+          name: 'Galaxy Tab S9',
+          type: DeviceType.TABLET,
+          os: 'Android',
+          ramGb: '8',
+          screenSize: '11',
+        },
       ],
     },
     {
       brand: 'Xiaomi',
       models: [
-        { name: 'Redmi Note 12', type: DeviceType.MOBILE, os: 'Android', ramGb: '6', screenSize: '6.67' },
+        {
+          name: 'Redmi Note 12',
+          type: DeviceType.MOBILE,
+          os: 'Android',
+          ramGb: '6',
+          screenSize: '6.67',
+        },
       ],
     },
     {
       brand: 'Dell',
       models: [
-        { name: 'XPS 15', type: DeviceType.DESKTOP, os: 'Windows', ramGb: '16', screenSize: '15.6' },
+        {
+          name: 'XPS 15',
+          type: DeviceType.DESKTOP,
+          os: 'Windows',
+          ramGb: '16',
+          screenSize: '15.6',
+        },
       ],
     },
   ]
@@ -460,15 +508,48 @@ async function main() {
   // the row count is the same for "viewed as admin" and "viewed as customer"
   // where it overlaps, and admin sees more.
   const orgSeeds = [
-    { slug: 'northwind-fintech', name: 'Northwind Fintech', industry: 'Banking & Finance', country: 'IN', city: 'Bengaluru' },
-    { slug: 'kairos-health',      name: 'Kairos Health',      industry: 'Healthcare',        country: 'US', city: 'Boston'   },
-    { slug: 'lumen-retail',      name: 'Lumen Retail',       industry: 'Retail',            country: 'GB', city: 'London'   },
-    { slug: 'orbit-games',       name: 'Orbit Games',        industry: 'Gaming',            country: 'KR', city: 'Seoul'    },
-    { slug: 'sprout-edu',        name: 'Sprout Education',   industry: 'Education',         country: 'IN', city: 'Mumbai'   },
-    { slug: 'vela-travel',       name: 'Vela Travel',        industry: 'Travel & Hosp.',    country: 'PT', city: 'Lisbon'   },
+    {
+      slug: 'northwind-fintech',
+      name: 'Northwind Fintech',
+      industry: 'Banking & Finance',
+      country: 'IN',
+      city: 'Bengaluru',
+    },
+    {
+      slug: 'kairos-health',
+      name: 'Kairos Health',
+      industry: 'Healthcare',
+      country: 'US',
+      city: 'Boston',
+    },
+    {
+      slug: 'lumen-retail',
+      name: 'Lumen Retail',
+      industry: 'Retail',
+      country: 'GB',
+      city: 'London',
+    },
+    { slug: 'orbit-games', name: 'Orbit Games', industry: 'Gaming', country: 'KR', city: 'Seoul' },
+    {
+      slug: 'sprout-edu',
+      name: 'Sprout Education',
+      industry: 'Education',
+      country: 'IN',
+      city: 'Mumbai',
+    },
+    {
+      slug: 'vela-travel',
+      name: 'Vela Travel',
+      industry: 'Travel & Hosp.',
+      country: 'PT',
+      city: 'Lisbon',
+    },
   ]
   for (const [i, s] of orgSeeds.entries()) {
-    const exists = await prisma.organisation.findUnique({ where: { slug: s.slug }, select: { id: true } })
+    const exists = await prisma.organisation.findUnique({
+      where: { slug: s.slug },
+      select: { id: true },
+    })
     if (exists) continue
     await prisma.organisation.create({
       data: {
@@ -487,10 +568,38 @@ async function main() {
   // ─── Extra customers, so /v1/users has more than the bootstrap four ─────
   // They are real AdminListView rows, not roles for the placeholder pages.
   const extraUsers = [
-    { email: 'rohan.patel@example.com', first: 'Rohan',  last: 'Patel',  country: 'IN', role: Role.CUSTOMER, orgSlug: 'northwind-fintech' },
-    { email: 'li.zhang@example.com',     first: 'Li',     last: 'Zhang',  country: 'CN', role: Role.CUSTOMER, orgSlug: 'lumen-retail'     },
-    { email: 'tariq.haddad@example.com', first: 'Tariq',  last: 'Haddad', country: 'EG', role: Role.CUSTOMER, orgSlug: 'orbit-games'      },
-    { email: 'sara.meneses@example.com', first: 'Sara',   last: 'Meneses',country: 'BR', role: Role.CUSTOMER, orgSlug: 'sprout-edu'       },
+    {
+      email: 'rohan.patel@example.com',
+      first: 'Rohan',
+      last: 'Patel',
+      country: 'IN',
+      role: Role.CUSTOMER,
+      orgSlug: 'northwind-fintech',
+    },
+    {
+      email: 'li.zhang@example.com',
+      first: 'Li',
+      last: 'Zhang',
+      country: 'CN',
+      role: Role.CUSTOMER,
+      orgSlug: 'lumen-retail',
+    },
+    {
+      email: 'tariq.haddad@example.com',
+      first: 'Tariq',
+      last: 'Haddad',
+      country: 'EG',
+      role: Role.CUSTOMER,
+      orgSlug: 'orbit-games',
+    },
+    {
+      email: 'sara.meneses@example.com',
+      first: 'Sara',
+      last: 'Meneses',
+      country: 'BR',
+      role: Role.CUSTOMER,
+      orgSlug: 'sprout-edu',
+    },
   ]
   const allOrgs = await prisma.organisation.findMany({ select: { id: true, slug: true } })
   const orgBySlug = new Map(allOrgs.map((o) => [o.slug, o.id] as const))
@@ -541,8 +650,10 @@ async function main() {
           organisationId: kairos,
           createdById: customer.id,
           title: 'Patient portal — appointment booking',
-          summary: 'End-to-end testing of the appointment booking flow including insurance capture and SMS reminders.',
-          instructions: 'Cover both insured and self-pay paths. Test across desktop and mobile, with at least one session per US timezone.',
+          summary:
+            'End-to-end testing of the appointment booking flow including insurance capture and SMS reminders.',
+          instructions:
+            'Cover both insured and self-pay paths. Test across desktop and mobile, with at least one session per US timezone.',
           status: ProjectStatus.IN_PROGRESS,
           priority: ProjectPriority.HIGH,
           platformTargets: ['web', 'android', 'ios'],
@@ -585,7 +696,8 @@ async function main() {
         projectIdx: 0,
         severity: BugSeverity.CRITICAL,
         status: BugStatus.TRIAGED,
-        stepsToReproduce: 'On Android 13 with Pixel 7a, enter UPI PIN, then tap Submit. The screen freezes with the spinner showing for 30s+ before timing out.',
+        stepsToReproduce:
+          'On Android 13 with Pixel 7a, enter UPI PIN, then tap Submit. The screen freezes with the spinner showing for 30s+ before timing out.',
         env: 'Android 13, Pixel 7a, app v4.3.1',
       },
       {
@@ -594,7 +706,8 @@ async function main() {
         projectIdx: 0,
         severity: BugSeverity.MEDIUM,
         status: BugStatus.NEW,
-        stepsToReproduce: 'Add a net-banking payment, click Continue. The redirect iframe has white text on a white background.',
+        stepsToReproduce:
+          'Add a net-banking payment, click Continue. The redirect iframe has white text on a white background.',
         env: 'Chrome 119, desktop',
       },
       {
@@ -603,7 +716,8 @@ async function main() {
         projectIdx: 1,
         severity: BugSeverity.HIGH,
         status: BugStatus.CONFIRMED,
-        stepsToReproduce: 'Log in as a patient in the Lisbon test account, navigate to the appointments list. Request times out after 30s.',
+        stepsToReproduce:
+          'Log in as a patient in the Lisbon test account, navigate to the appointments list. Request times out after 30s.',
         env: 'iOS 17, iPhone 13, EU',
       },
       {
@@ -612,7 +726,8 @@ async function main() {
         projectIdx: 1,
         severity: BugSeverity.LOW,
         status: BugStatus.IN_PROGRESS,
-        stepsToReproduce: 'Enter a 10-digit phone without country prefix — form submits. Expected: validation error.',
+        stepsToReproduce:
+          'Enter a 10-digit phone without country prefix — form submits. Expected: validation error.',
         env: 'Web, Chrome',
       },
     ]
@@ -630,13 +745,18 @@ async function main() {
           title: b.title,
           description: b.stepsToReproduce,
           stepsToReproduce: b.stepsToReproduce,
-          deviceModel: b.env.includes('Pixel') ? 'Pixel 7a'
-            : b.env.includes('iPhone') ? 'iPhone 13'
-            : null,
-          osName: b.env.includes('Android') ? 'Android'
-            : b.env.includes('iOS') ? 'iOS'
-            : b.env.includes('Chrome') ? 'Chrome OS'
-            : null,
+          deviceModel: b.env.includes('Pixel')
+            ? 'Pixel 7a'
+            : b.env.includes('iPhone')
+              ? 'iPhone 13'
+              : null,
+          osName: b.env.includes('Android')
+            ? 'Android'
+            : b.env.includes('iOS')
+              ? 'iOS'
+              : b.env.includes('Chrome')
+                ? 'Chrome OS'
+                : null,
           appVersion: b.env.includes('app v') ? 'v4.3.1' : null,
           severity: b.severity,
           status: b.status,
@@ -661,7 +781,10 @@ async function main() {
 
   // ─── Ratings given by the customer to a couple of testers ───────────────
   // Schema enforces @@unique([authorId, subjectType, subjectUserId, projectId]).
-  const tester1 = await prisma.user.findUnique({ where: { email: 'tester1@example.com' }, select: { id: true } })
+  const tester1 = await prisma.user.findUnique({
+    where: { email: 'tester1@example.com' },
+    select: { id: true },
+  })
   if (tester1 && allProjects[0]) {
     await prisma.rating.upsert({
       where: {
@@ -683,7 +806,10 @@ async function main() {
       update: {},
     })
   }
-  const tester2 = await prisma.user.findUnique({ where: { email: 'tester2@example.com' }, select: { id: true } })
+  const tester2 = await prisma.user.findUnique({
+    where: { email: 'tester2@example.com' },
+    select: { id: true },
+  })
   if (tester2 && allProjects[0]) {
     await prisma.rating.upsert({
       where: {

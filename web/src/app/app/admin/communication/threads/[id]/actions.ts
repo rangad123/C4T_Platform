@@ -68,10 +68,9 @@ export async function closeThread(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   if (!id) return
 
-  await serverFetch<{ id: string; isClosed: boolean }>(
-    `communication/threads/${id}/close`,
-    { method: 'POST' },
-  )
+  await serverFetch<{ id: string; isClosed: boolean }>(`communication/threads/${id}/close`, {
+    method: 'POST',
+  })
 
   revalidatePath(`${LIST_PATH}/${id}`)
   revalidatePath(LIST_PATH)

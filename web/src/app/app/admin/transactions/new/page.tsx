@@ -188,7 +188,9 @@ async function recordTransaction(formData: FormData): Promise<void> {
         ...(echo.externalRef ? { externalRef: echo.externalRef.slice(0, 120) } : {}),
         ...(occurredAt ? { occurredAt } : {}),
         ...(echo.paymentMethod ? { paymentMethod: echo.paymentMethod } : {}),
-        ...(echo.buildOrContestRef ? { buildOrContestRef: echo.buildOrContestRef.slice(0, 160) } : {}),
+        ...(echo.buildOrContestRef
+          ? { buildOrContestRef: echo.buildOrContestRef.slice(0, 160) }
+          : {}),
       },
     })
     createdId = created.id
@@ -334,7 +336,9 @@ export default async function NewTransactionPage({
               }}
             >
               <li>The entry gets a reference and appears in the ledger.</li>
-              <li>The counterparty, if there is one, is notified that a transaction was recorded.</li>
+              <li>
+                The counterparty, if there is one, is notified that a transaction was recorded.
+              </li>
               <li>
                 A row is written to the audit log against your account, and the amount, currency and
                 type can no longer be edited.

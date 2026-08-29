@@ -260,7 +260,14 @@ export default async function BugsPage({
       }
       toolbar={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-end',
+              flexWrap: 'wrap',
+            }}
+          >
             <div style={{ flex: 1, minWidth: 280 }}>
               <ListFilters
                 action={BASE}
@@ -288,12 +295,23 @@ export default async function BugsPage({
                     allLabel: 'All types',
                   },
                 ]}
-                sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
+                sort={{
+                  name: 'sort',
+                  orderName: 'order',
+                  options: SORT_OPTIONS,
+                  value: sort,
+                  order,
+                }}
               />
             </div>
-            <Button href={buildExportHref({ status, severity, type, search, projectId, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
-                Export CSV
-              </Button>
+            <Button
+              href={buildExportHref({ status, severity, type, search, projectId, sort, order })}
+              prefetch={false}
+              variant="secondary"
+              iconLeft="download"
+            >
+              Export CSV
+            </Button>
           </div>
 
           {/*
@@ -347,9 +365,9 @@ export default async function BugsPage({
                 minWidth: 240,
               }}
             >
-              Tick the checkboxes on the rows you want to update, then choose a
-              new status or severity and submit. Rows that cannot make the
-              change are skipped rather than aborting the batch.
+              Tick the checkboxes on the rows you want to update, then choose a new status or
+              severity and submit. Rows that cannot make the change are skipped rather than aborting
+              the batch.
             </p>
           </form>
         </div>

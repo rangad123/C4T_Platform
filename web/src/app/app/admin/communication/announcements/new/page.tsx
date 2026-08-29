@@ -87,19 +87,18 @@ export default async function NewAnnouncementPage() {
   // projects that a Select with all of them is fine, and avoids pulling in an
   // async typeahead just for this one field. Sorted by reference so the most
   // recent cycle is at the top — same ordering as the projects list.
-  const projects = await serverFetchOrNull<readonly { id: string; reference: string; title: string }[]>(
-    'projects?limit=200',
-  )
-  const templates = await serverFetchOrNull<
-    readonly { id: string; name: string; subject: string | null; body: string }[]
-  >('communication/templates')
+  const projects =
+    await serverFetchOrNull<readonly { id: string; reference: string; title: string }[]>(
+      'projects?limit=200',
+    )
+  const templates =
+    await serverFetchOrNull<
+      readonly { id: string; name: string; subject: string | null; body: string }[]
+    >('communication/templates')
 
   return (
     <DetailShell
-      crumbs={[
-        { label: 'Communication', href: LIST_PATH },
-        { label: 'New announcement' },
-      ]}
+      crumbs={[{ label: 'Communication', href: LIST_PATH }, { label: 'New announcement' }]}
       eyebrow="Operations"
       title="Compose an announcement"
       subtitle="One author, many readers. Pick the audience carefully — the API has no edit route, so a published announcement can only be deleted."
@@ -285,7 +284,13 @@ export default async function NewAnnouncementPage() {
               />
             </Field>
           ) : (
-            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-secondary)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
               No projects are available to scope to. The announcement will be platform-wide.
             </p>
           )}
@@ -373,7 +378,11 @@ export default async function NewAnnouncementPage() {
         </Panel>
 
         <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
-          <SubmitButton variant="primary" iconLeft="radio-tower" pendingLabel="Saving announcement…">
+          <SubmitButton
+            variant="primary"
+            iconLeft="radio-tower"
+            pendingLabel="Saving announcement…"
+          >
             Save announcement
           </SubmitButton>
           <Button variant="secondary" href={LIST_PATH}>

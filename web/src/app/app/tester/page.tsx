@@ -51,7 +51,8 @@ interface PayoutState {
 const NOTICES: Record<string, NoticeCopy> = {
   'payout-requested': {
     tone: 'success',
-    message: 'Your payout request has been submitted. You will see it move to paid once it settles.',
+    message:
+      'Your payout request has been submitted. You will see it move to paid once it settles.',
   },
   'payout-rejected': {
     tone: 'warning',
@@ -103,10 +104,7 @@ const STAT_TILE_STYLE: CSSProperties = {
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div style={STAT_TILE_STYLE}>
-      <span
-        className="c4t-eyebrow"
-        style={{ color: 'var(--text-muted)' }}
-      >
+      <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
         {label}
       </span>
       <span
@@ -159,7 +157,9 @@ export default async function TesterHomePage({
 
   const [summary, transactions, assignments, payout] = await Promise.all([
     serverFetchOrNull<EarningsSummary>('transactions/summary/mine'),
-    serverFetchOrNull<readonly TransactionRow[]>('transactions?limit=50&sort=occurredAt&order=desc'),
+    serverFetchOrNull<readonly TransactionRow[]>(
+      'transactions?limit=50&sort=occurredAt&order=desc',
+    ),
     serverFetchOrNull<readonly AssignmentRow[]>('projects/my-assignments?limit=6'),
     serverFetchOrNull<PayoutState>('transactions/payouts/mine'),
   ])
@@ -228,37 +228,94 @@ export default async function TesterHomePage({
           gap: 'var(--space-8)',
         }}
       >
-      <Notice code={notice} notices={NOTICES} />
+        <Notice code={notice} notices={NOTICES} />
 
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-          Dashboard
-        </span>
-        <h1 className="c4t-display-md" style={{ margin: 0 }}>
-          Welcome back{user.firstName ? `, ${user.firstName}` : ''}
-        </h1>
-        {openInvitations > 0 ? (
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-            You have {openInvitations} invitation{openInvitations === 1 ? '' : 's'} waiting on an answer.
-          </p>
-        ) : null}
-      </header>
+        <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+            Dashboard
+          </span>
+          <h1 className="c4t-display-md" style={{ margin: 0 }}>
+            Welcome back{user.firstName ? `, ${user.firstName}` : ''}
+          </h1>
+          {openInvitations > 0 ? (
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              You have {openInvitations} invitation{openInvitations === 1 ? '' : 's'} waiting on an
+              answer.
+            </p>
+          ) : null}
+        </header>
 
-      {/*
+        {/*
         Work first, money second. A tester opens this page to find out what
         they are meant to be doing; the ledger below is the record of what
         they already did.
       */}
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-            gap: 'var(--space-4)',
-            flexWrap: 'wrap',
-          }}
-        >
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 'var(--space-4)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 'var(--type-body-md-size)',
+                fontWeight: 'var(--fw-semibold)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              Your projects
+            </h2>
+            <Button href="/app/tester/projects" variant="link" size="sm" iconRight="arrow-right">
+              View all projects
+            </Button>
+          </div>
+
+          {liveAssignments.length === 0 ? (
+            <EmptyState
+              icon="briefcase"
+              title="No projects yet"
+              description="When a project invites you to test, it appears here."
+            />
+          ) : (
+            <CardGrid min={260}>
+              {liveAssignments.map((a) => (
+                <Card
+                  key={a.project!.id}
+                  href={`/app/tester/projects/${a.project!.id}`}
+                  title={a.project!.title}
+                  meta={[a.project!.reference, a.project!.organisation?.name]
+                    .filter(Boolean)
+                    .join(' · ')}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-2)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <StatusBadge status={a.status} />
+                    {a.project!.endDate ? (
+                      <span
+                        style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
+                      >
+                        Ends {formatDate(a.project!.endDate)}
+                      </span>
+                    ) : null}
+                  </div>
+                </Card>
+              ))}
+            </CardGrid>
+          )}
+        </section>
+
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
           <h2
             style={{
               margin: 0,
@@ -267,229 +324,199 @@ export default async function TesterHomePage({
               color: 'var(--text-primary)',
             }}
           >
-            Your projects
+            Earnings
           </h2>
-          <Button href="/app/tester/projects" variant="link" size="sm" iconRight="arrow-right">
-            View all projects
-          </Button>
-        </div>
-
-        {liveAssignments.length === 0 ? (
-          <EmptyState
-            icon="briefcase"
-            title="No projects yet"
-            description="When a project invites you to test, it appears here."
-          />
-        ) : (
-          <CardGrid min={260}>
-            {liveAssignments.map((a) => (
-              <Card
-                key={a.project!.id}
-                href={`/app/tester/projects/${a.project!.id}`}
-                title={a.project!.title}
-                meta={[a.project!.reference, a.project!.organisation?.name].filter(Boolean).join(' · ')}
+          {summary ? (
+            <>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
               >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-2)',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <StatusBadge status={a.status} />
-                  {a.project!.endDate ? (
-                    <span
-                      style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
-                    >
-                      Ends {formatDate(a.project!.endDate)}
-                    </span>
-                  ) : null}
-                </div>
-              </Card>
-            ))}
-          </CardGrid>
-        )}
-      </section>
-
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 'var(--type-body-md-size)',
-            fontWeight: 'var(--fw-semibold)',
-            color: 'var(--text-primary)',
-          }}
-        >
-          Earnings
-        </h2>
-        {summary ? (
-          <>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: 'var(--space-4)',
-              }}
-            >
-              <StatTile
-                label="Available to withdraw"
-                value={formatMoney(availableBalanceMinor ?? '0', currency)}
-                hint="Released funds not yet paid out"
-              />
-              {/* The legacy Credit Fund / Release Fund split. Credited is what
+                <StatTile
+                  label="Available to withdraw"
+                  value={formatMoney(availableBalanceMinor ?? '0', currency)}
+                  hint="Released funds not yet paid out"
+                />
+                {/* The legacy Credit Fund / Release Fund split. Credited is what
                   the tester has earned and been approved for; awaiting release
                   is the part an operator still holds back. Showing only one
                   number here is what used to imply approved money was
                   withdrawable. */}
-              <StatTile
-                label="Credited"
-                value={formatMoney(payout?.creditedMinor ?? summary.earnedTotalMinor, currency)}
-                hint="Approved earnings, released or not"
-              />
-              <StatTile
-                label="Awaiting release"
-                value={formatMoney(payout?.awaitingReleaseMinor ?? '0', currency)}
-                hint="Credited, not yet withdrawable"
-              />
-              <StatTile
-                label="Pending review"
-                value={formatMoney(summary.earnedPendingMinor, currency)}
-                hint="Not yet approved"
-              />
-              <StatTile label="Paid out" value={formatMoney(summary.paidOutMinor, currency)} />
-              <StatTile
-                label="TDS withheld"
-                value={formatMoney(summary.tdsWithheldMinor, currency)}
-                hint="Tax deducted on your behalf"
-              />
-            </div>
+                <StatTile
+                  label="Credited"
+                  value={formatMoney(payout?.creditedMinor ?? summary.earnedTotalMinor, currency)}
+                  hint="Approved earnings, released or not"
+                />
+                <StatTile
+                  label="Awaiting release"
+                  value={formatMoney(payout?.awaitingReleaseMinor ?? '0', currency)}
+                  hint="Credited, not yet withdrawable"
+                />
+                <StatTile
+                  label="Pending review"
+                  value={formatMoney(summary.earnedPendingMinor, currency)}
+                  hint="Not yet approved"
+                />
+                <StatTile label="Paid out" value={formatMoney(summary.paidOutMinor, currency)} />
+                <StatTile
+                  label="TDS withheld"
+                  value={formatMoney(summary.tdsWithheldMinor, currency)}
+                  hint="Tax deducted on your behalf"
+                />
+              </div>
 
-            {/* ── Requesting a payout ──────────────────────────────────────
+              {/* ── Requesting a payout ──────────────────────────────────────
                 Every branch below is driven by `payout`, which the API
                 computes. The button is never rendered enabled on a state the
                 server would reject — and the server re-checks all of it
                 anyway, because a disabled button is not authorisation. */}
-            {payout ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 'var(--space-4)',
-                  flexWrap: 'wrap',
-                  padding: 'var(--space-5)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-card)',
-                  background: 'var(--surface-raised)',
-                }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                  <span style={{ fontSize: 'var(--type-body-sm-size)', fontWeight: 'var(--fw-semibold)' }}>
-                    {payout.openRequest ? 'Payout in progress' : 'Request a payout'}
-                  </span>
-                  <span style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
-                    {payout.openRequest
-                      ? `${formatMoney(payout.openRequest.amountMinor, currency)} requested on ${formatDate(payout.openRequest.occurredAt)} · ${titleCase(payout.openRequest.status)}`
-                      : !payout.hasPaymentAccount
-                        ? 'Add your payment details before you can be paid.'
-                        : !payout.meetsMinimum
-                          ? `You can request a payout once your balance reaches ${formatMoney(payout.minimumMinor, currency)}.`
-                          : `${formatMoney(payout.availableMinor, currency)} is ready to be paid to your saved account.`}
-                  </span>
-                  {/* Distinguishes "you have earned nothing" from "your money
+              {payout ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 'var(--space-4)',
+                    flexWrap: 'wrap',
+                    padding: 'var(--space-5)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 'var(--radius-card)',
+                    background: 'var(--surface-raised)',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                    <span
+                      style={{
+                        fontSize: 'var(--type-body-sm-size)',
+                        fontWeight: 'var(--fw-semibold)',
+                      }}
+                    >
+                      {payout.openRequest ? 'Payout in progress' : 'Request a payout'}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 'var(--type-body-sm-size)',
+                        color: 'var(--text-secondary)',
+                      }}
+                    >
+                      {payout.openRequest
+                        ? `${formatMoney(payout.openRequest.amountMinor, currency)} requested on ${formatDate(payout.openRequest.occurredAt)} · ${titleCase(payout.openRequest.status)}`
+                        : !payout.hasPaymentAccount
+                          ? 'Add your payment details before you can be paid.'
+                          : !payout.meetsMinimum
+                            ? `You can request a payout once your balance reaches ${formatMoney(payout.minimumMinor, currency)}.`
+                            : `${formatMoney(payout.availableMinor, currency)} is ready to be paid to your saved account.`}
+                    </span>
+                    {/* Distinguishes "you have earned nothing" from "your money
                       is credited but an operator has not released it" — two
                       very different things to a tester chasing a payment. */}
-                  {!payout.openRequest &&
-                  !payout.meetsMinimum &&
-                  payout.awaitingReleaseMinor !== '0' ? (
-                    <span style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-muted)' }}>
-                      {formatMoney(payout.awaitingReleaseMinor, currency)} is credited but not yet
-                      released.
-                    </span>
-                  ) : null}
+                    {!payout.openRequest &&
+                    !payout.meetsMinimum &&
+                    payout.awaitingReleaseMinor !== '0' ? (
+                      <span
+                        style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-muted)' }}
+                      >
+                        {formatMoney(payout.awaitingReleaseMinor, currency)} is credited but not yet
+                        released.
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {payout.openRequest ? null : payout.hasPaymentAccount ? (
+                    <form action={requestPayoutAction}>
+                      <SubmitButton
+                        variant="primary"
+                        disabled={!payout.canRequest}
+                        pendingLabel="Requesting…"
+                      >
+                        Request {formatMoney(payout.availableMinor, currency)}
+                      </SubmitButton>
+                    </form>
+                  ) : (
+                    <Button href="/app/tester/profile?section=payment" variant="secondary">
+                      Add payment details
+                    </Button>
+                  )}
                 </div>
+              ) : null}
 
-                {payout.openRequest ? null : payout.hasPaymentAccount ? (
-                  <form action={requestPayoutAction}>
-                    <SubmitButton
-                      variant="primary"
-                      disabled={!payout.canRequest}
-                      pendingLabel="Requesting…"
-                    >
-                      Request {formatMoney(payout.availableMinor, currency)}
-                    </SubmitButton>
-                  </form>
-                ) : (
-                  <Button href="/app/tester/profile?section=payment" variant="secondary">
-                    Add payment details
-                  </Button>
-                )}
-              </div>
-            ) : null}
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 'var(--type-body-sm-size)',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <Icon name="info" size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+                Earnings are approved first, then released for withdrawal. Only released funds can
+                be paid out, so a credited balance is not always available yet.
+              </p>
+            </>
+          ) : (
+            <EmptyState
+              icon="alert-triangle"
+              title="Could not load your earnings"
+              description="The service is unreachable. Refresh in a moment."
+            />
+          )}
+        </section>
 
-            <p style={{ margin: 0, fontSize: 'var(--type-body-sm-size)', color: 'var(--text-muted)' }}>
-              <Icon name="info" size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-              Earnings are approved first, then released for withdrawal. Only released funds can
-              be paid out, so a credited balance is not always available yet.
-            </p>
-          </>
-        ) : (
-          <EmptyState
-            icon="alert-triangle"
-            title="Could not load your earnings"
-            description="The service is unreachable. Refresh in a moment."
-          />
-        )}
-      </section>
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 'var(--type-body-md-size)',
+              fontWeight: 'var(--fw-semibold)',
+              color: 'var(--text-primary)',
+            }}
+          >
+            Transaction history
+          </h2>
+          {!transactions || transactions.length === 0 ? (
+            <EmptyState
+              icon="credit-card"
+              title="No transactions yet"
+              description="Earnings and payouts appear here once a project you tested on records one."
+            />
+          ) : (
+            <Table
+              ariaLabel="Transaction history"
+              columns={columns}
+              rows={transactions}
+              rowKey={(row) => row.id}
+            />
+          )}
+        </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        <h2
+        <section
           style={{
-            margin: 0,
-            fontSize: 'var(--type-body-md-size)',
-            fontWeight: 'var(--fw-semibold)',
-            color: 'var(--text-primary)',
+            padding: 'var(--space-5)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-card)',
+            background: 'var(--surface-sunken)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-2)',
           }}
         >
-          Transaction history
-        </h2>
-        {!transactions || transactions.length === 0 ? (
-          <EmptyState
-            icon="credit-card"
-            title="No transactions yet"
-            description="Earnings and payouts appear here once a project you tested on records one."
-          />
-        ) : (
-          <Table
-            ariaLabel="Transaction history"
-            columns={columns}
-            rows={transactions}
-            rowKey={(row) => row.id}
-          />
-        )}
-      </section>
-
-      <section
-        style={{
-          padding: 'var(--space-5)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-card)',
-          background: 'var(--surface-sunken)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-2)',
-        }}
-      >
-        <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-          Your workspace
-        </span>
-        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-          Everything above is live: your earnings and transaction history, your profile and
-          devices, filing bug reports with screenshots or recordings attached, and announcements
-          from the platform and from projects you are on.
-        </p>
-      </section>
+          <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+            Your workspace
+          </span>
+          <p
+            style={{
+              margin: 0,
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--type-body-sm-size)',
+            }}
+          >
+            Everything above is live: your earnings and transaction history, your profile and
+            devices, filing bug reports with screenshots or recordings attached, and announcements
+            from the platform and from projects you are on.
+          </p>
+        </section>
       </main>
     </>
   )

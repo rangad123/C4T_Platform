@@ -51,13 +51,23 @@ interface BugRow {
 export default async function CustomerBugsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; severity?: string; search?: string; page?: string; projectId?: string }>
+  searchParams: Promise<{
+    status?: string
+    severity?: string
+    search?: string
+    page?: string
+    projectId?: string
+  }>
 }) {
   await requireRole(['CUSTOMER'])
 
   const params = await searchParams
-  const status = STATUSES.includes(params.status as (typeof STATUSES)[number]) ? params.status : undefined
-  const severity = SEVERITIES.includes(params.severity as (typeof SEVERITIES)[number]) ? params.severity : undefined
+  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
+    ? params.status
+    : undefined
+  const severity = SEVERITIES.includes(params.severity as (typeof SEVERITIES)[number])
+    ? params.severity
+    : undefined
   const search = searchTerm(params.search)
   const projectId = params.projectId?.length === 25 ? params.projectId : undefined
   const page = parsePage(params.page)
@@ -75,7 +85,11 @@ export default async function CustomerBugsPage({
       render: (row) => row.title,
       renderSecondary: (row) => [row.reference, row.project?.reference].filter(Boolean).join(' · '),
     },
-    { key: 'severity', header: 'Severity', render: (row) => <SeverityBadge severity={row.severity} /> },
+    {
+      key: 'severity',
+      header: 'Severity',
+      render: (row) => <SeverityBadge severity={row.severity} />,
+    },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     { key: 'type', header: 'Type', render: (row) => (row.type ? titleCase(row.type) : '—') },
     {
@@ -88,7 +102,12 @@ export default async function CustomerBugsPage({
         </span>
       ),
     },
-    { key: 'created', header: 'Reported', align: 'right', render: (row) => formatDate(row.createdAt) },
+    {
+      key: 'created',
+      header: 'Reported',
+      align: 'right',
+      render: (row) => formatDate(row.createdAt),
+    },
   ]
 
   return (
@@ -99,7 +118,11 @@ export default async function CustomerBugsPage({
       description="Every defect across your projects, newest first."
       crumbs={
         projectId
-          ? [{ label: 'Projects', href: '/app/customer/projects' }, { label: 'Project', href: `/app/customer/projects/${projectId}` }, { label: 'Bugs' }]
+          ? [
+              { label: 'Projects', href: '/app/customer/projects' },
+              { label: 'Project', href: `/app/customer/projects/${projectId}` },
+              { label: 'Bugs' },
+            ]
           : [{ label: 'Bugs' }]
       }
       result={result}
@@ -122,8 +145,20 @@ export default async function CustomerBugsPage({
             action={BASE}
             search={{ value: search, placeholder: 'Title or reference' }}
             selects={[
-              { name: 'severity', label: 'Severity', options: SEVERITIES, value: severity, allLabel: 'All severities' },
-              { name: 'status', label: 'Status', options: STATUSES, value: status, allLabel: 'All statuses' },
+              {
+                name: 'severity',
+                label: 'Severity',
+                options: SEVERITIES,
+                value: severity,
+                allLabel: 'All severities',
+              },
+              {
+                name: 'status',
+                label: 'Status',
+                options: STATUSES,
+                value: status,
+                allLabel: 'All statuses',
+              },
             ]}
           />
         </div>

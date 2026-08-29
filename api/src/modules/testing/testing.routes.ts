@@ -64,4 +64,8 @@ testingRouter.post(
   controller.createReview,
 )
 
-testingRouter.get('/builds/:buildId/summary', validate({ params: buildIdParam }), controller.summary)
+testingRouter.get(
+  '/builds/:buildId/summary',
+  validate({ params: buildIdParam }),
+  controller.summary,
+)

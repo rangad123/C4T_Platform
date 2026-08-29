@@ -48,13 +48,13 @@ export default async function ForgotPasswordPage({
         >
           {sent ? (
             <>
-              If an account exists for <strong>{emailParam}</strong>, we sent a reset link.
-              The link expires in 60 minutes.
+              If an account exists for <strong>{emailParam}</strong>, we sent a reset link. The link
+              expires in 60 minutes.
             </>
           ) : (
             <>
-              Enter the email you signed up with and we will send you a link to
-              choose a new password.
+              Enter the email you signed up with and we will send you a link to choose a new
+              password.
             </>
           )}
         </p>
@@ -97,7 +97,13 @@ export default async function ForgotPasswordPage({
             />
           </Field>
 
-          <SubmitButton variant="primary" size="lg" fullWidth iconRight="arrow-right" pendingLabel="Sending…">
+          <SubmitButton
+            variant="primary"
+            size="lg"
+            fullWidth
+            iconRight="arrow-right"
+            pendingLabel="Sending…"
+          >
             Send reset link
           </SubmitButton>
         </form>

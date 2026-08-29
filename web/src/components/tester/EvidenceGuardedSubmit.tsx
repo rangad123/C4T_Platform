@@ -52,9 +52,7 @@ export function EvidenceGuardedSubmit({
        evidence panel is well below the fold on a long report. */
     const target = form.querySelector<HTMLElement>('#videoUrl')
     target?.scrollIntoView({
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ? 'auto'
-        : 'smooth',
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
       block: 'center',
     })
   }
@@ -78,8 +76,8 @@ export function EvidenceGuardedSubmit({
             color: 'var(--status-error-fg)',
           }}
         >
-          Attach a screenshot or recording, or paste a video link, before filing. Nothing
-          you have written has been lost.
+          Attach a screenshot or recording, or paste a video link, before filing. Nothing you have
+          written has been lost.
         </p>
       ) : null}
     </div>

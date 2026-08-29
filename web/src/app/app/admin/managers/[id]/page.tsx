@@ -196,8 +196,14 @@ export default async function ManagerDetailPage({ params }: { params: Promise<{ 
           items={[
             { label: 'Role', value: <RoleBadge role={manager.role} /> },
             { label: 'Status', value: <StatusBadge status={manager.status} /> },
-            { label: 'Email verified', value: manager.emailVerifiedAt ? formatDate(manager.emailVerifiedAt) : 'Not verified' },
-            { label: 'Last signed in', value: manager.lastLoginAt ? formatDate(manager.lastLoginAt) : 'Never' },
+            {
+              label: 'Email verified',
+              value: manager.emailVerifiedAt ? formatDate(manager.emailVerifiedAt) : 'Not verified',
+            },
+            {
+              label: 'Last signed in',
+              value: manager.lastLoginAt ? formatDate(manager.lastLoginAt) : 'Never',
+            },
             { label: 'Account created', value: formatDate(manager.createdAt) },
             {
               label: 'Permissions',
@@ -227,7 +233,7 @@ export default async function ManagerDetailPage({ params }: { params: Promise<{ 
         title="Projects overseen"
         description={
           projectsFailed
-            ? "The project list could not be loaded. The assignments still exist in the database — try refresh."
+            ? 'The project list could not be loaded. The assignments still exist in the database — try refresh.'
             : `${projects.length} ${projects.length === 1 ? 'project' : 'projects'}. Unassigning removes the manager from the project without affecting the project itself.`
         }
       >

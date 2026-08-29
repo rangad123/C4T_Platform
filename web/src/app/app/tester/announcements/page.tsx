@@ -47,7 +47,10 @@ export default async function TesterAnnouncementsPage() {
 
   return (
     <>
-      <Topbar root={{ label: 'Tester', href: '/app/tester' }} crumbs={[{ label: 'Announcements' }]} />
+      <Topbar
+        root={{ label: 'Tester', href: '/app/tester' }}
+        crumbs={[{ label: 'Announcements' }]}
+      />
       <main
         id="main"
         style={{
@@ -58,103 +61,109 @@ export default async function TesterAnnouncementsPage() {
           gap: 'var(--space-6)',
         }}
       >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-          Updates
-        </span>
-        <h1 className="c4t-display-md" style={{ margin: 0 }}>
-          Announcements
-        </h1>
-        <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-          Platform notices, plus anything posted to a project you are on.
-        </p>
-      </header>
+        <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+            Updates
+          </span>
+          <h1 className="c4t-display-md" style={{ margin: 0 }}>
+            Announcements
+          </h1>
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+            Platform notices, plus anything posted to a project you are on.
+          </p>
+        </header>
 
-      {failed ? (
-        <EmptyState
-          icon="alert-triangle"
-          title="Could not load announcements"
-          description="The service is unreachable. Refresh in a moment."
-        />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon="message-square"
-          title="Nothing to read yet"
-          description="Notices from the platform and from projects you are on will appear here."
-        />
-      ) : (
-        <ul
-          style={{
-            listStyle: 'none',
-            margin: 0,
-            padding: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-4)',
-          }}
-        >
-          {rows.map((row) => (
-            <li
-              key={row.id}
-              style={{
-                padding: 'var(--space-5)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-card)',
-                background: 'var(--surface-raised)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-3)',
-              }}
-            >
-              <div
+        {failed ? (
+          <EmptyState
+            icon="alert-triangle"
+            title="Could not load announcements"
+            description="The service is unreachable. Refresh in a moment."
+          />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon="message-square"
+            title="Nothing to read yet"
+            description="Notices from the platform and from projects you are on will appear here."
+          />
+        ) : (
+          <ul
+            style={{
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-4)',
+            }}
+          >
+            {rows.map((row) => (
+              <li
+                key={row.id}
                 style={{
+                  padding: 'var(--space-5)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-card)',
+                  background: 'var(--surface-raised)',
                   display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-start',
+                  flexDirection: 'column',
                   gap: 'var(--space-3)',
-                  flexWrap: 'wrap',
                 }}
               >
-                <h2
+                <div
                   style={{
-                    margin: 0,
-                    fontSize: 'var(--type-body-md-size)',
-                    fontWeight: 'var(--fw-semibold)',
-                    color: 'var(--text-primary)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: 'var(--space-3)',
+                    flexWrap: 'wrap',
                   }}
                 >
-                  {row.title}
-                </h2>
-                {row.project ? (
-                  <Badge tone="info" uppercase={false}>
-                    {row.project.reference}
-                  </Badge>
-                ) : (
-                  <Badge tone="neutral" uppercase={false}>
-                    {titleCase(row.audience)}
-                  </Badge>
-                )}
-              </div>
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: 'var(--type-body-md-size)',
+                      fontWeight: 'var(--fw-semibold)',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    {row.title}
+                  </h2>
+                  {row.project ? (
+                    <Badge tone="info" uppercase={false}>
+                      {row.project.reference}
+                    </Badge>
+                  ) : (
+                    <Badge tone="neutral" uppercase={false}>
+                      {titleCase(row.audience)}
+                    </Badge>
+                  )}
+                </div>
 
-              <p
-                style={{
-                  margin: 0,
-                  color: 'var(--text-secondary)',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {row.body}
-              </p>
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-secondary)',
+                    lineHeight: 1.6,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {row.body}
+                </p>
 
-              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
-                {formatDateTime(row.publishedAt)}
-                {row.expiresAt ? ` · until ${formatDateTime(row.expiresAt)}` : ''}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-muted)',
+                    fontSize: 'var(--type-body-sm-size)',
+                  }}
+                >
+                  {formatDateTime(row.publishedAt)}
+                  {row.expiresAt ? ` · until ${formatDateTime(row.expiresAt)}` : ''}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </main>
     </>
   )

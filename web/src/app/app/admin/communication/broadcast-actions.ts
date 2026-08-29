@@ -29,7 +29,14 @@ const BROADCAST_PATH = '/app/admin/communication'
 export async function sendBroadcastAction(formData: FormData): Promise<void> {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
-  const testerIds = [...new Set(formData.getAll('testerIds').map((v) => (typeof v === 'string' ? v : '')).filter(Boolean))]
+  const testerIds = [
+    ...new Set(
+      formData
+        .getAll('testerIds')
+        .map((v) => (typeof v === 'string' ? v : ''))
+        .filter(Boolean),
+    ),
+  ]
   const subject = formTrimmed(formData, 'subject')
   const message = formTrimmed(formData, 'message')
 

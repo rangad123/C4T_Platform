@@ -113,8 +113,7 @@ export default async function ProjectsPage({
       key: 'title',
       header: 'Project',
       render: (row) => row.title,
-      renderSecondary: (row) =>
-        [row.reference, row.organisation?.name].filter(Boolean).join(' · '),
+      renderSecondary: (row) => [row.reference, row.organisation?.name].filter(Boolean).join(' · '),
     },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     {
@@ -188,14 +187,21 @@ export default async function ProjectsPage({
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
       hrefFor={pageHrefBuilder(BASE, { status, priority, search, sort, order })}
-      
+
       filtered={hasFilter([status, priority, search])}
       permission="project.read"
       emptyIcon="briefcase"
       emptyTitle="No projects yet"
       emptyDescription="A project appears here once a customer submits one, or when you create it on their behalf."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}
@@ -219,12 +225,17 @@ export default async function ProjectsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Button href={buildExportHref({ status, priority, search, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
-              Export CSV
-            </Button>
+          <Button
+            href={buildExportHref({ status, priority, search, sort, order })}
+            prefetch={false}
+            variant="secondary"
+            iconLeft="download"
+          >
+            Export CSV
+          </Button>
           <Button href="/app/admin/projects/new" variant="primary" iconLeft="plus">
-              New project
-            </Button>
+            New project
+          </Button>
         </div>
       }
     />

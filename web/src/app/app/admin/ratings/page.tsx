@@ -80,9 +80,7 @@ export default async function RatingsPage({
       key: 'subject',
       header: 'About',
       render: (row) =>
-        row.subjectType === 'PROJECT'
-          ? (row.project?.title ?? '—')
-          : personName(row.subjectUser),
+        row.subjectType === 'PROJECT' ? (row.project?.title ?? '—') : personName(row.subjectUser),
       renderSecondary: (row) => titleCase(row.subjectType),
     },
     {
@@ -137,7 +135,9 @@ export default async function RatingsPage({
       columns={columns}
       rowKey={(row) => row.id}
       hrefFor={pageHrefBuilder(BASE, { subjectType, subjectUserId })}
-      filtered={Boolean(subjectType || subjectUserId)} /* eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- any-of filter set */
+      filtered={Boolean(
+        subjectType || subjectUserId,
+      )} /* eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- any-of filter set */
       permission="rating.read"
       emptyIcon="trophy"
       emptyTitle={subjectUserId ? 'No ratings for this tester yet' : 'No ratings yet'}

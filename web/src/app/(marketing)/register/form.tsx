@@ -79,7 +79,15 @@ export default async function RegisterForm({
 } = {}) {
   const params = searchParams
     ? await searchParams
-    : { role: undefined, error: undefined, detail: undefined, email: undefined, firstName: undefined, lastName: undefined, organisationName: undefined }
+    : {
+        role: undefined,
+        error: undefined,
+        detail: undefined,
+        email: undefined,
+        firstName: undefined,
+        lastName: undefined,
+        organisationName: undefined,
+      }
   const role: SignUpRole | null =
     params.role === 'customer' || params.role === 'tester' ? params.role : null
 

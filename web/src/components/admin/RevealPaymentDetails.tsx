@@ -81,7 +81,10 @@ export function RevealPaymentDetails({ paymentAccountId }: RevealPaymentDetailsP
           </span>
         ) : (
           rows.map((key) => (
-            <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)' }}>
+            <div
+              key={key}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)' }}
+            >
               <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
                 {FIELD_LABELS[key]}
               </span>
@@ -108,7 +111,13 @@ export function RevealPaymentDetails({ paymentAccountId }: RevealPaymentDetailsP
 
   if (!open) {
     return (
-      <Button type="button" variant="secondary" size="sm" iconLeft="eye" onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        iconLeft="eye"
+        onClick={() => setOpen(true)}
+      >
         View decrypted details
       </Button>
     )

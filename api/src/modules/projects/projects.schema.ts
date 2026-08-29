@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { ProjectStatus, ProjectPriority, AssignmentStatus, BuildStatus, BugFieldType } from '@prisma/client'
+import {
+  ProjectStatus,
+  ProjectPriority,
+  AssignmentStatus,
+  BuildStatus,
+  BugFieldType,
+} from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
 export const PROJECT_SORT_FIELDS = [

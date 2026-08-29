@@ -121,7 +121,10 @@ export default async function CommunicationPage({
       eyebrow="Operations"
       title="Announcements"
       description="Announcements published to the platform, and who each one reaches. An announcement with no publish date is still a draft."
-      crumbs={[{ label: 'Communication', href: '/app/admin/communication' }, { label: 'Announcements' }]}
+      crumbs={[
+        { label: 'Communication', href: '/app/admin/communication' },
+        { label: 'Announcements' },
+      ]}
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
@@ -137,7 +140,11 @@ export default async function CommunicationPage({
            templates — are the section tabs above now. What stays is the one
            action that belongs to this list rather than to the module. */
         <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-          <Button href="/app/admin/communication/announcements/new" variant="primary" iconLeft="plus">
+          <Button
+            href="/app/admin/communication/announcements/new"
+            variant="primary"
+            iconLeft="plus"
+          >
             Compose announcement
           </Button>
         </div>

@@ -59,10 +59,7 @@ export default async function NewProjectPage() {
 
   return (
     <DetailShell
-      crumbs={[
-        { label: 'Projects', href: '/app/admin/projects' },
-        { label: 'New' },
-      ]}
+      crumbs={[{ label: 'Projects', href: '/app/admin/projects' }, { label: 'New' }]}
       eyebrow="Delivery"
       title="New project"
       subtitle="A test cycle on behalf of a customer. The reference, status, and creator are set by the platform."
@@ -125,25 +122,13 @@ export default async function NewProjectPage() {
                 options={PRIORITY_OPTIONS}
               />
             </Field>
-            <Field
-              label="Start date"
-              htmlFor="startDate"
-              hint="Leave blank to start today."
-            >
+            <Field label="Start date" htmlFor="startDate" hint="Leave blank to start today.">
               <Input id="startDate" name="startDate" type="date" />
             </Field>
-            <Field
-              label="End date"
-              htmlFor="endDate"
-              hint="Leave blank to keep the project open."
-            >
+            <Field label="End date" htmlFor="endDate" hint="Leave blank to keep the project open.">
               <Input id="endDate" name="endDate" type="date" />
             </Field>
-            <Field
-              label="Maximum testers"
-              htmlFor="maxTesters"
-              hint="Leave blank for no cap."
-            >
+            <Field label="Maximum testers" htmlFor="maxTesters" hint="Leave blank for no cap.">
               <Input id="maxTesters" name="maxTesters" type="number" min={1} max={10000} />
             </Field>
           </div>
@@ -182,8 +167,8 @@ export default async function NewProjectPage() {
               Create project
             </SubmitButton>
             <Button href="/app/admin/projects" type="button" variant="ghost">
-                Cancel
-              </Button>
+              Cancel
+            </Button>
           </div>
         </TrackedForm>
       </Panel>

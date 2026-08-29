@@ -137,9 +137,7 @@ export function AdminListPage<Row>({
             icon={filtered ? 'search' : emptyIcon}
             title={filtered ? `No ${title.toLowerCase()} match your filters` : emptyTitle}
             description={
-              filtered
-                ? 'Try widening the search or clearing the filters.'
-                : emptyDescription
+              filtered ? 'Try widening the search or clearing the filters.' : emptyDescription
             }
           />
         ) : (

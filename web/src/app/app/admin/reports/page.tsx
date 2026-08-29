@@ -48,7 +48,13 @@ interface BuildOption {
 }
 
 interface ByProjectReport {
-  project: { id: string; reference: string; title: string; status: string; organisation: { id: string; name: string } }
+  project: {
+    id: string
+    reference: string
+    title: string
+    status: string
+    organisation: { id: string; name: string }
+  }
   builds: BuildOption[]
   testerCount: number
   testCaseCount: number
@@ -85,7 +91,12 @@ export default async function ReportsPage({
   return (
     <main
       id="main"
-      style={{ padding: 'var(--space-9)', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+      style={{
+        padding: 'var(--space-9)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--space-6)',
+      }}
     >
       <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
@@ -95,19 +106,26 @@ export default async function ReportsPage({
           Reports
         </h1>
         <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}>
-          Every report reuses the same bug data the Bugs module already tracks and the Build
-          Summary already computes — scoped to a project, a build, a date range or a run of
-          builds.
+          Every report reuses the same bug data the Bugs module already tracks and the Build Summary
+          already computes — scoped to a project, a build, a date range or a run of builds.
         </p>
       </header>
 
       <SectionTabs basePath="/app/admin/reports" tabs={SECTIONS} active={section} />
 
       {section === 'by-project' ? (
-        <Panel title="Report by project" description="Every build's testers, test cases and bugs, rolled up to the project.">
+        <Panel
+          title="Report by project"
+          description="Every build's testers, test cases and bugs, rolled up to the project."
+        >
           <LiveGetForm
             action="/app/admin/reports"
-            style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', marginBottom: 'var(--space-6)' }}
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-end',
+              marginBottom: 'var(--space-6)',
+            }}
           >
             <input type="hidden" name="section" value="by-project" />
             <Field label="Project" htmlFor="rpt-projectId">
@@ -116,7 +134,10 @@ export default async function ReportsPage({
                 name="projectId"
                 defaultValue={params.projectId ?? ''}
                 placeholder="Choose a project"
-                options={projects.map((p) => ({ value: p.id, label: `${p.reference} — ${p.title}` }))}
+                options={projects.map((p) => ({
+                  value: p.id,
+                  label: `${p.reference} — ${p.title}`,
+                }))}
               />
             </Field>
             <LiveFormStatus />
@@ -124,7 +145,11 @@ export default async function ReportsPage({
           {params.projectId ? (
             <ByProject projectId={params.projectId} />
           ) : (
-            <EmptyState icon="briefcase" title="Choose a project" description="Pick a project above to see its report." />
+            <EmptyState
+              icon="briefcase"
+              title="Choose a project"
+              description="Pick a project above to see its report."
+            />
           )}
         </Panel>
       ) : null}
@@ -133,7 +158,12 @@ export default async function ReportsPage({
         <Panel title="Report by build" description="One test cycle's testers, test cases and bugs.">
           <LiveGetForm
             action="/app/admin/reports"
-            style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', marginBottom: 'var(--space-6)' }}
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-end',
+              marginBottom: 'var(--space-6)',
+            }}
           >
             <input type="hidden" name="section" value="by-build" />
             <Field label="Project" htmlFor="rpt-b-projectId">
@@ -142,13 +172,20 @@ export default async function ReportsPage({
                 name="projectId"
                 defaultValue={params.projectId ?? ''}
                 placeholder="Choose a project"
-                options={projects.map((p) => ({ value: p.id, label: `${p.reference} — ${p.title}` }))}
+                options={projects.map((p) => ({
+                  value: p.id,
+                  label: `${p.reference} — ${p.title}`,
+                }))}
               />
             </Field>
             <LiveFormStatus />
           </LiveGetForm>
           {!params.projectId ? (
-            <EmptyState icon="briefcase" title="Choose a project" description="Pick a project above, then its build." />
+            <EmptyState
+              icon="briefcase"
+              title="Choose a project"
+              description="Pick a project above, then its build."
+            />
           ) : (
             <ByBuildPicker projectId={params.projectId} buildId={params.buildId} />
           )}
@@ -156,33 +193,66 @@ export default async function ReportsPage({
       ) : null}
 
       {section === 'by-date' ? (
-        <Panel title="Report by date" description="Every bug reported across every project in the window, admin-wide.">
+        <Panel
+          title="Report by date"
+          description="Every bug reported across every project in the window, admin-wide."
+        >
           <LiveGetForm
             action="/app/admin/reports"
-            style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', marginBottom: 'var(--space-6)', flexWrap: 'wrap' }}
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-end',
+              marginBottom: 'var(--space-6)',
+              flexWrap: 'wrap',
+            }}
           >
             <input type="hidden" name="section" value="by-date" />
             <Field label="Start date" htmlFor="rpt-startDate">
-              <Input id="rpt-startDate" name="startDate" type="date" defaultValue={params.startDate ?? ''} required />
+              <Input
+                id="rpt-startDate"
+                name="startDate"
+                type="date"
+                defaultValue={params.startDate ?? ''}
+                required
+              />
             </Field>
             <Field label="End date" htmlFor="rpt-endDate">
-              <Input id="rpt-endDate" name="endDate" type="date" defaultValue={params.endDate ?? ''} required />
+              <Input
+                id="rpt-endDate"
+                name="endDate"
+                type="date"
+                defaultValue={params.endDate ?? ''}
+                required
+              />
             </Field>
             <LiveFormStatus />
           </LiveGetForm>
           {params.startDate && params.endDate ? (
             <ByDate startDate={params.startDate} endDate={params.endDate} />
           ) : (
-            <EmptyState icon="filter" title="Pick a date range" description="Both a start and an end date are required." />
+            <EmptyState
+              icon="filter"
+              title="Pick a date range"
+              description="Both a start and an end date are required."
+            />
           )}
         </Panel>
       ) : null}
 
       {section === 'by-build-range' ? (
-        <Panel title="Report by build range" description="Bugs across a run of builds on one project, from an earlier build to a later one.">
+        <Panel
+          title="Report by build range"
+          description="Bugs across a run of builds on one project, from an earlier build to a later one."
+        >
           <LiveGetForm
             action="/app/admin/reports"
-            style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', marginBottom: 'var(--space-6)' }}
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-end',
+              marginBottom: 'var(--space-6)',
+            }}
           >
             <input type="hidden" name="section" value="by-build-range" />
             <Field label="Project" htmlFor="rpt-r-projectId">
@@ -191,13 +261,20 @@ export default async function ReportsPage({
                 name="projectId"
                 defaultValue={params.projectId ?? ''}
                 placeholder="Choose a project"
-                options={projects.map((p) => ({ value: p.id, label: `${p.reference} — ${p.title}` }))}
+                options={projects.map((p) => ({
+                  value: p.id,
+                  label: `${p.reference} — ${p.title}`,
+                }))}
               />
             </Field>
             <LiveFormStatus />
           </LiveGetForm>
           {!params.projectId ? (
-            <EmptyState icon="briefcase" title="Choose a project" description="Pick a project above, then its build range." />
+            <EmptyState
+              icon="briefcase"
+              title="Choose a project"
+              description="Pick a project above, then its build range."
+            />
           ) : (
             <ByBuildRangePicker
               projectId={params.projectId}
@@ -214,7 +291,13 @@ export default async function ReportsPage({
 async function ByProject({ projectId }: { projectId: string }) {
   const report = await serverFetchOrNull<ByProjectReport>(`reports/by-project/${projectId}`)
   if (!report) {
-    return <EmptyState icon="alert-triangle" title="Could not load this report" description="The service is unreachable, or you do not have access to this project." />
+    return (
+      <EmptyState
+        icon="alert-triangle"
+        title="Could not load this report"
+        description="The service is unreachable, or you do not have access to this project."
+      />
+    )
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
@@ -223,12 +306,16 @@ async function ByProject({ projectId }: { projectId: string }) {
           {report.project.reference} — {report.project.title}
         </h3>
         <p style={{ margin: 'var(--space-1) 0 0', color: 'var(--text-muted)' }}>
-          {report.project.organisation.name} · {report.builds.length} build{report.builds.length === 1 ? '' : 's'} ·{' '}
-          {report.testerCount} tester{report.testerCount === 1 ? '' : 's'} · {report.testCaseCount} test case
+          {report.project.organisation.name} · {report.builds.length} build
+          {report.builds.length === 1 ? '' : 's'} · {report.testerCount} tester
+          {report.testerCount === 1 ? '' : 's'} · {report.testCaseCount} test case
           {report.testCaseCount === 1 ? '' : 's'}
         </p>
       </div>
-      <BugBreakdownView bugs={report.bugs} csvHref={`/app/admin/export/reports/by-project/${projectId}/export.csv`} />
+      <BugBreakdownView
+        bugs={report.bugs}
+        csvHref={`/app/admin/export/reports/by-project/${projectId}/export.csv`}
+      />
     </div>
   )
 }
@@ -236,11 +323,20 @@ async function ByProject({ projectId }: { projectId: string }) {
 async function ByBuildPicker({ projectId, buildId }: { projectId: string; buildId?: string }) {
   const builds = await serverFetchOrNull<BuildOption[]>(`projects/${projectId}/builds`)
   if (!builds) {
-    return <EmptyState icon="alert-triangle" title="Could not load builds" description="Refresh in a moment." />
+    return (
+      <EmptyState
+        icon="alert-triangle"
+        title="Could not load builds"
+        description="Refresh in a moment."
+      />
+    )
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-      <LiveGetForm action="/app/admin/reports" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end' }}>
+      <LiveGetForm
+        action="/app/admin/reports"
+        style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end' }}
+      >
         <input type="hidden" name="section" value="by-build" />
         <input type="hidden" name="projectId" value={projectId} />
         <Field label="Build" htmlFor="rpt-buildId">
@@ -257,7 +353,11 @@ async function ByBuildPicker({ projectId, buildId }: { projectId: string; buildI
       {buildId ? (
         <ByBuild buildId={buildId} />
       ) : (
-        <EmptyState icon="clock" title="Choose a build" description="Pick a build above to see its report." />
+        <EmptyState
+          icon="clock"
+          title="Choose a build"
+          description="Pick a build above to see its report."
+        />
       )}
     </div>
   )
@@ -279,7 +379,13 @@ async function ByBuild({ buildId }: { buildId: string }) {
   // reused directly (reports.routes.ts's comment: not a second report engine).
   const summary = await serverFetchOrNull<ByBuildReport>(`reports/by-build/${buildId}`)
   if (!summary) {
-    return <EmptyState icon="alert-triangle" title="Could not load this report" description="Refresh in a moment." />
+    return (
+      <EmptyState
+        icon="alert-triangle"
+        title="Could not load this report"
+        description="Refresh in a moment."
+      />
+    )
   }
   const bugs: BugBreakdown = {
     total: summary.bugCount,
@@ -291,21 +397,32 @@ async function ByBuild({ buildId }: { buildId: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
       <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-        {summary.testerCount} tester{summary.testerCount === 1 ? '' : 's'} · {summary.testCaseCount} test case
+        {summary.testerCount} tester{summary.testerCount === 1 ? '' : 's'} · {summary.testCaseCount}{' '}
+        test case
         {summary.testCaseCount === 1 ? '' : 's'}
         {summary.testCaseCompletion !== null ? ` · ${summary.testCaseCompletion}% complete` : ''}
       </p>
-      <BugBreakdownView bugs={bugs} csvHref={`/app/admin/export/reports/by-build/${buildId}/export.csv`} />
+      <BugBreakdownView
+        bugs={bugs}
+        csvHref={`/app/admin/export/reports/by-build/${buildId}/export.csv`}
+      />
     </div>
   )
 }
 
 async function ByDate({ startDate, endDate }: { startDate: string; endDate: string }) {
-  const report = await serverFetchOrNull<{ bugs: BugBreakdown; byProject: { project: ProjectOption | null; bugCount: number }[] }>(
-    `reports/by-date?startDate=${startDate}&endDate=${endDate}`,
-  )
+  const report = await serverFetchOrNull<{
+    bugs: BugBreakdown
+    byProject: { project: ProjectOption | null; bugCount: number }[]
+  }>(`reports/by-date?startDate=${startDate}&endDate=${endDate}`)
   if (!report) {
-    return <EmptyState icon="alert-triangle" title="Could not load this report" description="Only the platform side can report across every project." />
+    return (
+      <EmptyState
+        icon="alert-triangle"
+        title="Could not load this report"
+        description="Only the platform side can report across every project."
+      />
+    )
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
@@ -318,14 +435,21 @@ async function ByDate({ startDate, endDate }: { startDate: string; endDate: stri
       />
       {report.byProject.length > 0 ? (
         <div>
-          <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}>
+          <p
+            className="c4t-eyebrow"
+            style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
+          >
             By project
           </p>
           <BarChart
             title="Bugs per project"
             segments={report.byProject
               .filter((p) => p.project)
-              .map((p) => ({ label: p.project!.reference, value: p.bugCount, tone: 'neutral' as const }))}
+              .map((p) => ({
+                label: p.project!.reference,
+                value: p.bugCount,
+                tone: 'neutral' as const,
+              }))}
           />
         </div>
       ) : null}
@@ -344,7 +468,13 @@ async function ByBuildRangePicker({
 }) {
   const builds = await serverFetchOrNull<BuildOption[]>(`projects/${projectId}/builds`)
   if (!builds) {
-    return <EmptyState icon="alert-triangle" title="Could not load builds" description="Refresh in a moment." />
+    return (
+      <EmptyState
+        icon="alert-triangle"
+        title="Could not load builds"
+        description="Refresh in a moment."
+      />
+    )
   }
   const options = builds.map((b) => ({ value: b.id, label: b.name }))
   return (
@@ -356,17 +486,33 @@ async function ByBuildRangePicker({
         <input type="hidden" name="section" value="by-build-range" />
         <input type="hidden" name="projectId" value={projectId} />
         <Field label="Start build" htmlFor="rpt-startBuildId">
-          <Select id="rpt-startBuildId" name="startBuildId" defaultValue={startBuildId ?? ''} placeholder="Choose a build" options={options} />
+          <Select
+            id="rpt-startBuildId"
+            name="startBuildId"
+            defaultValue={startBuildId ?? ''}
+            placeholder="Choose a build"
+            options={options}
+          />
         </Field>
         <Field label="End build" htmlFor="rpt-endBuildId">
-          <Select id="rpt-endBuildId" name="endBuildId" defaultValue={endBuildId ?? ''} placeholder="Choose a build" options={options} />
+          <Select
+            id="rpt-endBuildId"
+            name="endBuildId"
+            defaultValue={endBuildId ?? ''}
+            placeholder="Choose a build"
+            options={options}
+          />
         </Field>
         <LiveFormStatus />
       </LiveGetForm>
       {startBuildId && endBuildId ? (
         <ByBuildRange projectId={projectId} startBuildId={startBuildId} endBuildId={endBuildId} />
       ) : (
-        <EmptyState icon="repeat" title="Choose both builds" description="A start and an end build are both required." />
+        <EmptyState
+          icon="repeat"
+          title="Choose both builds"
+          description="A start and an end build are both required."
+        />
       )}
     </div>
   )
@@ -385,7 +531,13 @@ async function ByBuildRange({
     `reports/by-build-range?projectId=${projectId}&startBuildId=${startBuildId}&endBuildId=${endBuildId}`,
   )
   if (!report) {
-    return <EmptyState icon="alert-triangle" title="Could not load this report" description="Both builds must belong to the selected project." />
+    return (
+      <EmptyState
+        icon="alert-triangle"
+        title="Could not load this report"
+        description="Both builds must belong to the selected project."
+      />
+    )
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>

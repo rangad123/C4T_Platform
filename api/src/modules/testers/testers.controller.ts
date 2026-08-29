@@ -9,7 +9,13 @@ import type { ListTestersQuery, ListGlobalDevicesQuery } from './testers.schema.
 export async function discover(req: Request, res: Response): Promise<void> {
   const result = await service.discoverTesters(
     req.user!,
-    validatedQuery<{ page: number; limit: number; search?: string; countryCode?: string; skills?: string[] }>(res),
+    validatedQuery<{
+      page: number
+      limit: number
+      search?: string
+      countryCode?: string
+      skills?: string[]
+    }>(res),
   )
   res.json({ data: result.items, meta: result.meta })
 }

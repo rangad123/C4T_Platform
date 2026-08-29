@@ -37,7 +37,10 @@ interface StatsResponse {
   users: { byRole: Record<string, number> }
   leads: Record<string, number> | null
   finance: { currency: string; collectedMinor: string; paidOutMinor: string }
-  payouts: { currency: string; byCategory: { indian: string; international: string; pending: string } }
+  payouts: {
+    currency: string
+    byCategory: { indian: string; international: string; pending: string }
+  }
 }
 
 function segmentsFromCounts(
@@ -186,9 +189,7 @@ export default async function AdminDashboardPage() {
           <ChartCard>
             <DonutChart
               title="Bugs by severity"
-              centerLabel={String(
-                Object.values(stats.bugs.bySeverity).reduce((a, b) => a + b, 0),
-              )}
+              centerLabel={String(Object.values(stats.bugs.bySeverity).reduce((a, b) => a + b, 0))}
               segments={segmentsFromCounts(stats.bugs.bySeverity, severityTone)}
             />
           </ChartCard>

@@ -82,7 +82,12 @@ export function EvidenceUpload({ max = 10 }: { max?: number }) {
           }}
         >
           <span
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              minWidth: 0,
+            }}
           >
             <Icon name="file-text" size={16} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -109,7 +114,14 @@ export function EvidenceUpload({ max = 10 }: { max?: number }) {
       ))}
 
       {error ? (
-        <p role="alert" style={{ margin: 0, color: 'var(--status-error-fg)', fontSize: 'var(--type-body-sm-size)' }}>
+        <p
+          role="alert"
+          style={{
+            margin: 0,
+            color: 'var(--status-error-fg)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
           {error}
         </p>
       ) : null}

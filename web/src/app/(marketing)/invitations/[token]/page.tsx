@@ -127,8 +127,8 @@ export default async function InvitationPage({
         {!user ? (
           <>
             <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              Sign in with the email address this invitation was sent to, and you will come
-              straight back here to accept it.
+              Sign in with the email address this invitation was sent to, and you will come straight
+              back here to accept it.
             </p>
             <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
               <Button
@@ -148,15 +148,21 @@ export default async function InvitationPage({
         ) : (
           <>
             <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              You are signed in as <strong>{user.email}</strong>. Accepting adds this account to
-              the team that invited you.
+              You are signed in as <strong>{user.email}</strong>. Accepting adds this account to the
+              team that invited you.
             </p>
             <form action={accept}>
               <SubmitButton variant="primary" pendingLabel="Joining the team…">
                 Accept the invitation
               </SubmitButton>
             </form>
-            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-muted)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
               Invited under a different address? Sign out and sign back in as that account, then
               open this link again.
             </p>

@@ -18,8 +18,20 @@ import {
 
 export const authRouter = Router()
 
-authRouter.post('/register', authIpLimiter, authLimiter, validate({ body: registerSchema }), controller.register)
-authRouter.post('/login', authIpLimiter, authLimiter, validate({ body: loginSchema }), controller.login)
+authRouter.post(
+  '/register',
+  authIpLimiter,
+  authLimiter,
+  validate({ body: registerSchema }),
+  controller.register,
+)
+authRouter.post(
+  '/login',
+  authIpLimiter,
+  authLimiter,
+  validate({ body: loginSchema }),
+  controller.login,
+)
 authRouter.post('/refresh', validate({ body: refreshSchema }), controller.refresh)
 authRouter.post('/logout', controller.logout)
 

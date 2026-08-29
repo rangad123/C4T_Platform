@@ -40,17 +40,17 @@ The agreement is the scope boundary. §5 excludes "any feature not expressly des
 Section 2", and §6.1 makes anything beyond it a Change Order. These nine rows are what
 Milestone 2 (₹25,000, "Backend core + Admin panel") actually owes.
 
-| # | §2.2 feature area | Legacy tables behind it | API | Admin UI |
-|---|---|---|---|---|
-| 1 | Project Management | `projects`, `builds`, `assigned_tests`, `applied_tests`, `documents` | 12 routes | list + detail + create + assign |
-| 2 | Organisation Management | `organisation`, `user_organisation_map`, `user_invitation`, `active_plans` | 10 routes | list + detail + create + members |
-| 3 | Communication | `message`, `message_recipient`, `announcements`, `notification`, `comments_monitor` | 8 routes | announcements + threads |
-| 4 | Crowd Tester Management | `users`, `skills`, `skill_categories`, `devices`, `user_browsers` | 3 routes | list + detail + verify |
-| 5 | Manager Management | `roles`, `permissions`, `projects.project_manager` | 4 routes | list + detail + assign |
-| 6 | Ratings & Reviews | `test_review`, `assigned_tests.rate/feedback`, `users.rating` | 4 routes | list + moderate |
-| 7 | Transactions | `payment_history`, `payment_acc_details`, `tds_history` | 5 routes | list + detail + record |
-| 8 | Profile Management | `users` (own row) | users/me + auth | profile + password + sessions |
-| 9 | Sub-Admin Permissions | `roles`, `resources`, `permissions` | 12 routes | permission editor |
+| #   | §2.2 feature area       | Legacy tables behind it                                                             | API             | Admin UI                         |
+| --- | ----------------------- | ----------------------------------------------------------------------------------- | --------------- | -------------------------------- |
+| 1   | Project Management      | `projects`, `builds`, `assigned_tests`, `applied_tests`, `documents`                | 12 routes       | list + detail + create + assign  |
+| 2   | Organisation Management | `organisation`, `user_organisation_map`, `user_invitation`, `active_plans`          | 10 routes       | list + detail + create + members |
+| 3   | Communication           | `message`, `message_recipient`, `announcements`, `notification`, `comments_monitor` | 8 routes        | announcements + threads          |
+| 4   | Crowd Tester Management | `users`, `skills`, `skill_categories`, `devices`, `user_browsers`                   | 3 routes        | list + detail + verify           |
+| 5   | Manager Management      | `roles`, `permissions`, `projects.project_manager`                                  | 4 routes        | list + detail + assign           |
+| 6   | Ratings & Reviews       | `test_review`, `assigned_tests.rate/feedback`, `users.rating`                       | 4 routes        | list + moderate                  |
+| 7   | Transactions            | `payment_history`, `payment_acc_details`, `tds_history`                             | 5 routes        | list + detail + record           |
+| 8   | Profile Management      | `users` (own row)                                                                   | users/me + auth | profile + password + sessions    |
+| 9   | Sub-Admin Permissions   | `roles`, `resources`, `permissions`                                                 | 12 routes       | permission editor                |
 
 All nine are now covered. The API was already complete at 100 routes before this pass; the
 gap was UI.
@@ -72,17 +72,17 @@ legacy `permissions` rows are **not** migrated, because the model changed shape.
 
 `users` carries 44 columns, doing the work of five tables in the rebuild:
 
-| Legacy columns | Rebuild home |
-|---|---|
-| `usr_username` `usr_email` `usr_password` `usr_active` `usr_activation_code` | `User` |
-| `usr_firstname` `usr_lastname` `usr_phone` `usr_country` `usr_city` `usr_profile_pic` | `User` |
-| `usr_gender` `usr_age` `usr_desig` `usr_lang` `usr_apple` `usr_skype` `usr_linkedin` | **no home** — see below |
-| `usr_skill_set` `usr_exp_years` `usr_looking_for` `rating` `usr_expert_badge` | `TesterProfile` |
-| `usr_agreement_file` `usr_agreement_verification` | `TesterProfile.ndaAcceptedAt` (lossy) |
-| `usr_account_balance` | **no home** — §5 excludes wallets |
-| `usr_current_orgnisation` | `OrganisationMember` |
-| `jira_username` `jira_password` `jira_url` | **deliberately dropped** — B4 |
-| `app_token` `usr_silent_mode` `activity_status` `usr_last_login` | partly `User.lastLoginAt` |
+| Legacy columns                                                                        | Rebuild home                          |
+| ------------------------------------------------------------------------------------- | ------------------------------------- |
+| `usr_username` `usr_email` `usr_password` `usr_active` `usr_activation_code`          | `User`                                |
+| `usr_firstname` `usr_lastname` `usr_phone` `usr_country` `usr_city` `usr_profile_pic` | `User`                                |
+| `usr_gender` `usr_age` `usr_desig` `usr_lang` `usr_apple` `usr_skype` `usr_linkedin`  | **no home** — see below               |
+| `usr_skill_set` `usr_exp_years` `usr_looking_for` `rating` `usr_expert_badge`         | `TesterProfile`                       |
+| `usr_agreement_file` `usr_agreement_verification`                                     | `TesterProfile.ndaAcceptedAt` (lossy) |
+| `usr_account_balance`                                                                 | **no home** — §5 excludes wallets     |
+| `usr_current_orgnisation`                                                             | `OrganisationMember`                  |
+| `jira_username` `jira_password` `jira_url`                                            | **deliberately dropped** — B4         |
+| `app_token` `usr_silent_mode` `activity_status` `usr_last_login`                      | partly `User.lastLoginAt`             |
 
 Demographics (`usr_gender`, `usr_age`) and social handles have no destination. They are used
 by legacy contest targeting (`contests.contest_min_age/max_age/contest_gender`), which is
@@ -123,7 +123,7 @@ built and live at `/app/admin/leads`.
 
 **This is the structural finding of the review, and blocker B2.**
 
-The legacy platform has *three* levels where the rebuild has two:
+The legacy platform has _three_ levels where the rebuild has two:
 
 ```
 legacy:   organisation → projects → builds → assigned_tests → bugs_report
@@ -198,7 +198,7 @@ scope — but it is a working feature for existing users under §2.8.
 3. **Evidence fields** — `bug_video_url`, `bug_screen1`, `bug_screen2`, `bug_attachment`,
    plus the `attachments` table. The rebuild has `BugAttachment` and covers this.
 
-Legacy bug *status* is far thinner: `bug_status int` with `0=>Normal, 1=>duplicate,
+Legacy bug _status_ is far thinner: `bug_status int` with `0=>Normal, 1=>duplicate,
 2=>invalid` against the rebuild's ten-state lifecycle. Migration is therefore a widening —
 every legacy `0` becomes `NEW` (or `CONFIRMED`; the Client should choose), `1` becomes
 `DUPLICATE`, `2` becomes `REJECTED`. Note the legacy schema has **no** notion of fixed or
@@ -311,26 +311,26 @@ both — but note `documents.doc_build_id` again needs `Build`.
 
 ## What the rebuild does not implement, ranked by risk to §2.8
 
-§2.8 promises: *"Users already existing on the current platform shall not face any issue
-with respect to features that rely on their already-migrated data."*
+§2.8 promises: _"Users already existing on the current platform shall not face any issue
+with respect to features that rely on their already-migrated data."_
 
-| Risk | Feature | Tables | Status |
-|---|---|---|---|
-| **Critical** | Build layer — everything hangs off it | `builds` +9 referencing | B2 — schema change needed before migration |
-| **Critical** | Legacy password verification | `users.usr_password` | B1 — implemented, algorithm unconfirmed |
-| **Critical** | Wallet, ledger, payout accounts, TDS | 3 + wallet columns | B3 — needs Client decision (§5 conflict) |
-| **High** | Test cases, execution reports, timesheets | 8 | Not built; arguably outside §2.3 |
-| **High** | Crowd self-application + 4 cycle types | `applied_tests`, cycle enums | Not built |
-| **High** | Contests / UX research | 8 | Out of scope per §5 — needs Change Order |
-| **Medium** | Device-matched tester selection | 11 | Degraded to free text |
-| **Medium** | Custom bug + feedback form builder | 4 | Not built |
-| **Medium** | Per-build announcements, fan-out inbox, notification prefs | 4 | Partly; blocked on B2 |
-| **Medium** | Defect taxonomy + reproducibility fraction | `bug_types` + columns | Not built |
-| **Low** | Runtime site settings | `site_settings` | Now env vars |
-| **Low** | Daily statistics history | `site_statistics` | Computed live |
-| **Low** | Skill categories | `skill_categories` | Flattened |
-| **Low** | Automation suite | 2 | Out of scope per §5 |
-| **N/A** | Jira credentials | 3 columns | Deliberately dropped — B4 |
+| Risk         | Feature                                                    | Tables                       | Status                                     |
+| ------------ | ---------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
+| **Critical** | Build layer — everything hangs off it                      | `builds` +9 referencing      | B2 — schema change needed before migration |
+| **Critical** | Legacy password verification                               | `users.usr_password`         | B1 — implemented, algorithm unconfirmed    |
+| **Critical** | Wallet, ledger, payout accounts, TDS                       | 3 + wallet columns           | B3 — needs Client decision (§5 conflict)   |
+| **High**     | Test cases, execution reports, timesheets                  | 8                            | Not built; arguably outside §2.3           |
+| **High**     | Crowd self-application + 4 cycle types                     | `applied_tests`, cycle enums | Not built                                  |
+| **High**     | Contests / UX research                                     | 8                            | Out of scope per §5 — needs Change Order   |
+| **Medium**   | Device-matched tester selection                            | 11                           | Degraded to free text                      |
+| **Medium**   | Custom bug + feedback form builder                         | 4                            | Not built                                  |
+| **Medium**   | Per-build announcements, fan-out inbox, notification prefs | 4                            | Partly; blocked on B2                      |
+| **Medium**   | Defect taxonomy + reproducibility fraction                 | `bug_types` + columns        | Not built                                  |
+| **Low**      | Runtime site settings                                      | `site_settings`              | Now env vars                               |
+| **Low**      | Daily statistics history                                   | `site_statistics`            | Computed live                              |
+| **Low**      | Skill categories                                           | `skill_categories`           | Flattened                                  |
+| **Low**      | Automation suite                                           | 2                            | Out of scope per §5                        |
+| **N/A**      | Jira credentials                                           | 3 columns                    | Deliberately dropped — B4                  |
 
 ---
 

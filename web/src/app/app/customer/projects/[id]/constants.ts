@@ -23,7 +23,9 @@ export const PROJECT_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const
 export type ProjectPriorityValue = (typeof PROJECT_PRIORITIES)[number]
 
 /** Mirrors `STATUS_TRANSITIONS` in `api/src/modules/projects/projects.service.ts`. */
-export const STATUS_TRANSITIONS: Readonly<Record<ProjectStatusValue, readonly ProjectStatusValue[]>> = {
+export const STATUS_TRANSITIONS: Readonly<
+  Record<ProjectStatusValue, readonly ProjectStatusValue[]>
+> = {
   DRAFT: ['SUBMITTED', 'CANCELLED'],
   SUBMITTED: ['APPROVED', 'DRAFT', 'CANCELLED'],
   APPROVED: ['IN_PROGRESS', 'PAUSED', 'CANCELLED'],
@@ -175,7 +177,13 @@ export interface BuildDetail {
   testDocument: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
   createdAt: string
   updatedAt: string
-  _count: { assignments: number; bugs: number; materials: number; features: number; testCases: number }
+  _count: {
+    assignments: number
+    bugs: number
+    materials: number
+    features: number
+    testCases: number
+  }
   capabilities: { canUpdate: boolean }
 }
 

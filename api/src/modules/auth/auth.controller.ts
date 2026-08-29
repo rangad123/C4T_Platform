@@ -1,11 +1,7 @@
 import type { Request, Response } from 'express'
 import { param } from '../../lib/http.js'
 import { env, isProduction, googleOAuthEnabled } from '../../config/env.js'
-import {
-  UnauthorizedError,
-  ForbiddenError,
-  ServiceUnavailableError,
-} from '../../lib/errors.js'
+import { UnauthorizedError, ForbiddenError, ServiceUnavailableError } from '../../lib/errors.js'
 import { recordAudit } from '../../lib/audit.js'
 import { ACCESS_COOKIE, REFRESH_COOKIE } from '../../middleware/authenticate.js'
 import { parseDuration, verifyAccessToken } from '../../lib/tokens.js'

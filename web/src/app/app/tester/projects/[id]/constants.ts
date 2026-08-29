@@ -120,7 +120,13 @@ export interface BuildDetail {
   testDocument: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
   createdAt: string
   updatedAt: string
-  _count: { assignments: number; bugs: number; materials: number; features: number; testCases: number }
+  _count: {
+    assignments: number
+    bugs: number
+    materials: number
+    features: number
+    testCases: number
+  }
 }
 
 /** A tag a bug can be filed against, from `GET /v1/projects/:id/features`. */

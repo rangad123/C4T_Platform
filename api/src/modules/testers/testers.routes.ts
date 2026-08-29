@@ -38,7 +38,6 @@ testersRouter.get(
   controller.discover,
 )
 
-
 // ─── Tester self-service (§2.3 "Manage their tester profile") ────────────────
 // Declared before "/:id" so "me" is never parsed as an id.
 

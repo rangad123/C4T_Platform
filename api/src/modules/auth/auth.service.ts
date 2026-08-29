@@ -329,9 +329,7 @@ export async function login(
    * legacy rows — those are always rehashed.
    */
   const rehash =
-    usingLegacy || needsRehash(record.passwordHash)
-      ? await hashPassword(input.password)
-      : undefined
+    usingLegacy || needsRehash(record.passwordHash) ? await hashPassword(input.password) : undefined
 
   await prisma.user.update({
     where: { id: record.id },

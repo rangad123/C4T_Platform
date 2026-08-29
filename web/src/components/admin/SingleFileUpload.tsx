@@ -110,7 +110,9 @@ export function SingleFileUpload({
         aria-hidden="true"
         tabIndex={-1}
       />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}
+      >
         <Button
           type="button"
           variant="secondary"
@@ -139,7 +141,11 @@ export function SingleFileUpload({
       {error ? (
         <p
           role="alert"
-          style={{ margin: 0, color: 'var(--status-error-fg)', fontSize: 'var(--type-body-sm-size)' }}
+          style={{
+            margin: 0,
+            color: 'var(--status-error-fg)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
         >
           {error}
         </p>

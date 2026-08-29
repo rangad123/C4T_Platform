@@ -122,7 +122,6 @@ export const PHOTOS = {
     src: '/images/pages/ai.jpg',
     alt: 'A sculpted head in profile, the letters AI glowing among drifting particles inside its open cranium',
   },
-
 } as const satisfies Record<string, Photo>
 
 export type PhotoKey = keyof typeof PHOTOS

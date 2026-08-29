@@ -4,11 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { serverFetch } from '@/lib/api/server'
 import { formString, formTrimmed } from '@/lib/form-data'
-import {
-  isAssignmentStatus,
-  isProjectPriority,
-  isProjectStatus,
-} from './constants'
+import { isAssignmentStatus, isProjectPriority, isProjectStatus } from './constants'
 
 /**
  * Server Actions for the project detail page (§2.2 Project Management).
@@ -283,8 +279,12 @@ export async function createBuild(formData: FormData): Promise<void> {
       targetDevices: parseList(formString(formData, 'targetDevices')),
       targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
       targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
-      targetCountries: parseList(formString(formData, 'targetCountries')).map((c) => c.toUpperCase()),
-      targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) => l.toLowerCase()),
+      targetCountries: parseList(formString(formData, 'targetCountries')).map((c) =>
+        c.toUpperCase(),
+      ),
+      targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) =>
+        l.toLowerCase(),
+      ),
       startDate: formTrimmed(formData, 'startDate') || null,
       endDate: formTrimmed(formData, 'endDate') || null,
       maxTesters: maxTesters ? maxTesters : null,

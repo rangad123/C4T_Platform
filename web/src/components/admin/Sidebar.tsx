@@ -295,7 +295,10 @@ export function Sidebar({
         tester who had collapsed the rail on a laptop then got a nameless menu
         on their phone.
       */}
-      <div className={styles.user} title={collapsed ? `${userName} — ${ROLE_LABEL[role]}` : undefined}>
+      <div
+        className={styles.user}
+        title={collapsed ? `${userName} — ${ROLE_LABEL[role]}` : undefined}
+      >
         <Icon name="user-check" size={18} className={[styles.icon, styles.userIcon].join(' ')} />
         <div className={styles.userMeta}>
           <span className={styles.userName}>{userName}</span>

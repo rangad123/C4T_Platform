@@ -203,7 +203,8 @@ export function deviceFitsTargets(
   const hasTablet = devices.some((d) => d.type === 'TABLET')
   const hasDesktop = devices.some((d) => d.type === 'DESKTOP')
 
-  const matches = (wantsMobile && hasMobile) || (wantsWeb && hasDesktop) || (wantsTablet && hasTablet)
+  const matches =
+    (wantsMobile && hasMobile) || (wantsWeb && hasDesktop) || (wantsTablet && hasTablet)
   return matches ? 'match' : 'mismatch'
 }
 
@@ -238,7 +239,13 @@ export interface BuildDetail {
   testDocument: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
   createdAt: string
   updatedAt: string
-  _count: { assignments: number; bugs: number; materials: number; features: number; testCases: number }
+  _count: {
+    assignments: number
+    bugs: number
+    materials: number
+    features: number
+    testCases: number
+  }
   capabilities: { canUpdate: boolean }
 }
 

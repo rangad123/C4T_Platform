@@ -41,10 +41,12 @@ const BASE = '/app/admin/transactions'
  * because every export of a `'use server'` module must be an async function —
  * exporting this array from there would unregister both actions.
  */
-const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'].map((status) => ({
-  value: status,
-  label: titleCase(status),
-}))
+const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'].map(
+  (status) => ({
+    value: status,
+    label: titleCase(status),
+  }),
+)
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: '', label: 'Not set' },
@@ -213,9 +215,13 @@ export default async function TransactionDetailPage({
         ? [
             titleCase(tx.paymentAccount.paymentType),
             tx.paymentAccount.bankName,
-            tx.paymentAccount.accountNumberLast4 ? `•••• ${tx.paymentAccount.accountNumberLast4}` : null,
+            tx.paymentAccount.accountNumberLast4
+              ? `•••• ${tx.paymentAccount.accountNumberLast4}`
+              : null,
             tx.paymentAccount.paypalEmailMasked,
-            tx.paymentAccount.paytmNumberLast4 ? `•••• ${tx.paymentAccount.paytmNumberLast4}` : null,
+            tx.paymentAccount.paytmNumberLast4
+              ? `•••• ${tx.paymentAccount.paytmNumberLast4}`
+              : null,
           ]
             .filter(Boolean)
             .join(' · ')
@@ -448,7 +454,13 @@ export default async function TransactionDetailPage({
             style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
           >
             <input type="hidden" name="id" value={tx.id} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: 'var(--space-4)',
+              }}
+            >
               <Field label="Payment method" htmlFor="paymentMethod">
                 <Select
                   id="paymentMethod"

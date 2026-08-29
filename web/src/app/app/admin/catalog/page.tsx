@@ -59,8 +59,18 @@ const GROUPS = [
   { key: 'devices', label: 'Devices', icon: 'smartphone', sections: ['devices', 'brands', 'os'] },
   { key: 'browsers', label: 'Browsers', icon: 'globe', sections: ['browsers'] },
   { key: 'networks', label: 'Network providers', icon: 'plug', sections: ['networks'] },
-  { key: 'skills', label: 'Skills', icon: 'graduation-cap', sections: ['skills', 'skill-categories'] },
-] as const satisfies readonly { key: string; label: string; icon: string; sections: readonly string[] }[]
+  {
+    key: 'skills',
+    label: 'Skills',
+    icon: 'graduation-cap',
+    sections: ['skills', 'skill-categories'],
+  },
+] as const satisfies readonly {
+  key: string
+  label: string
+  icon: string
+  sections: readonly string[]
+}[]
 
 function groupFor(section: string): (typeof GROUPS)[number] {
   return GROUPS.find((g) => (g.sections as readonly string[]).includes(section)) ?? GROUPS[0]
@@ -197,9 +207,7 @@ export default async function CatalogPage({
   const section = resolveSection(SECTIONS, params.section)
   const activeGroup = groupFor(section)
 
-  const catalog = await serverFetchOrNull<Catalog>(
-    showAll ? 'catalog?all=true' : 'catalog',
-  )
+  const catalog = await serverFetchOrNull<Catalog>(showAll ? 'catalog?all=true' : 'catalog')
 
   if (!catalog) {
     return (
@@ -234,10 +242,10 @@ export default async function CatalogPage({
           Device &amp; browser catalog
         </h1>
         <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}>
-          The controlled lists testers pick from when describing their kit. Keeping these
-          structured is what makes &ldquo;find every tester on Android 15&rdquo; answerable —
-          free-text device names never match reliably. Retiring an entry hides it from new
-          selections without breaking testers who already reference it.
+          The controlled lists testers pick from when describing their kit. Keeping these structured
+          is what makes &ldquo;find every tester on Android 15&rdquo; answerable — free-text device
+          names never match reliably. Retiring an entry hides it from new selections without
+          breaking testers who already reference it.
         </p>
         <div style={{ marginTop: 'var(--space-2)' }}>
           <Button
@@ -280,20 +288,275 @@ export default async function CatalogPage({
       ) : null}
 
       {activeGroup.key === 'devices' ? (
-      <Panel
-        title="Device models"
-        description={`${catalog.deviceModels.length} models across ${catalog.brands.length} brands.`}
-      >
-        {catalog.deviceModels.length === 0 ? (
-          <p style={{ margin: 0, color: 'var(--text-muted)' }}>No device models yet.</p>
-        ) : (
+        <Panel
+          title="Device models"
+          description={`${catalog.deviceModels.length} models across ${catalog.brands.length} brands.`}
+        >
+          {catalog.deviceModels.length === 0 ? (
+            <p style={{ margin: 0, color: 'var(--text-muted)' }}>No device models yet.</p>
+          ) : (
+            <ul style={LIST}>
+              {catalog.deviceModels.map((m) => (
+                <li key={m.id} style={ROW}>
+                  <span>
+                    <strong style={{ color: 'var(--text-primary)' }}>
+                      {m.brand.name} {m.name}
+                    </strong>
+                    <span
+                      style={{
+                        marginLeft: 'var(--space-3)',
+                        color: 'var(--text-muted)',
+                        fontSize: 'var(--type-body-sm-size)',
+                      }}
+                    >
+                      {[
+                        titleCase(m.type),
+                        m.defaultOs?.name,
+                        m.ramGb ? `${m.ramGb} GB` : null,
+                        m.screenSize ? `${m.screenSize}"` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </span>
+                  {!m.isActive ? (
+                    <Badge tone="neutral" uppercase={false}>
+                      Retired
+                    </Badge>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form action={addModelAction} style={INLINE_FORM}>
+            <Field label="Brand" htmlFor="brandId">
+              <Select
+                id="brandId"
+                name="brandId"
+                required
+                options={catalog.brands.map((b) => ({ value: b.id, label: b.name }))}
+              />
+            </Field>
+            <Field label="Model" htmlFor="modelName">
+              <Input id="modelName" name="name" required maxLength={160} placeholder="Galaxy S25" />
+            </Field>
+            <Field label="Type" htmlFor="modelType">
+              <Select
+                id="modelType"
+                name="type"
+                required
+                defaultValue="MOBILE"
+                options={DEVICE_TYPES.map((v) => ({ value: v, label: titleCase(v) }))}
+              />
+            </Field>
+            <Field label="Default OS" htmlFor="defaultOsId">
+              <Select
+                id="defaultOsId"
+                name="defaultOsId"
+                defaultValue=""
+                options={[
+                  { value: '', label: 'None' },
+                  ...catalog.operatingSystems.map((o) => ({
+                    value: o.id,
+                    label: `${o.name} (${titleCase(o.kind)})`,
+                  })),
+                ]}
+              />
+            </Field>
+            <Field label="RAM (GB)" htmlFor="ramGb">
+              <Input id="ramGb" name="ramGb" maxLength={20} style={{ width: 90 }} />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add model
+            </SubmitButton>
+          </form>
+        </Panel>
+      ) : null}
+
+      {activeGroup.key === 'devices' ? (
+        <Panel title="Brands" description={`${catalog.brands.length} brands.`}>
+          <ul style={CHIP_LIST}>
+            {catalog.brands.map((b) => (
+              <li key={b.id} style={b.isActive ? CHIP : CHIP_RETIRED}>
+                {b.name}
+                {!b.isActive ? (
+                  <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <form action={addBrandAction} style={INLINE_FORM}>
+            <Field label="Brand name" htmlFor="brandName">
+              <Input id="brandName" name="name" required maxLength={120} placeholder="OnePlus" />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add brand
+            </SubmitButton>
+          </form>
+        </Panel>
+      ) : null}
+
+      {activeGroup.key === 'devices' ? (
+        <Panel
+          title="Operating systems"
+          description="Mobile and desktop, with their versions. One list — the legacy schema split these across four tables for no behavioural reason."
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+            {[
+              { label: 'Mobile', rows: mobileOs },
+              { label: 'Desktop', rows: desktopOs },
+            ].map((group) => (
+              <div key={group.label}>
+                <p
+                  className="c4t-eyebrow"
+                  style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
+                >
+                  {group.label}
+                </p>
+                <ul style={LIST}>
+                  {group.rows.map((o) => (
+                    <li key={o.id} style={{ ...ROW, alignItems: 'flex-start' }}>
+                      <span>
+                        <strong style={{ color: 'var(--text-primary)' }}>{o.name}</strong>
+                        <span
+                          style={{
+                            display: 'block',
+                            marginTop: 'var(--space-1)',
+                            color: 'var(--text-muted)',
+                            fontSize: 'var(--type-body-sm-size)',
+                          }}
+                        >
+                          {o.versions.length > 0
+                            ? o.versions.map((v) => v.version).join(', ')
+                            : 'No versions yet'}
+                        </span>
+                      </span>
+                      <form
+                        action={addOsVersionAction}
+                        style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}
+                      >
+                        <input type="hidden" name="osId" value={o.id} />
+                        <Input
+                          name="version"
+                          required
+                          maxLength={60}
+                          placeholder="Add version"
+                          style={{ width: 130 }}
+                          aria-label={`Add a version to ${o.name}`}
+                        />
+                        <SubmitButton variant="ghost" size="sm" pendingLabel="Adding…">
+                          Add
+                        </SubmitButton>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      {activeGroup.key === 'browsers' ? (
+        <Panel title="Browsers" description={`${catalog.browsers.length} browsers.`}>
           <ul style={LIST}>
-            {catalog.deviceModels.map((m) => (
-              <li key={m.id} style={ROW}>
+            {catalog.browsers.map((b) => (
+              <li key={b.id} style={{ ...ROW, alignItems: 'flex-start' }}>
                 <span>
-                  <strong style={{ color: 'var(--text-primary)' }}>
-                    {m.brand.name} {m.name}
-                  </strong>
+                  <strong style={{ color: 'var(--text-primary)' }}>{b.name}</strong>
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: 'var(--space-1)',
+                      color: 'var(--text-muted)',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
+                    {b.versions.length > 0
+                      ? b.versions.map((v) => v.version).join(', ')
+                      : 'No versions yet'}
+                  </span>
+                </span>
+                <form
+                  action={addBrowserVersionAction}
+                  style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}
+                >
+                  <input type="hidden" name="browserId" value={b.id} />
+                  <Input
+                    name="version"
+                    required
+                    maxLength={60}
+                    placeholder="Add version"
+                    style={{ width: 130 }}
+                    aria-label={`Add a version to ${b.name}`}
+                  />
+                  <SubmitButton variant="ghost" size="sm" pendingLabel="Adding…">
+                    Add
+                  </SubmitButton>
+                </form>
+              </li>
+            ))}
+          </ul>
+          <form action={addBrowserAction} style={INLINE_FORM}>
+            <Field label="Browser name" htmlFor="browserName">
+              <Input id="browserName" name="name" required maxLength={120} placeholder="Opera" />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add browser
+            </SubmitButton>
+          </form>
+        </Panel>
+      ) : null}
+
+      {activeGroup.key === 'networks' ? (
+        <Panel title="Network providers" description={`${catalog.networks.length} carriers.`}>
+          <ul style={CHIP_LIST}>
+            {catalog.networks.map((n) => (
+              <li key={n.id} style={n.isActive ? CHIP : CHIP_RETIRED}>
+                {n.name}
+                {n.countryCode ? (
+                  <span
+                    style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}
+                  >
+                    {n.countryCode}
+                  </span>
+                ) : null}
+                {!n.isActive ? (
+                  <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <form action={addNetworkAction} style={INLINE_FORM}>
+            <Field label="Carrier" htmlFor="networkName">
+              <Input id="networkName" name="name" required maxLength={120} placeholder="Orange" />
+            </Field>
+            <Field label="Country" htmlFor="networkCountry" hint="ISO 2-letter.">
+              <Input
+                id="networkCountry"
+                name="countryCode"
+                maxLength={2}
+                style={{ width: 90, textTransform: 'uppercase' }}
+              />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add carrier
+            </SubmitButton>
+          </form>
+        </Panel>
+      ) : null}
+
+      {activeGroup.key === 'skills' ? (
+        <Panel
+          title="Skill categories"
+          description={`${catalog.skillCategories.length} categories.`}
+        >
+          <ul style={LIST}>
+            {catalog.skillCategories.map((c) => (
+              <li key={c.id} style={ROW}>
+                <span style={{ color: 'var(--text-primary)' }}>
+                  {c.name}
                   <span
                     style={{
                       marginLeft: 'var(--space-3)',
@@ -301,17 +564,10 @@ export default async function CatalogPage({
                       fontSize: 'var(--type-body-sm-size)',
                     }}
                   >
-                    {[
-                      titleCase(m.type),
-                      m.defaultOs?.name,
-                      m.ramGb ? `${m.ramGb} GB` : null,
-                      m.screenSize ? `${m.screenSize}"` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
+                    {c.skills.length} {c.skills.length === 1 ? 'skill' : 'skills'}
                   </span>
                 </span>
-                {!m.isActive ? (
+                {!c.isActive ? (
                   <Badge tone="neutral" uppercase={false}>
                     Retired
                   </Badge>
@@ -319,327 +575,80 @@ export default async function CatalogPage({
               </li>
             ))}
           </ul>
-        )}
-
-        <form action={addModelAction} style={INLINE_FORM}>
-          <Field label="Brand" htmlFor="brandId">
-            <Select
-              id="brandId"
-              name="brandId"
-              required
-              options={catalog.brands.map((b) => ({ value: b.id, label: b.name }))}
-            />
-          </Field>
-          <Field label="Model" htmlFor="modelName">
-            <Input id="modelName" name="name" required maxLength={160} placeholder="Galaxy S25" />
-          </Field>
-          <Field label="Type" htmlFor="modelType">
-            <Select
-              id="modelType"
-              name="type"
-              required
-              defaultValue="MOBILE"
-              options={DEVICE_TYPES.map((v) => ({ value: v, label: titleCase(v) }))}
-            />
-          </Field>
-          <Field label="Default OS" htmlFor="defaultOsId">
-            <Select
-              id="defaultOsId"
-              name="defaultOsId"
-              defaultValue=""
-              options={[
-                { value: '', label: 'None' },
-                ...catalog.operatingSystems.map((o) => ({
-                  value: o.id,
-                  label: `${o.name} (${titleCase(o.kind)})`,
-                })),
-              ]}
-            />
-          </Field>
-          <Field label="RAM (GB)" htmlFor="ramGb">
-            <Input id="ramGb" name="ramGb" maxLength={20} style={{ width: 90 }} />
-          </Field>
-          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-            Add model
-          </SubmitButton>
-        </form>
-      </Panel>
-      ) : null}
-
-      {activeGroup.key === 'devices' ? (
-      <Panel title="Brands" description={`${catalog.brands.length} brands.`}>
-        <ul style={CHIP_LIST}>
-          {catalog.brands.map((b) => (
-            <li key={b.id} style={b.isActive ? CHIP : CHIP_RETIRED}>
-              {b.name}
-              {!b.isActive ? (
-                <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        <form action={addBrandAction} style={INLINE_FORM}>
-          <Field label="Brand name" htmlFor="brandName">
-            <Input id="brandName" name="name" required maxLength={120} placeholder="OnePlus" />
-          </Field>
-          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-            Add brand
-          </SubmitButton>
-        </form>
-      </Panel>
-      ) : null}
-
-      {activeGroup.key === 'devices' ? (
-      <Panel
-        title="Operating systems"
-        description="Mobile and desktop, with their versions. One list — the legacy schema split these across four tables for no behavioural reason."
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-          {[
-            { label: 'Mobile', rows: mobileOs },
-            { label: 'Desktop', rows: desktopOs },
-          ].map((group) => (
-            <div key={group.label}>
-              <p
-                className="c4t-eyebrow"
-                style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
-              >
-                {group.label}
-              </p>
-              <ul style={LIST}>
-                {group.rows.map((o) => (
-                  <li key={o.id} style={{ ...ROW, alignItems: 'flex-start' }}>
-                    <span>
-                      <strong style={{ color: 'var(--text-primary)' }}>{o.name}</strong>
-                      <span
-                        style={{
-                          display: 'block',
-                          marginTop: 'var(--space-1)',
-                          color: 'var(--text-muted)',
-                          fontSize: 'var(--type-body-sm-size)',
-                        }}
-                      >
-                        {o.versions.length > 0
-                          ? o.versions.map((v) => v.version).join(', ')
-                          : 'No versions yet'}
-                      </span>
-                    </span>
-                    <form
-                      action={addOsVersionAction}
-                      style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}
-                    >
-                      <input type="hidden" name="osId" value={o.id} />
-                      <Input
-                        name="version"
-                        required
-                        maxLength={60}
-                        placeholder="Add version"
-                        style={{ width: 130 }}
-                        aria-label={`Add a version to ${o.name}`}
-                      />
-                      <SubmitButton variant="ghost" size="sm" pendingLabel="Adding…">
-                        Add
-                      </SubmitButton>
-                    </form>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </Panel>
-      ) : null}
-
-      {activeGroup.key === 'browsers' ? (
-      <Panel title="Browsers" description={`${catalog.browsers.length} browsers.`}>
-        <ul style={LIST}>
-          {catalog.browsers.map((b) => (
-            <li key={b.id} style={{ ...ROW, alignItems: 'flex-start' }}>
-              <span>
-                <strong style={{ color: 'var(--text-primary)' }}>{b.name}</strong>
-                <span
-                  style={{
-                    display: 'block',
-                    marginTop: 'var(--space-1)',
-                    color: 'var(--text-muted)',
-                    fontSize: 'var(--type-body-sm-size)',
-                  }}
-                >
-                  {b.versions.length > 0
-                    ? b.versions.map((v) => v.version).join(', ')
-                    : 'No versions yet'}
-                </span>
-              </span>
-              <form
-                action={addBrowserVersionAction}
-                style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}
-              >
-                <input type="hidden" name="browserId" value={b.id} />
-                <Input
-                  name="version"
-                  required
-                  maxLength={60}
-                  placeholder="Add version"
-                  style={{ width: 130 }}
-                  aria-label={`Add a version to ${b.name}`}
-                />
-                <SubmitButton variant="ghost" size="sm" pendingLabel="Adding…">
-                  Add
-                </SubmitButton>
-              </form>
-            </li>
-          ))}
-        </ul>
-        <form action={addBrowserAction} style={INLINE_FORM}>
-          <Field label="Browser name" htmlFor="browserName">
-            <Input id="browserName" name="name" required maxLength={120} placeholder="Opera" />
-          </Field>
-          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-            Add browser
-          </SubmitButton>
-        </form>
-      </Panel>
-      ) : null}
-
-      {activeGroup.key === 'networks' ? (
-      <Panel title="Network providers" description={`${catalog.networks.length} carriers.`}>
-        <ul style={CHIP_LIST}>
-          {catalog.networks.map((n) => (
-            <li key={n.id} style={n.isActive ? CHIP : CHIP_RETIRED}>
-              {n.name}
-              {n.countryCode ? (
-                <span style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}>
-                  {n.countryCode}
-                </span>
-              ) : null}
-              {!n.isActive ? (
-                <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        <form action={addNetworkAction} style={INLINE_FORM}>
-          <Field label="Carrier" htmlFor="networkName">
-            <Input id="networkName" name="name" required maxLength={120} placeholder="Orange" />
-          </Field>
-          <Field label="Country" htmlFor="networkCountry" hint="ISO 2-letter.">
-            <Input
-              id="networkCountry"
-              name="countryCode"
-              maxLength={2}
-              style={{ width: 90, textTransform: 'uppercase' }}
-            />
-          </Field>
-          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-            Add carrier
-          </SubmitButton>
-        </form>
-      </Panel>
+          <form action={addSkillCategoryAction} style={INLINE_FORM}>
+            <Field label="Category name" htmlFor="skillCategoryName">
+              <Input
+                id="skillCategoryName"
+                name="name"
+                required
+                maxLength={120}
+                placeholder="Domain knowledge"
+              />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add category
+            </SubmitButton>
+          </form>
+        </Panel>
       ) : null}
 
       {activeGroup.key === 'skills' ? (
-      <Panel
-        title="Skill categories"
-        description={`${catalog.skillCategories.length} categories.`}
-      >
-        <ul style={LIST}>
-          {catalog.skillCategories.map((c) => (
-            <li key={c.id} style={ROW}>
-              <span style={{ color: 'var(--text-primary)' }}>
-                {c.name}
-                <span
-                  style={{
-                    marginLeft: 'var(--space-3)',
-                    color: 'var(--text-muted)',
-                    fontSize: 'var(--type-body-sm-size)',
-                  }}
+        <Panel
+          title="Skills"
+          description="What a tester picks from when describing their expertise — no longer free text, so the list stays tidy instead of accumulating near-duplicates."
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+            {catalog.skillCategories.map((c) => (
+              <div key={c.id}>
+                <p
+                  className="c4t-eyebrow"
+                  style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
                 >
-                  {c.skills.length} {c.skills.length === 1 ? 'skill' : 'skills'}
-                </span>
-              </span>
-              {!c.isActive ? (
-                <Badge tone="neutral" uppercase={false}>
-                  Retired
-                </Badge>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        <form action={addSkillCategoryAction} style={INLINE_FORM}>
-          <Field label="Category name" htmlFor="skillCategoryName">
-            <Input
-              id="skillCategoryName"
-              name="name"
-              required
-              maxLength={120}
-              placeholder="Domain knowledge"
-            />
-          </Field>
-          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-            Add category
-          </SubmitButton>
-        </form>
-      </Panel>
+                  {c.name}
+                </p>
+                {c.skills.length === 0 ? (
+                  <p style={{ margin: 0, color: 'var(--text-muted)' }}>No skills yet.</p>
+                ) : (
+                  <ul style={LIST}>
+                    {c.skills.map((s) => (
+                      <li key={s.id} style={ROW}>
+                        <span style={{ color: 'var(--text-primary)' }}>{s.name}</span>
+                        {!s.isActive ? (
+                          <Badge tone="neutral" uppercase={false}>
+                            Retired
+                          </Badge>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+          <form action={addSkillAction} style={INLINE_FORM}>
+            <Field label="Skill name" htmlFor="skillName">
+              <Input
+                id="skillName"
+                name="name"
+                required
+                maxLength={120}
+                placeholder="Contract testing"
+              />
+            </Field>
+            <Field label="Category" htmlFor="skillCategoryId">
+              <Select
+                id="skillCategoryId"
+                name="categoryId"
+                required
+                options={catalog.skillCategories.map((c) => ({ value: c.id, label: c.name }))}
+              />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add skill
+            </SubmitButton>
+          </form>
+        </Panel>
       ) : null}
-
-      {activeGroup.key === 'skills' ? (
-      <Panel
-        title="Skills"
-        description="What a tester picks from when describing their expertise — no longer free text, so the list stays tidy instead of accumulating near-duplicates."
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-          {catalog.skillCategories.map((c) => (
-            <div key={c.id}>
-              <p
-                className="c4t-eyebrow"
-                style={{ color: 'var(--text-muted)', margin: '0 0 var(--space-3)' }}
-              >
-                {c.name}
-              </p>
-              {c.skills.length === 0 ? (
-                <p style={{ margin: 0, color: 'var(--text-muted)' }}>No skills yet.</p>
-              ) : (
-                <ul style={LIST}>
-                  {c.skills.map((s) => (
-                    <li key={s.id} style={ROW}>
-                      <span style={{ color: 'var(--text-primary)' }}>{s.name}</span>
-                      {!s.isActive ? (
-                        <Badge tone="neutral" uppercase={false}>
-                          Retired
-                        </Badge>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
-        </div>
-        <form action={addSkillAction} style={INLINE_FORM}>
-          <Field label="Skill name" htmlFor="skillName">
-            <Input
-              id="skillName"
-              name="name"
-              required
-              maxLength={120}
-              placeholder="Contract testing"
-            />
-          </Field>
-          <Field label="Category" htmlFor="skillCategoryId">
-            <Select
-              id="skillCategoryId"
-              name="categoryId"
-              required
-              options={catalog.skillCategories.map((c) => ({ value: c.id, label: c.name }))}
-            />
-          </Field>
-          <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
-            Add skill
-          </SubmitButton>
-        </form>
-      </Panel>
-      ) : null}
-
     </main>
   )
 }

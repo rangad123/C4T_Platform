@@ -305,11 +305,7 @@ export default async function NewUserPage({
             <Field label="Phone" htmlFor="phone" hint="Include the country dialling code.">
               <Input id="phone" name="phone" type="tel" maxLength={32} autoComplete="off" />
             </Field>
-            <Field
-              label="Country"
-              htmlFor="countryCode"
-              hint="Two-letter code, for example IN."
-            >
+            <Field label="Country" htmlFor="countryCode" hint="Two-letter code, for example IN.">
               <Input
                 id="countryCode"
                 name="countryCode"

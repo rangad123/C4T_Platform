@@ -82,14 +82,22 @@ export default async function SkillsAssetPage({
   const showAll = params.all === 'true'
   const sort = params.sort === 'name' ? 'name' : 'count'
   const order =
-    params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : sort === 'name' ? 'asc' : 'desc'
+    params.order === 'asc'
+      ? 'asc'
+      : params.order === 'desc'
+        ? 'desc'
+        : sort === 'name'
+          ? 'asc'
+          : 'desc'
 
   const catalog = await serverFetchOrNull<Catalog>(showAll ? 'catalog?all=true' : 'catalog')
 
   if (!catalog) {
     return (
       <>
-        <Topbar crumbs={[{ label: 'Assets', href: '/app/admin/assets/devices' }, { label: 'Skills' }]} />
+        <Topbar
+          crumbs={[{ label: 'Assets', href: '/app/admin/assets/devices' }, { label: 'Skills' }]}
+        />
         <main id="main" style={{ padding: 'var(--space-9)' }}>
           <EmptyState
             icon="alert-triangle"
@@ -168,10 +176,17 @@ export default async function SkillsAssetPage({
 
   return (
     <>
-      <Topbar crumbs={[{ label: 'Assets', href: '/app/admin/assets/devices' }, { label: 'Skills' }]} />
+      <Topbar
+        crumbs={[{ label: 'Assets', href: '/app/admin/assets/devices' }, { label: 'Skills' }]}
+      />
       <main
         id="main"
-        style={{ padding: 'var(--space-9)', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+        style={{
+          padding: 'var(--space-9)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-6)',
+        }}
       >
         <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
@@ -186,7 +201,11 @@ export default async function SkillsAssetPage({
             cross-links what testers have already chosen from there.
           </p>
           <div style={{ marginTop: 'var(--space-2)' }}>
-            <Button href={hrefWith(params, { all: showAll ? undefined : 'true' })} variant="secondary" size="sm">
+            <Button
+              href={hrefWith(params, { all: showAll ? undefined : 'true' })}
+              variant="secondary"
+              size="sm"
+            >
               {showAll ? 'Hide retired skills' : 'Show retired skills'}
             </Button>
           </div>
@@ -196,7 +215,12 @@ export default async function SkillsAssetPage({
 
         <LiveGetForm
           action={BASE}
-          style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
         >
           {showAll ? <input type="hidden" name="all" value="true" /> : null}
           <Field label="Category" htmlFor="category">
@@ -226,7 +250,10 @@ export default async function SkillsAssetPage({
           </Field>
           <LiveFormStatus />
           {category ? (
-            <Button href={hrefWith({ sort: params.sort, order: params.order, all: params.all }, {})} variant="ghost">
+            <Button
+              href={hrefWith({ sort: params.sort, order: params.order, all: params.all }, {})}
+              variant="ghost"
+            >
               Clear
             </Button>
           ) : null}

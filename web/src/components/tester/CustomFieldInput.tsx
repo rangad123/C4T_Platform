@@ -113,7 +113,13 @@ export function CustomFieldInput({ field }: CustomFieldInputProps) {
   }
 
   const inputType =
-    field.type === 'NUMBER' ? 'number' : field.type === 'DATE' ? 'date' : field.type === 'URL' ? 'url' : 'text'
+    field.type === 'NUMBER'
+      ? 'number'
+      : field.type === 'DATE'
+        ? 'date'
+        : field.type === 'URL'
+          ? 'url'
+          : 'text'
 
   return (
     <Field

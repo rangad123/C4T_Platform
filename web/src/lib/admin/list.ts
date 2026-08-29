@@ -16,9 +16,7 @@ import { ApiError, type PageMeta } from '@/lib/api/types'
  * function.
  */
 
-export type ListResult<Row> =
-  | { items: Row[]; meta: PageMeta }
-  | { error: 'forbidden' | 'unknown' }
+export type ListResult<Row> = { items: Row[]; meta: PageMeta } | { error: 'forbidden' | 'unknown' }
 
 export interface LoadListOptions {
   /** 1-based page number, already clamped by the caller. */
@@ -39,15 +37,14 @@ export async function loadList<Row>(
     })
     return {
       items: response.data,
-      meta:
-        response.meta ?? {
-          page,
-          limit,
-          total: response.data.length,
-          totalPages: 1,
-          hasNext: false,
-          hasPrev: false,
-        },
+      meta: response.meta ?? {
+        page,
+        limit,
+        total: response.data.length,
+        totalPages: 1,
+        hasNext: false,
+        hasPrev: false,
+      },
     }
   } catch (err) {
     if (err instanceof ApiError && err.status === 403) return { error: 'forbidden' }

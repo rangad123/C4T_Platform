@@ -51,20 +51,19 @@ export default async function TemplatesPage({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
       <header>
-        <p
-          className="c4t-eyebrow"
-          style={{ color: 'var(--text-muted)', margin: 0 }}
-        >
+        <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
           Operations
         </p>
         <h1 className="c4t-display-md" style={{ margin: 'var(--space-2) 0 0' }}>
           Message templates
         </h1>
-        <p style={{ margin: 'var(--space-3) 0 0', color: 'var(--text-secondary)', maxWidth: '75ch' }}>
+        <p
+          style={{ margin: 'var(--space-3) 0 0', color: 'var(--text-secondary)', maxWidth: '75ch' }}
+        >
           Reusable subject and body pairs. Once created, a template shows up as an &ldquo;Insert a
-          template&rdquo; option on both the announcement composer and the tester-broadcast
-          composer — picking one fills in the message; it does not lock the fields, so the sender
-          can still edit before sending.
+          template&rdquo; option on both the announcement composer and the tester-broadcast composer
+          — picking one fills in the message; it does not lock the fields, so the sender can still
+          edit before sending.
         </p>
       </header>
 
@@ -90,10 +89,25 @@ export default async function TemplatesPage({
           action={createTemplateAction}
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
         >
-          <Field label="Name" htmlFor="name" required hint="Shown in the template picker — keep it short and specific.">
-            <Input id="name" name="name" required maxLength={120} placeholder="Profile Update Request" />
+          <Field
+            label="Name"
+            htmlFor="name"
+            required
+            hint="Shown in the template picker — keep it short and specific."
+          >
+            <Input
+              id="name"
+              name="name"
+              required
+              maxLength={120}
+              placeholder="Profile Update Request"
+            />
           </Field>
-          <Field label="Subject" htmlFor="subject" hint="Optional. Only announcements use a subject line as such — broadcasts use it too, if present.">
+          <Field
+            label="Subject"
+            htmlFor="subject"
+            hint="Optional. Only announcements use a subject line as such — broadcasts use it too, if present."
+          >
             <Input id="subject" name="subject" maxLength={200} />
           </Field>
           <Field label="Body" htmlFor="body" required>
@@ -107,7 +121,10 @@ export default async function TemplatesPage({
         </TrackedForm>
       </Panel>
 
-      <Panel title="Existing templates" description={templates ? `${templates.length} saved.` : undefined}>
+      <Panel
+        title="Existing templates"
+        description={templates ? `${templates.length} saved.` : undefined}
+      >
         {!templates || templates.length === 0 ? (
           <EmptyState
             icon="file-text"

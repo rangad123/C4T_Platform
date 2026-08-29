@@ -169,7 +169,14 @@ export default async function OrganisationsPage({
       emptyTitle="No organisations yet"
       emptyDescription="An organisation appears here when a lead is converted, or when you create one directly."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}
@@ -186,12 +193,17 @@ export default async function OrganisationsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Button href={buildExportHref({ status, search, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
-              Export CSV
-            </Button>
+          <Button
+            href={buildExportHref({ status, search, sort, order })}
+            prefetch={false}
+            variant="secondary"
+            iconLeft="download"
+          >
+            Export CSV
+          </Button>
           <Button href="/app/admin/organisations/new" variant="primary" iconLeft="plus">
-              New organisation
-            </Button>
+            New organisation
+          </Button>
         </div>
       }
     />

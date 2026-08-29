@@ -1,4 +1,11 @@
-import { type Prisma, BugStatus, TesterStatus, Role, UserStatus, AssignmentStatus } from '@prisma/client'
+import {
+  type Prisma,
+  BugStatus,
+  TesterStatus,
+  Role,
+  UserStatus,
+  AssignmentStatus,
+} from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
@@ -461,9 +468,7 @@ export async function addDevice(
   input: Omit<Prisma.TesterDeviceUncheckedCreateInput, 'id' | 'testerProfileId' | 'createdAt'>,
 ) {
   const profile = await requireOwnProfile(userId)
-  const mirror = await resolveDeviceCatalogMirror(
-    input as Prisma.TesterDeviceUncheckedCreateInput,
-  )
+  const mirror = await resolveDeviceCatalogMirror(input as Prisma.TesterDeviceUncheckedCreateInput)
 
   return prisma.$transaction(async (tx) => {
     // Only one device can be primary, so clear the flag before setting a new one.
@@ -754,7 +759,11 @@ export async function discoverTesters(
           OR: [
             { headline: { contains: query.search, mode: 'insensitive' } },
             { profession: { contains: query.search, mode: 'insensitive' } },
-            { skills: { some: { skill: { name: { contains: query.search, mode: 'insensitive' } } } } },
+            {
+              skills: {
+                some: { skill: { name: { contains: query.search, mode: 'insensitive' } } },
+              },
+            },
           ],
         }
       : {}),

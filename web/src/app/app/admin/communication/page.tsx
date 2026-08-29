@@ -93,9 +93,10 @@ export default async function BroadcastPage({
     params.sent !== undefined && params.of !== undefined
       ? { sent: Number(params.sent), of: Number(params.of) }
       : null
-  const templates = await serverFetchOrNull<
-    readonly { id: string; name: string; subject: string | null; body: string }[]
-  >('communication/templates')
+  const templates =
+    await serverFetchOrNull<
+      readonly { id: string; name: string; subject: string | null; body: string }[]
+    >('communication/templates')
 
   const result = await loadList<TesterRow>('testers', {
     page,
@@ -191,7 +192,12 @@ export default async function BroadcastPage({
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
         >
           <Field label="Subject" htmlFor="subject" hint="Optional.">
-            <Input id="subject" name="subject" maxLength={200} placeholder="Update on this week's builds" />
+            <Input
+              id="subject"
+              name="subject"
+              maxLength={200}
+              placeholder="Update on this week's builds"
+            />
           </Field>
           <Field label="Message" htmlFor="message" required>
             <Textarea

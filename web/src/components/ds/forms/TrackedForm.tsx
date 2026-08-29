@@ -43,11 +43,25 @@ export interface TrackedFormProps {
  * runtime exactly as before — the only added behaviour is the beforeunload
  * warning.
  */
-export function TrackedForm({ action, children, style, onSubmit, id, className }: TrackedFormProps) {
+export function TrackedForm({
+  action,
+  children,
+  style,
+  onSubmit,
+  id,
+  className,
+}: TrackedFormProps) {
   const formRef = useRef<HTMLFormElement>(null)
 
   return (
-    <form ref={formRef} action={action} style={style} onSubmit={onSubmit} id={id} className={className}>
+    <form
+      ref={formRef}
+      action={action}
+      style={style}
+      onSubmit={onSubmit}
+      id={id}
+      className={className}
+    >
       {children}
       <UnsavedChangesWarning formRef={formRef} />
     </form>

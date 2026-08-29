@@ -10,7 +10,15 @@ import type { TableColumn } from '@/components/ds/admin/Table'
 const PAGE_SIZE = 25
 const BASE = '/app/customer/projects'
 const ROOT = { label: 'Customer', href: '/app/customer' }
-const STATUSES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED'] as const
+const STATUSES = [
+  'DRAFT',
+  'SUBMITTED',
+  'APPROVED',
+  'IN_PROGRESS',
+  'PAUSED',
+  'COMPLETED',
+  'CANCELLED',
+] as const
 
 interface ProjectRow {
   id: string
@@ -37,7 +45,9 @@ export default async function CustomerProjectsPage({
   await requireRole(['CUSTOMER'])
 
   const params = await searchParams
-  const status = STATUSES.includes(params.status as (typeof STATUSES)[number]) ? params.status : undefined
+  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
+    ? params.status
+    : undefined
   const search = searchTerm(params.search)
   const page = parsePage(params.page)
 
@@ -48,7 +58,12 @@ export default async function CustomerProjectsPage({
   })
 
   const columns: readonly TableColumn<ProjectRow>[] = [
-    { key: 'title', header: 'Project', render: (row) => row.title, renderSecondary: (row) => row.reference },
+    {
+      key: 'title',
+      header: 'Project',
+      render: (row) => row.title,
+      renderSecondary: (row) => row.reference,
+    },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     { key: 'priority', header: 'Priority', render: (row) => titleCase(row.priority) },
     { key: 'bugs', header: 'Bugs', align: 'right', render: (row) => row._count.bugs },
@@ -79,12 +94,27 @@ export default async function CustomerProjectsPage({
       emptyTitle="No projects yet"
       emptyDescription="Submit your first project to get testers looking at it."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}
               search={{ value: search, placeholder: 'Title or reference' }}
-              selects={[{ name: 'status', label: 'Status', options: STATUSES, value: status, allLabel: 'All statuses' }]}
+              selects={[
+                {
+                  name: 'status',
+                  label: 'Status',
+                  options: STATUSES,
+                  value: status,
+                  allLabel: 'All statuses',
+                },
+              ]}
             />
           </div>
           <Button href="/app/customer/projects/new" variant="primary" iconLeft="plus">

@@ -43,7 +43,12 @@ export async function GET(
     // Deliberately terse: a tester who cannot read this file should not learn
     // whether it exists, so 403 and 404 read the same from here.
     return NextResponse.json(
-      { error: status === 404 || status === 403 ? 'That file is not available.' : 'Could not fetch that file.' },
+      {
+        error:
+          status === 404 || status === 403
+            ? 'That file is not available.'
+            : 'Could not fetch that file.',
+      },
       { status: status === 404 || status === 403 ? 404 : 502 },
     )
   }

@@ -90,7 +90,10 @@ export async function POST(request: Request): Promise<Response> {
     cache: 'no-store',
   })
   if (!presignRes.ok) {
-    return NextResponse.json({ error: 'Could not start the upload.' }, { status: presignRes.status })
+    return NextResponse.json(
+      { error: 'Could not start the upload.' },
+      { status: presignRes.status },
+    )
   }
   const presign = (await presignRes.json()) as {
     data: { fileId: string; uploadUrl: string; requiredHeaders: Record<string, string> }

@@ -52,7 +52,9 @@ export default async function LoginForm({
 }: {
   searchParams?: Promise<{ next?: string; error?: string; email?: string; notice?: string }>
 } = {}) {
-  const params = searchParams ? await searchParams : { next: undefined, error: undefined, email: undefined, notice: undefined }
+  const params = searchParams
+    ? await searchParams
+    : { next: undefined, error: undefined, email: undefined, notice: undefined }
   const message = errorMessage(params.error)
   const preservedEmail = params.email ?? ''
 
@@ -147,7 +149,13 @@ export default async function LoginForm({
           />
         </Field>
 
-        <SubmitButton variant="primary" size="lg" fullWidth iconRight="arrow-right" pendingLabel="Signing in…">
+        <SubmitButton
+          variant="primary"
+          size="lg"
+          fullWidth
+          iconRight="arrow-right"
+          pendingLabel="Signing in…"
+        >
           Sign in
         </SubmitButton>
       </form>

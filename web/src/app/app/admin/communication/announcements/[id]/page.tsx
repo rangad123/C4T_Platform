@@ -37,9 +37,7 @@ export default async function AnnouncementDetailPage({
 
   let announcement: AnnouncementDetail
   try {
-    announcement = await serverFetch<AnnouncementDetail>(
-      `communication/announcements/${id}`,
-    )
+    announcement = await serverFetch<AnnouncementDetail>(`communication/announcements/${id}`)
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound()
     throw err
@@ -65,10 +63,7 @@ export default async function AnnouncementDetailPage({
         </Badge>
       }
     >
-      <Panel
-        title="Body"
-        description="The text as it was sent to the audience."
-      >
+      <Panel title="Body" description="The text as it was sent to the audience.">
         <div
           style={{
             whiteSpace: 'pre-wrap',

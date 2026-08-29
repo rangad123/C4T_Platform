@@ -101,7 +101,13 @@ export default async function ResetPasswordPage({
               />
             </Field>
 
-            <SubmitButton variant="primary" size="lg" fullWidth iconRight="arrow-right" pendingLabel="Updating…">
+            <SubmitButton
+              variant="primary"
+              size="lg"
+              fullWidth
+              iconRight="arrow-right"
+              pendingLabel="Updating…"
+            >
               Update password
             </SubmitButton>
           </form>

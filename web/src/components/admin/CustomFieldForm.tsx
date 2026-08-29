@@ -118,9 +118,7 @@ export function CustomFieldForm({ action, projectId, buildId, section }: CustomF
                 maxLength={120}
                 placeholder={index === 0 ? 'Production' : 'Another option'}
                 onChange={(event) =>
-                  setOptions((prev) =>
-                    prev.map((v, i) => (i === index ? event.target.value : v)),
-                  )
+                  setOptions((prev) => prev.map((v, i) => (i === index ? event.target.value : v)))
                 }
               />
               {/* The last remaining row is not removable — a choice field with

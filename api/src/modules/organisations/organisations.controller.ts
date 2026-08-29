@@ -86,7 +86,10 @@ export async function exportCsv(req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListOrganisationsQuery>(res)
   const csv = await service.exportOrganisationsCSV(req.user!, query)
   res.setHeader('content-type', 'text/csv; charset=utf-8')
-  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('organisations')}"`)
+  res.setHeader(
+    'content-disposition',
+    `attachment; filename="${timestampedFilename('organisations')}"`,
+  )
   res.send(csv)
 }
 

@@ -115,8 +115,7 @@ export default async function CustomerReportsPage({
   const projects = 'items' in projectsResult ? projectsResult.items : []
   /** A failed read is not the same as an empty account — say which. */
   const projectsFailed = 'error' in projectsResult
-  const projectsTruncated =
-    'meta' in projectsResult && projectsResult.meta.total > projects.length
+  const projectsTruncated = 'meta' in projectsResult && projectsResult.meta.total > projects.length
 
   const projectId = params.projectId ?? ''
   const projectOptions = [
@@ -141,7 +140,9 @@ export default async function CustomerReportsPage({
       eyebrow="Insights"
       title="Reports"
       subtitle="Bug distributions for a project, a run of builds, or a period, with a CSV of the underlying reports."
-      tabs={<SectionTabs basePath={BASE} tabs={SECTIONS} active={section} preserve={{ projectId }} />}
+      tabs={
+        <SectionTabs basePath={BASE} tabs={SECTIONS} active={section} preserve={{ projectId }} />
+      }
     >
       {projectsFailed ? (
         <EmptyState
@@ -158,7 +159,13 @@ export default async function CustomerReportsPage({
       ) : (
         <>
           {projectsTruncated ? (
-            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-muted)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
               Showing your {projects.length} most recent projects. Older ones are not in this list
               yet.
             </p>
@@ -326,13 +333,7 @@ async function BuildRangeReport({
   )
 }
 
-async function DateRangeReport({
-  startDate,
-  endDate,
-}: {
-  startDate: string
-  endDate: string
-}) {
+async function DateRangeReport({ startDate, endDate }: { startDate: string; endDate: string }) {
   const ready = Boolean(startDate && endDate)
   /**
    * The API validates the ordering too, but catching it here means the user
@@ -363,7 +364,9 @@ async function DateRangeReport({
 
       <div style={{ marginTop: 'var(--space-5)' }}>
         {!ready ? (
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>Choose both ends of the period.</p>
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+            Choose both ends of the period.
+          </p>
         ) : inverted ? (
           <p role="alert" style={{ margin: 0, color: 'var(--status-error-fg)' }}>
             The start date is after the end date.

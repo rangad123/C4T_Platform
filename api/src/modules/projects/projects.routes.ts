@@ -182,11 +182,7 @@ projectsRouter.post(
 
 projectsRouter.get('/:id/builds', validate({ params: projectIdParam }), controller.listBuilds)
 
-projectsRouter.get(
-  '/:id/builds/:buildId',
-  validate({ params: buildParam }),
-  controller.getBuild,
-)
+projectsRouter.get('/:id/builds/:buildId', validate({ params: buildParam }), controller.getBuild)
 
 projectsRouter.post(
   '/:id/builds',

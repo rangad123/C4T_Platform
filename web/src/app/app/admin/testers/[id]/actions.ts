@@ -96,8 +96,7 @@ export interface RevealedPaymentDetails {
 }
 
 export type RevealPaymentAccountResult =
-  | { ok: true; details: RevealedPaymentDetails }
-  | { ok: false; message: string }
+  { ok: true; details: RevealedPaymentDetails } | { ok: false; message: string }
 
 /**
  * Called directly from `RevealPaymentDetails` (a client component) rather

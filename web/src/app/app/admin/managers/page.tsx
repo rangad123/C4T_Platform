@@ -24,11 +24,7 @@ const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
  * catch-all Route Handler at `/app/admin/export/[...path]` so the export
  * stays same-origin (the route streams from the API on behalf of the browser).
  */
-function buildExportHref(filters: {
-  search?: string
-  sort?: string
-  order?: string
-}): string {
+function buildExportHref(filters: { search?: string; sort?: string; order?: string }): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(filters)) {
     if (value) params.set(key, value)
@@ -120,7 +116,14 @@ export default async function ManagersPage({
       emptyTitle="No managers yet"
       emptyDescription="An admin or sub-admin appears here as soon as they exist. Promote someone from the Users page to add a manager."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}

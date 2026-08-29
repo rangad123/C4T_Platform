@@ -81,7 +81,9 @@ const buildSelect = {
   },
   createdAt: true,
   updatedAt: true,
-  _count: { select: { assignments: true, bugs: true, materials: true, features: true, testCases: true } },
+  _count: {
+    select: { assignments: true, bugs: true, materials: true, features: true, testCases: true },
+  },
 } satisfies Prisma.BuildSelect
 
 /**
@@ -97,7 +99,10 @@ const buildSelect = {
  * Exported for `bugs.service.ts`'s `createBug` — one build-resolution rule,
  * not two.
  */
-export async function resolveBuildId(projectId: string, requested?: string | null): Promise<string> {
+export async function resolveBuildId(
+  projectId: string,
+  requested?: string | null,
+): Promise<string> {
   if (requested) {
     const build = await prisma.build.findFirst({
       where: { id: requested, projectId, deletedAt: null },
@@ -1151,7 +1156,11 @@ export async function listBuilds(user: Express.AuthenticatedUser, projectId: str
   })
 }
 
-export async function getBuild(user: Express.AuthenticatedUser, projectId: string, buildId: string) {
+export async function getBuild(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  buildId: string,
+) {
   const resolved = await projectRelations(user, projectId)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
     throw new NotFoundError('Project')
@@ -1164,7 +1173,11 @@ export async function getBuild(user: Express.AuthenticatedUser, projectId: strin
   return { ...build, capabilities: { canUpdate: can(user, 'project.update', resolved.relations) } }
 }
 
-export async function createBuild(user: Express.AuthenticatedUser, projectId: string, name: string) {
+export async function createBuild(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  name: string,
+) {
   const resolved = await projectRelations(user, projectId)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
     throw new NotFoundError('Project')
@@ -1228,7 +1241,11 @@ export async function updateBuild(
  * history that belongs to the build that produced them, not a template to
  * hand the copy a head start on.
  */
-export async function copyBuild(user: Express.AuthenticatedUser, projectId: string, buildId: string) {
+export async function copyBuild(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+  buildId: string,
+) {
   const resolved = await projectRelations(user, projectId)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
     throw new NotFoundError('Project')

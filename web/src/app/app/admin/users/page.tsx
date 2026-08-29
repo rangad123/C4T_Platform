@@ -112,9 +112,7 @@ export default async function UsersPage({
       key: 'org',
       header: 'Organisation',
       render: (row) =>
-        row.orgMemberships.length > 0
-          ? (row.orgMemberships[0]?.organisation.name ?? '—')
-          : '—',
+        row.orgMemberships.length > 0 ? (row.orgMemberships[0]?.organisation.name ?? '—') : '—',
       renderSecondary: (row) =>
         row.orgMemberships.length > 1 ? `+${row.orgMemberships.length - 1} more` : undefined,
     },
@@ -149,7 +147,14 @@ export default async function UsersPage({
       emptyTitle="No users match"
       emptyDescription="Every account on the platform is listed here, including administrators."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}
@@ -167,9 +172,14 @@ export default async function UsersPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Button href={buildExportHref({ role, status, search, sort, order })} prefetch={false} variant="secondary" iconLeft="download">
-              Export CSV
-            </Button>
+          <Button
+            href={buildExportHref({ role, status, search, sort, order })}
+            prefetch={false}
+            variant="secondary"
+            iconLeft="download"
+          >
+            Export CSV
+          </Button>
         </div>
       }
     />

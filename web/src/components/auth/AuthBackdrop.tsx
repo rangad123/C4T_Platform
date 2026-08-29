@@ -119,4 +119,3 @@ export function AuthModal({ children }: { children: ReactNode }) {
     </dialog>
   )
 }
-

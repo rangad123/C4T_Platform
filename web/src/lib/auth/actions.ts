@@ -175,7 +175,7 @@ export async function forgotPasswordAction(formData: FormData): Promise<void> {
     redirect('/forgot-password?error=missing')
   }
 
-    try {
+  try {
     await fetch(new URL('/v1/auth/forgot-password', env.API_ORIGIN), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

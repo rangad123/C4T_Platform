@@ -38,8 +38,12 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
     summary: formTrimmed(formData, 'summary'),
     instructions: formTrimmed(formData, 'instructions'),
     platformTargets: parseList(formString(formData, 'platformTargets')),
-    targetCountries: parseList(formString(formData, 'targetCountries')).map((code) => code.toUpperCase()),
-    targetLanguages: parseList(formString(formData, 'targetLanguages')).map((code) => code.toLowerCase()),
+    targetCountries: parseList(formString(formData, 'targetCountries')).map((code) =>
+      code.toUpperCase(),
+    ),
+    targetLanguages: parseList(formString(formData, 'targetLanguages')).map((code) =>
+      code.toLowerCase(),
+    ),
     startDate: formTrimmed(formData, 'startDate') || null,
     endDate: formTrimmed(formData, 'endDate') || null,
   }
@@ -167,8 +171,12 @@ export async function createBuild(formData: FormData): Promise<void> {
       targetDevices: parseList(formString(formData, 'targetDevices')),
       targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
       targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
-      targetCountries: parseList(formString(formData, 'targetCountries')).map((c) => c.toUpperCase()),
-      targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) => l.toLowerCase()),
+      targetCountries: parseList(formString(formData, 'targetCountries')).map((c) =>
+        c.toUpperCase(),
+      ),
+      targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) =>
+        l.toLowerCase(),
+      ),
       startDate: formTrimmed(formData, 'startDate') || null,
       endDate: formTrimmed(formData, 'endDate') || null,
       maxTesters: maxTesters ? maxTesters : null,

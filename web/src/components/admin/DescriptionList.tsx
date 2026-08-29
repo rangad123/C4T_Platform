@@ -38,10 +38,7 @@ export function DescriptionList({ items }: { items: readonly DescriptionItem[] }
             ...(item.wide ? { gridColumn: '1 / -1' } : {}),
           }}
         >
-          <dt
-            className="c4t-eyebrow"
-            style={{ color: 'var(--text-muted)', margin: 0 }}
-          >
+          <dt className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
             {item.label}
           </dt>
           <dd

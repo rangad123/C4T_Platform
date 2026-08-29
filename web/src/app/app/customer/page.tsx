@@ -96,7 +96,10 @@ export default async function CustomerDashboardPage() {
         }}
       >
         <header>
-          <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-3)' }}>
+          <p
+            className="c4t-eyebrow"
+            style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-3)' }}
+          >
             Customer
           </p>
           <h1 className="c4t-display-md" style={{ marginBottom: 'var(--space-2)' }}>
@@ -115,14 +118,24 @@ export default async function CustomerDashboardPage() {
             gap: 'var(--space-5)',
           }}
         >
-          <KpiCard icon="briefcase" label="Projects" value={projectRows.length} href="/app/customer/projects" />
+          <KpiCard
+            icon="briefcase"
+            label="Projects"
+            value={projectRows.length}
+            href="/app/customer/projects"
+          />
           <KpiCard
             icon="clock"
             label="In progress"
             value={inProgressCount}
             href="/app/customer/projects?status=IN_PROGRESS"
           />
-          <KpiCard icon="clipboard-check" label="Open bugs" value={openBugCount} href="/app/customer/bugs" />
+          <KpiCard
+            icon="clipboard-check"
+            label="Open bugs"
+            value={openBugCount}
+            href="/app/customer/bugs"
+          />
           <KpiCard
             icon="alert-triangle"
             label="Critical bugs"

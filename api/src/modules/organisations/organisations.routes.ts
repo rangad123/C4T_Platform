@@ -42,7 +42,11 @@ organisationsRouter.get('/', validate({ query: listOrganisationsQuery }), contro
  * id with a dot in it. The query schema is the same shape as the list
  * endpoint, minus pagination.
  */
-organisationsRouter.get('/export.csv', validate({ query: listOrganisationsQuery }), controller.exportCsv)
+organisationsRouter.get(
+  '/export.csv',
+  validate({ query: listOrganisationsQuery }),
+  controller.exportCsv,
+)
 
 organisationsRouter.post(
   '/',

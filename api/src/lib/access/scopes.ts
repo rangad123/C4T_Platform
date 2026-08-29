@@ -82,7 +82,10 @@ export function bugScope(user: Express.AuthenticatedUser): Prisma.BugWhereInput 
           project: {
             testersCanSeeOtherBugs: true,
             assignments: {
-              some: { testerId: user.id, status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] } },
+              some: {
+                testerId: user.id,
+                status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] },
+              },
             },
           },
         },

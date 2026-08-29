@@ -67,14 +67,18 @@ async function main() {
   )
 
   const [featureRows, materialRows, assignmentRows, bugRows] = await Promise.all([
-    prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM features WHERE build_id IS NULL`,
+    prisma.$queryRaw<
+      { count: bigint }[]
+    >`SELECT COUNT(*) AS count FROM features WHERE build_id IS NULL`,
     prisma.$queryRaw<
       { count: bigint }[]
     >`SELECT COUNT(*) AS count FROM project_materials WHERE build_id IS NULL`,
     prisma.$queryRaw<
       { count: bigint }[]
     >`SELECT COUNT(*) AS count FROM project_assignments WHERE build_id IS NULL`,
-    prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM bugs WHERE build_id IS NULL`,
+    prisma.$queryRaw<
+      { count: bigint }[]
+    >`SELECT COUNT(*) AS count FROM bugs WHERE build_id IS NULL`,
   ])
   const nullFeatures = featureRows[0]?.count ?? 0n
   const nullMaterials = materialRows[0]?.count ?? 0n

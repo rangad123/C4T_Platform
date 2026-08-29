@@ -1,7 +1,13 @@
 import { Router } from 'express'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
-import { ThreadType, AnnouncementAudience, Role, AssignmentStatus, type Prisma } from '@prisma/client'
+import {
+  ThreadType,
+  AnnouncementAudience,
+  Role,
+  AssignmentStatus,
+  type Prisma,
+} from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission, isAdminSide } from '../../middleware/authorize.js'
@@ -368,9 +374,7 @@ communicationRouter.get(
          * "this project only", that is a separate parameter, not a change of
          * meaning here.
          */
-        ...(query.projectId
-          ? [{ OR: [{ projectId: query.projectId }, { projectId: null }] }]
-          : []),
+        ...(query.projectId ? [{ OR: [{ projectId: query.projectId }, { projectId: null }] }] : []),
         ...(query.buildId ? [{ OR: [{ buildId: query.buildId }, { buildId: null }] }] : []),
       ],
     }

@@ -49,7 +49,12 @@ async function assertProjectReportAccess(
  */
 async function testersByCountry(projectId: string): Promise<Record<string, number>> {
   const rows = await prisma.projectAssignment.findMany({
-    where: { projectId, status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED] } },
+    where: {
+      projectId,
+      status: {
+        in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED],
+      },
+    },
     select: { tester: { select: { testerProfile: { select: { countryCode: true } } } } },
   })
   const counts: Record<string, number> = {}
@@ -74,7 +79,9 @@ async function bugBreakdown(where: Prisma.BugWhereInput) {
     bySeverity: Object.fromEntries(bySeverity.map((r) => [r.severity, r._count])),
     byStatus: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
     byType: Object.fromEntries(byType.map((r) => [r.type as string, r._count])),
-    byReproducibility: Object.fromEntries(byReproducibility.map((r) => [r.reproducibility, r._count])),
+    byReproducibility: Object.fromEntries(
+      byReproducibility.map((r) => [r.reproducibility, r._count]),
+    ),
   }
 }
 
@@ -103,7 +110,12 @@ reportsRouter.get(
 
     const [testerCount, testCaseCount, bugs, byCountry] = await Promise.all([
       prisma.projectAssignment.count({
-        where: { projectId, status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED] } },
+        where: {
+          projectId,
+          status: {
+            in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED],
+          },
+        },
       }),
       prisma.testCase.count({ where: { build: { projectId }, deletedAt: null } }),
       bugBreakdown({ projectId, deletedAt: null }),
@@ -203,7 +215,8 @@ const dateRangeQuery = z
   })
 
 reportsRouter.get('/by-date', validate({ query: dateRangeQuery }), async (req, res) => {
-  if (!isAdminSide(req.user!)) throw new ForbiddenError('Only the platform side can report across every project')
+  if (!isAdminSide(req.user!))
+    throw new ForbiddenError('Only the platform side can report across every project')
   const { startDate, endDate } = validatedQuery<z.infer<typeof dateRangeQuery>>(res)
 
   const where: Prisma.BugWhereInput = {
@@ -212,7 +225,12 @@ reportsRouter.get('/by-date', validate({ query: dateRangeQuery }), async (req, r
   }
   const [bugs, byProject] = await Promise.all([
     bugBreakdown(where),
-    prisma.bug.groupBy({ by: ['projectId'], where, _count: true, orderBy: { _count: { projectId: 'desc' } } }),
+    prisma.bug.groupBy({
+      by: ['projectId'],
+      where,
+      _count: true,
+      orderBy: { _count: { projectId: 'desc' } },
+    }),
   ])
 
   const projects = await prisma.project.findMany({
@@ -234,25 +252,22 @@ reportsRouter.get('/by-date', validate({ query: dateRangeQuery }), async (req, r
   })
 })
 
-reportsRouter.get(
-  '/by-date/export.csv',
-  validate({ query: dateRangeQuery }),
-  async (req, res) => {
-    if (!isAdminSide(req.user!)) throw new ForbiddenError('Only the platform side can report across every project')
-    const { startDate, endDate } = validatedQuery<z.infer<typeof dateRangeQuery>>(res)
-    const csv = await bugsService.exportBugsCSV(req.user!, {
-      ...bugQueryDefaults,
-      startDate,
-      endDate,
-    })
-    res.setHeader('content-type', 'text/csv; charset=utf-8')
-    res.setHeader(
-      'content-disposition',
-      `attachment; filename="${timestampedFilename('report-by-date')}"`,
-    )
-    res.send(csv)
-  },
-)
+reportsRouter.get('/by-date/export.csv', validate({ query: dateRangeQuery }), async (req, res) => {
+  if (!isAdminSide(req.user!))
+    throw new ForbiddenError('Only the platform side can report across every project')
+  const { startDate, endDate } = validatedQuery<z.infer<typeof dateRangeQuery>>(res)
+  const csv = await bugsService.exportBugsCSV(req.user!, {
+    ...bugQueryDefaults,
+    startDate,
+    endDate,
+  })
+  res.setHeader('content-type', 'text/csv; charset=utf-8')
+  res.setHeader(
+    'content-disposition',
+    `attachment; filename="${timestampedFilename('report-by-date')}"`,
+  )
+  res.send(csv)
+})
 
 // ─── By build range ──────────────────────────────────────────────────────────
 
@@ -292,8 +307,14 @@ async function resolveBuildRange(
 }
 
 reportsRouter.get('/by-build-range', validate({ query: buildRangeQuery }), async (req, res) => {
-  const { projectId, startBuildId, endBuildId } = validatedQuery<z.infer<typeof buildRangeQuery>>(res)
-  const { buildIds, builds } = await resolveBuildRange(req.user!, projectId, startBuildId, endBuildId)
+  const { projectId, startBuildId, endBuildId } =
+    validatedQuery<z.infer<typeof buildRangeQuery>>(res)
+  const { buildIds, builds } = await resolveBuildRange(
+    req.user!,
+    projectId,
+    startBuildId,
+    endBuildId,
+  )
 
   const bugs = await bugBreakdown({ buildId: { in: buildIds }, deletedAt: null })
   res.json({ data: { projectId, builds, bugs } })
@@ -303,7 +324,8 @@ reportsRouter.get(
   '/by-build-range/export.csv',
   validate({ query: buildRangeQuery }),
   async (req, res) => {
-    const { projectId, startBuildId, endBuildId } = validatedQuery<z.infer<typeof buildRangeQuery>>(res)
+    const { projectId, startBuildId, endBuildId } =
+      validatedQuery<z.infer<typeof buildRangeQuery>>(res)
     const { buildIds } = await resolveBuildRange(req.user!, projectId, startBuildId, endBuildId)
 
     const csv = await bugsService.exportBugsCSV(req.user!, {

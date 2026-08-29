@@ -252,7 +252,12 @@ export async function seedWorld(): Promise<World> {
     ],
   })
   await prisma.projectMaterial.create({
-    data: { projectId: projectA.id, buildId: buildA, title: 'Build link', url: 'https://example.com/build' },
+    data: {
+      projectId: projectA.id,
+      buildId: buildA,
+      title: 'Build link',
+      url: 'https://example.com/build',
+    },
   })
 
   const projectB = await prisma.project.create({

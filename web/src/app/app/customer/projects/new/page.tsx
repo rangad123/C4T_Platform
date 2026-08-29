@@ -91,12 +91,21 @@ const TEST_TYPES = [
 const ERRORS: Record<string, NoticeCopy> = {
   title: { tone: 'error', message: 'Give the test a title of at least three characters.' },
   build: { tone: 'error', message: 'Enter a build version.' },
-  url: { tone: 'error', message: 'Enter the full link to your app, starting with http:// or https://.' },
+  url: {
+    tone: 'error',
+    message: 'Enter the full link to your app, starting with http:// or https://.',
+  },
   participants: { tone: 'error', message: 'Enter how many testers you want, as a whole number.' },
   dates: { tone: 'error', message: 'Choose both a start and an end date.' },
   range: { tone: 'error', message: 'The test cannot end before it starts.' },
-  instructions: { tone: 'error', message: 'Describe the testing to be done — testers work from this.' },
-  invalid: { tone: 'error', message: 'Some values were not accepted. Check the fields on this step.' },
+  instructions: {
+    tone: 'error',
+    message: 'Describe the testing to be done — testers work from this.',
+  },
+  invalid: {
+    tone: 'error',
+    message: 'Some values were not accepted. Check the fields on this step.',
+  },
   failed: { tone: 'error', message: 'The project could not be created. Try again in a moment.' },
 }
 
@@ -167,10 +176,7 @@ function CarryFilters({ params }: { params: WizardParams }) {
     <>
       <CarryAll name="targetCountries" values={readMulti(params.targetCountries)} />
       <CarryAll name="targetLanguages" values={readMulti(params.targetLanguages)} />
-      <CarryAll
-        name="targetOperatingSystems"
-        values={readMulti(params.targetOperatingSystems)}
-      />
+      <CarryAll name="targetOperatingSystems" values={readMulti(params.targetOperatingSystems)} />
       <CarryAll name="targetBrowsers" values={readMulti(params.targetBrowsers)} />
     </>
   )
@@ -211,9 +217,7 @@ export default async function NewProjectWizardPage({
   await requireRole(['CUSTOMER'])
   const params = await searchParams
 
-  const step: Step = STEPS.some((s) => s.value === params.step)
-    ? (params.step as Step)
-    : 'type'
+  const step: Step = STEPS.some((s) => s.value === params.step) ? (params.step as Step) : 'type'
   /**
    * `findIndex` cannot miss — `step` is only ever one of `STEPS` — but it is
    * typed as possibly -1, so the current step is resolved by lookup instead
@@ -227,8 +231,7 @@ export default async function NewProjectWizardPage({
    * client consumes what an admin configured rather than a second hardcoded
    * list. Only the tester-requirements step needs it.
    */
-  const catalog =
-    step === 'filters' ? await serverFetchOrNull<CatalogShape>('catalog') : null
+  const catalog = step === 'filters' ? await serverFetchOrNull<CatalogShape>('catalog') : null
 
   const osOptions = (catalog?.operatingSystems ?? []).map((os) => ({
     value: os.name,
@@ -274,15 +277,12 @@ export default async function NewProjectWizardPage({
                   padding: '0 var(--space-4)',
                   borderRadius: 'var(--radius-full)',
                   fontSize: 'var(--type-body-sm-size)',
-                  fontWeight:
-                    state === 'current' ? 'var(--fw-semibold)' : 'var(--fw-medium)',
-                  background:
-                    state === 'current' ? 'var(--surface-sunken)' : 'transparent',
+                  fontWeight: state === 'current' ? 'var(--fw-semibold)' : 'var(--fw-medium)',
+                  background: state === 'current' ? 'var(--surface-sunken)' : 'transparent',
                   border: `1px solid ${
                     state === 'todo' ? 'var(--border-subtle)' : 'var(--border-default)'
                   }`,
-                  color:
-                    state === 'todo' ? 'var(--text-muted)' : 'var(--text-primary)',
+                  color: state === 'todo' ? 'var(--text-muted)' : 'var(--text-primary)',
                 }}
               >
                 {i + 1}. {s.label}
@@ -305,7 +305,10 @@ export default async function NewProjectWizardPage({
 
       {/* ── Step 1: what is under test ──────────────────────────────────── */}
       {step === 'type' ? (
-        <Panel title="What do you want to test?" description="This sets the kind of test and who can take it.">
+        <Panel
+          title="What do you want to test?"
+          description="This sets the kind of test and who can take it."
+        >
           <div style={FIELD_GRID}>
             {SUBJECTS.map((subject) => (
               <form key={subject.value} method="get" action={BASE}>
@@ -383,7 +386,10 @@ export default async function NewProjectWizardPage({
           <Carry name="instructions" value={params.instructions} />
           <Carry name="specialRequirements" value={params.specialRequirements} />
 
-          <Panel title="General settings" description="The test, the build it covers, and when it runs.">
+          <Panel
+            title="General settings"
+            description="The test, the build it covers, and when it runs."
+          >
             <div style={FORM_STYLE}>
               <div style={FIELD_GRID}>
                 <Field label="Test title" htmlFor="title" required>
@@ -500,7 +506,10 @@ export default async function NewProjectWizardPage({
           <Carry name="logoFileName" value={params.logoFileName} />
           <Carry name="testDocumentFileName" value={params.testDocumentFileName} />
 
-          <Panel title="Scope" description="What the testing covers, and anything testers must know first.">
+          <Panel
+            title="Scope"
+            description="What the testing covers, and anything testers must know first."
+          >
             <div style={FORM_STYLE}>
               <Field label="Type of testing" htmlFor="testType">
                 <Select

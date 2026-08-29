@@ -30,8 +30,12 @@ export async function createProjectAction(formData: FormData): Promise<void> {
     instructions: formTrimmed(formData, 'instructions') || undefined,
     priority: formTrimmed(formData, 'priority') || 'NORMAL',
     platformTargets: parseCommaList(formString(formData, 'platformTargets')),
-    targetCountries: parseCommaList(formString(formData, 'targetCountries')).map((c) => c.toUpperCase()),
-    targetLanguages: parseCommaList(formString(formData, 'targetLanguages')).map((l) => l.toLowerCase()),
+    targetCountries: parseCommaList(formString(formData, 'targetCountries')).map((c) =>
+      c.toUpperCase(),
+    ),
+    targetLanguages: parseCommaList(formString(formData, 'targetLanguages')).map((l) =>
+      l.toLowerCase(),
+    ),
     ...(startDate ? { startDate } : {}),
     ...(endDate ? { endDate } : {}),
     ...(maxTesters ? { maxTesters } : {}),

@@ -39,10 +39,7 @@ export default async function NewOrganisationPage({
 
   return (
     <DetailShell
-      crumbs={[
-        { label: 'Organisations', href: '/app/admin/organisations' },
-        { label: 'New' },
-      ]}
+      crumbs={[{ label: 'Organisations', href: '/app/admin/organisations' }, { label: 'New' }]}
       eyebrow="Accounts"
       title="New organisation"
       subtitle="A customer account. The owner, if set, becomes the first member and can manage the rest of the team."
@@ -66,13 +63,18 @@ export default async function NewOrganisationPage({
             }}
           >
             {params.error === 'duplicate'
-              ? "An organisation already uses that email or name. Pick another and try again."
+              ? 'An organisation already uses that email or name. Pick another and try again.'
               : "Couldn't create the organisation. Check the form and try again."}
           </div>
         ) : null}
         <TrackedForm action={createOrganisationAction} style={formStyle}>
           <div style={fieldGrid}>
-            <Field label="Name" htmlFor="name" required hint="The legal or trading name shown to the team.">
+            <Field
+              label="Name"
+              htmlFor="name"
+              required
+              hint="The legal or trading name shown to the team."
+            >
               <Input id="name" name="name" required defaultValue={params.name ?? ''} />
             </Field>
             <Field
@@ -85,7 +87,11 @@ export default async function NewOrganisationPage({
           </div>
 
           <div style={fieldGrid}>
-            <Field label="Industry" htmlFor="industry" hint="Free text — banking, retail, healthcare, etc.">
+            <Field
+              label="Industry"
+              htmlFor="industry"
+              hint="Free text — banking, retail, healthcare, etc."
+            >
               <Input id="industry" name="industry" />
             </Field>
             <Field label="Website" htmlFor="website" hint="Full URL, including https://">

@@ -191,14 +191,18 @@ export default async function CustomerCommunicationPage({
                         fontSize: 'var(--type-body-sm-size)',
                       }}
                     >
-                      <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                      <span
+                        style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}
+                      >
                         {message.sender ? personName(message.sender) : 'Crowd4Test'}
                       </span>
                       <span style={{ color: 'var(--text-muted)' }}>
                         {formatDateTime(message.createdAt)}
                       </span>
                     </div>
-                    <p style={{ margin: 0, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
+                    <p
+                      style={{ margin: 0, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}
+                    >
                       {message.body}
                     </p>
                   </li>
@@ -206,7 +210,13 @@ export default async function CustomerCommunicationPage({
               </ul>
 
               {openThread.isClosed ? (
-                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-muted)',
+                    fontSize: 'var(--type-body-sm-size)',
+                  }}
+                >
                   This conversation has been closed. Start a new one if you need to follow up.
                 </p>
               ) : (
@@ -267,10 +277,17 @@ export default async function CustomerCommunicationPage({
                       }}
                     >
                       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                        <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}>
+                        <span
+                          style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}
+                        >
                           {row.subject ?? titleCase(row.type)}
                         </span>
-                        <span style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
+                        <span
+                          style={{
+                            fontSize: 'var(--type-body-sm-size)',
+                            color: 'var(--text-secondary)',
+                          }}
+                        >
                           {row.project ? `${row.project.reference} · ` : ''}
                           {row._count.messages} message{row._count.messages === 1 ? '' : 's'}
                           {row.lastMessageAt ? ` · ${formatDateTime(row.lastMessageAt)}` : ''}
@@ -310,9 +327,18 @@ export default async function CustomerCommunicationPage({
                 <form
                   method="get"
                   action={BASE}
-                  style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'flex-end', flexWrap: 'wrap' }}
+                  style={{
+                    display: 'flex',
+                    gap: 'var(--space-4)',
+                    alignItems: 'flex-end',
+                    flexWrap: 'wrap',
+                  }}
                 >
-                  <Field label="About which project?" htmlFor="projectId" style={{ flex: '2 1 260px' }}>
+                  <Field
+                    label="About which project?"
+                    htmlFor="projectId"
+                    style={{ flex: '2 1 260px' }}
+                  >
                     <Select
                       id="projectId"
                       name="projectId"
@@ -347,7 +373,13 @@ export default async function CustomerCommunicationPage({
                         <input key={c.id} type="hidden" name="participantIds" value={c.id} />
                       ))}
 
-                      <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                      <p
+                        style={{
+                          margin: 0,
+                          color: 'var(--text-muted)',
+                          fontSize: 'var(--type-body-sm-size)',
+                        }}
+                      >
                         Goes to {contacts.map((c) => personName(c)).join(', ')}.
                       </p>
 

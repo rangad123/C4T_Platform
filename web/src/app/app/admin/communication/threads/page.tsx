@@ -164,10 +164,7 @@ export default async function CommunicationThreadsPage({
       eyebrow="Operations"
       title="Threads"
       description="Every conversation between customers, testers and the admin side — including threads you are not a participant in, because the admin side oversees all of them. Closed threads stay hidden until you show them."
-      crumbs={[
-        { label: 'Communication', href: '/app/admin/communication' },
-        { label: 'Threads' },
-      ]}
+      crumbs={[{ label: 'Communication', href: '/app/admin/communication' }, { label: 'Threads' }]}
       result={result}
       columns={columns}
       rowKey={(row) => row.id}

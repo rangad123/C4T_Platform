@@ -7,7 +7,14 @@ import { CountryFlag } from '@/components/admin/CountryFlag'
 import { Button } from '@/components/ds/core/Button'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { formatDate, formatRating, personName, searchTerm, hasFilter, titleCase } from '@/lib/admin/format'
+import {
+  formatDate,
+  formatRating,
+  personName,
+  searchTerm,
+  hasFilter,
+  titleCase,
+} from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
@@ -227,13 +234,24 @@ export default async function TestersPage({
               </span>
               <Link
                 href={pageHrefBuilder(BASE, { status, countryCode, search, sort, order })(1)}
-                style={{ color: 'var(--text-brand)', textDecoration: 'underline', textUnderlineOffset: 3 }}
+                style={{
+                  color: 'var(--text-brand)',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: 3,
+                }}
               >
                 Clear
               </Link>
             </div>
           ) : null}
-          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-end',
+              flexWrap: 'wrap',
+            }}
+          >
             <div style={{ flex: 1, minWidth: 280 }}>
               <ListFilters
                 action={BASE}
@@ -256,13 +274,24 @@ export default async function TestersPage({
                     maxLength: 2,
                   },
                 ]}
-                sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
+                sort={{
+                  name: 'sort',
+                  orderName: 'order',
+                  options: SORT_OPTIONS,
+                  value: sort,
+                  order,
+                }}
                 hidden={{ skills }}
               />
             </div>
-            <Button href={buildExportHref({ status, countryCode, search, sort, order, skills })} prefetch={false} variant="secondary" iconLeft="download">
-                Export CSV
-              </Button>
+            <Button
+              href={buildExportHref({ status, countryCode, search, sort, order, skills })}
+              prefetch={false}
+              variant="secondary"
+              iconLeft="download"
+            >
+              Export CSV
+            </Button>
           </div>
         </div>
       }

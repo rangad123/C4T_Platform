@@ -22,7 +22,14 @@ export const listBugsQuery = paginationQuery.extend({
   buildIds: z
     .string()
     .optional()
-    .transform((v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined)),
+    .transform((v) =>
+      v
+        ? v
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined,
+    ),
   status: z.nativeEnum(BugStatus).optional(),
   severity: z.nativeEnum(BugSeverity).optional(),
   type: z.nativeEnum(BugType).optional(),
@@ -86,71 +93,75 @@ function refineOccurrence<T extends { occurrence?: number; outOf?: number }>(
   }
 }
 
-export const createBugSchema = z.object({
-  projectId: z.string().cuid(),
-  /** Defaults to the project's default build when omitted. */
-  buildId: z.string().cuid().optional(),
-  title: z.string().trim().min(5, 'Give the bug a clear one-line title').max(200),
-  description: z.string().trim().min(10, 'Describe what is wrong').max(10_000),
-  /** The state the app was in before the steps begin. Optional. */
-  preCondition: z.string().trim().max(4000).optional(),
-  stepsToReproduce: z
-    .string()
-    .trim()
-    .min(5, 'Steps to reproduce are required — another person must be able to follow them')
-    .max(10_000),
-  expectedResult: z.string().trim().max(4000).optional(),
-  actualResult: z.string().trim().max(4000).optional(),
-  severity: z.nativeEnum(BugSeverity),
-  reproducibility: z.nativeEnum(BugReproducibility).default(BugReproducibility.ALWAYS),
-  ...occurrenceFields,
-  type: z.nativeEnum(BugType).optional(),
-  /** Must belong to the same project — checked in the service. */
-  featureId: z.string().cuid().optional(),
+export const createBugSchema = z
+  .object({
+    projectId: z.string().cuid(),
+    /** Defaults to the project's default build when omitted. */
+    buildId: z.string().cuid().optional(),
+    title: z.string().trim().min(5, 'Give the bug a clear one-line title').max(200),
+    description: z.string().trim().min(10, 'Describe what is wrong').max(10_000),
+    /** The state the app was in before the steps begin. Optional. */
+    preCondition: z.string().trim().max(4000).optional(),
+    stepsToReproduce: z
+      .string()
+      .trim()
+      .min(5, 'Steps to reproduce are required — another person must be able to follow them')
+      .max(10_000),
+    expectedResult: z.string().trim().max(4000).optional(),
+    actualResult: z.string().trim().max(4000).optional(),
+    severity: z.nativeEnum(BugSeverity),
+    reproducibility: z.nativeEnum(BugReproducibility).default(BugReproducibility.ALWAYS),
+    ...occurrenceFields,
+    type: z.nativeEnum(BugType).optional(),
+    /** Must belong to the same project — checked in the service. */
+    featureId: z.string().cuid().optional(),
 
-  /** A link to a recording hosted elsewhere, alongside any uploaded files. */
-  videoUrl: z.string().trim().url().max(2000).optional(),
+    /** A link to a recording hosted elsewhere, alongside any uploaded files. */
+    videoUrl: z.string().trim().url().max(2000).optional(),
 
-  deviceModel: z.string().trim().max(120).optional(),
-  osName: z.string().trim().max(60).optional(),
-  osVersion: z.string().trim().max(40).optional(),
-  browser: z.string().trim().max(80).optional(),
-  appVersion: z.string().trim().max(60).optional(),
-  networkType: z.string().trim().max(40).optional(),
+    deviceModel: z.string().trim().max(120).optional(),
+    osName: z.string().trim().max(60).optional(),
+    osVersion: z.string().trim().max(40).optional(),
+    browser: z.string().trim().max(80).optional(),
+    appVersion: z.string().trim().max(60).optional(),
+    networkType: z.string().trim().max(40).optional(),
 
-  /** Ids of already-uploaded files (see the uploads module). */
-  /**
-   * Answers to the build's own extra questions (§39). Validated against that
-   * build's field definitions in the service — this only bounds the shape.
-   */
-  customAnswers: z
-    .array(z.object({ fieldId: z.string().cuid(), value: z.string().max(4000) }))
-    .max(50)
-    .optional(),
-  attachmentFileIds: z.array(z.string().cuid()).max(20).default([]),
-}).superRefine(refineOccurrence)
+    /** Ids of already-uploaded files (see the uploads module). */
+    /**
+     * Answers to the build's own extra questions (§39). Validated against that
+     * build's field definitions in the service — this only bounds the shape.
+     */
+    customAnswers: z
+      .array(z.object({ fieldId: z.string().cuid(), value: z.string().max(4000) }))
+      .max(50)
+      .optional(),
+    attachmentFileIds: z.array(z.string().cuid()).max(20).default([]),
+  })
+  .superRefine(refineOccurrence)
 
 /** A reporter may correct their own report while it is still untriaged. */
-export const updateBugSchema = z.object({
-  title: z.string().trim().min(5).max(200).optional(),
-  description: z.string().trim().min(10).max(10_000).optional(),
-  preCondition: z.string().trim().max(4000).optional(),
-  stepsToReproduce: z.string().trim().min(5).max(10_000).optional(),
-  expectedResult: z.string().trim().max(4000).optional(),
-  actualResult: z.string().trim().max(4000).optional(),
-  severity: z.nativeEnum(BugSeverity).optional(),
-  reproducibility: z.nativeEnum(BugReproducibility).optional(),
-  ...occurrenceFields,
-  videoUrl: z.union([z.string().trim().url().max(2000), z.literal('')]).optional(),
-  type: z.nativeEnum(BugType).nullable().optional(),
-  featureId: z.string().cuid().nullable().optional(),
-  deviceModel: z.string().trim().max(120).optional(),
-  osName: z.string().trim().max(60).optional(),
-  osVersion: z.string().trim().max(40).optional(),
-  browser: z.string().trim().max(80).optional(),
-  appVersion: z.string().trim().max(60).optional(),
-  networkType: z.string().trim().max(40).optional(),
-}).superRefine(refineOccurrence)
+export const updateBugSchema = z
+  .object({
+    title: z.string().trim().min(5).max(200).optional(),
+    description: z.string().trim().min(10).max(10_000).optional(),
+    preCondition: z.string().trim().max(4000).optional(),
+    stepsToReproduce: z.string().trim().min(5).max(10_000).optional(),
+    expectedResult: z.string().trim().max(4000).optional(),
+    actualResult: z.string().trim().max(4000).optional(),
+    severity: z.nativeEnum(BugSeverity).optional(),
+    reproducibility: z.nativeEnum(BugReproducibility).optional(),
+    ...occurrenceFields,
+    videoUrl: z.union([z.string().trim().url().max(2000), z.literal('')]).optional(),
+    type: z.nativeEnum(BugType).nullable().optional(),
+    featureId: z.string().cuid().nullable().optional(),
+    deviceModel: z.string().trim().max(120).optional(),
+    osName: z.string().trim().max(60).optional(),
+    osVersion: z.string().trim().max(40).optional(),
+    browser: z.string().trim().max(80).optional(),
+    appVersion: z.string().trim().max(60).optional(),
+    networkType: z.string().trim().max(40).optional(),
+  })
+  .superRefine(refineOccurrence)
 
 /**
  * Move a bug through its lifecycle.
