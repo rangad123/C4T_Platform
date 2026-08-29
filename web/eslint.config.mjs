@@ -90,5 +90,14 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
 
+  // PM2's config is CommonJS and reads __dirname directly — mirrors the
+  // equivalent block in api/eslint.config.js.
+  {
+    files: ['ecosystem.config.cjs'],
+    languageOptions: {
+      globals: { module: 'writable', process: 'readonly', __dirname: 'readonly' },
+    },
+  },
+
   prettier,
 )

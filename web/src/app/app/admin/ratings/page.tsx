@@ -135,9 +135,8 @@ export default async function RatingsPage({
       columns={columns}
       rowKey={(row) => row.id}
       hrefFor={pageHrefBuilder(BASE, { subjectType, subjectUserId })}
-      filtered={Boolean(
-        subjectType || subjectUserId,
-      )} /* eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- any-of filter set */
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- any-of filter set, so "" must count as unset same as null/undefined
+      filtered={Boolean(subjectType || subjectUserId)}
       permission="rating.read"
       emptyIcon="trophy"
       emptyTitle={subjectUserId ? 'No ratings for this tester yet' : 'No ratings yet'}
