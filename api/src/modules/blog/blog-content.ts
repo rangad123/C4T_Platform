@@ -53,7 +53,12 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   },
   // The only embeds the editor's YouTube extension can produce — never a
   // caller-supplied arbitrary host.
-  allowedIframeHostnames: ['www.youtube.com', 'youtube.com', 'youtube-nocookie.com', 'player.vimeo.com'],
+  allowedIframeHostnames: [
+    'www.youtube.com',
+    'youtube.com',
+    'youtube-nocookie.com',
+    'player.vimeo.com',
+  ],
   allowedSchemes: ['http', 'https', 'mailto'],
   transformTags: {
     a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer nofollow' }, true),

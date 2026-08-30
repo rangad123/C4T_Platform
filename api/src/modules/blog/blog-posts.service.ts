@@ -224,7 +224,10 @@ export async function listPostsAdmin(query: AdminListPostsQuery) {
 }
 
 export async function getPostAdmin(id: string) {
-  const post = await prisma.blogPost.findFirst({ where: { id, deletedAt: null }, select: postAdminSelect })
+  const post = await prisma.blogPost.findFirst({
+    where: { id, deletedAt: null },
+    select: postAdminSelect,
+  })
   if (!post) throw new NotFoundError('Blog post')
   return shapeAdminPost(post)
 }

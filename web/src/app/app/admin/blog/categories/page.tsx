@@ -29,8 +29,14 @@ interface CategoryRow {
 const NOTICES: Record<string, NoticeCopy> = {
   created: { tone: 'success', message: 'Category created.' },
   updated: { tone: 'success', message: 'Category updated.' },
-  reactivated: { tone: 'success', message: 'Category reactivated — it can be used on posts again.' },
-  retired: { tone: 'success', message: 'Category retired. Existing posts keep it; it will no longer be offered on new ones.' },
+  reactivated: {
+    tone: 'success',
+    message: 'Category reactivated — it can be used on posts again.',
+  },
+  retired: {
+    tone: 'success',
+    message: 'Category retired. Existing posts keep it; it will no longer be offered on new ones.',
+  },
   failed: { tone: 'error', message: "That didn't work. Try again." },
 }
 
@@ -46,7 +52,13 @@ const NOTICES: Record<string, NoticeCopy> = {
 export default async function BlogCategoriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ new?: string; edit?: string; error?: string; notice?: string; name?: string }>
+  searchParams: Promise<{
+    new?: string
+    edit?: string
+    error?: string
+    notice?: string
+    name?: string
+  }>
 }) {
   const user = await requirePermission('blog.manage_categories')
   const canWrite = hasPermission(user, 'blog.manage_categories')
@@ -68,7 +80,11 @@ export default async function BlogCategoriesPage({
     {
       key: 'status',
       header: 'Status',
-      render: (row) => <Badge tone={row.isActive ? 'success' : 'neutral'}>{row.isActive ? 'Active' : 'Retired'}</Badge>,
+      render: (row) => (
+        <Badge tone={row.isActive ? 'success' : 'neutral'}>
+          {row.isActive ? 'Active' : 'Retired'}
+        </Badge>
+      ),
     },
     { key: 'posts', header: 'Posts', align: 'right', render: (row) => row.postCount },
     {
@@ -101,10 +117,18 @@ export default async function BlogCategoriesPage({
 
   return (
     <>
-      <Topbar crumbs={[{ label: 'Blog', href: '/app/admin/blog' }, { label: 'Categories' }]} root={{ label: 'Admin', href: '/app/admin' }} />
+      <Topbar
+        crumbs={[{ label: 'Blog', href: '/app/admin/blog' }, { label: 'Categories' }]}
+        root={{ label: 'Admin', href: '/app/admin' }}
+      />
       <main
         id="main"
-        style={{ padding: 'var(--space-9)', display: 'flex', flexDirection: 'column', gap: 'var(--space-7)' }}
+        style={{
+          padding: 'var(--space-9)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-7)',
+        }}
       >
         <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
@@ -138,7 +162,12 @@ export default async function BlogCategoriesPage({
               description="Create the first category before writing a post — every published post needs one."
             />
           ) : (
-            <Table ariaLabel="Blog categories" columns={columns} rows={categories} rowKey={(row) => row.id} />
+            <Table
+              ariaLabel="Blog categories"
+              columns={columns}
+              rows={categories}
+              rowKey={(row) => row.id}
+            />
           )}
         </Panel>
       </main>
@@ -146,11 +175,23 @@ export default async function BlogCategoriesPage({
       {canWrite ? (
         <Modal open={newModalOpen} closedHref={BASE} title="New category">
           {params.error ? <ErrorBanner code={params.error} /> : null}
-          <form action={createCategoryAction} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-            <Field label="Name" htmlFor="name" required hint="Shown on post cards and in the category filter — e.g. Software Testing.">
+          <form
+            action={createCategoryAction}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+          >
+            <Field
+              label="Name"
+              htmlFor="name"
+              required
+              hint="Shown on post cards and in the category filter — e.g. Software Testing."
+            >
               <Input id="name" name="name" required defaultValue={params.name ?? ''} />
             </Field>
-            <Field label="Description" htmlFor="description" hint="Optional. Shown at the top of the category's public page.">
+            <Field
+              label="Description"
+              htmlFor="description"
+              hint="Optional. Shown at the top of the category's public page."
+            >
               <Textarea id="description" name="description" rows={3} />
             </Field>
             <SubmitButton variant="primary" iconLeft="check" pendingLabel="Creating…">
@@ -163,13 +204,21 @@ export default async function BlogCategoriesPage({
       {canWrite && editing ? (
         <Modal open={Boolean(editingId)} closedHref={BASE} title="Edit category">
           {params.error ? <ErrorBanner code={params.error} /> : null}
-          <form action={updateCategoryAction} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+          <form
+            action={updateCategoryAction}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+          >
             <input type="hidden" name="id" value={editing.id} />
             <Field label="Name" htmlFor="edit-name" required>
               <Input id="edit-name" name="name" required defaultValue={editing.name} />
             </Field>
             <Field label="Description" htmlFor="edit-description">
-              <Textarea id="edit-description" name="description" rows={3} defaultValue={editing.description ?? ''} />
+              <Textarea
+                id="edit-description"
+                name="description"
+                rows={3}
+                defaultValue={editing.description ?? ''}
+              />
             </Field>
             <SubmitButton variant="primary" iconLeft="check" pendingLabel="Saving…">
               Save changes

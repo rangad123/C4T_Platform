@@ -201,7 +201,14 @@ export function TagCombobox({ name, allTags, defaultSelected, findOrCreateTag }:
       </div>
 
       {error ? (
-        <p role="alert" style={{ margin: 0, color: 'var(--status-error-fg)', fontSize: 'var(--type-body-sm-size)' }}>
+        <p
+          role="alert"
+          style={{
+            margin: 0,
+            color: 'var(--status-error-fg)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
           {error}
         </p>
       ) : null}

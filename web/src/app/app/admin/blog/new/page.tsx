@@ -55,8 +55,19 @@ export default async function NewBlogPostPage({
           action={createPostAction}
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
         >
-          <Field label="Title" htmlFor="title" required hint="You can change this any time from the editor.">
-            <Input id="title" name="title" required minLength={3} defaultValue={params.title ?? ''} />
+          <Field
+            label="Title"
+            htmlFor="title"
+            required
+            hint="You can change this any time from the editor."
+          >
+            <Input
+              id="title"
+              name="title"
+              required
+              minLength={3}
+              defaultValue={params.title ?? ''}
+            />
           </Field>
 
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>

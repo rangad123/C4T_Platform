@@ -220,5 +220,9 @@ export default async function BlogIndexPage({
 
 /** `en-GB` explicitly — see the note on the same helper in the old static page. */
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
 }

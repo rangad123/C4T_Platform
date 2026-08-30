@@ -76,16 +76,29 @@ const SECTIONS = [
 ] as const
 
 const NOTICES: Record<string, NoticeCopy> = {
-  created: { tone: 'success', message: 'Post created. Add a category and featured image before publishing.' },
+  created: {
+    tone: 'success',
+    message: 'Post created. Add a category and featured image before publishing.',
+  },
   saved: { tone: 'success', message: 'Changes saved.' },
   seo_saved: { tone: 'success', message: 'SEO details saved.' },
   published: { tone: 'success', message: 'Published. It now appears on the public blog.' },
-  scheduled: { tone: 'success', message: 'Scheduled. It will go live automatically at the chosen time.' },
+  scheduled: {
+    tone: 'success',
+    message: 'Scheduled. It will go live automatically at the chosen time.',
+  },
   archived: { tone: 'success', message: 'Archived. It no longer appears on the public blog.' },
   reverted: { tone: 'success', message: 'Moved back to draft.' },
-  featured: { tone: 'success', message: 'Marked as featured. Any previously featured post was un-featured.' },
+  featured: {
+    tone: 'success',
+    message: 'Marked as featured. Any previously featured post was un-featured.',
+  },
   unfeatured: { tone: 'success', message: 'No longer featured.' },
-  not_ready: { tone: 'error', message: 'A post needs a category and a featured image before it can be published or scheduled.' },
+  not_ready: {
+    tone: 'error',
+    message:
+      'A post needs a category and a featured image before it can be published or scheduled.',
+  },
   duplicate_slug: { tone: 'error', message: 'That slug is already used by another post.' },
   failed: { tone: 'error', message: "That didn't work. Try again." },
 }
@@ -127,7 +140,9 @@ export default async function BlogPostDetailPage({
   // hiccup there would silently drop the select's real option, the browser
   // would default to the blank placeholder, and saving the form would wipe
   // the post's category even though nobody touched that field.
-  const categoryOptions = (allCategories ?? []).filter((c) => c.isActive || c.id === post.categoryId)
+  const categoryOptions = (allCategories ?? []).filter(
+    (c) => c.isActive || c.id === post.categoryId,
+  )
   if (post.category && !categoryOptions.some((c) => c.id === post.category!.id)) {
     categoryOptions.push({ ...post.category, isActive: true })
   }
@@ -150,13 +165,24 @@ export default async function BlogPostDetailPage({
               {canPublish ? (
                 <PublishControls post={post} />
               ) : (
-                <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-                  You don&apos;t have the <code>blog.publish</code> permission — ask an admin to publish,
-                  schedule or archive this post.
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-secondary)',
+                    fontSize: 'var(--type-body-sm-size)',
+                  }}
+                >
+                  You don&apos;t have the <code>blog.publish</code> permission — ask an admin to
+                  publish, schedule or archive this post.
                 </p>
               )}
 
-              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 'var(--space-5)' }}>
+              <div
+                style={{
+                  borderTop: '1px solid var(--border-subtle)',
+                  paddingTop: 'var(--space-5)',
+                }}
+              >
                 {canPublish ? (
                   <form action={setFeaturedAction}>
                     <input type="hidden" name="id" value={post.id} />
@@ -182,10 +208,18 @@ export default async function BlogPostDetailPage({
           <Panel title="Record" description="What the platform knows about this post.">
             <DescriptionList
               items={[
-                { label: 'Author', value: post.authorDisplayName ?? [post.author.firstName, post.author.lastName].filter(Boolean).join(' ') },
+                {
+                  label: 'Author',
+                  value:
+                    post.authorDisplayName ??
+                    [post.author.firstName, post.author.lastName].filter(Boolean).join(' '),
+                },
                 { label: 'Created', value: formatDate(post.createdAt) },
                 { label: 'Last updated', value: formatDate(post.updatedAt) },
-                { label: 'Published', value: post.publishedAt ? formatDate(post.publishedAt) : '—' },
+                {
+                  label: 'Published',
+                  value: post.publishedAt ? formatDate(post.publishedAt) : '—',
+                },
                 { label: 'Reading time', value: `${post.readingTimeMinutes} min` },
                 { label: 'Views', value: post.viewCount },
                 {
@@ -198,7 +232,10 @@ export default async function BlogPostDetailPage({
           </Panel>
 
           {canDelete ? (
-            <Panel title="Danger zone" description="Deleting a post removes it from the admin list and the public site.">
+            <Panel
+              title="Danger zone"
+              description="Deleting a post removes it from the admin list and the public site."
+            >
               <form action={deletePostAction}>
                 <input type="hidden" name="id" value={post.id} />
                 <input type="hidden" name="slug" value={post.slug} />
@@ -237,13 +274,32 @@ export default async function BlogPostDetailPage({
                 <Field label="Title" htmlFor="title" required>
                   <Input id="title" name="title" required minLength={3} defaultValue={post.title} />
                 </Field>
-                <Field label="Slug" htmlFor="slug" hint="Changing this redirects the old URL automatically.">
-                  <Input id="slug" name="slug" defaultValue={post.slug} pattern="[a-z0-9]+(-[a-z0-9]+)*" />
+                <Field
+                  label="Slug"
+                  htmlFor="slug"
+                  hint="Changing this redirects the old URL automatically."
+                >
+                  <Input
+                    id="slug"
+                    name="slug"
+                    defaultValue={post.slug}
+                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  />
                 </Field>
               </div>
 
-              <Field label="Excerpt" htmlFor="excerpt" hint="Shown on post cards, in search results and as the SEO description fallback.">
-                <Textarea id="excerpt" name="excerpt" rows={2} maxLength={300} defaultValue={post.excerpt ?? ''} />
+              <Field
+                label="Excerpt"
+                htmlFor="excerpt"
+                hint="Shown on post cards, in search results and as the SEO description fallback."
+              >
+                <Textarea
+                  id="excerpt"
+                  name="excerpt"
+                  rows={2}
+                  maxLength={300}
+                  defaultValue={post.excerpt ?? ''}
+                />
               </Field>
 
               <div
@@ -253,7 +309,12 @@ export default async function BlogPostDetailPage({
                   gap: 'var(--space-5) var(--space-6)',
                 }}
               >
-                <Field label="Category" htmlFor="categoryId" required hint="Required to publish or schedule.">
+                <Field
+                  label="Category"
+                  htmlFor="categoryId"
+                  required
+                  hint="Required to publish or schedule."
+                >
                   <Select
                     id="categoryId"
                     name="categoryId"
@@ -262,8 +323,16 @@ export default async function BlogPostDetailPage({
                     options={categoryOptions.map((c) => ({ value: c.id, label: c.name }))}
                   />
                 </Field>
-                <Field label="Byline" htmlFor="authorDisplayName" hint="Overrides the author's name on the public page. Leave blank to show the account name.">
-                  <Input id="authorDisplayName" name="authorDisplayName" defaultValue={post.authorDisplayName ?? ''} />
+                <Field
+                  label="Byline"
+                  htmlFor="authorDisplayName"
+                  hint="Overrides the author's name on the public page. Leave blank to show the account name."
+                >
+                  <Input
+                    id="authorDisplayName"
+                    name="authorDisplayName"
+                    defaultValue={post.authorDisplayName ?? ''}
+                  />
                 </Field>
               </div>
 
@@ -276,7 +345,12 @@ export default async function BlogPostDetailPage({
                 />
               </Field>
 
-              <Field label="Featured image" htmlFor="featuredImage" required hint="Required to publish or schedule. Also used as the social-share image.">
+              <Field
+                label="Featured image"
+                htmlFor="featuredImage"
+                required
+                hint="Required to publish or schedule. Also used as the social-share image."
+              >
                 <SingleFileUpload
                   endpoint="/app/admin/upload"
                   scope="blog-featured-image"
@@ -322,16 +396,28 @@ export default async function BlogPostDetailPage({
       ) : null}
 
       {section === 'seo' ? (
-        <Panel title="SEO" description="Search and social-share metadata. Both fall back to the title and excerpt when left blank.">
+        <Panel
+          title="SEO"
+          description="Search and social-share metadata. Both fall back to the title and excerpt when left blank."
+        >
           {canWrite ? (
-            <form action={saveSeoAction} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+            <form
+              action={saveSeoAction}
+              style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+            >
               <input type="hidden" name="id" value={post.id} />
               <Field
                 label="SEO title"
                 htmlFor="seoTitle"
                 hint={`${(post.seoTitle ?? post.title).length}/70 characters — falls back to the post title.`}
               >
-                <Input id="seoTitle" name="seoTitle" maxLength={70} defaultValue={post.seoTitle ?? ''} placeholder={post.title} />
+                <Input
+                  id="seoTitle"
+                  name="seoTitle"
+                  maxLength={70}
+                  defaultValue={post.seoTitle ?? ''}
+                  placeholder={post.title}
+                />
               </Field>
               <Field
                 label="SEO description"
@@ -355,7 +441,10 @@ export default async function BlogPostDetailPage({
             <DescriptionList
               items={[
                 { label: 'SEO title', value: post.seoTitle ?? `${post.title} (from title)` },
-                { label: 'SEO description', value: post.seoDescription ?? `${post.excerpt ?? ''} (from excerpt)` },
+                {
+                  label: 'SEO description',
+                  value: post.seoDescription ?? `${post.excerpt ?? ''} (from excerpt)`,
+                },
               ]}
             />
           )}
@@ -389,7 +478,13 @@ function PublishControls({ post }: { post: PostDetail }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
       {!canPublishNow ? (
-        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+        <p
+          style={{
+            margin: 0,
+            color: 'var(--text-secondary)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
           Add a category and a featured image on the Content tab before publishing or scheduling.
         </p>
       ) : null}
@@ -398,7 +493,13 @@ function PublishControls({ post }: { post: PostDetail }) {
         <>
           <form action={publishPostAction}>
             <input type="hidden" name="id" value={post.id} />
-            <SubmitButton variant="primary" fullWidth iconLeft="check" disabled={!canPublishNow} pendingLabel="Publishing…">
+            <SubmitButton
+              variant="primary"
+              fullWidth
+              iconLeft="check"
+              disabled={!canPublishNow}
+              pendingLabel="Publishing…"
+            >
               Publish now
             </SubmitButton>
           </form>
@@ -408,9 +509,21 @@ function PublishControls({ post }: { post: PostDetail }) {
           >
             <input type="hidden" name="id" value={post.id} />
             <Field label="Schedule for" htmlFor="scheduledAt">
-              <Input id="scheduledAt" name="scheduledAt" type="datetime-local" required disabled={!canPublishNow} />
+              <Input
+                id="scheduledAt"
+                name="scheduledAt"
+                type="datetime-local"
+                required
+                disabled={!canPublishNow}
+              />
             </Field>
-            <SubmitButton variant="secondary" fullWidth iconLeft="clock" disabled={!canPublishNow} pendingLabel="Scheduling…">
+            <SubmitButton
+              variant="secondary"
+              fullWidth
+              iconLeft="clock"
+              disabled={!canPublishNow}
+              pendingLabel="Scheduling…"
+            >
               Schedule
             </SubmitButton>
           </form>
@@ -419,7 +532,13 @@ function PublishControls({ post }: { post: PostDetail }) {
 
       {post.status === 'SCHEDULED' ? (
         <>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+          <p
+            style={{
+              margin: 0,
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--type-body-sm-size)',
+            }}
+          >
             Goes live automatically on {post.scheduledAt ? formatDate(post.scheduledAt) : '—'}.
           </p>
           <form action={publishPostAction}>

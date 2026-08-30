@@ -34,37 +34,73 @@ export async function getAdmin(req: Request, res: Response): Promise<void> {
 
 export async function create(req: Request, res: Response): Promise<void> {
   const post = await service.createPost(req.user!.id, req.body)
-  await recordAudit({ req, action: 'blog_post.created', entityType: 'BlogPost', entityId: post.id, after: post })
+  await recordAudit({
+    req,
+    action: 'blog_post.created',
+    entityType: 'BlogPost',
+    entityId: post.id,
+    after: post,
+  })
   res.status(201).json({ data: post })
 }
 
 export async function update(req: Request, res: Response): Promise<void> {
   const post = await service.updatePost(param(req, 'id'), req.body)
-  await recordAudit({ req, action: 'blog_post.updated', entityType: 'BlogPost', entityId: post.id, after: post })
+  await recordAudit({
+    req,
+    action: 'blog_post.updated',
+    entityType: 'BlogPost',
+    entityId: post.id,
+    after: post,
+  })
   res.json({ data: post })
 }
 
 export async function publish(req: Request, res: Response): Promise<void> {
   const post = await service.publishPost(param(req, 'id'))
-  await recordAudit({ req, action: 'blog_post.published', entityType: 'BlogPost', entityId: post.id, after: post })
+  await recordAudit({
+    req,
+    action: 'blog_post.published',
+    entityType: 'BlogPost',
+    entityId: post.id,
+    after: post,
+  })
   res.json({ data: post })
 }
 
 export async function schedule(req: Request, res: Response): Promise<void> {
   const post = await service.schedulePost(param(req, 'id'), req.body.scheduledAt)
-  await recordAudit({ req, action: 'blog_post.scheduled', entityType: 'BlogPost', entityId: post.id, after: post })
+  await recordAudit({
+    req,
+    action: 'blog_post.scheduled',
+    entityType: 'BlogPost',
+    entityId: post.id,
+    after: post,
+  })
   res.json({ data: post })
 }
 
 export async function archive(req: Request, res: Response): Promise<void> {
   const post = await service.archivePost(param(req, 'id'))
-  await recordAudit({ req, action: 'blog_post.archived', entityType: 'BlogPost', entityId: post.id, after: post })
+  await recordAudit({
+    req,
+    action: 'blog_post.archived',
+    entityType: 'BlogPost',
+    entityId: post.id,
+    after: post,
+  })
   res.json({ data: post })
 }
 
 export async function revertToDraft(req: Request, res: Response): Promise<void> {
   const post = await service.revertToDraft(param(req, 'id'))
-  await recordAudit({ req, action: 'blog_post.reverted_to_draft', entityType: 'BlogPost', entityId: post.id, after: post })
+  await recordAudit({
+    req,
+    action: 'blog_post.reverted_to_draft',
+    entityType: 'BlogPost',
+    entityId: post.id,
+    after: post,
+  })
   res.json({ data: post })
 }
 

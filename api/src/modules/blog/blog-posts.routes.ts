@@ -59,7 +59,12 @@ admin.get(
   validate({ query: adminListPostsQuery }),
   controller.listAdmin,
 )
-admin.get('/:id', requirePermission(PERMISSIONS.BLOG_READ), validate({ params: postIdParam }), controller.getAdmin)
+admin.get(
+  '/:id',
+  requirePermission(PERMISSIONS.BLOG_READ),
+  validate({ params: postIdParam }),
+  controller.getAdmin,
+)
 admin.post(
   '/',
   requirePermission(PERMISSIONS.BLOG_WRITE),

@@ -20,18 +20,28 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>
 }): Promise<Metadata> {
   const { slug } = await params
-  const category = await publicFetch<BlogCategorySummary>(`blog/categories/${slug}`).catch(() => null)
+  const category = await publicFetch<BlogCategorySummary>(`blog/categories/${slug}`).catch(
+    () => null,
+  )
   if (!category) return {}
 
   const url = new URL(`${PREFIX}/category/${slug}`, env.NEXT_PUBLIC_SITE_URL).toString()
   const title = `${category.name} — Crowd4Test Blog`
-  const description = category.description ?? `Posts filed under ${category.name} on the Crowd4Test blog.`
+  const description =
+    category.description ?? `Posts filed under ${category.name} on the Crowd4Test blog.`
 
   return {
     title,
     description,
     alternates: { canonical: url },
-    openGraph: { type: 'website', siteName: SITE_NAME, title, description, url, images: ['/opengraph-image'] },
+    openGraph: {
+      type: 'website',
+      siteName: SITE_NAME,
+      title,
+      description,
+      url,
+      images: ['/opengraph-image'],
+    },
     twitter: { card: 'summary_large_image', title, description },
   }
 }
@@ -74,7 +84,12 @@ export default async function BlogCategoryPage({
         </div>
         <h1
           className="c4t-display-xl"
-          style={{ margin: '20px 0 0', color: 'var(--text-inverse)', maxWidth: 900, textWrap: 'pretty' }}
+          style={{
+            margin: '20px 0 0',
+            color: 'var(--text-inverse)',
+            maxWidth: 900,
+            textWrap: 'pretty',
+          }}
         >
           {category.name}
         </h1>
@@ -97,7 +112,11 @@ export default async function BlogCategoryPage({
           <>
             <div
               className="c4t-grid-4"
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--space-grid-gap)' }}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: 'var(--space-grid-gap)',
+              }}
             >
               {posts.map((post) => (
                 <ResourceCard
@@ -109,7 +128,11 @@ export default async function BlogCategoryPage({
                   readTime={`${post.readingTimeMinutes} min read`}
                   author={post.author ?? undefined}
                   href={`${PREFIX}/${post.slug}`}
-                  image={post.featuredImageUrl ? { src: post.featuredImageUrl, alt: post.title } : undefined}
+                  image={
+                    post.featuredImageUrl
+                      ? { src: post.featuredImageUrl, alt: post.title }
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -117,12 +140,19 @@ export default async function BlogCategoryPage({
             {meta && meta.totalPages > 1 ? (
               <nav
                 aria-label="Pagination"
-                style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-3)', marginTop: 'var(--space-9)' }}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  gap: 'var(--space-3)',
+                  marginTop: 'var(--space-9)',
+                }}
               >
                 {Array.from({ length: meta.totalPages }, (_, i) => i + 1).map((n) => (
                   <a
                     key={n}
-                    href={n > 1 ? `${PREFIX}/category/${slug}?page=${n}` : `${PREFIX}/category/${slug}`}
+                    href={
+                      n > 1 ? `${PREFIX}/category/${slug}?page=${n}` : `${PREFIX}/category/${slug}`
+                    }
                     aria-current={n === page ? 'page' : undefined}
                     style={{
                       display: 'inline-flex',

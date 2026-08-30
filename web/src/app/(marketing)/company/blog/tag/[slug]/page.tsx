@@ -41,7 +41,14 @@ export async function generateMetadata({
     description,
     alternates: { canonical: url },
     robots: { index: false, follow: true },
-    openGraph: { type: 'website', siteName: SITE_NAME, title, description, url, images: ['/opengraph-image'] },
+    openGraph: {
+      type: 'website',
+      siteName: SITE_NAME,
+      title,
+      description,
+      url,
+      images: ['/opengraph-image'],
+    },
   }
 }
 
@@ -82,7 +89,12 @@ export default async function BlogTagPage({
         </div>
         <h1
           className="c4t-display-xl"
-          style={{ margin: '20px 0 0', color: 'var(--text-inverse)', maxWidth: 900, textWrap: 'pretty' }}
+          style={{
+            margin: '20px 0 0',
+            color: 'var(--text-inverse)',
+            maxWidth: 900,
+            textWrap: 'pretty',
+          }}
         >
           {tag.name}
         </h1>
@@ -97,7 +109,11 @@ export default async function BlogTagPage({
           <>
             <div
               className="c4t-grid-4"
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--space-grid-gap)' }}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: 'var(--space-grid-gap)',
+              }}
             >
               {posts.map((post) => (
                 <ResourceCard
@@ -109,7 +125,11 @@ export default async function BlogTagPage({
                   readTime={`${post.readingTimeMinutes} min read`}
                   author={post.author ?? undefined}
                   href={`${PREFIX}/${post.slug}`}
-                  image={post.featuredImageUrl ? { src: post.featuredImageUrl, alt: post.title } : undefined}
+                  image={
+                    post.featuredImageUrl
+                      ? { src: post.featuredImageUrl, alt: post.title }
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -117,7 +137,12 @@ export default async function BlogTagPage({
             {meta && meta.totalPages > 1 ? (
               <nav
                 aria-label="Pagination"
-                style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-3)', marginTop: 'var(--space-9)' }}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  gap: 'var(--space-3)',
+                  marginTop: 'var(--space-9)',
+                }}
               >
                 {Array.from({ length: meta.totalPages }, (_, i) => i + 1).map((n) => (
                   <a

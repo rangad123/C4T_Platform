@@ -63,10 +63,14 @@ export default async function BlogPostsPage({
   await requirePermission('blog.read')
 
   const params = await searchParams
-  const status = STATUSES.includes(params.status as (typeof STATUSES)[number]) ? params.status : undefined
+  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
+    ? params.status
+    : undefined
   const search = searchTerm(params.search)
   const category = params.category?.trim() || undefined
-  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number]) ? params.sort : undefined
+  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
+    ? params.sort
+    : undefined
   const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
   const page = parsePage(params.page)
 
@@ -131,13 +135,26 @@ export default async function BlogPostsPage({
       emptyTitle="No posts yet"
       emptyDescription="Create the first post to get the blog started."
       toolbar={
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+          }}
+        >
           <div style={{ flex: 1, minWidth: 280 }}>
             <ListFilters
               action={BASE}
               search={{ value: search, placeholder: 'Title, slug or excerpt' }}
               selects={[
-                { name: 'status', label: 'Status', options: STATUSES, value: status, allLabel: 'All statuses' },
+                {
+                  name: 'status',
+                  label: 'Status',
+                  options: STATUSES,
+                  value: status,
+                  allLabel: 'All statuses',
+                },
                 {
                   name: 'category',
                   label: 'Category',

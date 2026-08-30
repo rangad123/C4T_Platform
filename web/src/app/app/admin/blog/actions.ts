@@ -172,7 +172,9 @@ export async function revertToDraftAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}/revert-to-draft`, { method: 'POST' })
+    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}/revert-to-draft`, {
+      method: 'POST',
+    })
   } catch {
     redirectWithNotice(id, 'failed')
   }

@@ -5,7 +5,11 @@ import { IconButton } from '../core/IconButton'
 import { Icon } from '../core/Icon'
 import { SOCIAL_ICONS, type SocialIconName } from '@/components/SocialIcons'
 
-const PLATFORMS: { icon: SocialIconName; label: string; hrefFor: (url: string, title: string) => string }[] = [
+const PLATFORMS: {
+  icon: SocialIconName
+  label: string
+  hrefFor: (url: string, title: string) => string
+}[] = [
   {
     icon: 'x',
     label: 'Share on X',

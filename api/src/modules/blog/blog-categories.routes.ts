@@ -82,18 +82,25 @@ blogCategoriesRouter.get(
   },
 )
 
-blogCategoriesRouter.get('/:slug', validate({ params: z.object({ slug: z.string() }) }), async (req, res) => {
-  const category = await prisma.blogCategory.findFirst({
-    where: { slug: param(req, 'slug'), isActive: true },
-    select: { id: true, name: true, slug: true, description: true },
-  })
-  if (!category) throw new NotFoundError('Category')
-  res.json({ data: category })
-})
+blogCategoriesRouter.get(
+  '/:slug',
+  validate({ params: z.object({ slug: z.string() }) }),
+  async (req, res) => {
+    const category = await prisma.blogCategory.findFirst({
+      where: { slug: param(req, 'slug'), isActive: true },
+      select: { id: true, name: true, slug: true, description: true },
+    })
+    if (!category) throw new NotFoundError('Category')
+    res.json({ data: category })
+  },
+)
 
 // ─── Admin ─────────────────────────────────────────────────────────────────
 
-const createSchema = z.object({ name: z.string().trim().min(2).max(100), description: z.string().trim().max(300).optional() })
+const createSchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  description: z.string().trim().max(300).optional(),
+})
 const updateSchema = z.object({
   name: z.string().trim().min(2).max(100).optional(),
   description: z.string().trim().max(300).optional(),
@@ -125,7 +132,13 @@ blogCategoriesRouter.post(
     const category = await prisma.blogCategory.create({
       data: { name: req.body.name, slug, description: req.body.description },
     })
-    await recordAudit({ req, action: 'blog_category.created', entityType: 'BlogCategory', entityId: category.id, after: category })
+    await recordAudit({
+      req,
+      action: 'blog_category.created',
+      entityType: 'BlogCategory',
+      entityId: category.id,
+      after: category,
+    })
     res.status(201).json({ data: category })
   },
 )
@@ -140,7 +153,10 @@ blogCategoriesRouter.patch(
     const existing = await prisma.blogCategory.findUnique({ where: { id } })
     if (!existing) throw new NotFoundError('Category')
 
-    const slug = req.body.name && req.body.name !== existing.name ? await uniqueCategorySlug(req.body.name, id) : undefined
+    const slug =
+      req.body.name && req.body.name !== existing.name
+        ? await uniqueCategorySlug(req.body.name, id)
+        : undefined
 
     const category = await prisma.blogCategory.update({
       where: { id },
@@ -151,7 +167,13 @@ blogCategoriesRouter.patch(
         ...(req.body.isActive !== undefined ? { isActive: req.body.isActive } : {}),
       },
     })
-    await recordAudit({ req, action: 'blog_category.updated', entityType: 'BlogCategory', entityId: id, after: category })
+    await recordAudit({
+      req,
+      action: 'blog_category.updated',
+      entityType: 'BlogCategory',
+      entityId: id,
+      after: category,
+    })
     res.json({ data: category })
   },
 )

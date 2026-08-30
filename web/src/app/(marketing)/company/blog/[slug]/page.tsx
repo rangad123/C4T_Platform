@@ -140,7 +140,9 @@ export default async function BlogPostPage({
   const breadcrumbTrail = [
     { name: 'Home', path: '/' },
     { name: 'Blog', path: PREFIX },
-    ...(post.category ? [{ name: post.category.name, path: `${PREFIX}/category/${post.category.slug}` }] : []),
+    ...(post.category
+      ? [{ name: post.category.name, path: `${PREFIX}/category/${post.category.slug}` }]
+      : []),
     { name: post.title, path: `${PREFIX}/${slug}` },
   ]
 
@@ -289,7 +291,11 @@ export default async function BlogPostPage({
                   readTime={`${item.readingTimeMinutes} min read`}
                   author={item.author ?? undefined}
                   href={`${PREFIX}/${item.slug}`}
-                  image={item.featuredImageUrl ? { src: item.featuredImageUrl, alt: item.title } : undefined}
+                  image={
+                    item.featuredImageUrl
+                      ? { src: item.featuredImageUrl, alt: item.title }
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -306,5 +312,9 @@ export default async function BlogPostPage({
 
 /** `en-GB` explicitly, not the server's locale — see the note on the same helper elsewhere in this codebase. */
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
 }

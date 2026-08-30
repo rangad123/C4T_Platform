@@ -95,7 +95,10 @@ export function BlogEditorToolbar({ editor: editorProp }: { editor: Editor | nul
             <button
               key={level}
               type="button"
-              className={[styles.textButton, editor.isActive('heading', { level }) ? styles.active : '']
+              className={[
+                styles.textButton,
+                editor.isActive('heading', { level }) ? styles.active : '',
+              ]
                 .filter(Boolean)
                 .join(' ')}
               aria-label={`Heading ${level}`}

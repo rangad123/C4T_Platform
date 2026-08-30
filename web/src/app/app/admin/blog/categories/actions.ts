@@ -54,7 +54,10 @@ export async function toggleCategoryActiveAction(formData: FormData): Promise<vo
   const isActive = formTrimmed(formData, 'isActive') === 'true'
 
   try {
-    await serverFetch<CategoryResponse>(`blog/categories/${id}`, { method: 'PATCH', body: { isActive } })
+    await serverFetch<CategoryResponse>(`blog/categories/${id}`, {
+      method: 'PATCH',
+      body: { isActive },
+    })
   } catch {
     redirect(`${BASE}?error=failed`)
   }

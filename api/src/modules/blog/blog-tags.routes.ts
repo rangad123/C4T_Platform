@@ -44,14 +44,18 @@ blogTagsRouter.get('/', async (req, res) => {
   res.json({ data: tags.map(({ _count, ...t }) => ({ ...t, postCount: _count.posts })) })
 })
 
-blogTagsRouter.get('/:slug', validate({ params: z.object({ slug: z.string() }) }), async (req, res) => {
-  const tag = await prisma.blogTag.findUnique({
-    where: { slug: param(req, 'slug') },
-    select: { id: true, name: true, slug: true },
-  })
-  if (!tag) throw new NotFoundError('Tag')
-  res.json({ data: tag })
-})
+blogTagsRouter.get(
+  '/:slug',
+  validate({ params: z.object({ slug: z.string() }) }),
+  async (req, res) => {
+    const tag = await prisma.blogTag.findUnique({
+      where: { slug: param(req, 'slug') },
+      select: { id: true, name: true, slug: true },
+    })
+    if (!tag) throw new NotFoundError('Tag')
+    res.json({ data: tag })
+  },
+)
 
 // ─── Admin ─────────────────────────────────────────────────────────────────
 

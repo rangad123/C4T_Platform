@@ -70,9 +70,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const [blogPosts, categories] = await Promise.all([
     allPublishedPosts(),
-    publicFetchPage<BlogCategorySummary>('blog/categories', { next: { tags: ['blog-categories'] } }).then(
-      (r) => r.data,
-    ),
+    publicFetchPage<BlogCategorySummary>('blog/categories', {
+      next: { tags: ['blog-categories'] },
+    }).then((r) => r.data),
   ])
 
   const posts: MetadataRoute.Sitemap = blogPosts.map((post) => ({
