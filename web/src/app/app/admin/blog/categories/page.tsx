@@ -15,7 +15,6 @@ import { requirePermission, hasPermission } from '@/lib/auth/session'
 import { createCategoryAction, updateCategoryAction, toggleCategoryActiveAction } from './actions'
 
 const BASE = '/app/admin/blog/categories'
-const ROOT = { label: 'Blog', href: '/app/admin/blog' }
 
 interface CategoryRow {
   id: string

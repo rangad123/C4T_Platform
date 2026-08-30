@@ -67,7 +67,7 @@ export default async function BlogPostsPage({
     ? params.status
     : undefined
   const search = searchTerm(params.search)
-  const category = params.category?.trim() || undefined
+  const category = searchTerm(params.category)
   const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
     ? params.sort
     : undefined
