@@ -32,6 +32,10 @@ const nextConfig: NextConfig = {
       // media the Client's responsibility — remove this before launch.
       { protocol: 'https', hostname: 'images.unsplash.com' },
       { protocol: 'https', hostname: 'cdn.crowd4test.com' },
+      // Blog featured images (`PUBLIC_ASSETS_BASE_URL`) — the interim direct-
+      // to-bucket URL, until a CDN sits in front of it and this resolves to
+      // cdn.crowd4test.com above instead.
+      { protocol: 'https', hostname: 'crowd4test.s3.ap-south-1.amazonaws.com' },
     ],
   },
 

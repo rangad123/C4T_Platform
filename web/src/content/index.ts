@@ -14,7 +14,8 @@
  *  - `pages.ts`        "Up to X test hours" placeholders in the Pilot plan
  *  - `company.ts`      the Trust page certifications group, an empty roles list
  *  - `media.ts`        every photograph is an Unsplash placeholder
- *  - `blog.ts`         no post has a body; every entry is a draft
+ *  - `blog.ts`         page chrome only — post content is DB-backed, see
+ *                       api/src/modules/blog/ and app/(marketing)/company/blog/
  *  - `case-studies.ts` every entry is a placeholder; see the §12.3 warning
  */
 

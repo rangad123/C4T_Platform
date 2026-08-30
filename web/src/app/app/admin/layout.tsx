@@ -69,6 +69,10 @@ const SECTIONS: readonly SidebarSection[] = [
     links: [{ href: '/app/admin/reports', label: 'Reports', icon: 'line-chart' }],
   },
   {
+    label: 'Content',
+    links: [{ href: '/app/admin/blog', label: 'Blog', icon: 'newspaper' }],
+  },
+  {
     label: 'Operations',
     links: [
       { href: '/app/admin/transactions', label: 'Transactions', icon: 'credit-card' },

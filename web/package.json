@@ -22,6 +22,18 @@
     "launch-check": "node scripts/launch-check.mjs"
   },
   "dependencies": {
+    "@tiptap/core": "^3.30.5",
+    "@tiptap/extension-image": "^3.30.5",
+    "@tiptap/extension-link": "^3.30.5",
+    "@tiptap/extension-placeholder": "^3.30.5",
+    "@tiptap/extension-table": "^3.30.5",
+    "@tiptap/extension-table-cell": "^3.30.5",
+    "@tiptap/extension-table-header": "^3.30.5",
+    "@tiptap/extension-table-row": "^3.30.5",
+    "@tiptap/extension-youtube": "^3.30.5",
+    "@tiptap/pm": "^3.30.5",
+    "@tiptap/react": "^3.30.5",
+    "@tiptap/starter-kit": "^3.30.5",
     "country-flag-icons": "^1.6.20",
     "lucide-react": "^1.30.0",
     "next": "16.3.0",

@@ -137,6 +137,26 @@ export async function createUploadUrl(params: {
   }
 }
 
+/**
+ * Permanent, non-expiring URL for the one class of object that IS public-read
+ * — currently only `FileScope.BLOG_FEATURED_IMAGE`. Every other scope goes
+ * through `createDownloadUrl` below instead: a short-lived signed URL is
+ * right for a private document an authenticated request is fetching, but
+ * useless for a blog post read by anonymous visitors and unfurl/crawler bots
+ * that never hold a session.
+ *
+ * In production this resolves through `PUBLIC_ASSETS_BASE_URL` (a CDN in
+ * front of the bucket) — the bucket's `blog_featured_image/*` key prefix
+ * must be made public-read for this to actually serve anything; that's an
+ * AWS console step, not something this function can arrange on its own.
+ */
+export function createPublicUrl(storageKey: string): string {
+  if (env.STORAGE_DRIVER === 'local') {
+    return `${env.API_PUBLIC_URL}/v1/uploads/local/${encodeURIComponent(storageKey)}`
+  }
+  return `${env.PUBLIC_ASSETS_BASE_URL}/${storageKey}`
+}
+
 /** Short-lived download URL. Objects are never public-read. */
 export async function createDownloadUrl(storageKey: string, filename?: string): Promise<string> {
   if (env.STORAGE_DRIVER === 'local') {

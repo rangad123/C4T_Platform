@@ -1,5 +1,6 @@
 /**
- * The four social marks used in the footer.
+ * The social marks used across the site — the footer's four, plus X, added
+ * for the blog post `ShareRow`.
  *
  * WHY INLINED RATHER THAN <img src="/social/...">
  * ──────────────────────────────────────────────────────────────────────────
@@ -86,6 +87,25 @@ function Facebook(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+function X(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      width={24}
+      height={24}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M4 4l16 16M20 4L4 20" />
+    </svg>
+  )
+}
+
 function Instagram(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -111,6 +131,7 @@ export const SOCIAL_ICONS = {
   youtube: Youtube,
   facebook: Facebook,
   instagram: Instagram,
+  x: X,
 } as const
 
 /**

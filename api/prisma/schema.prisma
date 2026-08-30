@@ -273,6 +273,15 @@ enum FileScope {
   /// a product that may be unreleased, so it resolves through `project.read`
   /// rather than being readable by every signed-in account.
   PROJECT_LOGO
+  /// Public marketing imagery for a blog post — the featured/hero image and
+  /// any image inserted inline into the article body via the editor. One
+  /// scope for both: they share the same visibility rule (public, not
+  /// per-post-ownership-gated), which is what a FileScope encodes. Unlike
+  /// every other scope, this one is served through a permanent public URL
+  /// rather than a short-lived signed one — see `createPublicUrl` in
+  /// `lib/storage.ts` — because a blog post is read by anonymous visitors
+  /// and unfurl/crawler bots that never hold a session.
+  BLOG_FEATURED_IMAGE
   OTHER
 }
 
@@ -369,6 +378,7 @@ model User {
   messageTemplatesAuthored MessageTemplate[]        @relation("MessageTemplateAuthor")
   orgInvitationsSent       OrganisationInvitation[] @relation("OrgInvitationAuthor")
   platformSettingsEdited   PlatformSetting[]        @relation("PlatformSettingEditor")
+  blogPostsAuthored        BlogPost[]               @relation("BlogPostAuthor")
 
   @@index([role, status])
   @@index([createdAt])
@@ -1859,6 +1869,7 @@ model FileObject {
   bugAttachments     BugAttachment[]     @relation("BugFile")
   messageAttachments MessageAttachment[] @relation("MessageFile")
   buildTestDocuments Build[]             @relation("BuildTestDocument")
+  blogFeaturedImages BlogPost[]          @relation("BlogPostFeaturedImage")
 
   @@index([uploadedById])
   @@index([scope])
@@ -1945,4 +1956,125 @@ model Lead {
   @@index([email])
   @@index([createdAt])
   @@map("leads")
+}
+
+// ─── Blog / CMS ────────────────────────────────────────────────────────────
+
+enum BlogPostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+/// The blog's topic taxonomy (Software Testing, QA, API Testing, ...) —
+/// distinct from `ResourceType` on the web app's `ResourceCard`, which
+/// describes FORMAT (Article/Guide/Report), not topic. Catalog model:
+/// `isActive`, not `deletedAt`, matching DeviceBrand/Skill/SkillCategory — a
+/// category is reference data an admin curates, not a business record.
+model BlogCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  posts BlogPost[]
+
+  @@map("blog_categories")
+}
+
+/// Deliberately name+slug only — no description, no dedicated admin CRUD
+/// page. Created on the fly from the post editor via find-or-create.
+model BlogTag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  posts BlogPostTag[]
+
+  @@map("blog_tags")
+}
+
+model BlogPostTag {
+  id     String @id @default(cuid())
+  postId String @map("post_id")
+  tagId  String @map("tag_id")
+
+  post BlogPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  BlogTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, tagId])
+  @@index([tagId])
+  @@map("blog_post_tags")
+}
+
+/// The blog/CMS article. Business record (a real editorial asset an admin
+/// might delete and expect to recover), so `deletedAt` — soft delete,
+/// matching Bug/Project/Organisation — not `isActive`.
+model BlogPost {
+  id      String         @id @default(cuid())
+  slug    String         @unique
+  title   String
+  excerpt String?
+  /// Sanitized HTML from the admin rich-text editor. Never trust unsanitized
+  /// input — see `sanitizeContent` in `modules/blog/blog-content.ts`, run on
+  /// every create/update before this column is written.
+  content String         @db.Text
+  status  BlogPostStatus @default(DRAFT)
+
+  categoryId String? @map("category_id")
+  authorId   String  @map("author_id")
+  /// Overrides the byline shown publicly (e.g. "Crowd4Test Team", a guest
+  /// author). Null falls back to the author account's name. Kept separate
+  /// from `authorId`, which stays the real accountable admin/sub-admin who
+  /// owns the row.
+  authorDisplayName String? @map("author_display_name")
+
+  featuredImageFileId String?  @map("featured_image_file_id")
+  /// At most one post is featured at a time — enforced in the service via a
+  /// transaction (unset the previous holder, set this one), not a DB
+  /// constraint; Prisma can't cleanly express a partial unique index without
+  /// a raw-SQL migration, and a single-writer admin workflow doesn't need one.
+  isFeatured           Boolean  @default(false) @map("is_featured")
+
+  /// Recomputed server-side on every save from the sanitized plain text
+  /// (`computeReadingTimeMinutes`) — never admin-entered.
+  readingTimeMinutes Int @default(0) @map("reading_time_minutes")
+  /// Incremented inline on each public read. No unique-visitor dedup — a
+  /// simple counter, matching the lack of any view-dedup infra elsewhere.
+  viewCount          Int @default(0) @map("view_count")
+
+  seoTitle       String? @map("seo_title")
+  seoDescription String? @map("seo_description")
+
+  /// Historical slugs, appended to whenever `slug` changes. The public
+  /// detail route falls back to this array on a lookup miss and issues a
+  /// permanent redirect to the current slug. No separate redirects table.
+  previousSlugs String[] @default([]) @map("previous_slugs")
+
+  /// Set while status is SCHEDULED; cleared on any other transition.
+  scheduledAt DateTime? @map("scheduled_at")
+  /// First-published timestamp. Preserved across an archive → republish
+  /// cycle rather than overwritten, so a post's original publication date
+  /// stays truthful.
+  publishedAt DateTime? @map("published_at")
+  archivedAt  DateTime? @map("archived_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  category      BlogCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  author        User          @relation("BlogPostAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  featuredImage FileObject?   @relation("BlogPostFeaturedImage", fields: [featuredImageFileId], references: [id], onDelete: SetNull)
+  tags          BlogPostTag[]
+
+  @@index([status, publishedAt])
+  @@index([categoryId])
+  @@index([isFeatured])
+  @@map("blog_posts")
 }

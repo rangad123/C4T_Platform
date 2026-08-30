@@ -22,6 +22,7 @@ export const PERMISSION_GROUPS = {
   TRANSACTIONS: 'Transactions',
   USERS: 'Users & Access',
   PLATFORM: 'Platform',
+  BLOG: 'Blog',
 } as const
 
 export interface PermissionDefinition {
@@ -85,6 +86,14 @@ export const PERMISSIONS = {
   // Marketing — the contact-form pipeline
   LEAD_READ: 'lead.read',
   LEAD_WRITE: 'lead.write',
+
+  // Blog
+  BLOG_READ: 'blog.read',
+  BLOG_WRITE: 'blog.write',
+  BLOG_PUBLISH: 'blog.publish',
+  BLOG_DELETE: 'blog.delete',
+  BLOG_MANAGE_CATEGORIES: 'blog.manage_categories',
+  BLOG_MANAGE_TAGS: 'blog.manage_tags',
 } as const
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS]
@@ -286,6 +295,43 @@ export const PERMISSION_CATALOGUE: PermissionDefinition[] = [
     label: 'Manage demo requests',
     description: 'Update the status and notes on a marketing enquiry',
   },
+
+  {
+    code: PERMISSIONS.BLOG_READ,
+    group: PERMISSION_GROUPS.BLOG,
+    label: 'View blog posts',
+    description: 'View blog posts, categories and tags in every status',
+  },
+  {
+    code: PERMISSIONS.BLOG_WRITE,
+    group: PERMISSION_GROUPS.BLOG,
+    label: 'Create and edit blog posts',
+    description: 'Create posts and edit their content, SEO fields and featured image',
+  },
+  {
+    code: PERMISSIONS.BLOG_PUBLISH,
+    group: PERMISSION_GROUPS.BLOG,
+    label: 'Publish blog posts',
+    description: 'Publish, schedule, archive and feature a blog post',
+  },
+  {
+    code: PERMISSIONS.BLOG_DELETE,
+    group: PERMISSION_GROUPS.BLOG,
+    label: 'Delete blog posts',
+    description: 'Delete a blog post',
+  },
+  {
+    code: PERMISSIONS.BLOG_MANAGE_CATEGORIES,
+    group: PERMISSION_GROUPS.BLOG,
+    label: 'Manage blog categories',
+    description: 'Create, edit and retire blog categories',
+  },
+  {
+    code: PERMISSIONS.BLOG_MANAGE_TAGS,
+    group: PERMISSION_GROUPS.BLOG,
+    label: 'Manage blog tags',
+    description: 'Create and edit blog tags',
+  },
 ]
 
 /** Sensible starting grant for a newly created Sub-Admin. */
@@ -300,4 +346,5 @@ export const DEFAULT_SUBADMIN_PERMISSIONS: string[] = [
   // A sub-admin who cannot see incoming enquiries cannot do sales triage, which
   // is most of what the role is for.
   PERMISSIONS.LEAD_READ,
+  PERMISSIONS.BLOG_READ,
 ]

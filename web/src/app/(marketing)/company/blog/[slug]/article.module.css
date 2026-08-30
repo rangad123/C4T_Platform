@@ -1,0 +1,160 @@
+/* Maps the sanitized HTML from the admin editor onto this site's own type
+   tokens — §43 of the blog spec: never rely on browser defaults for rich
+   content. Content arrives via `dangerouslySetInnerHTML` (already sanitized
+   server-side, see api/src/modules/blog/blog-content.ts), so every selector
+   here is `:global()` rather than a CSS-module class. Close cousin of
+   `components/admin/blog/BlogEditor.module.css`'s content rules — the two
+   are allowed to diverge slightly (this one optimizes for reading measure
+   and screen rhythm; that one for a comfortable editing caret) but both map
+   the same tag set onto the same tokens. */
+
+.article :global(h1) {
+  margin: var(--space-9) 0 var(--space-4);
+  font-size: var(--type-heading-lg-size);
+  line-height: var(--type-heading-lg-line);
+  text-wrap: pretty;
+}
+
+.article :global(h2) {
+  margin: var(--space-9) 0 var(--space-4);
+  font-size: var(--type-heading-md-size);
+  line-height: var(--type-heading-md-line);
+  text-wrap: pretty;
+}
+
+.article :global(h3),
+.article :global(h4) {
+  margin: var(--space-7) 0 var(--space-3);
+  font-size: var(--type-heading-sm-size);
+  line-height: var(--type-heading-sm-line);
+}
+
+.article :global(p) {
+  margin: 0 0 var(--space-5);
+  font-size: var(--type-body-lg-size);
+  line-height: var(--type-body-lg-line);
+  color: var(--text-primary);
+}
+
+.article :global(ul),
+.article :global(ol) {
+  margin: 0 0 var(--space-5);
+  padding-left: 1.4em;
+  font-size: var(--type-body-lg-size);
+  line-height: var(--type-body-lg-line);
+}
+
+.article :global(li) {
+  margin-bottom: var(--space-2);
+}
+
+.article :global(strong) {
+  font-weight: var(--fw-semibold);
+}
+
+.article :global(blockquote) {
+  margin: var(--space-7) 0;
+  padding-left: var(--space-6);
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-size: var(--type-body-lg-size);
+}
+
+.article :global(pre) {
+  margin: var(--space-7) 0;
+  padding: var(--space-6);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-card);
+  overflow-x: auto;
+}
+
+.article :global(code) {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.article :global(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.article :global(:not(pre) > code) {
+  padding: 1px 6px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-xs);
+}
+
+.article :global(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-7) 0;
+  font-size: var(--type-body-sm-size);
+}
+
+.article :global(th),
+.article :global(td) {
+  border: 1px solid var(--border-default);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+}
+
+.article :global(th) {
+  background: var(--surface-sunken);
+  font-weight: var(--fw-semibold);
+}
+
+.article :global(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-media);
+  margin: var(--space-3) 0;
+}
+
+.article :global(figure) {
+  margin: var(--space-7) 0;
+}
+
+.article :global(figcaption) {
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+  color: var(--text-muted);
+}
+
+.article :global(hr) {
+  margin: var(--space-9) 0;
+  border: none;
+  border-top: 1px solid var(--border-default);
+}
+
+.article :global(.c4t-callout) {
+  margin: var(--space-7) 0;
+  padding: var(--space-6);
+  background: var(--surface-accent-subtle);
+  border-left: 3px solid var(--text-brand);
+  border-radius: var(--radius-card);
+}
+
+.article :global(.c4t-callout p:last-child) {
+  margin-bottom: 0;
+}
+
+.article :global(iframe) {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  border: none;
+  border-radius: var(--radius-media);
+  margin: var(--space-7) 0;
+}
+
+.article :global(a) {
+  color: var(--text-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.article :global(a:hover) {
+  color: var(--teal-600);
+}

@@ -50,6 +50,7 @@ const TONES: Record<string, Tone> = {
   INVITED: 'info',
   DRAFT: 'neutral',
   SCHEDULED: 'info',
+  PUBLISHED: 'success',
 
   // Terminal-bad
   REJECTED: 'error',

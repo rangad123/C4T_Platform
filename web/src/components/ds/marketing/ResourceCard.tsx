@@ -1,7 +1,9 @@
 import type { CSSProperties } from 'react'
+import Link from 'next/link'
 import { Icon } from '../core/Icon'
 import type { IconName } from '../core/icon-registry'
 import { Media } from './Media'
+import { SiteImage } from './SiteImage'
 
 export type ResourceType = 'Article' | 'Guide' | 'Webinar' | 'Report' | 'Case study' | 'Podcast'
 
@@ -23,6 +25,20 @@ export interface ResourceCardProps {
   author?: string
   layout?: 'vertical' | 'horizontal'
   href: string
+  /**
+   * A real photo instead of the `<Media>` placeholder plate — a blog post's
+   * featured image. Optional and additive: every existing call site (the
+   * homepage resource carousel) omits this and keeps rendering the
+   * placeholder exactly as before.
+   */
+  image?: { src: string; alt: string }
+  /**
+   * Replaces `type` in the eyebrow row when present. A blog card's topic
+   * ("API Testing") is what belongs there, not its format ("Article") —
+   * `type` still silently drives the plate's icon glyph either way. Omit to
+   * keep the existing `type`-as-label behavior unchanged.
+   */
+  category?: string
   style?: CSSProperties
   className?: string
 }
@@ -48,13 +64,16 @@ export function ResourceCard({
   author,
   layout = 'vertical',
   href,
+  image,
+  category,
   style,
   className,
 }: ResourceCardProps) {
   const horizontal = layout === 'horizontal'
+  const eyebrowLabel = category ?? type
 
   return (
-    <a
+    <Link
       href={href}
       className={['c4t-card-hover', horizontal ? 'c4t-resource-horizontal' : null, className]
         .filter(Boolean)
@@ -74,19 +93,34 @@ export function ResourceCard({
         ...style,
       }}
     >
-      <Media
-        ratio={horizontal ? '4 / 3' : '16 / 9'}
-        label={type}
-        icon={TYPE_ICON[type]}
-        tone="sunken"
-        radius="0"
-        style={{
-          borderWidth: 0,
-          borderRight: horizontal ? '1px solid var(--border-subtle)' : 'none',
-          borderBottom: horizontal ? 'none' : '1px solid var(--border-subtle)',
-          height: horizontal ? '100%' : undefined,
-        }}
-      />
+      {image ? (
+        <SiteImage
+          src={image.src}
+          alt={image.alt}
+          fill
+          ratio={horizontal ? '4 / 3' : '16 / 9'}
+          sizes={horizontal ? '260px' : '(max-width: 900px) 100vw, 25vw'}
+          radius="0"
+          style={{
+            borderRight: horizontal ? '1px solid var(--border-subtle)' : 'none',
+            borderBottom: horizontal ? 'none' : '1px solid var(--border-subtle)',
+          }}
+        />
+      ) : (
+        <Media
+          ratio={horizontal ? '4 / 3' : '16 / 9'}
+          label={type}
+          icon={TYPE_ICON[type]}
+          tone="sunken"
+          radius="0"
+          style={{
+            borderWidth: 0,
+            borderRight: horizontal ? '1px solid var(--border-subtle)' : 'none',
+            borderBottom: horizontal ? 'none' : '1px solid var(--border-subtle)',
+            height: horizontal ? '100%' : undefined,
+          }}
+        />
+      )}
 
       <div
         style={{
@@ -109,7 +143,7 @@ export function ResourceCard({
             color: 'var(--text-brand)',
           }}
         >
-          {type}
+          {eyebrowLabel}
           {date ? (
             <span style={{ color: 'var(--text-muted)', letterSpacing: '0.06em' }}>{date}</span>
           ) : null}
@@ -163,6 +197,6 @@ export function ResourceCard({
           </div>
         ) : null}
       </div>
-    </a>
+    </Link>
   )
 }

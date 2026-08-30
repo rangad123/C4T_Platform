@@ -15,6 +15,7 @@ import { authorize } from '../../lib/access/policy.js'
 import {
   createUploadUrl,
   createDownloadUrl,
+  createPublicUrl,
   writeLocalObject,
   readLocalObject,
   assertUploadAllowed,
@@ -121,6 +122,15 @@ async function assertCanDownload(
   if (isAdminSide(user)) return
 
   if (file.scope === FileScope.AVATAR || file.scope === FileScope.ORG_LOGO) return
+
+  /**
+   * A blog post's featured/inline imagery. Genuinely public — served through
+   * `createPublicUrl` with no session at all via `GET /:id/public-url` below
+   * — so this branch is defense in depth for the authenticated
+   * `download-url` path only: never restrict that path more tightly than
+   * the public one.
+   */
+  if (file.scope === FileScope.BLOG_FEATURED_IMAGE) return
 
   /**
    * Published BY the platform TO its users — the blank NDA, for instance. Any
@@ -237,6 +247,31 @@ uploadsRouter.get(
     await assertCanDownload(req.user!, file)
 
     res.json({ data: { url: await createDownloadUrl(file.storageKey, file.originalName) } })
+  },
+)
+
+/**
+ * Resolves a just-uploaded `BLOG_FEATURED_IMAGE` file to its permanent public
+ * URL — used by the admin editor's inline-image-insert flow to get a URL it
+ * can embed straight into the Tiptap document. `authenticate` only, no
+ * admin-permission requirement (matching how open AVATAR/ORG_LOGO already
+ * are to any signed-in account) — but scope-restricted, since this is the
+ * one route that hands back a public URL at all.
+ */
+uploadsRouter.get(
+  '/:id/public-url',
+  authenticate,
+  validate({ params: z.object({ id: z.string().cuid() }) }),
+  async (req, res) => {
+    const file = await prisma.fileObject.findUnique({
+      where: { id: param(req, 'id') },
+      select: { scope: true, storageKey: true, isComplete: true },
+    })
+    if (!file?.isComplete) throw new NotFoundError('File')
+    if (file.scope !== FileScope.BLOG_FEATURED_IMAGE) {
+      throw new ForbiddenError('This file has no public URL')
+    }
+    res.json({ data: { url: createPublicUrl(file.storageKey) } })
   },
 )
 

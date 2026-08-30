@@ -28,6 +28,7 @@ export const runtime = 'nodejs'
  */
 const SCOPES = {
   'platform-document': 'PLATFORM_DOCUMENT',
+  'blog-featured-image': 'BLOG_FEATURED_IMAGE',
 } as const
 
 /** Matches the API's own `UPLOAD_MAX_BYTES` default. */
@@ -35,6 +36,12 @@ const MAX_BYTES = 52_428_800
 
 const ALLOWED: Record<keyof typeof SCOPES, readonly string[]> = {
   'platform-document': ['application/pdf'],
+  'blog-featured-image': ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+}
+
+const MIME_ERROR: Record<keyof typeof SCOPES, string> = {
+  'platform-document': 'That document has to be a PDF.',
+  'blog-featured-image': 'Use a PNG, JPEG, WebP or GIF image.',
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -60,7 +67,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const mimeType = file.type || 'application/octet-stream'
   if (!ALLOWED[scopeKey].includes(mimeType)) {
-    return NextResponse.json({ error: 'That document has to be a PDF.' }, { status: 400 })
+    return NextResponse.json({ error: MIME_ERROR[scopeKey] }, { status: 400 })
   }
 
   const cookie = request.headers.get('cookie') ?? ''
@@ -113,5 +120,20 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'The upload did not finish.' }, { status: 502 })
   }
 
-  return NextResponse.json({ fileId: presign.data.fileId, name: file.name })
+  // Blog images are the one file class with a real public URL — resolved here
+  // so the editor's inline-image-insert flow has a URL to embed immediately,
+  // without a second client-side round trip.
+  let url: string | undefined
+  if (scopeKey === 'blog-featured-image') {
+    const urlRes = await fetch(
+      new URL(`/v1/uploads/${presign.data.fileId}/public-url`, env.API_ORIGIN),
+      { headers: { cookie }, cache: 'no-store' },
+    )
+    if (urlRes.ok) {
+      const body = (await urlRes.json()) as { data: { url: string } }
+      url = body.data.url
+    }
+  }
+
+  return NextResponse.json({ fileId: presign.data.fileId, name: file.name, url })
 }

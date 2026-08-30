@@ -10,8 +10,13 @@ export interface SelectFilter {
   name: string
   /** Field label. */
   label: string
-  /** Enum values. The "all" option is prepended automatically. */
-  options: readonly string[]
+  /**
+   * Enum values, or `{value, label}` pairs when the value isn't a word
+   * `titleCase` can turn into a real display label on its own — a slug,
+   * say. A plain string still gets its label derived via `titleCase`, same
+   * as before. The "all" option is prepended automatically either way.
+   */
+  options: readonly (string | { value: string; label: string })[]
   /** Currently applied value, or undefined. */
   value: string | undefined
   /** Label for the empty option, e.g. "All statuses". */
@@ -153,7 +158,9 @@ export function ListFilters({
             defaultValue={filter.value ?? ''}
             options={[
               { value: '', label: filter.allLabel },
-              ...filter.options.map((value) => ({ value, label: titleCase(value) })),
+              ...filter.options.map((option) =>
+                typeof option === 'string' ? { value: option, label: titleCase(option) } : option,
+              ),
             ]}
           />
         </Field>

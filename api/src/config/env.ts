@@ -160,6 +160,15 @@ const schema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(52_428_800),
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /**
+   * Public CDN/host for the one file class anyone on the internet may read
+   * without a session — blog featured images (`FileScope.BLOG_FEATURED_IMAGE`).
+   * Every other scope stays behind a short-lived signed URL; this is the sole
+   * exception, because a blog post is read by anonymous visitors and
+   * unfurl/crawler bots that never hold one. See `createPublicUrl` in
+   * `lib/storage.ts`.
+   */
+  PUBLIC_ASSETS_BASE_URL: optionalUrl(),
 
   MAIL_DRIVER: z.enum(['console', 'smtp']).default('console'),
   MAIL_FROM: z.string().default('Crowd4Test <no-reply@crowd4test.com>'),
@@ -204,6 +213,11 @@ export const googleOAuthEnabled = Boolean(
 if (isProduction) {
   if (env.STORAGE_DRIVER === 's3' && !env.S3_BUCKET) {
     throw new Error('S3_BUCKET is required when STORAGE_DRIVER=s3')
+  }
+  if (env.STORAGE_DRIVER === 's3' && !env.PUBLIC_ASSETS_BASE_URL) {
+    throw new Error(
+      'PUBLIC_ASSETS_BASE_URL is required when STORAGE_DRIVER=s3 (blog images need a public CDN URL)',
+    )
   }
   if (env.STORAGE_DRIVER === 'local') {
     throw new Error('STORAGE_DRIVER=local is not supported in production; use s3')

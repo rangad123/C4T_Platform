@@ -18,6 +18,7 @@ import { catalogRouter } from '../modules/catalog/catalog.routes.js'
 import { paymentAccountsRouter } from '../modules/payment-accounts/payment-accounts.routes.js'
 import { testingRouter } from '../modules/testing/testing.routes.js'
 import { reportsRouter } from '../modules/reports/reports.routes.js'
+import { blogRouter } from '../modules/blog/blog.routes.js'
 
 /**
  * API v1. Every route is mounted under /v1 so a future breaking change can ship
@@ -41,6 +42,7 @@ v1Router.use('/payment-accounts', paymentAccountsRouter)
 v1Router.use('/notifications', notificationsRouter)
 v1Router.use('/uploads', uploadsRouter)
 v1Router.use('/stats', statsRouter)
+v1Router.use('/blog', blogRouter)
 /**
  * Mounted at the v1 root, not a prefix — the router's own routes already
  * spell out `/test-cases/*` and `/builds/:buildId/*` (a test case is not

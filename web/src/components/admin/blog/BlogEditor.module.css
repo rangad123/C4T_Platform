@@ -1,0 +1,210 @@
+.wrapper {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-input);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-default);
+  margin: 0 var(--space-1);
+}
+
+.textButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.textButton:hover {
+  background: var(--surface-canvas);
+  border-color: var(--border-default);
+}
+
+.textButton.active {
+  background: var(--surface-canvas);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.textButton:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.imageError {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: var(--status-error-fg);
+  background: var(--status-error-bg);
+  font-size: var(--type-body-sm-size);
+}
+
+/* ─── Article content — the editing surface itself ────────────────────────
+   Kept close to (but not copy-pasted from) the public article typography in
+   `company/blog/[slug]/article.module.css` — the two are allowed to diverge
+   slightly (this one needs a visible focus/caret and comfortable editing
+   line-height; the public one optimizes for reading), but both map the same
+   sanitized-HTML tag set onto this site's type tokens. */
+
+.content {
+  min-height: 360px;
+  padding: var(--space-6);
+  color: var(--text-primary);
+  font-size: var(--type-body-md-size);
+  line-height: 1.65;
+}
+
+.content:focus {
+  outline: none;
+}
+
+.content :global(p.is-editor-empty:first-child::before) {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.content :global(h1) {
+  margin: var(--space-7) 0 var(--space-3);
+  font-size: var(--type-heading-lg-size);
+  line-height: var(--type-heading-lg-line);
+}
+
+.content :global(h2) {
+  margin: var(--space-7) 0 var(--space-3);
+  font-size: var(--type-heading-md-size);
+  line-height: var(--type-heading-md-line);
+}
+
+.content :global(h3),
+.content :global(h4) {
+  margin: var(--space-6) 0 var(--space-2);
+  font-size: var(--type-heading-sm-size);
+  line-height: var(--type-heading-sm-line);
+}
+
+.content :global(p) {
+  margin: 0 0 var(--space-4);
+}
+
+.content :global(ul),
+.content :global(ol) {
+  margin: 0 0 var(--space-4);
+  padding-left: 1.4em;
+}
+
+.content :global(blockquote) {
+  margin: var(--space-5) 0;
+  padding-left: var(--space-5);
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.content :global(pre) {
+  margin: var(--space-5) 0;
+  padding: var(--space-5);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-card);
+  overflow-x: auto;
+}
+
+.content :global(code) {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.content :global(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.content :global(:not(pre) > code) {
+  padding: 1px 5px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-xs);
+}
+
+.content :global(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-5) 0;
+}
+
+.content :global(th),
+.content :global(td) {
+  border: 1px solid var(--border-default);
+  padding: var(--space-3);
+  text-align: left;
+}
+
+.content :global(th) {
+  background: var(--surface-sunken);
+  font-weight: var(--fw-semibold);
+}
+
+.content :global(img) {
+  max-width: 100%;
+  border-radius: var(--radius-media);
+}
+
+.content :global(hr) {
+  margin: var(--space-6) 0;
+  border: none;
+  border-top: 1px solid var(--border-default);
+}
+
+.content :global(.c4t-callout) {
+  margin: var(--space-5) 0;
+  padding: var(--space-5);
+  background: var(--surface-accent-subtle);
+  border-left: 3px solid var(--text-brand);
+  border-radius: var(--radius-card);
+}
+
+.content :global(.c4t-callout p:last-child) {
+  margin-bottom: 0;
+}
+
+.content :global(iframe) {
+  max-width: 100%;
+  border-radius: var(--radius-media);
+  margin: var(--space-5) 0;
+}
+
+.content :global(a) {
+  color: var(--text-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

@@ -123,6 +123,40 @@ export function breadcrumbFor(path: string, leafName?: string) {
   return breadcrumbJsonLd(trail)
 }
 
+/**
+ * `BlogPosting`, not the more generic `Article` — Google's preferred, more
+ * specific type for a blog post. Only ever called for an effectively-
+ * published post (never a draft/scheduled/preview render): marking up an
+ * article with no confirmed publication is an assertion that is not true
+ * yet, the same reasoning the old static blog's page-local `articleJsonLd`
+ * followed.
+ */
+export function blogPostingJsonLd(post: {
+  title: string
+  excerpt: string | null
+  slug: string
+  publishedAt: string | null
+  author: string | null
+  featuredImageUrl: string | null
+}) {
+  const url = new URL(`/company/blog/${post.slug}`, env.NEXT_PUBLIC_SITE_URL).toString()
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: post.title,
+    description: post.excerpt ?? undefined,
+    image: post.featuredImageUrl ?? undefined,
+    url,
+    mainEntityOfPage: url,
+    datePublished: post.publishedAt ?? undefined,
+    dateModified: post.publishedAt ?? undefined,
+    author: post.author
+      ? { '@type': 'Person', name: post.author }
+      : { '@type': 'Organization', name: SITE_NAME },
+    publisher: { '@type': 'Organization', name: SITE_NAME },
+  }
+}
+
 export function faqJsonLd(faqs: { question: string; answer: string }[]) {
   return {
     '@context': 'https://schema.org',

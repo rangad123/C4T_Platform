@@ -1,128 +1,220 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
-import { Badge, Button, CtaBanner, Section } from '@/components/ds'
+import Link from 'next/link'
+import { notFound, permanentRedirect } from 'next/navigation'
+import { Badge, Button, CtaBanner, ResourceCard, Section } from '@/components/ds'
+import { ShareRow } from '@/components/ds/marketing/ShareRow'
 import { DeepBand } from '@/components/sections/blocks'
 import s from '@/components/sections/sections.module.css'
 import { JsonLd } from '@/components/seo/JsonLd'
-import { DRAFT_METADATA, INCLUDE_DRAFTS } from '@/lib/content-visibility'
+import { serverFetch } from '@/lib/api/server'
+import { publicFetchPage, publicFetchWithExtras } from '@/lib/api/public'
+import { ApiError } from '@/lib/api/types'
 import { SITE_NAME } from '@/lib/seo/metadata'
-import { breadcrumbJsonLd } from '@/lib/seo/structured-data'
+import { blogPostingJsonLd, breadcrumbJsonLd } from '@/lib/seo/structured-data'
 import { env } from '@/lib/env'
-import { CLOSING_CTA, getPost, visiblePosts } from '@/content'
+import { CLOSING_CTA } from '@/content'
+import type { BlogPostDetail, BlogPostSummary } from '@/lib/blog/types'
+import styles from './article.module.css'
 
 const PREFIX = '/company/blog'
 
 /**
- * A blog post.
+ * A blog post — rewritten to read from the database (see the plan: the
+ * static `content/blog.ts` collection is retired entirely).
  *
- * The route registry does NOT hold these — it is for the fixed IA, and posts are a
- * collection that changes without a code review of the routing. So metadata is
- * built from the post itself rather than `buildMetadata`, and the sitemap picks
- * them up from `publishedPosts()`.
- *
- * `dynamicParams = false`: a slug that is not in the collection 404s instead of
- * rendering an empty article shell.
- *
- * ⚠ DRAFTS. In production `visiblePosts(false)` returns only published posts, so
- * a draft generates no route at all and this file 404s it. On preview it renders
- * with a visible Draft badge and `noindex`. No post is published today — every
- * entry lacks a body — so in production this route currently generates nothing,
- * which is correct rather than broken.
+ * Every slug now renders on demand rather than from a build-time
+ * `generateStaticParams` list — the old static site's assumption ("only
+ * pre-declared slugs exist") is exactly what this feature's "no manual
+ * refresh" requirement rules out. Freshness comes from `publicFetch`'s
+ * `next.tags` + the admin's `updateTag` calls instead, not from
+ * `dynamicParams = false` + rebuild.
  */
-export const dynamicParams = false
 
-export function generateStaticParams() {
-  return visiblePosts(INCLUDE_DRAFTS).map((post) => ({ slug: post.slug }))
+/** Resolves the post for a real visit, or — behind `?preview=1` — for the admin editor's Preview button. */
+async function loadPost(
+  slug: string,
+  isPreviewRequest: boolean,
+): Promise<{ post: BlogPostDetail; redirectTo: string | null }> {
+  if (isPreviewRequest) {
+    try {
+      const post = await serverFetch<BlogPostDetail>(`blog/posts/${slug}/preview`)
+      return { post, redirectTo: null }
+    } catch {
+      // Not signed in, lacking `blog.read`, or the slug genuinely doesn't
+      // exist — fall through to the normal public path below rather than
+      // surfacing anything. A non-admin pasting `?preview=1` onto a real
+      // URL should see exactly what everyone else sees, and learn nothing
+      // about whether a draft exists at a slug that isn't live.
+    }
+  }
+
+  const { data: post, redirectTo } = await publicFetchWithExtras<
+    BlogPostDetail,
+    { redirectTo: string | null }
+  >(`blog/posts/${slug}`, { next: { tags: [`blog-post-${slug}`] } })
+  return { post, redirectTo }
 }
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>
+  searchParams: Promise<{ preview?: string }>
 }): Promise<Metadata> {
   const { slug } = await params
-  const post = getPost(slug)
-  if (!post) return {}
+  const sp = await searchParams
+
+  let post: BlogPostDetail
+  try {
+    ;({ post } = await loadPost(slug, sp.preview === '1'))
+  } catch {
+    return {}
+  }
 
   const url = new URL(`${PREFIX}/${slug}`, env.NEXT_PUBLIC_SITE_URL).toString()
-  const isDraft = post.status === 'draft'
+  const title = post.seoTitle ?? post.title
+  const description = post.seoDescription ?? post.excerpt ?? undefined
+  const isLive = post.status === 'PUBLISHED'
 
   return {
-    title: post.title,
-    description: post.excerpt,
+    title,
+    description,
     alternates: { canonical: url },
     openGraph: {
-      // `article`, not `website` — it carries the publication date, which is what
-      // makes a post eligible for the news and article treatments.
+      // `article`, not `website` — it carries the publication date, which is
+      // what makes a post eligible for the news/article treatments.
       type: 'article',
       siteName: SITE_NAME,
-      title: post.title,
-      description: post.excerpt,
+      title,
+      description,
       url,
-      publishedTime: post.date,
+      // Always explicit — Next replaces `openGraph` wholesale on override
+      // rather than merging, so omitting `images` here would silently drop
+      // the fallback and every share of this post would unfurl with none.
+      images: [post.featuredImageUrl ?? '/opengraph-image'],
+      publishedTime: post.publishedAt ?? undefined,
       authors: post.author ? [post.author] : undefined,
     },
-    twitter: { card: 'summary_large_image', title: post.title, description: post.excerpt },
-    ...(isDraft ? DRAFT_METADATA : {}),
+    twitter: { card: 'summary_large_image', title, description },
+    ...(isLive ? {} : { robots: { index: false, follow: false } }),
   }
 }
 
-export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function BlogPostPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<{ preview?: string }>
+}) {
   const { slug } = await params
-  const post = getPost(slug)
+  const sp = await searchParams
+  const isPreviewRequest = sp.preview === '1'
 
-  if (!post) notFound()
-  // Belt and braces: `generateStaticParams` already excludes drafts in
-  // production, but an explicit guard means a future switch to on-demand
-  // rendering cannot leak one.
-  if (post.status === 'draft' && !INCLUDE_DRAFTS) notFound()
+  let post: BlogPostDetail
+  let redirectTo: string | null
+  try {
+    ;({ post, redirectTo } = await loadPost(slug, isPreviewRequest))
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) notFound()
+    throw err
+  }
 
-  const isDraft = post.status === 'draft'
+  // A slug change: the old URL still resolves (via `previousSlugs`), so send
+  // the visitor and every search engine on to the current one instead of
+  // quietly serving the post at a URL that no longer matches its metadata.
+  if (redirectTo) permanentRedirect(`${PREFIX}/${redirectTo}`)
+
+  const isLive = post.status === 'PUBLISHED'
+
+  const related = isLive
+    ? await publicFetchPage<BlogPostSummary>('blog/posts', {
+        query: { category: post.category?.slug, excludeId: post.id, limit: 3 },
+        next: { tags: ['blog-posts'] },
+      })
+        .then((r) => r.data)
+        .catch(() => [])
+    : []
+
+  const breadcrumbTrail = [
+    { name: 'Home', path: '/' },
+    { name: 'Blog', path: PREFIX },
+    ...(post.category ? [{ name: post.category.name, path: `${PREFIX}/category/${post.category.slug}` }] : []),
+    { name: post.title, path: `${PREFIX}/${slug}` },
+  ]
 
   return (
     <>
-      {/* No `Article` JSON-LD on a draft: marking up an article with no body and
-          no publication date is an assertion that is not true yet. The breadcrumb
-          is safe either way. */}
+      {/* No `BlogPosting` markup on a non-live preview — marking up an
+          article as published when it is not yet true is exactly the
+          mistake the old static page's own comment warned about. */}
       <JsonLd
         schema={
-          isDraft
-            ? breadcrumbJsonLd([
-                { name: 'Home', path: '/' },
-                { name: 'Blog', path: PREFIX },
-                { name: post.title, path: `${PREFIX}/${slug}` },
-              ])
-            : [
-                articleJsonLd(
-                  post.title,
-                  post.excerpt,
-                  `${PREFIX}/${slug}`,
-                  post.date,
-                  post.author,
-                ),
-                breadcrumbJsonLd([
-                  { name: 'Home', path: '/' },
-                  { name: 'Blog', path: PREFIX },
-                  { name: post.title, path: `${PREFIX}/${slug}` },
-                ]),
-              ]
+          isLive
+            ? [blogPostingJsonLd(post), breadcrumbJsonLd(breadcrumbTrail)]
+            : breadcrumbJsonLd(breadcrumbTrail)
         }
       />
 
       <Section tone="inverse" className={s.deep} compact>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="c4t-eyebrow" style={{ color: 'var(--text-inverse-muted)' }}>
-            {post.type}
+        <nav
+          aria-label="Breadcrumb"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 'var(--space-5)',
+            fontSize: 'var(--type-caption-size)',
+            color: 'var(--text-inverse-muted)',
+          }}
+        >
+          {breadcrumbTrail.slice(0, -1).map((crumb) => (
+            <span key={crumb.path} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Link href={crumb.path} style={{ color: 'inherit', textDecoration: 'none' }}>
+                {crumb.name}
+              </Link>
+              <span aria-hidden="true">/</span>
+            </span>
+          ))}
+          <span style={{ color: 'var(--text-inverse)' }} aria-current="page">
+            {post.title}
           </span>
-          {isDraft ? <Badge tone="warning">Draft — not published</Badge> : null}
-          {post.date ? (
+        </nav>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span className="c4t-eyebrow" style={{ color: 'var(--text-inverse-muted)' }}>
+            {post.category?.name ?? 'Article'}
+          </span>
+          {!isLive ? (
+            <Badge tone="warning">
+              {post.status === 'DRAFT'
+                ? 'Draft — preview only'
+                : post.status === 'SCHEDULED'
+                  ? 'Scheduled — preview only'
+                  : 'Archived — preview only'}
+            </Badge>
+          ) : null}
+          {post.publishedAt ? (
             <span
               className="c4t-eyebrow"
               style={{ color: 'var(--text-inverse-muted)', letterSpacing: '0.06em' }}
             >
-              {formatDate(post.date)}
+              {formatDate(post.publishedAt)}
             </span>
           ) : null}
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 'var(--type-caption-size)',
+              color: 'var(--text-inverse-muted)',
+            }}
+          >
+            {post.readingTimeMinutes} min read
+          </span>
         </div>
 
         <h1
@@ -137,35 +229,35 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
           {post.title}
         </h1>
 
-        <p
-          className="c4t-body-lg"
-          style={{ margin: '24px 0 0', color: 'var(--text-inverse-muted)', maxWidth: 620 }}
-        >
-          {post.excerpt}
-        </p>
+        {post.excerpt ? (
+          <p
+            className="c4t-body-lg"
+            style={{ margin: '24px 0 0', color: 'var(--text-inverse-muted)', maxWidth: 620 }}
+          >
+            {post.excerpt}
+          </p>
+        ) : null}
       </Section>
 
       <Section>
-        {/* `--container-prose` caps the measure at ~75ch, per the type rules.
-            Long-form is the one place on this site where line length is the whole
+        {/* `--container-prose` caps the measure at ~75ch — long-form is the
+            one place on this site where line length is the whole
             typographic problem. */}
-        <div style={{ maxWidth: 'var(--container-prose)' }}>
-          {post.body?.length ? (
-            post.body.map((paragraph) => (
-              <p
-                key={paragraph.slice(0, 40)}
-                className="c4t-body-lg"
-                style={{ margin: '0 0 24px', color: 'var(--text-primary)' }}
-              >
-                {paragraph}
-              </p>
-            ))
-          ) : (
-            <p className="c4t-body-lg" style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              This post has no body yet. Add one to <code>content/blog.ts</code> and set its status
-              to <code>published</code>.
-            </p>
-          )}
+        <div style={{ maxWidth: 'var(--container-prose)', margin: '0 auto' }}>
+          <div className={styles.article} dangerouslySetInnerHTML={{ __html: post.content }} />
+
+          <div
+            style={{
+              marginTop: 'var(--space-8)',
+              paddingTop: 'var(--space-7)',
+              borderTop: '1px solid var(--border-default)',
+            }}
+          >
+            <ShareRow
+              url={new URL(`${PREFIX}/${post.slug}`, env.NEXT_PUBLIC_SITE_URL).toString()}
+              title={post.title}
+            />
+          </div>
 
           <div style={{ marginTop: 'var(--space-9)' }}>
             <Button variant="secondary" iconLeft="arrow-left" href={PREFIX}>
@@ -173,6 +265,36 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
             </Button>
           </div>
         </div>
+
+        {related.length > 0 ? (
+          <div style={{ marginTop: 'var(--space-13)' }}>
+            <h2 className="c4t-heading-md" style={{ margin: '0 0 var(--space-6)' }}>
+              Related articles
+            </h2>
+            <div
+              className="c4t-grid-3"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 'var(--space-grid-gap)',
+              }}
+            >
+              {related.map((item) => (
+                <ResourceCard
+                  key={item.slug}
+                  type="Article"
+                  category={item.category?.name}
+                  title={item.title}
+                  description={item.excerpt ?? undefined}
+                  readTime={`${item.readingTimeMinutes} min read`}
+                  author={item.author ?? undefined}
+                  href={`${PREFIX}/${item.slug}`}
+                  image={item.featuredImageUrl ? { src: item.featuredImageUrl, alt: item.title } : undefined}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </Section>
 
       <DeepBand>
@@ -182,35 +304,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
   )
 }
 
-/**
- * `en-GB` explicitly, not the server's locale. A build machine in another region
- * would otherwise silently reorder every date on the site.
- */
+/** `en-GB` explicitly, not the server's locale — see the note on the same helper elsewhere in this codebase. */
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-function articleJsonLd(
-  title: string,
-  description: string,
-  path: string,
-  date?: string,
-  author?: string,
-) {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'Article',
-    headline: title,
-    description,
-    url: new URL(path, env.NEXT_PUBLIC_SITE_URL).toString(),
-    datePublished: date,
-    author: author
-      ? { '@type': 'Person', name: author }
-      : { '@type': 'Organization', name: SITE_NAME },
-    publisher: { '@type': 'Organization', name: SITE_NAME },
-  }
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 }
