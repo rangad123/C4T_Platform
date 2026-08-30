@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
 
@@ -82,7 +82,7 @@ export async function saveTransactionStatus(formData: FormData): Promise<void> {
   if (clear) body.settledAt = null
   else if (DATE_ONLY.test(settledAt)) body.settledAt = settledAt
 
-  await serverFetch<{ id: string }>(`transactions/${id}`, { method: 'PATCH', body })
+  await actionFetch<{ id: string }>(`transactions/${id}`, { method: 'PATCH', body })
   revalidate(id)
 }
 
@@ -100,7 +100,7 @@ export async function saveTransactionDetails(formData: FormData): Promise<void> 
   const id = formTrimmed(formData, 'id')
   if (!id) return
 
-  await serverFetch<{ id: string }>(`transactions/${id}`, {
+  await actionFetch<{ id: string }>(`transactions/${id}`, {
     method: 'PATCH',
     body: {
       description: formTrimmed(formData, 'description').slice(0, 1000),
@@ -129,7 +129,7 @@ export async function savePayoutDetails(formData: FormData): Promise<void> {
   const tdsAmountMinor = toMinorUnitsOrNull(formTrimmed(formData, 'tdsAmount'))
   const buildOrContestRef = formTrimmed(formData, 'buildOrContestRef')
 
-  await serverFetch<{ id: string }>(`transactions/${id}`, {
+  await actionFetch<{ id: string }>(`transactions/${id}`, {
     method: 'PATCH',
     body: {
       ...((PAYMENT_METHODS as readonly string[]).includes(paymentMethod) ? { paymentMethod } : {}),

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -86,7 +86,7 @@ export async function updateUserIdentity(formData: FormData): Promise<void> {
 
   let notice = 'identity-saved'
   try {
-    await serverFetch<unknown>(`users/${id}`, {
+    await actionFetch<unknown>(`users/${id}`, {
       method: 'PATCH',
       body: {
         ...(firstName ? { firstName } : {}),
@@ -124,7 +124,7 @@ export async function changeUserRole(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`users/${id}/role`, { method: 'POST', body: { role } })
+      await actionFetch<unknown>(`users/${id}/role`, { method: 'POST', body: { role } })
       revalidateUser(id)
     } catch (error) {
       notice = failureNotice(error)
@@ -151,7 +151,7 @@ export async function changeUserStatus(formData: FormData): Promise<void> {
   } else {
     const reason = formTrimmed(formData, 'reason')
     try {
-      await serverFetch<unknown>(`users/${id}/status`, {
+      await actionFetch<unknown>(`users/${id}/status`, {
         method: 'POST',
         body: { status, ...(reason ? { reason } : {}) },
       })
@@ -193,7 +193,7 @@ export async function setSubAdminPermissions(formData: FormData): Promise<void> 
 
   let notice = 'permissions-saved'
   try {
-    await serverFetch<unknown>(`users/${id}/permissions`, {
+    await actionFetch<unknown>(`users/${id}/permissions`, {
       method: 'PUT',
       body: { permissionCodes },
     })
@@ -219,7 +219,7 @@ export async function archiveUserAccount(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   if (!id) return
 
-  await serverFetch<unknown>(`users/${id}`, { method: 'DELETE' })
+  await actionFetch<unknown>(`users/${id}`, { method: 'DELETE' })
 
   revalidateUser(id)
   redirect(LIST_PATH)

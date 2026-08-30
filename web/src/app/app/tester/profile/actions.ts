@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed, formStringArray } from '@/lib/form-data'
@@ -73,13 +73,13 @@ export async function updateBasicInfoAction(formData: FormData): Promise<void> {
   let notice = 'about-saved'
   try {
     if (firstName) {
-      await serverFetch('users/me', {
+      await actionFetch('users/me', {
         method: 'PATCH',
         body: { firstName, lastName, phone },
       })
     }
 
-    await serverFetch('testers/me', {
+    await actionFetch('testers/me', {
       method: 'PATCH',
       body: {
         headline: formTrimmed(formData, 'headline'),
@@ -126,7 +126,7 @@ export async function setNdaDocumentAction(formData: FormData): Promise<void> {
   const fileId = formTrimmed(formData, 'fileId')
   if (!fileId) return
 
-  await serverFetch('testers/me/nda/document', { method: 'POST', body: { fileId } })
+  await actionFetch('testers/me/nda/document', { method: 'POST', body: { fileId } })
   revalidatePath(PROFILE_PATH)
 }
 
@@ -137,7 +137,7 @@ export async function setAvatarAction(formData: FormData): Promise<void> {
   const fileId = formTrimmed(formData, 'fileId')
   if (!fileId) return
 
-  await serverFetch('users/me', { method: 'PATCH', body: { avatarFileId: fileId } })
+  await actionFetch('users/me', { method: 'PATCH', body: { avatarFileId: fileId } })
   revalidatePath(PROFILE_PATH)
 }
 
@@ -199,7 +199,7 @@ export async function addDeviceAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch('testers/me/devices', { method: 'POST', body })
+      await actionFetch('testers/me/devices', { method: 'POST', body })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       notice = failureNotice(error)
@@ -219,7 +219,7 @@ export async function updateDeviceAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch(`testers/me/devices/${deviceId}`, { method: 'PATCH', body })
+      await actionFetch(`testers/me/devices/${deviceId}`, { method: 'PATCH', body })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       notice = failureNotice(error)
@@ -238,7 +238,7 @@ export async function removeDeviceAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch(`testers/me/devices/${deviceId}`, { method: 'DELETE' })
+      await actionFetch(`testers/me/devices/${deviceId}`, { method: 'DELETE' })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       notice = failureNotice(error)
@@ -281,7 +281,7 @@ export async function addBrowserAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch('catalog/me/browsers', { method: 'POST', body })
+      await actionFetch('catalog/me/browsers', { method: 'POST', body })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       // A 409 means this exact browser+version is already listed — a
@@ -307,7 +307,7 @@ export async function updateBrowserAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'PATCH', body })
+      await actionFetch(`catalog/me/browsers/${browserRowId}`, { method: 'PATCH', body })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       notice = failureNotice(error)
@@ -326,7 +326,7 @@ export async function removeBrowserAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch(`catalog/me/browsers/${browserRowId}`, { method: 'DELETE' })
+      await actionFetch(`catalog/me/browsers/${browserRowId}`, { method: 'DELETE' })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       notice = failureNotice(error)
@@ -349,7 +349,7 @@ export async function setSkillsAction(formData: FormData): Promise<void> {
 
   let notice = 'skills-saved'
   try {
-    await serverFetch('testers/me/skills', { method: 'PUT', body: { skillIds } })
+    await actionFetch('testers/me/skills', { method: 'PUT', body: { skillIds } })
     revalidatePath(PROFILE_PATH)
   } catch (error) {
     notice = failureNotice(error)
@@ -388,7 +388,7 @@ export async function addLanguageAction(formData: FormData): Promise<void> {
     const current = parseCurrentLanguages(formData)
     const next = [...current.filter((l) => l.code !== code), { code, proficiency }]
     try {
-      await serverFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
+      await actionFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       notice = failureNotice(error)
@@ -407,7 +407,7 @@ export async function removeLanguageAction(formData: FormData): Promise<void> {
   let notice = 'language-removed'
 
   try {
-    await serverFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
+    await actionFetch('testers/me/languages', { method: 'PUT', body: { languages: next } })
     revalidatePath(PROFILE_PATH)
   } catch (error) {
     notice = failureNotice(error)
@@ -432,7 +432,7 @@ export async function addWorkHistoryAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch('testers/me/work-history', {
+      await actionFetch('testers/me/work-history', {
         method: 'POST',
         body: {
           company,
@@ -461,7 +461,7 @@ export async function removeWorkHistoryAction(formData: FormData): Promise<void>
     notice = 'invalid'
   } else {
     try {
-      await serverFetch(`testers/me/work-history/${workHistoryId}`, { method: 'DELETE' })
+      await actionFetch(`testers/me/work-history/${workHistoryId}`, { method: 'DELETE' })
       revalidatePath(PROFILE_PATH)
     } catch (error) {
       notice = failureNotice(error)
@@ -473,7 +473,7 @@ export async function removeWorkHistoryAction(formData: FormData): Promise<void>
 
 export async function acceptNdaAction(_formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
-  await serverFetch('testers/me/nda', { method: 'POST', body: { accepted: true } })
+  await actionFetch('testers/me/nda', { method: 'POST', body: { accepted: true } })
   revalidatePath(PROFILE_PATH)
 }
 
@@ -508,7 +508,7 @@ export async function savePaymentAccountAction(formData: FormData): Promise<void
 
   let notice = 'payment-saved'
   try {
-    await serverFetch('payment-accounts/mine', {
+    await actionFetch('payment-accounts/mine', {
       method: 'PUT',
       body: {
         country,

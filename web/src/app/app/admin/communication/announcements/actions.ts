@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -73,7 +73,7 @@ export async function createAnnouncement(formData: FormData): Promise<void> {
       ? parsedExpiry.toISOString()
       : null
 
-  await serverFetch<{ id: string }>('communication/announcements', {
+  await actionFetch<{ id: string }>('communication/announcements', {
     method: 'POST',
     body: {
       title,

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -101,7 +101,7 @@ export async function saveOrganisationProfile(formData: FormData): Promise<void>
 
   let notice = 'profile-saved'
   try {
-    await serverFetch<unknown>(`organisations/${id}`, {
+    await actionFetch<unknown>(`organisations/${id}`, {
       method: 'PATCH',
       body: profileBody(formData),
     })
@@ -125,7 +125,7 @@ export async function saveOrganisationStatus(formData: FormData): Promise<void> 
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}`, { method: 'PATCH', body: { status } })
+      await actionFetch<unknown>(`organisations/${id}`, { method: 'PATCH', body: { status } })
       refresh(id)
     } catch (error) {
       notice = failureNotice(error)
@@ -142,7 +142,7 @@ export async function saveOrganisationNotes(formData: FormData): Promise<void> {
 
   let notice = 'notes-saved'
   try {
-    await serverFetch<unknown>(`organisations/${id}`, {
+    await actionFetch<unknown>(`organisations/${id}`, {
       method: 'PATCH',
       body: { notes: formTrimmed(formData, 'notes') },
     })
@@ -169,7 +169,7 @@ export async function addOrganisationMember(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}/members`, {
+      await actionFetch<unknown>(`organisations/${id}/members`, {
         method: 'POST',
         body: { userId, orgRole },
       })
@@ -195,7 +195,7 @@ export async function saveMemberRole(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}/members/${userId}`, {
+      await actionFetch<unknown>(`organisations/${id}/members/${userId}`, {
         method: 'PATCH',
         body: { orgRole },
       })
@@ -220,7 +220,7 @@ export async function removeOrganisationMember(formData: FormData): Promise<void
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}/members/${userId}`, { method: 'DELETE' })
+      await actionFetch<unknown>(`organisations/${id}/members/${userId}`, { method: 'DELETE' })
       refresh(id)
     } catch (error) {
       notice = failureNotice(error, { 409: 'last-owner' })
@@ -251,7 +251,7 @@ export async function archiveOrganisation(formData: FormData): Promise<void> {
     failure = 'archive-unconfirmed'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}`, { method: 'DELETE' })
+      await actionFetch<unknown>(`organisations/${id}`, { method: 'DELETE' })
       refresh(id)
     } catch (error) {
       failure = failureNotice(error, { 403: 'forbidden-delete', 409: 'archive-blocked' })

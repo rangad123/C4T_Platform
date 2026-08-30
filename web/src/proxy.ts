@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { env } from '@/lib/env'
+import { spendRefreshToken } from '@/lib/auth/refresh-core'
+import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
 
 /**
  * Next 16 Proxy — formerly `middleware.ts`.
@@ -13,12 +16,23 @@ import type { NextRequest } from 'next/server'
  * STATEFUL: a signed token proves only that the API minted it, never that the
  * session behind it is still live. Only the API can answer that.
  *
- * So all this does is a cookie-presence check to spare a signed-out visitor a
- * pointless round trip to a page that would only redirect them. The real check
- * is `requireUser()` in src/lib/auth/session.ts.
+ * So the access check here is a cookie-presence check, to spare a signed-out
+ * visitor a pointless round trip to a page that would only redirect them. The
+ * real check is `requireUser()` in src/lib/auth/session.ts.
  *
  * Deliberately no JWKS verification here. It would look reassuring, cost a
  * network fetch on every request, and still not tell us the session is alive.
+ *
+ * ── The one thing here that is NOT a presence check, and why it belongs
+ *
+ * Renewing an expired access token is a mechanical exchange, not an
+ * authorization decision: it says nothing about who may see what, and every
+ * page still asks the API who the user is afterwards. It has to happen here
+ * because it cannot happen anywhere else on a navigation — a Server Component
+ * render cannot set cookies, so it could rotate the token and then lose it,
+ * which the API reads as replay and answers by destroying the session.
+ * Proxy runs before rendering and can still set cookies, so it is the only
+ * correct place for it. See `refreshIfExpired` below.
  */
 
 const ACCESS_COOKIE = 'c4t_access'
@@ -27,7 +41,51 @@ const REFRESH_COOKIE = 'c4t_refresh'
 /** Signed-in users have no business on these. */
 const GUEST_ONLY = ['/login', '/register', '/forgot-password']
 
-export function proxy(request: NextRequest): NextResponse {
+/**
+ * Renews an expired access token so a navigation doesn't sign the user out.
+ *
+ * Fires only in the one state that needs it: the access cookie is gone (it
+ * carries `Max-Age=900`, so the browser drops it 15 minutes after it was
+ * minted) while the refresh cookie is still present. That state is otherwise
+ * a guaranteed bounce to /login, even though the session behind it is good
+ * for up to 30 days.
+ *
+ * A successful refresh costs one API call per 15 minutes per user, because
+ * the rotated access cookie immediately puts the request back into the
+ * common "has access cookie, do nothing" branch. Concurrent requests from
+ * one navigation share a single exchange — see `spendRefreshToken`, where
+ * that sharing is load-bearing rather than an optimisation.
+ *
+ * Returns true when the request may proceed as signed-in. On failure it
+ * returns false and the caller falls through to the usual redirect, so a
+ * genuinely dead session still signs out exactly as before.
+ */
+async function refreshIfExpired(
+  request: NextRequest,
+): Promise<ReturnType<typeof authCookieOptions>[]> {
+  const refreshToken = request.cookies.get(REFRESH_COOKIE)?.value
+  if (!refreshToken) return []
+
+  const cookieHeader = request.headers.get('cookie') ?? ''
+  const setCookies = await spendRefreshToken(refreshToken, cookieHeader)
+  if (!setCookies || setCookies.length === 0) return []
+
+  const isProduction = env.NEXT_PUBLIC_ENVIRONMENT === 'production'
+  const applied: ReturnType<typeof authCookieOptions>[] = []
+  for (const raw of setCookies) {
+    const parsed = parseSetCookie(raw)
+    if (!parsed) continue
+    const options = authCookieOptions(parsed, isProduction)
+    applied.push(options)
+    // Onto the forwarded request too, so the render happening *now* sees the
+    // new access token rather than running with the expired jar and
+    // redirecting anyway. The caller puts them on the response.
+    request.cookies.set(options.name, options.value)
+  }
+  return applied
+}
+
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl
 
   /**
@@ -71,6 +129,21 @@ export function proxy(request: NextRequest): NextResponse {
 
   // Presence only. The value is never trusted or decoded here.
   const hasSession = request.cookies.has(ACCESS_COOKIE) || request.cookies.has(REFRESH_COOKIE)
+
+  /**
+   * Renew before rendering when the access cookie has aged out but the
+   * session behind it has not. Confined to `/app` — the marketing site never
+   * reads a session, so refreshing for it would be a round trip bought for
+   * nothing.
+   */
+  let refreshed: ReturnType<typeof authCookieOptions>[] = []
+  if (
+    pathname.startsWith('/app') &&
+    !request.cookies.has(ACCESS_COOKIE) &&
+    request.cookies.has(REFRESH_COOKIE)
+  ) {
+    refreshed = await refreshIfExpired(request)
+  }
 
   if (pathname.startsWith('/app') && !hasSession) {
     const url = request.nextUrl.clone()
@@ -130,8 +203,14 @@ export function proxy(request: NextRequest): NextResponse {
    */
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('x-full-path', `${pathname}${search}`)
+  // `request.cookies.set` above updated the request's own jar; mirror it onto
+  // the headers actually forwarded to the render, so this request is served
+  // with the fresh access token rather than the expired one.
+  if (refreshed.length > 0) requestHeaders.set('cookie', request.cookies.toString())
 
-  return NextResponse.next({ request: { headers: requestHeaders } })
+  const response = NextResponse.next({ request: { headers: requestHeaders } })
+  for (const options of refreshed) response.cookies.set(options)
+  return response
 }
 
 export const config = {

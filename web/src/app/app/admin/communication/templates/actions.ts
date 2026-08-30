@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -25,7 +25,7 @@ export async function createTemplateAction(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch('communication/templates', {
+    await actionFetch('communication/templates', {
       method: 'POST',
       body: { name, ...(subject ? { subject } : {}), body },
     })
@@ -43,6 +43,6 @@ export async function deleteTemplateAction(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   if (!id) return
 
-  await serverFetch(`communication/templates/${id}`, { method: 'DELETE' })
+  await actionFetch(`communication/templates/${id}`, { method: 'DELETE' })
   revalidatePath(LIST_PATH)
 }

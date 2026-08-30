@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { isAssignmentStatus, isProjectPriority, isProjectStatus } from './constants'
 
@@ -72,7 +72,7 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   // "false" value to read, so absence IS the off state.
   body.testersCanSeeOtherBugs = formData.has('testersCanSeeOtherBugs')
 
-  await serverFetch(`projects/${id}`, { method: 'PATCH', body })
+  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
   revalidateProject(id)
 }
 
@@ -93,7 +93,7 @@ export async function updateProjectDelivery(formData: FormData): Promise<void> {
 
   if (Object.keys(body).length === 0) return
 
-  await serverFetch(`projects/${id}`, { method: 'PATCH', body })
+  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
   revalidateProject(id)
 }
 
@@ -107,7 +107,7 @@ export async function changeProjectStatus(formData: FormData): Promise<void> {
   if (!id || !isProjectStatus(status)) return
 
   const note = formTrimmed(formData, 'note')
-  await serverFetch(`projects/${id}/status`, {
+  await actionFetch(`projects/${id}/status`, {
     method: 'POST',
     body: { status, ...(note ? { note } : {}) },
   })
@@ -133,7 +133,7 @@ export async function inviteTesters(formData: FormData): Promise<void> {
 
   const notes = formTrimmed(formData, 'notes')
   const buildId = formTrimmed(formData, 'buildId')
-  await serverFetch(`projects/${id}/assignments`, {
+  await actionFetch(`projects/${id}/assignments`, {
     method: 'POST',
     body: { testerIds, ...(notes ? { notes } : {}), ...(buildId ? { buildId } : {}) },
   })
@@ -148,7 +148,7 @@ export async function updateAssignment(formData: FormData): Promise<void> {
   if (!id || !testerId || !isAssignmentStatus(status)) return
 
   const notes = formTrimmed(formData, 'notes')
-  await serverFetch(`projects/${id}/assignments/${testerId}`, {
+  await actionFetch(`projects/${id}/assignments/${testerId}`, {
     method: 'PATCH',
     body: { status, ...(notes ? { notes } : {}) },
   })
@@ -171,7 +171,7 @@ export async function addMaterial(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!url && !fileId) return
 
-  await serverFetch(`projects/${id}/materials`, {
+  await actionFetch(`projects/${id}/materials`, {
     method: 'POST',
     body: {
       title,
@@ -189,7 +189,7 @@ export async function removeMaterial(formData: FormData): Promise<void> {
   const materialId = formTrimmed(formData, 'materialId')
   if (!id || !materialId) return
 
-  await serverFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
+  await actionFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
   revalidateProject(id)
 }
 
@@ -200,7 +200,7 @@ export async function addFeature(formData: FormData): Promise<void> {
   if (!id || !name) return
 
   const buildId = formTrimmed(formData, 'buildId')
-  await serverFetch(`projects/${id}/features`, {
+  await actionFetch(`projects/${id}/features`, {
     method: 'POST',
     body: { name, ...(buildId ? { buildId } : {}) },
   })
@@ -212,7 +212,7 @@ export async function removeFeature(formData: FormData): Promise<void> {
   const featureId = formTrimmed(formData, 'featureId')
   if (!id || !featureId) return
 
-  await serverFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
+  await actionFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
   revalidateProject(id)
 }
 
@@ -231,7 +231,7 @@ export async function archiveProject(formData: FormData): Promise<void> {
   if (!id || !reference) return
   if (confirmation.toUpperCase() !== reference.toUpperCase()) return
 
-  await serverFetch(`projects/${id}`, { method: 'DELETE' })
+  await actionFetch(`projects/${id}`, { method: 'DELETE' })
   revalidateProject(id)
   // `redirect` throws to unwind — it must be the last statement and must not sit
   // inside a try/catch.
@@ -260,13 +260,13 @@ export async function createBuild(formData: FormData): Promise<void> {
 
   const section = formTrimmed(formData, 'section')
 
-  const build = await serverFetch<{ id: string }>(`projects/${id}/builds`, {
+  const build = await actionFetch<{ id: string }>(`projects/${id}/builds`, {
     method: 'POST',
     body: { name },
   })
 
   const maxTesters = formTrimmed(formData, 'maxTesters')
-  await serverFetch(`projects/${id}/builds/${build.id}`, {
+  await actionFetch(`projects/${id}/builds/${build.id}`, {
     method: 'PATCH',
     body: {
       status: formTrimmed(formData, 'status'),
@@ -304,7 +304,7 @@ export async function renameBuild(formData: FormData): Promise<void> {
   const name = formTrimmed(formData, 'name')
   if (!id || !buildId || !name) return
 
-  await serverFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
+  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
   revalidateProject(id)
 }
 
@@ -340,7 +340,7 @@ export async function updateBuild(formData: FormData): Promise<void> {
   const maxTesters = formTrimmed(formData, 'maxTesters')
   body.maxTesters = maxTesters ? maxTesters : null
 
-  await serverFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
+  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
   revalidateProject(id)
 }
 
@@ -350,7 +350,7 @@ export async function copyBuild(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!id || !buildId) return
 
-  const copy = await serverFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
+  const copy = await actionFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
     method: 'POST',
   })
   revalidateProject(id)
@@ -369,7 +369,7 @@ export async function createTestCase(formData: FormData): Promise<void> {
   if (!id || !buildId || !title || !description || !steps || !expectedResult) return
 
   const feature = formTrimmed(formData, 'feature')
-  await serverFetch('test-cases', {
+  await actionFetch('test-cases', {
     method: 'POST',
     body: { buildId, title, description, steps, expectedResult, ...(feature ? { feature } : {}) },
   })
@@ -382,7 +382,7 @@ export async function assignTestCase(formData: FormData): Promise<void> {
   const testerId = formTrimmed(formData, 'testerId')
   if (!id || !testCaseId || !testerId) return
 
-  await serverFetch(`test-cases/${testCaseId}/assignments`, {
+  await actionFetch(`test-cases/${testCaseId}/assignments`, {
     method: 'POST',
     body: { testerIds: [testerId] },
   })

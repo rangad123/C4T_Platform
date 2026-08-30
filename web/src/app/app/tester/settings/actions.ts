@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
@@ -57,7 +57,7 @@ export async function changePassword(formData: FormData): Promise<void> {
 
   let failure: string | null = null
   try {
-    await serverFetch('auth/change-password', {
+    await actionFetch('auth/change-password', {
       method: 'POST',
       body: { currentPassword, newPassword },
     })
@@ -96,7 +96,7 @@ export async function revokeSession(formData: FormData): Promise<void> {
 
   let wasCurrent = false
   try {
-    const sessions = await serverFetch<ActiveSession[]>('auth/sessions')
+    const sessions = await actionFetch<ActiveSession[]>('auth/sessions')
     wasCurrent = sessions.some((session) => session.id === sessionId && session.isCurrent)
   } catch {
     // Unreadable list — let the delete below be the real check.
@@ -104,7 +104,7 @@ export async function revokeSession(formData: FormData): Promise<void> {
 
   let failure: string | null = null
   try {
-    await serverFetch(`auth/sessions/${sessionId}`, { method: 'DELETE' })
+    await actionFetch(`auth/sessions/${sessionId}`, { method: 'DELETE' })
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) failure = 'session_missing'
     else if (error instanceof ApiError && error.status === 403) failure = 'session_forbidden'
@@ -130,7 +130,7 @@ export async function signOutEverywhere(): Promise<void> {
   await requireRole(['TESTER'])
 
   try {
-    await serverFetch('auth/logout-all', { method: 'POST' })
+    await actionFetch('auth/logout-all', { method: 'POST' })
   } catch {
     // Even an unreachable API must not strand someone on a page they believe
     // they have just signed out of. Clear locally and go to sign-in.

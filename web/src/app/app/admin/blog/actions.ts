@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath, updateTag } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed, formStringArray } from '@/lib/form-data'
 
@@ -44,7 +44,7 @@ export async function createPostAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>('blog/posts/admin', { method: 'POST', body: { title } })
+    post = await actionFetch<PostResponse>('blog/posts/admin', { method: 'POST', body: { title } })
   } catch {
     redirect(`${BASE}/new?error=failed&title=${encodeURIComponent(title)}`)
   }
@@ -69,7 +69,7 @@ export async function saveContentAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}`, { method: 'PATCH', body })
+    post = await actionFetch<PostResponse>(`blog/posts/admin/${id}`, { method: 'PATCH', body })
   } catch (err) {
     const code = err instanceof ApiError && err.status === 409 ? 'duplicate_slug' : 'failed'
     redirectWithNotice(id, code)
@@ -89,7 +89,7 @@ export async function saveSeoAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}`, { method: 'PATCH', body })
+    post = await actionFetch<PostResponse>(`blog/posts/admin/${id}`, { method: 'PATCH', body })
   } catch {
     redirectWithNotice(id, 'failed')
   }
@@ -104,7 +104,7 @@ export async function setFeaturedAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}`, {
+    post = await actionFetch<PostResponse>(`blog/posts/admin/${id}`, {
       method: 'PATCH',
       body: { isFeatured },
     })
@@ -124,7 +124,7 @@ export async function publishPostAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}/publish`, { method: 'POST' })
+    post = await actionFetch<PostResponse>(`blog/posts/admin/${id}/publish`, { method: 'POST' })
   } catch (err) {
     const code = err instanceof ApiError && err.status === 400 ? 'not_ready' : 'failed'
     redirectWithNotice(id, code)
@@ -140,7 +140,7 @@ export async function schedulePostAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}/schedule`, {
+    post = await actionFetch<PostResponse>(`blog/posts/admin/${id}/schedule`, {
       method: 'POST',
       body: { scheduledAt },
     })
@@ -158,7 +158,7 @@ export async function archivePostAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}/archive`, { method: 'POST' })
+    post = await actionFetch<PostResponse>(`blog/posts/admin/${id}/archive`, { method: 'POST' })
   } catch {
     redirectWithNotice(id, 'failed')
   }
@@ -172,7 +172,7 @@ export async function revertToDraftAction(formData: FormData): Promise<void> {
 
   let post: PostResponse
   try {
-    post = await serverFetch<PostResponse>(`blog/posts/admin/${id}/revert-to-draft`, {
+    post = await actionFetch<PostResponse>(`blog/posts/admin/${id}/revert-to-draft`, {
       method: 'POST',
     })
   } catch {
@@ -188,7 +188,7 @@ export async function deletePostAction(formData: FormData): Promise<void> {
   const slug = formTrimmed(formData, 'slug')
 
   try {
-    await serverFetch<void>(`blog/posts/admin/${id}`, { method: 'DELETE' })
+    await actionFetch<void>(`blog/posts/admin/${id}`, { method: 'DELETE' })
   } catch {
     redirectWithNotice(id, 'failed')
   }
@@ -214,5 +214,5 @@ interface TagResponse {
  * picker on demand rather than through a separate tag-management page.
  */
 export async function findOrCreateTagAction(name: string): Promise<TagResponse> {
-  return serverFetch<TagResponse>('blog/tags/find-or-create', { method: 'POST', body: { name } })
+  return actionFetch<TagResponse>('blog/tags/find-or-create', { method: 'POST', body: { name } })
 }

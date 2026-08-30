@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission, requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -44,7 +44,7 @@ export async function postThreadMessage(formData: FormData): Promise<void> {
   // already told them.
   if (!id || !body) return
 
-  await serverFetch<{ id: string }>(`communication/threads/${id}/messages`, {
+  await actionFetch<{ id: string }>(`communication/threads/${id}/messages`, {
     method: 'POST',
     body: {
       body: body.slice(0, MESSAGE_MAX_LENGTH),
@@ -68,7 +68,7 @@ export async function closeThread(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   if (!id) return
 
-  await serverFetch<{ id: string; isClosed: boolean }>(`communication/threads/${id}/close`, {
+  await actionFetch<{ id: string; isClosed: boolean }>(`communication/threads/${id}/close`, {
     method: 'POST',
   })
 

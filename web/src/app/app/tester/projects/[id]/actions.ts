@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -60,7 +60,7 @@ export async function respondToInvitation(formData: FormData): Promise<void> {
 
   let notice = raw === 'ACCEPTED' ? 'accepted' : 'declined'
   try {
-    await serverFetch(`projects/${id}/respond`, {
+    await actionFetch(`projects/${id}/respond`, {
       method: 'POST',
       body: { response: raw, ...(notes ? { notes } : {}) },
     })

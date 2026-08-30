@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -53,7 +53,7 @@ export async function addBugComment(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch(`bugs/${id}/comments`, { method: 'POST', body: { body, isInternal: false } })
+    await actionFetch(`bugs/${id}/comments`, { method: 'POST', body: { body, isInternal: false } })
   } catch (error) {
     reason = reasonFor(error)
   }
@@ -86,7 +86,7 @@ export async function moveBugStatus(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch(`bugs/${id}/status`, {
+    await actionFetch(`bugs/${id}/status`, {
       method: 'POST',
       body: { status, ...(note ? { note } : {}) },
     })

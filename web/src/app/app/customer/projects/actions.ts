@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { parseCommaList } from '@/lib/admin/csv'
 
@@ -41,7 +41,7 @@ export async function createProjectAction(formData: FormData): Promise<void> {
     ...(maxTesters ? { maxTesters } : {}),
   }
 
-  const { id } = await serverFetch<ProjectResponse>('projects', { method: 'POST', body })
+  const { id } = await actionFetch<ProjectResponse>('projects', { method: 'POST', body })
 
   revalidatePath('/app/customer/projects')
   redirect(`/app/customer/projects/${id}`)

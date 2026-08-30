@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth/session'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -70,7 +70,7 @@ export async function updateOrgProfileAction(formData: FormData): Promise<void> 
 
   let notice = 'profile-saved'
   try {
-    await serverFetch<unknown>(`organisations/${id}/profile`, {
+    await actionFetch<unknown>(`organisations/${id}/profile`, {
       method: 'PATCH',
       body: profileBody(formData),
     })
@@ -97,7 +97,7 @@ export async function addOrgMemberAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}/members`, {
+      await actionFetch<unknown>(`organisations/${id}/members`, {
         method: 'POST',
         body: { userId, orgRole },
       })
@@ -123,7 +123,7 @@ export async function updateOrgMemberAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}/members/${userId}`, {
+      await actionFetch<unknown>(`organisations/${id}/members/${userId}`, {
         method: 'PATCH',
         body: { orgRole },
       })
@@ -148,7 +148,7 @@ export async function removeOrgMemberAction(formData: FormData): Promise<void> {
     notice = 'invalid'
   } else {
     try {
-      await serverFetch<unknown>(`organisations/${id}/members/${userId}`, { method: 'DELETE' })
+      await actionFetch<unknown>(`organisations/${id}/members/${userId}`, { method: 'DELETE' })
       revalidatePath(DETAIL_PATH)
     } catch (error) {
       notice = failureNotice(error, { 409: 'last-owner' })
@@ -176,7 +176,7 @@ export async function inviteTeamMemberAction(formData: FormData): Promise<void> 
   if (!email) redirect(`${DETAIL_PATH}?section=members&notice=invite-email`)
 
   try {
-    await serverFetch(`organisations/${id}/invitations`, {
+    await actionFetch(`organisations/${id}/invitations`, {
       method: 'POST',
       body: {
         email,
@@ -210,7 +210,7 @@ export async function revokeInvitationAction(formData: FormData): Promise<void> 
   if (!id || !invitationId) return
 
   try {
-    await serverFetch(`organisations/${id}/invitations/${invitationId}`, { method: 'DELETE' })
+    await actionFetch(`organisations/${id}/invitations/${invitationId}`, { method: 'DELETE' })
   } catch {
     redirect(`${DETAIL_PATH}?section=members&notice=invite-failed`)
   }

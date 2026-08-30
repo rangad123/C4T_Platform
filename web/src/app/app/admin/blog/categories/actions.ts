@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath, updateTag } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -19,7 +19,7 @@ export async function createCategoryAction(formData: FormData): Promise<void> {
   }
 
   try {
-    await serverFetch<CategoryResponse>('blog/categories', { method: 'POST', body })
+    await actionFetch<CategoryResponse>('blog/categories', { method: 'POST', body })
   } catch (err) {
     const code = err instanceof ApiError && err.status === 409 ? 'duplicate' : 'failed'
     redirect(`${BASE}?new=1&error=${code}&name=${encodeURIComponent(body.name)}`)
@@ -38,7 +38,7 @@ export async function updateCategoryAction(formData: FormData): Promise<void> {
   }
 
   try {
-    await serverFetch<CategoryResponse>(`blog/categories/${id}`, { method: 'PATCH', body })
+    await actionFetch<CategoryResponse>(`blog/categories/${id}`, { method: 'PATCH', body })
   } catch (err) {
     const code = err instanceof ApiError && err.status === 409 ? 'duplicate' : 'failed'
     redirect(`${BASE}?edit=${id}&error=${code}`)
@@ -54,7 +54,7 @@ export async function toggleCategoryActiveAction(formData: FormData): Promise<vo
   const isActive = formTrimmed(formData, 'isActive') === 'true'
 
   try {
-    await serverFetch<CategoryResponse>(`blog/categories/${id}`, {
+    await actionFetch<CategoryResponse>(`blog/categories/${id}`, {
       method: 'PATCH',
       body: { isActive },
     })

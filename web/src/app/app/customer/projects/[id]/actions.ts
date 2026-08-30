@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
 import { isProjectPriority, isProjectStatus } from './constants'
@@ -53,7 +53,7 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   body.maxTesters = maxTesters ? maxTesters : null
   body.testersCanSeeOtherBugs = formData.has('testersCanSeeOtherBugs')
 
-  await serverFetch(`projects/${id}`, { method: 'PATCH', body })
+  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
   revalidateProject(id)
 }
 
@@ -71,7 +71,7 @@ export async function updateProjectDelivery(formData: FormData): Promise<void> {
   }
   if (Object.keys(body).length === 0) return
 
-  await serverFetch(`projects/${id}`, { method: 'PATCH', body })
+  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
   revalidateProject(id)
 }
 
@@ -81,7 +81,7 @@ export async function changeProjectStatus(formData: FormData): Promise<void> {
   if (!id || !isProjectStatus(status)) return
 
   const note = formTrimmed(formData, 'note')
-  await serverFetch(`projects/${id}/status`, {
+  await actionFetch(`projects/${id}/status`, {
     method: 'POST',
     body: { status, ...(note ? { note } : {}) },
   })
@@ -99,7 +99,7 @@ export async function addMaterial(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!url && !fileId) return
 
-  await serverFetch(`projects/${id}/materials`, {
+  await actionFetch(`projects/${id}/materials`, {
     method: 'POST',
     body: {
       title,
@@ -117,7 +117,7 @@ export async function removeMaterial(formData: FormData): Promise<void> {
   const materialId = formTrimmed(formData, 'materialId')
   if (!id || !materialId) return
 
-  await serverFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
+  await actionFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
   revalidateProject(id)
 }
 
@@ -127,7 +127,7 @@ export async function addFeature(formData: FormData): Promise<void> {
   if (!id || !name) return
 
   const buildId = formTrimmed(formData, 'buildId')
-  await serverFetch(`projects/${id}/features`, {
+  await actionFetch(`projects/${id}/features`, {
     method: 'POST',
     body: { name, ...(buildId ? { buildId } : {}) },
   })
@@ -139,7 +139,7 @@ export async function removeFeature(formData: FormData): Promise<void> {
   const featureId = formTrimmed(formData, 'featureId')
   if (!id || !featureId) return
 
-  await serverFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
+  await actionFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
   revalidateProject(id)
 }
 
@@ -152,13 +152,13 @@ export async function createBuild(formData: FormData): Promise<void> {
 
   const section = formTrimmed(formData, 'section')
 
-  const build = await serverFetch<{ id: string }>(`projects/${id}/builds`, {
+  const build = await actionFetch<{ id: string }>(`projects/${id}/builds`, {
     method: 'POST',
     body: { name },
   })
 
   const maxTesters = formTrimmed(formData, 'maxTesters')
-  await serverFetch(`projects/${id}/builds/${build.id}`, {
+  await actionFetch(`projects/${id}/builds/${build.id}`, {
     method: 'PATCH',
     body: {
       status: formTrimmed(formData, 'status'),
@@ -196,7 +196,7 @@ export async function renameBuild(formData: FormData): Promise<void> {
   const name = formTrimmed(formData, 'name')
   if (!id || !buildId || !name) return
 
-  await serverFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
+  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
   revalidateProject(id)
 }
 
@@ -227,7 +227,7 @@ export async function updateBuild(formData: FormData): Promise<void> {
   const maxTesters = formTrimmed(formData, 'maxTesters')
   body.maxTesters = maxTesters ? maxTesters : null
 
-  await serverFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
+  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
   revalidateProject(id)
 }
 
@@ -236,7 +236,7 @@ export async function copyBuild(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!id || !buildId) return
 
-  const copy = await serverFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
+  const copy = await actionFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
     method: 'POST',
   })
   revalidateProject(id)
@@ -258,7 +258,7 @@ export async function setBugCustomization(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!id || !buildId) return
 
-  await serverFetch(`projects/${id}/builds/${buildId}`, {
+  await actionFetch(`projects/${id}/builds/${buildId}`, {
     method: 'PATCH',
     body: { bugCustomizationEnabled: formTrimmed(formData, 'enabled') === 'yes' },
   })
@@ -286,7 +286,7 @@ export async function addBugCustomField(formData: FormData): Promise<void> {
   const section = formTrimmed(formData, 'section') || 'settings'
 
   try {
-    await serverFetch(`projects/${id}/custom-fields`, {
+    await actionFetch(`projects/${id}/custom-fields`, {
       method: 'POST',
       body: {
         buildId,
@@ -317,7 +317,7 @@ export async function removeBugCustomField(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!id || !fieldId) return
 
-  await serverFetch(`projects/${id}/custom-fields/${fieldId}`, { method: 'DELETE' })
+  await actionFetch(`projects/${id}/custom-fields/${fieldId}`, { method: 'DELETE' })
   revalidateProject(id)
   redirect(
     `/app/customer/projects/${id}?section=settings${buildId ? `&buildId=${buildId}` : ''}&notice=field-removed`,

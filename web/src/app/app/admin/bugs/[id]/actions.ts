@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
@@ -108,7 +108,7 @@ export async function triageBugSeverity(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch(`bugs/${id}/triage`, { method: 'POST', body: { severity } })
+    await actionFetch(`bugs/${id}/triage`, { method: 'POST', body: { severity } })
   } catch (error) {
     reason = reasonFor(error)
   }
@@ -135,7 +135,7 @@ export async function updateBugClassification(formData: FormData): Promise<void>
 
   let reason: string | null = null
   try {
-    await serverFetch(`bugs/${id}`, {
+    await actionFetch(`bugs/${id}`, {
       method: 'PATCH',
       body: {
         type: type || null,
@@ -185,7 +185,7 @@ export async function moveBugStatus(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch(`bugs/${id}/status`, { method: 'POST', body })
+    await actionFetch(`bugs/${id}/status`, { method: 'POST', body })
   } catch (error) {
     reason = reasonFor(error)
   }
@@ -210,7 +210,7 @@ export async function addBugComment(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch(`bugs/${id}/comments`, { method: 'POST', body: { body, isInternal } })
+    await actionFetch(`bugs/${id}/comments`, { method: 'POST', body: { body, isInternal } })
   } catch (error) {
     reason = reasonFor(error)
   }
@@ -232,7 +232,7 @@ export async function removeBugAttachment(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch<void>(`bugs/${id}/attachments/${attachmentId}`, { method: 'DELETE' })
+    await actionFetch<void>(`bugs/${id}/attachments/${attachmentId}`, { method: 'DELETE' })
   } catch (error) {
     reason = reasonFor(error)
   }
@@ -264,7 +264,7 @@ export async function deleteBug(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch(`bugs/${id}`, { method: 'DELETE' })
+    await actionFetch(`bugs/${id}`, { method: 'DELETE' })
   } catch (error) {
     reason = reasonFor(error)
   }

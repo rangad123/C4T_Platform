@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
@@ -28,7 +28,7 @@ export async function requestPayoutAction(formData: FormData): Promise<void> {
   const note = formTrimmed(formData, 'note')
 
   try {
-    await serverFetch('transactions/payouts/request', {
+    await actionFetch('transactions/payouts/request', {
       method: 'POST',
       body: note ? { note } : {},
     })

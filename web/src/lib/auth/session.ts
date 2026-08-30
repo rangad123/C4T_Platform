@@ -1,8 +1,8 @@
 import 'server-only'
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
-import { serverFetchOrNull } from '@/lib/api/server'
-import { ROLE_HOME, type Role, type SessionUser } from '@/lib/api/types'
+import { serverFetch } from '@/lib/api/server'
+import { ApiError, ROLE_HOME, type Role, type SessionUser } from '@/lib/api/types'
 
 /**
  * THE authorization boundary.
@@ -19,9 +19,28 @@ import { ROLE_HOME, type Role, type SessionUser } from '@/lib/api/types'
  * `cache()` deduplicates this within a single render pass, so a layout and
  * three nested Server Components asking for the user cost one API call.
  */
+/**
+ * ── `null` means "no session", NOT "something went wrong"
+ *
+ * This used to call `serverFetchOrNull`, whose blanket catch collapsed every
+ * possible failure — a real 401, a network blip, a 500, an HTML error page
+ * from a proxy — into `null`. `requireUser` reads `null` as "signed out" and
+ * redirects to /login, so any momentary API hiccup silently threw the user
+ * out of the app and discarded whatever they were doing.
+ *
+ * Only an actual auth failure may produce `null` here. Everything else
+ * rethrows and surfaces in the segment's `error.tsx`, which offers a retry —
+ * the honest response to "we could not reach the API", and one that does not
+ * cost the user their session or their work.
+ */
 export const getUser = cache(async (): Promise<SessionUser | null> => {
-  const result = await serverFetchOrNull<{ user: SessionUser }>('/auth/me')
-  return result?.user ?? null
+  try {
+    const result = await serverFetch<{ user: SessionUser }>('/auth/me')
+    return result?.user ?? null
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null
+    throw error
+  }
 })
 
 /** Redirects to sign-in when there is no live session. */

@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
@@ -47,7 +47,7 @@ async function patchTesterStatus(
   status: TesterStatusValue,
   reason?: string,
 ): Promise<void> {
-  await serverFetch<unknown>(`testers/${id}/status`, {
+  await actionFetch<unknown>(`testers/${id}/status`, {
     method: 'PATCH',
     body: reason ? { status, reason } : { status },
   })
@@ -121,7 +121,7 @@ export async function revealPaymentAccountAction(
   await requirePermission('payment_account.decrypt')
 
   try {
-    const details = await serverFetch<RevealedPaymentDetails>(
+    const details = await actionFetch<RevealedPaymentDetails>(
       `payment-accounts/${paymentAccountId}/reveal`,
       { method: 'POST', body: { password } },
     )

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -39,7 +39,7 @@ function reasonFor(error: unknown): string {
 async function submit(path: string, body: Record<string, unknown>): Promise<void> {
   let reason: string | null = null
   try {
-    await serverFetch(path, { method: 'POST', body })
+    await actionFetch(path, { method: 'POST', body })
   } catch (error) {
     reason = reasonFor(error)
   }

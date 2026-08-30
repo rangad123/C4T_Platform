@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -60,7 +60,7 @@ export async function bulkChangeBugStatusAction(formData: FormData): Promise<voi
     : undefined
   if (!status && !severity) return
 
-  const result = await serverFetch<{
+  const result = await actionFetch<{
     updated: string[]
     skipped: { id: string; reason: string }[]
   }>('bugs/bulk-status', {

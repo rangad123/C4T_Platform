@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -172,7 +172,7 @@ export async function reportBugAction(formData: FormData): Promise<void> {
 
   let reason: string | null = null
   try {
-    await serverFetch<{ id: string }>('bugs', {
+    await actionFetch<{ id: string }>('bugs', {
       method: 'POST',
       body: {
         projectId,

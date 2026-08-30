@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
@@ -25,7 +25,7 @@ export async function postMessageAction(formData: FormData): Promise<void> {
   if (!body) redirect(`${BASE}?thread=${threadId}&notice=empty`)
 
   try {
-    await serverFetch(`communication/threads/${threadId}/messages`, {
+    await actionFetch(`communication/threads/${threadId}/messages`, {
       method: 'POST',
       body: { body },
     })
@@ -63,7 +63,7 @@ export async function startThreadAction(formData: FormData): Promise<void> {
 
   let thread: { id: string }
   try {
-    thread = await serverFetch<{ id: string }>('communication/threads', {
+    thread = await actionFetch<{ id: string }>('communication/threads', {
       method: 'POST',
       body: {
         type: 'PROJECT',

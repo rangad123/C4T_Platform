@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
@@ -90,7 +90,7 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
 
   let project: CreatedProject
   try {
-    project = await serverFetch<CreatedProject>('projects', {
+    project = await actionFetch<CreatedProject>('projects', {
       method: 'POST',
       body: {
         title,
@@ -119,7 +119,7 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
    */
   let buildId: string | null = null
   try {
-    const detail = await serverFetch<CreatedProject>(`projects/${project.id}`)
+    const detail = await actionFetch<CreatedProject>(`projects/${project.id}`)
     buildId = detail.builds?.find((b) => b.isDefault)?.id ?? detail.builds?.[0]?.id ?? null
   } catch {
     buildId = null
@@ -127,7 +127,7 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
 
   if (buildId) {
     try {
-      await serverFetch(`projects/${project.id}/builds/${buildId}`, {
+      await actionFetch(`projects/${project.id}/builds/${buildId}`, {
         method: 'PATCH',
         body: {
           name: buildName,
