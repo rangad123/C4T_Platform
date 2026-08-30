@@ -1,5 +1,5 @@
-import { access } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { access, readdir } from 'node:fs/promises'
+import { join, dirname, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { indexableRoutes } from '../src/lib/seo/routes'
 
@@ -26,16 +26,40 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
- * A prerendered route lands as `<path>.html`; a dynamically rendered one only
- * has `<path>.js`. Either proves the page exists — this checks for a page, not
- * for a particular rendering strategy.
+ * Every file under `.next/server/app`, as a `/`-joined relative path with
+ * every `(group)` segment stripped — a route group organises source files
+ * but never appears in the URL, yet Next's dynamic (non-prerendered) output
+ * keeps the folder in the server tree. Matching on the raw path missed every
+ * indexable route that lives in a route group and isn't statically
+ * prerendered (e.g. one reading `searchParams`), which is exactly `ƒ` routes.
  */
-async function wasBuilt(routePath: string): Promise<boolean> {
-  const relative = routePath === '/' ? 'index' : routePath.replace(/^\//, '')
-  for (const candidate of [`${relative}.html`, `${relative}.js`, join(relative, 'page.js')]) {
-    if (await exists(join(SERVER_APP, candidate))) return true
+async function collectBuiltPaths(dir: string, base: string[] = []): Promise<Set<string>> {
+  const paths = new Set<string>()
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const nested = await collectBuiltPaths(join(dir, entry.name), [...base, entry.name])
+      for (const p of nested) paths.add(p)
+    } else {
+      const segments = [...base, entry.name].filter((s) => !/^\(.*\)$/.test(s))
+      paths.add(posix.join(...segments))
+    }
   }
-  return false
+  return paths
+}
+
+/**
+ * A prerendered route lands as `<path>.html`; a dynamically rendered one only
+ * has `<path>/page.js`. Either proves the page exists — this checks for a
+ * page, not for a particular rendering strategy.
+ */
+function wasBuilt(routePath: string, built: Set<string>): boolean {
+  const relative = routePath === '/' ? 'index' : routePath.replace(/^\//, '')
+  return (
+    built.has(`${relative}.html`) ||
+    built.has(`${relative}.js`) ||
+    built.has(posix.join(relative, 'page.js'))
+  )
 }
 
 async function main() {
@@ -44,11 +68,12 @@ async function main() {
     process.exit(1)
   }
 
+  const built = await collectBuiltPaths(SERVER_APP)
   const routes = indexableRoutes()
   const missing: string[] = []
 
   for (const route of routes) {
-    if (!(await wasBuilt(route.path))) missing.push(route.path)
+    if (!wasBuilt(route.path, built)) missing.push(route.path)
   }
 
   if (missing.length > 0) {

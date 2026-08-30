@@ -31,6 +31,14 @@ import type { BlogCategorySummary, BlogPostSummary } from '@/lib/blog/types'
  * `noindex` (see the `generateMetadata` in `company/blog/tag/[slug]/page.tsx`
  * for why), and a noindex page has no business in a sitemap.
  */
+// Blog posts/categories are DB-backed, so this route can no longer be
+// statically prerendered at build time — that's the one step where no API
+// is reachable (CI has none running at all; production's `next build` runs
+// before the new deploy's app is live). Rendering per-request instead means
+// the API only has to be reachable when a crawler actually requests the
+// sitemap, which is always true once the app is up.
+export const dynamic = 'force-dynamic'
+
 function canonicalUrl(path: string): string {
   const url = new URL(path, env.NEXT_PUBLIC_SITE_URL).toString()
   // Strip the trailing slash except on the origin-only case, where there is
