@@ -36,7 +36,7 @@ export default async function RegisterPage({
   return (
     <div
       style={{
-        padding: 'var(--space-11) var(--space-7)',
+        padding: 'var(--space-9) var(--space-7)',
         display: 'flex',
         justifyContent: 'center',
       }}

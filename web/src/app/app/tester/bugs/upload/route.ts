@@ -85,6 +85,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     cache: 'no-store',
   })
   if (!putRes.ok) {
+    // The presigned PUT failed against S3 (or the local driver) itself — this
+    // is the one leg of the three-step dance that never goes through our own
+    // API, so its error body is otherwise invisible.
+    const bodyText = await putRes.text().catch(() => '')
+    console.error(
+      `[bugs/upload] PUT to storage failed: ${putRes.status} ${putRes.statusText} — ${bodyText.slice(0, 2000)}`,
+    )
     return NextResponse.json({ error: 'The file could not be stored.' }, { status: 502 })
   }
 

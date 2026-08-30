@@ -144,6 +144,22 @@ function RoleChooser({ message, email }: { message: string | null; email?: strin
 
   return (
     <>
+      <Link
+        href="/"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: 'var(--text-secondary)',
+          fontSize: 'var(--type-body-sm-size)',
+          textDecoration: 'none',
+          marginBottom: 'var(--space-5)',
+        }}
+      >
+        <Icon name="arrow-left" size={16} />
+        Back to home
+      </Link>
+
       <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
         Create an account
       </h1>
@@ -151,7 +167,7 @@ function RoleChooser({ message, email }: { message: string | null; email?: strin
         style={{
           color: 'var(--text-secondary)',
           fontSize: 'var(--type-body-sm-size)',
-          marginBottom: 'var(--space-7)',
+          marginBottom: 'var(--space-5)',
         }}
       >
         Tell us which describes you.
@@ -159,7 +175,7 @@ function RoleChooser({ message, email }: { message: string | null; email?: strin
 
       {message ? <ErrorBanner>{message}</ErrorBanner> : null}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
         <RoleCard
           href={`/register?role=customer${carry}`}
           icon="building-2"
@@ -231,7 +247,7 @@ function RoleCard({
       style={{
         display: 'flex',
         gap: 'var(--space-4)',
-        padding: 'var(--space-6)',
+        padding: 'var(--space-5)',
         border: '1px solid var(--border-default)',
         borderRadius: 'var(--radius-card)',
         background: 'var(--surface-canvas)',
