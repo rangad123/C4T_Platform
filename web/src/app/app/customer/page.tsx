@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Topbar } from '@/components/admin/Topbar'
@@ -41,6 +42,25 @@ interface MyOrganisation {
 }
 
 /**
+ * One plain-English line summarising where things stand — critical bugs
+ * outrank a plain open-bug count, which outranks a calm "nothing open" line.
+ */
+function buildNarrative(
+  criticalOpenCount: number,
+  openBugCount: number,
+  inProgressCount: number,
+): string {
+  const projectPhrase = `${inProgressCount} project${inProgressCount === 1 ? '' : 's'} in progress`
+  if (criticalOpenCount > 0) {
+    return `${criticalOpenCount} critical bug${criticalOpenCount === 1 ? '' : 's'} open across ${projectPhrase}.`
+  }
+  if (openBugCount > 0) {
+    return `${openBugCount} open bug${openBugCount === 1 ? '' : 's'}, none critical, across ${projectPhrase}.`
+  }
+  return `No open bugs right now, across ${projectPhrase}.`
+}
+
+/**
  * `/app/customer` — the customer landing.
  *
  * No dedicated stats endpoint exists for this role (the admin-side one at
@@ -81,6 +101,7 @@ export default async function CustomerDashboardPage() {
   const criticalOpenCount = bugRows.filter(
     (b) => b.severity === 'CRITICAL' && OPEN_BUG_STATUSES.has(b.status),
   ).length
+  const narrative = buildNarrative(criticalOpenCount, openBugCount, inProgressCount)
 
   return (
     <>
@@ -108,6 +129,16 @@ export default async function CustomerDashboardPage() {
           <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: 640 }}>
             A glimpse of your projects and bugs — every number links through to the filtered list
             behind it.
+          </p>
+          <p
+            style={{
+              margin: 'var(--space-3) 0 0',
+              color: 'var(--text-primary)',
+              fontWeight: 'var(--fw-medium)',
+              maxWidth: 640,
+            }}
+          >
+            {narrative}
           </p>
         </header>
 
@@ -189,20 +220,22 @@ export default async function CustomerDashboardPage() {
               }}
             >
               {recentProjects.map((project) => (
-                <li key={project.id}>
-                  <a
+                <li key={project.id} style={{ display: 'flex' }}>
+                  <Link
                     href={`/app/customer/projects/${project.id}`}
+                    className="c4t-card-hover"
                     style={{
                       display: 'flex',
+                      flex: 1,
                       flexDirection: 'column',
                       gap: 'var(--space-3)',
-                      height: '100%',
                       padding: 'var(--space-5)',
                       border: '1px solid var(--border-default)',
                       borderRadius: 'var(--radius-card)',
                       background: 'var(--surface-canvas)',
                       textDecoration: 'none',
                       color: 'inherit',
+                      transition: 'var(--transition-surface)',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
@@ -246,7 +279,7 @@ export default async function CustomerDashboardPage() {
                         : ''}
                       updated {formatDate(project.updatedAt)}
                     </span>
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>

@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { Tone } from '@/components/admin/StatusBadge'
 import { toneColor } from './tone-color'
 import styles from './DonutChart.module.css'
@@ -98,9 +99,9 @@ export function DonutChart({ title, segments, centerLabel, href }: DonutChartPro
   )
 
   return href ? (
-    <a href={href} className={styles.wrapper}>
+    <Link href={href} className={styles.wrapper}>
       {content}
-    </a>
+    </Link>
   ) : (
     <div className={styles.wrapper}>{content}</div>
   )

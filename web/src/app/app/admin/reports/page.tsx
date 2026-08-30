@@ -8,9 +8,19 @@ import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
 import { Input } from '@/components/ds/forms/Input'
+import { Button } from '@/components/ds/core/Button'
 import { BarChart } from '@/components/admin/charts/BarChart'
 import { BugBreakdownView, type BugBreakdown } from '@/components/admin/BugBreakdownView'
 import { formatDate } from '@/lib/admin/format'
+
+/** A plain "start over" link for a report's own filter form — only worth showing once something is actually picked. */
+function ResetFilters({ href }: { href: string }) {
+  return (
+    <Button href={href} variant="ghost" size="sm" iconLeft="x">
+      Reset
+    </Button>
+  )
+}
 
 /**
  * `/app/admin/reports` — §15-21 of the platform UX brief.
@@ -141,6 +151,9 @@ export default async function ReportsPage({
               />
             </Field>
             <LiveFormStatus />
+            {params.projectId ? (
+              <ResetFilters href="/app/admin/reports?section=by-project" />
+            ) : null}
           </LiveGetForm>
           {params.projectId ? (
             <ByProject projectId={params.projectId} />
@@ -179,6 +192,7 @@ export default async function ReportsPage({
               />
             </Field>
             <LiveFormStatus />
+            {params.projectId ? <ResetFilters href="/app/admin/reports?section=by-build" /> : null}
           </LiveGetForm>
           {!params.projectId ? (
             <EmptyState
@@ -227,6 +241,9 @@ export default async function ReportsPage({
               />
             </Field>
             <LiveFormStatus />
+            {params.startDate || params.endDate ? (
+              <ResetFilters href="/app/admin/reports?section=by-date" />
+            ) : null}
           </LiveGetForm>
           {params.startDate && params.endDate ? (
             <ByDate startDate={params.startDate} endDate={params.endDate} />
@@ -268,6 +285,9 @@ export default async function ReportsPage({
               />
             </Field>
             <LiveFormStatus />
+            {params.projectId ? (
+              <ResetFilters href="/app/admin/reports?section=by-build-range" />
+            ) : null}
           </LiveGetForm>
           {!params.projectId ? (
             <EmptyState
@@ -349,6 +369,9 @@ async function ByBuildPicker({ projectId, buildId }: { projectId: string; buildI
           />
         </Field>
         <LiveFormStatus />
+        {buildId ? (
+          <ResetFilters href={`/app/admin/reports?section=by-build&projectId=${projectId}`} />
+        ) : null}
       </LiveGetForm>
       {buildId ? (
         <ByBuild buildId={buildId} />
@@ -504,6 +527,9 @@ async function ByBuildRangePicker({
           />
         </Field>
         <LiveFormStatus />
+        {startBuildId || endBuildId ? (
+          <ResetFilters href={`/app/admin/reports?section=by-build-range&projectId=${projectId}`} />
+        ) : null}
       </LiveGetForm>
       {startBuildId && endBuildId ? (
         <ByBuildRange projectId={projectId} startBuildId={startBuildId} endBuildId={endBuildId} />

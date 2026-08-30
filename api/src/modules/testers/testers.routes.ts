@@ -38,6 +38,13 @@ testersRouter.get(
   controller.discover,
 )
 
+testersRouter.get(
+  '/discover/:id',
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
+  validate({ params: testerIdParam }),
+  controller.discoverOne,
+)
+
 // ─── Tester self-service (§2.3 "Manage their tester profile") ────────────────
 // Declared before "/:id" so "me" is never parsed as an id.
 

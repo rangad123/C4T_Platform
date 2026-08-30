@@ -36,7 +36,11 @@ export function KpiCard({ icon, label, value, href }: KpiCardProps) {
         <Icon name={icon} size={16} style={{ color: 'var(--text-muted)' }} />
         <span
           className="c4t-eyebrow"
-          style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
+          style={{
+            color: 'var(--text-muted)',
+            fontSize: 'var(--type-caption-size)',
+            textWrap: 'balance',
+          }}
         >
           {label}
         </span>

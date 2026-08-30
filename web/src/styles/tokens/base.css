@@ -2,7 +2,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--surface-canvas); color: var(--text-primary); font: var(--fw-regular) var(--type-body-md-size)/var(--type-body-md-line) var(--font-sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
-h1, h2, h3, h4, h5, h6 { margin: 0; font-family: var(--font-display); font-weight: var(--fw-semibold); color: var(--text-primary); }
+h1, h2, h3, h4, h5, h6 { margin: 0; font-family: var(--font-display); font-weight: var(--fw-semibold); color: var(--text-primary); text-wrap: balance; }
 p { margin: 0; text-wrap: pretty; }
 a { color: var(--text-link); text-decoration: none; transition: var(--transition-control); }
 a:hover { color: var(--text-link-hover); text-decoration: underline; text-underline-offset: 3px; }

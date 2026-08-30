@@ -1,11 +1,4 @@
-import {
-  type Prisma,
-  BugStatus,
-  TesterStatus,
-  Role,
-  UserStatus,
-  AssignmentStatus,
-} from '@prisma/client'
+import { type Prisma, BugStatus, TesterStatus, Role, UserStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
@@ -713,35 +706,108 @@ export async function assertAssignable(testerUserId: string): Promise<void> {
  * hand a client the pool's contact details. This is a deliberately narrower
  * projection over the same table.
  *
- * ── WHAT IS WITHHELD, AND WHY IT DEPENDS
- *
- * A tester's NAME is shown only once they have actually worked with this
- * customer — an accepted, active or completed assignment on one of that
- * organisation's projects. Everyone else in the pool appears by initials.
- *
- * The reasoning: a client browsing the crowd is judging capability, and
- * country, rating, skills and devices answer that completely. A name adds
- * nothing to the decision but makes the whole pool personally identifiable to
- * anyone who signs up. Once someone is on your build you plainly need to know
- * who they are, so the name appears then.
- *
- * Email, phone and payment details are never included at any stage.
+ * Every tester's real name and photo are shown, by product decision — there
+ * is no longer an "unworked with" anonymisation tier. Email, phone and
+ * payment details are still never included at any stage.
  */
-export async function discoverTesters(
-  user: Express.AuthenticatedUser,
-  query: {
-    page: number
-    limit: number
-    search?: string
-    countryCode?: string
-    skills?: string[]
-  },
-) {
-  /**
-   * Only verified testers are discoverable. An applicant or a rejected
-   * account is platform-internal state a client has no business browsing.
-   */
-  const where: Prisma.TesterProfileWhereInput = {
+const DISCOVERABLE_TESTER_SELECT = {
+  id: true,
+  headline: true,
+  bio: true,
+  profession: true,
+  city: true,
+  countryCode: true,
+  ratingAverage: true,
+  ratingCount: true,
+  bugsAcceptedCount: true,
+  projectsCompletedCount: true,
+  experienceYears: true,
+  user: { select: { id: true, firstName: true, lastName: true, avatarFileId: true } },
+  skills: { select: { skill: { select: { id: true, name: true, slug: true } } }, take: 8 },
+  devices: { select: { type: true, osName: true }, take: 6 },
+} satisfies Prisma.TesterProfileSelect
+
+type DiscoverableTesterRow = Prisma.TesterProfileGetPayload<{
+  select: typeof DISCOVERABLE_TESTER_SELECT
+}>
+
+function shapeDiscoverableTester(t: DiscoverableTesterRow) {
+  const first = t.user.firstName?.trim() ?? ''
+  const last = t.user.lastName?.trim() ?? ''
+
+  return {
+    id: t.id,
+    displayName: [first, last].filter(Boolean).join(' ') || 'Tester',
+    avatarFileId: t.user.avatarFileId,
+    headline: t.headline,
+    bio: t.bio,
+    profession: t.profession,
+    city: t.city,
+    countryCode: t.countryCode,
+    ratingAverage: t.ratingAverage,
+    ratingCount: t.ratingCount,
+    bugsAcceptedCount: t.bugsAcceptedCount,
+    projectsCompletedCount: t.projectsCompletedCount,
+    experienceYears: t.experienceYears,
+    skills: t.skills.map((s) => s.skill),
+    /** Coarse device coverage — a type and an OS, never a specific handset. */
+    platforms: [...new Set(t.devices.map((d) => d.osName ?? d.type).filter(Boolean))] as string[],
+  }
+}
+
+export async function discoverTesters(query: {
+  page: number
+  limit: number
+  search?: string
+  countryCode?: string
+  skills?: string[]
+}) {
+  const where = discoverableTesterWhere(query)
+
+  const [items, total] = await Promise.all([
+    prisma.testerProfile.findMany({
+      where,
+      select: DISCOVERABLE_TESTER_SELECT,
+      orderBy: [{ ratingAverage: 'desc' }, { bugsAcceptedCount: 'desc' }],
+      ...toSkipTake(query),
+    }),
+    prisma.testerProfile.count({ where }),
+  ])
+
+  return {
+    items: items.map(shapeDiscoverableTester),
+    meta: buildMeta(query, total),
+  }
+}
+
+/**
+ * One row of the crowd, for the profile page a card in `discoverTesters`
+ * links to. Same visibility rule as the list — verified testers only, same
+ * fields — just a single record instead of a page.
+ */
+export async function getDiscoverableTester(testerId: string) {
+  const tester = await prisma.testerProfile.findFirst({
+    where: {
+      id: testerId,
+      status: TesterStatus.VERIFIED,
+      user: { deletedAt: null, status: UserStatus.ACTIVE },
+    },
+    select: DISCOVERABLE_TESTER_SELECT,
+  })
+  if (!tester) throw new NotFoundError('Tester')
+  return shapeDiscoverableTester(tester)
+}
+
+function discoverableTesterWhere(query: {
+  search?: string
+  countryCode?: string
+  skills?: string[]
+}): Prisma.TesterProfileWhereInput {
+  return {
+    /**
+     * Only verified testers are discoverable. An applicant or a rejected
+     * account is platform-internal state a client has no business browsing.
+     */
     status: TesterStatus.VERIFIED,
     user: { deletedAt: null, status: UserStatus.ACTIVE },
     ...(query.countryCode ? { countryCode: query.countryCode } : {}),
@@ -750,8 +816,7 @@ export async function discoverTesters(
       : {}),
     /**
      * Search deliberately does NOT match on name or email — that would let a
-     * client confirm whether a specific person is on the platform, which is
-     * exactly what withholding the name is meant to prevent. Headline,
+     * client confirm whether a specific person is on the platform. Headline,
      * profession and skills are what a capability search needs.
      */
     ...(query.search
@@ -767,82 +832,5 @@ export async function discoverTesters(
           ],
         }
       : {}),
-  }
-
-  const [items, total] = await Promise.all([
-    prisma.testerProfile.findMany({
-      where,
-      select: {
-        id: true,
-        headline: true,
-        profession: true,
-        countryCode: true,
-        ratingAverage: true,
-        ratingCount: true,
-        bugsAcceptedCount: true,
-        projectsCompletedCount: true,
-        experienceYears: true,
-        user: { select: { id: true, firstName: true, lastName: true, avatarFileId: true } },
-        skills: { select: { skill: { select: { id: true, name: true, slug: true } } }, take: 8 },
-        devices: { select: { type: true, osName: true }, take: 6 },
-      },
-      orderBy: [{ ratingAverage: 'desc' }, { bugsAcceptedCount: 'desc' }],
-      ...toSkipTake(query),
-    }),
-    prisma.testerProfile.count({ where }),
-  ])
-
-  /**
-   * Which of these have actually worked with this customer. One query for the
-   * whole page rather than one per row.
-   */
-  const testerIds = items.map((t) => t.user.id)
-  const worked = testerIds.length
-    ? await prisma.projectAssignment.findMany({
-        where: {
-          testerId: { in: testerIds },
-          status: {
-            in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED],
-          },
-          project: {
-            deletedAt: null,
-            organisation: { members: { some: { userId: user.id } } },
-          },
-        },
-        select: { testerId: true },
-      })
-    : []
-  const knownToCustomer = new Set(worked.map((a) => a.testerId))
-
-  return {
-    items: items.map((t) => {
-      const isKnown = knownToCustomer.has(t.user.id)
-      const first = t.user.firstName?.trim() ?? ''
-      const last = t.user.lastName?.trim() ?? ''
-      const initials = `${first.charAt(0)}${last.charAt(0)}`.toUpperCase() || '—'
-
-      return {
-        id: t.id,
-        /** Present only for someone who has worked on this customer's builds. */
-        displayName: isKnown ? [first, last].filter(Boolean).join(' ') || 'Tester' : initials,
-        isNamed: isKnown,
-        /** Withheld until they are on one of your builds, for the same reason. */
-        avatarFileId: isKnown ? t.user.avatarFileId : null,
-        headline: t.headline,
-        profession: t.profession,
-        countryCode: t.countryCode,
-        ratingAverage: t.ratingAverage,
-        ratingCount: t.ratingCount,
-        bugsAcceptedCount: t.bugsAcceptedCount,
-        projectsCompletedCount: t.projectsCompletedCount,
-        experienceYears: t.experienceYears,
-        skills: t.skills.map((s) => s.skill),
-        /** Coarse device coverage — a type and an OS, never a specific handset. */
-        platforms: [
-          ...new Set(t.devices.map((d) => d.osName ?? d.type).filter(Boolean)),
-        ] as string[],
-      }
-    }),
-    meta: buildMeta(query, total),
   }
 }

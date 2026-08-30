@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { Tone } from '@/components/admin/StatusBadge'
 import { toneColor } from './tone-color'
 import styles from './BarChart.module.css'
@@ -67,9 +68,9 @@ export function BarChart({ title, segments, href }: BarChartProps) {
   )
 
   return href ? (
-    <a href={href} className={styles.wrapper}>
+    <Link href={href} className={styles.wrapper}>
       {body}
-    </a>
+    </Link>
   ) : (
     <div className={styles.wrapper}>{body}</div>
   )

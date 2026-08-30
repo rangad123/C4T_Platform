@@ -101,6 +101,33 @@ const STAT_TILE_STYLE: CSSProperties = {
   background: 'var(--surface-raised)',
 }
 
+/**
+ * One plain-English line for what actually needs a look today. An invitation
+ * outranks everything else — it blocks a tester from being assigned work at
+ * all — then payout state, since "there is money waiting" or "your request
+ * is in progress" is the next thing worth knowing without reading the tiles.
+ */
+function buildNarrative(
+  openInvitations: number,
+  payout: PayoutState | null,
+  currency: string,
+): string {
+  if (openInvitations > 0) {
+    return `You have ${openInvitations} invitation${openInvitations === 1 ? '' : 's'} waiting on an answer.`
+  }
+  if (!payout) return 'Nothing waiting on you right now.'
+  if (payout.openRequest) {
+    return `Your payout request for ${formatMoney(payout.openRequest.amountMinor, currency)} is in progress.`
+  }
+  if (payout.canRequest) {
+    return `${formatMoney(payout.availableMinor, currency)} is ready to withdraw.`
+  }
+  if (!payout.hasPaymentAccount && BigInt(payout.availableMinor || '0') > 0n) {
+    return 'You have earnings ready, but no payment details on file yet.'
+  }
+  return 'Nothing waiting on you right now.'
+}
+
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div style={STAT_TILE_STYLE}>
@@ -187,6 +214,7 @@ export default async function TesterHomePage({
    * endpoint itself enforces against.
    */
   const availableBalanceMinor = payout?.availableMinor ?? null
+  const narrative = buildNarrative(openInvitations, payout, currency)
 
   const columns: readonly TableColumn<TransactionRow>[] = [
     {
@@ -237,12 +265,9 @@ export default async function TesterHomePage({
           <h1 className="c4t-display-md" style={{ margin: 0 }}>
             Welcome back{user.firstName ? `, ${user.firstName}` : ''}
           </h1>
-          {openInvitations > 0 ? (
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              You have {openInvitations} invitation{openInvitations === 1 ? '' : 's'} waiting on an
-              answer.
-            </p>
-          ) : null}
+          <p style={{ margin: 0, color: 'var(--text-primary)', fontWeight: 'var(--fw-medium)' }}>
+            {narrative}
+          </p>
         </header>
 
         {/*

@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { requireRole } from '@/lib/auth/session'
 import { loadList } from '@/lib/admin/list'
 import { serverFetchOrNull } from '@/lib/api/server'
@@ -22,26 +23,15 @@ const PAGE_SIZE = 24
 /**
  * `/app/customer/crowdtesters` — §44, browsing the testing crowd.
  *
- * ── ON NAMES
- *
- * Most of the crowd appears by initials. A tester's name and picture show only
- * once they have actually worked on one of this organisation's builds — the
- * API decides that, per row, and never sends the name otherwise.
- *
- * The reasoning is in `discoverTesters` on the API: a client browsing the pool
- * is judging capability, and country, rating, skills and platforms answer that
- * completely. A name adds nothing to the decision while making the entire
- * crowd personally identifiable to anyone who signs up. The banner below says
- * so plainly rather than leaving a wall of initials looking like a bug.
- *
- * Search matches headline, profession and skills — never a name, so this
- * cannot be used to check whether a particular person is on the platform.
+ * Every tester's real name and photo show, by product decision. Search still
+ * deliberately does not match on name — see `discoverTesters` on the API —
+ * only headline, profession and skills, so this page can't be used to check
+ * whether a particular person is on the platform.
  */
 
 interface CrowdTester {
   id: string
   displayName: string
-  isNamed: boolean
   avatarFileId: string | null
   headline: string | null
   profession: string | null
@@ -158,19 +148,6 @@ export default async function CrowdtestersPage({
         </LiveGetForm>
       </Panel>
 
-      {/* Said once, near the results, rather than repeated on every card. */}
-      <p
-        style={{
-          margin: 0,
-          color: 'var(--text-muted)',
-          fontSize: 'var(--type-body-sm-size)',
-          maxWidth: '80ch',
-        }}
-      >
-        Testers appear by their initials until they have worked on one of your builds. Their
-        experience, rating and skills are shown either way.
-      </p>
-
       {failed ? (
         <EmptyState
           icon="alert-triangle"
@@ -198,102 +175,109 @@ export default async function CrowdtestersPage({
             {testers.map((tester) => {
               const rating = formatRating(tester.ratingAverage)
               return (
-                <li
-                  key={tester.id}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-3)',
-                    padding: 'var(--space-5)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 'var(--radius-card)',
-                    background: 'var(--surface-canvas)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                    <Avatar name={tester.displayName} fileId={tester.avatarFileId} size="md" />
-                    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                      <span
-                        style={{
-                          fontWeight: 'var(--fw-semibold)',
-                          color: 'var(--text-primary)',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {tester.displayName}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 'var(--type-body-sm-size)',
-                          color: 'var(--text-secondary)',
-                        }}
-                      >
-                        {tester.profession ?? tester.headline ?? 'Tester'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div
+                <li key={tester.id} style={{ display: 'flex', minWidth: 0 }}>
+                  <Link
+                    href={`${BASE}/${tester.id}`}
+                    className="c4t-card-hover"
                     style={{
                       display: 'flex',
-                      alignItems: 'center',
-                      gap: 'var(--space-4)',
-                      flexWrap: 'wrap',
-                      fontSize: 'var(--type-body-sm-size)',
-                      color: 'var(--text-secondary)',
+                      flex: 1,
+                      flexDirection: 'column',
+                      gap: 'var(--space-3)',
+                      padding: 'var(--space-5)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: 'var(--radius-card)',
+                      background: 'var(--surface-canvas)',
+                      textDecoration: 'none',
+                      color: 'inherit',
+                      transition: 'var(--transition-surface)',
                     }}
                   >
-                    {tester.countryCode ? (
-                      <CountryLabel countryCode={tester.countryCode} size={14} />
-                    ) : null}
-                    {rating ? (
-                      <span>
-                        {rating} ({tester.ratingCount})
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>Not yet rated</span>
-                    )}
-                  </div>
-
-                  {tester.skills.length > 0 ? (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                      {tester.skills.slice(0, 4).map((skill) => (
-                        <Badge key={skill.id} tone="neutral" uppercase={false}>
-                          {skill.name}
-                        </Badge>
-                      ))}
-                      {tester.skills.length > 4 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                      <Avatar name={tester.displayName} fileId={tester.avatarFileId} size="md" />
+                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                         <span
                           style={{
-                            fontSize: 'var(--type-caption-size)',
-                            color: 'var(--text-muted)',
-                            alignSelf: 'center',
+                            fontWeight: 'var(--fw-semibold)',
+                            color: 'var(--text-primary)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
                           }}
                         >
-                          +{tester.skills.length - 4}
+                          {tester.displayName}
                         </span>
+                        <span
+                          style={{
+                            fontSize: 'var(--type-body-sm-size)',
+                            color: 'var(--text-secondary)',
+                          }}
+                        >
+                          {tester.profession ?? tester.headline ?? 'Tester'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-4)',
+                        flexWrap: 'wrap',
+                        fontSize: 'var(--type-body-sm-size)',
+                        color: 'var(--text-secondary)',
+                      }}
+                    >
+                      {tester.countryCode ? (
+                        <CountryLabel countryCode={tester.countryCode} size={14} />
+                      ) : null}
+                      {rating ? (
+                        <span>
+                          {rating} ({tester.ratingCount})
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>Not yet rated</span>
+                      )}
+                    </div>
+
+                    {tester.skills.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                        {tester.skills.slice(0, 4).map((skill) => (
+                          <Badge key={skill.id} tone="neutral" uppercase={false}>
+                            {skill.name}
+                          </Badge>
+                        ))}
+                        {tester.skills.length > 4 ? (
+                          <span
+                            style={{
+                              fontSize: 'var(--type-caption-size)',
+                              color: 'var(--text-muted)',
+                              alignSelf: 'center',
+                            }}
+                          >
+                            +{tester.skills.length - 4}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: 'var(--space-4)',
+                        fontSize: 'var(--type-caption-size)',
+                        color: 'var(--text-muted)',
+                        marginTop: 'auto',
+                        paddingTop: 'var(--space-2)',
+                      }}
+                    >
+                      <span>{tester.bugsAcceptedCount} accepted</span>
+                      <span>{tester.projectsCompletedCount} projects</span>
+                      {tester.experienceYears != null ? (
+                        <span>{tester.experienceYears}y experience</span>
                       ) : null}
                     </div>
-                  ) : null}
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 'var(--space-4)',
-                      fontSize: 'var(--type-caption-size)',
-                      color: 'var(--text-muted)',
-                      marginTop: 'auto',
-                      paddingTop: 'var(--space-2)',
-                    }}
-                  >
-                    <span>{tester.bugsAcceptedCount} accepted</span>
-                    <span>{tester.projectsCompletedCount} projects</span>
-                    {tester.experienceYears != null ? (
-                      <span>{tester.experienceYears}y experience</span>
-                    ) : null}
-                  </div>
+                  </Link>
                 </li>
               )
             })}

@@ -58,6 +58,7 @@ desktop.ini
 
 # Tooling scratch
 .playwright-mcp/
+.claude/scheduled_tasks.lock
 
 Crowd4Test_Service_Agreement (1).docx
 

@@ -56,6 +56,31 @@ function segmentsFromCounts(
     }))
 }
 
+/**
+ * One plain-English line summarising what actually needs a look today —
+ * every number below already says this, but not everyone reads a grid of
+ * tiles fluently. Priority order is urgency, not the tiles' own layout order:
+ * a critical bug outranks a new lead.
+ */
+function buildNarrative(stats: StatsResponse, newLeads: number): string {
+  const notes: string[] = []
+  if (stats.bugs.openCritical > 0) {
+    notes.push(
+      `${stats.bugs.openCritical} open critical bug${stats.bugs.openCritical === 1 ? '' : 's'}`,
+    )
+  }
+  if (stats.leads && newLeads > 0) {
+    notes.push(`${newLeads} new lead${newLeads === 1 ? '' : 's'} waiting for a response`)
+  }
+  if (BigInt(stats.payouts.byCategory.pending) > 0n) {
+    notes.push('tester payouts pending')
+  }
+  if (notes.length === 0) {
+    return 'Nothing urgent right now — no critical bugs, no leads waiting, and no payouts pending.'
+  }
+  return `Needs attention: ${notes.join(', ')}.`
+}
+
 function ChartCard({ children }: { children: React.ReactNode }) {
   return (
     <div
@@ -93,6 +118,7 @@ export default async function AdminDashboardPage() {
   const activeProjects = stats.projects.byStatus.IN_PROGRESS ?? 0
   const verifiedTesters = stats.testers.byStatus.VERIFIED ?? 0
   const newLeads = stats.leads?.NEW ?? 0
+  const narrative = buildNarrative(stats, newLeads)
 
   // BigInt, not Number: these are minor-unit strings and a float sum risks
   // precision loss above 2^53 — same care `formatMoney` itself takes.
@@ -127,6 +153,16 @@ export default async function AdminDashboardPage() {
           </h1>
           <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: 640 }}>
             A glimpse of the platform — every number links through to the filtered list behind it.
+          </p>
+          <p
+            style={{
+              margin: 'var(--space-3) 0 0',
+              color: 'var(--text-primary)',
+              fontWeight: 'var(--fw-medium)',
+              maxWidth: 640,
+            }}
+          >
+            {narrative}
           </p>
         </header>
 

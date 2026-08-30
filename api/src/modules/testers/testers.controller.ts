@@ -6,9 +6,8 @@ import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './testers.service.js'
 import type { ListTestersQuery, ListGlobalDevicesQuery } from './testers.schema.js'
 
-export async function discover(req: Request, res: Response): Promise<void> {
+export async function discover(_req: Request, res: Response): Promise<void> {
   const result = await service.discoverTesters(
-    req.user!,
     validatedQuery<{
       page: number
       limit: number
@@ -18,6 +17,11 @@ export async function discover(req: Request, res: Response): Promise<void> {
     }>(res),
   )
   res.json({ data: result.items, meta: result.meta })
+}
+
+export async function discoverOne(req: Request, res: Response): Promise<void> {
+  const tester = await service.getDiscoverableTester(param(req, 'id'))
+  res.json({ data: tester })
 }
 
 export async function list(_req: Request, res: Response): Promise<void> {
