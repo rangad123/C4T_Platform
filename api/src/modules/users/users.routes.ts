@@ -33,6 +33,32 @@ usersRouter.patch('/me', validate({ body: updateOwnProfileSchema }), async (req,
   res.json({ data: await service.updateUser(req.user!.id, req.body) })
 })
 
+/**
+ * Close your own account.
+ *
+ * Reuses `deleteUser` rather than defining a second kind of deletion — the
+ * retention rules are a property of the platform, not of who pressed the
+ * button. So this is the same soft delete an admin performs: the row stays
+ * for the bugs and payouts that reference it, the email is released for
+ * reuse, and every session is revoked.
+ *
+ * The id is the caller's own, taken from the session and never from the
+ * request, so this route cannot be pointed at anybody else. Deleting other
+ * people remains `DELETE /users/:id`, behind `user.write`.
+ *
+ * Declared before `/:id` so "me" is never parsed as an id.
+ */
+usersRouter.delete('/me', async (req, res) => {
+  const result = await service.deleteUser(req.user!.id)
+  await recordAudit({
+    req,
+    action: 'user.self_deleted',
+    entityType: 'User',
+    entityId: req.user!.id,
+  })
+  res.json({ data: result })
+})
+
 // ─── Permission catalogue — needed to render the Sub-Admin editor ────────────
 
 usersRouter.get(

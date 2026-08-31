@@ -25,9 +25,18 @@ const TESTER_SECTIONS: readonly SidebarSection[] = [
     label: 'Work',
     links: [{ href: '/app/tester/projects', label: 'Projects', icon: 'briefcase' }],
   },
+  /**
+   * Two entries, because they are two different things. Announcements are a
+   * one-way broadcast the platform writes and testers read; Communication is
+   * a real conversation with a reply box. Folding the second name onto the
+   * first would have promised a reply button that does not exist there.
+   */
   {
     label: 'Updates',
-    links: [{ href: '/app/tester/announcements', label: 'Announcements', icon: 'message-square' }],
+    links: [
+      { href: '/app/tester/communication', label: 'Communication', icon: 'message-square' },
+      { href: '/app/tester/announcements', label: 'Announcements', icon: 'megaphone' },
+    ],
   },
   {
     label: 'Account',

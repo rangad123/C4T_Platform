@@ -26,7 +26,7 @@ import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
-import { formatDate, orDash, personName, titleCase } from '@/lib/admin/format'
+import { formatDate, formatMoney, orDash, personName, titleCase } from '@/lib/admin/format'
 import {
   updateBasicInfoAction,
   addDeviceAction,
@@ -44,6 +44,8 @@ import {
   savePaymentAccountAction,
   setNdaDocumentAction,
   setAvatarAction,
+  requestPayoutFromProfileAction,
+  deleteAccountAction,
 } from './actions'
 
 const PROFILE_PATH = '/app/tester/profile'
@@ -126,6 +128,46 @@ interface ProfileDetail {
   skills: readonly { skill: { id: string; name: string } }[]
   languages: readonly { code: string; proficiency: string }[]
   workHistory: readonly WorkHistoryEntry[]
+}
+
+/**
+ * `GET /v1/transactions/payouts/mine` — the wallet.
+ *
+ * Every figure is a string because the amounts are `BigInt` minor units on
+ * the API and JSON has no BigInt. They are formatted, never arithmetic'd,
+ * here — the API is the only thing that adds money up.
+ */
+interface PayoutState {
+  currency: string
+  availableMinor: string
+  creditedMinor: string
+  releasedMinor: string
+  awaitingReleaseMinor: string
+  minimumMinor: string
+  hasPaymentAccount: boolean
+  meetsMinimum: boolean
+  openRequest: {
+    id: string
+    reference: string
+    amountMinor: string
+    status: string
+    occurredAt: string
+  } | null
+  canRequest: boolean
+}
+
+/** One row of the tester's own ledger — `GET /v1/transactions`, self-scoped. */
+interface LedgerRow {
+  id: string
+  reference: string
+  type: string
+  status: string
+  amountMinor: string
+  currency: string
+  description: string | null
+  occurredAt: string
+  settledAt: string | null
+  paymentMethod: string | null
 }
 
 interface PaymentAccount {
@@ -246,6 +288,19 @@ const CHIP = {
  */
 const NOTICES: Record<string, NoticeCopy> = {
   'about-saved': { tone: 'success', message: 'Your profile is up to date.' },
+  'payout-requested': {
+    tone: 'success',
+    message: 'Your payout request has been submitted. It will show below once it settles.',
+  },
+  'payout-rejected': {
+    tone: 'warning',
+    message:
+      'That request could not be submitted. Check your balance and payment details below, then try again.',
+  },
+  'delete-mismatch': {
+    tone: 'warning',
+    message: 'That is not the email on this account, so nothing was deleted.',
+  },
   'skills-saved': { tone: 'success', message: 'Your skills are up to date.' },
   'payment-saved': { tone: 'success', message: 'Your payment details are on file.' },
   'device-added': { tone: 'success', message: 'Device added.' },
@@ -316,7 +371,9 @@ export default async function TesterProfilePage({
 }: {
   searchParams: Promise<{ section?: string; edit?: string; view?: string; notice?: string }>
 }) {
-  await requireRole(['TESTER'])
+  // The session user, not the tester profile: the email lives on the account
+  // and is what the close-account confirmation is checked against.
+  const sessionUser = await requireRole(['TESTER'])
 
   const resolvedParams = await searchParams
   const section = resolveSection(SECTIONS, resolvedParams.section)
@@ -324,6 +381,41 @@ export default async function TesterProfilePage({
   const workView: WorkView = WORK_VIEWS.some((v) => v.value === resolvedParams.view)
     ? (resolvedParams.view as WorkView)
     : 'projects'
+
+  /**
+   * A payout leaves the wallet; everything else adds to it. The sign is
+   * derived from the transaction type rather than stored, because the ledger
+   * records amounts as magnitudes — a debit is a debit by virtue of what it
+   * is, not by carrying a minus.
+   */
+  const ledgerColumns: readonly TableColumn<LedgerRow>[] = [
+    {
+      key: 'movement',
+      header: 'Movement',
+      render: (row) => (row.type === 'TESTER_PAYOUT' ? 'Payout' : titleCase(row.type)),
+      renderSecondary: (row) => row.description ?? row.reference,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (row) =>
+        `${row.type === 'TESTER_PAYOUT' ? '−' : '+'}${formatMoney(row.amountMinor, row.currency)}`,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      align: 'right',
+      render: (row) => formatDate(row.occurredAt),
+      renderSecondary: (row) =>
+        row.settledAt ? `Settled ${formatDate(row.settledAt)}` : undefined,
+    },
+  ]
 
   const assignmentColumns: readonly TableColumn<AssignmentRow>[] = [
     {
@@ -374,32 +466,57 @@ export default async function TesterProfilePage({
   // each back specific sections only — fetching them regardless of section
   // meant opening About or Work history waited on the full device/skill
   // catalog and the payout instrument for no reason.
-  const [profile, catalog, paymentAccount, myBrowsers, ndaTemplate, assignments] =
-    await Promise.all([
-      serverFetchOrNull<ProfileDetail>('testers/me'),
-      section === 'assets' || section === 'skills'
-        ? serverFetchOrNull<Catalog>('catalog')
-        : Promise.resolve(null),
-      section === 'payment'
-        ? serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine')
-        : Promise.resolve(null),
-      // The tester's registered browsers. Same tab as devices, so it is gated
-      // on the same section — and it is what populates the browser picker on
-      // the bug-report form.
-      section === 'assets'
-        ? serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers')
-        : Promise.resolve(null),
-      // The blank NDA an admin has published, if any. Same tab as the NDA panel.
-      section === 'about'
-        ? serverFetchOrNull<NdaTemplate | null>('settings/nda-template')
-        : Promise.resolve(null),
-      // Platform work history. Only the Projects half of the Work tab needs it.
-      section === 'work' && workView === 'projects'
-        ? serverFetchOrNull<readonly AssignmentRow[]>('projects/my-assignments', {
-            query: { limit: 100 },
-          })
-        : Promise.resolve(null),
-    ])
+  const [
+    profile,
+    catalog,
+    paymentAccount,
+    myBrowsers,
+    ndaTemplate,
+    assignments,
+    payoutState,
+    payoutHistory,
+  ] = await Promise.all([
+    serverFetchOrNull<ProfileDetail>('testers/me'),
+    section === 'assets' || section === 'skills'
+      ? serverFetchOrNull<Catalog>('catalog')
+      : Promise.resolve(null),
+    section === 'payment'
+      ? serverFetchOrNull<PaymentAccount | null>('payment-accounts/mine')
+      : Promise.resolve(null),
+    // The tester's registered browsers. Same tab as devices, so it is gated
+    // on the same section — and it is what populates the browser picker on
+    // the bug-report form.
+    section === 'assets'
+      ? serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers')
+      : Promise.resolve(null),
+    // The blank NDA an admin has published, if any. Same tab as the NDA panel.
+    section === 'about'
+      ? serverFetchOrNull<NdaTemplate | null>('settings/nda-template')
+      : Promise.resolve(null),
+    // Platform work history. Only the Projects half of the Work tab needs it.
+    section === 'work' && workView === 'projects'
+      ? serverFetchOrNull<readonly AssignmentRow[]>('projects/my-assignments', {
+          query: { limit: 100 },
+        })
+      : Promise.resolve(null),
+    /**
+     * The wallet, and the ledger rows behind it. Both belong to the Payment
+     * tab, so both are gated on it.
+     *
+     * The balance is computed by the API from the transaction ledger on
+     * every read — there is no stored balance field to drift, and nothing
+     * a client sends can move it. See `payoutBalance` in the transactions
+     * module.
+     */
+    section === 'payment'
+      ? serverFetchOrNull<PayoutState>('transactions/payouts/mine')
+      : Promise.resolve(null),
+    section === 'payment'
+      ? serverFetchOrNull<readonly LedgerRow[]>('transactions', {
+          query: { page: 1, limit: 25, sort: 'occurredAt', order: 'desc' },
+        })
+      : Promise.resolve(null),
+  ])
 
   if (!profile) {
     return (
@@ -827,6 +944,54 @@ export default async function TesterProfilePage({
               </div>
             </div>
           </Modal>
+
+          {/* ── Danger zone ───────────────────────────────────────────────
+              Typing the account's own email is the confirmation. A yes/no
+              button on something irreversible is too easy to click through,
+              and this codebase already uses a typed confirmation for
+              archiving a project — the same weight of decision.
+
+              The account is closed, not erased: bugs filed and payouts made
+              have to keep resolving, so the row stays and the email is
+              released. The copy says so rather than promising an erasure
+              that will not happen. */}
+          <Panel
+            title="Close your account"
+            description="This signs you out everywhere and ends your access to Crowd4Test."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                Your work stays on the platform where it has to — the bugs you filed and the payouts
+                you were paid are part of other people&rsquo;s records too. Your profile stops being
+                visible, your sessions end immediately, and your email is freed up so you could sign
+                up again later.
+              </p>
+              <form
+                action={deleteAccountAction}
+                style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
+              >
+                <Field
+                  label="Type your email to confirm"
+                  htmlFor="confirmEmail"
+                  hint="This is the last step — there is no undo."
+                >
+                  <Input
+                    id="confirmEmail"
+                    name="confirmEmail"
+                    type="email"
+                    required
+                    autoComplete="off"
+                    placeholder={sessionUser.email}
+                  />
+                </Field>
+                <div>
+                  <SubmitButton variant="secondary" pendingLabel="Closing your account…">
+                    Close my account
+                  </SubmitButton>
+                </div>
+              </form>
+            </div>
+          </Panel>
         </>
       ) : null}
 
@@ -1676,6 +1841,127 @@ export default async function TesterProfilePage({
 
       {section === 'payment' ? (
         <>
+          {/* ── Wallet ───────────────────────────────────────────────────
+              Balances only; the ledger below is what explains them. Every
+              figure is computed by the API from the transaction rows on each
+              read, so there is no stored total for a client to disagree
+              with — or to tamper with. */}
+          <Panel
+            title="Wallet balance"
+            description="What you have earned, and what you can withdraw right now."
+          >
+            {!payoutState ? (
+              <Muted>Your balance could not be loaded. Refresh in a moment.</Muted>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: 'var(--space-4)',
+                  }}
+                >
+                  {[
+                    {
+                      label: 'Available to withdraw',
+                      value: formatMoney(payoutState.availableMinor, payoutState.currency),
+                    },
+                    {
+                      label: 'Awaiting release',
+                      value: formatMoney(payoutState.awaitingReleaseMinor, payoutState.currency),
+                    },
+                    {
+                      label: 'Credited in total',
+                      value: formatMoney(payoutState.creditedMinor, payoutState.currency),
+                    },
+                  ].map((tile) => (
+                    <div
+                      key={tile.label}
+                      style={{
+                        padding: 'var(--space-5)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-card)',
+                        background: 'var(--surface-raised)',
+                      }}
+                    >
+                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
+                        {tile.label}
+                      </p>
+                      <p
+                        style={{
+                          margin: 'var(--space-2) 0 0',
+                          fontSize: 'var(--type-display-sm-size)',
+                          fontWeight: 'var(--fw-semibold)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {tile.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {payoutState.openRequest ? (
+                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                    A payout of{' '}
+                    {formatMoney(payoutState.openRequest.amountMinor, payoutState.currency)} is
+                    already in progress ({payoutState.openRequest.reference} ·{' '}
+                    {titleCase(payoutState.openRequest.status)}). You can request again once it
+                    settles.
+                  </p>
+                ) : !payoutState.hasPaymentAccount ? (
+                  <Muted>
+                    Add your payment details above before requesting a payout — there is nowhere to
+                    send it otherwise.
+                  </Muted>
+                ) : !payoutState.meetsMinimum ? (
+                  <Muted>
+                    {`The minimum payout is ${formatMoney(payoutState.minimumMinor, payoutState.currency)}. Keep earning and the option appears here.`}
+                  </Muted>
+                ) : (
+                  /* No amount field: the server pays out whatever is
+                     available at the moment it runs. A number typed here
+                     could only ever be stale by the time it arrived. */
+                  <form action={requestPayoutFromProfileAction}>
+                    <SubmitButton variant="primary" pendingLabel="Requesting…">
+                      {`Request ${formatMoney(payoutState.availableMinor, payoutState.currency)}`}
+                    </SubmitButton>
+                  </form>
+                )}
+              </div>
+            )}
+          </Panel>
+
+          {/* ── Ledger ───────────────────────────────────────────────────
+              Credits and debits as recorded, newest first. This is the
+              working the balance above is derived from. */}
+          <Panel
+            title="Payout history"
+            description="Every credit and payout on your account."
+            flush={(payoutHistory?.length ?? 0) > 0}
+          >
+            {payoutHistory === null ? (
+              <div style={{ padding: 'var(--space-6)' }}>
+                <Muted>Your history could not be loaded. Refresh in a moment.</Muted>
+              </div>
+            ) : payoutHistory.length === 0 ? (
+              <div style={{ padding: 'var(--space-6)' }}>
+                <EmptyState
+                  icon="banknote"
+                  title="Nothing yet"
+                  description="Once work you have done is credited, every movement shows up here."
+                />
+              </div>
+            ) : (
+              <Table
+                ariaLabel="Payout history"
+                columns={ledgerColumns}
+                rows={[...payoutHistory]}
+                rowKey={(row) => row.id}
+              />
+            )}
+          </Panel>
+
           <Panel
             title="Payment details"
             description="Where your earnings get paid out. Sensitive fields are encrypted — this page never shows the full account number back to you either, only what you'd need to confirm it's the right account."

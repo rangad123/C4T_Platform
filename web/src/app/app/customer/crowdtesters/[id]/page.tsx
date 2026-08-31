@@ -8,9 +8,32 @@ import { DescriptionList } from '@/components/admin/DescriptionList'
 import { Avatar } from '@/components/admin/Avatar'
 import { CountryLabel } from '@/components/admin/CountryFlag'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Modal } from '@/components/admin/Modal'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { Badge } from '@/components/ds/core/Badge'
+import { Button } from '@/components/ds/core/Button'
+import { SubmitButton } from '@/components/ds/core/SubmitButton'
+import { Field } from '@/components/ds/forms/Field'
+import { Select } from '@/components/ds/forms/Select'
+import { Textarea } from '@/components/ds/forms/Textarea'
 import { formatDate } from '@/lib/admin/format'
+import { rateTesterAction } from './actions'
+
+/**
+ * Assignments that can be rated, matching `assertWorkedTogether` on the API.
+ * Anything earlier than this is an invitation, not work.
+ */
+const RATEABLE_STATUSES = new Set(['ACTIVE', 'COMPLETED'])
+
+/** Wording for each score, so the number is not the only cue. */
+const SCORE_LABEL: Record<number, string> = {
+  5: 'Excellent',
+  4: 'Good',
+  3: 'Adequate',
+  2: 'Below par',
+  1: 'Poor',
+}
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const LIST_PATH = '/app/customer/crowdtesters'
@@ -48,6 +71,31 @@ interface TesterEngagement {
   project: { id: string; reference: string; title: string }
   build: { id: string; name: string; testType: string | null } | null
   bugsReported: number
+  /** The rating subject is the person behind the profile. */
+  testerUserId: string
+  alreadyRated: boolean
+}
+
+const NOTICES: Record<string, NoticeCopy> = {
+  'rating-saved': { tone: 'success', message: 'Thanks — your rating has been recorded.' },
+  'rating-duplicate': {
+    tone: 'warning',
+    message: 'You have already rated this tester on that project.',
+  },
+  'rating-not-worked-together': {
+    tone: 'warning',
+    message: 'You can only rate a tester on a project they actually worked on for you.',
+  },
+  'rating-needs-project': {
+    tone: 'warning',
+    message: 'Choose which piece of work you are rating.',
+  },
+  'rating-invalid': { tone: 'warning', message: 'Give a score between 1 and 5.' },
+  'rating-forbidden': { tone: 'error', message: 'You are not allowed to rate this tester.' },
+  'rating-failed': {
+    tone: 'error',
+    message: 'That rating could not be saved. Try again in a moment.',
+  },
 }
 
 function formatRating(raw: string | null): string | null {
@@ -71,11 +119,14 @@ function Muted({ children }: { children: string }) {
  */
 export default async function CrowdtesterProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ notice?: string; rate?: string }>
 }) {
   await requireRole(['CUSTOMER'])
   const { id } = await params
+  const { notice, rate } = await searchParams
 
   let tester: TesterProfileDetail | null = null
   try {
@@ -128,7 +179,45 @@ export default async function CrowdtesterProfilePage({
             ? `Responded ${formatDate(row.respondedAt)}`
             : undefined,
     },
+    /**
+     * Rating belongs to a piece of work, not to a person in the abstract —
+     * which is why the control lives on the engagement rather than at the
+     * top of the profile.
+     *
+     * Two states suppress the button, both mirroring rules the API enforces
+     * anyway. Work already rated says so, because one author rates one
+     * subject once per project. And an invitation that was never taken up
+     * cannot be rated at all: `assertWorkedTogether` requires the assignment
+     * to have reached ACTIVE or COMPLETED, so offering it on an INVITED row
+     * would be a button whose only possible outcome is a refusal.
+     *
+     * `interactive` keeps this cell out of the row's own link.
+     */
+    {
+      key: 'rate',
+      header: '',
+      align: 'right',
+      interactive: true,
+      render: (row) =>
+        row.alreadyRated ? (
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+            Rated
+          </span>
+        ) : RATEABLE_STATUSES.has(row.status) ? (
+          <Button
+            href={`${LIST_PATH}/${id}?rate=${row.project.id}`}
+            variant="ghost"
+            size="sm"
+            iconLeft="star"
+          >
+            Rate
+          </Button>
+        ) : null,
+    },
   ]
+
+  // The engagement the rating dialog is open for, if any.
+  const ratingTarget = rate ? engagements.find((e) => e.project.id === rate) : undefined
 
   return (
     <DetailShell
@@ -190,6 +279,46 @@ export default async function CrowdtesterProfilePage({
        * the same tester. The question worth answering — "have they worked
        * with US, and how did it go" — needs no one else's data.
        */}
+      <Notice code={notice} notices={NOTICES} />
+
+      {ratingTarget ? (
+        <Modal open closedHref={`${LIST_PATH}/${id}`} title={`Rate ${tester.displayName}`}>
+          <form
+            action={rateTesterAction}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+          >
+            <input type="hidden" name="testerProfileId" value={id} />
+            <input type="hidden" name="subjectUserId" value={ratingTarget.testerUserId} />
+            <input type="hidden" name="projectId" value={ratingTarget.project.id} />
+
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              For their work on {ratingTarget.project.reference} · {ratingTarget.project.title}.
+            </p>
+
+            <Field label="Score" htmlFor="score" required hint="1 is poor, 5 is excellent.">
+              <Select
+                id="score"
+                name="score"
+                required
+                defaultValue="5"
+                options={[5, 4, 3, 2, 1].map((n) => ({
+                  value: String(n),
+                  label: `${n} — ${SCORE_LABEL[n]}`,
+                }))}
+              />
+            </Field>
+            <Field label="Comment" htmlFor="comment" hint="Optional. Shared with the tester.">
+              <Textarea id="comment" name="comment" rows={4} maxLength={2000} />
+            </Field>
+            <div>
+              <SubmitButton variant="primary" pendingLabel="Saving…">
+                Submit rating
+              </SubmitButton>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
+
       <Panel
         title="Work history"
         description="What this tester has done on your projects."

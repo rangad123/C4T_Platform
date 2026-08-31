@@ -54,6 +54,8 @@ export interface SessionUser {
   firstName: string | null
   lastName: string | null
   emailVerified: boolean
+  /** Drives the header avatar. Null until a picture is uploaded. */
+  avatarFileId: string | null
   permissions: string[]
   organisationId: string | null
   testerProfileId: string | null

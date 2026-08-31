@@ -535,3 +535,62 @@ export async function savePaymentAccountAction(formData: FormData): Promise<void
   // real saved values (§20).
   redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`)
 }
+
+/**
+ * Ask to be paid, from the profile's own payment section.
+ *
+ * Same endpoint and same reasoning as the dashboard's version: the amount is
+ * never sent, because the API pays whatever is available when it runs and a
+ * number the browser was holding could only be stale. This one exists so the
+ * request lands back on the payment tab rather than the dashboard, and it is
+ * the same underlying ledger either way — two doors, one system.
+ */
+export async function requestPayoutFromProfileAction(): Promise<void> {
+  await requireRole(['TESTER'])
+
+  let notice = 'payout-requested'
+  try {
+    await actionFetch('transactions/payouts/request', { method: 'POST', body: {} })
+    revalidatePath(PROFILE_PATH)
+  } catch (error) {
+    // 400 is every rule the tester can actually act on — no payment details,
+    // under the minimum, one already in flight. The page re-reads the real
+    // state on the way back, so the notice only names the category.
+    notice = failureNotice(error, { 400: 'payout-rejected' })
+  }
+
+  redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`)
+}
+
+/**
+ * Close the tester's own account.
+ *
+ * The deletion itself is the same soft delete an admin performs — the row is
+ * kept, the email is released, every session is revoked — because the
+ * platform's records (bugs filed, payouts made) must survive the person
+ * leaving. Nothing about retention changes just because the request came
+ * from the account holder.
+ *
+ * Typing the email is the confirmation. A yes/no on something irreversible
+ * is too easy to click through, and this page already uses the same
+ * typed-confirmation idea for archiving a project.
+ */
+export async function deleteAccountAction(formData: FormData): Promise<void> {
+  const user = await requireRole(['TESTER'])
+
+  const typed = formTrimmed(formData, 'confirmEmail').toLowerCase()
+  if (typed !== user.email.toLowerCase()) {
+    redirect(`${PROFILE_PATH}?section=about&notice=delete-mismatch`)
+  }
+
+  try {
+    await actionFetch('users/me', { method: 'DELETE' })
+  } catch (error) {
+    redirect(`${PROFILE_PATH}?section=about&notice=${failureNotice(error)}`)
+  }
+
+  // The API has revoked every session, so there is nothing left to sign out
+  // of — go straight to the signed-out screen rather than a page that would
+  // only bounce.
+  redirect('/login?notice=account_deleted')
+}

@@ -825,6 +825,7 @@ export async function organisationIdsForUser(userId: string): Promise<string[]> 
 export async function getTesterEngagementsForOrganisation(
   testerProfileId: string,
   organisationIds: readonly string[],
+  authorId: string,
 ) {
   // No organisation means nothing of the caller's to have worked on. Return
   // empty rather than unfiltered — an empty scope must never widen to "all".
@@ -873,6 +874,25 @@ export async function getTesterEngagementsForOrganisation(
         })
   const bugsByProject = new Map(bugCounts.map((b) => [b.projectId, b._count._all]))
 
+  /**
+   * Existing ratings this caller has already left, so the UI can offer to
+   * rate work that has not been rated and say so where it has. The API would
+   * reject a duplicate anyway (one author, one subject, one project); this
+   * just stops the offer being made in the first place.
+   */
+  const ratedProjectIds = new Set(
+    (
+      await prisma.rating.findMany({
+        where: {
+          authorId,
+          subjectUserId: tester.userId,
+          projectId: { in: projectIds },
+        },
+        select: { projectId: true },
+      })
+    ).flatMap((r) => (r.projectId ? [r.projectId] : [])),
+  )
+
   return assignments.map((a) => ({
     status: a.status,
     invitedAt: a.invitedAt,
@@ -881,6 +901,14 @@ export async function getTesterEngagementsForOrganisation(
     project: a.project,
     build: a.build,
     bugsReported: bugsByProject.get(a.project.id) ?? 0,
+    /**
+     * The subject of a rating is the person, not the profile. Returned here
+     * rather than on the public profile shape because this list is already
+     * scoped to work done for the caller — precisely the people they are
+     * entitled to rate.
+     */
+    testerUserId: tester.userId,
+    alreadyRated: ratedProjectIds.has(a.project.id),
   }))
 }
 

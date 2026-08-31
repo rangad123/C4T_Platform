@@ -60,6 +60,7 @@ export interface PublicUser {
   firstName: string | null
   lastName: string | null
   emailVerified: boolean
+  avatarFileId: string | null
   permissions: string[]
   organisationId: string | null
   testerProfileId: string | null
@@ -85,6 +86,15 @@ async function loadPublicUser(userId: string): Promise<PublicUser> {
       firstName: true,
       lastName: true,
       emailVerifiedAt: true,
+      /**
+       * For the header avatar. Included in the session payload rather than
+       * fetched separately because every authenticated page already reads
+       * this endpoint, and a second request per page to draw one thumbnail
+       * would be a poor trade. Replacing a picture writes a new FileObject
+       * and repoints this id, so the URL changes on its own and no
+       * cache-busting is needed.
+       */
+      avatarFileId: true,
       permissions: { select: { permission: { select: { code: true } } } },
       orgMemberships: { select: { organisationId: true }, take: 1 },
       testerProfile: { select: { id: true } },
@@ -100,6 +110,7 @@ async function loadPublicUser(userId: string): Promise<PublicUser> {
     firstName: user.firstName,
     lastName: user.lastName,
     emailVerified: user.emailVerifiedAt !== null,
+    avatarFileId: user.avatarFileId,
     permissions: user.permissions.map((p) => p.permission.code),
     organisationId: user.orgMemberships[0]?.organisationId ?? null,
     testerProfileId: user.testerProfile?.id ?? null,

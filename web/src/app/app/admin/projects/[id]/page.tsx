@@ -177,6 +177,8 @@ export default async function ProjectDetailPage({
   }
 
   const canDelete = hasPermission(user, 'project.delete')
+  // Gates the per-assignment payout shortcut — writing money is its own grant.
+  const canWriteTransactions = hasPermission(user, 'transaction.write')
   const { capabilities } = project
   // The build every build-scoped tab below reads and writes against. The API
   // already resolved this (the requested `?buildId=`, or the project's
@@ -395,6 +397,37 @@ export default async function ProjectDetailPage({
       align: 'right',
       render: (row) => formatDate(row.respondedAt),
     },
+    /**
+     * Paying a tester from the assignment that earned it.
+     *
+     * The same link as the one on the tester's own record, carrying the
+     * project so the payment says what it was for. Both are shortcuts into
+     * the one transaction form — there is a single ledger, and this is a
+     * second door to it rather than a second way of doing it.
+     *
+     * `interactive` keeps the cell out of the row's own link: an `<a>`
+     * inside an `<a>` is a hydration error, not a styling quirk.
+     */
+    ...(canWriteTransactions
+      ? [
+          {
+            key: 'payout',
+            header: '',
+            align: 'right' as const,
+            interactive: true,
+            render: (row: ProjectAssignmentRow) => (
+              <Button
+                href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${row.tester.id}&projectId=${project.id}`}
+                variant="ghost"
+                size="sm"
+                iconLeft="banknote"
+              >
+                Pay
+              </Button>
+            ),
+          },
+        ]
+      : []),
   ]
 
   const bugColumns: readonly TableColumn<ProjectBugRow>[] = [

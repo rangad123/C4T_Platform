@@ -443,6 +443,9 @@ export default async function TesterDetailPage({
   const canVerify = hasPermission(viewer, 'tester.verify')
   const canDecryptPayment = hasPermission(viewer, 'payment_account.decrypt')
   const canReadTransactions = hasPermission(viewer, 'transaction.read')
+  // Writing money is a separate grant from reading it — the payout shortcut
+  // is hidden for anyone who could only look.
+  const canWriteTransactions = hasPermission(viewer, 'transaction.write')
 
   /**
    * Each pair here backs exactly one section — fetching all five on every
@@ -973,6 +976,25 @@ export default async function TesterDetailPage({
             title="Payment history"
             description="Earnings and payouts recorded against this tester. The same rows the Transactions module tracks, filtered to this tester."
             flush={'items' in paymentHistory && paymentHistory.items.length > 0}
+            actions={
+              /*
+               * Deliberately a link into the existing transaction form with
+               * this tester pre-filled, not a payout form of its own. A
+               * second way to write money would be a second set of rules to
+               * keep in step with the first; this is one ledger reached from
+               * a convenient place. The form already echoes these params.
+               */
+              canWriteTransactions ? (
+                <Button
+                  href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${tester.user.id}`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="banknote"
+                >
+                  Add payout
+                </Button>
+              ) : undefined
+            }
           >
             {'error' in paymentHistory ? (
               <Muted>

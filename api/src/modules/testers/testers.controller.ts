@@ -36,6 +36,7 @@ export async function discoverEngagements(req: Request, res: Response): Promise<
   const engagements = await service.getTesterEngagementsForOrganisation(
     param(req, 'id'),
     organisationIds,
+    req.user!.id,
   )
   res.json({ data: engagements })
 }
