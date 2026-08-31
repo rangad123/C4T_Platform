@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { InboxList } from '@/components/admin/InboxList'
+import { MarkReadOnView } from '@/components/admin/MarkReadOnView'
+import { buildAnnouncementItems, loadBroadcastReads } from '@/lib/communication/inbox'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
@@ -86,11 +89,11 @@ export default async function TesterProjectWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string; notice?: string }>
+  searchParams: Promise<{ section?: string; notice?: string; announcement?: string }>
 }) {
   const user = await requireRole(['TESTER'])
   const { id } = await params
-  const { section: rawSection, notice } = await searchParams
+  const { section: rawSection, notice, announcement: announcementId } = await searchParams
 
   let project: ProjectDetail | null = null
   let loadError: 'forbidden' | 'unknown' | null = null
@@ -164,7 +167,7 @@ export default async function TesterProjectWorkspacePage({
    * Section-gated reads. `Promise.resolve(null)` for a tab that is not open
    * keeps the shape of the tuple without paying for the request.
    */
-  const [buildDetail, features, myBugs, otherBugs, announcements] = await Promise.all([
+  const [buildDetail, features, myBugs, otherBugs, announcements, reads] = await Promise.all([
     !isInvited && section === 'build'
       ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${activeBuildId}`)
       : Promise.resolve(null),
@@ -204,6 +207,14 @@ export default async function TesterProjectWorkspacePage({
           query: { projectId: project.id, buildId: activeBuildId, limit: 50 },
         })
       : Promise.resolve(null),
+    /**
+     * Which of them this tester has not read. The announcement itself has no
+     * read column — the notification created when it was published is the
+     * read state, so this asks for the unread ones and matches by id.
+     */
+    !isInvited && section === 'announcements'
+      ? loadBroadcastReads()
+      : Promise.resolve({ unreadIds: new Set<string>(), notificationIdFor: new Map() }),
   ])
 
   /**
@@ -213,6 +224,19 @@ export default async function TesterProjectWorkspacePage({
    * `buildId` at all and so showed other builds' announcements.
    */
   const relevantAnnouncements = announcements ?? []
+
+  const announcementItems = buildAnnouncementItems({
+    basePath: detailPath,
+    announcements: relevantAnnouncements,
+    reads,
+    // The tab has to survive the click, or opening a notice would bounce the
+    // reader back to the project's first section.
+    carry: { section: 'announcements' },
+  })
+
+  const openAnnouncement = announcementId
+    ? (relevantAnnouncements.find((a) => a.id === announcementId) ?? null)
+    : null
 
   const bugColumns: readonly TableColumn<BugRow>[] = [
     {
@@ -602,72 +626,59 @@ export default async function TesterProjectWorkspacePage({
 
       {/* ── Announcements ────────────────────────────────────────────── */}
       {!isInvited && section === 'announcements' ? (
-        <Panel
-          title="Announcements"
-          description="Notices for this project, plus anything the platform has posted to everyone."
-        >
-          {!announcements ? (
-            <Muted>Announcements could not be loaded. Refresh in a moment.</Muted>
-          ) : relevantAnnouncements.length === 0 ? (
-            <Muted>Nothing has been posted for this project.</Muted>
-          ) : (
-            <ul style={{ ...listResetStyle, gap: 'var(--space-4)' }}>
-              {relevantAnnouncements.map((row) => (
-                <li
-                  key={row.id}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-3)',
-                    padding: 'var(--space-5)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-card)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: 'var(--space-3)',
-                      flexWrap: 'wrap',
-                    }}
+        <>
+          {/* ── One open announcement ────────────────────────────────────
+              Displaying it is what marks it read, via the notification that
+              carries it — see `MarkReadOnView` for why that is an effect and
+              not part of the render. */}
+          {openAnnouncement ? (
+            <>
+              <MarkReadOnView
+                notificationId={reads.notificationIdFor.get(openAnnouncement.id) ?? null}
+              />
+              <Panel
+                title={openAnnouncement.title}
+                description={[
+                  openAnnouncement.author ? personName(openAnnouncement.author) : 'Crowd4Test',
+                  openAnnouncement.buildId
+                    ? (openAnnouncement.build?.name ?? 'This build')
+                    : openAnnouncement.projectId
+                      ? 'This project'
+                      : 'Platform-wide',
+                  formatDateTime(openAnnouncement.publishedAt),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                actions={
+                  <Button
+                    href={`${detailPath}?section=announcements`}
+                    variant="secondary"
+                    size="sm"
+                    iconLeft="arrow-left"
                   >
-                    <h3
-                      style={{
-                        margin: 0,
-                        fontSize: 'var(--type-body-md-size)',
-                        fontWeight: 'var(--fw-semibold)',
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      {row.title}
-                    </h3>
-                    {/*
-                      Three scopes reach this list, and which one a notice has
-                      changes whether it is the tester's problem: their build,
-                      the whole project, or the platform. Labelling only
-                      "This project" would make a build-specific instruction
-                      look like it applied to everyone on the project.
-                    */}
-                    <Badge
-                      tone={row.buildId ? 'warning' : row.projectId ? 'info' : 'neutral'}
-                      uppercase={false}
-                    >
-                      {row.buildId
-                        ? (row.build?.name ?? 'Your build')
-                        : row.projectId
-                          ? 'This project'
-                          : titleCase(row.audience)}
-                    </Badge>
-                  </div>
-                  <Prose>{row.body}</Prose>
-                  <Caption>{formatDateTime(row.publishedAt)}</Caption>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
+                    Back
+                  </Button>
+                }
+              >
+                <Prose>{openAnnouncement.body}</Prose>
+              </Panel>
+            </>
+          ) : null}
+
+          <Panel
+            title="Announcements"
+            description="Notices for this build and this project, plus anything posted to everyone."
+            flush={announcementItems.length > 0}
+          >
+            {!announcements ? (
+              <Muted>Announcements could not be loaded. Refresh in a moment.</Muted>
+            ) : announcementItems.length === 0 ? (
+              <Muted>Nothing has been posted for this project.</Muted>
+            ) : (
+              <InboxList items={announcementItems} />
+            )}
+          </Panel>
+        </>
       ) : null}
     </DetailShell>
   )

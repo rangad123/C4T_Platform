@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { InboxList } from '@/components/admin/InboxList'
+import { MarkReadOnView } from '@/components/admin/MarkReadOnView'
+import {
+  buildAnnouncementItems,
+  loadBroadcastReads,
+  type BroadcastReads,
+} from '@/lib/communication/inbox'
 import { Modal } from '@/components/admin/Modal'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
@@ -22,7 +29,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
-import { formatDate, personName, titleCase } from '@/lib/admin/format'
+import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
 import { BuildSwitcher } from '@/components/admin/BuildSwitcher'
 import {
   BUILD_STATUSES,
@@ -220,6 +227,7 @@ export default async function CustomerProjectDetailPage({
     notice?: string
     /** The tester being rated, when the rating dialog is open. */
     rate?: string
+    announcement?: string
     /** Echoed back when a rename is rejected, so the attempt isn't retyped. */
     name?: string
   }>
@@ -297,6 +305,7 @@ export default async function CustomerProjectDetailPage({
     projectReport,
     defaultBuildDetailIfDifferent,
     projectRatings,
+    reads,
     announcements,
     customFields,
   ] = await Promise.all([
@@ -347,6 +356,12 @@ export default async function CustomerProjectDetailPage({
           query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
         })
       : Promise.resolve(null),
+    section === 'announcements'
+      ? loadBroadcastReads()
+      : Promise.resolve<BroadcastReads>({
+          unreadIds: new Set<string>(),
+          notificationIdFor: new Map<string, string>(),
+        }),
     section === 'announcements'
       ? serverFetchOrNull<readonly AnnouncementRow[]>('communication/announcements', {
           query: { projectId: project.id, buildId: activeBuildId, limit: 50 },
@@ -401,6 +416,19 @@ export default async function CustomerProjectDetailPage({
   const RATEABLE = new Set(['ACTIVE', 'COMPLETED'])
 
   // The assignment the rating dialog is open for, if any.
+  const announcementItems = buildAnnouncementItems({
+    basePath: detailPath,
+    announcements: announcements ?? [],
+    reads,
+    // Keep the tab and the build, or opening a notice would drop the reader
+    // back on the project's first section against a different build.
+    carry: { section: 'announcements', buildId: activeBuildId },
+  })
+
+  const openAnnouncement = resolvedSearchParams.announcement
+    ? ((announcements ?? []).find((a) => a.id === resolvedSearchParams.announcement) ?? null)
+    : null
+
   const ratingTarget = resolvedSearchParams.rate
     ? project.assignments.find((a) => a.tester.id === resolvedSearchParams.rate)
     : undefined
@@ -1619,84 +1647,61 @@ export default async function CustomerProjectDetailPage({
           platform, so there is no compose form here — see the note in the
           page docblock. */}
       {section === 'announcements' ? (
-        <Panel title="Announcements" description="Notices posted to the testers on this project.">
-          {announcements === null ? (
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              Announcements could not be loaded. Refresh in a moment.
-            </p>
-          ) : announcements.length === 0 ? (
-            <EmptyState
-              icon="message-square"
-              title="Nothing posted yet"
-              description="Announcements for this project and build will appear here. Ask your Crowd4Test contact to post one."
-            />
-          ) : (
-            <ul
-              style={{
-                listStyle: 'none',
-                margin: 0,
-                padding: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-4)',
-              }}
-            >
-              {announcements.map((row) => (
-                <li
-                  key={row.id}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-3)',
-                    padding: 'var(--space-5)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-card)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: 'var(--space-3)',
-                      flexWrap: 'wrap',
-                    }}
+        <>
+          {openAnnouncement ? (
+            <>
+              <MarkReadOnView
+                notificationId={reads.notificationIdFor.get(openAnnouncement.id) ?? null}
+              />
+              <Panel
+                title={openAnnouncement.title}
+                description={[
+                  openAnnouncement.author ? personName(openAnnouncement.author) : 'Crowd4Test',
+                  openAnnouncement.buildId
+                    ? (openAnnouncement.build?.name ?? 'This build')
+                    : openAnnouncement.projectId
+                      ? 'This project'
+                      : 'Platform-wide',
+                  formatDateTime(openAnnouncement.publishedAt),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                actions={
+                  <Button
+                    href={`${detailPath}?section=announcements&buildId=${activeBuildId}`}
+                    variant="secondary"
+                    size="sm"
+                    iconLeft="arrow-left"
                   >
-                    <h3
-                      style={{
-                        margin: 0,
-                        fontSize: 'var(--type-body-md-size)',
-                        fontWeight: 'var(--fw-semibold)',
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      {row.title}
-                    </h3>
-                    {/* Which scope a notice has changes who acted on it. */}
-                    <Badge
-                      tone={row.buildId ? 'warning' : row.projectId ? 'info' : 'neutral'}
-                      uppercase={false}
-                    >
-                      {row.buildId
-                        ? (row.build?.name ?? 'This build')
-                        : row.projectId
-                          ? 'This project'
-                          : titleCase(row.audience)}
-                    </Badge>
-                  </div>
-                  <p style={{ margin: 0, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
-                    {row.body}
-                  </p>
-                  <span
-                    style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
-                  >
-                    {formatDate(row.publishedAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
+                    Back
+                  </Button>
+                }
+              >
+                <Prose>{openAnnouncement.body}</Prose>
+              </Panel>
+            </>
+          ) : null}
+
+          <Panel
+            title="Announcements"
+            description="Notices posted to the testers on this project."
+            flush={announcementItems.length > 0}
+          >
+            {announcements === null ? (
+              <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                Announcements could not be loaded. Refresh in a moment.
+              </p>
+            ) : announcementItems.length === 0 ? (
+              <EmptyState
+                icon="message-square"
+                title="Nothing posted yet"
+                description="Announcements for this project and build will appear here. Ask your Crowd4Test contact to post one."
+              />
+            ) : (
+              <InboxList items={announcementItems} />
+            )}
+          </Panel>
+        </>
       ) : null}
 
       {/* ── Build settings: the client's own bug form (§36-38) ─────────── */}

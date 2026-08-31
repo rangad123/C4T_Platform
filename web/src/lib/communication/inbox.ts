@@ -51,7 +51,8 @@ export interface InboxAnnouncement {
   body: string
   projectId: string | null
   buildId: string | null
-  project: { id: string; reference: string; title: string } | null
+  /** Optional: neither builder reads it, and not every caller selects it. */
+  project?: { id: string; reference: string; title: string } | null
   build: { id: string; name: string } | null
   publishedAt: string | null
   author: { id: string; firstName: string | null; lastName: string | null } | null
@@ -163,4 +164,40 @@ export function buildInboxItems(options: {
   return [...threadItems, ...broadcastItems].sort(
     (a, b) => new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime(),
   )
+}
+
+/**
+ * The same inbox rows, for a project's Announcements tab.
+ *
+ * Separate from `buildInboxItems` because the two lists answer different
+ * questions. That one merges conversations and broadcasts across the whole
+ * account; this one is everything posted about ONE project, and the thing a
+ * reader most needs from each row is which scope it applies to — this build,
+ * the whole project, or the platform. A build-specific instruction that
+ * looked project-wide would be acted on by people it was never meant for.
+ */
+export function buildAnnouncementItems(options: {
+  basePath: string
+  announcements: readonly InboxAnnouncement[]
+  reads: BroadcastReads
+  /** Extra query kept on the link so the tab and build survive the click. */
+  carry?: Record<string, string>
+}): InboxItem[] {
+  const { basePath, announcements, reads, carry } = options
+
+  return announcements.map((a) => {
+    const params = new URLSearchParams({ ...carry, announcement: a.id })
+    return {
+      id: `announcement-${a.id}`,
+      href: `${basePath}?${params.toString()}`,
+      sender: a.author ? personName(a.author) : 'Crowd4Test',
+      subject: a.title,
+      preview: preview(a.body),
+      timestamp: a.publishedAt,
+      unread: reads.unreadIds.has(a.id),
+      // Build first: it is the narrowest scope and the one that changes
+      // whether a notice is this reader's problem.
+      tag: a.buildId ? (a.build?.name ?? 'This build') : a.projectId ? 'Project' : 'Platform',
+    }
+  })
 }
