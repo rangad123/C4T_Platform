@@ -68,13 +68,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       body: JSON.stringify({ code }),
       cache: 'no-store',
     })
-  } catch {
+  } catch (error) {
+    console.error('[auth/google/complete] exchange unreachable', error)
     return redirectTo('/login?error=network')
   }
 
   if (!response.ok) {
-    // Expired, already used (a double-click, a refreshed tab, a crawler
-    // that followed the link), or tampered with — either way, restart.
+    /**
+     * Expired, already used (a double-click, a refreshed tab, a crawler that
+     * followed the link), or tampered with — either way, restart.
+     *
+     * Logged because the screen cannot say more than "that did not work": the
+     * reader has no way to act on the difference and the body may describe
+     * internals. Without this the only symptom of a handoff that never
+     * matches — the failure mode a second API worker produces — is a generic
+     * message and nothing anywhere to explain it, which cost most of a night.
+     */
+    console.error('[auth/google/complete] exchange refused', {
+      status: response.status,
+      body: await response.text().catch(() => ''),
+    })
     return redirectTo('/login?error=google_failed')
   }
 
