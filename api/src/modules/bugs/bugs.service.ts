@@ -18,7 +18,7 @@ import { nextReference } from '../../lib/reference.js'
 import { createNotification, createNotifications } from '../notifications/notifications.service.js'
 import { refreshTesterAggregates } from '../testers/testers.service.js'
 import { createDownloadUrl } from '../../lib/storage.js'
-import { resolveBuildId } from '../projects/projects.service.js'
+import { resolveBuildId, isProjectOpenForWork } from '../projects/projects.service.js'
 import { BUG_SORT_FIELDS, type ListBugsQuery } from './bugs.schema.js'
 
 const bugSelect = {
@@ -493,7 +493,9 @@ export async function createBug(
   // Only a tester with an accepted/active assignment may log a defect.
   authorize(user, 'bug.create', resolved.relations)
 
-  if (['COMPLETED', 'CANCELLED', 'DRAFT'].includes(resolved.project.status)) {
+  // Same rule as tester assignment — see `isProjectOpenForWork`. A paused or
+  // unapproved project takes neither testers nor reports.
+  if (!isProjectOpenForWork(resolved.project.status)) {
     throw new ConflictError('This project is not currently accepting bug reports')
   }
 

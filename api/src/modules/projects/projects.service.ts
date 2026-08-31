@@ -139,6 +139,44 @@ const STATUS_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
 }
 
 /**
+ * The statuses in which a project is open for work — testers may be assigned
+ * to it, and bugs may be filed against it.
+ *
+ * Both rules used to be spelled out separately as lists of statuses to
+ * REFUSE, and the two lists disagreed. Bug reports were refused in DRAFT,
+ * COMPLETED and CANCELLED; assignment only in COMPLETED and CANCELLED. That
+ * left real holes rather than deliberate choices:
+ *
+ *  - PAUSED blocked neither. A project explicitly halted still took new bug
+ *    reports and still accepted new testers, which is the opposite of what
+ *    pausing one is for.
+ *  - SUBMITTED blocked neither. A project still awaiting approval took bug
+ *    reports against scope nobody had agreed to yet.
+ *  - DRAFT blocked bugs but not assignment, so testers could be rostered onto
+ *    a project that had not been submitted, then find they could not report.
+ *
+ * Stated as an allow-list instead, because the question is really "is this
+ * project live?" and there are only two answers that mean yes. APPROVED is
+ * deliberately one of them: scope is agreed and the delivery team onboards
+ * testers there before flipping to IN_PROGRESS, so refusing it would break a
+ * real step rather than close a hole.
+ *
+ * A new status added to the enum is therefore closed by default, which is the
+ * right way round for a gate.
+ */
+const OPEN_FOR_WORK: readonly ProjectStatus[] = [ProjectStatus.APPROVED, ProjectStatus.IN_PROGRESS]
+
+/**
+ * Whether a project is live enough to take testers and bug reports.
+ *
+ * Takes a plain string so callers holding a status off a `select` do not each
+ * have to import the Prisma enum to ask.
+ */
+export function isProjectOpenForWork(status: string): boolean {
+  return (OPEN_FOR_WORK as readonly string[]).includes(status)
+}
+
+/**
  * Builds the WHERE clause that scopes a project query to what the caller may
  * see. This is the single place project visibility is decided:
  *   ADMIN / SUB_ADMIN — everything
@@ -949,8 +987,8 @@ export async function assignTesters(
     select: { id: true, title: true, status: true, maxTesters: true },
   })
   if (!project) throw new NotFoundError('Project')
-  if (project.status === ProjectStatus.CANCELLED || project.status === ProjectStatus.COMPLETED) {
-    throw new ConflictError('Cannot assign testers to a closed project')
+  if (!isProjectOpenForWork(project.status)) {
+    throw new ConflictError('Testers can only be assigned to a project that is approved or running')
   }
 
   const buildId = await resolveBuildId(projectId, requestedBuildId)

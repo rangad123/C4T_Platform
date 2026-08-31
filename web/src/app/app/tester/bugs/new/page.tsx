@@ -28,11 +28,15 @@ const BUG_TYPES = [
 ] as const
 
 /**
- * Statuses a project must NOT be in for the API to accept a report — mirrors
- * the service's own guard so the picker never offers a project that would be
+ * Statuses in which the API accepts a report — mirrors `isProjectOpenForWork`
+ * in `projects.service.ts`, so this page never offers a project that would be
  * rejected on submit.
+ *
+ * An allow-list, matching the API. As a deny-list this drifted: it refused
+ * DRAFT, COMPLETED and CANCELLED but let PAUSED and SUBMITTED through, which
+ * is exactly the hole the API side has now closed.
  */
-const CLOSED_TO_REPORTS: readonly string[] = ['DRAFT', 'COMPLETED', 'CANCELLED']
+const OPEN_TO_REPORTS: readonly string[] = ['APPROVED', 'IN_PROGRESS']
 
 /** Assignment statuses that carry the right to file a bug (`bug.create`). */
 const CAN_REPORT: readonly string[] = ['ACCEPTED', 'ACTIVE']
@@ -100,7 +104,7 @@ export default async function NewTesterBugPage({
     (a) =>
       CAN_REPORT.includes(a.status) &&
       a.project !== null &&
-      !CLOSED_TO_REPORTS.includes(a.project.status),
+      OPEN_TO_REPORTS.includes(a.project.status),
   )
 
   /**
