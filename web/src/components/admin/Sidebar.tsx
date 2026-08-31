@@ -221,21 +221,41 @@ export function Sidebar({
       aria-label={`${portalLabel} navigation`}
       title={collapsed ? 'Expand navigation' : undefined}
       /*
-        Collapsed, the whole rail is the way back — the toggle is hidden, so
-        without this there would be nothing to press.
+        Collapsed, the entire rail is one control: any click reopens it,
+        including one on a section icon.
 
-        Anything already interactive keeps its own behaviour: `closest`
-        catches a nav link or the mobile button and leaves the click alone,
-        so the rail still navigates. Only a press on the rail's own
-        background expands it. Not a <button>, because this element wraps
-        the navigation and nesting controls inside one is invalid.
+        ── WHY CAPTURE, AND WHY BOTH CALLS
+
+        `onClickCapture` runs on the way DOWN, before the event reaches the
+        link it started on. `stopPropagation` there means the anchor's own
+        handler never fires, which is what actually stops `next/link` from
+        navigating -- its router call is a click handler like any other, and
+        by the bubble phase it has already run. `preventDefault` separately
+        cancels the browser's own follow of the `href`, which is a different
+        mechanism and needs cancelling too.
+
+        So a collapsed icon is a picture of where you would go, not a way to
+        go there. Expanding first costs one extra click and removes the
+        guesswork of navigating by a 20px glyph with no label beside it.
+
+        ── ONLY WHEN IT IS ACTUALLY A RAIL
+
+        `collapsed` is a stored preference, not a description of the layout.
+        Below 900px the stylesheet ignores it and lays the sidebar out full
+        width as a header, so a reader whose saved preference is "collapsed"
+        would arrive on a phone to a nav where every tap -- including the
+        menu button -- did nothing but toggle an invisible setting.
+        Measuring the element at click time settles it without guessing a
+        viewport during render: a rail is 64px, the mobile header is the
+        width of the screen, and nothing sits between them.
       */
-      onClick={
+      onClickCapture={
         collapsed
           ? (event) => {
-              if (!(event.target as HTMLElement).closest('a, button')) {
-                setCollapsedPreference(false)
-              }
+              if (event.currentTarget.getBoundingClientRect().width > 120) return
+              event.preventDefault()
+              event.stopPropagation()
+              setCollapsedPreference(false)
             }
           : undefined
       }
