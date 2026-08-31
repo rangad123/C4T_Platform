@@ -232,9 +232,12 @@
   width: 28px;
   height: 28px;
   flex: none;
-  border: 1px solid var(--border-default);
+  /* Chromeless, like the notification bell. A box around it read as a
+     separate widget sitting beside the lockup rather than part of it; the
+     hover fill below is enough to show it is pressable. */
+  border: 0;
   border-radius: var(--radius-input);
-  background: var(--surface-canvas);
+  background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   transition: var(--transition-control);
