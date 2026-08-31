@@ -9,6 +9,51 @@ import { ApiError } from '@/lib/api/types'
 
 const WIZARD = '/app/customer/projects/new'
 
+/**
+ * Rebuilds the wizard's own query string from what was submitted, so a
+ * rejected create returns the person to a filled-in form rather than an
+ * empty one.
+ *
+ * `logoFileId` is deliberately dropped when the logo itself was the problem:
+ * sending back a reference that just failed would fail again on the next
+ * submit, with the same opaque result.
+ */
+function carryBack(formData: FormData, errorCode: string): string {
+  const keep = [
+    'subject',
+    'title',
+    'buildName',
+    'appUrl',
+    'logoFileId',
+    'logoFileName',
+    'maxTesters',
+    'startDate',
+    'endDate',
+    'testType',
+    'testDocumentFileId',
+    'testDocumentFileName',
+    'instructions',
+    'specialRequirements',
+  ] as const
+
+  const params = new URLSearchParams()
+  for (const key of keep) {
+    // The name travels with the id, so a cleared logo does not leave its
+    // filename behind claiming a file that is no longer attached.
+    if (errorCode === 'logo' && (key === 'logoFileId' || key === 'logoFileName')) continue
+    const value = formTrimmed(formData, key)
+    if (value) params.set(key, value)
+  }
+  for (const key of ['platformTargets', 'targetCountries', 'targetLanguages'] as const) {
+    for (const value of formData.getAll(key).map(String).filter(Boolean)) {
+      params.append(key, value)
+    }
+  }
+  params.set('step', 'general')
+  params.set('error', errorCode)
+  return params.toString()
+}
+
 /** A build as the project detail returns it. */
 interface BuildRow {
   id: string
@@ -133,8 +178,18 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
     if (status === 422) code = 'invalid'
     else if (status === 403 && message.includes('organisation')) code = 'no-org'
     else if (status === 400 && message.includes('several organisations')) code = 'many-orgs'
+    else if (status === 400 && message.includes('logo')) code = 'logo'
     else if (status === 409) code = 'duplicate'
-    redirect(`${WIZARD}?step=general&error=${code}`)
+    /**
+     * Everything typed goes back with the error.
+     *
+     * A rejected create used to return a bare `?error=`, so the wizard came
+     * back blank and four steps of input were gone — punishing the person for
+     * a failure that was usually not theirs. The fields are already carried
+     * between steps in the query string; carrying them through a failure too
+     * is the same mechanism.
+     */
+    redirect(`${WIZARD}?${carryBack(formData, code)}`)
   }
 
   /**

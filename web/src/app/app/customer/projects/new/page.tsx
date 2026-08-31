@@ -121,6 +121,11 @@ const ERRORS: Record<string, NoticeCopy> = {
     tone: 'error',
     message: 'A project with that title already exists. Choose a different title.',
   },
+  logo: {
+    tone: 'warning',
+    message:
+      'That logo could not be attached, so it has been cleared — everything else you entered is still here. Upload it again, or continue without one.',
+  },
 }
 
 interface CatalogShape {

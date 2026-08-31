@@ -500,6 +500,27 @@ export async function createProject(
   const organisationId = await resolveOrganisationId(user, input.organisationId)
   const { organisationId: _drop, ...data } = input
 
+  /**
+   * A logo that no longer resolves must not sink the whole project.
+   *
+   * `logoFileId` is a foreign key, so a stale or half-finished upload made
+   * Postgres reject the INSERT, which surfaced as a flat "Malformed database
+   * query" 400 — and the wizard turned that into "try again in a moment",
+   * advice that could never work. Checking it here turns an opaque failure
+   * into a sentence naming the one field at fault.
+   */
+  if (typeof data.logoFileId === 'string' && data.logoFileId.length > 0) {
+    const logo = await prisma.fileObject.findFirst({
+      where: { id: data.logoFileId, isComplete: true },
+      select: { id: true },
+    })
+    if (!logo) {
+      throw new BadRequestError(
+        'That logo upload could not be found. Upload it again, or continue without one.',
+      )
+    }
+  }
+
   const project = await prisma.project.create({
     data: {
       ...(data as Prisma.ProjectCreateInput),
