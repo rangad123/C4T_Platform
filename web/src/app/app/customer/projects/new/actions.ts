@@ -18,7 +18,7 @@ const WIZARD = '/app/customer/projects/new'
  * sending back a reference that just failed would fail again on the next
  * submit, with the same opaque result.
  */
-function carryBack(formData: FormData, errorCode: string): string {
+function carryBack(formData: FormData, errorCode: string, detail = ''): string {
   const keep = [
     'subject',
     'title',
@@ -51,6 +51,7 @@ function carryBack(formData: FormData, errorCode: string): string {
   }
   params.set('step', 'general')
   params.set('error', errorCode)
+  if (detail) params.set('detail', detail)
   return params.toString()
 }
 
@@ -173,13 +174,31 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
      * retrying in a moment will never fix either.
      */
     const status = error instanceof ApiError ? error.status : 0
-    const message = error instanceof ApiError ? error.message.toLowerCase() : ''
+    const raw = error instanceof ApiError ? error.message : ''
+    const message = raw.toLowerCase()
     let code = 'failed'
     if (status === 422) code = 'invalid'
     else if (status === 403 && message.includes('organisation')) code = 'no-org'
     else if (status === 400 && message.includes('several organisations')) code = 'many-orgs'
     else if (status === 400 && message.includes('logo')) code = 'logo'
     else if (status === 409) code = 'duplicate'
+
+    /**
+     * Show what the API said, when the API said something a person can act on.
+     *
+     * Collapsing every unmapped failure into "try again in a moment" hid the
+     * one piece of information that would have ended the problem — the
+     * reason. This API writes its 4xx messages for humans ("You do not belong
+     * to an organisation"), and its error handler already strips anything
+     * lower-level than that, so passing one through is safe.
+     *
+     * 5xx and network failures stay generic: their text describes our
+     * internals, not anything the reader can do.
+     */
+    const detail = code === 'failed' && status >= 400 && status < 500 ? raw.slice(0, 200) : ''
+    // The full picture goes to the server log either way, so an unmapped
+    // failure leaves a trail even when the screen stays vague.
+    console.error('[projects/new] create failed', { status, message: raw })
     /**
      * Everything typed goes back with the error.
      *
@@ -189,7 +208,7 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
      * between steps in the query string; carrying them through a failure too
      * is the same mechanism.
      */
-    redirect(`${WIZARD}?${carryBack(formData, code)}`)
+    redirect(`${WIZARD}?${carryBack(formData, code, detail)}`)
   }
 
   /**

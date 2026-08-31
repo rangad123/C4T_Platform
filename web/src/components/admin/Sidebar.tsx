@@ -40,6 +40,11 @@ export interface SidebarProps {
   sections: readonly SidebarSection[]
   /** The portal's own home route. Default `/app/admin`. */
   homeHref?: string
+  /**
+   * Where the user block links to. Defaults to `<homeHref>/profile`, which is
+   * where all three portals keep it.
+   */
+  profileHref?: string
   /** Shown in the brand-row and section `aria-label`s. Default `'Admin'`. */
   portalLabel?: string
 }
@@ -146,8 +151,10 @@ export function Sidebar({
   role,
   sections,
   homeHref = '/app/admin',
+  profileHref,
   portalLabel = 'Admin',
 }: SidebarProps) {
+  const profileTarget = profileHref ?? `${homeHref}/profile`
   const collapsed = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
   const pathname = usePathname()
 
@@ -303,8 +310,10 @@ export function Sidebar({
         tester who had collapsed the rail on a laptop then got a nameless menu
         on their phone.
       */}
-      <div
+      <Link
         className={styles.user}
+        href={profileTarget}
+        aria-current={pathname === profileTarget ? 'page' : undefined}
         title={collapsed ? `${userName} — ${ROLE_LABEL[role]}` : undefined}
       >
         {/*
@@ -314,13 +323,13 @@ export function Sidebar({
           picture still gets a filled circle rather than a gap.
         */}
         <span className={styles.userAvatar}>
-          <Avatar name={userName} fileId={avatarFileId} size="sm" />
+          <Avatar name={userName} fileId={avatarFileId} size="md" />
         </span>
         <div className={styles.userMeta}>
           <span className={styles.userName}>{userName}</span>
           <span className={styles.userRole}>{ROLE_LABEL[role]}</span>
         </div>
-      </div>
+      </Link>
     </aside>
   )
 }

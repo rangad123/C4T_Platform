@@ -137,6 +137,8 @@ interface CatalogShape {
 interface WizardParams {
   step?: string
   error?: string
+  /** What the API said, when it said something worth repeating. */
+  detail?: string
   subject?: string
   title?: string
   buildName?: string
@@ -270,6 +272,23 @@ export default async function NewProjectWizardPage({
       subtitle={`Step ${stepIndex + 1} of ${STEPS.length} — ${current.label}.`}
     >
       <Notice code={params.error} notices={ERRORS} param="error" />
+      {/*
+        The reason, when there is one worth showing. It sits under the notice
+        rather than inside it so the generic sentence still reads on its own,
+        and so a failure that arrives without a reason looks no different from
+        before.
+      */}
+      {params.error === 'failed' && params.detail ? (
+        <p
+          style={{
+            margin: 'calc(var(--space-4) * -1) 0 0',
+            color: 'var(--text-secondary)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
+          The service said: {params.detail}
+        </p>
+      ) : null}
 
       {/* Progress. A list rather than decoration, so a screen reader can hear
           where it is; completed steps link back, later ones do not. */}

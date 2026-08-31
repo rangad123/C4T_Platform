@@ -97,19 +97,43 @@
   flex: 1;
 }
 
+/*
+ * The whole block is the link to your own profile — the picture, the name and
+ * the role together. It is the one place the app already says who you are, so
+ * it is where people reach for their account.
+ */
 .user {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-4) var(--space-3);
   border-top: 1px solid var(--border-default);
   margin: 0 calc(var(--space-3) * -1);
-  padding-top: var(--space-4);
+  text-decoration: none;
+  color: inherit;
+  transition: var(--transition-control);
+}
+
+.user:hover {
+  background: var(--action-ghost-bg-hover);
+}
+
+/* Inset so the ring is not clipped by the sidebar's own edge — the block runs
+   full-bleed via the negative margin above. */
+.user:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.user[aria-current='page'] .userName {
+  color: var(--text-primary);
 }
 
 .userMeta {
   display: flex;
   flex-direction: column;
+  justify-content: center;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -125,11 +149,16 @@
  */
 .userAvatar {
   flex-shrink: 0;
+  /* The picture and the two lines beside it are near enough the same height,
+     so they optically centre without nudging either. */
+  display: flex;
+  align-items: center;
 }
 
 .userName {
-  font-size: var(--type-body-sm-size);
-  font-weight: var(--fw-medium);
+  font-size: var(--type-body-md-size);
+  font-weight: var(--fw-semibold);
+  line-height: 1.25;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -138,7 +167,8 @@
 
 .userRole {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.2;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
