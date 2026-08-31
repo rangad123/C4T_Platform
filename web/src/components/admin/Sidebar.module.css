@@ -115,8 +115,16 @@
 
 /* The icon stands in for the name only on the collapsed desktop rail. Both are
    always in the DOM — see the note at the markup. */
-.userIcon {
-  display: none;
+/*
+ * The signed-in user's picture, beside their name.
+ *
+ * Its predecessor (a generic user glyph) was hidden while the sidebar was
+ * expanded and only appeared in the collapsed rail. A face is worth showing
+ * in both: expanded it sits next to the name, collapsed it becomes the only
+ * thing left once the text is hidden, which is exactly what a rail wants.
+ */
+.userAvatar {
+  flex-shrink: 0;
 }
 
 .userName {
@@ -171,10 +179,6 @@
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
-}
-
-.sidebar.collapsed .userIcon {
-  display: inline-flex;
 }
 
 /* Collapsed rail has no room for the logo and the toggle side by side —
@@ -277,11 +281,6 @@
 
   .sidebar.collapsed .userMeta {
     display: flex;
-  }
-
-  /* The name is shown here, so the stand-in icon is not needed. */
-  .sidebar.collapsed .userIcon {
-    display: none;
   }
 
   .sidebar.collapsed .link {

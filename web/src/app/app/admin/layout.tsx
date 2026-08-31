@@ -95,7 +95,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
 
   return (
-    <AppShell nav={<Sidebar userName={displayName} role={user.role} sections={SECTIONS} />}>
+    <AppShell
+      nav={
+        <Sidebar
+          userName={displayName}
+          avatarFileId={user.avatarFileId}
+          role={user.role}
+          sections={SECTIONS}
+        />
+      }
+    >
       {/* Each page renders its own <Topbar> (so the breadcrumb reflects the
           route) followed by its own <main id="main">. The landmark is NOT
           here: the Topbar carries a nav and the sign-out control, neither of

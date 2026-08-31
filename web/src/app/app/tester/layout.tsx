@@ -57,6 +57,7 @@ export default async function TesterLayout({ children }: { children: React.React
       nav={
         <Sidebar
           userName={displayName}
+          avatarFileId={user.avatarFileId}
           role={user.role}
           sections={TESTER_SECTIONS}
           homeHref="/app/tester"

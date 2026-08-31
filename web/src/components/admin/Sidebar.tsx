@@ -7,6 +7,7 @@ import { Logo } from '@/components/ds/core/Logo'
 import { Icon } from '@/components/ds/core/Icon'
 import type { IconName } from '@/components/ds/core/icon-registry'
 import type { Role } from '@/lib/api/types'
+import { Avatar } from './Avatar'
 import styles from './Sidebar.module.css'
 
 export interface SidebarLink {
@@ -28,6 +29,12 @@ export interface SidebarSection {
 export interface SidebarProps {
   /** Display name of the signed-in user. */
   userName: string
+  /**
+   * The signed-in user's profile picture, if they have set one. Null falls
+   * back to their initials, which `Avatar` draws — so the row keeps the same
+   * shape whether or not a picture exists.
+   */
+  avatarFileId?: string | null
   /** Role of the signed-in user — used for the role chip and section gating. */
   role: Role
   sections: readonly SidebarSection[]
@@ -135,6 +142,7 @@ function setCollapsedPreference(next: boolean): void {
  */
 export function Sidebar({
   userName,
+  avatarFileId = null,
   role,
   sections,
   homeHref = '/app/admin',
@@ -299,7 +307,15 @@ export function Sidebar({
         className={styles.user}
         title={collapsed ? `${userName} — ${ROLE_LABEL[role]}` : undefined}
       >
-        <Icon name="user-check" size={18} className={[styles.icon, styles.userIcon].join(' ')} />
+        {/*
+          The signed-in user's own face, next to their name. This replaced a
+          generic user-check glyph, which said nothing the name did not
+          already say. `Avatar` falls back to initials, so a user with no
+          picture still gets a filled circle rather than a gap.
+        */}
+        <span className={styles.userAvatar}>
+          <Avatar name={userName} fileId={avatarFileId} size="sm" />
+        </span>
         <div className={styles.userMeta}>
           <span className={styles.userName}>{userName}</span>
           <span className={styles.userRole}>{ROLE_LABEL[role]}</span>

@@ -4,7 +4,6 @@ import { logoutAction } from '@/lib/auth/actions'
 import { getUser } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { NotificationBell } from './NotificationBell'
-import { Avatar } from './Avatar'
 import styles from './Topbar.module.css'
 
 export interface Crumb {
@@ -74,16 +73,6 @@ export async function Topbar({ crumbs, root = DEFAULT_ROOT }: TopbarProps) {
 
       <div className={styles.actions}>
         {user ? <NotificationBell initialUnread={unread} /> : null}
-        {user ? (
-          /* The avatar is a picture of who is signed in, not a control — the
-             profile link lives in the sidebar, and duplicating it here would
-             give the same destination two places to go wrong. */
-          <Avatar
-            name={[user.firstName, user.lastName].filter(Boolean).join(' ') || user.email}
-            fileId={user.avatarFileId ?? null}
-            size="sm"
-          />
-        ) : null}
         <form action={logoutAction} className={styles.logoutForm}>
           <button type="submit" className={styles.logoutButton}>
             <Icon name="log-out" size={16} />

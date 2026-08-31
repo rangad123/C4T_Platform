@@ -59,6 +59,7 @@ export default async function CustomerLayout({ children }: { children: React.Rea
       nav={
         <Sidebar
           userName={displayName}
+          avatarFileId={user.avatarFileId}
           role={user.role}
           sections={CUSTOMER_SECTIONS}
           homeHref="/app/customer"
