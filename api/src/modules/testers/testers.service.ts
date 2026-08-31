@@ -798,6 +798,92 @@ export async function getDiscoverableTester(testerId: string) {
   return shapeDiscoverableTester(tester)
 }
 
+/** Every organisation a user belongs to, for scoping their own reads. */
+export async function organisationIdsForUser(userId: string): Promise<string[]> {
+  const memberships = await prisma.organisationMember.findMany({
+    where: { userId, organisation: { deletedAt: null } },
+    select: { organisationId: true },
+  })
+  return memberships.map((m) => m.organisationId)
+}
+
+/**
+ * What a tester has done FOR THE CALLER'S ORGANISATION — never for anyone
+ * else's.
+ *
+ * The aggregate counts on a discoverable profile ("projects completed",
+ * "bugs accepted") are platform-wide and safe because they are just numbers.
+ * Naming the work is different: a project title identifies a client and what
+ * they were building, so returning this tester's whole history would leak
+ * one customer's roadmap to another simply because they hired the same
+ * freelancer. The `organisationId` filter is the entire privacy boundary
+ * here, and it is applied in the query rather than after it.
+ *
+ * The answer this exists to give is "has this tester worked with US before,
+ * and how did it go" — which is answerable without naming anyone else.
+ */
+export async function getTesterEngagementsForOrganisation(
+  testerProfileId: string,
+  organisationIds: readonly string[],
+) {
+  // No organisation means nothing of the caller's to have worked on. Return
+  // empty rather than unfiltered — an empty scope must never widen to "all".
+  if (organisationIds.length === 0) return []
+
+  const tester = await prisma.testerProfile.findFirst({
+    where: {
+      id: testerProfileId,
+      status: TesterStatus.VERIFIED,
+      user: { deletedAt: null, status: UserStatus.ACTIVE },
+    },
+    select: { userId: true },
+  })
+  if (!tester) throw new NotFoundError('Tester')
+
+  const assignments = await prisma.projectAssignment.findMany({
+    where: {
+      testerId: tester.userId,
+      project: { organisationId: { in: [...organisationIds] }, deletedAt: null },
+    },
+    select: {
+      status: true,
+      invitedAt: true,
+      respondedAt: true,
+      completedAt: true,
+      project: { select: { id: true, reference: true, title: true } },
+      build: { select: { id: true, name: true, testType: true } },
+    },
+    orderBy: { invitedAt: 'desc' },
+    take: 50,
+  })
+
+  /**
+   * Bugs this tester filed on those same projects, counted per project.
+   * Grouped in one query rather than counted per row — a customer with a
+   * long history with one tester would otherwise cost a query per project.
+   */
+  const projectIds = [...new Set(assignments.map((a) => a.project.id))]
+  const bugCounts =
+    projectIds.length === 0
+      ? []
+      : await prisma.bug.groupBy({
+          by: ['projectId'],
+          where: { projectId: { in: projectIds }, reportedById: tester.userId, deletedAt: null },
+          _count: { _all: true },
+        })
+  const bugsByProject = new Map(bugCounts.map((b) => [b.projectId, b._count._all]))
+
+  return assignments.map((a) => ({
+    status: a.status,
+    invitedAt: a.invitedAt,
+    respondedAt: a.respondedAt,
+    completedAt: a.completedAt,
+    project: a.project,
+    build: a.build,
+    bugsReported: bugsByProject.get(a.project.id) ?? 0,
+  }))
+}
+
 function discoverableTesterWhere(query: {
   search?: string
   countryCode?: string

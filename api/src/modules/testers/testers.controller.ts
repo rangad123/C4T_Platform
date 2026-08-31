@@ -24,6 +24,22 @@ export async function discoverOne(req: Request, res: Response): Promise<void> {
   res.json({ data: tester })
 }
 
+/**
+ * What this tester has done on the caller's own projects.
+ *
+ * The organisation scope comes from the caller's memberships, never from the
+ * request — a client that could name the organisation could name someone
+ * else's and read their project titles.
+ */
+export async function discoverEngagements(req: Request, res: Response): Promise<void> {
+  const organisationIds = await service.organisationIdsForUser(req.user!.id)
+  const engagements = await service.getTesterEngagementsForOrganisation(
+    param(req, 'id'),
+    organisationIds,
+  )
+  res.json({ data: engagements })
+}
+
 export async function list(_req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListTestersQuery>(res)
   const { items, meta } = await service.listTesters(query)

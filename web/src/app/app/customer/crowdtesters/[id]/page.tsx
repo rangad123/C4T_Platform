@@ -1,13 +1,16 @@
 import { notFound } from 'next/navigation'
 import { requireRole } from '@/lib/auth/session'
-import { serverFetch } from '@/lib/api/server'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { Avatar } from '@/components/admin/Avatar'
 import { CountryLabel } from '@/components/admin/CountryFlag'
+import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { Badge } from '@/components/ds/core/Badge'
+import { formatDate } from '@/lib/admin/format'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const LIST_PATH = '/app/customer/crowdtesters'
@@ -29,6 +32,22 @@ interface TesterProfileDetail {
   experienceYears: number | null
   skills: readonly { id: string; name: string; slug: string }[]
   platforms: readonly string[]
+}
+
+/**
+ * One engagement of this tester ON THE VIEWER'S OWN PROJECTS.
+ *
+ * The API scopes this to the caller's organisation, so it can never name
+ * another customer's work — see `getTesterEngagementsForOrganisation`.
+ */
+interface TesterEngagement {
+  status: string
+  invitedAt: string
+  respondedAt: string | null
+  completedAt: string | null
+  project: { id: string; reference: string; title: string }
+  build: { id: string; name: string; testType: string | null } | null
+  bugsReported: number
 }
 
 function formatRating(raw: string | null): string | null {
@@ -66,7 +85,50 @@ export default async function CrowdtesterProfilePage({
     throw error
   }
 
+  // Optional: a profile is still worth showing if the history fails to load.
+  const engagements =
+    (await serverFetchOrNull<readonly TesterEngagement[]>(`testers/discover/${id}/engagements`)) ??
+    []
+
   const rating = formatRating(tester.ratingAverage)
+
+  const engagementColumns: readonly TableColumn<TesterEngagement>[] = [
+    {
+      key: 'project',
+      header: 'Project',
+      render: (row) => row.project.title,
+      renderSecondary: (row) =>
+        row.build ? `${row.project.reference} · ${row.build.name}` : row.project.reference,
+    },
+    {
+      key: 'testType',
+      header: 'Testing',
+      render: (row) => row.build?.testType ?? '—',
+    },
+    {
+      key: 'status',
+      header: 'Standing',
+      render: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      key: 'bugs',
+      header: 'Bugs filed',
+      align: 'right',
+      render: (row) => String(row.bugsReported),
+    },
+    {
+      key: 'dates',
+      header: 'Invited',
+      align: 'right',
+      render: (row) => formatDate(row.invitedAt),
+      renderSecondary: (row) =>
+        row.completedAt
+          ? `Finished ${formatDate(row.completedAt)}`
+          : row.respondedAt
+            ? `Responded ${formatDate(row.respondedAt)}`
+            : undefined,
+    },
+  ]
 
   return (
     <DetailShell
@@ -117,6 +179,32 @@ export default async function CrowdtesterProfilePage({
             { label: 'Projects completed', value: String(tester.projectsCompletedCount) },
           ]}
         />
+      </Panel>
+
+      {/*
+       * Work history, scoped to this customer's own projects.
+       *
+       * Deliberately not this tester's full platform history: a project title
+       * names a client and what they were building, so listing everything
+       * would leak one customer's roadmap to another just because they hired
+       * the same tester. The question worth answering — "have they worked
+       * with US, and how did it go" — needs no one else's data.
+       */}
+      <Panel
+        title="Work history"
+        description="What this tester has done on your projects."
+        flush={engagements.length > 0}
+      >
+        {engagements.length === 0 ? (
+          <Muted>This tester has not worked on any of your projects yet.</Muted>
+        ) : (
+          <Table
+            columns={engagementColumns}
+            rows={[...engagements]}
+            rowKey={(row) => `${row.project.id}:${row.build?.id ?? 'none'}`}
+            rowHref={(row) => `/app/customer/projects/${row.project.id}`}
+          />
+        )}
       </Panel>
 
       {tester.bio ? (

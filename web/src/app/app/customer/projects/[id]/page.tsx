@@ -1449,10 +1449,21 @@ export default async function CustomerProjectDetailPage({
               />
             </div>
           ) : (
+            /*
+             * Rows link to the tester's profile, but only when there is a
+             * profile to link to. `testerProfile` is nullable, and the
+             * profile route resolves a testerProfile id — linking with the
+             * user id instead would 404 on every row.
+             */
             <Table
               columns={testerColumns}
               rows={[...project.assignments]}
               rowKey={(row) => row.tester.id}
+              rowHref={(row) =>
+                row.tester.testerProfile
+                  ? `/app/customer/crowdtesters/${row.tester.testerProfile.id}`
+                  : ''
+              }
             />
           )}
         </Panel>

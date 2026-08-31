@@ -45,6 +45,21 @@ testersRouter.get(
   controller.discoverOne,
 )
 
+/**
+ * This tester's history on the caller's OWN projects.
+ *
+ * Customer-only on purpose. The scope is the caller's organisation
+ * memberships, which admin-side users do not have — an admin asking this
+ * would get an empty list rather than the everything they might expect, so
+ * they use the admin tester record instead.
+ */
+testersRouter.get(
+  '/discover/:id/engagements',
+  requireRole(Role.CUSTOMER),
+  validate({ params: testerIdParam }),
+  controller.discoverEngagements,
+)
+
 // ─── Tester self-service (§2.3 "Manage their tester profile") ────────────────
 // Declared before "/:id" so "me" is never parsed as an id.
 
