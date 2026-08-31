@@ -33,5 +33,16 @@ jobs:
           script_stop: true
           script: |
             cd /var/www/c4t
+            # Discard files the box regenerates itself before deploy-pull.sh
+            # checks for a dirty tree. `next build` rewrites next-env.d.ts
+            # with different contents from the ones `next dev` writes, so the
+            # previous deploy's own build left the tree dirty and blocked the
+            # next one.
+            #
+            # It lives here as well as in deploy-pull.sh because the copy on
+            # the box is whatever the last SUCCESSFUL deploy left behind — so
+            # a fix to that script cannot land while that script is what is
+            # blocking the deploy. This block always runs at its newest.
+            git checkout -- web/next-env.d.ts 2>/dev/null || true
             bash scripts/deploy-pull.sh
             bash api/scripts/deploy.sh
