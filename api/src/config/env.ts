@@ -215,6 +215,23 @@ if (isProduction) {
     throw new Error('S3_BUCKET is required when STORAGE_DRIVER=s3')
   }
   /**
+   * A production server that sends Google a localhost callback is sending
+   * every user who clicks "Continue with Google" back to their OWN machine.
+   * Nothing errors: Google redirects, the browser fails to connect, and the
+   * sign-in simply never completes — which is exactly how this shipped and
+   * sat unnoticed, because the failure happens in the user's browser and
+   * leaves no trace in the server's logs.
+   *
+   * A warning rather than a throw, for the same reason as the asset URL
+   * below: Google sign-in is one way in, and password sign-in still works.
+   * Taking the whole API down over it would be the worse failure.
+   */
+  if (env.GOOGLE_REDIRECT_URI && /localhost|127\.0\.0\.1/.test(env.GOOGLE_REDIRECT_URI)) {
+    console.warn(
+      `[config] GOOGLE_REDIRECT_URI points at ${env.GOOGLE_REDIRECT_URI} on a production server. Google will send users there after sign-in, so it will never complete. Set it to this deployment's own callback URL and register that URL in the Google console.`,
+    )
+  }
+  /**
    * A WARNING, NOT A THROW — and that distinction cost a production outage.
    *
    * This was a boot guard. `PUBLIC_ASSETS_BASE_URL` is used by exactly one
