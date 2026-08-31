@@ -214,9 +214,25 @@ if (isProduction) {
   if (env.STORAGE_DRIVER === 's3' && !env.S3_BUCKET) {
     throw new Error('S3_BUCKET is required when STORAGE_DRIVER=s3')
   }
+  /**
+   * A WARNING, NOT A THROW — and that distinction cost a production outage.
+   *
+   * This was a boot guard. `PUBLIC_ASSETS_BASE_URL` is used by exactly one
+   * thing: building a public URL for a blog post's featured image. When the
+   * variable was missing on the deploy box, the whole API refused to start,
+   * so sign-in, projects, bugs, payouts and every other endpoint went down
+   * over a CDN address for marketing-site pictures.
+   *
+   * A missing value for one feature must degrade that feature, not the
+   * service. `createPublicUrl` raises a clear error at the point of use, so
+   * the failure lands on the request that actually needs it.
+   *
+   * The S3_BUCKET check above stays a throw: without it, EVERY upload and
+   * download in the platform is broken, which is not one feature.
+   */
   if (env.STORAGE_DRIVER === 's3' && !env.PUBLIC_ASSETS_BASE_URL) {
-    throw new Error(
-      'PUBLIC_ASSETS_BASE_URL is required when STORAGE_DRIVER=s3 (blog images need a public CDN URL)',
+    console.warn(
+      '[config] PUBLIC_ASSETS_BASE_URL is not set. Blog featured images will have no public URL; everything else works. Set it to the CDN (or bucket) origin serving public assets.',
     )
   }
   if (env.STORAGE_DRIVER === 'local') {

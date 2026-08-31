@@ -154,6 +154,15 @@ export function createPublicUrl(storageKey: string): string {
   if (env.STORAGE_DRIVER === 'local') {
     return `${env.API_PUBLIC_URL}/v1/uploads/local/${encodeURIComponent(storageKey)}`
   }
+  /**
+   * Checked here rather than at boot. This used to be a startup guard, which
+   * meant a missing CDN address for blog pictures stopped the entire API from
+   * starting — sign-in included. Failing on the one request that needs the
+   * value keeps the blast radius to the feature that needs it.
+   */
+  if (!env.PUBLIC_ASSETS_BASE_URL) {
+    throw new Error('PUBLIC_ASSETS_BASE_URL is not configured, so this asset has no public URL')
+  }
   return `${env.PUBLIC_ASSETS_BASE_URL}/${storageKey}`
 }
 
