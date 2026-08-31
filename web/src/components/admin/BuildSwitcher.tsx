@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation'
 export interface BuildSwitcherOption {
   id: string
   name: string
-  isDefault: boolean
 }
 
 export interface BuildSwitcherProps {
@@ -23,6 +22,19 @@ export interface BuildSwitcherProps {
  * unboundedly. `'use client'` only for the auto-submit-on-change — there is
  * no other client state here, and the actual scoping happens server-side via
  * the `?buildId=` this pushes, exactly like every other filter in this app.
+ *
+ * ── WHY NO "(default)" MARKER
+ *
+ * Options used to render as `name (default)` for the build carrying
+ * `isDefault`. That flag is pure plumbing: it is set once, on the build every
+ * project is created with, and no screen in any portal can move it. Its only
+ * behavioural consequence lives in `archiveBuild`, which the frontend never
+ * calls. So the suffix marked something a reader could neither change nor act
+ * on — and after renaming that build it read as leftover text, as though the
+ * new name had only half applied. The default build still sorts first
+ * (`orderBy: [{ isDefault: 'desc' }, …]`), which is all the ordering cue this
+ * control needs. `isDefault` is still read on the page itself, to prefill the
+ * New build modal — it is the label that was noise, not the field.
  */
 export function BuildSwitcher({ basePath, builds, activeBuildId }: BuildSwitcherProps) {
   const router = useRouter()
@@ -66,7 +78,6 @@ export function BuildSwitcher({ basePath, builds, activeBuildId }: BuildSwitcher
         {builds.map((build) => (
           <option key={build.id} value={build.id}>
             {build.name}
-            {build.isDefault ? ' (default)' : ''}
           </option>
         ))}
       </select>
