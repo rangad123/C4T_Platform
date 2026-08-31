@@ -125,6 +125,7 @@ export default async function ProjectDetailPage({
     name?: string
     rate?: string
     notice?: string
+    detail?: string
   }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
@@ -326,6 +327,34 @@ export default async function ProjectDetailPage({
    * fixed code, never the API's own message — the page owns the wording, and
    * nothing lower-level than these strings reaches the screen.
    */
+  /**
+   * Outcomes that land on the page itself rather than inside a dialog —
+   * inviting testers, and rating one from the roster. `invite-failed` carries
+   * the API's own sentence in `?detail=`, because "Testers cannot be added to
+   * a paused, completed or cancelled project" tells the reader what to do and
+   * a generic retry message does not.
+   */
+  const PAGE_NOTICES: Record<string, { tone: 'success' | 'error'; message: string }> = {
+    invited: { tone: 'success', message: 'The testers have been invited.' },
+    'invite-failed': { tone: 'error', message: 'Those testers could not be invited.' },
+    'rating-saved': { tone: 'success', message: 'Your rating has been saved.' },
+    'rating-duplicate': {
+      tone: 'error',
+      message: 'You have already rated this tester on that project.',
+    },
+    'rating-not-worked-together': {
+      tone: 'error',
+      message: 'That tester did not work on this project.',
+    },
+    'rating-forbidden': { tone: 'error', message: 'You do not have permission to leave ratings.' },
+    'rating-needs-project': { tone: 'error', message: 'Choose the project the rating is about.' },
+    'rating-invalid': { tone: 'error', message: 'Give a score from 1 to 5.' },
+    'rating-failed': { tone: 'error', message: 'The rating could not be saved. Try again.' },
+  }
+  const pageNotice = resolvedSearchParams.notice
+    ? PAGE_NOTICES[resolvedSearchParams.notice]
+    : undefined
+
   const MODAL_ERRORS: Record<string, string> = {
     'build-name-taken': 'Another build on this project already uses that name.',
     'build-rename-failed': 'The build could not be renamed. Try again.',
@@ -777,6 +806,25 @@ export default async function ProjectDetailPage({
         ) : undefined
       }
     >
+      {pageNotice ? (
+        <p
+          role="status"
+          style={{
+            margin: 0,
+            padding: 'var(--space-4) var(--space-5)',
+            borderRadius: 'var(--radius-card)',
+            background:
+              pageNotice.tone === 'success' ? 'var(--status-success-bg)' : 'var(--status-error-bg)',
+            color:
+              pageNotice.tone === 'success' ? 'var(--status-success-fg)' : 'var(--status-error-fg)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
+          {pageNotice.message}
+          {resolvedSearchParams.detail ? ` ${resolvedSearchParams.detail}` : ''}
+        </p>
+      ) : null}
+
       {section === 'dashboard' ? (
         <>
           <Panel

@@ -48,6 +48,8 @@ function projectHref(
     edit?: string
     error?: string
     name?: string
+    notice?: string
+    detail?: string
   },
 ): string {
   const params = new URLSearchParams()
@@ -55,6 +57,9 @@ function projectHref(
   if (extra?.buildId) params.set('buildId', extra.buildId)
   if (extra?.edit) params.set('edit', extra.edit)
   if (extra?.error) params.set('error', extra.error)
+  if (extra?.notice) params.set('notice', extra.notice)
+  // The API's own sentence, when it wrote one a reader can act on.
+  if (extra?.detail) params.set('detail', extra.detail)
   // Echoed so a reopened dialog shows what was typed, not the stored value.
   if (extra?.name) params.set('name', extra.name)
   const qs = params.toString()
@@ -183,11 +188,37 @@ export async function inviteTesters(formData: FormData): Promise<void> {
 
   const notes = formTrimmed(formData, 'notes')
   const buildId = formTrimmed(formData, 'buildId')
-  await actionFetch(`projects/${id}/assignments`, {
-    method: 'POST',
-    body: { testerIds, ...(notes ? { notes } : {}), ...(buildId ? { buildId } : {}) },
-  })
+
+  try {
+    await actionFetch(`projects/${id}/assignments`, {
+      method: 'POST',
+      body: { testerIds, ...(notes ? { notes } : {}), ...(buildId ? { buildId } : {}) },
+    })
+  } catch (error) {
+    /**
+     * The API writes these 4xx messages for people — "Testers cannot be added
+     * to a paused, completed or cancelled project" says exactly what to do
+     * about it. Throwing sent that to the page's crash screen instead, which
+     * replaced a sentence the reader could act on with a reference number
+     * they could not.
+     *
+     * Only 4xx text is passed through. A 5xx describes our internals.
+     */
+    const status = error instanceof ApiError ? error.status : 0
+    const detail =
+      status >= 400 && status < 500 && error instanceof ApiError ? error.message.slice(0, 200) : ''
+    redirect(
+      projectHref(id, {
+        section: 'testers',
+        buildId,
+        notice: 'invite-failed',
+        detail,
+      }),
+    )
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'testers', buildId, notice: 'invited' }))
 }
 
 /** Activate, complete or remove one tester on the roster. */

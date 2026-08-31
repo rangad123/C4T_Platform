@@ -139,32 +139,43 @@ const STATUS_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
 }
 
 /**
- * The statuses in which a project is open for work — testers may be assigned
- * to it, and bugs may be filed against it.
+ * The statuses in which testing is actually running, so bugs may be filed.
  *
- * Both rules used to be spelled out separately as lists of statuses to
- * REFUSE, and the two lists disagreed. Bug reports were refused in DRAFT,
- * COMPLETED and CANCELLED; assignment only in COMPLETED and CANCELLED. That
- * left real holes rather than deliberate choices:
+ * This started as a deny-list that refused DRAFT, COMPLETED and CANCELLED,
+ * which left two holes: PAUSED took reports despite being deliberately
+ * halted, and SUBMITTED took reports against scope nobody had agreed to yet.
+ * Stated as an allow-list instead, both close, and a status added to the enum
+ * later is closed until someone decides otherwise.
  *
- *  - PAUSED blocked neither. A project explicitly halted still took new bug
- *    reports and still accepted new testers, which is the opposite of what
- *    pausing one is for.
- *  - SUBMITTED blocked neither. A project still awaiting approval took bug
- *    reports against scope nobody had agreed to yet.
- *  - DRAFT blocked bugs but not assignment, so testers could be rostered onto
- *    a project that had not been submitted, then find they could not report.
+ * APPROVED is deliberately included: scope is agreed and the delivery team
+ * onboards testers there before flipping to IN_PROGRESS.
  *
- * Stated as an allow-list instead, because the question is really "is this
- * project live?" and there are only two answers that mean yes. APPROVED is
- * deliberately one of them: scope is agreed and the delivery team onboards
- * testers there before flipping to IN_PROGRESS, so refusing it would break a
- * real step rather than close a hole.
- *
- * A new status added to the enum is therefore closed by default, which is the
- * right way round for a gate.
+ * This is NOT the rule for adding testers to the roster — see
+ * `OPEN_FOR_ROSTERING`, which is wider on purpose. Sharing one list between
+ * the two was a mistake: it made a draft project impossible to staff.
  */
 const OPEN_FOR_WORK: readonly ProjectStatus[] = [ProjectStatus.APPROVED, ProjectStatus.IN_PROGRESS]
+
+/**
+ * The statuses in which a project can still take testers onto its roster.
+ *
+ * Deliberately wider than `OPEN_FOR_WORK`, because building the crowd and
+ * doing the testing are not the same act. Lining testers up while the scope
+ * is still being written is normal — they are invited, they accept, and the
+ * work starts when the project goes live. Refusing that made a draft project
+ * impossible to staff, which is the wrong end to fix.
+ *
+ * What stays refused is a project nobody should be joining any more: PAUSED,
+ * because it has been deliberately halted; COMPLETED and CANCELLED, because
+ * they are over. Still an allow-list, so a status added later is closed until
+ * someone decides otherwise.
+ */
+const OPEN_FOR_ROSTERING: readonly ProjectStatus[] = [
+  ProjectStatus.DRAFT,
+  ProjectStatus.SUBMITTED,
+  ProjectStatus.APPROVED,
+  ProjectStatus.IN_PROGRESS,
+]
 
 /**
  * Whether a project is live enough to take testers and bug reports.
@@ -174,6 +185,11 @@ const OPEN_FOR_WORK: readonly ProjectStatus[] = [ProjectStatus.APPROVED, Project
  */
 export function isProjectOpenForWork(status: string): boolean {
   return (OPEN_FOR_WORK as readonly string[]).includes(status)
+}
+
+/** Whether testers can still be added to this project's roster. */
+export function isProjectOpenForRostering(status: string): boolean {
+  return (OPEN_FOR_ROSTERING as readonly string[]).includes(status)
 }
 
 /**
