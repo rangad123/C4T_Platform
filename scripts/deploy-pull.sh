@@ -9,6 +9,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Generated files the box rewrites itself, restored before the check below.
+#
+# `next build` regenerates web/next-env.d.ts with different contents from the
+# ones `next dev` writes, so the deploy's own build left the tree dirty and
+# every SUBSEQUENT deploy was refused — the guard doing its job, on a change
+# no human made. These are discarded rather than protected: Next owns the
+# file and says so in its header, so there is nothing here to lose.
+#
+# Listed explicitly. A blanket `git checkout .` would defeat the guard.
+for generated in web/next-env.d.ts; do
+  git checkout -- "$generated" 2>/dev/null || true
+done
+
 # A `git reset --hard` below would silently discard anything not committed —
 # most likely a hotfix edited directly on the box and never pushed. Fail
 # loud instead of guessing which one of "this deploy" or "that edit" should
