@@ -219,6 +219,26 @@ export function Sidebar({
         .filter(Boolean)
         .join(' ')}
       aria-label={`${portalLabel} navigation`}
+      title={collapsed ? 'Expand navigation' : undefined}
+      /*
+        Collapsed, the whole rail is the way back — the toggle is hidden, so
+        without this there would be nothing to press.
+
+        Anything already interactive keeps its own behaviour: `closest`
+        catches a nav link or the mobile button and leaves the click alone,
+        so the rail still navigates. Only a press on the rail's own
+        background expands it. Not a <button>, because this element wraps
+        the navigation and nesting controls inside one is invalid.
+      */
+      onClick={
+        collapsed
+          ? (event) => {
+              if (!(event.target as HTMLElement).closest('a, button')) {
+                setCollapsedPreference(false)
+              }
+            }
+          : undefined
+      }
     >
       <div className={styles.brandRow}>
         {/* `href={null}` makes Logo render a plain <span>. Logo links to "/"
@@ -229,16 +249,24 @@ export function Sidebar({
           <Logo size={28} wordmarkSize={14} withWordmark={!collapsed} href={null} />
         </Link>
 
-        <button
-          type="button"
-          className={styles.toggle}
-          onClick={() => setCollapsedPreference(!collapsed)}
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-        >
-          <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={16} />
-        </button>
+        {/*
+          Only while expanded. Collapsed, the rail is narrow enough that a
+          second control beside the mark crowds it, and the rail's own click
+          handler above already reopens it — so the button would be a second
+          way to do the one thing the whole surface already does.
+        */}
+        {!collapsed ? (
+          <button
+            type="button"
+            className={styles.toggle}
+            onClick={() => setCollapsedPreference(true)}
+            aria-expanded
+            aria-label="Collapse navigation"
+            title="Collapse navigation"
+          >
+            <Icon name="panel-left" size={18} />
+          </button>
+        ) : null}
 
         {/*
           The mobile control. Rendered always and shown by CSS below 900px,

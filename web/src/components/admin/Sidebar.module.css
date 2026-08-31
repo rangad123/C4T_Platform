@@ -183,6 +183,10 @@
   width: 64px;
   padding-left: var(--space-2);
   padding-right: var(--space-2);
+  /* The rail is the control now that the toggle is hidden — say so. The
+     links inside carry their own pointer, so this only reads as clickable
+     on the background, which is exactly the part that expands it. */
+  cursor: pointer;
 }
 
 .sidebar.collapsed .sectionLabel,
@@ -223,8 +227,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  /* 28px to match `Logo size={28}` beside it: equal boxes centre on one
+     line, where a taller control would sit visibly proud of the mark. */
+  width: 28px;
+  height: 28px;
+  flex: none;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-input);
   background: var(--surface-canvas);
