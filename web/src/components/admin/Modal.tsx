@@ -12,6 +12,15 @@ export interface ModalProps {
   /** URL to navigate to when the dialog closes itself — the same URL with `edit` (and any error/echo params) stripped. */
   closedHref: string
   title: string
+  /**
+   * Whether clicking the backdrop dismisses the dialog. Default `true`.
+   *
+   * Set `false` for a step the user should leave deliberately — a
+   * confirmation they must answer, or anything irreversible where a stray
+   * click landing outside the panel should not count as "no". Escape and the
+   * X button still work, so the dialog is never a trap.
+   */
+  closeOnBackdropClick?: boolean
   /** The page's own already-existing Server Component form — unchanged, `Field`/`Input`/`TrackedForm` untouched. */
   children: ReactNode
 }
@@ -95,7 +104,13 @@ const FOCUS_RESTORE_KEY = 'c4t-modal-restore-focus'
  * leaves focus on `<body>`. See `FOCUS_RESTORE_KEY` above and the two
  * `useEffect`s below for how that path is covered instead.
  */
-export function Modal({ open, closedHref, title, children }: ModalProps) {
+export function Modal({
+  open,
+  closedHref,
+  title,
+  closeOnBackdropClick = true,
+  children,
+}: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null)
   // A page can and does render more than one Modal at once (a list of
   // per-row edit dialogs, say). A hardcoded id would give every instance's
@@ -266,8 +281,49 @@ export function Modal({ open, closedHref, title, children }: ModalProps) {
       event.preventDefault()
       requestClose()
     }
+
+    /**
+     * Click-outside-to-dismiss.
+     *
+     * A `showModal()` dialog paints its own `::backdrop`, and a click landing
+     * there reports the DIALOG ELEMENT as its target — content clicks report
+     * whatever inner node was hit. That identity check is the whole test;
+     * there is no separate backdrop node to bind a handler to. It only works
+     * because this dialog has `padding: 0`: padding belongs to the element,
+     * so a padded dialog would report clicks in its own gutter as backdrop
+     * hits and close when the user meant to click near a field.
+     *
+     * ── Why `pointerdown` is tracked too
+     *
+     * Selecting text in a field and releasing the mouse past the panel's
+     * edge produces a click whose target is the dialog, which would dismiss
+     * the form mid-edit and — since a drag means the user was working — very
+     * likely take unsaved changes with it. Requiring the gesture to have
+     * BEGUN on the backdrop keeps a sloppy drag from being read as a
+     * dismissal.
+     *
+     * Dismissal goes through `requestClose`, so it inherits the same
+     * unsaved-changes gate as Escape and the X.
+     */
+    let pressedOnBackdrop = false
+    function onPointerDown(event: PointerEvent) {
+      pressedOnBackdrop = event.target === dialog
+    }
+    function onClick(event: MouseEvent) {
+      if (!closeOnBackdropClick) return
+      if (event.target !== dialog || !pressedOnBackdrop) return
+      pressedOnBackdrop = false
+      requestClose()
+    }
+
     dialog.addEventListener('cancel', onCancel)
-    return () => dialog.removeEventListener('cancel', onCancel)
+    dialog.addEventListener('pointerdown', onPointerDown)
+    dialog.addEventListener('click', onClick)
+    return () => {
+      dialog.removeEventListener('cancel', onCancel)
+      dialog.removeEventListener('pointerdown', onPointerDown)
+      dialog.removeEventListener('click', onClick)
+    }
   })
 
   return (
