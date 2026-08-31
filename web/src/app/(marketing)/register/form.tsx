@@ -419,6 +419,12 @@ function SignUpForm({
           required
           hint="At least 12 characters. Length beats complexity."
         >
+          {/*
+            Every other password field in the app can be revealed; this one
+            could not. Sign-up is where it matters most — the field asks for
+            at least twelve characters, autocomplete has nothing to offer on
+            a new account, and there is no second field to catch a typo.
+          */}
           <Input
             id="password"
             name="password"
@@ -427,6 +433,7 @@ function SignUpForm({
             required
             minLength={12}
             iconLeft="lock"
+            showPasswordToggle
           />
         </Field>
 

@@ -200,7 +200,13 @@ export function TopNav({
 
           "Sign in" for people who already have an account and "Book a demo" for
           people who want to talk to someone first — the latter is the one the
-          business runs on, so it keeps the only filled button.
+          business runs on, so it keeps the only FILLED button.
+
+          Sign in is outlined rather than ghost. As a ghost it rendered with no
+          background and no border at all, which made it read as plain text
+          sitting next to a button rather than as something to click. Outlined
+          gives it a real edge and hover state while leaving "Book a demo" the
+          only solid one, so the order of commitment above still holds.
 
           Sign-up is reachable from the foot of the sign-in card ("Create an
           account"), which is the clearest possible placement: a person who
@@ -209,7 +215,7 @@ export function TopNav({
           points at the same visitor.
         */}
         <div className="c4t-nav-desktop" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Button variant="ghost" size="sm" href="/login">
+          <Button variant="secondary" size="sm" href="/login">
             Sign in
           </Button>
           <Button variant="primary" size="sm" href="/contact">
@@ -457,7 +463,7 @@ export function TopNav({
             <Button variant="primary" fullWidth href="/contact">
               Book a demo
             </Button>
-            <Button variant="ghost" fullWidth href="/login">
+            <Button variant="secondary" fullWidth href="/login">
               Sign in
             </Button>
           </div>

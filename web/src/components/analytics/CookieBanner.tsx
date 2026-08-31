@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Button, Checkbox } from '@/components/ds'
 import { COOKIE_BANNER } from '@/content'
@@ -31,6 +31,12 @@ import { useConsent } from '@/lib/analytics/useConsent'
  * categories appear later (marketing, personalisation), they belong in
  * `ConsentState` first — a checkbox that controls nothing is dark-pattern
  * territory.
+ *
+ * IT RESERVES ITS OWN SPACE. Being `position: fixed`, it sat on top of
+ * whatever happened to be at the bottom of the page. On /contact that was the
+ * "Book my demo" submit button: the banner covered it and swallowed the
+ * click, so a first-time visitor — the only kind who sees this banner — could
+ * not book a demo at all. See the effect below.
  * ──────────────────────────────────────────────────────────────────────────
  */
 export function CookieBanner() {
@@ -38,6 +44,40 @@ export function CookieBanner() {
   const [dismissed, setDismissed] = useState(false)
   const [managing, setManaging] = useState(false)
   const [analytics, setAnalytics] = useState(false)
+  const bannerRef = useRef<HTMLDivElement>(null)
+
+  const visible = decided === false && !dismissed
+
+  /**
+   * Pads the page by exactly the banner's height while it is up, so nothing
+   * ends up underneath it.
+   *
+   * Measured rather than hardcoded because the height is not fixed: the copy
+   * wraps differently across breakpoints, and "Manage preferences" expands
+   * the banner with two more checkboxes. A `ResizeObserver` keeps the
+   * reservation correct through both.
+   *
+   * The previous inline value is restored on cleanup rather than blanked, so
+   * dismissing the banner cannot leave the page with padding it did not start
+   * with.
+   */
+  useEffect(() => {
+    const banner = bannerRef.current
+    if (!visible || !banner) return
+
+    const previous = document.body.style.paddingBottom
+    const apply = () => {
+      document.body.style.paddingBottom = `${banner.offsetHeight}px`
+    }
+    apply()
+
+    const observer = new ResizeObserver(apply)
+    observer.observe(banner)
+    return () => {
+      observer.disconnect()
+      document.body.style.paddingBottom = previous
+    }
+  }, [visible])
 
   function decide(allowAnalytics: boolean) {
     document.cookie = [
@@ -55,10 +95,11 @@ export function CookieBanner() {
   }
 
   // `decided === null` is pre-hydration — render nothing rather than guess.
-  if (decided !== false || dismissed) return null
+  if (!visible) return null
 
   return (
     <div
+      ref={bannerRef}
       role="dialog"
       aria-modal={false}
       aria-labelledby="c4t-consent-title"
