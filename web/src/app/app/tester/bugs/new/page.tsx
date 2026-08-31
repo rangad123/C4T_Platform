@@ -104,18 +104,27 @@ export default async function NewTesterBugPage({
   )
 
   /**
-   * Arriving from a build workspace ("Report a bug" on the project page)
-   * carries the project and build in the URL, so the form opens already
-   * pointed at what the tester was looking at. Landing here cold from the
-   * sidebar leaves the picker on the first reportable project.
+   * The project is context, not a question.
    *
-   * The preselection is only honoured when it matches a project the tester
-   * can actually report against — a hand-edited `?projectId=` for someone
-   * else's project falls back rather than pre-filling a value the API will
-   * refuse.
+   * A bug is always filed from inside the build being tested — both "Report a
+   * bug" entry points sit on the project page and carry `?projectId=&buildId=`
+   * — so the form states what it is filing against rather than asking. The
+   * picker this replaces was worse than redundant: `features` and
+   * `customFields` below are fetched on the server for whatever project is
+   * active at render, so changing the dropdown in the browser left the
+   * Feature list and the client's custom questions belonging to the PREVIOUS
+   * project, and the submit carried a `featureId` the chosen project does not
+   * own.
+   *
+   * Only a project the tester can actually report against counts — a
+   * hand-edited `?projectId=` for someone else's project resolves to nothing
+   * and gets the "open a project" state below, rather than being quietly
+   * swapped for a different project. There is deliberately no "first
+   * reportable project" fallback: with no visible picker, defaulting would
+   * file the report against a project nobody chose.
    */
   const preselected = reportable.find((a) => a.project?.id === params.projectId) ?? null
-  const activeProjectId = preselected?.project?.id ?? reportable[0]?.project?.id ?? ''
+  const activeProjectId = preselected?.project?.id ?? ''
 
   /**
    * Features and the tester's registered browsers make the report specific:
@@ -187,12 +196,31 @@ export default async function NewTesterBugPage({
         </p>
       ) : null}
 
-      {reportable.length === 0 ? (
-        <EmptyState
-          icon="clipboard-check"
-          title="No project to report against"
-          description="You can file a bug once you have accepted an invitation to a project that is still running."
-        />
+      {!preselected ? (
+        reportable.length === 0 ? (
+          <EmptyState
+            icon="clipboard-check"
+            title="No project to report against"
+            description="You can file a bug once you have accepted an invitation to a project that is still running."
+          />
+        ) : (
+          /*
+           * Reachable only by opening this URL directly, since every link to
+           * it carries a project. Rather than guess which of the tester's
+           * projects they meant, send them to pick one — the bug form lives
+           * inside a project, and that is where the button is.
+           */
+          <EmptyState
+            icon="clipboard-check"
+            title="Open a project to report a bug"
+            description="Reports are filed against the build you are testing. Open the project, then use Report a bug."
+            action={
+              <Button href="/app/tester/projects" variant="primary">
+                Go to your projects
+              </Button>
+            }
+          />
+        )
       ) : (
         <TrackedForm
           action={reportBugAction}
@@ -211,18 +239,31 @@ export default async function NewTesterBugPage({
                 <input type="hidden" name="buildId" value={params.buildId} />
               ) : null}
 
-              <Field label="Project" htmlFor="projectId" required>
-                <Select
-                  id="projectId"
-                  name="projectId"
-                  required
-                  defaultValue={activeProjectId}
-                  options={reportable.map((a) => ({
-                    value: a.project!.id,
-                    label: `${a.project!.reference} — ${a.project!.title}`,
-                  }))}
-                />
-              </Field>
+              {/*
+                The project travels as a hidden value, not a control. The
+                action reads `projectId` exactly as before and the API still
+                re-checks the assignment on submit — this removes the question,
+                not the field.
+              */}
+              <input type="hidden" name="projectId" value={activeProjectId} />
+
+              <div>
+                <span
+                  className="c4t-eyebrow"
+                  style={{ display: 'block', color: 'var(--text-muted)' }}
+                >
+                  Project
+                </span>
+                <p
+                  style={{
+                    margin: 'var(--space-1) 0 0',
+                    color: 'var(--text-primary)',
+                    fontSize: 'var(--type-body-md-size)',
+                  }}
+                >
+                  {preselected.project!.reference} — {preselected.project!.title}
+                </p>
+              </div>
 
               {features && features.length > 0 ? (
                 <Field
