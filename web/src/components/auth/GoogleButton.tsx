@@ -30,16 +30,32 @@ export interface GoogleButtonProps {
  * right element: it works without JavaScript, it is keyboard and
  * middle-click friendly, and it keeps this a Server Component.
  *
- * It points straight at the API's own origin (`env.API_ORIGIN`) — the same
- * server the other auth flows already call directly (see
- * `lib/auth/actions.ts`'s `new URL('/v1/auth/...', env.API_ORIGIN)` calls).
- * There is no same-origin rewrite to lean on: `next.config.ts` deliberately
- * has none in the Vercel + Render split deploy, so a relative `/api/v1/...`
- * link 404s on Vercel's own domain instead of ever reaching the API. This
- * link has to carry the full origin because, unlike a fetch, the browser
- * itself follows it — Google's redirect has to land on wherever the API's
- * `GET /v1/auth/google/callback` route actually lives, which is the API's
- * origin, not the web app's.
+ * ── WHY NOT `API_ORIGIN`
+ *
+ * It used to build this from `env.API_ORIGIN`, reasoning that the browser has
+ * to reach the API's own `GET /v1/auth/google/callback`. True, but
+ * `API_ORIGIN` is the origin THIS SERVER uses to reach the API, and on a
+ * single-box deployment that is `http://127.0.0.1:4000` — the loopback
+ * address of the machine reading it. Every other use of `API_ORIGIN` in this
+ * app is a server-side `fetch`, where loopback is exactly right; this was the
+ * one place the value was handed to a browser.
+ *
+ * The effect was silent and confusing rather than broken-looking: production
+ * rendered `href="http://127.0.0.1:4000/v1/auth/google"`, so clicking it sent
+ * the visitor to their OWN machine. For anyone without a local server they
+ * got a connection error; for a developer running one, the entire sign-in ran
+ * against their laptop, which then failed a state check and redirected to
+ * localhost — a failure that looks like a broken deployment and is nothing of
+ * the kind.
+ *
+ * `NEXT_PUBLIC_API_BASE` is the browser-facing address of the same API, which
+ * is what a link the browser follows needs. It takes either shape:
+ *   - a path (`/api/v1`, the default) where a proxy in front of both services
+ *     routes it — the single-box nginx deployment;
+ *   - an absolute origin, for the split deployment where the API is on a
+ *     different host and no shared proxy exists.
+ * Joining without `new URL()` keeps both working: a path stays relative to
+ * whatever host the visitor is actually on.
  */
 export function GoogleButton({
   role,
@@ -53,7 +69,9 @@ export function GoogleButton({
   if (intent) params.set('intent', intent)
   const query = params.toString()
 
-  const href = new URL(`/v1/auth/google${query ? `?${query}` : ''}`, env.API_ORIGIN).toString()
+  // Trailing slash trimmed so a base of `/api/v1/` does not produce `//auth`.
+  const base = env.NEXT_PUBLIC_API_BASE.replace(/\/$/, '')
+  const href = `${base}/auth/google${query ? `?${query}` : ''}`
 
   return (
     <a
