@@ -115,7 +115,13 @@ export default async function ProjectDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string; edit?: string; buildId?: string }>
+  searchParams: Promise<{
+    section?: string
+    edit?: string
+    buildId?: string
+    error?: string
+    name?: string
+  }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
   const { id } = await params
@@ -301,6 +307,37 @@ export default async function ProjectDetailPage({
     const qs = sp.toString()
     return qs ? `${detailPath}?${qs}` : detailPath
   })()
+  /**
+   * A failed modal save reopens the dialog with `?error=`. The action sends a
+   * fixed code, never the API's own message — the page owns the wording, and
+   * nothing lower-level than these strings reaches the screen.
+   */
+  const MODAL_ERRORS: Record<string, string> = {
+    'build-name-taken': 'Another build on this project already uses that name.',
+    'build-rename-failed': 'The build could not be renamed. Try again.',
+    'build-save-failed': 'The build could not be saved. Try again.',
+    'brief-save-failed': 'The brief could not be saved. Try again.',
+  }
+  const modalError = resolvedSearchParams.error
+    ? (MODAL_ERRORS[resolvedSearchParams.error] ?? 'That did not save. Try again.')
+    : null
+
+  const modalErrorNote = modalError ? (
+    <p
+      role="alert"
+      style={{
+        margin: 0,
+        padding: 'var(--space-3) var(--space-4)',
+        borderRadius: 'var(--radius-card)',
+        background: 'var(--status-error-bg)',
+        color: 'var(--status-error-fg)',
+        fontSize: 'var(--type-body-sm-size)',
+      }}
+    >
+      {modalError}
+    </p>
+  ) : null
+
   const briefModalOpen = edit === 'brief'
   const renameBuildModalOpen = edit === 'rename-build'
   const buildDetailsModalOpen = edit === 'build-details'
@@ -913,6 +950,9 @@ export default async function ProjectDetailPage({
           {capabilities.canUpdate ? (
             <Modal open={briefModalOpen} closedHref={closedHref} title="Edit the brief">
               <TrackedForm action={updateProjectBrief} style={stackStyle}>
+                {modalErrorNote}
+                <input type="hidden" name="section" value={section} />
+                <input type="hidden" name="buildId" value={activeBuildId} />
                 <input type="hidden" name="id" value={project.id} />
 
                 <Field label="Title" htmlFor="title" required>
@@ -1196,6 +1236,8 @@ export default async function ProjectDetailPage({
       {capabilities.canUpdate && buildDetail ? (
         <Modal open={buildDetailsModalOpen} closedHref={closedHref} title="Edit build details">
           <TrackedForm action={updateBuild} style={stackStyle}>
+            {modalErrorNote}
+            <input type="hidden" name="section" value={section} />
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="buildId" value={activeBuildId} />
 
@@ -2155,15 +2197,20 @@ export default async function ProjectDetailPage({
       {capabilities.canUpdate && activeBuild ? (
         <Modal open={renameBuildModalOpen} closedHref={closedHref} title="Rename build">
           <form action={renameBuild} style={stackStyle}>
+            {modalErrorNote}
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="buildId" value={activeBuild.id} />
+            <input type="hidden" name="section" value={section} />
             <Field label="Name" htmlFor="rename-build-name">
               <Input
                 id="rename-build-name"
                 name="name"
                 required
                 maxLength={120}
-                defaultValue={activeBuild.name}
+                // After a rejected rename the typed name comes back in the
+                // URL, so the dialog reopens on what was attempted rather
+                // than reverting to the stored name and hiding the mistake.
+                defaultValue={resolvedSearchParams.name ?? activeBuild.name}
               />
             </Field>
             <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">

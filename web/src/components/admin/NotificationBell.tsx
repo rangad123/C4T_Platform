@@ -146,7 +146,7 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
           justifyContent: 'center',
           width: 36,
           height: 36,
-          borderRadius: 'var(--radius-control)',
+          borderRadius: 'var(--radius-button)',
           // Chromeless, like the Sign out control it sits beside. A boxed
           // icon read as a separate widget rather than part of the bar.
           border: 0,

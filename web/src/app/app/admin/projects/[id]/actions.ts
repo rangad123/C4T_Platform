@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { ApiError } from '@/lib/api/types'
 import { isAssignmentStatus, isProjectPriority, isProjectStatus } from './constants'
 
 /**
@@ -25,6 +26,39 @@ import { isAssignmentStatus, isProjectPriority, isProjectStatus } from './consta
 function revalidateProject(id: string): void {
   revalidatePath('/app/admin/projects')
   revalidatePath(`/app/admin/projects/${id}`)
+}
+
+/**
+ * Where a modal action lands when it finishes.
+ *
+ * `Modal` is driven by the URL: it is open while `?edit=` names it, so the
+ * ONLY way to close one is a redirect that drops that parameter. An action
+ * that saves and then just falls off the end leaves the dialog sitting there
+ * looking like the click did nothing — which is exactly how a working save
+ * came to be reported as a broken one.
+ *
+ * Passing `edit` back instead reopens the dialog, which is what a failure
+ * wants: the values stay on screen to be corrected.
+ */
+function projectHref(
+  id: string,
+  extra?: {
+    section?: string
+    buildId?: string
+    edit?: string
+    error?: string
+    name?: string
+  },
+): string {
+  const params = new URLSearchParams()
+  if (extra?.section) params.set('section', extra.section)
+  if (extra?.buildId) params.set('buildId', extra.buildId)
+  if (extra?.edit) params.set('edit', extra.edit)
+  if (extra?.error) params.set('error', extra.error)
+  // Echoed so a reopened dialog shows what was typed, not the stored value.
+  if (extra?.name) params.set('name', extra.name)
+  const qs = params.toString()
+  return qs ? `/app/admin/projects/${id}?${qs}` : `/app/admin/projects/${id}`
 }
 
 /** `Android, iOS , web` → `['Android', 'iOS', 'web']`. */
@@ -72,8 +106,16 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   // "false" value to read, so absence IS the off state.
   body.testersCanSeeOtherBugs = formData.has('testersCanSeeOtherBugs')
 
-  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  const section = formTrimmed(formData, 'section')
+  const buildId = formTrimmed(formData, 'buildId')
+  try {
+    await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  } catch {
+    redirect(projectHref(id, { section, buildId, edit: 'brief', error: 'brief-save-failed' }))
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section, buildId }))
 }
 
 /** Priority and reported progress. One PATCH, one panel. */
@@ -93,8 +135,16 @@ export async function updateProjectDelivery(formData: FormData): Promise<void> {
 
   if (Object.keys(body).length === 0) return
 
-  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  const section = formTrimmed(formData, 'section')
+  const buildId = formTrimmed(formData, 'buildId')
+  try {
+    await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  } catch {
+    redirect(projectHref(id, { section, buildId, edit: 'brief', error: 'brief-save-failed' }))
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section, buildId }))
 }
 
 /**
@@ -302,10 +352,33 @@ export async function renameBuild(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   const buildId = formTrimmed(formData, 'buildId')
   const name = formTrimmed(formData, 'name')
+  const section = formTrimmed(formData, 'section') || 'build'
   if (!id || !buildId || !name) return
 
-  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
+  try {
+    await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
+  } catch (error) {
+    /**
+     * 409 is the API's own uniqueness check — build names are unique per
+     * project, and a duplicate is far and away the likeliest way a rename
+     * fails. Reopen the dialog with the typed name still in it rather than
+     * throwing to the page's crash screen, which loses the input and says
+     * nothing about what went wrong.
+     */
+    const status = error instanceof ApiError ? error.status : 0
+    redirect(
+      projectHref(id, {
+        section,
+        buildId,
+        edit: 'rename-build',
+        error: status === 409 ? 'build-name-taken' : 'build-rename-failed',
+        name,
+      }),
+    )
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section, buildId }))
 }
 
 /**
@@ -340,8 +413,23 @@ export async function updateBuild(formData: FormData): Promise<void> {
   const maxTesters = formTrimmed(formData, 'maxTesters')
   body.maxTesters = maxTesters ? maxTesters : null
 
-  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
+  const section = formTrimmed(formData, 'section') || 'build'
+  try {
+    await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    redirect(
+      projectHref(id, {
+        section,
+        buildId,
+        edit: 'build-details',
+        error: status === 409 ? 'build-name-taken' : 'build-save-failed',
+      }),
+    )
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section, buildId }))
 }
 
 /** §7 "Copy Build" — lands on the new copy, on the build-details tab. */
