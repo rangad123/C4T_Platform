@@ -6,6 +6,8 @@ import {
   AnnouncementAudience,
   Role,
   AssignmentStatus,
+  NotificationType,
+  UserStatus,
   type Prisma,
 } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
@@ -303,6 +305,105 @@ const listAnnouncementsQuery = paginationQuery.extend({
   buildId: z.string().cuid().optional(),
 })
 
+/**
+ * Everyone a published announcement should reach, as user ids.
+ *
+ * The mirror of the read scope in `GET /announcements`. It has to be a mirror
+ * and not an approximation: notifying someone who then cannot open the thing
+ * is worse than not notifying them, and missing someone the list would show
+ * makes the bell a liar.
+ *
+ * The rules, per axis:
+ *  - AUDIENCE picks the roles, exactly as `announcementAudienceFor` does in
+ *    reverse.
+ *  - NO PROJECT is platform-wide: every active user in those roles.
+ *  - A PROJECT narrows testers to its live roster and customers to the owning
+ *    organisation's members.
+ *  - A BUILD narrows the testers further to that build's own roster, which is
+ *    the same anchoring the read path uses. Customers are NOT narrowed by
+ *    build, because the read path does not narrow them either — they see
+ *    their organisation's project announcements whichever build carries them.
+ *
+ * The author is always dropped. Being told about your own announcement is
+ * noise, and it is the one recipient guaranteed to have already read it.
+ */
+async function announcementRecipients(announcement: {
+  id: string
+  authorId: string
+  audience: AnnouncementAudience
+  projectId: string | null
+  buildId: string | null
+}): Promise<string[]> {
+  const roles =
+    announcement.audience === AnnouncementAudience.ALL
+      ? [Role.CUSTOMER, Role.TESTER, Role.ADMIN, Role.SUB_ADMIN]
+      : announcement.audience === AnnouncementAudience.CUSTOMERS
+        ? [Role.CUSTOMER]
+        : announcement.audience === AnnouncementAudience.TESTERS
+          ? [Role.TESTER]
+          : [Role.ADMIN, Role.SUB_ADMIN]
+
+  const live = { deletedAt: null, status: UserStatus.ACTIVE }
+  const where: Prisma.UserWhereInput[] = []
+
+  if (roles.includes(Role.TESTER)) {
+    const onRoster = {
+      status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] },
+      ...(announcement.buildId
+        ? { buildId: announcement.buildId }
+        : announcement.projectId
+          ? { projectId: announcement.projectId }
+          : {}),
+    }
+    where.push({
+      ...live,
+      role: Role.TESTER,
+      ...(announcement.projectId ? { assignments: { some: onRoster } } : {}),
+    })
+  }
+
+  if (roles.includes(Role.CUSTOMER)) {
+    where.push({
+      ...live,
+      role: Role.CUSTOMER,
+      ...(announcement.projectId
+        ? {
+            orgMemberships: {
+              some: { organisation: { projects: { some: { id: announcement.projectId } } } },
+            },
+          }
+        : {}),
+    })
+  }
+
+  const adminRoles = roles.filter((r) => r === Role.ADMIN || r === Role.SUB_ADMIN)
+  if (adminRoles.length > 0) {
+    where.push({ ...live, role: { in: adminRoles } })
+  }
+
+  if (where.length === 0) return []
+
+  const users = await prisma.user.findMany({ where: { OR: where }, select: { id: true } })
+  return users.map((u) => u.id).filter((id) => id !== announcement.authorId)
+}
+
+/**
+ * The deep link a notification carries for an announcement.
+ *
+ * Portal-agnostic, like every other link this API writes — the frontend's
+ * `resolveNotificationHref` puts the reader's own portal in front of it. A
+ * project-scoped announcement points at that project's Announcements tab,
+ * carrying the build so the tab opens on the cycle the announcement is about.
+ * A platform-wide one has no project to point at and goes to the reader's
+ * announcements list instead.
+ */
+function announcementLink(announcement: { projectId: string | null; buildId: string | null }) {
+  if (!announcement.projectId) return '/app/announcements'
+  const params = new URLSearchParams({ section: 'announcements' })
+  if (announcement.buildId) params.set('buildId', announcement.buildId)
+  return `/app/projects/${announcement.projectId}?${params.toString()}`
+}
+
 communicationRouter.get(
   '/announcements',
   validate({ query: listAnnouncementsQuery }),
@@ -469,6 +570,32 @@ communicationRouter.post(
       entityId: announcement.id,
       after: { title: input.title, audience: input.audience, projectId: input.projectId ?? null },
     })
+
+    /**
+     * Publishing is what makes it visible, so publishing is what notifies.
+     * A draft (`publishNow` false) reaches nobody and must not ring anyone's
+     * bell; there is no separate publish endpoint today, so this is the only
+     * moment an announcement can become visible.
+     *
+     * The notification IS the read state. `Announcement` has no per-user read
+     * column and needs none — one unified notification system, exactly as the
+     * enum's own ANNOUNCEMENT member always intended, and unread is simply
+     * `readAt === null` on the row the reader already owns.
+     */
+    if (announcement.publishedAt) {
+      const recipients = await announcementRecipients(announcement)
+      await createNotifications(recipients, {
+        type: NotificationType.ANNOUNCEMENT,
+        title: announcement.title,
+        body: announcement.body.slice(0, 300),
+        link: announcementLink(announcement),
+        metadata: {
+          announcementId: announcement.id,
+          projectId: announcement.projectId,
+          buildId: announcement.buildId,
+        },
+      })
+    }
 
     res.status(201).json({ data: announcement })
   },
