@@ -577,21 +577,21 @@ export default async function CustomerProjectDetailPage({
       badges={<StatusBadge status={project.status} />}
       subtitle={`${project.reference} · created ${formatDate(project.createdAt)}`}
       tabs={
+        /*
+         * The build picker sits ABOVE the tabs, not beside them.
+         *
+         * Every tab below is scoped to the selected build, so the choice is
+         * not one tab's control — it frames all of them. Sharing a row with
+         * the tabs also made it the first thing to wrap off a narrow screen,
+         * which is the opposite of what its importance deserves.
+         */
         <div
           style={{
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
             gap: 'var(--space-4)',
-            flexWrap: 'wrap',
           }}
         >
-          <SectionTabs
-            basePath={detailPath}
-            tabs={SECTIONS}
-            active={section}
-            preserve={{ buildId }}
-          />
           {/* Wraps: the build name is user-supplied and unbounded, and beside
               the buttons it pushed this row past a phone viewport. */}
           <div
@@ -627,10 +627,29 @@ export default async function CustomerProjectDetailPage({
               </>
             ) : null}
           </div>
+
+          <SectionTabs
+            basePath={detailPath}
+            tabs={SECTIONS}
+            active={section}
+            preserve={{ buildId }}
+          />
         </div>
       }
       aside={
-        section === 'dashboard' ? (
+        /*
+         * Where the two editable project panels live.
+         *
+         * Status and Priority were on the Dashboard, which is a place to READ
+         * how the work is going — putting the controls that change it there
+         * mixed reporting with administration. They sit with Build details
+         * now, the tab that already exists for looking after the project
+         * rather than watching it.
+         *
+         * "At a glance" stays on the Dashboard: it is three counts, which is
+         * reporting, not administration.
+         */
+        section === 'build' ? (
           <>
             <Panel
               title="Status"
@@ -710,17 +729,17 @@ export default async function CustomerProjectDetailPage({
                 </div>
               )}
             </Panel>
-
-            <Panel title="At a glance">
-              <DescriptionList
-                items={[
-                  { label: 'Testers on the roster', value: String(project._count.assignments) },
-                  { label: 'Bugs logged', value: String(project._count.bugs) },
-                  { label: 'Materials attached', value: String(project._count.materials) },
-                ]}
-              />
-            </Panel>
           </>
+        ) : section === 'dashboard' ? (
+          <Panel title="At a glance">
+            <DescriptionList
+              items={[
+                { label: 'Testers on the roster', value: String(project._count.assignments) },
+                { label: 'Bugs logged', value: String(project._count.bugs) },
+                { label: 'Materials attached', value: String(project._count.materials) },
+              ]}
+            />
+          </Panel>
         ) : undefined
       }
     >
@@ -901,7 +920,10 @@ export default async function CustomerProjectDetailPage({
             actions={
               capabilities.canUpdate ? (
                 <Button
-                  href={`${detailPath}?section=${section}&edit=brief`}
+                  // Carries the selected build, like every other link here.
+                  // Without it, opening the brief silently reset the picker
+                  // to the default build.
+                  href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=brief`}
                   variant="primary"
                   size="sm"
                 >
