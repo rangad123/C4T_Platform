@@ -29,6 +29,12 @@ export interface PageMeta {
   totalPages: number
   hasNext: boolean
   hasPrev: boolean
+  /**
+   * Notifications only: every unread row for this user, independent of the
+   * page or of any `unreadOnly` filter. `total` counts what the filter
+   * matched, which is not the same number once the list is filtered.
+   */
+  unreadCount?: number
 }
 
 export interface ValidationDetail {

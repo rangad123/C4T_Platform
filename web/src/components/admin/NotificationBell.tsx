@@ -5,6 +5,31 @@ import { useRouter } from 'next/navigation'
 import { Icon } from '@/components/ds/core/Icon'
 import { formatDateTime } from '@/lib/admin/format'
 
+/**
+ * What each kind of notification calls itself in the panel.
+ *
+ * MESSAGE_RECEIVED reads as "Communication" and ANNOUNCEMENT as
+ * "Announcement" because those are the two places a reader is being sent,
+ * and the label is what tells them which before they click. The rest fall
+ * back to their enum name in sentence case.
+ */
+const TYPE_LABELS: Record<string, string> = {
+  MESSAGE_RECEIVED: 'Communication',
+  ANNOUNCEMENT: 'Announcement',
+  PROJECT_ASSIGNED: 'Project',
+  PROJECT_STATUS_CHANGED: 'Project',
+  BUG_REPORTED: 'Bug',
+  BUG_STATUS_CHANGED: 'Bug',
+  RATING_RECEIVED: 'Rating',
+  TRANSACTION_UPDATED: 'Payment',
+  TESTER_STATUS_CHANGED: 'Account',
+  SYSTEM: 'System',
+}
+
+function typeLabel(type: string): string {
+  return TYPE_LABELS[type] ?? type.charAt(0) + type.slice(1).toLowerCase().replace(/_/g, ' ')
+}
+
 interface NotificationItem {
   id: string
   type: string
@@ -97,9 +122,12 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
   }, [open])
 
   function markRead(id: string): void {
-    setItems((prev) =>
-      prev ? prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)) : prev,
-    )
+    /**
+     * Dropped from the list, not greyed out. The panel shows unread only, so
+     * a row that has been read no longer belongs in it — leaving it behind
+     * would make the list disagree with the badge beside it.
+     */
+    setItems((prev) => (prev ? prev.filter((n) => n.id !== id) : prev))
     setUnread((n) => Math.max(0, n - 1))
     void fetch('/app/notifications', {
       method: 'POST',
@@ -114,9 +142,7 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
   }
 
   function markAllRead(): void {
-    setItems((prev) =>
-      prev ? prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })) : prev,
-    )
+    setItems([])
     setUnread(0)
     void fetch('/app/notifications', {
       method: 'POST',
@@ -240,7 +266,7 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
             </p>
           ) : !items || items.length === 0 ? (
             <p style={{ margin: 0, padding: 'var(--space-4)', color: 'var(--text-muted)' }}>
-              Nothing to catch up on.
+              You are all caught up.
             </p>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -269,13 +295,32 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
                           }}
                         />
                       ) : null}
-                      {n.title}
+                      <span
+                        className="c4t-eyebrow"
+                        style={{ color: 'var(--text-muted)', flexShrink: 0 }}
+                      >
+                        {typeLabel(n.type)}
+                      </span>
+                      <span
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {n.title}
+                      </span>
                     </span>
                     {n.body ? (
                       <span
                         style={{
                           color: 'var(--text-secondary)',
                           fontSize: 'var(--type-body-sm-size)',
+                          // One line. The panel is a scan of what is waiting,
+                          // and the full text is on the page it links to.
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                         }}
                       >
                         {n.body}

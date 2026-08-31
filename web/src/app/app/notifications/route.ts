@@ -32,15 +32,26 @@ export async function GET(): Promise<NextResponse> {
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
 
   try {
-    const { data } = await serverFetchPage<NotificationRow>('notifications', {
-      query: { page: 1, limit: 20 },
+    /**
+     * Unread only. The panel is a list of what still needs attention, not an
+     * archive — everything already read is one click away in the full list
+     * and only makes the thing that does need attention harder to find.
+     */
+    const { data, meta } = await serverFetchPage<NotificationRow>('notifications', {
+      query: { page: 1, limit: 20, unreadOnly: 'true' },
     })
     return NextResponse.json({
       notifications: data.map((n) => ({
         ...n,
         href: resolveNotificationHref(n.link, user.role),
       })),
-      unread: data.filter((n) => n.readAt === null).length,
+      /**
+       * The API's own count of every unread row, not the length of this page.
+       * Counting the page capped the badge at 20 and, now that the page is
+       * filtered, would have been the only number available — a reader with
+       * 30 waiting would have been told 20.
+       */
+      unread: meta?.unreadCount ?? data.length,
     })
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 502
