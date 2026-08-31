@@ -21,10 +21,27 @@ module.exports = {
       script: 'dist/index.js',
       cwd: __dirname,
 
-      // Cluster mode across available cores. Safe here because the API holds no
-      // in-process state — sessions live in Postgres, which is the point of
-      // stateful-auth-in-the-database rather than in memory.
-      instances: configuredInstances ? Number(configuredInstances) : 'max',
+      /**
+       * ONE INSTANCE BY DEFAULT, and that is load-bearing.
+       *
+       * This used to say `'max'`, on the reasoning that the API holds no
+       * in-process state because sessions live in Postgres. That is true of
+       * sessions and false of the Google OAuth handoff: `lib/oauth/handoff.ts`
+       * keeps its one-time codes in a `Map`, and says so — "this API runs as a
+       * single instance" is written into that file as an assumption.
+       *
+       * With two workers it stopped being true. Google's callback lands on one
+       * worker and mints a code into that worker's memory; the web app's
+       * exchange call is balanced to whichever worker is free, and finding no
+       * such code, refuses it. Sign-in then failed about half the time, with
+       * `google_failed` and nothing in the logs to say why.
+       *
+       * Raising this again means making that handoff shared first — a table,
+       * or signing the payload into the code instead of storing it. Until
+       * then `PM2_INSTANCES` is an override for someone who has done that
+       * work, not a tuning knob.
+       */
+      instances: configuredInstances ? Number(configuredInstances) : 1,
       exec_mode: 'cluster',
 
       env_production: {

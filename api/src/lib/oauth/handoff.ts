@@ -17,12 +17,25 @@ import type { SessionTokens } from '../../modules/auth/auth.service.js'
  * straight into cookies, and sets its OWN cookies from that response —
  * exactly the way password login already does via `cookie-bridge.ts`.
  *
- * In-memory, not the database: this API runs as a single instance, the code
- * lives for well under a minute, and a lost code just means the visitor
- * retries sign-in — not worth a table and a cleanup job for that. A deploy
- * landing in the few-second window between mint and exchange loses it too;
- * same acceptable failure mode as any other in-flight request during a
- * restart.
+ * In-memory, not the database: the code lives for well under a minute, and a
+ * lost code just means the visitor retries sign-in — not worth a table and a
+ * cleanup job for that. A deploy landing in the few-second window between
+ * mint and exchange loses it too; same acceptable failure mode as any other
+ * in-flight request during a restart.
+ *
+ * ── THIS REQUIRES A SINGLE PROCESS
+ *
+ * A `Map` is per-worker. Under PM2 cluster mode the callback mints a code
+ * into one worker and the exchange arrives at whichever worker is free, so
+ * roughly half of all sign-ins fail with no trace beyond a refused exchange.
+ * That happened: `ecosystem.config.cjs` ran `instances: 'max'` against this
+ * assumption for as long as both existed, and now pins one instance with a
+ * pointer back here.
+ *
+ * Anyone wanting more workers has to make this shared first — a table keyed
+ * by code, or signing the tokens into the code so nothing is stored at all.
+ * The second is tempting and worse: it puts session material in a URL, which
+ * is exactly what this indirection exists to avoid.
  */
 const TTL_MS = 60_000
 
