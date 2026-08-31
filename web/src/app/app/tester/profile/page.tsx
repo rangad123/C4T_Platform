@@ -595,23 +595,6 @@ export default async function TesterProfilePage({
 
       {section === 'about' ? (
         <>
-          <Panel
-            title="Profile picture"
-            description="Shown next to your name on projects you work on."
-            actions={
-              <Button
-                href={`${PROFILE_PATH}?section=about&edit=photo`}
-                variant="primary"
-                size="sm"
-                iconLeft="image"
-              >
-                Change photo
-              </Button>
-            }
-          >
-            <Avatar name={personName(profile.user)} fileId={profile.user.avatarFileId} size="xl" />
-          </Panel>
-
           <Modal
             open={edit === 'photo'}
             closedHref={`${PROFILE_PATH}?section=about`}
@@ -664,25 +647,78 @@ export default async function TesterProfilePage({
               </Button>
             }
           >
-            <DescriptionList
-              items={[
-                { label: 'First name', value: orDash(profile.user.firstName) },
-                { label: 'Last name', value: orDash(profile.user.lastName) },
-                { label: 'Headline', value: orDash(profile.headline), wide: true },
-                { label: 'Bio', value: orDash(profile.bio), wide: true },
-                { label: 'Age group', value: profile.ageGroup ?? 'Prefer not to say' },
-                { label: 'Gender', value: profile.gender ?? 'Prefer not to say' },
-                { label: 'City', value: orDash(profile.city) },
-                { label: 'Country', value: orDash(profile.countryCode) },
-                { label: 'Email', value: profile.user.email },
-                { label: 'Phone', value: orDash(profile.user.phone) },
-                { label: 'Skype', value: orDash(profile.skype) },
-                { label: 'LinkedIn', value: orDash(profile.linkedinUrl) },
-                { label: 'Profession', value: orDash(profile.profession) },
-                { label: 'Years of experience', value: orDash(profile.experienceYears) },
-                { label: 'Looking for', value: profile.lookingFor ?? 'Not saying' },
-              ]}
-            />
+            {/*
+              The picture lives here rather than in a panel of its own.
+              It is one of the things a project owner sees when they look you
+              up, exactly like the fields below it — a separate panel implied
+              it was a separate subject, and cost a whole card to show one
+              avatar and one button.
+
+              "Change photo" is secondary: "Edit" in the panel header is the
+              primary action for this panel, and two primaries side by side
+              would leave neither reading as the main one.
+            */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-5)',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Avatar
+                  name={personName(profile.user)}
+                  fileId={profile.user.avatarFileId}
+                  size="xl"
+                />
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 'var(--space-3)',
+                  }}
+                >
+                  <span
+                    style={{
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
+                    Shown next to your name on projects you work on.
+                  </span>
+                  <Button
+                    href={`${PROFILE_PATH}?section=about&edit=photo`}
+                    variant="secondary"
+                    size="sm"
+                    iconLeft="image"
+                  >
+                    Change photo
+                  </Button>
+                </div>
+              </div>
+
+              <DescriptionList
+                items={[
+                  { label: 'First name', value: orDash(profile.user.firstName) },
+                  { label: 'Last name', value: orDash(profile.user.lastName) },
+                  { label: 'Headline', value: orDash(profile.headline), wide: true },
+                  { label: 'Bio', value: orDash(profile.bio), wide: true },
+                  { label: 'Age group', value: profile.ageGroup ?? 'Prefer not to say' },
+                  { label: 'Gender', value: profile.gender ?? 'Prefer not to say' },
+                  { label: 'City', value: orDash(profile.city) },
+                  { label: 'Country', value: orDash(profile.countryCode) },
+                  { label: 'Email', value: profile.user.email },
+                  { label: 'Phone', value: orDash(profile.user.phone) },
+                  { label: 'Skype', value: orDash(profile.skype) },
+                  { label: 'LinkedIn', value: orDash(profile.linkedinUrl) },
+                  { label: 'Profession', value: orDash(profile.profession) },
+                  { label: 'Years of experience', value: orDash(profile.experienceYears) },
+                  { label: 'Looking for', value: profile.lookingFor ?? 'Not saying' },
+                ]}
+              />
+            </div>
           </Panel>
 
           <Modal
