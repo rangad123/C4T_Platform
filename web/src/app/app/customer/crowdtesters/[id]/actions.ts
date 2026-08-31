@@ -29,11 +29,30 @@ export async function rateTesterAction(formData: FormData): Promise<void> {
   const score = Number(formTrimmed(formData, 'score'))
   const comment = formTrimmed(formData, 'comment')
 
-  const base = `/app/customer/crowdtesters/${testerProfileId}`
-  if (!testerProfileId || !subjectUserId) return
-  if (!projectId) redirect(`${base}?notice=rating-needs-project`)
+  /**
+   * Where to land afterwards.
+   *
+   * A rating can be left from the tester's profile or from the assignment on
+   * a project, and each should return to where it started rather than
+   * teleporting the person somewhere else. That is the ONLY difference
+   * between the two — same action, same endpoint, same rules — so it is one
+   * field rather than a second copy of this function.
+   *
+   * Only a path within this portal is accepted: `returnTo` arrives from a
+   * form field, and an unchecked one is an open redirect.
+   */
+  const requested = formTrimmed(formData, 'returnTo')
+  const returnTo =
+    requested.startsWith('/app/customer/') && !requested.startsWith('//') ? requested : null
+
+  const base = returnTo ?? `/app/customer/crowdtesters/${testerProfileId}`
+  const withNotice = (notice: string) => `${base}${base.includes('?') ? '&' : '?'}notice=${notice}`
+
+  if (!subjectUserId) return
+  if (!returnTo && !testerProfileId) return
+  if (!projectId) redirect(withNotice('rating-needs-project'))
   if (!Number.isInteger(score) || score < 1 || score > 5) {
-    redirect(`${base}?notice=rating-invalid`)
+    redirect(withNotice('rating-invalid'))
   }
 
   try {
@@ -57,9 +76,9 @@ export async function rateTesterAction(formData: FormData): Promise<void> {
           : status === 403
             ? 'rating-forbidden'
             : 'rating-failed'
-    redirect(`${base}?notice=${notice}`)
+    redirect(withNotice(notice))
   }
 
   revalidatePath(base)
-  redirect(`${base}?notice=rating-saved`)
+  redirect(withNotice('rating-saved'))
 }
