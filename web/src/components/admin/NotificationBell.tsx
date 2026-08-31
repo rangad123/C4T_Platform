@@ -147,8 +147,10 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
           width: 36,
           height: 36,
           borderRadius: 'var(--radius-control)',
-          border: '1px solid var(--border-default)',
-          background: 'var(--surface-raised)',
+          // Chromeless, like the Sign out control it sits beside. A boxed
+          // icon read as a separate widget rather than part of the bar.
+          border: 0,
+          background: 'transparent',
           color: 'var(--text-secondary)',
           cursor: 'pointer',
         }}
@@ -159,17 +161,20 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
             aria-hidden="true"
             style={{
               position: 'absolute',
-              top: -6,
-              right: -6,
-              minWidth: 18,
-              height: 18,
-              padding: '0 5px',
+              // Overlapping the glyph's top-right, not orbiting it. With the
+              // button's border gone there is no box edge to sit outside of,
+              // so the badge hugs the bell itself.
+              top: 2,
+              right: 2,
+              minWidth: 16,
+              height: 16,
+              padding: '0 4px',
               borderRadius: 999,
               background: 'var(--accent-strong, var(--teal-500, #0b7a6e))',
               color: '#fff',
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 'var(--fw-semibold)',
-              lineHeight: '18px',
+              lineHeight: '16px',
               textAlign: 'center',
               fontVariantNumeric: 'tabular-nums',
             }}
