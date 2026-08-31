@@ -100,7 +100,7 @@ const BUG_PREVIEW_SIZE = 10
  * while reading bugs as while editing the brief.
  */
 const SECTIONS = [
-  { value: 'overview', label: 'Overview', icon: 'file-text' },
+  { value: 'dashboard', label: 'Dashboard', icon: 'line-chart' },
   { value: 'build', label: 'Build details', icon: 'clock' },
   { value: 'testers', label: 'Testers', icon: 'users' },
   { value: 'materials', label: 'Materials', icon: 'book-open' },
@@ -261,7 +261,7 @@ export default async function ProjectDetailPage({
     // Same by-project report the Reports module's "By project" section
     // renders — reused for the Overview tab's summary rather than a second
     // aggregation. Rolled up across every build, unlike `buildSummaryData`.
-    section === 'overview'
+    section === 'dashboard'
       ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
       : Promise.resolve(null),
     // Only the New build modal reads this, and that modal opens from every
@@ -306,6 +306,20 @@ export default async function ProjectDetailPage({
   const buildDetailsModalOpen = edit === 'build-details'
   const activeBuild = project.builds.find((b) => b.id === activeBuildId)
 
+  /**
+   * What this list shows: only what Build details does not.
+   *
+   * Window, target countries, target languages and testing instructions were
+   * rendered by this panel AND by Build details. They are not two facts that
+   * agree -- the new-project wizard writes one set of answers to the project
+   * and to its first build -- so the two panels restated one input, and once
+   * a build was edited they disagreed with nothing to say which governed.
+   * The build's copy governs, so the duplicates come out of here.
+   *
+   * `summary` carries the same text the removed instructions did, because
+   * the wizard fills both from one field. The project's own columns are
+   * untouched and "Edit the brief" still sets them.
+   */
   const overview: DescriptionItem[] = [
     { label: 'Reference', value: <Mono>{project.reference}</Mono> },
     {
@@ -340,25 +354,11 @@ export default async function ProjectDetailPage({
     { label: 'Submitted', value: formatDate(project.submittedAt) },
     { label: 'Approved', value: formatDate(project.approvedAt) },
     { label: 'Completed', value: formatDate(project.completedAt) },
-    {
-      label: 'Window',
-      value: `${formatDate(project.startDate)} to ${formatDate(project.endDate)}`,
-    },
     { label: 'Platform targets', value: <TokenList values={project.platformTargets} /> },
-    { label: 'Target countries', value: <TokenList values={project.targetCountries} /> },
-    {
-      label: 'Target languages',
-      value: <TokenList values={project.targetLanguages} uppercase={false} />,
-    },
     {
       label: 'Summary',
       wide: true,
       value: project.summary ? <Prose>{project.summary}</Prose> : '',
-    },
-    {
-      label: 'Testing instructions',
-      wide: true,
-      value: project.instructions ? <Prose>{project.instructions}</Prose> : '',
     },
   ]
 
@@ -520,7 +520,18 @@ export default async function ProjectDetailPage({
         </div>
       }
       aside={
-        section === 'overview' ? (
+        /*
+         * Status and Priority sit with Build details, not the Dashboard.
+         *
+         * The Dashboard is where you read how the work is going; these two
+         * are the controls that change it. Keeping administration next to
+         * the build being administered matches the customer portal, which
+         * moved for the same reason.
+         *
+         * "At a glance" and "Managers" stay: three counts and a list of
+         * owners are reporting, not administration.
+         */
+        section === 'build' ? (
           <>
             <Panel
               title="Status"
@@ -608,7 +619,9 @@ export default async function ProjectDetailPage({
                 </div>
               )}
             </Panel>
-
+          </>
+        ) : section === 'dashboard' ? (
+          <>
             <Panel title="At a glance">
               <DescriptionList
                 items={[
@@ -652,11 +665,11 @@ export default async function ProjectDetailPage({
         ) : undefined
       }
     >
-      {section === 'overview' ? (
+      {section === 'dashboard' ? (
         <>
           <Panel
-            title="Overview"
-            description="What the customer asked for and where it stands."
+            title="Project brief"
+            description="The project itself. Anything that changes per test cycle is in Build details."
             actions={
               capabilities.canUpdate ? (
                 <Button
@@ -670,6 +683,126 @@ export default async function ProjectDetailPage({
             }
           >
             <DescriptionList items={overview} />
+          </Panel>
+
+          {/*
+            Moved off Build details.
+
+            Build details is what this test cycle IS; how it is going belongs
+            with the other reporting, on the Dashboard. It sits beside the
+            project-wide panel below rather than replacing it: same metrics,
+            two different scopes, so each says which scope it covers in its
+            own title.
+          */}
+          <Panel
+            title={`Build summary — ${activeBuild?.name ?? 'this build'}`}
+            description="Real-time metrics for this build — testers, bugs and test-case execution."
+          >
+            {!buildSummaryData ? (
+              <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                    gap: 'var(--space-4)',
+                  }}
+                >
+                  {[
+                    { label: 'Testers', value: buildSummaryData.testerCount },
+                    { label: 'Bugs', value: buildSummaryData.bugCount },
+                    { label: 'Test cases', value: buildSummaryData.testCaseCount },
+                    {
+                      label: 'Test completion',
+                      value:
+                        buildSummaryData.testCaseCompletion === null
+                          ? '—'
+                          : `${buildSummaryData.testCaseCompletion}%`,
+                    },
+                  ].map((kpi) => (
+                    <div
+                      key={kpi.label}
+                      style={{
+                        padding: 'var(--space-5)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-card)',
+                        background: 'var(--surface-raised)',
+                      }}
+                    >
+                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
+                        {kpi.label}
+                      </p>
+                      <p
+                        style={{
+                          margin: 'var(--space-2) 0 0',
+                          fontSize: 'var(--type-display-sm-size)',
+                          fontWeight: 'var(--fw-semibold)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {kpi.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <BarChart
+                  title="Bugs by severity"
+                  segments={Object.entries(buildSummaryData.bugsBySeverity).map(
+                    ([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone: severityTone(label),
+                    }),
+                  )}
+                />
+                <BarChart
+                  title="Bugs by status"
+                  segments={Object.entries(buildSummaryData.bugsByStatus).map(([label, value]) => ({
+                    label: titleCase(label),
+                    value,
+                    tone: statusTone(label),
+                  }))}
+                />
+                <DonutChart
+                  title="Test reports by result"
+                  centerLabel={String(
+                    Object.values(buildSummaryData.testReportsByResult).reduce((a, b) => a + b, 0),
+                  )}
+                  segments={Object.entries(buildSummaryData.testReportsByResult).map(
+                    ([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone:
+                        label === 'PASS'
+                          ? 'success'
+                          : label === 'FAIL'
+                            ? 'error'
+                            : label === 'BLOCKED'
+                              ? 'warning'
+                              : 'neutral',
+                    }),
+                  )}
+                />
+
+                {buildSummaryData.reviewCount > 0 ? (
+                  <p
+                    style={{
+                      margin: 0,
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
+                    {buildSummaryData.reviewCount} review
+                    {buildSummaryData.reviewCount === 1 ? '' : 's'}
+                    {buildSummaryData.averageRating !== null
+                      ? ` · average rating ${buildSummaryData.averageRating.toFixed(1)} / 5`
+                      : ''}
+                  </p>
+                ) : null}
+              </div>
+            )}
           </Panel>
 
           <Panel
@@ -1057,117 +1190,6 @@ export default async function ProjectDetailPage({
               </Button>
             </div>
           ) : null}
-
-          <Panel
-            title="Summary"
-            description="Real-time metrics for this build — testers, bugs and test-case execution."
-          >
-            {!buildSummaryData ? (
-              <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                    gap: 'var(--space-4)',
-                  }}
-                >
-                  {[
-                    { label: 'Testers', value: buildSummaryData.testerCount },
-                    { label: 'Bugs', value: buildSummaryData.bugCount },
-                    { label: 'Test cases', value: buildSummaryData.testCaseCount },
-                    {
-                      label: 'Test completion',
-                      value:
-                        buildSummaryData.testCaseCompletion === null
-                          ? '—'
-                          : `${buildSummaryData.testCaseCompletion}%`,
-                    },
-                  ].map((kpi) => (
-                    <div
-                      key={kpi.label}
-                      style={{
-                        padding: 'var(--space-5)',
-                        border: '1px solid var(--border-default)',
-                        borderRadius: 'var(--radius-card)',
-                        background: 'var(--surface-raised)',
-                      }}
-                    >
-                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        {kpi.label}
-                      </p>
-                      <p
-                        style={{
-                          margin: 'var(--space-2) 0 0',
-                          fontSize: 'var(--type-display-sm-size)',
-                          fontWeight: 'var(--fw-semibold)',
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        {kpi.value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <BarChart
-                  title="Bugs by severity"
-                  segments={Object.entries(buildSummaryData.bugsBySeverity).map(
-                    ([label, value]) => ({
-                      label: titleCase(label),
-                      value,
-                      tone: severityTone(label),
-                    }),
-                  )}
-                />
-                <BarChart
-                  title="Bugs by status"
-                  segments={Object.entries(buildSummaryData.bugsByStatus).map(([label, value]) => ({
-                    label: titleCase(label),
-                    value,
-                    tone: statusTone(label),
-                  }))}
-                />
-                <DonutChart
-                  title="Test reports by result"
-                  centerLabel={String(
-                    Object.values(buildSummaryData.testReportsByResult).reduce((a, b) => a + b, 0),
-                  )}
-                  segments={Object.entries(buildSummaryData.testReportsByResult).map(
-                    ([label, value]) => ({
-                      label: titleCase(label),
-                      value,
-                      tone:
-                        label === 'PASS'
-                          ? 'success'
-                          : label === 'FAIL'
-                            ? 'error'
-                            : label === 'BLOCKED'
-                              ? 'warning'
-                              : 'neutral',
-                    }),
-                  )}
-                />
-
-                {buildSummaryData.reviewCount > 0 ? (
-                  <p
-                    style={{
-                      margin: 0,
-                      color: 'var(--text-secondary)',
-                      fontSize: 'var(--type-body-sm-size)',
-                    }}
-                  >
-                    {buildSummaryData.reviewCount} review
-                    {buildSummaryData.reviewCount === 1 ? '' : 's'}
-                    {buildSummaryData.averageRating !== null
-                      ? ` · average rating ${buildSummaryData.averageRating.toFixed(1)} / 5`
-                      : ''}
-                  </p>
-                ) : null}
-              </div>
-            )}
-          </Panel>
         </>
       ) : null}
 
