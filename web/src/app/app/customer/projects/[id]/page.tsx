@@ -6,13 +6,7 @@ import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
-import {
-  StatusBadge,
-  SeverityBadge,
-  statusTone,
-  severityTone,
-  bugTypeTone,
-} from '@/components/admin/StatusBadge'
+import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
@@ -38,7 +32,6 @@ import {
   type AnnouncementRow,
   type BugCustomFieldRow,
   type BuildDetail,
-  type BuildReport,
   type BuildSummary,
   type ProjectBugRow,
   type ProjectDetail,
@@ -156,10 +149,25 @@ const NOTICES: Record<string, NoticeCopy> = {
   },
 }
 
+/**
+ * Overview and Summary were one view split across three places.
+ *
+ * "Build details" carried its own metrics panel, a separate "Summary" tab
+ * carried the same build's bug breakdown from a different endpoint, and
+ * "Overview" carried a third set of the same counts at project level. Bugs
+ * by severity and by status were each drawn twice for the same build, from
+ * two sources that could disagree, and nothing said which was authoritative.
+ *
+ * They are now one Dashboard: metrics and charts here, configuration in
+ * Build details, and each chart drawn exactly once.
+ *
+ * Dashboard is deliberately first — `resolveSection` falls back to the first
+ * tab, so old `?section=overview` and `?section=summary` links land here
+ * rather than 404ing or rendering an empty tab.
+ */
 const SECTIONS = [
-  { value: 'overview', label: 'Overview', icon: 'file-text' },
+  { value: 'dashboard', label: 'Dashboard', icon: 'line-chart' },
   { value: 'build', label: 'Build details', icon: 'clock' },
-  { value: 'summary', label: 'Summary', icon: 'line-chart' },
   { value: 'testers', label: 'Testers', icon: 'users' },
   { value: 'materials', label: 'Materials', icon: 'book-open' },
   { value: 'features', label: 'Features', icon: 'layout-grid' },
@@ -253,11 +261,19 @@ export default async function CustomerProjectDetailPage({
     bugs,
     projectReport,
     defaultBuildDetailIfDifferent,
-    buildReport,
     announcements,
     customFields,
   ] = await Promise.all([
-    section === 'build'
+    /**
+     * Everything build-shaped on the Dashboard comes from this one endpoint.
+     *
+     * `BuildSummary` already carries the type and reproducibility breakdowns
+     * that `reports/by-build` returns, plus test-report results and review
+     * ratings that it does not — it is a superset. The Summary tab was
+     * fetching the second endpoint for charts this one could already draw,
+     * which is how the same build ended up with two sets of bug charts.
+     */
+    section === 'dashboard'
       ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
       : Promise.resolve(null),
     section === 'features'
@@ -270,19 +286,16 @@ export default async function CustomerProjectDetailPage({
           query: { projectId: project.id, buildId: activeBuildId, limit: BUG_PREVIEW_SIZE },
         })
       : Promise.resolve(null),
-    section === 'overview'
+    /**
+     * Project-level context for the Dashboard: where the crowd is based, and
+     * totals across every build rather than the selected one. Nothing here
+     * overlaps the build summary above — that is the point of keeping both.
+     */
+    section === 'dashboard'
       ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
       : Promise.resolve(null),
     newBuildModalOpen && defaultBuildId !== activeBuildId
       ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
-      : Promise.resolve(null),
-    /**
-     * Build-level bug distributions — the reference's Summary tab. Reuses the
-     * reports module rather than aggregating here; it is the same endpoint the
-     * Reports page calls, scoped to one build.
-     */
-    section === 'summary'
-      ? serverFetchOrNull<BuildReport>(`reports/by-build/${activeBuildId}`)
       : Promise.resolve(null),
     /**
      * Announcements for this project and build. The context filters are the
@@ -519,7 +532,7 @@ export default async function CustomerProjectDetailPage({
         </div>
       }
       aside={
-        section === 'overview' ? (
+        section === 'dashboard' ? (
           <>
             <Panel
               title="Status"
@@ -615,11 +628,178 @@ export default async function CustomerProjectDetailPage({
     >
       <Notice code={resolvedSearchParams.notice} notices={NOTICES} />
 
-      {section === 'overview' ? (
+      {section === 'dashboard' ? (
         <>
+          {/* ── Key metrics ───────────────────────────────────────────────
+              The selected build's headline numbers. Everything below reads
+              as detail on these four, so they lead. */}
           <Panel
-            title="Overview"
-            description="What you asked for and where it stands."
+            title="Key metrics"
+            description={`Where ${activeBuild?.name ?? 'this build'} stands right now.`}
+          >
+            {!buildSummaryData ? (
+              <Muted>These metrics could not be loaded. Refresh in a moment.</Muted>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                {[
+                  { label: 'Testers', value: String(buildSummaryData.testerCount) },
+                  { label: 'Bugs', value: String(buildSummaryData.bugCount) },
+                  { label: 'Test cases', value: String(buildSummaryData.testCaseCount) },
+                  {
+                    label: 'Test completion',
+                    value:
+                      buildSummaryData.testCaseCompletion === null
+                        ? '—'
+                        : `${buildSummaryData.testCaseCompletion}%`,
+                  },
+                ].map((kpi) => (
+                  <div
+                    key={kpi.label}
+                    style={{
+                      padding: 'var(--space-5)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: 'var(--radius-card)',
+                      background: 'var(--surface-raised)',
+                    }}
+                  >
+                    <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
+                      {kpi.label}
+                    </p>
+                    <p
+                      style={{
+                        margin: 'var(--space-2) 0 0',
+                        fontSize: 'var(--type-display-sm-size)',
+                        fontWeight: 'var(--fw-semibold)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {kpi.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          {/* ── Bug overview ──────────────────────────────────────────────
+              One breakdown, four cuts, from one source. This replaces the
+              severity/status charts the build tab drew and the separate set
+              the Summary tab drew from a different endpoint. */}
+          <Panel title="Bug overview" description="How the bugs found on this build break down.">
+            {!buildSummaryData ? (
+              <Muted>This breakdown could not be loaded. Refresh in a moment.</Muted>
+            ) : buildSummaryData.bugCount === 0 ? (
+              <Muted>No bugs have been reported on this build yet.</Muted>
+            ) : (
+              <BugBreakdownView
+                bugs={{
+                  total: buildSummaryData.bugCount,
+                  bySeverity: dropZeros(buildSummaryData.bugsBySeverity),
+                  byStatus: dropZeros(buildSummaryData.bugsByStatus),
+                  byType: dropZeros(buildSummaryData.bugsByType),
+                  byReproducibility: dropZeros(buildSummaryData.bugsByReproducibility),
+                }}
+                csvHref={`/app/customer/export/reports/by-build/${activeBuildId}/export.csv`}
+              />
+            )}
+          </Panel>
+
+          {/* ── Testing progress ──────────────────────────────────────────
+              Execution rather than defects: what the test runs returned. */}
+          <Panel
+            title="Testing progress"
+            description="What the test runs on this build have returned so far."
+          >
+            {!buildSummaryData ? (
+              <Muted>Progress could not be loaded. Refresh in a moment.</Muted>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                <DonutChart
+                  title="Test reports by result"
+                  centerLabel={String(
+                    Object.values(buildSummaryData.testReportsByResult).reduce((a, b) => a + b, 0),
+                  )}
+                  segments={Object.entries(buildSummaryData.testReportsByResult).map(
+                    ([label, value]) => ({
+                      label: titleCase(label),
+                      value,
+                      tone:
+                        label === 'PASS'
+                          ? 'success'
+                          : label === 'FAIL'
+                            ? 'error'
+                            : label === 'BLOCKED'
+                              ? 'warning'
+                              : 'neutral',
+                    }),
+                  )}
+                />
+                {buildSummaryData.reviewCount > 0 ? (
+                  <p
+                    style={{
+                      margin: 0,
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
+                    {buildSummaryData.reviewCount} review
+                    {buildSummaryData.reviewCount === 1 ? '' : 's'}
+                    {buildSummaryData.averageRating !== null
+                      ? ` · average rating ${buildSummaryData.averageRating.toFixed(1)} / 5`
+                      : ''}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </Panel>
+
+          {/* ── Tester participation ──────────────────────────────────────
+              Project-scoped on purpose: the crowd is assembled across the
+              project, and where it is based is not a per-build fact. This is
+              the only thing the project report is fetched for, so nothing
+              here repeats a number from the panels above. */}
+          <Panel
+            title="Tester participation"
+            description="The crowd across every build on this project."
+          >
+            {!projectReport ? (
+              <Muted>Participation could not be loaded. Refresh in a moment.</Muted>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+                <DescriptionList
+                  items={[
+                    { label: 'Testers on the project', value: String(projectReport.testerCount) },
+                    { label: 'Bugs across all builds', value: String(projectReport.bugs.total) },
+                    { label: 'Builds', value: String(project.builds.length) },
+                  ]}
+                />
+                {Object.keys(projectReport.testersByCountry).length > 0 ? (
+                  <BarChart
+                    title="Testers by country"
+                    segments={Object.entries(projectReport.testersByCountry).map(
+                      ([label, value]) => ({ label, value, tone: 'info' as const }),
+                    )}
+                  />
+                ) : (
+                  <Muted>No testers have been assigned yet.</Muted>
+                )}
+              </div>
+            )}
+          </Panel>
+
+          {/* ── Project brief ─────────────────────────────────────────────
+              Kept on the Dashboard rather than moved into Build details:
+              these are project-level facts (scope, window, targets), and
+              filing them under a single build would misattribute them. */}
+          <Panel
+            title="Project brief"
+            description="What you asked for, and the window it runs in."
             actions={
               capabilities.canUpdate ? (
                 <Button
@@ -633,105 +813,6 @@ export default async function CustomerProjectDetailPage({
             }
           >
             <DescriptionList items={overview} />
-          </Panel>
-
-          <Panel
-            title="Project summary"
-            description="Real-time metrics across every build on this project — testers, bugs and test cases."
-          >
-            {!projectReport ? (
-              <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                    gap: 'var(--space-4)',
-                  }}
-                >
-                  {[
-                    { label: 'Testers', value: projectReport.testerCount },
-                    { label: 'Bugs', value: projectReport.bugs.total },
-                    { label: 'Test cases', value: projectReport.testCaseCount },
-                    { label: 'Builds', value: project.builds.length },
-                  ].map((kpi) => (
-                    <div
-                      key={kpi.label}
-                      style={{
-                        padding: 'var(--space-5)',
-                        border: '1px solid var(--border-default)',
-                        borderRadius: 'var(--radius-card)',
-                        background: 'var(--surface-raised)',
-                      }}
-                    >
-                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        {kpi.label}
-                      </p>
-                      <p
-                        style={{
-                          margin: 'var(--space-2) 0 0',
-                          fontSize: 'var(--type-display-sm-size)',
-                          fontWeight: 'var(--fw-semibold)',
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        {kpi.value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                    gap: 'var(--space-6)',
-                  }}
-                >
-                  <DonutChart
-                    title="Bugs by severity"
-                    href={`/app/customer/bugs?projectId=${project.id}`}
-                    centerLabel={String(projectReport.bugs.total)}
-                    segments={Object.entries(projectReport.bugs.bySeverity).map(
-                      ([label, value]) => ({
-                        label: titleCase(label),
-                        value,
-                        tone: severityTone(label),
-                      }),
-                    )}
-                  />
-                  <DonutChart
-                    title="Bugs by type"
-                    href={`/app/customer/bugs?projectId=${project.id}`}
-                    centerLabel={String(
-                      Object.values(projectReport.bugs.byType).reduce((a, b) => a + b, 0),
-                    )}
-                    segments={Object.entries(projectReport.bugs.byType).map(([label, value]) => ({
-                      label: titleCase(label),
-                      value,
-                      tone: bugTypeTone(label),
-                    }))}
-                  />
-                </div>
-
-                <BarChart
-                  title="Bugs by status"
-                  href={`/app/customer/bugs?projectId=${project.id}`}
-                  segments={Object.entries(projectReport.bugs.byStatus).map(([label, value]) => ({
-                    label: titleCase(label),
-                    value,
-                    tone: statusTone(label),
-                  }))}
-                />
-                <BarChart
-                  title="Testers by country"
-                  segments={Object.entries(projectReport.testersByCountry).map(
-                    ([label, value]) => ({ label, value, tone: 'info' as const }),
-                  )}
-                />
-              </div>
-            )}
           </Panel>
 
           {capabilities.canUpdate ? (
@@ -991,115 +1072,6 @@ export default async function CustomerProjectDetailPage({
               </form>
             </div>
           ) : null}
-
-          <Panel
-            title="Summary"
-            description="Real-time metrics for this build — testers, bugs and test-case execution."
-          >
-            {!buildSummaryData ? (
-              <Muted>Summary could not be loaded. Refresh in a moment.</Muted>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                    gap: 'var(--space-4)',
-                  }}
-                >
-                  {[
-                    { label: 'Testers', value: buildSummaryData.testerCount },
-                    { label: 'Bugs', value: buildSummaryData.bugCount },
-                    { label: 'Test cases', value: buildSummaryData.testCaseCount },
-                    {
-                      label: 'Test completion',
-                      value:
-                        buildSummaryData.testCaseCompletion === null
-                          ? '—'
-                          : `${buildSummaryData.testCaseCompletion}%`,
-                    },
-                  ].map((kpi) => (
-                    <div
-                      key={kpi.label}
-                      style={{
-                        padding: 'var(--space-5)',
-                        border: '1px solid var(--border-default)',
-                        borderRadius: 'var(--radius-card)',
-                        background: 'var(--surface-raised)',
-                      }}
-                    >
-                      <p className="c4t-eyebrow" style={{ margin: 0, color: 'var(--text-muted)' }}>
-                        {kpi.label}
-                      </p>
-                      <p
-                        style={{
-                          margin: 'var(--space-2) 0 0',
-                          fontSize: 'var(--type-display-sm-size)',
-                          fontWeight: 'var(--fw-semibold)',
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        {kpi.value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <BarChart
-                  title="Bugs by severity"
-                  segments={Object.entries(buildSummaryData.bugsBySeverity).map(
-                    ([label, value]) => ({
-                      label: titleCase(label),
-                      value,
-                      tone: severityTone(label),
-                    }),
-                  )}
-                />
-                <BarChart
-                  title="Bugs by status"
-                  segments={Object.entries(buildSummaryData.bugsByStatus).map(([label, value]) => ({
-                    label: titleCase(label),
-                    value,
-                    tone: statusTone(label),
-                  }))}
-                />
-                <DonutChart
-                  title="Test reports by result"
-                  centerLabel={String(
-                    Object.values(buildSummaryData.testReportsByResult).reduce((a, b) => a + b, 0),
-                  )}
-                  segments={Object.entries(buildSummaryData.testReportsByResult).map(
-                    ([label, value]) => ({
-                      label: titleCase(label),
-                      value,
-                      tone:
-                        label === 'PASS'
-                          ? 'success'
-                          : label === 'FAIL'
-                            ? 'error'
-                            : label === 'BLOCKED'
-                              ? 'warning'
-                              : 'neutral',
-                    }),
-                  )}
-                />
-                {buildSummaryData.reviewCount > 0 ? (
-                  <p
-                    style={{
-                      margin: 0,
-                      color: 'var(--text-secondary)',
-                      fontSize: 'var(--type-body-sm-size)',
-                    }}
-                  >
-                    {buildSummaryData.reviewCount} review
-                    {buildSummaryData.reviewCount === 1 ? '' : 's'}
-                    {buildSummaryData.averageRating !== null
-                      ? ` · average rating ${buildSummaryData.averageRating.toFixed(1)} / 5`
-                      : ''}
-                  </p>
-                ) : null}
-              </div>
-            )}
-          </Panel>
         </>
       ) : null}
 
@@ -1449,44 +1421,6 @@ export default async function CustomerProjectDetailPage({
                 </div>
               }
             />
-          )}
-        </Panel>
-      ) : null}
-
-      {/* ── Summary: this build's bug distributions ───────────────────── */}
-      {section === 'summary' ? (
-        <Panel
-          title={`Summary — ${activeBuild?.name ?? 'this build'}`}
-          description="How the reports on this build break down."
-        >
-          {buildReport === null ? (
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              This summary could not be loaded. Refresh in a moment.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-              <DescriptionList
-                items={[
-                  { label: 'Build', value: activeBuild?.name ?? '—' },
-                  { label: 'Testers on it', value: String(buildReport.testerCount) },
-                  { label: 'Reports', value: String(buildReport.bugCount) },
-                  {
-                    label: 'Test cases',
-                    value: `${buildReport.testCaseCount} · ${buildReport.testCaseCompletion}% done`,
-                  },
-                ]}
-              />
-              <BugBreakdownView
-                bugs={{
-                  total: buildReport.bugCount,
-                  bySeverity: dropZeros(buildReport.bugsBySeverity),
-                  byStatus: dropZeros(buildReport.bugsByStatus),
-                  byType: dropZeros(buildReport.bugsByType),
-                  byReproducibility: dropZeros(buildReport.bugsByReproducibility),
-                }}
-                csvHref={`/app/customer/export/reports/by-build/${activeBuildId}/export.csv`}
-              />
-            </div>
           )}
         </Panel>
       ) : null}
