@@ -265,7 +265,11 @@ export function Sidebar({
             by default, and an anchor inside this anchor is invalid HTML — it
             threw a hydration error and made the whole lockup unclickable. The
             wrapping Link owns the destination; Logo just draws the mark. */}
-        <Link href={homeHref} aria-label={`Crowd4Test ${portalLabel.toLowerCase()} home`}>
+        <Link
+          href={homeHref}
+          className={styles.brand}
+          aria-label={`Crowd4Test ${portalLabel.toLowerCase()} home`}
+        >
           <Logo size={28} wordmarkSize={14} withWordmark={!collapsed} href={null} />
         </Link>
 

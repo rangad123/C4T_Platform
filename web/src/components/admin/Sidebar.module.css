@@ -21,6 +21,22 @@
   margin-bottom: var(--space-3);
 }
 
+/*
+  The logo's own link.
+
+  An <a> is inline, so its box is a LINE box — font ascent and descender
+  included — and it ends up taller than the 28px lockup inside it. The row
+  then centres that taller box, which leaves the mark sitting high against
+  the collapse control beside it. `inline-flex` makes the link hug its
+  contents so both children of the row are the same 28px and centre on the
+  same line.
+*/
+.brand {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
 .nav {
   display: flex;
   flex-direction: column;
