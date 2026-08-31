@@ -2,7 +2,7 @@
 
 import { useId, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { Logo } from '@/components/ds/core/Logo'
 import { Icon } from '@/components/ds/core/Icon'
 import type { IconName } from '@/components/ds/core/icon-registry'
@@ -157,6 +157,29 @@ export function Sidebar({
   const profileTarget = profileHref ?? `${homeHref}/profile`
   const collapsed = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  /**
+   * Which query keys tell two links on the SAME path apart.
+   *
+   * The profile's sections are tabs on one page, so their nav entries differ
+   * only by `?section=`. `usePathname` drops the query, so without this every
+   * one of them would light up at once — and the bare "Your profile" link
+   * would stay lit while a section was open, since its path matches too.
+   *
+   * Collected from the links themselves rather than hardcoded, so any future
+   * group of query-distinguished entries works the same way.
+   */
+  const qualifyingKeys = new Map<string, Set<string>>()
+  for (const section of sections) {
+    for (const link of section.links) {
+      const [linkPath, linkQuery] = link.href.split('?')
+      if (!linkQuery || !linkPath) continue
+      const keys = qualifyingKeys.get(linkPath) ?? new Set<string>()
+      for (const key of new URLSearchParams(linkQuery).keys()) keys.add(key)
+      qualifyingKeys.set(linkPath, keys)
+    }
+  }
 
   /**
    * The mobile menu, open/closed.
@@ -252,10 +275,30 @@ export function Sidebar({
             <div key={section.label ?? `section-${sectionIndex}`} className={styles.section}>
               {section.label ? <span className={styles.sectionLabel}>{section.label}</span> : null}
               {visibleLinks.map((link) => {
-                const isActive =
-                  !link.disabled &&
-                  (pathname === link.href ||
-                    (link.href !== homeHref && pathname.startsWith(`${link.href}/`)))
+                const [linkPath = link.href, linkQuery] = link.href.split('?')
+                const linkParams = new URLSearchParams(linkQuery ?? '')
+
+                const pathMatches =
+                  pathname === linkPath ||
+                  (linkPath !== homeHref && pathname.startsWith(`${linkPath}/`))
+
+                // Every parameter the link names must match the current URL.
+                const queryMatches = [...linkParams.entries()].every(
+                  ([key, value]) => searchParams.get(key) === value,
+                )
+
+                /**
+                 * A link carrying no query of its own is the group's landing
+                 * entry. It stays lit only while none of its siblings' keys
+                 * are set — otherwise opening a section would highlight both
+                 * that section and the entry above it.
+                 */
+                const siblingKeys = qualifyingKeys.get(linkPath)
+                const isLandingEntry = linkParams.size === 0 && siblingKeys
+                const landingMatches =
+                  !isLandingEntry || ![...siblingKeys].some((key) => searchParams.get(key))
+
+                const isActive = !link.disabled && pathMatches && queryMatches && landingMatches
 
                 const linkClass = [
                   styles.link,

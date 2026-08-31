@@ -50,7 +50,26 @@ const TESTER_SECTIONS: readonly SidebarSection[] = [
   {
     label: 'Account',
     links: [
+      /*
+       * The profile's sections get their own entries rather than only being
+       * tabs on the page. They are the things a tester actually comes here to
+       * do — add a device, list a skill, get paid — and burying each one
+       * behind "Your profile" made them a second click and a hunt for the
+       * right tab. `Sidebar` tells them apart by their `?section=`; see the
+       * active-state note there.
+       */
       { href: '/app/tester/profile', label: 'Your profile', icon: 'user-check' },
+      { href: '/app/tester/profile?section=assets', label: 'Assets', icon: 'smartphone' },
+      {
+        href: '/app/tester/profile?section=skills',
+        label: 'Skills and languages',
+        icon: 'briefcase',
+      },
+      {
+        href: '/app/tester/profile?section=payment',
+        label: 'Payment details',
+        icon: 'credit-card',
+      },
       { href: '/app/tester/settings', label: 'Settings', icon: 'settings' },
     ],
   },
