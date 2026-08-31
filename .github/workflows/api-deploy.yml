@@ -43,6 +43,9 @@ jobs:
             # the box is whatever the last SUCCESSFUL deploy left behind — so
             # a fix to that script cannot land while that script is what is
             # blocking the deploy. This block always runs at its newest.
-            git checkout -- web/next-env.d.ts 2>/dev/null || true
+            # Restores it when tracked-and-modified; deletes it when untracked
+            # (which it becomes once the ignore rule lands). Either way the
+            # build regenerates it straight afterwards.
+            git checkout -- web/next-env.d.ts 2>/dev/null || rm -f web/next-env.d.ts
             bash scripts/deploy-pull.sh
             bash api/scripts/deploy.sh
