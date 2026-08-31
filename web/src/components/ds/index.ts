@@ -1,6 +1,6 @@
 /**
  * The Crowd4Test design system, ported from
- * handoff_supplement_crowd4test/ds_components/.
+ * design-handoff/ds_components/.
  *
  * Server Components unless a component genuinely needs interactivity. Only
  * TopNav, Tabs, FaqAccordion, the case-study carousel and ContactForm carry

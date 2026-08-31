@@ -1,9 +1,0 @@
-:root {
-  --shadow-none: none;
-  --shadow-xs: 0 1px 2px rgb(23 19 15 / 0.06);
-  --shadow-sm: 0 1px 2px rgb(23 19 15 / 0.05), 0 2px 6px rgb(23 19 15 / 0.05);
-  --shadow-md: 0 2px 4px rgb(23 19 15 / 0.05), 0 8px 20px rgb(23 19 15 / 0.08);
-  --shadow-lg: 0 4px 8px rgb(23 19 15 / 0.06), 0 20px 44px rgb(23 19 15 / 0.12);
-  --shadow-focus: 0 0 0 3px rgb(232 83 47 / 0.28);
-  --shadow-card-hover: var(--shadow-md);
-}

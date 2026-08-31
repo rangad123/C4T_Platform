@@ -1,7 +1,7 @@
 /**
  * Site content. No CMS (CLAUDE.md rule 4) — every word on the marketing site is
  * a typed export from this folder, transcribed from
- * `design_handoff_crowd4test_website/design/content.md`.
+ * `design-handoff/design/content.md`.
  *
  * WHY THIS EXISTS AS A BARREL. Pages import from `@/content`, so a content
  * module can be split or renamed without touching a page. It also gives the

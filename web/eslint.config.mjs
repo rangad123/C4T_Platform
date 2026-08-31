@@ -28,8 +28,9 @@ export default tseslint.config(
        * diffable against future handoff revisions. Linting them produces
        * hundreds of findings we must not act on.
        */
-      'design_handoff_crowd4test_website/**',
-      'handoff_supplement_crowd4test/**',
+      // The design handoff: prototype JSX and reference sources, not app
+      // code. Linting it fails on rules it was never written against.
+      'design-handoff/**',
     ],
   },
 

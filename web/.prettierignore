@@ -7,8 +7,7 @@ package-lock.json
 # Read-only design handoff — the browser prototype and the design-system
 # sources we port FROM. Kept byte-identical so they stay diffable against a
 # future handoff revision.
-design_handoff_crowd4test_website/
-handoff_supplement_crowd4test/
+design-handoff/
 
 # Design tokens are COPIED VERBATIM from the handoff (see CLAUDE.md rule 1 and
 # the PORT NOTE headers in colors.css / fonts.css / base.css). Reformatting them
