@@ -24,13 +24,40 @@ import { safeNextOrHome } from '@/lib/safe-redirect'
  * The code is short-lived and single-use (enforced on the API side), so
  * sitting briefly in a URL is an accepted, standard trade-off — the same
  * shape as the `code` Google itself hands back to the API's own callback.
+ *
+ * ── WHY THE REDIRECTS ARE RELATIVE
+ *
+ * These used to be `new URL(path, request.url)`. Behind a reverse proxy
+ * `request.url` is the address the PROXY used to reach this server, not the
+ * one the visitor typed — on the single-box nginx deployment that is
+ * `localhost:3000`, with the scheme taken from `x-forwarded-proto`. Every
+ * redirect from here therefore pointed at `https://localhost:3000`, which is
+ * a host that speaks no TLS: the browser reported a protocol error and the
+ * whole thing looked like the API had sent the user somewhere absurd.
+ *
+ * A relative `Location` avoids the question entirely. RFC 7231 allows it and
+ * every browser resolves it against the URL it actually requested, which is
+ * the public one by definition. Nothing to configure, and nothing to get
+ * wrong in a second deployment shape.
  */
+
+/**
+ * A redirect that does not need to know its own public address.
+ *
+ * `NextResponse.redirect` insists on an absolute URL, which is the trap this
+ * route fell into, so the header is set directly. Cookies bridged by
+ * `bridgeApiCookies` ride along regardless: it writes to Next's cookie store,
+ * not to a response object.
+ */
+function redirectTo(path: string): NextResponse {
+  return new NextResponse(null, { status: 307, headers: { location: path } })
+}
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const code = request.nextUrl.searchParams.get('code')
   const target = safeNextOrHome(request.nextUrl.searchParams.get('target'))
 
   if (!code) {
-    return NextResponse.redirect(new URL('/login?error=google_failed', request.url))
+    return redirectTo('/login?error=google_failed')
   }
 
   let response: Response
@@ -42,15 +69,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       cache: 'no-store',
     })
   } catch {
-    return NextResponse.redirect(new URL('/login?error=network', request.url))
+    return redirectTo('/login?error=network')
   }
 
   if (!response.ok) {
     // Expired, already used (a double-click, a refreshed tab, a crawler
     // that followed the link), or tampered with — either way, restart.
-    return NextResponse.redirect(new URL('/login?error=google_failed', request.url))
+    return redirectTo('/login?error=google_failed')
   }
 
   await bridgeApiCookies(response)
-  return NextResponse.redirect(new URL(target, request.url))
+  return redirectTo(target)
 }
