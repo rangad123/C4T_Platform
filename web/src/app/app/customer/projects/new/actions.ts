@@ -80,7 +80,17 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
   const maxTesters = maxTestersRaw ? Number(maxTestersRaw) : NaN
   if (!title || title.length < 3) redirect(`${WIZARD}?step=general&error=title`)
   if (!buildName) redirect(`${WIZARD}?step=general&error=build`)
-  if (!appUrl || !/^https?:\/\//i.test(appUrl)) redirect(`${WIZARD}?step=general&error=url`)
+  /**
+   * A URL is checked for shape, not for presence.
+   *
+   * Requiring one was a wizard-only rule that the API never had: `appUrl` is
+   * optional on a build and only format-checked when supplied. It blocked
+   * real cases the platform otherwise supports — a mobile build distributed
+   * as an APK, or a project scoped before a staging URL exists — for no
+   * reason the backend agreed with. Anything actually typed still has to be
+   * a URL, so a typo is caught rather than saved.
+   */
+  if (appUrl && !/^https?:\/\//i.test(appUrl)) redirect(`${WIZARD}?step=general&error=url`)
   if (!Number.isInteger(maxTesters) || maxTesters < 1) {
     redirect(`${WIZARD}?step=general&error=participants`)
   }
@@ -108,8 +118,23 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
       },
     })
   } catch (error) {
+    /**
+     * Say which thing went wrong when the API was specific about it.
+     *
+     * Everything except a 422 used to collapse into "could not be created,
+     * try again in a moment" — advice that is actively wrong for the most
+     * likely causes. A customer with no organisation, or one who belongs to
+     * several, gets a precise 403/400 from `resolveOrganisationId`, and
+     * retrying in a moment will never fix either.
+     */
     const status = error instanceof ApiError ? error.status : 0
-    redirect(`${WIZARD}?step=general&error=${status === 422 ? 'invalid' : 'failed'}`)
+    const message = error instanceof ApiError ? error.message.toLowerCase() : ''
+    let code = 'failed'
+    if (status === 422) code = 'invalid'
+    else if (status === 403 && message.includes('organisation')) code = 'no-org'
+    else if (status === 400 && message.includes('several organisations')) code = 'many-orgs'
+    else if (status === 409) code = 'duplicate'
+    redirect(`${WIZARD}?step=general&error=${code}`)
   }
 
   /**
@@ -131,7 +156,12 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
         method: 'PATCH',
         body: {
           name: buildName,
-          appUrl,
+          // `null`, not `''`. The field is nullable but format-checked, so an
+          // empty string is not "no URL" to the API — it is a malformed one,
+          // and it fails the whole build update. That surfaced as "the
+          // project was created, but its first build still needs its details"
+          // for every project deliberately created without a URL.
+          appUrl: appUrl || null,
           instructions,
           maxTesters,
           startDate,

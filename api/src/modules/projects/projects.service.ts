@@ -1173,10 +1173,18 @@ export async function getBuild(
   return { ...build, capabilities: { canUpdate: can(user, 'project.update', resolved.relations) } }
 }
 
+/**
+ * Creates a build with whatever details the caller supplied.
+ *
+ * `input` carries the same fields as an edit, `name` included. Taking them
+ * all here is what lets a create be one write: callers previously had to POST
+ * a name and then PATCH the rest, and a failure between the two left a build
+ * with no details behind a client that had already moved on.
+ */
 export async function createBuild(
   user: Express.AuthenticatedUser,
   projectId: string,
-  name: string,
+  input: Record<string, unknown> & { name: string },
 ) {
   const resolved = await projectRelations(user, projectId)
   if (!resolved || !can(user, 'project.read', resolved.relations)) {
@@ -1185,13 +1193,13 @@ export async function createBuild(
   authorize(user, 'project.update', resolved.relations)
 
   const existing = await prisma.build.findFirst({
-    where: { projectId, name, deletedAt: null },
+    where: { projectId, name: input.name, deletedAt: null },
     select: { id: true },
   })
   if (existing) throw new ConflictError('A build with this name already exists on this project')
 
   return prisma.build.create({
-    data: { projectId, name },
+    data: { ...input, projectId },
     select: buildSelect,
   })
 }
@@ -1270,39 +1278,50 @@ export async function copyBuild(
     suffix += 1
   }
 
-  const copy = await prisma.build.create({
-    data: {
-      projectId,
-      name,
-      isDefault: false,
-      status: 'NEW',
-      testType: source.testType,
-      description: source.description,
-      appUrl: source.appUrl,
-      releaseNotes: source.releaseNotes,
-      instructions: source.instructions,
-      specialRequirements: source.specialRequirements,
-      targetDevices: source.targetDevices,
-      targetBrowsers: source.targetBrowsers,
-      targetOperatingSystems: source.targetOperatingSystems,
-      targetCountries: source.targetCountries,
-      targetLanguages: source.targetLanguages,
-      maxTesters: source.maxTesters,
-      testersCanSeeOtherBugs: source.testersCanSeeOtherBugs,
-      testDocumentFileId: source.testDocumentFileId,
-    },
-    select: buildSelect,
-  })
-
   const features = await prisma.feature.findMany({ where: { buildId }, select: { name: true } })
-  if (features.length === 0) return copy
 
-  await prisma.feature.createMany({
-    data: features.map((f) => ({ projectId, buildId: copy.id, name: f.name })),
+  /**
+   * One transaction, because a copy is one thing to the user.
+   *
+   * The build and its features were previously written separately. A failure
+   * between them left a build carrying the source's settings but none of its
+   * features — a half-copy that looks complete, since nothing on screen says
+   * how many features there should have been.
+   */
+  return prisma.$transaction(async (tx) => {
+    const copy = await tx.build.create({
+      data: {
+        projectId,
+        name,
+        isDefault: false,
+        status: 'NEW',
+        testType: source.testType,
+        description: source.description,
+        appUrl: source.appUrl,
+        releaseNotes: source.releaseNotes,
+        instructions: source.instructions,
+        specialRequirements: source.specialRequirements,
+        targetDevices: source.targetDevices,
+        targetBrowsers: source.targetBrowsers,
+        targetOperatingSystems: source.targetOperatingSystems,
+        targetCountries: source.targetCountries,
+        targetLanguages: source.targetLanguages,
+        maxTesters: source.maxTesters,
+        testersCanSeeOtherBugs: source.testersCanSeeOtherBugs,
+        testDocumentFileId: source.testDocumentFileId,
+      },
+      select: buildSelect,
+    })
+
+    if (features.length === 0) return copy
+
+    await tx.feature.createMany({
+      data: features.map((f) => ({ projectId, buildId: copy.id, name: f.name })),
+    })
+    // `copy`'s `_count.features` was snapshotted before the createMany above —
+    // re-read so the response the caller sees matches what actually happened.
+    return tx.build.findUniqueOrThrow({ where: { id: copy.id }, select: buildSelect })
   })
-  // `copy`'s `_count.features` was snapshotted before the createMany above —
-  // re-read so the response the caller sees matches what actually happened.
-  return prisma.build.findUniqueOrThrow({ where: { id: copy.id }, select: buildSelect })
 }
 
 /**

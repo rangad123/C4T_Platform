@@ -117,6 +117,43 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'error',
     message: 'That field could not be added. Try again in a moment.',
   },
+  'build-renamed': { tone: 'success', message: 'The build has been renamed.' },
+  'build-name-taken': {
+    tone: 'warning',
+    message: 'That build name is already used on this project. Choose another name.',
+  },
+  'build-rename-failed': {
+    tone: 'error',
+    message: 'The build could not be renamed. Try again in a moment.',
+  },
+  'build-saved': { tone: 'success', message: 'Build details saved.' },
+  'build-save-failed': {
+    tone: 'error',
+    message: 'Those build details could not be saved. Try again in a moment.',
+  },
+  'build-created': { tone: 'success', message: 'The build has been created.' },
+  'build-create-failed': {
+    tone: 'error',
+    message: 'That build could not be created. Try again in a moment.',
+  },
+  'build-copied': {
+    tone: 'success',
+    message: 'The build was copied. Its settings are here, ready to adjust.',
+  },
+  'build-copy-failed': {
+    tone: 'error',
+    message: 'Unable to copy this build. Please try again.',
+  },
+  'brief-saved': { tone: 'success', message: 'The brief has been updated.' },
+  'brief-save-failed': {
+    tone: 'error',
+    message: 'The brief could not be saved. Try again in a moment.',
+  },
+  'settings-saved': { tone: 'success', message: 'That setting has been saved.' },
+  'settings-save-failed': {
+    tone: 'error',
+    message: 'That setting could not be saved. Try again in a moment.',
+  },
 }
 
 const SECTIONS = [
@@ -136,7 +173,14 @@ export default async function CustomerProjectDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string; edit?: string; buildId?: string; notice?: string }>
+  searchParams: Promise<{
+    section?: string
+    edit?: string
+    buildId?: string
+    notice?: string
+    /** Echoed back when a rename is rejected, so the attempt isn't retyped. */
+    name?: string
+  }>
 }) {
   await requireRole(['CUSTOMER'])
   const { id } = await params
@@ -1064,6 +1108,7 @@ export default async function CustomerProjectDetailPage({
           <TrackedForm action={updateBuild} style={stackStyle}>
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="buildId" value={activeBuildId} />
+            <input type="hidden" name="section" value={section} />
             <Field label="Name" htmlFor="build-name">
               <Input id="build-name" name="name" maxLength={120} defaultValue={buildDetail.name} />
             </Field>
@@ -1840,13 +1885,16 @@ export default async function CustomerProjectDetailPage({
           <form action={renameBuild} style={stackStyle}>
             <input type="hidden" name="id" value={project.id} />
             <input type="hidden" name="buildId" value={activeBuildId} />
+            <input type="hidden" name="section" value={section} />
             <Field label="Name" htmlFor="rename-build-name">
               <Input
                 id="rename-build-name"
                 name="name"
                 required
                 maxLength={120}
-                defaultValue={activeBuild?.name}
+                // The rejected name, when one comes back — retyping it only
+                // to be told again why it was refused helps nobody.
+                defaultValue={resolvedSearchParams.name ?? activeBuild?.name}
                 autoFocus
               />
             </Field>

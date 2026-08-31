@@ -53,8 +53,14 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   body.maxTesters = maxTesters ? maxTesters : null
   body.testersCanSeeOtherBugs = formData.has('testersCanSeeOtherBugs')
 
-  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  try {
+    await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  } catch {
+    redirect(`/app/customer/projects/${id}?notice=brief-save-failed`)
+  }
+
   revalidateProject(id)
+  redirect(`/app/customer/projects/${id}?notice=brief-saved`)
 }
 
 export async function updateProjectDelivery(formData: FormData): Promise<void> {
@@ -150,54 +156,103 @@ export async function createBuild(formData: FormData): Promise<void> {
   const name = formTrimmed(formData, 'name')
   if (!id || !name) return
 
-  const section = formTrimmed(formData, 'section')
-
-  const build = await actionFetch<{ id: string }>(`projects/${id}/builds`, {
-    method: 'POST',
-    body: { name },
-  })
-
+  const section = formTrimmed(formData, 'section') || 'build'
   const maxTesters = formTrimmed(formData, 'maxTesters')
-  await actionFetch(`projects/${id}/builds/${build.id}`, {
-    method: 'PATCH',
-    body: {
-      status: formTrimmed(formData, 'status'),
-      testType: formTrimmed(formData, 'testType') || null,
-      description: formTrimmed(formData, 'description') || null,
-      appUrl: formTrimmed(formData, 'appUrl') || null,
-      releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
-      instructions: formTrimmed(formData, 'instructions') || null,
-      specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
-      targetDevices: parseList(formString(formData, 'targetDevices')),
-      targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
-      targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
-      targetCountries: parseList(formString(formData, 'targetCountries')).map((c) =>
-        c.toUpperCase(),
-      ),
-      targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) =>
-        l.toLowerCase(),
-      ),
-      startDate: formTrimmed(formData, 'startDate') || null,
-      endDate: formTrimmed(formData, 'endDate') || null,
-      maxTesters: maxTesters ? maxTesters : null,
-      testersCanSeeOtherBugs: formData.has('testersCanSeeOtherBugs'),
-    },
-  })
-  revalidateProject(id)
 
-  const params = new URLSearchParams({ buildId: build.id })
-  if (section) params.set('section', section)
-  redirect(`/app/customer/projects/${id}?${params.toString()}`)
+  // One request. This used to POST the name and then PATCH everything else,
+  // so a failure on the second call left a nameless-but-real build behind
+  // while the browser had already navigated away from the form.
+  let build: { id: string }
+  try {
+    build = await actionFetch<{ id: string }>(`projects/${id}/builds`, {
+      method: 'POST',
+      body: {
+        name,
+        status: formTrimmed(formData, 'status'),
+        testType: formTrimmed(formData, 'testType') || null,
+        description: formTrimmed(formData, 'description') || null,
+        appUrl: formTrimmed(formData, 'appUrl') || null,
+        releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
+        instructions: formTrimmed(formData, 'instructions') || null,
+        specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
+        targetDevices: parseList(formString(formData, 'targetDevices')),
+        targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
+        targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
+        targetCountries: parseList(formString(formData, 'targetCountries')).map((c) =>
+          c.toUpperCase(),
+        ),
+        targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) =>
+          l.toLowerCase(),
+        ),
+        startDate: formTrimmed(formData, 'startDate') || null,
+        endDate: formTrimmed(formData, 'endDate') || null,
+        maxTesters: maxTesters ? maxTesters : null,
+        testersCanSeeOtherBugs: formData.has('testersCanSeeOtherBugs'),
+      },
+    })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    const notice = status === 409 ? 'build-name-taken' : 'build-create-failed'
+    const params = new URLSearchParams({ section, notice })
+    if (status === 409) params.set('edit', 'new-build')
+    redirect(`/app/customer/projects/${id}?${params.toString()}`)
+  }
+
+  revalidateProject(id)
+  redirect(buildHref(id, build.id, 'build-created', { section }))
+}
+
+/**
+ * Renaming, saving and creating a build all have to END IN A REDIRECT.
+ *
+ * `Modal` derives its open state from `searchParams.edit`, so the only thing
+ * that closes it is navigating to a URL without that parameter. These actions
+ * used to update the build and simply return: the PATCH succeeded, the data
+ * behind the dialog refreshed, and the dialog stayed open with no
+ * confirmation — indistinguishable from a save button that does nothing,
+ * which is exactly how it was reported.
+ *
+ * The failure path matters as much. Without a catch, an `ApiError` from a
+ * duplicate name escapes the action and Next renders the segment's crash
+ * screen over the whole page, losing what the user typed. Mapping it to a
+ * notice keeps them on the page with a sentence about the actual problem.
+ */
+function buildHref(
+  id: string,
+  buildId: string,
+  notice: string,
+  extra?: { section?: string; edit?: string; name?: string },
+): string {
+  const params = new URLSearchParams({ buildId, notice })
+  if (extra?.section) params.set('section', extra.section)
+  if (extra?.edit) params.set('edit', extra.edit)
+  // Echoed so a reopened dialog shows what was typed, not the stored value.
+  if (extra?.name) params.set('name', extra.name)
+  return `/app/customer/projects/${id}?${params.toString()}`
 }
 
 export async function renameBuild(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   const buildId = formTrimmed(formData, 'buildId')
   const name = formTrimmed(formData, 'name')
+  const section = formTrimmed(formData, 'section') || 'build'
   if (!id || !buildId || !name) return
 
-  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
+  try {
+    await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body: { name } })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    // 409 is the API's own uniqueness check: build names are unique per
+    // project. Keep the dialog open for it so the name can be corrected
+    // without retyping anything else.
+    if (status === 409) {
+      redirect(buildHref(id, buildId, 'build-name-taken', { section, edit: 'rename-build', name }))
+    }
+    redirect(buildHref(id, buildId, 'build-rename-failed', { section }))
+  }
+
   revalidateProject(id)
+  redirect(buildHref(id, buildId, 'build-renamed', { section }))
 }
 
 export async function updateBuild(formData: FormData): Promise<void> {
@@ -227,8 +282,20 @@ export async function updateBuild(formData: FormData): Promise<void> {
   const maxTesters = formTrimmed(formData, 'maxTesters')
   body.maxTesters = maxTesters ? maxTesters : null
 
-  await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
+  const section = formTrimmed(formData, 'section') || 'build'
+
+  try {
+    await actionFetch(`projects/${id}/builds/${buildId}`, { method: 'PATCH', body })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    if (status === 409) {
+      redirect(buildHref(id, buildId, 'build-name-taken', { section, edit: 'build-details' }))
+    }
+    redirect(buildHref(id, buildId, 'build-save-failed', { section }))
+  }
+
   revalidateProject(id)
+  redirect(buildHref(id, buildId, 'build-saved', { section }))
 }
 
 export async function copyBuild(formData: FormData): Promise<void> {
@@ -236,11 +303,21 @@ export async function copyBuild(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!id || !buildId) return
 
-  const copy = await actionFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
-    method: 'POST',
-  })
+  let copy: { id: string }
+  try {
+    copy = await actionFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
+      method: 'POST',
+    })
+  } catch {
+    // Copying failed, so stay on the build that was being copied and say so
+    // in its own terms. This previously threw uncaught, which surfaced as the
+    // generic project-level crash screen — a message about creating a
+    // project, for an action that copies a build.
+    redirect(buildHref(id, buildId, 'build-copy-failed', { section: 'build' }))
+  }
+
   revalidateProject(id)
-  redirect(`/app/customer/projects/${id}?section=build&buildId=${copy.id}`)
+  redirect(buildHref(id, copy.id, 'build-copied', { section: 'build' }))
 }
 
 // ─── Custom bug fields (§36-38) ──────────────────────────────────────────────
@@ -258,11 +335,17 @@ export async function setBugCustomization(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!id || !buildId) return
 
-  await actionFetch(`projects/${id}/builds/${buildId}`, {
-    method: 'PATCH',
-    body: { bugCustomizationEnabled: formTrimmed(formData, 'enabled') === 'yes' },
-  })
+  try {
+    await actionFetch(`projects/${id}/builds/${buildId}`, {
+      method: 'PATCH',
+      body: { bugCustomizationEnabled: formTrimmed(formData, 'enabled') === 'yes' },
+    })
+  } catch {
+    redirect(buildHref(id, buildId, 'settings-save-failed', { section: 'settings' }))
+  }
+
   revalidateProject(id)
+  redirect(buildHref(id, buildId, 'settings-saved', { section: 'settings' }))
 }
 
 export async function addBugCustomField(formData: FormData): Promise<void> {

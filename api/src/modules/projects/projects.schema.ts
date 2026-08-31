@@ -107,10 +107,6 @@ export const projectBuildQuery = z.object({
   buildId: z.string().cuid().optional(),
 })
 
-export const createBuildSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-})
-
 const isoCountryList = z.array(isoCountry).max(60)
 const isoLanguageList = z.array(isoLanguage).max(40)
 
@@ -141,6 +137,20 @@ export const updateBuildSchema = z.object({
   testDocumentFileId: z.string().cuid().nullable().optional(),
   /** §36 — whether this build's bug form carries the client's extra fields. */
   bugCustomizationEnabled: z.boolean().optional(),
+})
+
+/**
+ * Creating a build takes the same fields as editing one, with `name` required.
+ *
+ * It used to accept only the name, which forced callers to POST and then
+ * immediately PATCH everything else. Two writes with no transaction between
+ * them meant a failure on the second left a build that existed but had none
+ * of the details the user filled in — and the client had already navigated.
+ * Accepting the whole thing at once makes creation succeed or fail as one
+ * operation, with no extra endpoint.
+ */
+export const createBuildSchema = updateBuildSchema.extend({
+  name: z.string().trim().min(1).max(120),
 })
 
 /** Tester responding to an invitation (§2.3). */

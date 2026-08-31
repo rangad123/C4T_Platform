@@ -189,7 +189,11 @@ export async function getBuild(req: Request, res: Response): Promise<void> {
 }
 
 export async function createBuild(req: Request, res: Response): Promise<void> {
-  const build = await service.createBuild(req.user!, param(req, 'id'), req.body.name)
+  const build = await service.createBuild(
+    req.user!,
+    param(req, 'id'),
+    req.body as Record<string, unknown> & { name: string },
+  )
   await recordAudit({
     req,
     action: 'project.build_created',

@@ -107,6 +107,20 @@ const ERRORS: Record<string, NoticeCopy> = {
     message: 'Some values were not accepted. Check the fields on this step.',
   },
   failed: { tone: 'error', message: 'The project could not be created. Try again in a moment.' },
+  'no-org': {
+    tone: 'error',
+    message:
+      'Your account is not linked to an organisation yet, so there is nothing to create the project under. Contact your account manager to get set up.',
+  },
+  'many-orgs': {
+    tone: 'error',
+    message:
+      'Your account belongs to more than one organisation, so we cannot tell which should own this project. Contact your account manager.',
+  },
+  duplicate: {
+    tone: 'error',
+    message: 'A project with that title already exists. Choose a different title.',
+  },
 }
 
 interface CatalogShape {
@@ -415,17 +429,21 @@ export default async function NewProjectWizardPage({
                 </Field>
               </div>
 
+              {/*
+               * Optional, matching the API — a build has never required an
+               * appUrl. Mobile builds distributed as a file, and projects
+               * scoped before a staging URL exists, were being turned away
+               * by a rule only this form believed in.
+               */}
               <Field
                 label="Link to your app"
                 htmlFor="appUrl"
-                required
-                hint="The URL testers open. Include http:// or https://."
+                hint="The URL testers open, if there is one. Include http:// or https://."
               >
                 <Input
                   id="appUrl"
                   name="appUrl"
                   type="url"
-                  required
                   maxLength={2000}
                   defaultValue={params.appUrl ?? ''}
                   placeholder="https://staging.example.com"
