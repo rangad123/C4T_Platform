@@ -520,14 +520,37 @@ export default async function ProjectDetailPage({
             align: 'right' as const,
             interactive: true,
             render: (row: ProjectAssignmentRow) => (
-              <Button
-                href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${row.tester.id}&projectId=${project.id}&buildId=${row.buildId || activeBuildId}`}
-                variant="ghost"
-                size="sm"
-                iconLeft="banknote"
+              /*
+               * Both directions, from the assignment that earned it: CREDIT
+               * puts money in the tester's wallet, DEBIT sends it out to
+               * their registered payment option. Only the debit existed, so
+               * paying someone for this build meant crediting them from
+               * somewhere else first.
+               */
+              <span
+                style={{
+                  display: 'inline-flex',
+                  gap: 'var(--space-2)',
+                  justifyContent: 'flex-end',
+                }}
               >
-                Pay
-              </Button>
+                <Button
+                  href={`/app/admin/transactions/new?type=TESTER_EARNING&counterpartyId=${row.tester.id}&projectId=${project.id}&buildId=${row.buildId || activeBuildId}`}
+                  variant="ghost"
+                  size="sm"
+                  iconLeft="plus"
+                >
+                  Credit
+                </Button>
+                <Button
+                  href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${row.tester.id}&projectId=${project.id}&buildId=${row.buildId || activeBuildId}`}
+                  variant="ghost"
+                  size="sm"
+                  iconLeft="banknote"
+                >
+                  Debit
+                </Button>
+              </span>
             ),
           },
         ]

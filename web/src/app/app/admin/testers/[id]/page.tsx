@@ -1079,15 +1079,32 @@ export default async function TesterDetailPage({
                * keep in step with the first; this is one ledger reached from
                * a convenient place. The form already echoes these params.
                */
+              /*
+               * The two directions money moves, in the ledger's own terms:
+               * a CREDIT adds to the tester's wallet (TESTER_EARNING), a
+               * DEBIT sends it to the payment option they registered
+               * (TESTER_PAYOUT). Only the debit half existed, so there was
+               * no way to put money IN from here.
+               */
               canWriteTransactions ? (
-                <Button
-                  href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${tester.user.id}`}
-                  variant="primary"
-                  size="sm"
-                  iconLeft="banknote"
-                >
-                  Add payout
-                </Button>
+                <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                  <Button
+                    href={`/app/admin/transactions/new?type=TESTER_EARNING&counterpartyId=${tester.user.id}`}
+                    variant="primary"
+                    size="sm"
+                    iconLeft="plus"
+                  >
+                    Credit wallet
+                  </Button>
+                  <Button
+                    href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${tester.user.id}`}
+                    variant="secondary"
+                    size="sm"
+                    iconLeft="banknote"
+                  >
+                    Debit payout
+                  </Button>
+                </div>
               ) : undefined
             }
           >

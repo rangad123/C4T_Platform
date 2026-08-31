@@ -50,9 +50,21 @@ const COUNTERPARTY_REQUIRED: readonly string[] = ['TESTER_EARNING', 'TESTER_PAYO
 
 const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP'] as const
 
+/**
+ * Named for what the entry DOES to the tester's wallet, not for the enum
+ * behind it. The buttons that link here say "Credit" and "Debit", and a form
+ * that then offered "Tester earning" and "Tester payout" would read as a
+ * different thing arrived at by accident. The stored value is unchanged.
+ */
+const TYPE_LABELS: Record<(typeof TYPES)[number], string> = {
+  TESTER_EARNING: 'Credit — add funds to the tester’s wallet',
+  TESTER_PAYOUT: 'Debit — send funds to their payment details',
+  ADJUSTMENT: 'Adjustment',
+}
+
 const TYPE_OPTIONS: readonly SelectOption[] = TYPES.map((type) => ({
   value: type,
-  label: titleCase(type),
+  label: TYPE_LABELS[type],
 }))
 const STATUS_OPTIONS: readonly SelectOption[] = STATUSES.map((status) => ({
   value: status,

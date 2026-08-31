@@ -387,13 +387,22 @@ export default async function TesterProfilePage({
    * derived from the transaction type rather than stored, because the ledger
    * records amounts as magnitudes — a debit is a debit by virtue of what it
    * is, not by carrying a minus.
+   *
+   * Named credit and debit, which is what a statement calls them and what
+   * this platform's own predecessor called them (`payment_history.pmt_type`
+   * was `credit | debit | release`). A credit adds to the wallet; a debit is
+   * money sent to the payment option on file. "Tester earning" described the
+   * row's provenance rather than its effect on the balance, which is the
+   * thing a reader is scanning the column for.
    */
   const ledgerColumns: readonly TableColumn<LedgerRow>[] = [
     {
       key: 'movement',
       header: 'Movement',
-      render: (row) => (row.type === 'TESTER_PAYOUT' ? 'Payout' : titleCase(row.type)),
-      renderSecondary: (row) => row.description ?? row.reference,
+      render: (row) => (row.type === 'TESTER_PAYOUT' ? 'Debit' : 'Credit'),
+      renderSecondary: (row) =>
+        row.description ??
+        (row.type === 'TESTER_PAYOUT' ? 'Sent to your payment details' : titleCase(row.type)),
     },
     {
       key: 'amount',
