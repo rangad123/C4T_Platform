@@ -509,9 +509,26 @@ export async function createProject(
    * advice that could never work. Checking it here turns an opaque failure
    * into a sentence naming the one field at fault.
    */
-  if (typeof data.logoFileId === 'string' && data.logoFileId.length > 0) {
+  /**
+   * The logo is attached through its RELATION, never as a scalar id.
+   *
+   * `logoFileId` is the column behind `logo`, and this create already uses
+   * the relation form for organisation and createdBy — so Prisma types the
+   * whole argument as `ProjectCreateInput`, where the scalar simply is not a
+   * field. Spreading it in made Prisma reject the call as malformed, which
+   * the error handler reported as "Malformed database query". The `as` cast
+   * is what let it compile: it silenced the one check that would have caught
+   * this at build time.
+   *
+   * The effect was that creating a project with a logo NEVER worked, and
+   * said nothing useful about why.
+   */
+  const { logoFileId, ...rest } = data as Record<string, unknown> & { logoFileId?: unknown }
+  const logoId = typeof logoFileId === 'string' && logoFileId.length > 0 ? logoFileId : null
+
+  if (logoId) {
     const logo = await prisma.fileObject.findFirst({
-      where: { id: data.logoFileId, isComplete: true },
+      where: { id: logoId, isComplete: true },
       select: { id: true },
     })
     if (!logo) {
@@ -523,10 +540,11 @@ export async function createProject(
 
   const project = await prisma.project.create({
     data: {
-      ...(data as Prisma.ProjectCreateInput),
+      ...(rest as Prisma.ProjectCreateInput),
       reference: await nextReference('project'),
       organisation: { connect: { id: organisationId } },
       createdBy: { connect: { id: user.id } },
+      ...(logoId ? { logo: { connect: { id: logoId } } } : {}),
       status: ProjectStatus.DRAFT,
       // Every project gets one build the moment it exists, so a caller that
       // never opens the build switcher (the tester portal, a bug report, an
