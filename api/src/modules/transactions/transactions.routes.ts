@@ -55,6 +55,8 @@ const txSelect = {
   buildOrContestRef: true,
   organisation: { select: { id: true, name: true } },
   project: { select: { id: true, reference: true, title: true } },
+  /// What the money was for, when it was for a build.
+  build: { select: { id: true, name: true } },
   counterparty: { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
   recordedBy: { select: { id: true, firstName: true, lastName: true } },
   // Masked — never `include`, never `secureDetails`. Same select used by
@@ -226,6 +228,8 @@ const listQuery = paginationQuery.extend({
   status: z.nativeEnum(TransactionStatus).optional(),
   organisationId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
+  /** "Everything paid out on this build" — the query buildId exists for. */
+  buildId: z.string().cuid().optional(),
   counterpartyId: z.string().cuid().optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
@@ -251,6 +255,7 @@ function transactionWhere(
     ...(query.status ? { status: query.status } : {}),
     ...(query.organisationId ? { organisationId: query.organisationId } : {}),
     ...(query.projectId ? { projectId: query.projectId } : {}),
+    ...(query.buildId ? { buildId: query.buildId } : {}),
     ...(query.counterpartyId ? { counterpartyId: query.counterpartyId } : {}),
     ...(query.paymentMethod ? { paymentMethod: query.paymentMethod } : {}),
     ...(query.from || query.to
@@ -397,6 +402,8 @@ const createSchema = z.object({
   currency: z.string().trim().length(3).toUpperCase().default('INR'),
   organisationId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
+  /** The build this money is for, when it is for one. */
+  buildId: z.string().cuid().optional(),
   counterpartyId: z.string().cuid().optional(),
   description: z.string().trim().max(1000).optional(),
   externalRef: z.string().trim().max(120).optional(),
@@ -451,6 +458,32 @@ transactionsRouter.post(
       })
       if (!account)
         throw new BadRequestError('paymentAccountId does not belong to the counterparty')
+    }
+    /**
+     * A build must belong to the project it is filed under, or the pairing
+     * says something untrue: "paid for build X on project Y" when X was never
+     * part of Y. Checked here rather than trusted, because both ids arrive
+     * from the client — the payout links carry them in a query string.
+     */
+    if (input.buildId) {
+      const build = await prisma.build.findFirst({
+        where: {
+          id: input.buildId,
+          deletedAt: null,
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+        },
+        select: { projectId: true },
+      })
+      if (!build) {
+        throw new BadRequestError(
+          input.projectId
+            ? 'That build does not belong to the given project'
+            : 'That build does not exist',
+        )
+      }
+      // Filing against a build implies its project, so fill it in rather than
+      // leaving a row that knows the build but not what it belonged to.
+      input.projectId ??= build.projectId
     }
 
     const tx = await prisma.transaction.create({

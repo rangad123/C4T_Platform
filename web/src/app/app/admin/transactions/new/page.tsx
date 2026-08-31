@@ -68,6 +68,7 @@ const ECHO_KEYS = [
   'amount',
   'currency',
   'projectId',
+  'buildId',
   'counterpartyId',
   'description',
   'externalRef',
@@ -183,6 +184,7 @@ async function recordTransaction(formData: FormData): Promise<void> {
         amountMinor,
         currency,
         ...(echo.projectId ? { projectId: echo.projectId } : {}),
+        ...(echo.buildId ? { buildId: echo.buildId } : {}),
         ...(echo.counterpartyId ? { counterpartyId: echo.counterpartyId } : {}),
         ...(echo.description ? { description: echo.description.slice(0, 1000) } : {}),
         ...(echo.externalRef ? { externalRef: echo.externalRef.slice(0, 120) } : {}),
@@ -520,6 +522,16 @@ export default async function NewTransactionPage({
                 options={projectOptions}
               />
             </Field>
+
+            {/*
+              Carried, not chosen. A build only reaches this form from the
+              "Pay" link on a tester's assignment, which already knows which
+              build the work was for — so there is nothing here to pick, and a
+              picker would need every build of every project loaded to offer
+              one. The API rejects a build that does not belong to the project
+              above, so this cannot quietly file a payout against the wrong one.
+            */}
+            {params.buildId ? <input type="hidden" name="buildId" value={params.buildId} /> : null}
 
             <Field
               label="Counterparty"

@@ -1062,6 +1062,8 @@ model Build {
   testCases     TestCase[]
   testReports   TestReport[]
   testReviews   TestReview[]
+  /// Payouts and earnings recorded against this build.
+  transactions  Transaction[]
 
   @@unique([projectId, name])
   @@index([projectId])
@@ -1771,6 +1773,14 @@ model Transaction {
 
   organisationId String? @map("organisation_id")
   projectId      String? @map("project_id")
+  /// The build the money is for, when it is for one.
+  ///
+  /// A tester is paid for a build, not for a project — a project can run many,
+  /// and "which of these five builds was this ₹750 for" is the first question
+  /// asked when a payout is queried. `projectId` alone cannot answer it, and
+  /// `buildOrContestRef` below is free text, so it cannot be joined or
+  /// filtered on. This can.
+  buildId        String? @map("build_id")
   /// Customer being invoiced, or Tester being paid.
   counterpartyId String? @map("counterparty_id")
   recordedById   String  @map("recorded_by_id")
@@ -1797,8 +1807,10 @@ model Transaction {
   /// (the "Outstanding amount" the brief asks for) is always a plain
   /// subtraction, never a null-check first.
   paidAmountMinor   BigInt         @default(0) @map("paid_amount_minor")
-  /// Free text — no `Contest` model exists in this schema yet, and `projectId`
-  /// already covers the Build case.
+  /// Free text, and now only for contests: no `Contest` model exists in this
+  /// schema yet. Builds moved to the real `buildId` relation above, because a
+  /// reference you cannot join on cannot answer "what did we pay for this
+  /// build".
   buildOrContestRef String?        @map("build_or_contest_ref")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -1806,6 +1818,10 @@ model Transaction {
 
   organisation   Organisation?   @relation(fields: [organisationId], references: [id], onDelete: SetNull)
   project        Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  /// SetNull, like `project`: a deleted build must not take the payment
+  /// record with it. What was paid stays true even when what it was for is
+  /// gone.
+  build          Build?          @relation(fields: [buildId], references: [id], onDelete: SetNull)
   counterparty   User?           @relation("TransactionCounterparty", fields: [counterpartyId], references: [id], onDelete: SetNull)
   recordedBy     User            @relation("TransactionRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
   paymentAccount PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
@@ -1815,6 +1831,8 @@ model Transaction {
   @@index([type, status])
   @@index([occurredAt])
   @@index([paymentAccountId])
+  /// "Everything paid out on this build" is the query this column exists for.
+  @@index([buildId])
   @@map("transactions")
 }
 

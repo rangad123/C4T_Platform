@@ -417,7 +417,7 @@ export default async function ProjectDetailPage({
             interactive: true,
             render: (row: ProjectAssignmentRow) => (
               <Button
-                href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${row.tester.id}&projectId=${project.id}`}
+                href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${row.tester.id}&projectId=${project.id}&buildId=${row.buildId || activeBuildId}`}
                 variant="ghost"
                 size="sm"
                 iconLeft="banknote"
