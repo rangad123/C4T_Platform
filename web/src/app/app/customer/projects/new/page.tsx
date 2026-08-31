@@ -107,6 +107,11 @@ const ERRORS: Record<string, NoticeCopy> = {
     message: 'Some values were not accepted. Check the fields on this step.',
   },
   failed: { tone: 'error', message: 'The project could not be created. Try again in a moment.' },
+  unreachable: {
+    tone: 'warning',
+    message:
+      'We could not reach the service just then — nothing you entered was wrong, and it is all still here. This usually clears in a few seconds, so try again.',
+  },
   'no-org': {
     tone: 'error',
     message:

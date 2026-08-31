@@ -177,7 +177,14 @@ export async function createProjectFromWizard(formData: FormData): Promise<void>
     const raw = error instanceof ApiError ? error.message : ''
     const message = raw.toLowerCase()
     let code = 'failed'
-    if (status === 422) code = 'invalid'
+    /**
+     * `status === 0` means the request never got an HTTP reply — the API was
+     * unreachable, which on this box happens while a deploy reloads it.
+     * Worth its own message: nothing was wrong with what the person entered,
+     * and unlike every other failure here, trying again really is the fix.
+     */
+    if (status === 0) code = 'unreachable'
+    else if (status === 422) code = 'invalid'
     else if (status === 403 && message.includes('organisation')) code = 'no-org'
     else if (status === 400 && message.includes('several organisations')) code = 'many-orgs'
     else if (status === 400 && message.includes('logo')) code = 'logo'
