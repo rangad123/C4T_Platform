@@ -204,6 +204,25 @@ ratingsRouter.post('/', validate({ body: createRatingSchema }), async (req, res)
     select: ratingSelect,
   })
 
+  /**
+   * Audited because a rating changes a number the platform sorts the crowd
+   * by. Moderation was already recorded; creation was not, which left the
+   * hiding of a rating traceable and the leaving of one not — the wrong way
+   * round, since only one of those is reversible.
+   */
+  await recordAudit({
+    req,
+    action: 'rating.created',
+    entityType: 'Rating',
+    entityId: rating.id,
+    after: {
+      subjectType: input.subjectType,
+      subjectUserId: input.subjectUserId ?? null,
+      projectId: input.projectId,
+      score: input.score,
+    },
+  })
+
   if (input.subjectUserId) {
     await refreshTesterAggregates(input.subjectUserId)
     await createNotification({
