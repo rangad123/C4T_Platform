@@ -17,6 +17,8 @@ import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { SingleFileUpload } from '@/components/admin/SingleFileUpload'
 import { DownloadLink } from '@/components/tester/DownloadLink'
 import { PaymentMethodFields, type PaymentType } from '@/components/tester/PaymentMethodFields'
+import Link from 'next/link'
+import { Icon } from '@/components/ds/core/Icon'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
@@ -586,6 +588,97 @@ export default async function TesterProfilePage({
       badges={<StatusBadge status={profile.status} />}
       subtitle="What projects see when deciding whether to invite you, and how we reach you."
       tabs={<SectionTabs basePath="/app/tester/profile" tabs={SECTIONS} active={section} />}
+      /*
+        The page ran full-width with an empty right column. This fills it with
+        the three sections a tester has to complete before projects will
+        invite them — and, because `devices`, `skills` and `languages` come
+        back on every read of the profile regardless of which tab is open, it
+        can say what is actually in each rather than just repeating the tab
+        strip above.
+
+        About you and Work history are deliberately absent: About you is where
+        this page opens, and work history is optional background rather than
+        something to finish.
+      */
+      aside={
+        <Panel
+          title="Finish your profile"
+          description="The more of this a project can see, the more likely an invite becomes."
+        >
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {[
+              {
+                value: 'assets',
+                label: 'Assets',
+                detail:
+                  profile.devices.length === 0
+                    ? 'No devices yet'
+                    : `${profile.devices.length} device${profile.devices.length === 1 ? '' : 's'}`,
+                done: profile.devices.length > 0,
+              },
+              {
+                value: 'skills',
+                label: 'Skills and languages',
+                detail:
+                  profile.skills.length === 0 && profile.languages.length === 0
+                    ? 'Nothing listed yet'
+                    : `${profile.skills.length} skill${
+                        profile.skills.length === 1 ? '' : 's'
+                      } · ${profile.languages.length} language${
+                        profile.languages.length === 1 ? '' : 's'
+                      }`,
+                done: profile.skills.length > 0,
+              },
+              {
+                value: 'payment',
+                label: 'Payment details',
+                detail: 'Where your payouts are sent',
+                // Whether an account exists is only read on that tab, so this
+                // one links without claiming either way rather than costing
+                // every profile render an extra call to find out.
+                done: null,
+              },
+            ].map((item) => (
+              <li key={item.value}>
+                <Link
+                  href={`/app/tester/profile?section=${item.value}`}
+                  aria-current={section === item.value ? 'page' : undefined}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-3) var(--space-4)',
+                    borderRadius: 'var(--radius-card)',
+                    textDecoration: 'none',
+                    color: 'var(--text-primary)',
+                    background: section === item.value ? 'var(--surface-sunken)' : 'transparent',
+                  }}
+                >
+                  <Icon
+                    name={item.done === true ? 'check-circle-2' : 'minus'}
+                    size={16}
+                    style={{
+                      flex: 'none',
+                      color: item.done === true ? 'var(--status-success-fg)' : 'var(--text-muted)',
+                    }}
+                  />
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontWeight: 'var(--fw-semibold)' }}>{item.label}</span>
+                    <span
+                      style={{
+                        color: 'var(--text-secondary)',
+                        fontSize: 'var(--type-body-sm-size)',
+                      }}
+                    >
+                      {item.detail}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      }
     >
       <Notice code={resolvedParams.notice} notices={NOTICES} />
 
