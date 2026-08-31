@@ -318,3 +318,11 @@ export interface ProjectBugRow {
   createdAt: string
   reportedBy: ProjectPerson | null
 }
+
+/** Just enough of a rating to know who has already rated whom on a project. */
+export interface ProjectRatingRow {
+  id: string
+  score: number
+  author: { id: string } | null
+  subjectUser: { id: string } | null
+}

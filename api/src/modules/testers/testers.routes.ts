@@ -46,16 +46,20 @@ testersRouter.get(
 )
 
 /**
- * This tester's history on the caller's OWN projects.
+ * This tester's engagement history, scoped to what the caller may see.
  *
- * Customer-only on purpose. The scope is the caller's organisation
- * memberships, which admin-side users do not have — an admin asking this
- * would get an empty list rather than the everything they might expect, so
- * they use the admin tester record instead.
+ * A customer gets work done on their OWN projects — the scope is their
+ * organisation memberships. An admin-side caller has no such memberships, so
+ * scoping by them would return nothing; they get every project instead,
+ * which is what rating from the admin tester record needs, since a rating
+ * always names a project the tester was actually on.
+ *
+ * The distinction lives in the controller, not here, because "no
+ * organisations" and "all organisations" must never be the same value.
  */
 testersRouter.get(
   '/discover/:id/engagements',
-  requireRole(Role.CUSTOMER),
+  requireRole(Role.CUSTOMER, Role.ADMIN, Role.SUB_ADMIN),
   validate({ params: testerIdParam }),
   controller.discoverEngagements,
 )

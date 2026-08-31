@@ -824,12 +824,19 @@ export async function organisationIdsForUser(userId: string): Promise<string[]> 
  */
 export async function getTesterEngagementsForOrganisation(
   testerProfileId: string,
-  organisationIds: readonly string[],
+  /**
+   * Which organisations' projects count as the caller's.
+   *
+   * `null` means every project, and is ONLY ever passed for an admin-side
+   * caller, who has no organisation memberships to scope by and is entitled
+   * to the whole picture. It is a distinct value rather than an empty array
+   * on purpose: an empty array is a customer who belongs to nothing, and
+   * must stay empty rather than silently widening to "all".
+   */
+  organisationIds: readonly string[] | null,
   authorId: string,
 ) {
-  // No organisation means nothing of the caller's to have worked on. Return
-  // empty rather than unfiltered — an empty scope must never widen to "all".
-  if (organisationIds.length === 0) return []
+  if (organisationIds !== null && organisationIds.length === 0) return []
 
   const tester = await prisma.testerProfile.findFirst({
     where: {
@@ -844,7 +851,10 @@ export async function getTesterEngagementsForOrganisation(
   const assignments = await prisma.projectAssignment.findMany({
     where: {
       testerId: tester.userId,
-      project: { organisationId: { in: [...organisationIds] }, deletedAt: null },
+      project: {
+        ...(organisationIds === null ? {} : { organisationId: { in: [...organisationIds] } }),
+        deletedAt: null,
+      },
     },
     select: {
       status: true,

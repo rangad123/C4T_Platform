@@ -26,7 +26,7 @@ import { Modal } from '@/components/admin/Modal'
 import { loadList, parsePage } from '@/lib/admin/list'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, stars, titleCase } from '@/lib/admin/format'
-import { setTesterStatus, rejectTester } from './actions'
+import { setTesterStatus, rejectTester, rateTesterAction } from './actions'
 
 /**
  * `/app/admin/testers/[id]` — one crowd tester, §2.2 "Onboard, verify, manage,
@@ -342,6 +342,42 @@ const ratingColumns: readonly TableColumn<RatingRow>[] = [
  * Verification and performance stay in the aside — they are the decision
  * you came to make, and they have to stay visible whichever tab is open.
  */
+/**
+ * Assignment statuses a rating may attach to — the same set
+ * `assertMayRate` accepts on the API side. An invitation that was never
+ * taken up is not work, so it cannot be rated, and offering the button on
+ * one would be offering a guaranteed refusal.
+ */
+const RATEABLE_STATUSES = new Set(['ACTIVE', 'COMPLETED'])
+
+/** One engagement of this tester, from `GET /testers/discover/:id/engagements`. */
+interface TesterEngagement {
+  status: string
+  completedAt: string | null
+  project: { id: string; reference: string; title: string }
+  build: { id: string; name: string } | null
+  bugsReported: number
+  testerUserId: string
+  alreadyRated: boolean
+}
+
+/** What each outcome of the rating form says. The page owns this copy. */
+const RATING_NOTICES: Record<string, { tone: 'success' | 'error'; message: string }> = {
+  'rating-saved': { tone: 'success', message: 'Your rating has been saved.' },
+  'rating-duplicate': {
+    tone: 'error',
+    message: 'You have already rated this tester on that project.',
+  },
+  'rating-not-worked-together': {
+    tone: 'error',
+    message: 'That tester did not work on that project.',
+  },
+  'rating-forbidden': { tone: 'error', message: 'You do not have permission to leave ratings.' },
+  'rating-needs-project': { tone: 'error', message: 'Choose the project the rating is about.' },
+  'rating-invalid': { tone: 'error', message: 'Give a score from 1 to 5.' },
+  'rating-failed': { tone: 'error', message: 'The rating could not be saved. Try again.' },
+}
+
 const SECTIONS = [
   { value: 'profile', label: 'Profile', icon: 'user-check' },
   { value: 'devices', label: 'Devices', icon: 'smartphone' },
@@ -378,12 +414,18 @@ export default async function TesterDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ ratingsPage?: string; section?: string; edit?: string }>
+  searchParams: Promise<{
+    ratingsPage?: string
+    section?: string
+    edit?: string
+    rate?: string
+    notice?: string
+  }>
 }) {
   const viewer = await requirePermission('tester.read')
 
   const { id } = await params
-  const { ratingsPage, section: rawSection, edit } = await searchParams
+  const { ratingsPage, section: rawSection, edit, rate, notice } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let tester: TesterDetail | null = null
@@ -446,6 +488,7 @@ export default async function TesterDetailPage({
   // Writing money is a separate grant from reading it — the payout shortcut
   // is hidden for anyone who could only look.
   const canWriteTransactions = hasPermission(viewer, 'transaction.write')
+  const canRate = hasPermission(viewer, 'rating.write')
 
   /**
    * Each pair here backs exactly one section — fetching all five on every
@@ -456,7 +499,7 @@ export default async function TesterDetailPage({
    * section needs together (payment account + history, projects + bugs)
    * instead of one after another cuts the round trips further.
    */
-  const [paymentAccount, paymentHistory, ratings, platformProjects, reportedBugs] =
+  const [paymentAccount, paymentHistory, ratings, platformProjects, reportedBugs, engagements] =
     await Promise.all([
       section === 'payment'
         ? serverFetchOrNull<PaymentAccountDetail | null>(
@@ -503,9 +546,61 @@ export default async function TesterDetailPage({
             query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
           })
         : Promise.resolve({ error: 'forbidden' as const }),
+      /**
+       * Every project this tester has actually been on, so a rating can name
+       * one. Admin-side callers get the unscoped list — see the route's own
+       * note on why "no organisations" and "all organisations" differ.
+       *
+       * Best-effort: a failure costs the rating control, not the page.
+       */
+      section === 'ratings' && canRate
+        ? serverFetchOrNull<readonly TesterEngagement[]>(`testers/discover/${id}/engagements`)
+        : Promise.resolve(null),
     ])
 
   const ratingRows = 'error' in ratings ? [] : ratings.items
+
+  /**
+   * The engagement the rating dialog is open for, if any. Resolved from the
+   * loaded list rather than trusted from the URL, so a hand-edited `?rate=`
+   * naming a project this tester was never on simply opens nothing.
+   */
+  const ratingTarget = rate ? engagements?.find((e) => e.project.id === rate) : undefined
+
+  const ratingNotice = notice ? RATING_NOTICES[notice] : undefined
+
+  const engagementColumns: readonly TableColumn<TesterEngagement>[] = [
+    {
+      key: 'project',
+      header: 'Project',
+      render: (row) => row.project.title,
+      renderSecondary: (row) =>
+        row.build ? `${row.project.reference} · ${row.build.name}` : row.project.reference,
+    },
+    { key: 'status', header: 'Assignment', render: (row) => <StatusBadge status={row.status} /> },
+    { key: 'bugs', header: 'Bugs', align: 'right', render: (row) => String(row.bugsReported) },
+    {
+      key: 'rate',
+      header: '',
+      align: 'right',
+      interactive: true,
+      render: (row) =>
+        row.alreadyRated ? (
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+            Rated
+          </span>
+        ) : RATEABLE_STATUSES.has(row.status) ? (
+          <Button
+            href={`${detailPath}?section=ratings&rate=${row.project.id}`}
+            variant="ghost"
+            size="sm"
+            iconLeft="star"
+          >
+            Rate
+          </Button>
+        ) : null,
+    },
+  ]
   const average = toRating(tester.ratingAverage)
   const location = [tester.city, tester.countryCode].filter(Boolean).join(', ')
   const currentWorkflowStatus = (WORKFLOW_STATUSES as readonly string[]).includes(tester.status)
@@ -1019,6 +1114,28 @@ export default async function TesterDetailPage({
 
       {section === 'ratings' ? (
         <>
+          {ratingNotice ? (
+            <p
+              role="status"
+              style={{
+                margin: 0,
+                padding: 'var(--space-4) var(--space-5)',
+                borderRadius: 'var(--radius-card)',
+                background:
+                  ratingNotice.tone === 'success'
+                    ? 'var(--status-success-bg)'
+                    : 'var(--status-error-bg)',
+                color:
+                  ratingNotice.tone === 'success'
+                    ? 'var(--status-success-fg)'
+                    : 'var(--status-error-fg)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
+              {ratingNotice.message}
+            </p>
+          ) : null}
+
           <Panel
             title="Ratings received"
             description="Reviews left on this tester. Hidden reviews stay listed, and are left out of the average."
@@ -1083,6 +1200,73 @@ export default async function TesterDetailPage({
               </>
             )}
           </Panel>
+
+          {/*
+            Rating is done from a piece of work, never from the person in the
+            abstract: the API requires a project the tester was actually on,
+            so the control belongs on the engagement rather than at the top of
+            the record. Same reasoning, and same shape, as the customer's own
+            crowdtester profile.
+          */}
+          {canRate ? (
+            <Panel
+              title="Rate this tester"
+              description="Ratings attach to a project the tester worked on. Each project can be rated once by you."
+              flush={!!engagements && engagements.length > 0}
+            >
+              {!engagements ? (
+                <Muted>Their project history could not be loaded. Refresh in a moment.</Muted>
+              ) : engagements.length === 0 ? (
+                <Muted>
+                  This tester has not been on a project yet, so there is nothing to rate.
+                </Muted>
+              ) : (
+                <Table
+                  ariaLabel="Projects available to rate"
+                  columns={engagementColumns}
+                  rows={[...engagements]}
+                  rowKey={(row) => `${row.project.id}-${row.status}`}
+                />
+              )}
+            </Panel>
+          ) : null}
+
+          {ratingTarget ? (
+            <Modal
+              open
+              closedHref={`${detailPath}?section=ratings`}
+              title={`Rate on ${ratingTarget.project.reference}`}
+            >
+              <TrackedForm action={rateTesterAction} style={FORM_STYLE}>
+                <input type="hidden" name="testerProfileId" value={id} />
+                <input type="hidden" name="subjectUserId" value={ratingTarget.testerUserId} />
+                <input type="hidden" name="projectId" value={ratingTarget.project.id} />
+                <input type="hidden" name="returnTo" value={`${detailPath}?section=ratings`} />
+                <Field label="Score" htmlFor="rating-score" required>
+                  <Select
+                    id="rating-score"
+                    name="score"
+                    required
+                    defaultValue="5"
+                    options={[5, 4, 3, 2, 1].map((n) => ({
+                      value: String(n),
+                      label: `${n} out of 5`,
+                    }))}
+                  />
+                </Field>
+                <Field
+                  label="Comment"
+                  htmlFor="rating-comment"
+                  hint="Optional. The tester can read this."
+                >
+                  <Textarea id="rating-comment" name="comment" rows={4} maxLength={2000} />
+                </Field>
+                <SubmitButton variant="primary" pendingLabel="Saving…">
+                  Save rating
+                </SubmitButton>
+              </TrackedForm>
+            </Modal>
+          ) : null}
         </>
       ) : null}
     </DetailShell>

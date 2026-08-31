@@ -67,6 +67,7 @@ export const PERMISSIONS = {
   // Ratings — §2.2 Ratings & Reviews
   RATING_READ: 'rating.read',
   RATING_MODERATE: 'rating.moderate',
+  RATING_WRITE: 'rating.write',
 
   // Transactions — §2.2 Transactions
   TRANSACTION_READ: 'transaction.read',
@@ -230,6 +231,12 @@ export const PERMISSION_CATALOGUE: PermissionDefinition[] = [
     group: PERMISSION_GROUPS.RATINGS,
     label: 'Moderate ratings',
     description: 'Hide or restore a rating',
+  },
+  {
+    code: PERMISSIONS.RATING_WRITE,
+    group: PERMISSION_GROUPS.RATINGS,
+    label: 'Leave ratings',
+    description: 'Rate a tester on a project they worked on',
   },
 
   {

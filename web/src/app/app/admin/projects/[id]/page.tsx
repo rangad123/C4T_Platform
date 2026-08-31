@@ -30,6 +30,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { loadList } from '@/lib/admin/list'
 import { requireRole, hasPermission } from '@/lib/auth/session'
+import { rateTesterAction } from '../../testers/[id]/actions'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, personName, titleCase } from '@/lib/admin/format'
 import { BuildSwitcher } from '@/components/admin/BuildSwitcher'
@@ -49,6 +50,7 @@ import {
   type ProjectReportSummary,
   type TestCaseRow,
   type VerifiedTesterRow,
+  type ProjectRatingRow,
 } from './constants'
 import { BarChart } from '@/components/admin/charts/BarChart'
 import { DonutChart } from '@/components/admin/charts/DonutChart'
@@ -121,6 +123,8 @@ export default async function ProjectDetailPage({
     buildId?: string
     error?: string
     name?: string
+    rate?: string
+    notice?: string
   }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
@@ -234,6 +238,7 @@ export default async function ProjectDetailPage({
     testCases,
     projectReport,
     defaultBuildDetailIfDifferent,
+    projectRatings,
   ] = await Promise.all([
     section === 'testers' && capabilities.canAssignTesters
       ? loadList<VerifiedTesterRow>('testers', {
@@ -277,6 +282,15 @@ export default async function ProjectDetailPage({
     // above already has what the modal needs — no reason to fetch it twice.
     newBuildModalOpen && defaultBuildId !== activeBuildId
       ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
+      : Promise.resolve(null),
+    /**
+     * Ratings already left on this project, so the roster can say which
+     * testers this viewer has rated. Only needed where the column renders.
+     */
+    section === 'testers'
+      ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
+          query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
+        })
       : Promise.resolve(null),
   ])
   const defaultBuildDetail =
@@ -399,6 +413,29 @@ export default async function ProjectDetailPage({
     },
   ]
 
+  /** Mirrors `assertMayRate` on the API: an invitation never taken up is not work. */
+  const RATEABLE_ASSIGNMENTS = new Set(['ACTIVE', 'COMPLETED'])
+
+  const canRate = hasPermission(user, 'rating.write')
+
+  const ratingTarget =
+    canRate && resolvedSearchParams.rate
+      ? project.assignments.find(
+          (a) => a.tester.id === resolvedSearchParams.rate && RATEABLE_ASSIGNMENTS.has(a.status),
+        )
+      : undefined
+
+  /**
+   * Who this viewer has already rated on this project. Their OWN ratings
+   * only — someone else rating the same tester does not use up their turn,
+   * and the API keys uniqueness on the author.
+   */
+  const ratedByMe = new Set(
+    (projectRatings ?? [])
+      .filter((r) => r.author?.id === user.id && r.subjectUser?.id)
+      .map((r) => r.subjectUser!.id),
+  )
+
   const assignmentColumns: readonly TableColumn<ProjectAssignmentRow>[] = [
     {
       key: 'tester',
@@ -462,6 +499,44 @@ export default async function ProjectDetailPage({
                 Pay
               </Button>
             ),
+          },
+        ]
+      : []),
+    /**
+     * Rate this tester for their work on this project.
+     *
+     * Same action and same endpoint as the tester record's own rating table —
+     * one flow with two doors, per the ask that ratings be reachable from a
+     * build assignment as well as from a profile. `returnTo` brings the
+     * person back to this roster rather than to the tester's record.
+     *
+     * Hidden where the API would refuse it: already rated by this viewer, or
+     * an invitation never taken up, since `assertMayRate` requires the
+     * assignment to have reached ACTIVE or COMPLETED. `interactive` keeps the
+     * cell out of the row's own link.
+     */
+    ...(canRate
+      ? [
+          {
+            key: 'rate',
+            header: '',
+            align: 'right' as const,
+            interactive: true,
+            render: (row: ProjectAssignmentRow) =>
+              ratedByMe.has(row.tester.id) ? (
+                <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                  Rated
+                </span>
+              ) : RATEABLE_ASSIGNMENTS.has(row.status) ? (
+                <Button
+                  href={`${detailPath}?section=testers&buildId=${activeBuildId}&rate=${row.tester.id}`}
+                  variant="ghost"
+                  size="sm"
+                  iconLeft="star"
+                >
+                  Rate
+                </Button>
+              ) : null,
           },
         ]
       : []),
@@ -2191,6 +2266,54 @@ export default async function ProjectDetailPage({
               </SubmitButton>
             </div>
           </TrackedForm>
+        </Modal>
+      ) : null}
+
+      {ratingTarget ? (
+        <Modal
+          open
+          closedHref={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+          title={`Rate ${personName(ratingTarget.tester)}`}
+        >
+          <form action={rateTesterAction} style={stackStyle}>
+            <input type="hidden" name="subjectUserId" value={ratingTarget.tester.id} />
+            <input
+              type="hidden"
+              name="testerProfileId"
+              value={ratingTarget.tester.testerProfile?.id ?? ''}
+            />
+            <input type="hidden" name="projectId" value={project.id} />
+            <input
+              type="hidden"
+              name="returnTo"
+              value={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+            />
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              For their work on {project.reference} · {project.title}.
+            </p>
+            <Field label="Score" htmlFor="rating-score" required hint="1 is poor, 5 is excellent.">
+              <Select
+                id="rating-score"
+                name="score"
+                required
+                defaultValue="5"
+                options={[5, 4, 3, 2, 1].map((n) => ({
+                  value: String(n),
+                  label: `${n} out of 5`,
+                }))}
+              />
+            </Field>
+            <Field
+              label="Comment"
+              htmlFor="rating-comment"
+              hint="Optional. Shared with the tester."
+            >
+              <Textarea id="rating-comment" name="comment" rows={4} maxLength={2000} />
+            </Field>
+            <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">
+              Save rating
+            </SubmitButton>
+          </form>
         </Modal>
       ) : null}
 

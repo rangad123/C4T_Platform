@@ -122,6 +122,42 @@ async function assertWorkedTogether(
   })
   if (!project) throw new BadRequestError('Project does not exist')
 
+  /**
+   * The delivery team — admins, sub-admins, and the project managers among
+   * them, who are admin-side users with a ManagerAssignment rather than a
+   * role of their own.
+   *
+   * They did not "work with" the tester the way a customer did, so the
+   * co-membership half of the rule cannot apply to them. What still applies,
+   * and is the part that matters, is that the rating has to describe real
+   * work: the tester must actually have been on this project. Without that,
+   * `ratingAverage` stops meaning anything, and it is a sort key in the
+   * crowd tester pool.
+   *
+   * Gated on a permission rather than on the role, so a sub-admin can be
+   * given read-and-moderate without also being able to author. ADMIN passes
+   * everything, matching `requirePermission`, which cannot be used here —
+   * it is middleware that rejects customers and testers outright, and they
+   * post to this route too.
+   */
+  if (isAdminSide(author)) {
+    const mayWrite =
+      author.role === Role.ADMIN || (author.permissions ?? []).includes(PERMISSIONS.RATING_WRITE)
+    if (!mayWrite) {
+      throw new ForbiddenError('You do not have permission to leave ratings')
+    }
+    const wasAssigned = await prisma.projectAssignment.findFirst({
+      where: {
+        projectId,
+        testerId: subjectUserId,
+        status: { in: [AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED] },
+      },
+      select: { id: true },
+    })
+    if (!wasAssigned) throw new BadRequestError('That tester did not work on this project')
+    return
+  }
+
   if (author.role === Role.CUSTOMER) {
     const [isMember, wasAssigned] = await Promise.all([
       prisma.organisationMember.findFirst({
@@ -168,8 +204,13 @@ async function assertWorkedTogether(
 ratingsRouter.post('/', validate({ body: createRatingSchema }), async (req, res) => {
   const input = req.body as z.infer<typeof createRatingSchema>
 
-  if (isAdminSide(req.user!)) {
-    throw new ForbiddenError('Administrators moderate ratings rather than leaving them')
+  /**
+   * The delivery team rates testers, not customers. Nothing asked for the
+   * reverse, and `assertMayRate`'s admin branch checks a tester assignment,
+   * which would be meaningless for any other subject.
+   */
+  if (isAdminSide(req.user!) && input.subjectType !== RatingSubjectType.TESTER) {
+    throw new ForbiddenError('The delivery team can only rate testers')
   }
   if (!input.projectId) {
     throw new BadRequestError('projectId is required — ratings are always tied to a project')

@@ -1,5 +1,6 @@
 'use server'
 
+import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
@@ -135,4 +136,68 @@ export async function revealPaymentAccountAction(
     }
     return { ok: false, message: 'Could not reveal these details. Try again.' }
   }
+}
+
+/**
+ * Rate a tester on a project they worked on (§2.2 "Ratings & Reviews").
+ *
+ * The delivery team can leave ratings, not only moderate them. The API is the
+ * enforcement point, as everywhere else here: it checks `rating.write`,
+ * refuses a subject who was never on the named project, and refuses a second
+ * rating from the same author on the same project. This action only shapes
+ * the body and turns a refusal into a notice code the page owns the copy for.
+ *
+ * `returnTo` exists because the same rating can be left from two places — the
+ * tester record and a build's assignment list — and each should return to
+ * where it started rather than teleporting the person to the other one. Only
+ * a path inside the admin portal is accepted; an unchecked one is an open
+ * redirect.
+ */
+export async function rateTesterAction(formData: FormData): Promise<void> {
+  await requirePermission('rating.write')
+
+  const testerProfileId = formTrimmed(formData, 'testerProfileId')
+  const subjectUserId = formTrimmed(formData, 'subjectUserId')
+  const projectId = formTrimmed(formData, 'projectId')
+  const score = Number(formTrimmed(formData, 'score'))
+  const comment = formTrimmed(formData, 'comment')
+
+  const requested = formTrimmed(formData, 'returnTo')
+  const returnTo =
+    requested.startsWith('/app/admin/') && !requested.startsWith('//') ? requested : null
+
+  const base = returnTo ?? `/app/admin/testers/${testerProfileId}?section=ratings`
+  const withNotice = (notice: string) => `${base}${base.includes('?') ? '&' : '?'}notice=${notice}`
+
+  if (!subjectUserId) return
+  if (!returnTo && !testerProfileId) return
+  if (!projectId) redirect(withNotice('rating-needs-project'))
+  if (!Number.isInteger(score) || score < 1 || score > 5) redirect(withNotice('rating-invalid'))
+
+  try {
+    await actionFetch('ratings', {
+      method: 'POST',
+      body: {
+        subjectType: 'TESTER',
+        subjectUserId,
+        projectId,
+        score,
+        ...(comment ? { comment } : {}),
+      },
+    })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    const notice =
+      status === 409
+        ? 'rating-duplicate'
+        : status === 400
+          ? 'rating-not-worked-together'
+          : status === 403
+            ? 'rating-forbidden'
+            : 'rating-failed'
+    redirect(withNotice(notice))
+  }
+
+  revalidatePath(base)
+  redirect(withNotice('rating-saved'))
 }

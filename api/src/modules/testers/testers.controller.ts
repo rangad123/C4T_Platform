@@ -4,6 +4,7 @@ import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
 import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './testers.service.js'
+import { isAdminSide } from '../../middleware/authorize.js'
 import type { ListTestersQuery, ListGlobalDevicesQuery } from './testers.schema.js'
 
 export async function discover(_req: Request, res: Response): Promise<void> {
@@ -32,7 +33,15 @@ export async function discoverOne(req: Request, res: Response): Promise<void> {
  * else's and read their project titles.
  */
 export async function discoverEngagements(req: Request, res: Response): Promise<void> {
-  const organisationIds = await service.organisationIdsForUser(req.user!.id)
+  /**
+   * An admin-side caller has no organisation memberships, so scoping by them
+   * would return nothing. They see every project this tester worked on —
+   * which is what the rating flow on the admin tester record needs, since a
+   * rating has to name a project the tester was actually on.
+   */
+  const organisationIds = isAdminSide(req.user!)
+    ? null
+    : await service.organisationIdsForUser(req.user!.id)
   const engagements = await service.getTesterEngagementsForOrganisation(
     param(req, 'id'),
     organisationIds,
