@@ -739,15 +739,56 @@ export default async function CustomerProjectDetailPage({
             </Panel>
           </>
         ) : section === 'dashboard' ? (
-          <Panel title="At a glance">
-            <DescriptionList
-              items={[
-                { label: 'Testers on the roster', value: String(project._count.assignments) },
-                { label: 'Bugs logged', value: String(project._count.bugs) },
-                { label: 'Materials attached', value: String(project._count.materials) },
-              ]}
-            />
-          </Panel>
+          <>
+            <Panel title="At a glance">
+              <DescriptionList
+                items={[
+                  { label: 'Testers on the roster', value: String(project._count.assignments) },
+                  { label: 'Bugs logged', value: String(project._count.bugs) },
+                  { label: 'Materials attached', value: String(project._count.materials) },
+                ]}
+              />
+            </Panel>
+
+            {/* ── Project brief ───────────────────────────────
+                In the aside rather than under the charts. Once the fields
+                Build details already carried came out, what is left is nine
+                short facts -- a reference, where the project sits in its
+                lifecycle, the platforms in scope, and the ask. That is
+                reference material, not analysis: it reads fine in a narrow
+                column, whereas the charts it used to sit below genuinely
+                need the width. It also fills the space that sat empty under
+                "At a glance".
+
+                Still on the Dashboard rather than Build details: these are
+                facts about the project itself, and filing them under a
+                single build would misattribute them. See `overview` for what
+                was removed from this list and why.
+
+                The "Edit the brief" modal stays in the main column below --
+                a <dialog> renders the same wherever it sits, and the aside
+                is for what is read, not for what is only sometimes open. */}
+            <Panel
+              title="Project brief"
+              description="Facts about the project itself. Per-cycle detail is in Build details."
+              actions={
+                capabilities.canUpdate ? (
+                  <Button
+                    // Carries the selected build, like every other link here.
+                    // Without it, opening the brief silently reset the picker
+                    // to the default build.
+                    href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=brief`}
+                    variant="primary"
+                    size="sm"
+                  >
+                    Edit
+                  </Button>
+                ) : undefined
+              }
+            >
+              <DescriptionList items={overview} />
+            </Panel>
+          </>
         ) : undefined
       }
     >
@@ -916,33 +957,6 @@ export default async function CustomerProjectDetailPage({
                 )}
               </div>
             )}
-          </Panel>
-
-          {/* ── Project brief ─────────────────────────────────────────────
-              Kept on the Dashboard rather than moved into Build details:
-              these are facts about the project itself, and filing them under
-              a single build would misattribute them. Anything that varies
-              per test cycle lives on Build details instead — see `overview`
-              for what was removed from here and why. */}
-          <Panel
-            title="Project brief"
-            description="The project itself. Anything that changes per test cycle is in Build details."
-            actions={
-              capabilities.canUpdate ? (
-                <Button
-                  // Carries the selected build, like every other link here.
-                  // Without it, opening the brief silently reset the picker
-                  // to the default build.
-                  href={`${detailPath}?section=${section}&buildId=${activeBuildId}&edit=brief`}
-                  variant="primary"
-                  size="sm"
-                >
-                  Edit
-                </Button>
-              ) : undefined
-            }
-          >
-            <DescriptionList items={overview} />
           </Panel>
 
           {capabilities.canUpdate ? (
