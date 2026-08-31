@@ -22,7 +22,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
-import { formatDate, titleCase } from '@/lib/admin/format'
+import { formatDate, personName, titleCase } from '@/lib/admin/format'
 import { BuildSwitcher } from '@/components/admin/BuildSwitcher'
 import {
   BUILD_STATUSES,
@@ -36,6 +36,7 @@ import {
   type ProjectBugRow,
   type ProjectDetail,
   type ProjectMaterial,
+  type ProjectRatingRow,
   type ProjectReportSummary,
   BUG_FIELD_TYPE_LABEL,
 } from './constants'
@@ -60,6 +61,12 @@ import {
   addBugCustomField,
   removeBugCustomField,
 } from './actions'
+/*
+ * The one rating action, shared with the tester's own profile page. Imported
+ * across rather than copied so both doors post the same body to the same
+ * endpoint and cannot drift apart.
+ */
+import { rateTesterAction } from '../../crowdtesters/[id]/actions'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const BUG_PREVIEW_SIZE = 10
@@ -142,6 +149,22 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'error',
     message: 'The brief could not be saved. Try again in a moment.',
   },
+  'rating-saved': { tone: 'success', message: 'Thanks — your rating has been recorded.' },
+  'rating-duplicate': {
+    tone: 'warning',
+    message: 'You have already rated this tester on this project.',
+  },
+  'rating-not-worked-together': {
+    tone: 'warning',
+    message: 'You can only rate a tester once they have actually worked on this project.',
+  },
+  'rating-needs-project': { tone: 'warning', message: 'Choose which work you are rating.' },
+  'rating-invalid': { tone: 'warning', message: 'Give a score between 1 and 5.' },
+  'rating-forbidden': { tone: 'error', message: 'You are not allowed to rate this tester.' },
+  'rating-failed': {
+    tone: 'error',
+    message: 'That rating could not be saved. Try again in a moment.',
+  },
   'settings-saved': { tone: 'success', message: 'That setting has been saved.' },
   'settings-save-failed': {
     tone: 'error',
@@ -165,6 +188,15 @@ const NOTICES: Record<string, NoticeCopy> = {
  * tab, so old `?section=overview` and `?section=summary` links land here
  * rather than 404ing or rendering an empty tab.
  */
+/** Wording for each score, so the number is not the only cue. */
+const RATING_SCORE_LABEL: Record<number, string> = {
+  5: 'Excellent',
+  4: 'Good',
+  3: 'Adequate',
+  2: 'Below par',
+  1: 'Poor',
+}
+
 const SECTIONS = [
   { value: 'dashboard', label: 'Dashboard', icon: 'line-chart' },
   { value: 'build', label: 'Build details', icon: 'clock' },
@@ -186,11 +218,14 @@ export default async function CustomerProjectDetailPage({
     edit?: string
     buildId?: string
     notice?: string
+    /** The tester being rated, when the rating dialog is open. */
+    rate?: string
     /** Echoed back when a rename is rejected, so the attempt isn't retyped. */
     name?: string
   }>
 }) {
-  await requireRole(['CUSTOMER'])
+  // Needed to tell my own ratings apart from anyone else's on this project.
+  const sessionUser = await requireRole(['CUSTOMER'])
   const { id } = await params
   const resolvedSearchParams = await searchParams
   const edit = resolvedSearchParams.edit
@@ -261,6 +296,7 @@ export default async function CustomerProjectDetailPage({
     bugs,
     projectReport,
     defaultBuildDetailIfDifferent,
+    projectRatings,
     announcements,
     customFields,
   ] = await Promise.all([
@@ -302,6 +338,15 @@ export default async function CustomerProjectDetailPage({
      * API's, so this cannot show another organisation's notices — and a
      * build-scoped announcement only appears on the build it was written for.
      */
+    /**
+     * Ratings already on this project, so a tester the viewer has rated shows
+     * that instead of a button the API would only reject.
+     */
+    section === 'testers'
+      ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
+          query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
+        })
+      : Promise.resolve(null),
     section === 'announcements'
       ? serverFetchOrNull<readonly AnnouncementRow[]>('communication/announcements', {
           query: { projectId: project.id, buildId: activeBuildId, limit: 50 },
@@ -339,6 +384,27 @@ export default async function CustomerProjectDetailPage({
    * come from the tester's profile and are what a client actually uses to
    * judge coverage.
    */
+  /**
+   * Who this viewer has already rated on this project.
+   *
+   * Filtered to their OWN ratings: the list carries every rating they may
+   * see, and someone else's rating of the same tester does not use up their
+   * turn.
+   */
+  const ratedByMe = new Set(
+    (projectRatings ?? [])
+      .filter((r) => r.author?.id === sessionUser.id && r.subjectUser?.id)
+      .map((r) => r.subjectUser!.id),
+  )
+
+  /** Mirrors `assertWorkedTogether` on the API: an invitation is not work. */
+  const RATEABLE = new Set(['ACTIVE', 'COMPLETED'])
+
+  // The assignment the rating dialog is open for, if any.
+  const ratingTarget = resolvedSearchParams.rate
+    ? project.assignments.find((a) => a.tester.id === resolvedSearchParams.rate)
+    : undefined
+
   const testerColumns: readonly TableColumn<ProjectDetail['assignments'][number]>[] = [
     {
       key: 'tester',
@@ -377,6 +443,38 @@ export default async function CustomerProjectDetailPage({
           : row.respondedAt
             ? `Responded ${formatDate(row.respondedAt)}`
             : undefined,
+    },
+    /**
+     * Rating the work, from the work.
+     *
+     * The other entry point is the tester's own profile; both post through
+     * `rateTesterAction` to the same endpoint, so there is one rating system
+     * with two doors rather than two implementations to keep in step.
+     *
+     * Hidden where the API would refuse it — already rated, or an invitation
+     * never taken up — so this is never a button whose only outcome is an
+     * error. `interactive` keeps the cell out of the row's own link.
+     */
+    {
+      key: 'rate',
+      header: '',
+      align: 'right',
+      interactive: true,
+      render: (row) =>
+        ratedByMe.has(row.tester.id) ? (
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+            Rated
+          </span>
+        ) : RATEABLE.has(row.status) ? (
+          <Button
+            href={`${detailPath}?section=testers&buildId=${activeBuildId}&rate=${row.tester.id}`}
+            variant="ghost"
+            size="sm"
+            iconLeft="star"
+          >
+            Rate
+          </Button>
+        ) : null,
     },
   ]
 
@@ -1822,6 +1920,62 @@ export default async function CustomerProjectDetailPage({
               </SubmitButton>
             </div>
           </TrackedForm>
+        </Modal>
+      ) : null}
+
+      {/* ── Rate a tester on this project ────────────────────────────────
+          Opened by ?rate=<testerUserId> from the Testers table. `returnTo`
+          brings the person back here rather than to the tester's profile,
+          which is where the same action's other caller starts from. */}
+      {ratingTarget ? (
+        <Modal
+          open
+          closedHref={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+          title={`Rate ${personName(ratingTarget.tester)}`}
+        >
+          <form action={rateTesterAction} style={stackStyle}>
+            <input type="hidden" name="subjectUserId" value={ratingTarget.tester.id} />
+            <input
+              type="hidden"
+              name="testerProfileId"
+              value={ratingTarget.tester.testerProfile?.id ?? ''}
+            />
+            <input type="hidden" name="projectId" value={project.id} />
+            <input
+              type="hidden"
+              name="returnTo"
+              value={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+            />
+
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              For their work on {project.reference} · {project.title}.
+            </p>
+
+            <Field label="Score" htmlFor="rating-score" required hint="1 is poor, 5 is excellent.">
+              <Select
+                id="rating-score"
+                name="score"
+                required
+                defaultValue="5"
+                options={[5, 4, 3, 2, 1].map((n) => ({
+                  value: String(n),
+                  label: `${n} — ${RATING_SCORE_LABEL[n]}`,
+                }))}
+              />
+            </Field>
+            <Field
+              label="Comment"
+              htmlFor="rating-comment"
+              hint="Optional. Shared with the tester."
+            >
+              <Textarea id="rating-comment" name="comment" rows={4} maxLength={2000} />
+            </Field>
+            <div>
+              <SubmitButton variant="primary" pendingLabel="Saving…">
+                Submit rating
+              </SubmitButton>
+            </div>
+          </form>
         </Modal>
       ) : null}
 

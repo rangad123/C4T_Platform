@@ -102,6 +102,21 @@ export interface ProjectBuild {
   createdAt: string
 }
 
+/**
+ * A rating already left on this project — `GET /v1/ratings?projectId=…`.
+ *
+ * The list carries every rating the caller may see, not only their own, so
+ * `author.id` is what decides whether the "Rate" control is offered: one
+ * author rates one subject once per project, and the API enforces that
+ * regardless of what the page shows.
+ */
+export interface ProjectRatingRow {
+  id: string
+  score: number
+  author: { id: string } | null
+  subjectUser: { id: string } | null
+}
+
 export interface ProjectManagerRow {
   assignedAt: string
   manager: ProjectPerson & { role: string }
