@@ -446,6 +446,7 @@ export default async function ProjectDetailPage({
   const RATEABLE_ASSIGNMENTS = new Set(['ACTIVE', 'COMPLETED'])
 
   const canRate = hasPermission(user, 'rating.write')
+  const canReadTesters = hasPermission(user, 'tester.read')
 
   const ratingTarget =
     canRate && resolvedSearchParams.rate
@@ -1543,6 +1544,21 @@ export default async function ProjectDetailPage({
               columns={assignmentColumns}
               rows={project.assignments}
               rowKey={(row) => row.tester.id}
+              /*
+                Straight to the tester's record, as the customer portal's own
+                roster already does.
+
+                Two reasons a row stays unlinked. `testerProfile` is nullable
+                and the route resolves a TesterProfile id, so linking with the
+                user id would 404 on every row. And the destination needs
+                tester.read: offering a link that only bounces the reader back
+                is worse than not offering one.
+              */
+              rowHref={(row) =>
+                canReadTesters && row.tester.testerProfile
+                  ? `/app/admin/testers/${row.tester.testerProfile.id}`
+                  : ''
+              }
               style={bareTableStyle}
               emptyState={
                 <div style={{ padding: 'var(--space-6)' }}>
