@@ -1,11 +1,17 @@
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
+import { InboxList } from '@/components/admin/InboxList'
+import { MarkReadOnView } from '@/components/admin/MarkReadOnView'
+import {
+  buildInboxItems,
+  loadBroadcastReads,
+  type InboxAnnouncement,
+} from '@/lib/communication/inbox'
 import { loadList } from '@/lib/admin/list'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Panel } from '@/components/admin/Panel'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
-import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
@@ -57,6 +63,12 @@ interface ThreadRow {
   project: { id: string; reference: string; title: string } | null
   createdBy: { id: string; firstName: string | null; lastName: string | null; role: string } | null
   participants: readonly {
+    /**
+     * When this participant last opened the thread. The API has always sent
+     * it; this shape never declared it, so the list could not tell a thread
+     * with something new in it from one already read.
+     */
+    lastReadAt: string | null
     user: { id: string; firstName: string | null; lastName: string | null; role: string }
   }[]
   _count: { messages: number }
@@ -89,12 +101,17 @@ interface ProjectDetailContacts {
 export default async function CustomerCommunicationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ thread?: string; projectId?: string; notice?: string }>
+  searchParams: Promise<{
+    thread?: string
+    announcement?: string
+    projectId?: string
+    notice?: string
+  }>
 }) {
-  await requireRole(['CUSTOMER'])
-  const { thread: threadId, projectId, notice } = await searchParams
+  const viewer = await requireRole(['CUSTOMER'])
+  const { thread: threadId, announcement: announcementId, projectId, notice } = await searchParams
 
-  const [threadsResult, projectsResult] = await Promise.all([
+  const [threadsResult, projectsResult, announcementsResult, reads] = await Promise.all([
     loadList<ThreadRow>('communication/threads', {
       page: 1,
       limit: 50,
@@ -105,10 +122,30 @@ export default async function CustomerCommunicationPage({
       limit: 100,
       query: { sort: 'title', order: 'asc' },
     }),
+    /**
+     * Platform-wide announcements share this inbox — see `buildInboxItems`
+     * for why. Project-scoped ones are filtered out there: they belong to
+     * the build they are about, not to a flat list.
+     */
+    loadList<InboxAnnouncement>('communication/announcements', { page: 1, limit: 50 }),
+    loadBroadcastReads(),
   ])
 
   const threads = 'items' in threadsResult ? threadsResult.items : []
   const projects = 'items' in projectsResult ? projectsResult.items : []
+  const announcements = 'items' in announcementsResult ? announcementsResult.items : []
+
+  const inboxItems = buildInboxItems({
+    basePath: BASE,
+    viewerId: viewer.id,
+    threads,
+    announcements,
+    reads,
+  })
+
+  const openAnnouncement = announcementId
+    ? (announcements.find((a) => a.id === announcementId) ?? null)
+    : null
 
   /**
    * The open thread, and the contacts for whichever project a new thread would
@@ -134,6 +171,37 @@ export default async function CustomerCommunicationPage({
       subtitle="Conversations with the Crowd4Test team about your projects."
     >
       <Notice code={notice} notices={NOTICES} />
+
+      {/* ── An open announcement ─────────────────────────────────────────
+          A broadcast has no reply, so it is a panel and not a conversation.
+          Opening it is what marks it read — see `MarkReadOnView` for why the
+          write happens on display rather than during the render. */}
+      {openAnnouncement ? (
+        <>
+          <MarkReadOnView
+            notificationId={reads.notificationIdFor.get(openAnnouncement.id) ?? null}
+          />
+          <Panel
+            title={openAnnouncement.title}
+            description={`From ${
+              openAnnouncement.author ? personName(openAnnouncement.author) : 'Crowd4Test'
+            }${
+              openAnnouncement.publishedAt
+                ? ` · ${formatDateTime(openAnnouncement.publishedAt)}`
+                : ''
+            }`}
+            actions={
+              <Button href={BASE} variant="secondary" size="sm" iconLeft="arrow-left">
+                Back to inbox
+              </Button>
+            }
+          >
+            <p style={{ margin: 0, whiteSpace: 'pre-wrap', maxWidth: '70ch' }}>
+              {openAnnouncement.body}
+            </p>
+          </Panel>
+        </>
+      ) : null}
 
       {/* ── An open conversation ──────────────────────────────────────── */}
       {threadId ? (
@@ -241,71 +309,19 @@ export default async function CustomerCommunicationPage({
       ) : (
         <>
           {/* ── The list ───────────────────────────────────────────────── */}
-          <Panel title="Conversations" description="Most recently active first.">
-            {threads.length === 0 ? (
+          <Panel
+            title="Inbox"
+            description="Conversations and platform announcements, newest first."
+            flush={inboxItems.length > 0}
+          >
+            {inboxItems.length === 0 ? (
               <EmptyState
                 icon="message-square"
-                title="No conversations yet"
-                description="Start one below when you need to reach the team about a project."
+                title="Nothing here yet"
+                description="Conversations you start and announcements we send both arrive here."
               />
             ) : (
-              <ul
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 'var(--space-3)',
-                }}
-              >
-                {threads.map((row) => (
-                  <li key={row.id}>
-                    <a
-                      href={`${BASE}?thread=${row.id}`}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 'var(--space-4)',
-                        flexWrap: 'wrap',
-                        padding: 'var(--space-4)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-card)',
-                        textDecoration: 'none',
-                        color: 'inherit',
-                      }}
-                    >
-                      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                        <span
-                          style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-primary)' }}
-                        >
-                          {row.subject ?? titleCase(row.type)}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 'var(--type-body-sm-size)',
-                            color: 'var(--text-secondary)',
-                          }}
-                        >
-                          {row.project ? `${row.project.reference} · ` : ''}
-                          {row._count.messages} message{row._count.messages === 1 ? '' : 's'}
-                          {row.lastMessageAt ? ` · ${formatDateTime(row.lastMessageAt)}` : ''}
-                        </span>
-                      </span>
-                      {row.isClosed ? (
-                        <Badge tone="neutral" uppercase={false}>
-                          Closed
-                        </Badge>
-                      ) : (
-                        <Badge tone="success" uppercase={false}>
-                          Open
-                        </Badge>
-                      )}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+              <InboxList items={inboxItems} />
             )}
           </Panel>
 

@@ -34,8 +34,17 @@ const TESTER_SECTIONS: readonly SidebarSection[] = [
   {
     label: 'Updates',
     links: [
+      /*
+       * Announcements is deliberately not here.
+       *
+       * A build-scoped announcement belongs to the build it is about, and is
+       * read at Project → Build → Announcements. A platform-wide one is
+       * broadcast, which is what Communications is for, and appears in that
+       * inbox alongside the conversations. Neither wanted a flat global feed
+       * of its own, which showed both kinds stripped of the context that made
+       * them mean anything.
+       */
       { href: '/app/tester/communication', label: 'Communication', icon: 'message-square' },
-      { href: '/app/tester/announcements', label: 'Announcements', icon: 'megaphone' },
     ],
   },
   {

@@ -155,3 +155,36 @@ export function searchTerm(value: string | undefined | null): string | undefined
 export function hasFilter(values: readonly unknown[]): boolean {
   return values.some((v) => Boolean(v))
 }
+
+/**
+ * A timestamp as an inbox shows it: time for today, weekday within the last
+ * week, then a date. The full value is never what someone is after in a list
+ * — they want "is this new" — and a full date on every row is noise that
+ * pushes the subject out of view.
+ */
+export function formatInboxTime(value: string | null | undefined): string {
+  if (!value) return ''
+  const then = new Date(value)
+  if (Number.isNaN(then.getTime())) return ''
+
+  const now = new Date()
+  const sameDay =
+    then.getFullYear() === now.getFullYear() &&
+    then.getMonth() === now.getMonth() &&
+    then.getDate() === now.getDate()
+
+  if (sameDay) {
+    return then.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const daysAgo = (now.getTime() - then.getTime()) / 86_400_000
+  if (daysAgo >= 0 && daysAgo < 7) {
+    return then.toLocaleDateString('en-GB', { weekday: 'short' })
+  }
+
+  return then.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(then.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  })
+}

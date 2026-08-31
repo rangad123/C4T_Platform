@@ -397,8 +397,15 @@ async function announcementRecipients(announcement: {
  * A platform-wide one has no project to point at and goes to the reader's
  * announcements list instead.
  */
-function announcementLink(announcement: { projectId: string | null; buildId: string | null }) {
-  if (!announcement.projectId) return '/app/announcements'
+function announcementLink(announcement: {
+  id: string
+  projectId: string | null
+  buildId: string | null
+}) {
+  // Platform-wide announcements are broadcast, and broadcast is what the
+  // Communications inbox holds — there is no global announcements feed to
+  // send anyone to.
+  if (!announcement.projectId) return `/app/communication?announcement=${announcement.id}`
   const params = new URLSearchParams({ section: 'announcements' })
   if (announcement.buildId) params.set('buildId', announcement.buildId)
   return `/app/projects/${announcement.projectId}?${params.toString()}`
