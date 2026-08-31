@@ -522,6 +522,28 @@ export default async function CustomerProjectDetailPage({
     },
   ]
 
+  /**
+   * What the brief shows: only what Build details does not.
+   *
+   * Window, target countries, target languages and testing instructions used
+   * to appear here AND on Build details. They are not two facts that happen
+   * to agree — the wizard writes the same answers to the project and to its
+   * first build, so the two panels restated one input, and after a build was
+   * edited they disagreed with no way to tell which one governed. The build's
+   * copy is the one that governs: it is what the tester's project page reads
+   * and what each test cycle actually runs to.
+   *
+   * So the brief keeps what is true of the project and nothing else — who it
+   * is, where it is in its lifecycle, the platforms in scope, and the ask.
+   * `summary` carries the same text the removed instructions did, because the
+   * wizard fills both from one field, so nothing readable is lost.
+   *
+   * The project's own columns are untouched and still edited by "Edit the
+   * brief" — they feed the tester-facing project window and the admin CSV
+   * export. That modal already sets several things this list does not show
+   * (title, max testers, bug visibility); this is the same split, not a new
+   * one.
+   */
   const overview: DescriptionItem[] = [
     { label: 'Reference', value: <Mono>{project.reference}</Mono> },
     { label: 'Priority', value: titleCase(project.priority) },
@@ -530,25 +552,11 @@ export default async function CustomerProjectDetailPage({
     { label: 'Submitted', value: formatDate(project.submittedAt) },
     { label: 'Approved', value: formatDate(project.approvedAt) },
     { label: 'Completed', value: formatDate(project.completedAt) },
-    {
-      label: 'Window',
-      value: `${formatDate(project.startDate)} to ${formatDate(project.endDate)}`,
-    },
     { label: 'Platform targets', value: <TokenList values={project.platformTargets} /> },
-    { label: 'Target countries', value: <TokenList values={project.targetCountries} /> },
-    {
-      label: 'Target languages',
-      value: <TokenList values={project.targetLanguages} uppercase={false} />,
-    },
     {
       label: 'Summary',
       wide: true,
       value: project.summary ? <Prose>{project.summary}</Prose> : '',
-    },
-    {
-      label: 'Testing instructions',
-      wide: true,
-      value: project.instructions ? <Prose>{project.instructions}</Prose> : '',
     },
   ]
 
@@ -912,11 +920,13 @@ export default async function CustomerProjectDetailPage({
 
           {/* ── Project brief ─────────────────────────────────────────────
               Kept on the Dashboard rather than moved into Build details:
-              these are project-level facts (scope, window, targets), and
-              filing them under a single build would misattribute them. */}
+              these are facts about the project itself, and filing them under
+              a single build would misattribute them. Anything that varies
+              per test cycle lives on Build details instead — see `overview`
+              for what was removed from here and why. */}
           <Panel
             title="Project brief"
-            description="What you asked for, and the window it runs in."
+            description="The project itself. Anything that changes per test cycle is in Build details."
             actions={
               capabilities.canUpdate ? (
                 <Button
