@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { LeadStatus, Role, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
+import { searchTerms } from '../../lib/search.js'
 import { param } from '../../lib/http.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission } from '../../middleware/authorize.js'
@@ -159,14 +160,17 @@ leadsRouter.get(
       // Spam is excluded unless explicitly asked for. It is kept for tuning the
       // filter, not for reading every morning.
       ...(query.status ? { status: query.status } : { status: { not: LeadStatus.SPAM } }),
-      ...(query.search
+      /** Every term must match some column — see `searchTerms`. */
+      ...(searchTerms(query.search).length > 0
         ? {
-            OR: [
-              { firstName: { contains: query.search, mode: 'insensitive' } },
-              { lastName: { contains: query.search, mode: 'insensitive' } },
-              { email: { contains: query.search, mode: 'insensitive' } },
-              { company: { contains: query.search, mode: 'insensitive' } },
-            ],
+            AND: searchTerms(query.search).map((term) => ({
+              OR: [
+                { firstName: { contains: term, mode: 'insensitive' as const } },
+                { lastName: { contains: term, mode: 'insensitive' as const } },
+                { email: { contains: term, mode: 'insensitive' as const } },
+                { company: { contains: term, mode: 'insensitive' as const } },
+              ],
+            })),
           }
         : {}),
     }

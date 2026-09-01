@@ -1,5 +1,6 @@
 import { type Prisma, Role, UserStatus, TesterStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
+import { searchTerms } from '../../lib/search.js'
 import { hashPassword } from '../../lib/password.js'
 import { NotFoundError, BadRequestError, ConflictError, ForbiddenError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
@@ -28,13 +29,20 @@ export async function listUsers(query: ListUsersQuery) {
     deletedAt: null,
     ...(query.role ? { role: query.role } : {}),
     ...(query.status ? { status: query.status } : {}),
-    ...(query.search
+    /**
+     * Every TERM must match some column, rather than the whole string
+     * matching one. A name lives across firstName and lastName, so searching
+     * one — the obvious thing to type — matched nothing before this.
+     */
+    ...(searchTerms(query.search).length > 0
       ? {
-          OR: [
-            { email: { contains: query.search, mode: 'insensitive' } },
-            { firstName: { contains: query.search, mode: 'insensitive' } },
-            { lastName: { contains: query.search, mode: 'insensitive' } },
-          ],
+          AND: searchTerms(query.search).map((term) => ({
+            OR: [
+              { email: { contains: term, mode: 'insensitive' as const } },
+              { firstName: { contains: term, mode: 'insensitive' as const } },
+              { lastName: { contains: term, mode: 'insensitive' as const } },
+            ],
+          })),
         }
       : {}),
   }
@@ -65,13 +73,20 @@ export async function exportUsersCSV(query: ListUsersQuery): Promise<string> {
     deletedAt: null,
     ...(query.role ? { role: query.role } : {}),
     ...(query.status ? { status: query.status } : {}),
-    ...(query.search
+    /**
+     * Every TERM must match some column, rather than the whole string
+     * matching one. A name lives across firstName and lastName, so searching
+     * one — the obvious thing to type — matched nothing before this.
+     */
+    ...(searchTerms(query.search).length > 0
       ? {
-          OR: [
-            { email: { contains: query.search, mode: 'insensitive' } },
-            { firstName: { contains: query.search, mode: 'insensitive' } },
-            { lastName: { contains: query.search, mode: 'insensitive' } },
-          ],
+          AND: searchTerms(query.search).map((term) => ({
+            OR: [
+              { email: { contains: term, mode: 'insensitive' as const } },
+              { firstName: { contains: term, mode: 'insensitive' as const } },
+              { lastName: { contains: term, mode: 'insensitive' as const } },
+            ],
+          })),
         }
       : {}),
   }

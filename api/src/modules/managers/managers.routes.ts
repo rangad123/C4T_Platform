@@ -3,6 +3,7 @@ import { param } from '../../lib/http.js'
 import { z } from 'zod'
 import { Role } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
+import { searchTerms } from '../../lib/search.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission } from '../../middleware/authorize.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
@@ -43,13 +44,16 @@ managersRouter.get('/', validate({ query: listQuery }), async (_req, res) => {
   const where = {
     role: { in: [Role.ADMIN, Role.SUB_ADMIN] },
     deletedAt: null,
-    ...(query.search
+    /** Every term must match some column — see `searchTerms`. */
+    ...(searchTerms(query.search).length > 0
       ? {
-          OR: [
-            { email: { contains: query.search, mode: 'insensitive' as const } },
-            { firstName: { contains: query.search, mode: 'insensitive' as const } },
-            { lastName: { contains: query.search, mode: 'insensitive' as const } },
-          ],
+          AND: searchTerms(query.search).map((term) => ({
+            OR: [
+              { email: { contains: term, mode: 'insensitive' as const } },
+              { firstName: { contains: term, mode: 'insensitive' as const } },
+              { lastName: { contains: term, mode: 'insensitive' as const } },
+            ],
+          })),
         }
       : {}),
   }
@@ -85,13 +89,16 @@ managersRouter.get('/export.csv', validate({ query: listQuery }), async (_req, r
   const where = {
     role: { in: [Role.ADMIN, Role.SUB_ADMIN] },
     deletedAt: null,
-    ...(query.search
+    /** Every term must match some column — see `searchTerms`. */
+    ...(searchTerms(query.search).length > 0
       ? {
-          OR: [
-            { email: { contains: query.search, mode: 'insensitive' as const } },
-            { firstName: { contains: query.search, mode: 'insensitive' as const } },
-            { lastName: { contains: query.search, mode: 'insensitive' as const } },
-          ],
+          AND: searchTerms(query.search).map((term) => ({
+            OR: [
+              { email: { contains: term, mode: 'insensitive' as const } },
+              { firstName: { contains: term, mode: 'insensitive' as const } },
+              { lastName: { contains: term, mode: 'insensitive' as const } },
+            ],
+          })),
         }
       : {}),
   }

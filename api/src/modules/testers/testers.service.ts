@@ -1,5 +1,6 @@
 import { type Prisma, BugStatus, TesterStatus, Role, UserStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
+import { searchTerms } from '../../lib/search.js'
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import {
@@ -89,20 +90,30 @@ export async function listTesters(query: ListTestersQuery) {
     ...(query.minRating !== undefined ? { ratingAverage: { gte: query.minRating } } : {}),
     ...(query.deviceType ? { devices: { some: { type: query.deviceType } } } : {}),
     ...(query.languages?.length ? { languages: { some: { code: { in: query.languages } } } } : {}),
-    // Every requested skill must be present, so one AND clause per slug.
-    ...(query.skills?.length
-      ? { AND: query.skills.map((slug) => ({ skills: { some: { skill: { slug } } } })) }
-      : {}),
-    ...(query.search
-      ? {
+    /**
+     * Skills and search share one AND, because an object cannot carry the key
+     * twice — the second would silently replace the first and drop whichever
+     * filter lost.
+     *
+     * One clause per skill, since every requested skill must be present. One
+     * clause per search TERM, since every term must match some column: that
+     * is what lets "devi madduri" find a person whose name is split across
+     * two columns, in either order.
+     */
+    ...(() => {
+      const and: Prisma.TesterProfileWhereInput[] = [
+        ...(query.skills ?? []).map((slug) => ({ skills: { some: { skill: { slug } } } })),
+        ...searchTerms(query.search).map((term) => ({
           OR: [
-            { user: { email: { contains: query.search, mode: 'insensitive' } } },
-            { user: { firstName: { contains: query.search, mode: 'insensitive' } } },
-            { user: { lastName: { contains: query.search, mode: 'insensitive' } } },
-            { headline: { contains: query.search, mode: 'insensitive' } },
+            { user: { email: { contains: term, mode: 'insensitive' as const } } },
+            { user: { firstName: { contains: term, mode: 'insensitive' as const } } },
+            { user: { lastName: { contains: term, mode: 'insensitive' as const } } },
+            { headline: { contains: term, mode: 'insensitive' as const } },
           ],
-        }
-      : {}),
+        })),
+      ]
+      return and.length > 0 ? { AND: and } : {}
+    })(),
   }
 
   const [items, total] = await Promise.all([
@@ -131,19 +142,30 @@ export async function exportTestersCSV(query: ListTestersQuery): Promise<string>
     ...(query.minRating !== undefined ? { ratingAverage: { gte: query.minRating } } : {}),
     ...(query.deviceType ? { devices: { some: { type: query.deviceType } } } : {}),
     ...(query.languages?.length ? { languages: { some: { code: { in: query.languages } } } } : {}),
-    ...(query.skills?.length
-      ? { AND: query.skills.map((slug) => ({ skills: { some: { skill: { slug } } } })) }
-      : {}),
-    ...(query.search
-      ? {
+    /**
+     * Skills and search share one AND, because an object cannot carry the key
+     * twice — the second would silently replace the first and drop whichever
+     * filter lost.
+     *
+     * One clause per skill, since every requested skill must be present. One
+     * clause per search TERM, since every term must match some column: that
+     * is what lets "devi madduri" find a person whose name is split across
+     * two columns, in either order.
+     */
+    ...(() => {
+      const and: Prisma.TesterProfileWhereInput[] = [
+        ...(query.skills ?? []).map((slug) => ({ skills: { some: { skill: { slug } } } })),
+        ...searchTerms(query.search).map((term) => ({
           OR: [
-            { user: { email: { contains: query.search, mode: 'insensitive' } } },
-            { user: { firstName: { contains: query.search, mode: 'insensitive' } } },
-            { user: { lastName: { contains: query.search, mode: 'insensitive' } } },
-            { headline: { contains: query.search, mode: 'insensitive' } },
+            { user: { email: { contains: term, mode: 'insensitive' as const } } },
+            { user: { firstName: { contains: term, mode: 'insensitive' as const } } },
+            { user: { lastName: { contains: term, mode: 'insensitive' as const } } },
+            { headline: { contains: term, mode: 'insensitive' as const } },
           ],
-        }
-      : {}),
+        })),
+      ]
+      return and.length > 0 ? { AND: and } : {}
+    })(),
   }
 
   const items = await prisma.testerProfile.findMany({
