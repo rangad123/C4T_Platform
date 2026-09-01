@@ -2,7 +2,6 @@ import type { Request, Response } from 'express'
 import { param } from '../../lib/http.js'
 import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
-import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './bugs.service.js'
 import type { ListBugsQuery } from './bugs.schema.js'
 
@@ -25,19 +24,6 @@ export async function list(req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListBugsQuery>(res)
   const { items, meta } = await service.listBugs(req.user!, query)
   res.json({ data: items, meta })
-}
-
-/**
- * CSV export. Same query params as `list` minus pagination — the export is
- * the full filtered set. Access scope is enforced by the service, never
- * bypassed here.
- */
-export async function exportCsv(req: Request, res: Response): Promise<void> {
-  const query = validatedQuery<ListBugsQuery>(res)
-  const csv = await service.exportBugsCSV(req.user!, query)
-  res.setHeader('content-type', 'text/csv; charset=utf-8')
-  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('bugs')}"`)
-  res.send(csv)
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {

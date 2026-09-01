@@ -2,7 +2,6 @@ import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
-import { Button } from '@/components/ds/core/Button'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, formatMoney, hasFilter, personName, titleCase } from '@/lib/admin/format'
@@ -46,20 +45,6 @@ type Category = Exclude<(typeof SECTIONS)[number]['value'], 'all'>
 
 function isCategory(value: string): value is Category {
   return value === 'indian' || value === 'international' || value === 'pending'
-}
-
-/**
- * Build the CSV export URL for the current filter set. Goes through the
- * catch-all Route Handler at `/app/admin/export/[...path]` so the export
- * stays same-origin (the route streams from the API on behalf of the browser).
- */
-function buildExportHref(filters: Record<string, string | undefined>): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value)
-  }
-  const qs = params.toString()
-  return qs ? `/app/admin/export/transactions?${qs}` : '/app/admin/export/transactions'
 }
 
 interface TransactionRow {
@@ -391,14 +376,6 @@ export default async function TransactionsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Button
-            href={buildExportHref(apiQuery)}
-            prefetch={false}
-            variant="secondary"
-            iconLeft="download"
-          >
-            Export CSV
-          </Button>
         </div>
       }
       summary={

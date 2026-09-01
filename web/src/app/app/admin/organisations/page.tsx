@@ -37,25 +37,6 @@ interface OrganisationRow {
 }
 
 /**
- * Build the CSV export URL for the current filter set. Goes through the
- * catch-all Route Handler at `/app/admin/export/[...path]` so the export
- * stays same-origin (the route streams from the API on behalf of the browser).
- */
-function buildExportHref(filters: {
-  status?: string
-  search?: string
-  sort?: string
-  order?: string
-}): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value)
-  }
-  const qs = params.toString()
-  return qs ? `/app/admin/export/organisations?${qs}` : '/app/admin/export/organisations'
-}
-
-/**
  * `/app/admin/organisations` — every customer organisation on the platform.
  *
  * The API scopes this list by caller rather than by permission: an admin sees
@@ -193,14 +174,6 @@ export default async function OrganisationsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Button
-            href={buildExportHref({ status, search, sort, order })}
-            prefetch={false}
-            variant="secondary"
-            iconLeft="download"
-          >
-            Export CSV
-          </Button>
           <Button href="/app/admin/organisations/new" variant="primary" iconLeft="plus">
             New organisation
           </Button>

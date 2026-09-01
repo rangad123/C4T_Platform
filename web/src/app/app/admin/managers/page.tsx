@@ -1,7 +1,6 @@
 import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
-import { Button } from '@/components/ds/core/Button'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { personName, searchTerm, hasFilter } from '@/lib/admin/format'
@@ -18,20 +17,6 @@ const SORT_OPTIONS = [
   { value: 'status', label: 'Status' },
 ] as const
 const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
-
-/**
- * Build the CSV export URL for the current filter set. Goes through the
- * catch-all Route Handler at `/app/admin/export/[...path]` so the export
- * stays same-origin (the route streams from the API on behalf of the browser).
- */
-function buildExportHref(filters: { search?: string; sort?: string; order?: string }): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value)
-  }
-  const qs = params.toString()
-  return qs ? `/app/admin/export/managers?${qs}` : '/app/admin/export/managers'
-}
 
 /**
  * The manager list is the API's "users with role ADMIN or SUB_ADMIN" view.
@@ -131,14 +116,6 @@ export default async function ManagersPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Button
-            href={buildExportHref({ search, sort, order })}
-            prefetch={false}
-            variant="secondary"
-            iconLeft="download"
-          >
-            Export CSV
-          </Button>
         </div>
       }
     />

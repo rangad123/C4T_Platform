@@ -47,12 +47,6 @@ projectsRouter.get(
 // ─── Shared list/detail — the service scopes results by role ─────────────────
 
 projectsRouter.get('/', validate({ query: listProjectsQuery }), controller.list)
-/**
- * CSV export — declared before "/:id" so "export.csv" is not consumed as an
- * id with a dot in it. The query schema is the same shape as the list
- * endpoint, minus pagination.
- */
-projectsRouter.get('/export.csv', validate({ query: listProjectsQuery }), controller.exportCsv)
 projectsRouter.get(
   '/:id',
   validate({ params: projectIdParam, query: projectBuildQuery }),

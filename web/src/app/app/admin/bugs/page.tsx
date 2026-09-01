@@ -2,7 +2,6 @@ import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { CountryFlag } from '@/components/admin/CountryFlag'
 import { ListFilters } from '@/components/admin/ListFilters'
-import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
 import { Select } from '@/components/ds/forms/Select'
@@ -35,32 +34,6 @@ const SORT_OPTIONS = [
   { value: 'reference', label: 'Reference' },
 ] as const
 const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
-
-/**
- * Build the CSV export URL for the current filter set. Goes through the
- * catch-all Route Handler at `/app/admin/export/[...path]` so the export
- * stays same-origin (the route streams from the API on behalf of the browser).
- *
- * Empty/undefined values are dropped so the link does not carry `?status=`
- * placeholders into the export — the API treats an empty query param as
- * "no filter applied" anyway, but a clean URL is easier to bookmark.
- */
-function buildExportHref(filters: {
-  status?: string
-  severity?: string
-  type?: string
-  search?: string
-  projectId?: string
-  sort?: string
-  order?: string
-}): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value)
-  }
-  const qs = params.toString()
-  return qs ? `/app/admin/export/bugs?${qs}` : '/app/admin/export/bugs'
-}
 
 /** Independent of severity/status — what kind of defect this is. */
 export const BUG_TYPES = [
@@ -304,14 +277,6 @@ export default async function BugsPage({
                 }}
               />
             </div>
-            <Button
-              href={buildExportHref({ status, severity, type, search, projectId, sort, order })}
-              prefetch={false}
-              variant="secondary"
-              iconLeft="download"
-            >
-              Export CSV
-            </Button>
           </div>
 
           {/*

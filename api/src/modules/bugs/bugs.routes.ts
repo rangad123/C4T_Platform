@@ -29,12 +29,6 @@ export const bugsRouter = Router()
 bugsRouter.use(authenticate)
 
 bugsRouter.get('/', validate({ query: listBugsQuery }), controller.list)
-/**
- * CSV export — declared before `/:id` so "export.csv" is not consumed as an
- * id with a dot in it. The query schema is the same shape as the list
- * endpoint, minus pagination.
- */
-bugsRouter.get('/export.csv', validate({ query: listBugsQuery }), controller.exportCsv)
 bugsRouter.get('/:id', validate({ params: bugIdParam }), controller.getOne)
 
 /** Creating requires an active assignment — enforced in the service. */

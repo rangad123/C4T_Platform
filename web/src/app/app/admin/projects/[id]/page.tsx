@@ -679,21 +679,6 @@ export default async function ProjectDetailPage({
                 >
                   New build
                 </Button>
-                {/*
-                  Up here with the other build controls rather than at the
-                  foot of Build details. It exports the SELECTED build, so it
-                  belongs with the picker that selects it — and from the
-                  bottom of one tab it was invisible from the other six.
-                */}
-                <Button
-                  href={`/app/admin/export/reports/by-build/${activeBuildId}/export.csv`}
-                  prefetch={false}
-                  variant="secondary"
-                  size="sm"
-                  iconLeft="download"
-                >
-                  Download report
-                </Button>
               </>
             ) : null}
           </div>

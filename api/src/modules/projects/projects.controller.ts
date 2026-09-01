@@ -3,7 +3,6 @@ import { param } from '../../lib/http.js'
 import { type AssignmentStatus } from '@prisma/client'
 import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
-import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './projects.service.js'
 import type { ListProjectsQuery } from './projects.schema.js'
 
@@ -11,15 +10,6 @@ export async function list(req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListProjectsQuery>(res)
   const { items, meta } = await service.listProjects(req.user!, query)
   res.json({ data: items, meta })
-}
-
-/** CSV export — same filters as `list`, no pagination. Access scope via the service. */
-export async function exportCsv(req: Request, res: Response): Promise<void> {
-  const query = validatedQuery<ListProjectsQuery>(res)
-  const csv = await service.exportProjectsCSV(req.user!, query)
-  res.setHeader('content-type', 'text/csv; charset=utf-8')
-  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('projects')}"`)
-  res.send(csv)
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {

@@ -9,25 +9,20 @@ import { param } from '../../lib/http.js'
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors.js'
 import { projectRelations } from '../../lib/access/relations.js'
 import { authorize } from '../../lib/access/policy.js'
-import { timestampedFilename } from '../../lib/csv.js'
-import * as bugsService from '../bugs/bugs.service.js'
 import * as testingService from '../testing/testing.service.js'
 
 /**
  * The Reports module — §15-21 of the platform UX brief.
  *
- * Deliberately NOT a second report engine: every CSV here is
- * `bugsService.exportBugsCSV` with a different `where`, and every JSON
- * "view" is either `testingService.buildSummary` (by build) or the same
- * shape computed across a wider scope (by project / date / build range).
+ * Deliberately NOT a second report engine: every JSON "view" is either
+ * `testingService.buildSummary` (by build) or the same shape computed
+ * across a wider scope (by project / date / build range).
  * The brief is explicit about this — "if the application already has
  * report-generation infrastructure, reuse it."
  */
 export const reportsRouter = Router()
 
 reportsRouter.use(authenticate)
-
-const bugQueryDefaults = { page: 1, limit: 1, order: 'desc' as const }
 
 async function assertProjectReportAccess(
   user: Express.AuthenticatedUser,
@@ -141,25 +136,6 @@ reportsRouter.get(
   },
 )
 
-reportsRouter.get(
-  '/by-project/:projectId/export.csv',
-  validate({ params: projectIdParam }),
-  async (req, res) => {
-    const projectId = param(req, 'projectId')
-    await assertProjectReportAccess(req.user!, projectId)
-    const csv = await bugsService.exportBugsCSV(req.user!, {
-      ...bugQueryDefaults,
-      projectId,
-    })
-    res.setHeader('content-type', 'text/csv; charset=utf-8')
-    res.setHeader(
-      'content-disposition',
-      `attachment; filename="${timestampedFilename('report-by-project')}"`,
-    )
-    res.send(csv)
-  },
-)
-
 // ─── By build ────────────────────────────────────────────────────────────────
 
 const buildIdParam = z.object({ buildId: z.string().cuid() })
@@ -179,26 +155,6 @@ reportsRouter.get('/by-build/:buildId', validate({ params: buildIdParam }), asyn
   await loadBuildForReport(req.user!, buildId)
   res.json({ data: await testingService.buildSummary(req.user!, buildId) })
 })
-
-/** Also the Build page's "Download report" action — one endpoint, two entry points. */
-reportsRouter.get(
-  '/by-build/:buildId/export.csv',
-  validate({ params: buildIdParam }),
-  async (req, res) => {
-    const buildId = param(req, 'buildId')
-    await loadBuildForReport(req.user!, buildId)
-    const csv = await bugsService.exportBugsCSV(req.user!, {
-      ...bugQueryDefaults,
-      buildId,
-    })
-    res.setHeader('content-type', 'text/csv; charset=utf-8')
-    res.setHeader(
-      'content-disposition',
-      `attachment; filename="${timestampedFilename('report-by-build')}"`,
-    )
-    res.send(csv)
-  },
-)
 
 // ─── By date ─────────────────────────────────────────────────────────────────
 //
@@ -252,23 +208,6 @@ reportsRouter.get('/by-date', validate({ query: dateRangeQuery }), async (req, r
   })
 })
 
-reportsRouter.get('/by-date/export.csv', validate({ query: dateRangeQuery }), async (req, res) => {
-  if (!isAdminSide(req.user!))
-    throw new ForbiddenError('Only the platform side can report across every project')
-  const { startDate, endDate } = validatedQuery<z.infer<typeof dateRangeQuery>>(res)
-  const csv = await bugsService.exportBugsCSV(req.user!, {
-    ...bugQueryDefaults,
-    startDate,
-    endDate,
-  })
-  res.setHeader('content-type', 'text/csv; charset=utf-8')
-  res.setHeader(
-    'content-disposition',
-    `attachment; filename="${timestampedFilename('report-by-date')}"`,
-  )
-  res.send(csv)
-})
-
 // ─── By build range ──────────────────────────────────────────────────────────
 
 const buildRangeQuery = z.object({
@@ -319,25 +258,3 @@ reportsRouter.get('/by-build-range', validate({ query: buildRangeQuery }), async
   const bugs = await bugBreakdown({ buildId: { in: buildIds }, deletedAt: null })
   res.json({ data: { projectId, builds, bugs } })
 })
-
-reportsRouter.get(
-  '/by-build-range/export.csv',
-  validate({ query: buildRangeQuery }),
-  async (req, res) => {
-    const { projectId, startBuildId, endBuildId } =
-      validatedQuery<z.infer<typeof buildRangeQuery>>(res)
-    const { buildIds } = await resolveBuildRange(req.user!, projectId, startBuildId, endBuildId)
-
-    const csv = await bugsService.exportBugsCSV(req.user!, {
-      ...bugQueryDefaults,
-      projectId,
-      buildIds,
-    })
-    res.setHeader('content-type', 'text/csv; charset=utf-8')
-    res.setHeader(
-      'content-disposition',
-      `attachment; filename="${timestampedFilename('report-by-build-range')}"`,
-    )
-    res.send(csv)
-  },
-)

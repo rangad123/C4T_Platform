@@ -946,7 +946,6 @@ export default async function CustomerProjectDetailPage({
                   byType: dropZeros(buildSummaryData.bugsByType),
                   byReproducibility: dropZeros(buildSummaryData.bugsByReproducibility),
                 }}
-                csvHref={`/app/customer/export/reports/by-build/${activeBuildId}/export.csv`}
               />
             )}
           </Panel>

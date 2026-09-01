@@ -1,4 +1,3 @@
-import { Button } from '@/components/ds/core/Button'
 import { BarChart } from '@/components/admin/charts/BarChart'
 import { statusTone, severityTone } from '@/components/admin/StatusBadge'
 import { titleCase } from '@/lib/admin/format'
@@ -13,12 +12,10 @@ export interface BugBreakdown {
 
 export interface BugBreakdownViewProps {
   bugs: BugBreakdown
-  /** Same-origin CSV link. Each portal proxies through its own export route. */
-  csvHref: string
 }
 
 /**
- * The four bug distributions a report answers with, plus its CSV link.
+ * The four bug distributions a report answers with.
  *
  * Shared by the admin and customer Reports pages rather than copied: the
  * report shapes come from the same `/v1/reports/*` routes, so two renderers
@@ -26,29 +23,12 @@ export interface BugBreakdownViewProps {
  * and `reproducibility` are open vocabularies with no tone mapping, so they
  * render neutral.
  */
-export function BugBreakdownView({ bugs, csvHref }: BugBreakdownViewProps) {
+export function BugBreakdownView({ bugs }: BugBreakdownViewProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 'var(--space-4)',
-          flexWrap: 'wrap',
-        }}
-      >
-        <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-          {bugs.total} bug{bugs.total === 1 ? '' : 's'} in this report.
-        </p>
-        {/*
-          `prefetch={false}` is load-bearing: this href generates a CSV on the
-          API, and Next would otherwise run it on hover.
-        */}
-        <Button href={csvHref} prefetch={false} variant="secondary" size="sm" iconLeft="download">
-          Download CSV
-        </Button>
-      </div>
+      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+        {bugs.total} bug{bugs.total === 1 ? '' : 's'} in this report.
+      </p>
 
       {bugs.total === 0 ? (
         <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>

@@ -2,7 +2,6 @@ import type { Request, Response } from 'express'
 import { param } from '../../lib/http.js'
 import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
-import { timestampedFilename } from '../../lib/csv.js'
 import * as service from './testers.service.js'
 import { isAdminSide } from '../../middleware/authorize.js'
 import type { ListTestersQuery, ListGlobalDevicesQuery } from './testers.schema.js'
@@ -54,15 +53,6 @@ export async function list(_req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListTestersQuery>(res)
   const { items, meta } = await service.listTesters(query)
   res.json({ data: items, meta })
-}
-
-/** CSV export — same filters as `list`, no pagination. */
-export async function exportCsv(_req: Request, res: Response): Promise<void> {
-  const query = validatedQuery<ListTestersQuery>(res)
-  const csv = await service.exportTestersCSV(query)
-  res.setHeader('content-type', 'text/csv; charset=utf-8')
-  res.setHeader('content-disposition', `attachment; filename="${timestampedFilename('testers')}"`)
-  res.send(csv)
 }
 
 /** §18 Global Assets — every device across every tester. */

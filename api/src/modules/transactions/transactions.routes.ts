@@ -19,7 +19,6 @@ import { nextReference } from '../../lib/reference.js'
 import { createNotification } from '../notifications/notifications.service.js'
 import { PERMISSIONS } from '../../config/permissions.js'
 import { transactionScope } from '../../lib/access/scopes.js'
-import { timestampedFilename } from '../../lib/csv.js'
 
 /**
  * §2.2 "Transactions" — payment and billing RECORDS for projects, Customers and
@@ -306,79 +305,6 @@ transactionsRouter.get('/', validate({ query: listQuery }), async (req, res) => 
       })),
     },
   })
-})
-
-/**
- * CSV export — declared before "/:id" so "export.csv" is not consumed as an
- * id with a dot in it. Same filters/scope as the list endpoint, no pagination.
- */
-transactionsRouter.get('/export.csv', validate({ query: listQuery }), async (req, res) => {
-  const query = validatedQuery<z.infer<typeof listQuery>>(res)
-  const where = transactionWhere(req.user!, query)
-
-  const items = await prisma.transaction.findMany({
-    where,
-    select: txSelect,
-    orderBy: buildOrderBy(query.sort, query.order, TRANSACTION_SORT_FIELDS, 'occurredAt'),
-  })
-
-  // BigInt minor units, converted to a plain decimal string for the
-  // spreadsheet — Excel/Sheets read "150000" as 150000, not ₹1,500.00, so
-  // divide by 100 here rather than exporting the raw minor-unit integer.
-  const money = (minor: bigint) => (Number(minor) / 100).toFixed(2)
-
-  const rows = items.map((t) => [
-    t.reference,
-    t.type,
-    t.status,
-    money(t.amountMinor),
-    money(t.paidAmountMinor),
-    money(t.amountMinor - t.paidAmountMinor),
-    t.tdsAmountMinor !== null ? money(t.tdsAmountMinor) : '',
-    t.currency,
-    t.paymentMethod ?? '',
-    t.description ?? '',
-    t.organisation?.name ?? '',
-    t.project?.reference ?? '',
-    t.buildOrContestRef ?? '',
-    [t.counterparty?.firstName, t.counterparty?.lastName].filter(Boolean).join(' '),
-    t.counterparty?.role ?? '',
-    t.occurredAt,
-    t.settledAt,
-    t.createdAt,
-  ])
-
-  const { toCsv } = await import('../../lib/csv.js')
-  const csv = toCsv(
-    [
-      'Reference',
-      'Type',
-      'Status',
-      'Amount',
-      'Paid amount',
-      'Outstanding amount',
-      'TDS amount',
-      'Currency',
-      'Payment method',
-      'Description',
-      'Organisation',
-      'Project',
-      'Build/contest ref',
-      'Counterparty',
-      'Counterparty role',
-      'Occurred at',
-      'Settled at',
-      'Created at',
-    ],
-    rows,
-  )
-
-  res.setHeader('content-type', 'text/csv; charset=utf-8')
-  res.setHeader(
-    'content-disposition',
-    `attachment; filename="${timestampedFilename('transactions')}"`,
-  )
-  res.send(csv)
 })
 
 transactionsRouter.get(

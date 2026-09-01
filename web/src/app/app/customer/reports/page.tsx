@@ -15,8 +15,6 @@ import { formatDate } from '@/lib/admin/format'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const BASE = '/app/customer/reports'
-/** The customer's own export proxy, so the download link is same-origin. */
-const EXPORT = '/app/customer/export/reports'
 
 /** The API caps `limit` at 100; see the note where the picker is loaded. */
 const PROJECT_PICKER_LIMIT = 100
@@ -217,10 +215,7 @@ export default async function CustomerReportsPage({
                       { label: 'Test cases', value: String(projectReport.testCaseCount) },
                     ]}
                   />
-                  <BugBreakdownView
-                    bugs={projectReport.bugs}
-                    csvHref={`${EXPORT}/by-project/${projectId}/export.csv`}
-                  />
+                  <BugBreakdownView bugs={projectReport.bugs} />
                 </div>
               )}
             </Panel>
@@ -323,10 +318,7 @@ async function BuildRangeReport({
             picked.
           </p>
         ) : (
-          <BugBreakdownView
-            bugs={report.bugs}
-            csvHref={`${EXPORT}/by-build-range/export.csv?projectId=${projectId}&startBuildId=${startBuildId}&endBuildId=${endBuildId}`}
-          />
+          <BugBreakdownView bugs={report.bugs} />
         )}
       </div>
     </Panel>
@@ -386,10 +378,7 @@ async function DateRangeReport({ startDate, endDate }: { startDate: string; endD
             >
               {formatDate(startDate)} – {formatDate(endDate)}
             </p>
-            <BugBreakdownView
-              bugs={report.bugs}
-              csvHref={`${EXPORT}/by-date/export.csv?startDate=${startDate}&endDate=${endDate}`}
-            />
+            <BugBreakdownView bugs={report.bugs} />
           </div>
         )}
       </div>

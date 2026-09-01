@@ -4,7 +4,6 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { Avatar } from '@/components/admin/Avatar'
 import { CountryFlag } from '@/components/admin/CountryFlag'
-import { Button } from '@/components/ds/core/Button'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import {
@@ -28,27 +27,6 @@ const SORT_OPTIONS = [
   { value: 'status', label: 'Status' },
 ] as const
 const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
-
-/**
- * Build the CSV export URL for the current filter set. Goes through the
- * catch-all Route Handler at `/app/admin/export/[...path]` so the export
- * stays same-origin (the route streams from the API on behalf of the browser).
- */
-function buildExportHref(filters: {
-  status?: string
-  countryCode?: string
-  search?: string
-  sort?: string
-  order?: string
-  skills?: string
-}): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value)
-  }
-  const qs = params.toString()
-  return qs ? `/app/admin/export/testers?${qs}` : '/app/admin/export/testers'
-}
 
 interface TesterRow {
   id: string
@@ -284,14 +262,6 @@ export default async function TestersPage({
                 hidden={{ skills }}
               />
             </div>
-            <Button
-              href={buildExportHref({ status, countryCode, search, sort, order, skills })}
-              prefetch={false}
-              variant="secondary"
-              iconLeft="download"
-            >
-              Export CSV
-            </Button>
           </div>
         </div>
       }

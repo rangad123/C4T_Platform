@@ -101,21 +101,9 @@ testersRouter.get(
 )
 
 /**
- * CSV export — declared before "/:id" so "export.csv" is not consumed as an
- * id with a dot in it. The query schema is the same shape as the list
- * endpoint, minus pagination.
- */
-testersRouter.get(
-  '/export.csv',
-  requirePermission(PERMISSIONS.TESTER_READ),
-  validate({ query: listTestersQuery }),
-  controller.exportCsv,
-)
-
-/**
  * §18 Global Assets — every device (and, filtered, every recorded browser)
- * across every tester. Declared before "/:id" for the same reason as
- * "export.csv" — "devices" must never be parsed as an id.
+ * across every tester. Declared before "/:id" so "devices" is never parsed
+ * as an id.
  */
 testersRouter.get(
   '/devices',

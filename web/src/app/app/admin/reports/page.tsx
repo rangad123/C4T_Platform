@@ -332,10 +332,7 @@ async function ByProject({ projectId }: { projectId: string }) {
           {report.testCaseCount === 1 ? '' : 's'}
         </p>
       </div>
-      <BugBreakdownView
-        bugs={report.bugs}
-        csvHref={`/app/admin/export/reports/by-project/${projectId}/export.csv`}
-      />
+      <BugBreakdownView bugs={report.bugs} />
     </div>
   )
 }
@@ -425,10 +422,7 @@ async function ByBuild({ buildId }: { buildId: string }) {
         {summary.testCaseCount === 1 ? '' : 's'}
         {summary.testCaseCompletion !== null ? ` · ${summary.testCaseCompletion}% complete` : ''}
       </p>
-      <BugBreakdownView
-        bugs={bugs}
-        csvHref={`/app/admin/export/reports/by-build/${buildId}/export.csv`}
-      />
+      <BugBreakdownView bugs={bugs} />
     </div>
   )
 }
@@ -452,10 +446,7 @@ async function ByDate({ startDate, endDate }: { startDate: string; endDate: stri
       <p style={{ margin: 0, color: 'var(--text-muted)' }}>
         {formatDate(startDate)} to {formatDate(endDate)}
       </p>
-      <BugBreakdownView
-        bugs={report.bugs}
-        csvHref={`/app/admin/export/reports/by-date/export.csv?startDate=${startDate}&endDate=${endDate}`}
-      />
+      <BugBreakdownView bugs={report.bugs} />
       {report.byProject.length > 0 ? (
         <div>
           <p
@@ -570,10 +561,7 @@ async function ByBuildRange({
       <p style={{ margin: 0, color: 'var(--text-muted)' }}>
         {report.builds.map((b) => b.name).join(' → ')}
       </p>
-      <BugBreakdownView
-        bugs={report.bugs}
-        csvHref={`/app/admin/export/reports/by-build-range/export.csv?projectId=${projectId}&startBuildId=${startBuildId}&endBuildId=${endBuildId}`}
-      />
+      <BugBreakdownView bugs={report.bugs} />
     </div>
   )
 }

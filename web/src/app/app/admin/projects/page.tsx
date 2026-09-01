@@ -30,26 +30,6 @@ const SORT_OPTIONS = [
 ] as const
 const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
 
-/**
- * Build the CSV export URL for the current filter set. Goes through the
- * catch-all Route Handler at `/app/admin/export/[...path]` so the export
- * stays same-origin (the route streams from the API on behalf of the browser).
- */
-function buildExportHref(filters: {
-  status?: string
-  priority?: string
-  search?: string
-  sort?: string
-  order?: string
-}): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value)
-  }
-  const qs = params.toString()
-  return qs ? `/app/admin/export/projects?${qs}` : '/app/admin/export/projects'
-}
-
 interface ProjectRow {
   id: string
   reference: string
@@ -225,14 +205,6 @@ export default async function ProjectsPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
-          <Button
-            href={buildExportHref({ status, priority, search, sort, order })}
-            prefetch={false}
-            variant="secondary"
-            iconLeft="download"
-          >
-            Export CSV
-          </Button>
           <Button href="/app/admin/projects/new" variant="primary" iconLeft="plus">
             New project
           </Button>
