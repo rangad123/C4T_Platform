@@ -21,7 +21,20 @@ export default async function ResetPasswordPage({
   const { token = '', error } = await searchParams
 
   return (
-    <div>
+    /*
+      Centred and held to `--container-form`, the same as /login and
+      /register. Without the ceiling the card took the full width of the
+      marketing container, which stretched a single email field and its
+      button across the whole viewport -- a 1,900px input for an address.
+    */
+    <div
+      style={{
+        padding: 'var(--space-11) var(--space-7)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+      }}
+    >
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--space-9)' }}>
         <Logo size={32} withWordmark />
       </div>
@@ -32,6 +45,8 @@ export default async function ResetPasswordPage({
           background: 'var(--surface-canvas)',
           border: '1px solid var(--border-default)',
           borderRadius: 'var(--radius-card)',
+          width: '100%',
+          maxWidth: 'var(--container-form)',
         }}
       >
         <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
