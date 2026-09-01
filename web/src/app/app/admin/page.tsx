@@ -6,6 +6,7 @@ import { BarChart, type BarSegment } from '@/components/admin/charts/BarChart'
 import { DonutChart } from '@/components/admin/charts/DonutChart'
 import { statusTone, severityTone } from '@/components/admin/StatusBadge'
 import { titleCase, formatMoney } from '@/lib/admin/format'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 
 /**
  * The admin landing — where ADMIN and SUB_ADMIN arrive after sign-in.
@@ -96,7 +97,25 @@ function ChartCard({ children }: { children: React.ReactNode }) {
   )
 }
 
-export default async function AdminDashboardPage() {
+/**
+ * A Google sign-in that found an existing account of a different kind. One
+ * email is one account, so the role chosen at sign-up cannot override the
+ * role that account already has — said here rather than left to guess.
+ */
+const NOTICES: Record<string, NoticeCopy> = {
+  'google-existing-account': {
+    tone: 'info',
+    message:
+      'You already had an account with that Google address, so we signed you into it rather than making a second one.',
+  },
+}
+
+export default async function AdminDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>
+}) {
+  const { notice } = await searchParams
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
   const stats = await serverFetchOrNull<StatsResponse>('stats/admin')
   const displayName = user.firstName ?? user.email
@@ -141,6 +160,8 @@ export default async function AdminDashboardPage() {
           gap: 'var(--space-8)',
         }}
       >
+        <Notice code={notice} notices={NOTICES} />
+
         <header>
           <p
             className="c4t-eyebrow"

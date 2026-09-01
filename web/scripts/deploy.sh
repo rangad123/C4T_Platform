@@ -5,6 +5,32 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 npm ci
-npm run build
+
+# ── Build beside the running build, never into it ────────────────────────────
+#
+# `next build` writes in place. A build killed partway — the OOM reaper on a
+# small box is the usual cause — leaves the .next that is CURRENTLY BEING
+# SERVED incomplete. Next reads it lazily, so the site does not fall over at
+# deploy time; it fails minutes later with "client reference manifest does not
+# exist" and needs a hand to recover. `set -e` stopping the reload does not
+# help, because the damage is already on disk.
+#
+# Building into .next.new and renaming leaves the live build untouched until
+# there is a complete replacement for it. A failure here — out of memory, out
+# of disk, a bad commit — is then a failed deploy and nothing more.
+rm -rf .next.new
+NEXT_DIST_DIR=.next.new npm run build
+
+# A build can exit 0 and still be short. BUILD_ID is written last, so its
+# absence means the output is not finished, whatever the exit code said.
+test -f .next.new/BUILD_ID
+
+# Two renames, so the window where .next is not a complete build is
+# milliseconds rather than the length of a build. The previous one is kept
+# until the next deploy, which makes a rollback `mv .next.old .next`.
+rm -rf .next.old
+if [ -d .next ]; then mv .next .next.old; fi
+mv .next.new .next
+
 pm2 startOrReload ecosystem.config.cjs --env production
 pm2 save

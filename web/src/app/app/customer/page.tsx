@@ -10,6 +10,7 @@ import { Avatar } from '@/components/admin/Avatar'
 import { Button } from '@/components/ds/core/Button'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { formatDate } from '@/lib/admin/format'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 
@@ -78,7 +79,25 @@ function buildNarrative(
  * still a "coming soon" sidebar entry), so it is left out rather than shown
  * as a number that goes nowhere.
  */
-export default async function CustomerDashboardPage() {
+/**
+ * A Google sign-in that found an existing account of a different kind. One
+ * email is one account, so the role chosen at sign-up cannot override the
+ * role that account already has — said here rather than left to guess.
+ */
+const NOTICES: Record<string, NoticeCopy> = {
+  'google-existing-account': {
+    tone: 'info',
+    message:
+      'You already had an account with that Google address, so we signed you into it rather than making a second one.',
+  },
+}
+
+export default async function CustomerDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>
+}) {
+  const { notice } = await searchParams
   const user = await requireRole(['CUSTOMER'])
 
   const [projects, bugs, organisations] = await Promise.all([
@@ -116,6 +135,8 @@ export default async function CustomerDashboardPage() {
           gap: 'var(--space-8)',
         }}
       >
+        <Notice code={notice} notices={NOTICES} />
+
         <header>
           <p
             className="c4t-eyebrow"

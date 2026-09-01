@@ -5,6 +5,16 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   /**
+   * Where the build is written. `.next` unless told otherwise.
+   *
+   * The deploy script builds into `.next.new` and renames it into place, so
+   * a build that dies halfway cannot damage the one currently being served.
+   * `next start` runs without the variable and therefore reads `.next`, and
+   * so does CI — this changes nothing for either.
+   */
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
+
+  /**
    * Cache Components (Partial Prerendering) is deliberately NOT enabled.
    *
    * It is the direction Next.js is heading and will eventually be the default,

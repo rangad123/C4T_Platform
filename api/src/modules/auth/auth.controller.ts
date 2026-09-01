@@ -382,10 +382,28 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
      * absolute same-origin path passes; anything else is an open redirect
      * waiting to be used for phishing.
      */
-    const target =
+    let target =
       payload.next && payload.next.startsWith('/') && !payload.next.startsWith('//')
         ? payload.next
         : (ROLE_HOME[user.role] ?? '/app')
+
+    /**
+     * Say so when the role they picked is not the role they got.
+     *
+     * `signInWithGoogle` only honours `signUpRole` for an account it CREATES.
+     * An identity that already exists — or a local account on the same
+     * verified address — signs into that account, whichever role it holds.
+     * That is correct, and one email cannot be two accounts, but doing it
+     * silently means choosing "sign up as a tester" and landing in a customer
+     * portal with nothing to explain the difference.
+     *
+     * Only on a genuine mismatch, and never on a fresh registration, where
+     * `created` is true and the role is exactly what was asked for.
+     */
+    if (!created && user.role !== signUpRole) {
+      const sep = target.includes('?') ? '&' : '?'
+      target = `${target}${sep}notice=google-existing-account&had=${encodeURIComponent(user.role)}`
+    }
 
     /**
      * NOT `setAuthCookies(res, tokens)` + a straight redirect. This response

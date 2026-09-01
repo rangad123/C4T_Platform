@@ -49,6 +49,16 @@ interface PayoutState {
 }
 
 const NOTICES: Record<string, NoticeCopy> = {
+  /**
+   * A Google sign-in that found an existing account of a different kind. One
+   * email is one account, so the role chosen at sign-up cannot override the
+   * role that account already has — said here rather than left to guess.
+   */
+  'google-existing-account': {
+    tone: 'info',
+    message:
+      'You already had an account with that Google address, so we signed you into it rather than making a second one.',
+  },
   'payout-requested': {
     tone: 'success',
     message:

@@ -7,6 +7,9 @@ node_modules/
 dist/
 build/
 .next/
+# Deploy scratch: the incoming build, and the previous one kept for rollback.
+.next.new/
+.next.old/
 out/
 # Incremental TypeScript cache. Machine-specific, changes on every build, and
 # was tracked — so every `npm run build` produced a spurious diff.
