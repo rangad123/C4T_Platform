@@ -11,6 +11,11 @@ interface ProjectResponse {
   id: string
 }
 
+/** Just enough of the detail read to find the build the create just made. */
+interface ProjectBuilds {
+  builds?: readonly { id: string; isDefault: boolean }[]
+}
+
 /**
  * Create a project on behalf of any organisation.
  *
@@ -54,6 +59,35 @@ export async function createProjectAction(formData: FormData): Promise<void> {
     body,
   })
 
+  /**
+   * Type of testing belongs to the BUILD, not the project.
+   *
+   * `POST /projects` creates the project and one default build; `testType` is
+   * a field on that build, so it takes a second call — the same three-step
+   * the customer wizard does. The build id is not in the create response
+   * (`projectSelect` has no builds), hence the read in between.
+   *
+   * Best-effort, and deliberately so: if this fails the project still exists
+   * and its type can be set from Build details. Losing a whole project over
+   * one optional field would be the worse outcome, so the redirect happens
+   * either way and carries a notice when the type did not stick.
+   */
+  const testType = formTrimmed(formData, 'testType')
+  let notice = ''
+  if (testType) {
+    try {
+      const detail = await serverFetch<ProjectBuilds>(`projects/${id}`)
+      const buildId = detail.builds?.find((b) => b.isDefault)?.id ?? detail.builds?.[0]?.id
+      if (!buildId) throw new Error('no build on the new project')
+      await serverFetch(`projects/${id}/builds/${buildId}`, {
+        method: 'PATCH',
+        body: { testType },
+      })
+    } catch {
+      notice = '?notice=test-type-unset'
+    }
+  }
+
   revalidatePath('/app/admin/projects')
-  redirect(`/app/admin/projects/${id}`)
+  redirect(`/app/admin/projects/${id}${notice}`)
 }

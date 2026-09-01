@@ -10,6 +10,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission } from '@/lib/auth/session'
 import { serverFetchPage } from '@/lib/api/server'
 import { createProjectAction } from '@/lib/admin/project-actions'
+import { TEST_TYPE_OPTIONS } from '@/lib/testing/test-types'
 import { titleCase } from '@/lib/admin/format'
 
 /**
@@ -117,7 +118,18 @@ export default async function NewProjectPage() {
             <Textarea id="instructions" name="instructions" rows={6} maxLength={20000} />
           </Field>
 
+          {/*
+            Type of testing is a BUILD field, not a project one — the customer
+            wizard collects it here too and applies it to the build the create
+            makes. Offered on this form for the same reason: an admin opening a
+            project on a customer's behalf is describing the same test cycle,
+            and leaving it out meant every admin-created project started with
+            its type unset and no prompt to set one.
+          */}
           <div style={fieldGrid}>
+            <Field label="Type of testing" htmlFor="testType">
+              <Select id="testType" name="testType" defaultValue="" options={TEST_TYPE_OPTIONS} />
+            </Field>
             <Field label="Priority" htmlFor="priority">
               <Select
                 id="priority"

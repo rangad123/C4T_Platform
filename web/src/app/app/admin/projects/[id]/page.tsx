@@ -330,6 +330,11 @@ export default async function ProjectDetailPage({
    */
   const PAGE_NOTICES: Record<string, { tone: 'success' | 'error'; message: string }> = {
     invited: { tone: 'success', message: 'The testers have been invited.' },
+    'test-type-unset': {
+      tone: 'error',
+      message:
+        'The project was created, but the type of testing did not save. Set it in Build details.',
+    },
     'invite-failed': { tone: 'error', message: 'Those testers could not be invited.' },
     'rating-saved': { tone: 'success', message: 'Your rating has been saved.' },
     'rating-duplicate': {

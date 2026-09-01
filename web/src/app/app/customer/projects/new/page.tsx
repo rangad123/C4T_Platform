@@ -9,6 +9,7 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
+import { TEST_TYPE_OPTIONS } from '@/lib/testing/test-types'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { countryOptions, languageOptions } from '@/lib/admin/locales'
 import { createProjectFromWizard } from './actions'
@@ -66,26 +67,6 @@ const SUBJECTS = [
     description: 'An Android or iOS build, tested on devices.',
     icon: 'smartphone',
   },
-] as const
-
-/**
- * Test types offered when the platform has no catalog for them.
- *
- * `Build.testType` is free text on purpose (see the schema note) — there is no
- * admin-managed list to read, so this is a starting vocabulary rather than a
- * constraint, and the field accepts anything the API's 120-character limit
- * allows.
- */
-const TEST_TYPES = [
-  'Exploratory testing',
-  'Functional testing',
-  'Usability testing',
-  'Regression testing',
-  'Compatibility testing',
-  'Performance testing',
-  'Security testing',
-  'Localization testing',
-  'Accessibility testing',
 ] as const
 
 const ERRORS: Record<string, NoticeCopy> = {
@@ -563,10 +544,7 @@ export default async function NewProjectWizardPage({
                   id="testType"
                   name="testType"
                   defaultValue={params.testType ?? ''}
-                  options={[
-                    { value: '', label: 'Not specified' },
-                    ...TEST_TYPES.map((t) => ({ value: t, label: t })),
-                  ]}
+                  options={TEST_TYPE_OPTIONS}
                 />
               </Field>
 
