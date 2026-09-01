@@ -612,23 +612,24 @@ export default async function ProjectDetailPage({
         </>
       }
       tabs={
+        /*
+         * The build controls sit ABOVE the tabs, not beside them, matching
+         * the customer portal.
+         *
+         * Every tab below is scoped to the selected build, so the picker is
+         * not one tab's control — it frames all of them. Sharing a row with
+         * the tabs also made it the first thing to wrap off a narrow screen,
+         * which is the opposite of what its importance deserves.
+         */
         <div
           style={{
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
             gap: 'var(--space-4)',
-            flexWrap: 'wrap',
           }}
         >
-          <SectionTabs
-            basePath={detailPath}
-            tabs={visibleSections}
-            active={section}
-            preserve={{ buildId }}
-          />
           {/* Wraps: the build name is user-supplied and unbounded, and beside
-              two buttons it pushed this row past a phone viewport. */}
+              three buttons it pushed this row past a phone viewport. */}
           <div
             style={{
               display: 'flex',
@@ -659,9 +660,31 @@ export default async function ProjectDetailPage({
                 >
                   New build
                 </Button>
+                {/*
+                  Up here with the other build controls rather than at the
+                  foot of Build details. It exports the SELECTED build, so it
+                  belongs with the picker that selects it — and from the
+                  bottom of one tab it was invisible from the other six.
+                */}
+                <Button
+                  href={`/app/admin/export/reports/by-build/${activeBuildId}/export.csv`}
+                  prefetch={false}
+                  variant="secondary"
+                  size="sm"
+                  iconLeft="download"
+                >
+                  Download report
+                </Button>
               </>
             ) : null}
           </div>
+
+          <SectionTabs
+            basePath={detailPath}
+            tabs={visibleSections}
+            active={section}
+            preserve={{ buildId }}
+          />
         </div>
       }
       aside={
@@ -1346,19 +1369,6 @@ export default async function ProjectDetailPage({
               />
             )}
           </Panel>
-
-          {capabilities.canUpdate ? (
-            <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-              <Button
-                href={`/app/admin/export/reports/by-build/${activeBuildId}/export.csv`}
-                prefetch={false}
-                variant="secondary"
-                iconLeft="download"
-              >
-                Download report
-              </Button>
-            </div>
-          ) : null}
         </>
       ) : null}
 
