@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Logo } from '@/components/ds/core/Logo'
+import { AuthCard, AuthPage } from '@/components/auth/AuthCard'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
@@ -43,28 +43,8 @@ export default async function ForgotPasswordPage({
       marketing container, which stretched a single email field and its
       button across the whole viewport -- a 1,900px input for an address.
     */
-    <div
-      style={{
-        padding: 'var(--space-11) var(--space-7)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--space-9)' }}>
-        <Logo size={32} withWordmark />
-      </div>
-
-      <div
-        style={{
-          padding: 'var(--space-9)',
-          background: 'var(--surface-canvas)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-card)',
-          width: '100%',
-          maxWidth: 'var(--container-form)',
-        }}
-      >
+    <AuthPage withLogo>
+      <AuthCard raised={false}>
         <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
           {sent ? 'Check your inbox' : 'Reset your password'}
         </h1>
@@ -159,7 +139,7 @@ export default async function ForgotPasswordPage({
             Sign in
           </a>
         </div>
-      </div>
-    </div>
+      </AuthCard>
+    </AuthPage>
   )
 }

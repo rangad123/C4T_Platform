@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import RegisterForm from './form'
+import { AuthCard, AuthPage } from '@/components/auth/AuthCard'
 
 export const metadata: Metadata = {
   title: 'Create an account',
@@ -34,26 +35,10 @@ export default async function RegisterPage({
   // path Next expects, and the form below receives the awaited value.
   const params = await searchParams
   return (
-    <div
-      style={{
-        padding: 'var(--space-9) var(--space-7)',
-        display: 'flex',
-        justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          padding: 'var(--space-9)',
-          background: 'var(--surface-canvas)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-card)',
-          boxShadow: 'var(--shadow-md)',
-          width: '100%',
-          maxWidth: 'var(--container-form)',
-        }}
-      >
+    <AuthPage compact>
+      <AuthCard>
         <RegisterForm searchParams={Promise.resolve(params)} />
-      </div>
-    </div>
+      </AuthCard>
+    </AuthPage>
   )
 }

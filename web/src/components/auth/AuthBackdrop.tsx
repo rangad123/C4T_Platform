@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { Logo } from '@/components/ds/core/Logo'
 import { IconButton } from '@/components/ds/core/IconButton'
+import { AuthCard } from './AuthCard'
 
 /**
  * The native `<dialog>` modal that wraps every auth page.
@@ -85,16 +86,7 @@ export function AuthModal({ children }: { children: ReactNode }) {
           __html: `dialog::backdrop { background: rgb(23 19 15 / 0.55); backdrop-filter: blur(4px); }`,
         }}
       />
-      <div
-        style={{
-          position: 'relative',
-          padding: 'var(--space-9)',
-          background: 'var(--surface-canvas)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-card)',
-          boxShadow: 'var(--shadow-lg)',
-        }}
-      >
+      <AuthCard variant="modal">
         <IconButton
           icon="arrow-left"
           label="Back"
@@ -115,7 +107,7 @@ export function AuthModal({ children }: { children: ReactNode }) {
           <Logo size={32} withWordmark />
         </div>
         {children}
-      </div>
+      </AuthCard>
     </dialog>
   )
 }

@@ -1,0 +1,88 @@
+/* The panel every auth screen sits in — sign in, register, forgot and reset
+   password, and the modal that intercepts /login from the marketing nav.
+
+   All five had the same block of inline styles copied out, which is why the
+   padding below could not be made responsive in one place. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-11) var(--space-7);
+}
+
+/* Register sat closer to the nav than the other three. Kept rather than
+   unified, so this refactor changes no spacing at the widths it already
+   looked right on. */
+.compact {
+  padding-top: var(--space-9);
+}
+
+.logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-9);
+}
+
+.card {
+  width: 100%;
+  max-width: var(--container-form);
+  padding: var(--space-9);
+  background: var(--surface-canvas);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+}
+
+/* Sign in and register carry a shadow; the two password screens do not. */
+.raised {
+  box-shadow: var(--shadow-md);
+}
+
+/* The modal sits over a dimmed page, and takes the heavier shadow the design
+   system reserves for modals. `position: relative` anchors its back button. */
+.modal {
+  position: relative;
+  box-shadow: var(--shadow-lg);
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────────
+   40px of padding on each side of the card, plus 24px on each side of the page
+   around it, is 128px of a 320px viewport — and the email field inside also
+   gives up 42px to its leading icon. That left about 172px for the value, so
+   "admin@crowd4test.com" (~178px) did not fit, and the browser scrolled the
+   first character out of sight to keep the caret visible.
+
+   320px is a small phone, but it is also any ordinary window at high browser
+   zoom, which is how this was reported.
+
+   Halving both paddings returns 48px to the field. Vertical padding is left
+   alone: it costs the field nothing. */
+
+@media (max-width: 480px) {
+  .wrap {
+    padding-left: var(--space-5);
+    padding-right: var(--space-5);
+  }
+
+  .card {
+    padding-left: var(--space-6);
+    padding-right: var(--space-6);
+  }
+}
+
+/* Below 380px every remaining pixel counts: measured in a headless browser, a
+   305px viewport gives the email field 189px of content against the 179px
+   "admin@crowd4test.com" needs. Wider phones are not this tight — a 375px
+   viewport leaves it 60px of slack. */
+
+@media (max-width: 380px) {
+  .wrap {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+
+  .card {
+    padding-left: var(--space-5);
+    padding-right: var(--space-5);
+  }
+}

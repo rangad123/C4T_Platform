@@ -4,6 +4,7 @@ import { getUser } from '@/lib/auth/session'
 import { ROLE_HOME } from '@/lib/api/types'
 import { safeNextOrHome } from '@/lib/safe-redirect'
 import LoginForm from './form'
+import { AuthCard, AuthPage } from '@/components/auth/AuthCard'
 
 export const metadata: Metadata = {
   title: 'Sign in',
@@ -56,26 +57,10 @@ export default async function LoginPage({
   if (user) redirect(safeNextOrHome(params.next, ROLE_HOME[user.role]))
 
   return (
-    <div
-      style={{
-        padding: 'var(--space-11) var(--space-7)',
-        display: 'flex',
-        justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          padding: 'var(--space-9)',
-          background: 'var(--surface-canvas)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-card)',
-          boxShadow: 'var(--shadow-md)',
-          width: '100%',
-          maxWidth: 'var(--container-form)',
-        }}
-      >
+    <AuthPage>
+      <AuthCard>
         <LoginForm searchParams={Promise.resolve(params)} />
-      </div>
-    </div>
+      </AuthCard>
+    </AuthPage>
   )
 }
