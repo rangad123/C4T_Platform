@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { CtaBanner, ResourceCard, Section, Tag } from '@/components/ds'
 import { DeepBand } from '@/components/sections/blocks'
-import s from '@/components/sections/sections.module.css'
 import { JsonLd } from '@/components/seo/JsonLd'
 import { BlogSearchBox } from '@/components/ds/marketing/BlogSearchBox'
 import { buildMetadata } from '@/lib/seo/metadata'
@@ -62,28 +61,18 @@ export default async function BlogIndexPage({
     <>
       <JsonLd schema={breadcrumbFor(PATH, 'Blog')} />
 
-      <Section tone="inverse" className={s.deep} compact>
-        <div className="c4t-eyebrow" style={{ color: 'var(--text-inverse-muted)' }}>
-          {BLOG_INDEX.eyebrow}
-        </div>
-        <h1
-          className="c4t-display-xl"
-          style={{
-            margin: '20px 0 0',
-            color: 'var(--text-inverse)',
-            maxWidth: 900,
-            textWrap: 'pretty',
-          }}
-        >
-          {BLOG_INDEX.title}
-        </h1>
-        <p
-          className="c4t-body-lg"
-          style={{ margin: '24px 0 0', color: 'var(--text-inverse-muted)', maxWidth: 620 }}
-        >
-          {BLOG_INDEX.description}
-        </p>
-      </Section>
+      {/*
+        No hero. The banner that stood here said nothing a reader arriving at
+        a blog index does not already know, and cost most of a screen before
+        the first post -- the filters and the newest article now start the
+        page.
+
+        The heading stays for the document, not the design: a page with no
+        <h1> has no outline for a screen reader to follow and nothing for a
+        search result to title itself with. `c4t-visually-hidden` is the
+        platform's existing utility for exactly this.
+      */}
+      <h1 className="c4t-visually-hidden">{BLOG_INDEX.title}</h1>
 
       <Section>
         <div
@@ -144,10 +133,19 @@ export default async function BlogIndexPage({
 
             {gridPosts.length > 0 ? (
               <div
-                className="c4t-grid-4"
+                /*
+                  Sized by the card, not by a column count. Four fixed
+                  columns made each card ~285px, which is narrower than the
+                  category and date lines it has to carry -- both are mono
+                  uppercase with wide tracking, so both wrapped mid-phrase and
+                  the header became six lines of shouting above the title.
+
+                  `auto-fill` also means one post does not stretch across the
+                  whole row: it takes a single track and the rest stay empty.
+                */
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
                   gap: 'var(--space-grid-gap)',
                 }}
               >

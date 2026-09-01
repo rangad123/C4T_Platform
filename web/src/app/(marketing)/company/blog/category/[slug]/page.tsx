@@ -111,10 +111,10 @@ export default async function BlogCategoryPage({
         ) : (
           <>
             <div
-              className="c4t-grid-4"
+              /* Sized by the card — see the note on the blog index grid. */
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
                 gap: 'var(--space-grid-gap)',
               }}
             >

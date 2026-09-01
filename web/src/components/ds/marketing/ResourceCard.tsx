@@ -130,11 +130,23 @@ export function ResourceCard({
           flex: 1,
         }}
       >
+        {/*
+          Wraps as a row, not as words.
+
+          Both halves are mono uppercase with wide tracking, so in a narrow
+          card a non-wrapping flex squeezed each one until it broke
+          mid-phrase -- "AI BASED TEST" / "AUTOMATION" over "1" / "SEPTEMBER"
+          / "2026", six lines of shouting above the title. Allowing the row to
+          wrap puts the date on its own line instead, and `nowrap` on the date
+          keeps it whole once it gets there.
+        */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            flexWrap: 'wrap',
+            columnGap: 10,
+            rowGap: 4,
             fontFamily: 'var(--font-mono)',
             fontSize: 'var(--type-eyebrow-size)',
             fontWeight: 'var(--fw-semibold)',
@@ -145,7 +157,15 @@ export function ResourceCard({
         >
           {eyebrowLabel}
           {date ? (
-            <span style={{ color: 'var(--text-muted)', letterSpacing: '0.06em' }}>{date}</span>
+            <span
+              style={{
+                color: 'var(--text-muted)',
+                letterSpacing: '0.06em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {date}
+            </span>
           ) : null}
         </div>
 
