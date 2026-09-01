@@ -48,7 +48,11 @@ export default async function NewProjectPage() {
   let orgLoadFailed = false
   try {
     const response = await serverFetchPage<OrganisationOption>('organisations', {
-      query: { limit: 200, status: 'ACTIVE' },
+      // 100 is the API's ceiling (`paginationQuery`). Asking for 200 was a
+      // silent 422 that the catch below turned into an empty list, so the
+      // picker offered nothing and read as "this platform has no
+      // organisations" rather than "that request was rejected".
+      query: { limit: 100, status: 'ACTIVE' },
     })
     organisations = response.data
   } catch {

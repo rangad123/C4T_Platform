@@ -101,7 +101,9 @@ export default async function ManagerDetailPage({ params }: { params: Promise<{ 
   const [projectsResult, candidatesResult] = await Promise.all([
     serverFetchOrNull<ManagerProjectEnvelope>(`managers/${id}/projects`),
     serverFetchOrNull<ProjectListEnvelope>('projects', {
-      query: { limit: 200 },
+      // 100 is the API's ceiling — see the organisation picker on
+      // projects/new. `serverFetchOrNull` swallows the 422 the same way.
+      query: { limit: 100 },
     }),
   ])
 

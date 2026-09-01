@@ -71,14 +71,37 @@ export async function serverFetch<T>(path: string, options: ServerRequestOptions
   return (json as ApiSuccess<T>).data
 }
 
-/** Returns null on any failure rather than throwing — for optional reads. */
+/**
+ * Returns null on any failure rather than throwing — for optional reads.
+ *
+ * Null is the right ANSWER for a read the page can do without. It is a poor
+ * DIAGNOSIS: a rejected request and an empty result arrive here identically,
+ * and the page renders "nothing to show" either way.
+ *
+ * That has cost real time. A picker asking for `limit: 200` against an API
+ * that caps at 100 is a 422, swallowed here, and the screen reads "this
+ * platform has no organisations". It happened three times in three different
+ * pickers before anyone recognised the pattern.
+ *
+ * So a 4xx is logged. Not shown — the caller chose to treat failure as
+ * absence and that is still what the reader sees — but written down, so the
+ * next one is a grep rather than a hunt. 5xx and network failures are left
+ * alone: they are already loud elsewhere and would drown the signal.
+ */
 export async function serverFetchOrNull<T>(
   path: string,
   options?: ServerRequestOptions,
 ): Promise<T | null> {
   try {
     return await serverFetch<T>(path, options)
-  } catch {
+  } catch (error) {
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      console.error('[serverFetchOrNull] request refused, returning null', {
+        path,
+        status: error.status,
+        message: error.message,
+      })
+    }
     return null
   }
 }
