@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useEffect, useRef } from 'react'
 import { SubmitButton } from '../core/SubmitButton'
 import { Icon } from '../core/Icon'
 import { Checkbox } from '../forms/Checkbox'
@@ -60,10 +60,34 @@ export function ContactForm({
   success,
 }: ContactFormProps) {
   const [state, formAction] = useActionState<LeadState, FormData>(action, { status: 'idle' })
+  const successRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Bring the confirmation into view.
+   *
+   * The success panel is a fraction of the height of the form it replaces, so
+   * the page above the reader collapses by several hundred pixels the moment
+   * the lead is accepted. The scroll position does not move, so the viewport
+   * ends up showing whatever now occupies it — on the landing page, the
+   * "What happens on the call" list below — with the confirmation pushed off
+   * the top of the screen. The submission worked and looked like it had not.
+   *
+   * Scrolling rather than focusing keeps the decision the panel documents
+   * below: a screen reader still hears `role="status"` announce the
+   * confirmation without being thrown out of wherever it was reading.
+   */
+  useEffect(() => {
+    if (state.status !== 'success') return
+    const node = successRef.current
+    if (!node) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    node.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' })
+  }, [state.status])
 
   if (state.status === 'success') {
     return (
       <div
+        ref={successRef}
         // Announced without stealing focus, so a screen-reader user hears the
         // confirmation where they are rather than being thrown to the top.
         role="status"
