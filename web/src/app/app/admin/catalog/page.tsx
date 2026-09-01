@@ -532,13 +532,27 @@ export default async function CatalogPage({
             <Field label="Carrier" htmlFor="networkName">
               <Input id="networkName" name="name" required maxLength={120} placeholder="Orange" />
             </Field>
-            <Field label="Country" htmlFor="networkCountry" hint="ISO 2-letter.">
+            {/*
+              The format is shown by example, not by a hint under the input.
+
+              `INLINE_FORM` bottom-aligns its children so the controls sit on
+              one line, and a hint renders BELOW the control — so this was the
+              only field in any of these six forms tall enough to push its own
+              label and input above everyone else's. Carrier beside it already
+              says "Orange" the same way; this now matches it.
+            */}
+            <Field label="Country" htmlFor="networkCountry">
               <Input
                 id="networkCountry"
                 name="countryCode"
                 maxLength={2}
+                placeholder="GB"
+                aria-describedby="networkCountryFormat"
                 style={{ width: 90, textTransform: 'uppercase' }}
               />
+              <span id="networkCountryFormat" className="c4t-visually-hidden">
+                Two-letter ISO country code.
+              </span>
             </Field>
             <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
               Add carrier
