@@ -32,5 +32,14 @@ rm -rf .next.old
 if [ -d .next ]; then mv .next .next.old; fi
 mv .next.new .next
 
+# `next build` rewrites tsconfig.json to register the generated types under
+# whatever dist dir it just used — so building into .next.new adds
+# ".next.new/types/**/*.ts" to `include` and leaves the tree dirty. That is
+# harmless in itself (nothing type-checks on this box) but deploy-pull.sh
+# refuses to reset a dirty tree, so it would block the NEXT deploy. Put the
+# file back now, where the change was made, rather than leaving it for the
+# next run to trip over.
+git checkout -- tsconfig.json 2>/dev/null || true
+
 pm2 startOrReload ecosystem.config.cjs --env production
 pm2 save

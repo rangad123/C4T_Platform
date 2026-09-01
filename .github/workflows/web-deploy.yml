@@ -44,5 +44,12 @@ jobs:
             # (which it becomes once the ignore rule lands). Either way the
             # build regenerates it straight afterwards.
             git checkout -- web/next-env.d.ts 2>/dev/null || rm -f web/next-env.d.ts
+            # Same reasoning for tsconfig.json, which `next build` also
+            # rewrites — it registers the generated types of whichever dist
+            # dir was used. web/scripts/deploy.sh puts it back itself now, but
+            # that script only reaches the box on a SUCCESSFUL deploy, and a
+            # tree already dirty from an earlier build blocks every deploy
+            # until something resets it. This block always runs at its newest.
+            git checkout -- web/tsconfig.json 2>/dev/null || true
             bash scripts/deploy-pull.sh
             bash web/scripts/deploy.sh
