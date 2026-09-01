@@ -1,9 +1,23 @@
+import type { Metadata } from 'next'
 import { Logo } from '@/components/ds/core/Logo'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { forgotPasswordAction } from '@/lib/auth/actions'
+
+/**
+ * `robots` matters more here than the title.
+ *
+ * Every other auth page is noindex; these two were not, so a password
+ * screen could be crawled and listed. Nothing here is useful in a search
+ * result and a reset form least of all -- the page is only ever reached
+ * from a link in a mail.
+ */
+export const metadata: Metadata = {
+  title: 'Reset your password',
+  robots: { index: false, follow: false },
+}
 
 /**
  * `/forgot-password` — request a password-reset email.
