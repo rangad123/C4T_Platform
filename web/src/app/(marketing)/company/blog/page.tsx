@@ -61,20 +61,23 @@ export default async function BlogIndexPage({
     <>
       <JsonLd schema={breadcrumbFor(PATH, 'Blog')} />
 
-      {/*
-        No hero. The banner that stood here said nothing a reader arriving at
-        a blog index does not already know, and cost most of a screen before
-        the first post -- the filters and the newest article now start the
-        page.
-
-        The heading stays for the document, not the design: a page with no
-        <h1> has no outline for a screen reader to follow and nothing for a
-        search result to title itself with. `c4t-visually-hidden` is the
-        platform's existing utility for exactly this.
-      */}
-      <h1 className="c4t-visually-hidden">{BLOG_INDEX.title}</h1>
-
       <Section>
+        {/*
+          A heading, not the hero that used to stand here.
+          
+          The banner cost most of a screen to say "Blog" to someone who had
+          just clicked Blog. This says the same thing in one line, at the top
+          of the same container as the filters, so the page starts where its
+          content does.
+
+          `BLOG_INDEX.eyebrow` rather than a typed-in string: copy comes from
+          the content module, and this is the word the nav, the breadcrumb and
+          the JSON-LD already use for this page.
+        */}
+        <h1 className="c4t-display-md" style={{ margin: '0 0 var(--space-7)' }}>
+          {BLOG_INDEX.eyebrow}
+        </h1>
+
         <div
           style={{
             display: 'flex',
