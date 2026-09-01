@@ -22,6 +22,7 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
@@ -825,15 +826,8 @@ export default async function TesterProfilePage({
                 >
                   <Input id="email" name="email" defaultValue={profile.user.email} disabled />
                 </Field>
-                <Field label="Phone" htmlFor="phone">
-                  <Input
-                    id="phone"
-                    name="phone"
-                    type="tel"
-                    maxLength={32}
-                    autoComplete="tel"
-                    defaultValue={profile.user.phone ?? ''}
-                  />
+                <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
+                  <PhoneInput id="phone" name="phone" defaultValue={profile.user.phone ?? ''} />
                 </Field>
                 <Field label="Skype" htmlFor="skype">
                   <Input

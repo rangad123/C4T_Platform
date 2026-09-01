@@ -17,6 +17,7 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
@@ -553,13 +554,11 @@ export default async function UserDetailPage({
                       autoComplete="off"
                     />
                   </Field>
-                  <Field label="Phone" htmlFor="phone" hint="Include the country dialling code.">
-                    <Input
+                  <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
+                    <PhoneInput
                       id="phone"
                       name="phone"
-                      type="tel"
                       defaultValue={user.phone ?? ''}
-                      maxLength={32}
                       autoComplete="off"
                     />
                   </Field>

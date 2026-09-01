@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { phoneField } from '../../lib/phone.js'
 import { OrganisationStatus, OrgMemberRole } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
@@ -14,7 +15,7 @@ const orgProfileFields = {
   website: z.string().trim().url().max(255).optional().or(z.literal('')),
   industry: z.string().trim().max(120).optional(),
   contactEmail: z.string().trim().toLowerCase().email().max(255).optional(),
-  contactPhone: z.string().trim().max(32).optional(),
+  contactPhone: phoneField.optional(),
   addressLine1: z.string().trim().max(255).optional(),
   addressLine2: z.string().trim().max(255).optional(),
   city: z.string().trim().max(120).optional(),

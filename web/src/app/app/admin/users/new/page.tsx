@@ -8,6 +8,7 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
 import { Select } from '@/components/ds/forms/Select'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch } from '@/lib/api/server'
@@ -302,8 +303,8 @@ export default async function NewUserPage({
             <Field label="Last name" htmlFor="lastName">
               <Input id="lastName" name="lastName" maxLength={80} autoComplete="off" />
             </Field>
-            <Field label="Phone" htmlFor="phone" hint="Include the country dialling code.">
-              <Input id="phone" name="phone" type="tel" maxLength={32} autoComplete="off" />
+            <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
+              <PhoneInput id="phone" name="phone" autoComplete="off" />
             </Field>
             <Field label="Country" htmlFor="countryCode" hint="Two-letter code, for example IN.">
               <Input

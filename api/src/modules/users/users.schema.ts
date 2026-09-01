@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { Role, UserStatus } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
+import { phoneField } from '../../lib/phone.js'
 
 export const USER_SORT_FIELDS = ['createdAt', 'email', 'role', 'status', 'lastLoginAt'] as const
 
@@ -18,7 +19,7 @@ export const createUserSchema = z.object({
   role: z.nativeEnum(Role),
   firstName: z.string().trim().min(1).max(80),
   lastName: z.string().trim().max(80).optional(),
-  phone: z.string().trim().max(32).optional(),
+  phone: phoneField.optional(),
   countryCode: z.string().trim().length(2).toUpperCase().optional(),
   /** Only meaningful for SUB_ADMIN; ignored otherwise. */
   permissionCodes: z.array(z.string().trim().max(80)).max(60).optional(),
@@ -29,7 +30,7 @@ export const createUserSchema = z.object({
 export const updateUserSchema = z.object({
   firstName: z.string().trim().min(1).max(80).optional(),
   lastName: z.string().trim().max(80).optional(),
-  phone: z.string().trim().max(32).optional(),
+  phone: phoneField.optional(),
   countryCode: z.string().trim().length(2).toUpperCase().optional(),
   timezone: z.string().trim().max(60).optional(),
   avatarFileId: z.string().cuid().nullable().optional(),

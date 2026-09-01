@@ -14,6 +14,7 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { serverFetch, serverFetchPage } from '@/lib/api/server'
@@ -531,13 +532,12 @@ export default async function OrganisationDetailPage({
                 />
               </Field>
 
-              <Field label="Contact phone" htmlFor="contactPhone">
-                <Input
+              <Field label="Contact phone" htmlFor="contactPhone" hint={PHONE_HINT}>
+                <PhoneInput
                   id="contactPhone"
                   name="contactPhone"
-                  type="tel"
                   defaultValue={organisation.contactPhone ?? ''}
-                  maxLength={32}
+                  autoComplete="off"
                 />
               </Field>
 

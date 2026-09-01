@@ -13,6 +13,7 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
 import { Select } from '@/components/ds/forms/Select'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
@@ -481,19 +482,8 @@ export default async function AdminProfilePage({
                   />
                 </Field>
 
-                <Field
-                  label="Phone"
-                  htmlFor="phone"
-                  hint="Up to 32 characters, including the code."
-                >
-                  <Input
-                    id="phone"
-                    name="phone"
-                    type="tel"
-                    defaultValue={profile.phone ?? ''}
-                    maxLength={32}
-                    autoComplete="tel"
-                  />
+                <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
+                  <PhoneInput id="phone" name="phone" defaultValue={profile.phone ?? ''} />
                 </Field>
 
                 <Field

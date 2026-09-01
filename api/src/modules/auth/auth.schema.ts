@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { phoneField } from '../../lib/phone.js'
 import { Role } from '@prisma/client'
 
 const email = z.string().trim().toLowerCase().email('Enter a valid email address').max(255)
@@ -22,7 +23,7 @@ export const registerSchema = z
     password,
     firstName: z.string().trim().min(1).max(80),
     lastName: z.string().trim().min(1).max(80).optional(),
-    phone: z.string().trim().max(32).optional(),
+    phone: phoneField.optional(),
     countryCode: z.string().trim().length(2).toUpperCase().optional(),
     /**
      * SELF-REGISTRATION IS CUSTOMER OR TESTER ONLY, and the choice is required.
