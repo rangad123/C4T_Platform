@@ -27,6 +27,7 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
+import { loadList } from '@/lib/admin/list'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
@@ -44,6 +45,7 @@ import {
   type ProjectDetail,
   type ProjectMaterial,
   type ProjectRatingRow,
+  type TestCaseRow,
   type ProjectReportSummary,
   BUG_FIELD_TYPE_LABEL,
 } from './constants'
@@ -209,6 +211,7 @@ const SECTIONS = [
   { value: 'testers', label: 'Testers', icon: 'users' },
   { value: 'materials', label: 'Materials', icon: 'book-open' },
   { value: 'features', label: 'Features', icon: 'layout-grid' },
+  { value: 'testing', label: 'Test reports', icon: 'test-tube-diagonal' },
   { value: 'bugs', label: 'Bugs', icon: 'clipboard-check' },
   { value: 'announcements', label: 'Announcements', icon: 'message-square' },
   { value: 'settings', label: 'Settings', icon: 'settings' },
@@ -305,6 +308,7 @@ export default async function CustomerProjectDetailPage({
     reads,
     announcements,
     customFields,
+    testCases,
   ] = await Promise.all([
     /**
      * Everything build-shaped on the Dashboard comes from this one endpoint.
@@ -367,6 +371,19 @@ export default async function CustomerProjectDetailPage({
           query: { buildId: activeBuildId },
         })
       : Promise.resolve(null),
+    /**
+     * The build's test cases with their reports. Scoped by the API: a
+     * customer sees every case on a build of their own project, so this is
+     * the same endpoint the admin panel calls with no customer-only variant
+     * to keep in step.
+     */
+    section === 'testing'
+      ? loadList<TestCaseRow>('test-cases', {
+          page: 1,
+          limit: 50,
+          query: { buildId: activeBuildId },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
   ])
   const priority = isProjectPriority(project.priority) ? project.priority : 'NORMAL'
   const transitions = allowedTransitions(project.status)
@@ -407,6 +424,45 @@ export default async function CustomerProjectDetailPage({
   const RATEABLE = new Set(['ACTIVE', 'COMPLETED'])
 
   // The assignment the rating dialog is open for, if any.
+  /**
+   * Read-only on purpose. Writing test cases and assigning testers is the
+   * delivery team's job, so a customer gets what the checks returned and
+   * none of the controls that produce them.
+   */
+  const testCaseColumns: readonly TableColumn<TestCaseRow>[] = [
+    {
+      key: 'title',
+      header: 'Test case',
+      render: (row) => row.title,
+      renderSecondary: (row) => row.feature ?? undefined,
+    },
+    {
+      key: 'result',
+      header: 'Latest result',
+      render: (row) => {
+        // Reports come back newest first, so the head of the list is current.
+        const latest = row.reports[0]
+        return latest ? <StatusBadge status={latest.result} /> : <Muted>Not tested</Muted>
+      },
+      renderSecondary: (row) =>
+        row.reports[0]
+          ? `${personName(row.reports[0].tester)} · ${formatDate(row.reports[0].createdAt)}`
+          : undefined,
+    },
+    {
+      key: 'assigned',
+      header: 'Assigned',
+      align: 'right',
+      render: (row) => String(row.assignments.length),
+    },
+    {
+      key: 'reports',
+      header: 'Reports',
+      align: 'right',
+      render: (row) => String(row._count.reports),
+    },
+  ]
+
   const announcementItems = buildAnnouncementItems({
     basePath: detailPath,
     announcements: announcements ?? [],
@@ -1625,6 +1681,36 @@ export default async function CustomerProjectDetailPage({
           which is admin-side. Notices to the crowd go out through the
           platform, so there is no compose form here — see the note in the
           page docblock. */}
+      {section === 'testing' ? (
+        <Panel
+          title="Test reports"
+          description={
+            'error' in testCases
+              ? 'Test cases could not be loaded.'
+              : `What the scripted checks on ${activeBuild?.name ?? 'this build'} have returned. A test case is a check the team wrote; a bug is a defect one of them turned up.`
+          }
+        >
+          {'error' in testCases ? (
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              Test cases could not be loaded. Refresh in a moment.
+            </p>
+          ) : testCases.items.length === 0 ? (
+            <EmptyState
+              icon="test-tube-diagonal"
+              title="No test cases yet"
+              description="Scripted checks written for this build appear here, with what each one returned."
+            />
+          ) : (
+            <Table
+              ariaLabel="Test reports"
+              columns={testCaseColumns}
+              rows={testCases.items}
+              rowKey={(row) => row.id}
+            />
+          )}
+        </Panel>
+      ) : null}
+
       {section === 'announcements' ? (
         <>
           {openAnnouncement ? (

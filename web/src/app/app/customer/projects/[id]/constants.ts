@@ -305,3 +305,32 @@ export const BUG_FIELD_TYPE_LABEL: Record<string, string> = {
   RADIO: 'Single choice',
   CHECKBOX: 'Multiple choice',
 }
+
+/**
+ * A test case with its reports, as `GET /test-cases?buildId=` returns it.
+ *
+ * The API scopes this by relation: a customer sees every case on their own
+ * build, a plain tester only the ones assigned to them. Same endpoint, same
+ * shape, different rows — so this type serves both portals.
+ */
+export interface TestCaseRow {
+  id: string
+  feature: string | null
+  title: string
+  description: string
+  steps: string
+  expectedResult: string
+  createdAt: string
+  assignments: readonly { id: string; assignedAt: string; tester: ProjectPerson }[]
+  reports: readonly {
+    id: string
+    result: string
+    notes: string | null
+    devices: string | null
+    browsers: string | null
+    createdAt: string
+    tester: ProjectPerson
+    linkedBug: { id: string; reference: string; title: string } | null
+  }[]
+  _count: { reports: number }
+}

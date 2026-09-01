@@ -18,6 +18,7 @@ import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
+import { loadList } from '@/lib/admin/list'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
@@ -30,6 +31,7 @@ import type {
   ProjectDetail,
   ProjectFeature,
   ProjectMaterial,
+  TestCaseRow,
 } from './constants'
 
 const ROOT = { label: 'Tester', href: '/app/tester' }
@@ -158,6 +160,7 @@ export default async function TesterProjectWorkspacePage({
     ...(project.testersCanSeeOtherBugs
       ? ([{ value: 'bugs-others', label: 'Bugs (others)', icon: 'users' }] as const)
       : []),
+    { value: 'testing', label: 'Test reports', icon: 'test-tube-diagonal' },
     { value: 'announcements', label: 'Announcements', icon: 'message-square' },
   ] as const
   const section = resolveSection(SECTIONS, rawSection)
@@ -167,55 +170,69 @@ export default async function TesterProjectWorkspacePage({
    * Section-gated reads. `Promise.resolve(null)` for a tab that is not open
    * keeps the shape of the tuple without paying for the request.
    */
-  const [buildDetail, features, myBugs, otherBugs, announcements, reads] = await Promise.all([
-    !isInvited && section === 'build'
-      ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${activeBuildId}`)
-      : Promise.resolve(null),
-    !isInvited && section === 'build'
-      ? serverFetchOrNull<readonly ProjectFeature[]>(`projects/${project.id}/features`, {
-          query: { buildId: activeBuildId },
-        })
-      : Promise.resolve(null),
-    !isInvited && section === 'bugs'
-      ? serverFetchOrNull<readonly BugRow[]>('bugs', {
-          query: {
-            buildId: activeBuildId,
-            reportedById: user.id,
-            limit: BUG_PAGE_SIZE,
-            sort: 'createdAt',
-            order: 'desc',
-          },
-        })
-      : Promise.resolve(null),
-    !isInvited && section === 'bugs-others'
-      ? serverFetchOrNull<readonly BugRow[]>('bugs', {
-          query: {
-            buildId: activeBuildId,
-            excludeReportedById: user.id,
-            limit: BUG_PAGE_SIZE,
-            sort: 'createdAt',
-            order: 'desc',
-          },
-        })
-      : Promise.resolve(null),
-    !isInvited && section === 'announcements'
-      ? serverFetchOrNull<readonly AnnouncementRow[]>('communication/announcements', {
-          // Scoped to this project and this tester's build. Without the
-          // filter this tab showed every announcement the tester could see
-          // platform-wide, which on a project workspace reads as though they
-          // all concern this project.
-          query: { projectId: project.id, buildId: activeBuildId, limit: 50 },
-        })
-      : Promise.resolve(null),
-    /**
-     * Which of them this tester has not read. The announcement itself has no
-     * read column — the notification created when it was published is the
-     * read state, so this asks for the unread ones and matches by id.
-     */
-    !isInvited && section === 'announcements'
-      ? loadBroadcastReads()
-      : Promise.resolve({ unreadIds: new Set<string>(), notificationIdFor: new Map() }),
-  ])
+  const [buildDetail, features, myBugs, otherBugs, announcements, reads, testCases] =
+    await Promise.all([
+      !isInvited && section === 'build'
+        ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${activeBuildId}`)
+        : Promise.resolve(null),
+      !isInvited && section === 'build'
+        ? serverFetchOrNull<readonly ProjectFeature[]>(`projects/${project.id}/features`, {
+            query: { buildId: activeBuildId },
+          })
+        : Promise.resolve(null),
+      !isInvited && section === 'bugs'
+        ? serverFetchOrNull<readonly BugRow[]>('bugs', {
+            query: {
+              buildId: activeBuildId,
+              reportedById: user.id,
+              limit: BUG_PAGE_SIZE,
+              sort: 'createdAt',
+              order: 'desc',
+            },
+          })
+        : Promise.resolve(null),
+      !isInvited && section === 'bugs-others'
+        ? serverFetchOrNull<readonly BugRow[]>('bugs', {
+            query: {
+              buildId: activeBuildId,
+              excludeReportedById: user.id,
+              limit: BUG_PAGE_SIZE,
+              sort: 'createdAt',
+              order: 'desc',
+            },
+          })
+        : Promise.resolve(null),
+      !isInvited && section === 'announcements'
+        ? serverFetchOrNull<readonly AnnouncementRow[]>('communication/announcements', {
+            // Scoped to this project and this tester's build. Without the
+            // filter this tab showed every announcement the tester could see
+            // platform-wide, which on a project workspace reads as though they
+            // all concern this project.
+            query: { projectId: project.id, buildId: activeBuildId, limit: 50 },
+          })
+        : Promise.resolve(null),
+      /**
+       * Which of them this tester has not read. The announcement itself has no
+       * read column — the notification created when it was published is the
+       * read state, so this asks for the unread ones and matches by id.
+       */
+      !isInvited && section === 'announcements'
+        ? loadBroadcastReads()
+        : Promise.resolve({ unreadIds: new Set<string>(), notificationIdFor: new Map() }),
+      /**
+       * The tester's OWN test cases on this build. The API scopes it: a plain
+       * tester gets only the cases assigned to them, so this is the same
+       * endpoint the admin and customer panels call and there is no
+       * tester-only variant to keep in step.
+       */
+      !isInvited && section === 'testing'
+        ? loadList<TestCaseRow>('test-cases', {
+            page: 1,
+            limit: 50,
+            query: { buildId: activeBuildId },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+    ])
 
   /**
    * Already narrowed server-side to this project and this tester's build,
@@ -625,6 +642,81 @@ export default async function TesterProjectWorkspacePage({
       ) : null}
 
       {/* ── Announcements ────────────────────────────────────────────── */}
+      {!isInvited && section === 'testing' ? (
+        <Panel
+          title="Test reports"
+          description="The scripted checks assigned to you on this build, and what you reported for each."
+        >
+          {'error' in testCases ? (
+            <Muted>Your test cases could not be loaded. Refresh in a moment.</Muted>
+          ) : testCases.items.length === 0 ? (
+            <Muted>
+              Nothing assigned to you on this build yet. A test case is a check the team has written
+              out; when one is assigned it appears here with its steps.
+            </Muted>
+          ) : (
+            <ul style={{ ...listResetStyle, gap: 'var(--space-4)' }}>
+              {testCases.items.map((tc) => {
+                // Newest first from the API, so the head is the current result.
+                const latest = tc.reports[0]
+                return (
+                  <li
+                    key={tc.id}
+                    style={{
+                      padding: 'var(--space-5)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-card)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 'var(--space-3)',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <strong style={{ color: 'var(--text-primary)' }}>{tc.title}</strong>
+                      {latest ? (
+                        <StatusBadge status={latest.result} />
+                      ) : (
+                        <Badge tone="neutral">Not tested</Badge>
+                      )}
+                    </div>
+
+                    {/*
+                      The steps and the expectation, because this reader is the
+                      one running the check — the other two portals show what a
+                      case RETURNED, this one shows what to do.
+                    */}
+                    <DescriptionList
+                      items={[
+                        { label: 'Feature', value: tc.feature ?? '—' },
+                        { label: 'Steps', value: <Prose>{tc.steps}</Prose>, wide: true },
+                        {
+                          label: 'Expected result',
+                          value: <Prose>{tc.expectedResult}</Prose>,
+                          wide: true,
+                        },
+                        ...(latest
+                          ? [
+                              {
+                                label: 'You reported',
+                                value: `${titleCase(latest.result)} on ${formatDate(latest.createdAt)}`,
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Panel>
+      ) : null}
+
       {!isInvited && section === 'announcements' ? (
         <>
           {/* ── One open announcement ────────────────────────────────────

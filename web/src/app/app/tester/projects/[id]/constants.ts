@@ -166,3 +166,31 @@ export interface AnnouncementRow {
   expiresAt: string | null
   author: Person | null
 }
+
+/**
+ * A test case with its reports, as `GET /test-cases?buildId=` returns it.
+ *
+ * The API scopes by relation, so a plain tester receives only the cases
+ * assigned to them — the same endpoint and shape the admin and customer
+ * portals read, with different rows.
+ */
+export interface TestCaseRow {
+  id: string
+  feature: string | null
+  title: string
+  description: string
+  steps: string
+  expectedResult: string
+  createdAt: string
+  assignments: readonly { id: string; assignedAt: string }[]
+  reports: readonly {
+    id: string
+    result: string
+    notes: string | null
+    devices: string | null
+    browsers: string | null
+    createdAt: string
+    linkedBug: { id: string; reference: string; title: string } | null
+  }[]
+  _count: { reports: number }
+}
