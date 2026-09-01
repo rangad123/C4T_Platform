@@ -61,7 +61,6 @@ import {
   removeMaterial,
   renameBuild,
   updateBuild,
-  copyBuild,
   updateProjectBrief,
   updateProjectDelivery,
   setBugCustomization,
@@ -290,7 +289,6 @@ export default async function CustomerProjectDetailPage({
 
   const { capabilities } = project
   const activeBuildId = project.activeBuildId
-  const defaultBuildId = project.builds.find((b) => b.isDefault)?.id ?? activeBuildId
 
   const buildDetail = await serverFetchOrNull<BuildDetail>(
     `projects/${project.id}/builds/${activeBuildId}`,
@@ -303,7 +301,6 @@ export default async function CustomerProjectDetailPage({
     features,
     bugs,
     projectReport,
-    defaultBuildDetailIfDifferent,
     projectRatings,
     reads,
     announcements,
@@ -339,9 +336,6 @@ export default async function CustomerProjectDetailPage({
     section === 'dashboard'
       ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
       : Promise.resolve(null),
-    newBuildModalOpen && defaultBuildId !== activeBuildId
-      ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
-      : Promise.resolve(null),
     /**
      * Announcements for this project and build. The context filters are the
      * API's, so this cannot show another organisation's notices — and a
@@ -374,9 +368,6 @@ export default async function CustomerProjectDetailPage({
         })
       : Promise.resolve(null),
   ])
-  const defaultBuildDetail =
-    defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
-
   const priority = isProjectPriority(project.priority) ? project.priority : 'NORMAL'
   const transitions = allowedTransitions(project.status)
   const detailPath = `/app/customer/projects/${project.id}`
@@ -1232,18 +1223,6 @@ export default async function CustomerProjectDetailPage({
               />
             )}
           </Panel>
-
-          {capabilities.canUpdate ? (
-            <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-              <form action={copyBuild}>
-                <input type="hidden" name="id" value={project.id} />
-                <input type="hidden" name="buildId" value={activeBuildId} />
-                <SubmitButton variant="secondary" iconLeft="repeat" pendingLabel="Copying…">
-                  Copy this build
-                </SubmitButton>
-              </form>
-            </div>
-          ) : null}
         </>
       ) : null}
 
@@ -1837,7 +1816,7 @@ export default async function CustomerProjectDetailPage({
                   id="new-build-testType"
                   name="testType"
                   maxLength={120}
-                  defaultValue={defaultBuildDetail?.testType ?? ''}
+                  defaultValue={buildDetail?.testType ?? ''}
                 />
               </Field>
               <Field label="Start date" htmlFor="new-build-startDate">
@@ -1857,7 +1836,7 @@ export default async function CustomerProjectDetailPage({
                   type="number"
                   min={1}
                   max={10000}
-                  defaultValue={defaultBuildDetail?.maxTesters ?? ''}
+                  defaultValue={buildDetail?.maxTesters ?? ''}
                 />
               </Field>
               <Field label="Application / website URL" htmlFor="new-build-appUrl">
@@ -1866,7 +1845,7 @@ export default async function CustomerProjectDetailPage({
                   name="appUrl"
                   type="url"
                   maxLength={2000}
-                  defaultValue={defaultBuildDetail?.appUrl ?? ''}
+                  defaultValue={buildDetail?.appUrl ?? ''}
                 />
               </Field>
             </div>
@@ -1879,7 +1858,7 @@ export default async function CustomerProjectDetailPage({
                 <Input
                   id="new-build-targetCountries"
                   name="targetCountries"
-                  defaultValue={defaultBuildDetail?.targetCountries.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetCountries.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -1890,7 +1869,7 @@ export default async function CustomerProjectDetailPage({
                 <Input
                   id="new-build-targetLanguages"
                   name="targetLanguages"
-                  defaultValue={defaultBuildDetail?.targetLanguages.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetLanguages.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -1901,7 +1880,7 @@ export default async function CustomerProjectDetailPage({
                 <Input
                   id="new-build-targetDevices"
                   name="targetDevices"
-                  defaultValue={defaultBuildDetail?.targetDevices.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetDevices.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -1912,7 +1891,7 @@ export default async function CustomerProjectDetailPage({
                 <Input
                   id="new-build-targetBrowsers"
                   name="targetBrowsers"
-                  defaultValue={defaultBuildDetail?.targetBrowsers.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetBrowsers.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -1923,7 +1902,7 @@ export default async function CustomerProjectDetailPage({
                 <Input
                   id="new-build-targetOperatingSystems"
                   name="targetOperatingSystems"
-                  defaultValue={defaultBuildDetail?.targetOperatingSystems.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetOperatingSystems.join(', ') ?? ''}
                 />
               </Field>
             </div>
@@ -1932,7 +1911,7 @@ export default async function CustomerProjectDetailPage({
                 id="new-build-description"
                 name="description"
                 rows={3}
-                defaultValue={defaultBuildDetail?.description ?? ''}
+                defaultValue={buildDetail?.description ?? ''}
               />
             </Field>
             <Field label="Testing instructions" htmlFor="new-build-instructions">
@@ -1940,7 +1919,7 @@ export default async function CustomerProjectDetailPage({
                 id="new-build-instructions"
                 name="instructions"
                 rows={6}
-                defaultValue={defaultBuildDetail?.instructions ?? ''}
+                defaultValue={buildDetail?.instructions ?? ''}
               />
             </Field>
             <Field label="Special requirements" htmlFor="new-build-specialRequirements">
@@ -1948,7 +1927,7 @@ export default async function CustomerProjectDetailPage({
                 id="new-build-specialRequirements"
                 name="specialRequirements"
                 rows={3}
-                defaultValue={defaultBuildDetail?.specialRequirements ?? ''}
+                defaultValue={buildDetail?.specialRequirements ?? ''}
               />
             </Field>
             <Field label="Release notes" htmlFor="new-build-releaseNotes">
@@ -1956,12 +1935,12 @@ export default async function CustomerProjectDetailPage({
                 id="new-build-releaseNotes"
                 name="releaseNotes"
                 rows={3}
-                defaultValue={defaultBuildDetail?.releaseNotes ?? ''}
+                defaultValue={buildDetail?.releaseNotes ?? ''}
               />
             </Field>
             <Checkbox
               name="testersCanSeeOtherBugs"
-              defaultChecked={defaultBuildDetail?.testersCanSeeOtherBugs ?? false}
+              defaultChecked={buildDetail?.testersCanSeeOtherBugs ?? false}
               label="Testers can see bugs raised by others (this build)"
               description="Overrides the project's own setting for this build only."
             />

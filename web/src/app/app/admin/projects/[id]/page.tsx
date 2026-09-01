@@ -67,7 +67,6 @@ import {
   removeMaterial,
   renameBuild,
   updateBuild,
-  copyBuild,
   updateAssignment,
   updateProjectBrief,
   updateProjectDelivery,
@@ -200,7 +199,6 @@ export default async function ProjectDetailPage({
   // The build "New build" copies its general details from — see §2 below.
   // Falls back to the active build if a project somehow has no build flagged
   // default (shouldn't happen; every project gets one on creation).
-  const defaultBuildId = project.builds.find((b) => b.isDefault)?.id ?? activeBuildId
 
   // `buildDetail` decides which tabs even exist (exploratory builds hide the
   // Test reports tab, below), so it has to resolve before `section` can be
@@ -231,72 +229,54 @@ export default async function ProjectDetailPage({
    * a visit only pays for the data it shows; `loading.tsx` already covers
    * the brief gap while that narrower set of fetches resolves.
    */
-  const [
-    testerPool,
-    bugs,
-    features,
-    buildSummaryData,
-    testCases,
-    projectReport,
-    defaultBuildDetailIfDifferent,
-    projectRatings,
-  ] = await Promise.all([
-    section === 'testers' && capabilities.canAssignTesters
-      ? loadList<VerifiedTesterRow>('testers', {
-          page: 1,
-          limit: TESTER_POOL_SIZE,
-          query: { status: 'VERIFIED', sort: 'ratingAverage', order: 'desc' },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    section === 'bugs'
-      ? loadList<ProjectBugRow>('bugs', {
-          page: 1,
-          limit: BUG_PREVIEW_SIZE,
-          query: { projectId: project.id, buildId: activeBuildId },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    section === 'features'
-      ? serverFetchOrNull<
-          readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
-        >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
-      : Promise.resolve(null),
-    section === 'build'
-      ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
-      : Promise.resolve(null),
-    section === 'testing'
-      ? loadList<TestCaseRow>('test-cases', {
-          page: 1,
-          limit: 50,
-          query: { buildId: activeBuildId },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    // Same by-project report the Reports module's "By project" section
-    // renders — reused for the Overview tab's summary rather than a second
-    // aggregation. Rolled up across every build, unlike `buildSummaryData`.
-    section === 'dashboard'
-      ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
-      : Promise.resolve(null),
-    // Only the New build modal reads this, and that modal opens from every
-    // section's tab bar (see the "New build" button below) — gated on the
-    // modal being open, not on `section`. Most projects have exactly one
-    // build, so the active one already IS the default and `buildDetail`
-    // above already has what the modal needs — no reason to fetch it twice.
-    newBuildModalOpen && defaultBuildId !== activeBuildId
-      ? serverFetchOrNull<BuildDetail>(`projects/${project.id}/builds/${defaultBuildId}`)
-      : Promise.resolve(null),
-    /**
-     * Ratings already left on this project, so the roster can say which
-     * testers this viewer has rated. Only needed where the column renders.
-     */
-    section === 'testers'
-      ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
-          query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
-        })
-      : Promise.resolve(null),
-  ])
-  const defaultBuildDetail =
-    defaultBuildId !== activeBuildId ? defaultBuildDetailIfDifferent : buildDetail
-
+  const [testerPool, bugs, features, buildSummaryData, testCases, projectReport, projectRatings] =
+    await Promise.all([
+      section === 'testers' && capabilities.canAssignTesters
+        ? loadList<VerifiedTesterRow>('testers', {
+            page: 1,
+            limit: TESTER_POOL_SIZE,
+            query: { status: 'VERIFIED', sort: 'ratingAverage', order: 'desc' },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      section === 'bugs'
+        ? loadList<ProjectBugRow>('bugs', {
+            page: 1,
+            limit: BUG_PREVIEW_SIZE,
+            query: { projectId: project.id, buildId: activeBuildId },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      section === 'features'
+        ? serverFetchOrNull<
+            readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
+          >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
+        : Promise.resolve(null),
+      section === 'build'
+        ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
+        : Promise.resolve(null),
+      section === 'testing'
+        ? loadList<TestCaseRow>('test-cases', {
+            page: 1,
+            limit: 50,
+            query: { buildId: activeBuildId },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      // Same by-project report the Reports module's "By project" section
+      // renders — reused for the Overview tab's summary rather than a second
+      // aggregation. Rolled up across every build, unlike `buildSummaryData`.
+      section === 'dashboard'
+        ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
+        : Promise.resolve(null),
+      // Only the New build modal reads this, and that modal opens from every
+      /**
+       * Ratings already left on this project, so the roster can say which
+       * testers this viewer has rated. Only needed where the column renders.
+       */
+      section === 'testers'
+        ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
+            query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
+          })
+        : Promise.resolve(null),
+    ])
   const assignedTesterIds = new Set(project.assignments.map((row) => row.tester.id))
   // `assertAssignable` on the API rejects a tester who is not ACTIVE or has not
   // accepted the NDA, so those are filtered out here rather than offered and
@@ -1369,13 +1349,6 @@ export default async function ProjectDetailPage({
 
           {capabilities.canUpdate ? (
             <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-              <form action={copyBuild}>
-                <input type="hidden" name="id" value={project.id} />
-                <input type="hidden" name="buildId" value={activeBuildId} />
-                <SubmitButton variant="secondary" iconLeft="repeat" pendingLabel="Copying…">
-                  Copy this build
-                </SubmitButton>
-              </form>
               <Button
                 href={`/app/admin/export/reports/by-build/${activeBuildId}/export.csv`}
                 prefetch={false}
@@ -2186,13 +2159,23 @@ export default async function ProjectDetailPage({
       {capabilities.canUpdate ? (
         <Modal open={newBuildModalOpen} closedHref={closedHref} title="New build">
           {/*
-            Pre-filled from the project's default build ("Original build"),
-            the same field split `copyBuild`'s "Copy this build" already
-            uses: everything general about how to run the build (test type,
-            targets, instructions, scope...) carries over so a second test
-            cycle doesn't mean re-typing it. Name, status, and the window
-            dates are build-specific — they start fresh here rather than
-            inheriting the original's current name, status or dates.
+            Pre-filled from the build being viewed.
+
+            "Copy this build" used to sit under Build details and do exactly
+            this, so there were two ways to start a build from an existing
+            one -- one that copied silently and one that asked. This is the
+            one that asks, which is the one worth keeping: everything general
+            about how the cycle runs (test type, targets, instructions,
+            scope) carries over, and the reader can change any of it before
+            it exists rather than after.
+
+            Name, status and the window dates start fresh. They are what
+            makes a build a different build, and inheriting them would only
+            mean clearing them again.
+
+            The source used to be the project's DEFAULT build, which was
+            surprising anywhere except on the default build itself: making a
+            variant of 1.0.5 pre-filled from "Original build".
           */}
           <TrackedForm action={createBuild} style={stackStyle}>
             <input type="hidden" name="id" value={project.id} />
@@ -2224,7 +2207,7 @@ export default async function ProjectDetailPage({
                   id="new-build-testType"
                   name="testType"
                   maxLength={120}
-                  defaultValue={defaultBuildDetail?.testType ?? ''}
+                  defaultValue={buildDetail?.testType ?? ''}
                 />
               </Field>
               <Field label="Start date" htmlFor="new-build-startDate">
@@ -2244,7 +2227,7 @@ export default async function ProjectDetailPage({
                   type="number"
                   min={1}
                   max={10000}
-                  defaultValue={defaultBuildDetail?.maxTesters ?? ''}
+                  defaultValue={buildDetail?.maxTesters ?? ''}
                 />
               </Field>
               <Field label="Application / website URL" htmlFor="new-build-appUrl">
@@ -2253,7 +2236,7 @@ export default async function ProjectDetailPage({
                   name="appUrl"
                   type="url"
                   maxLength={2000}
-                  defaultValue={defaultBuildDetail?.appUrl ?? ''}
+                  defaultValue={buildDetail?.appUrl ?? ''}
                 />
               </Field>
             </div>
@@ -2267,7 +2250,7 @@ export default async function ProjectDetailPage({
                 <Input
                   id="new-build-targetCountries"
                   name="targetCountries"
-                  defaultValue={defaultBuildDetail?.targetCountries.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetCountries.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -2278,7 +2261,7 @@ export default async function ProjectDetailPage({
                 <Input
                   id="new-build-targetLanguages"
                   name="targetLanguages"
-                  defaultValue={defaultBuildDetail?.targetLanguages.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetLanguages.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -2289,7 +2272,7 @@ export default async function ProjectDetailPage({
                 <Input
                   id="new-build-targetDevices"
                   name="targetDevices"
-                  defaultValue={defaultBuildDetail?.targetDevices.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetDevices.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -2300,7 +2283,7 @@ export default async function ProjectDetailPage({
                 <Input
                   id="new-build-targetBrowsers"
                   name="targetBrowsers"
-                  defaultValue={defaultBuildDetail?.targetBrowsers.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetBrowsers.join(', ') ?? ''}
                 />
               </Field>
               <Field
@@ -2311,7 +2294,7 @@ export default async function ProjectDetailPage({
                 <Input
                   id="new-build-targetOperatingSystems"
                   name="targetOperatingSystems"
-                  defaultValue={defaultBuildDetail?.targetOperatingSystems.join(', ') ?? ''}
+                  defaultValue={buildDetail?.targetOperatingSystems.join(', ') ?? ''}
                 />
               </Field>
             </div>
@@ -2321,7 +2304,7 @@ export default async function ProjectDetailPage({
                 id="new-build-description"
                 name="description"
                 rows={3}
-                defaultValue={defaultBuildDetail?.description ?? ''}
+                defaultValue={buildDetail?.description ?? ''}
               />
             </Field>
             <Field label="Testing instructions" htmlFor="new-build-instructions">
@@ -2329,7 +2312,7 @@ export default async function ProjectDetailPage({
                 id="new-build-instructions"
                 name="instructions"
                 rows={6}
-                defaultValue={defaultBuildDetail?.instructions ?? ''}
+                defaultValue={buildDetail?.instructions ?? ''}
               />
             </Field>
             <Field label="Special requirements" htmlFor="new-build-specialRequirements">
@@ -2337,7 +2320,7 @@ export default async function ProjectDetailPage({
                 id="new-build-specialRequirements"
                 name="specialRequirements"
                 rows={3}
-                defaultValue={defaultBuildDetail?.specialRequirements ?? ''}
+                defaultValue={buildDetail?.specialRequirements ?? ''}
               />
             </Field>
             <Field label="Release notes" htmlFor="new-build-releaseNotes">
@@ -2345,13 +2328,13 @@ export default async function ProjectDetailPage({
                 id="new-build-releaseNotes"
                 name="releaseNotes"
                 rows={3}
-                defaultValue={defaultBuildDetail?.releaseNotes ?? ''}
+                defaultValue={buildDetail?.releaseNotes ?? ''}
               />
             </Field>
 
             <Checkbox
               name="testersCanSeeOtherBugs"
-              defaultChecked={defaultBuildDetail?.testersCanSeeOtherBugs ?? false}
+              defaultChecked={buildDetail?.testersCanSeeOtherBugs ?? false}
               label="Testers can see bugs raised by others (this build)"
               description="Overrides the project's own setting for this build only."
             />

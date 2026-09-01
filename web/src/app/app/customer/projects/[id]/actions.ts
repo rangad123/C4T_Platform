@@ -298,28 +298,6 @@ export async function updateBuild(formData: FormData): Promise<void> {
   redirect(buildHref(id, buildId, 'build-saved', { section }))
 }
 
-export async function copyBuild(formData: FormData): Promise<void> {
-  const id = formTrimmed(formData, 'id')
-  const buildId = formTrimmed(formData, 'buildId')
-  if (!id || !buildId) return
-
-  let copy: { id: string }
-  try {
-    copy = await actionFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
-      method: 'POST',
-    })
-  } catch {
-    // Copying failed, so stay on the build that was being copied and say so
-    // in its own terms. This previously threw uncaught, which surfaced as the
-    // generic project-level crash screen — a message about creating a
-    // project, for an action that copies a build.
-    redirect(buildHref(id, buildId, 'build-copy-failed', { section: 'build' }))
-  }
-
-  revalidateProject(id)
-  redirect(buildHref(id, copy.id, 'build-copied', { section: 'build' }))
-}
-
 // ─── Custom bug fields (§36-38) ──────────────────────────────────────────────
 
 /**

@@ -463,19 +463,6 @@ export async function updateBuild(formData: FormData): Promise<void> {
   redirect(projectHref(id, { section, buildId }))
 }
 
-/** §7 "Copy Build" — lands on the new copy, on the build-details tab. */
-export async function copyBuild(formData: FormData): Promise<void> {
-  const id = formTrimmed(formData, 'id')
-  const buildId = formTrimmed(formData, 'buildId')
-  if (!id || !buildId) return
-
-  const copy = await actionFetch<{ id: string }>(`projects/${id}/builds/${buildId}/copy`, {
-    method: 'POST',
-  })
-  revalidateProject(id)
-  redirect(`/app/admin/projects/${id}?section=build&buildId=${copy.id}`)
-}
-
 // ─── Structured testing workflow ──────────────────────────────────────────
 
 export async function createTestCase(formData: FormData): Promise<void> {
