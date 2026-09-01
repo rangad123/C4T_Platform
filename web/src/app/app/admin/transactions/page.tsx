@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
@@ -132,7 +132,7 @@ export default async function TransactionsPage({
     month?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('transaction.read')
 
   const params = await searchParams
   const section = resolveSection(SECTIONS, params.section)

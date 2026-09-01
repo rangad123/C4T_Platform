@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { Button } from '@/components/ds/core/Button'
@@ -79,7 +79,7 @@ export default async function UsersPage({
     order?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('user.read')
 
   const params = await searchParams
   const role = ROLES.includes(params.role as (typeof ROLES)[number]) ? params.role : undefined

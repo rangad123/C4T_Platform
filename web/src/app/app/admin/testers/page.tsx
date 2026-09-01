@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { Avatar } from '@/components/admin/Avatar'
@@ -110,7 +110,7 @@ export default async function TestersPage({
     skills?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('tester.read')
 
   const params = await searchParams
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])

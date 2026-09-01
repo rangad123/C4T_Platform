@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
@@ -201,7 +201,7 @@ export default async function CatalogPage({
 }: {
   searchParams: Promise<{ all?: string; error?: string; section?: string }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('tester.read')
   const params = await searchParams
   const showAll = params.all === 'true'
   const section = resolveSection(SECTIONS, params.section)

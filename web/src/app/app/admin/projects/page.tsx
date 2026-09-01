@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { Button } from '@/components/ds/core/Button'
 import { ListFilters } from '@/components/admin/ListFilters'
@@ -86,7 +86,7 @@ export default async function ProjectsPage({
     order?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('project.read')
 
   const params = await searchParams
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])

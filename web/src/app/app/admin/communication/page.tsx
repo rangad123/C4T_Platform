@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { Avatar } from '@/components/admin/Avatar'
@@ -77,7 +77,7 @@ export default async function BroadcastPage({
     of?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('communication.read')
 
   const params = await searchParams
   const search = searchTerm(params.search)

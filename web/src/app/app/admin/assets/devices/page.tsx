@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { AssetsTabs } from '../tabs'
 import { ListFilters } from '@/components/admin/ListFilters'
@@ -54,7 +54,7 @@ export default async function DevicesAssetPage({
     page?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('tester.read')
 
   const params = await searchParams
   const search = searchTerm(params.search)

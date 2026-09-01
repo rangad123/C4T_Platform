@@ -42,7 +42,15 @@ export default async function AdminSettingsPage({
 }: {
   searchParams: Promise<{ notice?: string }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  /**
+   * Administrators only.
+   *
+   * These are platform-wide values every account inherits, so this is not a
+   * scope to hand out with a read permission — and the nav already hides it
+   * from a sub-admin. A hidden link that still opens when typed is not a
+   * gate, so the two say the same thing.
+   */
+  await requireRole(['ADMIN'])
   const { notice } = await searchParams
 
   const template = await serverFetchOrNull<NdaTemplate | null>('settings/nda-template')

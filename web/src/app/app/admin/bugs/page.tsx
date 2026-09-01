@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { CountryFlag } from '@/components/admin/CountryFlag'
 import { ListFilters } from '@/components/admin/ListFilters'
@@ -126,7 +126,7 @@ export default async function BugsPage({
     projectId?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('bug.read')
 
   const params = await searchParams
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])

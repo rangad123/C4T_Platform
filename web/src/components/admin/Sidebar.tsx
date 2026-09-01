@@ -18,6 +18,15 @@ export interface SidebarLink {
   disabled?: boolean
   /** Restrict to specific roles. Missing = available to anyone on the admin side. */
   roles?: readonly Role[]
+  /**
+   * Permission code the destination requires. Missing = no permission gate.
+   *
+   * Filtered by the LAYOUT, not here: only a Server Component knows the
+   * signed-in user, and deciding it there keeps the whole permission set off
+   * the wire. A link that survives to this component is one the reader may
+   * open.
+   */
+  permission?: string
 }
 
 export interface SidebarSection {

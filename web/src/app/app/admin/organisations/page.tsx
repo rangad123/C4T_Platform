@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { Avatar } from '@/components/admin/Avatar'
 import { CountryFlag } from '@/components/admin/CountryFlag'
@@ -75,7 +75,7 @@ export default async function OrganisationsPage({
     order?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('organisation.read')
 
   const params = await searchParams
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])

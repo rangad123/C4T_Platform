@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { Badge } from '@/components/ds/core/Badge'
@@ -47,7 +47,7 @@ export default async function RatingsPage({
     page?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('rating.read')
 
   const params = await searchParams
   const subjectType = SUBJECT_TYPES.includes(params.subjectType as (typeof SUBJECT_TYPES)[number])

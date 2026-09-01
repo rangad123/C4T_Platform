@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { requireRole } from '@/lib/auth/session'
+import { requireRole, hasPermission } from '@/lib/auth/session'
 import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
 import { AppShell } from '@/components/admin/AppShell'
 
@@ -32,7 +32,7 @@ const SECTIONS: readonly SidebarSection[] = [
   },
   {
     label: 'Pipeline',
-    links: [{ href: '/app/admin/leads', label: 'Leads', icon: 'mail' }],
+    links: [{ href: '/app/admin/leads', label: 'Leads', icon: 'mail', permission: 'lead.read' }],
   },
   /**
    * Grouped by what an admin is actually doing, not by API module. The group
@@ -43,13 +43,38 @@ const SECTIONS: readonly SidebarSection[] = [
   {
     label: 'Accounts',
     links: [
-      { href: '/app/admin/organisations', label: 'Organisations', icon: 'building-2' },
-      { href: '/app/admin/users', label: 'Users', icon: 'user-check' },
-      { href: '/app/admin/testers', label: 'Testers', icon: 'users' },
-      { href: '/app/admin/managers', label: 'Managers', icon: 'shield-check' },
-      { href: '/app/admin/assets/devices', label: 'Devices', icon: 'smartphone' },
-      { href: '/app/admin/assets/browsers', label: 'Browsers', icon: 'monitor' },
-      { href: '/app/admin/assets/skills', label: 'Skills', icon: 'graduation-cap' },
+      {
+        href: '/app/admin/organisations',
+        label: 'Organisations',
+        icon: 'building-2',
+        permission: 'organisation.read',
+      },
+      { href: '/app/admin/users', label: 'Users', icon: 'user-check', permission: 'user.read' },
+      { href: '/app/admin/testers', label: 'Testers', icon: 'users', permission: 'tester.read' },
+      {
+        href: '/app/admin/managers',
+        label: 'Managers',
+        icon: 'shield-check',
+        permission: 'manager.read',
+      },
+      {
+        href: '/app/admin/assets/devices',
+        label: 'Devices',
+        icon: 'smartphone',
+        permission: 'tester.read',
+      },
+      {
+        href: '/app/admin/assets/browsers',
+        label: 'Browsers',
+        icon: 'monitor',
+        permission: 'tester.read',
+      },
+      {
+        href: '/app/admin/assets/skills',
+        label: 'Skills',
+        icon: 'graduation-cap',
+        permission: 'tester.read',
+      },
     ],
   },
   {
@@ -62,29 +87,60 @@ const SECTIONS: readonly SidebarSection[] = [
      * permanent sidebar entry.
      */
     label: 'Delivery',
-    links: [{ href: '/app/admin/projects', label: 'Projects', icon: 'briefcase' }],
+    links: [
+      {
+        href: '/app/admin/projects',
+        label: 'Projects',
+        icon: 'briefcase',
+        permission: 'project.read',
+      },
+    ],
   },
   {
     label: 'Reports',
-    links: [{ href: '/app/admin/reports', label: 'Reports', icon: 'line-chart' }],
+    links: [
+      {
+        href: '/app/admin/reports',
+        label: 'Reports',
+        icon: 'line-chart',
+        permission: 'stats.read',
+      },
+    ],
   },
   {
     label: 'Content',
-    links: [{ href: '/app/admin/blog', label: 'Blog', icon: 'newspaper' }],
+    links: [{ href: '/app/admin/blog', label: 'Blog', icon: 'newspaper', permission: 'blog.read' }],
   },
   {
     label: 'Operations',
     links: [
-      { href: '/app/admin/transactions', label: 'Transactions', icon: 'credit-card' },
-      { href: '/app/admin/communication', label: 'Communication', icon: 'message-square' },
-      { href: '/app/admin/catalog', label: 'Catalog', icon: 'layout-grid' },
+      {
+        href: '/app/admin/transactions',
+        label: 'Transactions',
+        icon: 'credit-card',
+        permission: 'transaction.read',
+      },
+      {
+        href: '/app/admin/communication',
+        label: 'Communication',
+        icon: 'message-square',
+        permission: 'communication.read',
+      },
+      {
+        href: '/app/admin/catalog',
+        label: 'Catalog',
+        icon: 'layout-grid',
+        permission: 'tester.read',
+      },
     ],
   },
   {
     label: 'Account',
     links: [
       { href: '/app/admin/profile', label: 'Your profile', icon: 'user-check' },
-      { href: '/app/admin/settings', label: 'Settings', icon: 'settings' },
+      // Platform-wide values every account inherits — an administrator's
+      // call, not something to hand out with a read permission.
+      { href: '/app/admin/settings', label: 'Settings', icon: 'settings', roles: ['ADMIN'] },
     ],
   },
 ]
@@ -94,6 +150,29 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
 
+  /**
+   * The panel a SUB_ADMIN sees is the panel they can use.
+   *
+   * Admin and sub-admin share these routes — one portal, permissions decide
+   * the scope — but the nav was the full administrator list for everyone. A
+   * sub-admin granted read on projects and testers still saw Users, Managers,
+   * Transactions and Settings, and every one of them answered with a 403 or
+   * "ask an administrator for this permission". That reads as a broken panel
+   * rather than a scoped one.
+   *
+   * Filtered here rather than inside `Sidebar` because only a Server
+   * Component knows who is signed in, and this keeps the account's whole
+   * permission set off the wire. `hasPermission` returns true for ADMIN
+   * without consulting anything, so an administrator's nav is unchanged.
+   *
+   * The page behind each link enforces the same code itself — this decides
+   * what is worth showing, never what is allowed.
+   */
+  const sections = SECTIONS.map((section) => ({
+    ...section,
+    links: section.links.filter((link) => !link.permission || hasPermission(user, link.permission)),
+  })).filter((section) => section.links.length > 0)
+
   return (
     <AppShell
       nav={
@@ -101,7 +180,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           userName={displayName}
           avatarFileId={user.avatarFileId}
           role={user.role}
-          sections={SECTIONS}
+          sections={sections}
         />
       }
     >

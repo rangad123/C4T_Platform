@@ -1,4 +1,4 @@
-import { requireRole } from '@/lib/auth/session'
+import { requirePermission } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { loadList } from '@/lib/admin/list'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
@@ -84,7 +84,7 @@ export default async function ReportsPage({
     endDate?: string
   }>
 }) {
-  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  await requirePermission('stats.read')
   const params = await searchParams
   const section = resolveSection(SECTIONS, params.section)
 
