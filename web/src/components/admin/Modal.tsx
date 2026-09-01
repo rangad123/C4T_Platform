@@ -120,6 +120,7 @@ export function Modal({
   const titleId = useId()
   const router = useRouter()
   const [confirmingClose, setConfirmingClose] = useState(false)
+  const confirmRef = useRef<HTMLDivElement>(null)
   const initialValuesRef = useRef<WeakMap<Element, string> | null>(null)
 
   useEffect(() => {
@@ -261,6 +262,20 @@ export function Modal({
     }
     return false
   }
+
+  /**
+   * Move focus into the confirmation when it appears.
+   *
+   * The form behind it goes `inert` at the same moment, so whichever control
+   * asked to close — a Cancel button inside the form — takes focus with it
+   * and leaves the keyboard on `<body>`. Focusing the safe option is also
+   * what `role="alertdialog"` implies, and it scrolls the banner into view on
+   * its own for anyone who was further up the form.
+   */
+  useEffect(() => {
+    if (!confirmingClose) return
+    confirmRef.current?.querySelector('button')?.focus()
+  }, [confirmingClose])
 
   /** Escape and the X both call this instead of closing outright. */
   function requestClose() {
@@ -436,9 +451,27 @@ export function Modal({
         </div>
         {confirmingClose ? (
           <div
+            ref={confirmRef}
             role="alertdialog"
             aria-label="Discard changes?"
             style={{
+              /*
+               * Pinned to the bottom of the panel's own scrollport.
+               *
+               * The banner is the last child of a container that scrolls at
+               * 85vh, so on a form as long as "New build" it rendered below
+               * everything else — a question the user had to go looking for,
+               * having just asked to close. Sticky keeps it on screen from
+               * wherever they were when they pressed Cancel, and keeps it
+               * there if they scroll while deciding.
+               *
+               * The negative bottom offset is the panel's own padding, so the
+               * banner sits flush with the bottom edge instead of leaving a
+               * strip the form scrolls through underneath it.
+               */
+              position: 'sticky',
+              bottom: 'calc(var(--space-7) * -1)',
+              zIndex: 1,
               display: 'flex',
               flexDirection: 'column',
               gap: 'var(--space-4)',
