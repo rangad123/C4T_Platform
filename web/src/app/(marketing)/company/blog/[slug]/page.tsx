@@ -9,6 +9,7 @@ import { JsonLd } from '@/components/seo/JsonLd'
 import { serverFetch } from '@/lib/api/server'
 import { publicFetchPage, publicFetchWithExtras } from '@/lib/api/public'
 import { ApiError } from '@/lib/api/types'
+import { SiteImage } from '@/components/ds/marketing/SiteImage'
 import { SITE_NAME } from '@/lib/seo/metadata'
 import { blogPostingJsonLd, breadcrumbJsonLd } from '@/lib/seo/structured-data'
 import { env } from '@/lib/env'
@@ -238,6 +239,32 @@ export default async function BlogPostPage({
           >
             {post.excerpt}
           </p>
+        ) : null}
+
+        {/*
+          The featured image, on the post it belongs to.
+
+          It was already being uploaded, stored and served — the index card
+          rendered it and `generateMetadata` put it in the OpenGraph tags —
+          but the article itself never showed it. So an author picked an
+          image, saw it as a thumbnail, and found the post it was for had no
+          picture at all.
+
+          `priority` because this is the hero: it is the largest thing above
+          the fold, and lazy-loading it means the reader watches it arrive.
+          16/9 to match the shape the index card crops to, so the same
+          upload reads the same way in both places.
+        */}
+        {post.featuredImageUrl ? (
+          <SiteImage
+            src={post.featuredImageUrl}
+            alt={post.title}
+            fill
+            ratio="16 / 9"
+            priority
+            sizes="(max-width: 1200px) 100vw, 1200px"
+            style={{ marginTop: 'var(--space-8)' }}
+          />
         ) : null}
       </Section>
 
