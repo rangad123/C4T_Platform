@@ -802,6 +802,33 @@ export default async function ProjectDetailPage({
               />
             </Panel>
 
+            {/*
+              In the aside, matching the customer portal.
+
+              What is left after the de-duplication is a short column of facts
+              about the project -- a reference, where it sits in its lifecycle,
+              the platforms in scope, the ask. That is reference material, and
+              it reads better beside the reporting than above it, where it
+              pushed the metrics this tab exists for below the fold.
+            */}
+            <Panel
+              title="Project brief"
+              description="The project itself. Per-cycle detail is in Build details."
+              actions={
+                capabilities.canUpdate ? (
+                  <Button
+                    href={`${detailPath}?section=${section}&edit=brief`}
+                    variant="primary"
+                    size="sm"
+                  >
+                    Edit
+                  </Button>
+                ) : undefined
+              }
+            >
+              <DescriptionList items={overview} />
+            </Panel>
+
             <Panel
               title="Managers"
               description="Internal owners. Assigned from the managers section."
@@ -851,24 +878,6 @@ export default async function ProjectDetailPage({
 
       {section === 'dashboard' ? (
         <>
-          <Panel
-            title="Project brief"
-            description="The project itself. Anything that changes per test cycle is in Build details."
-            actions={
-              capabilities.canUpdate ? (
-                <Button
-                  href={`${detailPath}?section=${section}&edit=brief`}
-                  variant="primary"
-                  size="sm"
-                >
-                  Edit
-                </Button>
-              ) : undefined
-            }
-          >
-            <DescriptionList items={overview} />
-          </Panel>
-
           {/*
             Moved off Build details.
 
