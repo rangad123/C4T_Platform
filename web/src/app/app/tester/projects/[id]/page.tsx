@@ -16,6 +16,8 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
+import { Input } from '@/components/ds/forms/Input'
+import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { loadList } from '@/lib/admin/list'
@@ -23,7 +25,7 @@ import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
 import { DownloadLink } from '@/components/tester/DownloadLink'
-import { respondToInvitation } from './actions'
+import { reportTestResult, respondToInvitation } from './actions'
 import type {
   AnnouncementRow,
   BugRow,
@@ -63,7 +65,15 @@ const BUG_PAGE_SIZE = 50
  * pages.
  */
 
+/** Mirrors `TestCaseResult`, so a tampered post fails validation, not silently. */
+const TEST_RESULTS = ['PASS', 'FAIL', 'BLOCKED', 'NOT_TESTED'] as const
+
 const NOTICES: Record<string, NoticeCopy> = {
+  'result-saved': {
+    tone: 'success',
+    message: 'Result recorded. You can report again if you retest and it changes.',
+  },
+  'result-invalid': { tone: 'error', message: 'Choose a result before submitting.' },
   accepted: {
     tone: 'success',
     message: 'You are on the project. The brief and the full build details are open to you now.',
@@ -709,6 +719,53 @@ export default async function TesterProjectWorkspacePage({
                           : []),
                       ]}
                     />
+
+                    {/*
+                      Reporting the outcome, which is the point of being
+                      assigned a case. `POST /test-cases/:id/reports` had
+                      existed unused since the testing module was written, so
+                      a tester could be given a scripted check and had nowhere
+                      to say what happened.
+
+                      Reporting again is allowed on purpose: a retest that
+                      changes the answer should be recordable, and the API
+                      keeps every report rather than overwriting, so the
+                      history stays honest. The newest is what the other two
+                      portals show.
+                    */}
+                    <form
+                      action={reportTestResult}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-end',
+                        gap: 'var(--space-3)',
+                        flexWrap: 'wrap',
+                        marginTop: 'var(--space-4)',
+                        paddingTop: 'var(--space-4)',
+                        borderTop: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <input type="hidden" name="id" value={project.id} />
+                      <input type="hidden" name="testCaseId" value={tc.id} />
+                      <Field label="Result" htmlFor={`result-${tc.id}`} required>
+                        <Select
+                          id={`result-${tc.id}`}
+                          name="result"
+                          required
+                          defaultValue={latest?.result ?? 'PASS'}
+                          options={TEST_RESULTS.map((value) => ({
+                            value,
+                            label: titleCase(value),
+                          }))}
+                        />
+                      </Field>
+                      <Field label="Notes" htmlFor={`notes-${tc.id}`} hint="Optional.">
+                        <Input id={`notes-${tc.id}`} name="notes" maxLength={4000} />
+                      </Field>
+                      <SubmitButton variant="primary" pendingLabel="Saving…">
+                        {latest ? 'Report again' : 'Report result'}
+                      </SubmitButton>
+                    </form>
                   </li>
                 )
               })}

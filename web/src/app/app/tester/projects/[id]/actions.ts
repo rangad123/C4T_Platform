@@ -72,3 +72,52 @@ export async function respondToInvitation(formData: FormData): Promise<void> {
 
   redirect(`${detailPath(id)}?notice=${notice}`)
 }
+
+/**
+ * Record the outcome of a test case assigned to this tester.
+ *
+ * `POST /test-cases/:id/reports` has existed since the testing module was
+ * written and no portal called it, so a tester could be assigned a scripted
+ * check and had nowhere to say what happened. The Test reports tab lists the
+ * cases; this is what closes the loop.
+ *
+ * The API owns the rules — that the case is assigned to this tester, that
+ * the build is still open — and this only narrows `result` to the enum so a
+ * hand-built post cannot smuggle a value past the page's own select.
+ */
+export async function reportTestResult(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const id = formTrimmed(formData, 'id')
+  const testCaseId = formTrimmed(formData, 'testCaseId')
+  if (!id || !testCaseId) redirect(LIST_PATH)
+
+  const back = (notice: string) => `${detailPath(id)}?section=testing&notice=${notice}`
+
+  const result = formTrimmed(formData, 'result')
+  if (!['PASS', 'FAIL', 'BLOCKED', 'NOT_TESTED'].includes(result)) {
+    redirect(back('result-invalid'))
+  }
+
+  const notes = formTrimmed(formData, 'notes')
+  const devices = formTrimmed(formData, 'devices')
+  const browsers = formTrimmed(formData, 'browsers')
+
+  let notice = 'result-saved'
+  try {
+    await actionFetch(`test-cases/${testCaseId}/reports`, {
+      method: 'POST',
+      body: {
+        result,
+        ...(notes ? { notes } : {}),
+        ...(devices ? { devices } : {}),
+        ...(browsers ? { browsers } : {}),
+      },
+    })
+    revalidatePath(detailPath(id))
+  } catch (error) {
+    notice = reasonFor(error)
+  }
+
+  redirect(back(notice))
+}

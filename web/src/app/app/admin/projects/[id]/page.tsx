@@ -125,11 +125,13 @@ export default async function ProjectDetailPage({
     rate?: string
     notice?: string
     detail?: string
+    testerSearch?: string
   }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
   const { id } = await params
   const resolvedSearchParams = await searchParams
+  const testerSearch = resolvedSearchParams.testerSearch?.trim() ?? ''
   const edit = resolvedSearchParams.edit
   const buildId = resolvedSearchParams.buildId
 
@@ -232,10 +234,22 @@ export default async function ProjectDetailPage({
   const [testerPool, bugs, features, buildSummaryData, testCases, projectReport, projectRatings] =
     await Promise.all([
       section === 'testers' && capabilities.canAssignTesters
-        ? loadList<VerifiedTesterRow>('testers', {
+        ? /*
+             The pool is the top 40 by rating UNLESS a search narrows it.
+             Without the search, a tester outside that 40 simply could not be
+             invited from here — the list was the whole interface and there
+             was no way past it. `listTestersQuery` has taken a `search` since
+             the module was written; nothing here asked for it.
+           */
+          loadList<VerifiedTesterRow>('testers', {
             page: 1,
             limit: TESTER_POOL_SIZE,
-            query: { status: 'VERIFIED', sort: 'ratingAverage', order: 'desc' },
+            query: {
+              status: 'VERIFIED',
+              sort: 'ratingAverage',
+              order: 'desc',
+              ...(testerSearch ? { search: testerSearch } : {}),
+            },
           })
         : Promise.resolve({ error: 'forbidden' as const }),
       section === 'bugs'
@@ -1592,6 +1606,43 @@ export default async function ProjectDetailPage({
                 title="Invite testers"
                 description="Verified testers who have accepted the NDA and are not already on the roster."
               >
+                {/*
+                  A GET form, so the term lives in the URL and this page stays
+                  a Server Component — the same shape every other filter in
+                  the panel uses. The hidden fields carry the tab and build,
+                  which would otherwise be dropped on submit.
+                */}
+                <form
+                  method="get"
+                  style={{
+                    display: 'flex',
+                    gap: 'var(--space-3)',
+                    flexWrap: 'wrap',
+                    marginBottom: 'var(--space-5)',
+                  }}
+                >
+                  <input type="hidden" name="section" value="testers" />
+                  <input type="hidden" name="buildId" value={activeBuildId} />
+                  <Input
+                    name="testerSearch"
+                    defaultValue={testerSearch}
+                    placeholder="Search testers by name or email"
+                    aria-label="Search testers"
+                    style={{ flex: '1 1 240px' }}
+                  />
+                  <Button type="submit" variant="secondary" iconLeft="search">
+                    Search
+                  </Button>
+                  {testerSearch ? (
+                    <Button
+                      href={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+                      variant="ghost"
+                    >
+                      Clear
+                    </Button>
+                  ) : null}
+                </form>
+
                 {'error' in testerPool ? (
                   <Muted>
                     The tester pool could not be read. Inviting from here needs the tester.read
@@ -1599,8 +1650,9 @@ export default async function ProjectDetailPage({
                   </Muted>
                 ) : invitable.length === 0 ? (
                   <Muted>
-                    Every verified tester in the top {TESTER_POOL_SIZE} by rating is already on this
-                    roster. Verify more testers to widen the pool.
+                    {testerSearch
+                      ? `No verified tester off this roster matches "${testerSearch}".`
+                      : `Every verified tester in the top ${TESTER_POOL_SIZE} by rating is already on this roster. Search by name or email to reach one outside it.`}
                   </Muted>
                 ) : (
                   <form action={inviteTesters} style={stackStyle}>
