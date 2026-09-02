@@ -43,14 +43,6 @@ v1Router.use('/notifications', notificationsRouter)
 v1Router.use('/uploads', uploadsRouter)
 v1Router.use('/stats', statsRouter)
 v1Router.use('/blog', blogRouter)
-/**
- * Mounted at the v1 root, not a prefix — the router's own routes already
- * spell out `/test-cases/*` and `/builds/:buildId/*` (a test case is not
- * "owned" by one single collection path the way projects/bugs are, and
- * `builds` already lives nested under `/projects/:id/builds` for create/
- * list/rename — this covers the reads a build id alone is enough for).
- */
-v1Router.use('/', testingRouter)
 v1Router.use('/reports', reportsRouter)
 /**
  * ⚠ `/leads` is the only router here whose POST is UNAUTHENTICATED — the
@@ -59,3 +51,24 @@ v1Router.use('/reports', reportsRouter)
  * the note at the top of leads.routes.ts before adding anything to it.
  */
 v1Router.use('/leads', leadsRouter)
+
+/**
+ * Mounted at the v1 root, not a prefix — the router's own routes already
+ * spell out `/test-cases/*` and `/builds/:buildId/*` (a test case is not
+ * "owned" by one single collection path the way projects/bugs are, and
+ * `builds` already lives nested under `/projects/:id/builds` for create/
+ * list/rename — this covers the reads a build id alone is enough for).
+ *
+ * ⚠ LAST, AND IT HAS TO STAY LAST. A router mounted at `/` receives every
+ * request that reaches this line, and this one opens with
+ * `testingRouter.use(authenticate)`. Anything mounted after it is therefore
+ * authenticated whether it asked to be or not.
+ *
+ * That is not hypothetical: it sat above `/leads`, so `POST /v1/leads` — the
+ * one route on this API that must work without a session — answered 401 to
+ * every demo request the marketing site submitted. The site's own fallback
+ * hid it, showing the visitor a confirmation and writing the enquiry to the
+ * web server's log, so the form looked healthy while the leads table stopped
+ * growing.
+ */
+v1Router.use('/', testingRouter)
