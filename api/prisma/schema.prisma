@@ -1879,15 +1879,17 @@ model FileObject {
 
   uploadedBy User @relation("FileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
 
-  userAvatars        User[]              @relation("UserAvatar")
-  testerNdas         TesterProfile[]     @relation("TesterNda")
-  orgLogos           Organisation[]      @relation("OrgLogo")
-  projectLogos       Project[]           @relation("ProjectLogo")
-  projectMaterials   ProjectMaterial[]   @relation("MaterialFile")
-  bugAttachments     BugAttachment[]     @relation("BugFile")
-  messageAttachments MessageAttachment[] @relation("MessageFile")
-  buildTestDocuments Build[]             @relation("BuildTestDocument")
-  blogFeaturedImages BlogPost[]          @relation("BlogPostFeaturedImage")
+  userAvatars         User[]              @relation("UserAvatar")
+  testerNdas          TesterProfile[]     @relation("TesterNda")
+  orgLogos            Organisation[]      @relation("OrgLogo")
+  projectLogos        Project[]           @relation("ProjectLogo")
+  projectMaterials    ProjectMaterial[]   @relation("MaterialFile")
+  bugAttachments      BugAttachment[]     @relation("BugFile")
+  messageAttachments  MessageAttachment[] @relation("MessageFile")
+  buildTestDocuments  Build[]             @relation("BuildTestDocument")
+  blogFeaturedImages  BlogPost[]          @relation("BlogPostFeaturedImage")
+  blogSecondaryImages BlogPost[]          @relation("BlogPostSecondaryImage")
+  blogGalleryImages   BlogPostImage[]     @relation("BlogPostGalleryImage")
 
   @@index([uploadedById])
   @@index([scope])
@@ -1942,6 +1944,9 @@ model Lead {
   lastName  String  @map("last_name")
   /// Lower-cased on write so duplicate detection is not case-sensitive.
   email     String
+  /// Optional on both forms that write here — a demo request is not worth
+  /// losing over a phone number. Shape is enforced by `phoneField`.
+  phone     String?
   company   String
   /// Free-text band from the form's select, e.g. "51–500". Not an enum: the
   /// options are marketing copy and will change without a migration.
@@ -1983,6 +1988,23 @@ enum BlogPostStatus {
   SCHEDULED
   PUBLISHED
   ARCHIVED
+}
+
+/// How the public page arranges a post.
+///
+/// The body is the same sanitized HTML in every case — this changes the frame
+/// around it, not the writing. STANDARD is what every existing post renders
+/// as today, which is why it is the default: adding this column must not
+/// restyle anything already published.
+enum BlogPostLayout {
+  /// Full-width featured image above a centred prose column.
+  STANDARD
+  /// Edge-to-edge image with the title over it.
+  HERO
+  /// Featured image beside the opening, prose below.
+  SPLIT
+  /// Leads with the gallery; for posts that are mostly pictures.
+  GALLERY
 }
 
 /// The blog's topic taxonomy (Software Testing, QA, API Testing, ...) —
@@ -2044,20 +2066,25 @@ model BlogPost {
   content String         @db.Text
   status  BlogPostStatus @default(DRAFT)
 
-  categoryId String? @map("category_id")
-  authorId   String  @map("author_id")
+  categoryId        String? @map("category_id")
+  authorId          String  @map("author_id")
   /// Overrides the byline shown publicly (e.g. "Crowd4Test Team", a guest
   /// author). Null falls back to the author account's name. Kept separate
   /// from `authorId`, which stays the real accountable admin/sub-admin who
   /// owns the row.
   authorDisplayName String? @map("author_display_name")
 
-  featuredImageFileId String?  @map("featured_image_file_id")
+  layout BlogPostLayout @default(STANDARD)
+
+  featuredImageFileId  String? @map("featured_image_file_id")
+  /// A second post-level image. Used by SPLIT, and as the social card when
+  /// the featured image is the wrong crop for one.
+  secondaryImageFileId String? @map("secondary_image_file_id")
   /// At most one post is featured at a time — enforced in the service via a
   /// transaction (unset the previous holder, set this one), not a DB
   /// constraint; Prisma can't cleanly express a partial unique index without
   /// a raw-SQL migration, and a single-writer admin workflow doesn't need one.
-  isFeatured           Boolean  @default(false) @map("is_featured")
+  isFeatured           Boolean @default(false) @map("is_featured")
 
   /// Recomputed server-side on every save from the sanitized plain text
   /// (`computeReadingTimeMinutes`) — never admin-entered.
@@ -2086,13 +2113,42 @@ model BlogPost {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  category      BlogCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  author        User          @relation("BlogPostAuthor", fields: [authorId], references: [id], onDelete: Restrict)
-  featuredImage FileObject?   @relation("BlogPostFeaturedImage", fields: [featuredImageFileId], references: [id], onDelete: SetNull)
-  tags          BlogPostTag[]
+  category       BlogCategory?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  author         User            @relation("BlogPostAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  featuredImage  FileObject?     @relation("BlogPostFeaturedImage", fields: [featuredImageFileId], references: [id], onDelete: SetNull)
+  secondaryImage FileObject?     @relation("BlogPostSecondaryImage", fields: [secondaryImageFileId], references: [id], onDelete: SetNull)
+  tags           BlogPostTag[]
+  galleryImages  BlogPostImage[]
 
   @@index([status, publishedAt])
   @@index([categoryId])
   @@index([isFeatured])
   @@map("blog_posts")
+}
+
+/// One image in a post's gallery.
+///
+/// A join model rather than an array of file ids on the post, because a
+/// gallery image carries two things an id cannot: the caption shown under it,
+/// and the order it appears in. `onDelete: Cascade` from the post — a gallery
+/// entry has no meaning without the post it belongs to — but `Restrict` is
+/// wrong on the file, so the file relation is `Cascade` too: removing the
+/// underlying upload should take its gallery rows with it rather than leave
+/// rows pointing at nothing.
+model BlogPostImage {
+  id       String  @id @default(cuid())
+  postId   String  @map("post_id")
+  fileId   String  @map("file_id")
+  caption  String?
+  /// 0-based. Gapless order is maintained by the service on every write.
+  position Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post BlogPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  file FileObject @relation("BlogPostGalleryImage", fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, position])
+  @@index([postId])
+  @@map("blog_post_images")
 }
