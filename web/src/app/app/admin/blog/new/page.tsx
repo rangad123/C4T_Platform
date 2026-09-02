@@ -4,6 +4,8 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { Select } from '@/components/ds/forms/Select'
+import { BLOG_TEMPLATE_OPTIONS } from '@/lib/admin/blog-templates'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission } from '@/lib/auth/session'
 import { createPostAction } from '../actions'
@@ -68,6 +70,20 @@ export default async function NewBlogPostPage({
               minLength={3}
               defaultValue={params.title ?? ''}
             />
+          </Field>
+
+          {/*
+            The template only seeds the editor — it is not stored, and it is
+            applied on the next screen rather than here, because the create
+            endpoint accepts a title and nothing else. Carried across on the
+            redirect, and ignored there if the body is not empty.
+          */}
+          <Field
+            label="Start from"
+            htmlFor="template"
+            hint="A skeleton of headings you write over. Choose Blank post to start from nothing."
+          >
+            <Select id="template" name="template" defaultValue="" options={BLOG_TEMPLATE_OPTIONS} />
           </Field>
 
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>

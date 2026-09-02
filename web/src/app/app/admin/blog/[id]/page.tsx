@@ -15,6 +15,7 @@ import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { BlogEditor } from '@/components/admin/blog/BlogEditor'
+import { blogTemplateHtml } from '@/lib/admin/blog-templates'
 import { TagCombobox, type TagOption } from '@/components/admin/blog/TagCombobox'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
@@ -108,11 +109,12 @@ export default async function BlogPostDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string; notice?: string }>
+  searchParams: Promise<{ section?: string; notice?: string; template?: string }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
   const { id } = await params
   const sp = await searchParams
+
   const section = resolveSection(SECTIONS, sp.section)
 
   let post: PostDetail
@@ -127,6 +129,22 @@ export default async function BlogPostDetailPage({
     serverFetchOrNull<CategoryOption[]>('blog/categories/admin'),
     serverFetchOrNull<TagOption[]>('blog/tags'),
   ])
+
+  /**
+   * The body the editor opens with.
+   *
+   * A starter template chosen on the create screen arrives as `?template=`
+   * and seeds the editor here, because create only accepts a title. It is
+   * applied ONLY to an empty post: seeding over written text would replace
+   * the whole document, and the form is a plain `<form>` rather than a
+   * `TrackedForm`, so there is no unsaved-changes guard standing behind it.
+   *
+   * Tiptap renders an empty document as `<p></p>`, so that counts as empty
+   * too — otherwise the template would refuse to apply to a post the author
+   * had merely clicked into once.
+   */
+  const bodyIsEmpty = post.content.trim() === '' || post.content.trim() === '<p></p>'
+  const seededContent = bodyIsEmpty ? (blogTemplateHtml(sp.template) ?? post.content) : post.content
 
   const canWrite = hasPermission(user, 'blog.write')
   const canPublish = hasPermission(user, 'blog.publish')
@@ -375,7 +393,18 @@ export default async function BlogPostDetailPage({
               </Field>
 
               <Field label="Body" htmlFor="content">
-                <BlogEditor name="content" defaultValue={post.content} />
+                {/*
+                  `key` is load-bearing. `useEditor` reads `content` once, with
+                  no deps, so a soft navigation that only changes `?template=`
+                  would re-render this element with new props and the editor
+                  would keep its old document. Keying on the seed forces a
+                  remount, which is the only thing that actually reseeds it.
+                */}
+                <BlogEditor
+                  key={seededContent === post.content ? 'saved' : `template-${sp.template}`}
+                  name="content"
+                  defaultValue={seededContent}
+                />
               </Field>
 
               <SubmitButton variant="primary" iconLeft="check" pendingLabel="Saving…">

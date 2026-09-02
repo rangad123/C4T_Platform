@@ -41,6 +41,16 @@ function redirectWithNotice(id: string, code: string): never {
 
 export async function createPostAction(formData: FormData): Promise<void> {
   const title = formTrimmed(formData, 'title')
+  /**
+   * The chosen starter template, passed on to the editor rather than stored.
+   *
+   * `POST blog/posts/admin` takes a title and nothing else — it writes
+   * `content: ''` and does not sanitize, so sending body HTML through it
+   * would store it unsanitized. The editor seeds from this instead, and the
+   * skeleton reaches the database through the ordinary save path, sanitized
+   * like anything else the author types.
+   */
+  const template = formTrimmed(formData, 'template')
 
   let post: PostResponse
   try {
@@ -50,7 +60,9 @@ export async function createPostAction(formData: FormData): Promise<void> {
   }
 
   revalidatePath(BASE)
-  redirect(`${BASE}/${post.id}?notice=created`)
+  redirect(
+    `${BASE}/${post.id}?notice=created${template ? `&template=${encodeURIComponent(template)}` : ''}`,
+  )
 }
 
 export async function saveContentAction(formData: FormData): Promise<void> {
