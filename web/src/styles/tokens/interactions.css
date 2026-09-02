@@ -22,6 +22,10 @@
 
 .c4t-navlink:hover { color: var(--text-primary) !important; }
 .c4t-megalink:hover { background: var(--surface-sunken) !important; }
+/* A row in the dashboard's activity feed. Not --surface-sunken: an unread row
+   already sits on that, so hovering one would look like nothing happened. */
+.c4t-activity-row { transition: var(--transition-control); }
+.c4t-activity-row:hover { background: var(--action-ghost-bg-hover) !important; }
 .c4t-footerlink:hover { color: var(--text-primary) !important; text-decoration: none; }
 /* PORT NOTE: was var(--white) — see rule 2. */
 .c4t-inverse-link:hover { color: var(--ink-50) !important; }

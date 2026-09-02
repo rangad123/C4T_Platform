@@ -4,31 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Icon } from '@/components/ds/core/Icon'
 import { formatDateTime } from '@/lib/admin/format'
-
-/**
- * What each kind of notification calls itself in the panel.
- *
- * MESSAGE_RECEIVED reads as "Communication" and ANNOUNCEMENT as
- * "Announcement" because those are the two places a reader is being sent,
- * and the label is what tells them which before they click. The rest fall
- * back to their enum name in sentence case.
- */
-const TYPE_LABELS: Record<string, string> = {
-  MESSAGE_RECEIVED: 'Communication',
-  ANNOUNCEMENT: 'Announcement',
-  PROJECT_ASSIGNED: 'Project',
-  PROJECT_STATUS_CHANGED: 'Project',
-  BUG_REPORTED: 'Bug',
-  BUG_STATUS_CHANGED: 'Bug',
-  RATING_RECEIVED: 'Rating',
-  TRANSACTION_UPDATED: 'Payment',
-  TESTER_STATUS_CHANGED: 'Account',
-  SYSTEM: 'System',
-}
-
-function typeLabel(type: string): string {
-  return TYPE_LABELS[type] ?? type.charAt(0) + type.slice(1).toLowerCase().replace(/_/g, ' ')
-}
+import { notificationTypeLabel } from '@/lib/notifications/labels'
 
 interface NotificationItem {
   id: string
@@ -299,7 +275,7 @@ export function NotificationBell({ initialUnread }: { initialUnread: number }) {
                         className="c4t-eyebrow"
                         style={{ color: 'var(--text-muted)', flexShrink: 0 }}
                       >
-                        {typeLabel(n.type)}
+                        {notificationTypeLabel(n.type)}
                       </span>
                       <span
                         style={{

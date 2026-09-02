@@ -1,5 +1,5 @@
 import { requireRole } from '@/lib/auth/session'
-import { serverFetchOrNull } from '@/lib/api/server'
+import { serverFetchOrNull, serverFetchPage } from '@/lib/api/server'
 import { Topbar } from '@/components/admin/Topbar'
 import { KpiCard } from '@/components/admin/KpiCard'
 import { BarChart, type BarSegment } from '@/components/admin/charts/BarChart'
@@ -7,6 +7,9 @@ import { DonutChart } from '@/components/admin/charts/DonutChart'
 import { statusTone } from '@/components/admin/StatusBadge'
 import { titleCase, formatMoney } from '@/lib/admin/format'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
+import { Panel } from '@/components/admin/Panel'
+import { ActivityFeed, type ActivityItem } from '@/components/admin/ActivityFeed'
+import { resolveNotificationHref } from '@/lib/notifications/href'
 
 /**
  * The admin landing — where ADMIN and SUB_ADMIN arrive after sign-in.
@@ -119,6 +122,28 @@ export default async function AdminDashboardPage({
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
   const stats = await serverFetchOrNull<StatsResponse>('stats/admin')
   const displayName = user.firstName ?? user.email
+
+  /**
+   * The activity feed's rows. Read AND unread, unlike the bell — see
+   * `ActivityFeed` for why a dashboard wants the ones already seen.
+   *
+   * Its own try/catch: a dashboard that renders nothing because one panel's
+   * endpoint is briefly unavailable is worse than a dashboard missing one
+   * panel, and `serverFetchPage` throws where `serverFetchOrNull` would not.
+   */
+  let activity: ActivityItem[] = []
+  try {
+    const { data } = await serverFetchPage<Omit<ActivityItem, 'href'> & { link: string | null }>(
+      'notifications',
+      { query: { page: 1, limit: 30 } },
+    )
+    activity = data.map(({ link, ...row }) => ({
+      ...row,
+      href: resolveNotificationHref(link, user.role),
+    }))
+  } catch {
+    activity = []
+  }
 
   if (!stats) {
     return (
@@ -283,6 +308,13 @@ export default async function AdminDashboardPage({
             />
           </ChartCard>
         </div>
+
+        <Panel
+          title="Latest activity"
+          description="Everything that has happened on your account, newest first. Unread entries are marked."
+        >
+          <ActivityFeed items={activity} />
+        </Panel>
       </main>
     </>
   )
