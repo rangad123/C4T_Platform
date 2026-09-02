@@ -195,12 +195,6 @@ export default async function AdminDashboardPage({
           }}
         >
           <KpiCard
-            icon="clipboard-check"
-            label="Open critical bugs"
-            value={stats.bugs.openCritical}
-            href="/app/admin/bugs?severity=CRITICAL"
-          />
-          <KpiCard
             icon="briefcase"
             label="Projects in progress"
             value={activeProjects}
