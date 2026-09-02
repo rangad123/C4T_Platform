@@ -4,7 +4,7 @@ import { Topbar } from '@/components/admin/Topbar'
 import { KpiCard } from '@/components/admin/KpiCard'
 import { BarChart, type BarSegment } from '@/components/admin/charts/BarChart'
 import { DonutChart } from '@/components/admin/charts/DonutChart'
-import { statusTone, severityTone } from '@/components/admin/StatusBadge'
+import { statusTone } from '@/components/admin/StatusBadge'
 import { titleCase, formatMoney } from '@/lib/admin/format'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 
@@ -234,22 +234,6 @@ export default async function AdminDashboardPage({
               title="Projects by status"
               href="/app/admin/projects"
               segments={segmentsFromCounts(stats.projects.byStatus, statusTone)}
-            />
-          </ChartCard>
-
-          <ChartCard>
-            <DonutChart
-              title="Bugs by severity"
-              centerLabel={String(Object.values(stats.bugs.bySeverity).reduce((a, b) => a + b, 0))}
-              segments={segmentsFromCounts(stats.bugs.bySeverity, severityTone)}
-            />
-          </ChartCard>
-
-          <ChartCard>
-            <BarChart
-              title="Bugs by status"
-              href="/app/admin/bugs"
-              segments={segmentsFromCounts(stats.bugs.byStatus, statusTone)}
             />
           </ChartCard>
 
