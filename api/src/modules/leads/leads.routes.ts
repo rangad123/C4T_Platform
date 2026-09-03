@@ -9,6 +9,7 @@ import { requirePermission } from '../../middleware/authorize.js'
 import { leadLimiter } from '../../middleware/rateLimit.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
 import { buildMeta, paginationQuery, toSkipTake } from '../../lib/pagination.js'
+import { phoneField } from '../../lib/phone.js'
 import { NotFoundError } from '../../lib/errors.js'
 import { recordAudit } from '../../lib/audit.js'
 import { createNotifications } from '../notifications/notifications.service.js'
@@ -46,6 +47,19 @@ import { PERMISSIONS } from '../../config/permissions.js'
  */
 export const leadsRouter = Router()
 
+/**
+ * An optional text field as the column wants it.
+ *
+ * Every string here is `.trim()`ed by zod and `phoneField` accepts `''`
+ * outright, so "absent" arrives as either `undefined` or an empty string and
+ * both mean the same thing to a nullable column. Spelled out rather than
+ * written `value || null`, which reads as a nullish slip.
+ */
+function blankToNull(value: string | undefined): string | null {
+  if (value === undefined || value === '') return null
+  return value
+}
+
 /* ─── Public: submit an enquiry ─────────────────────────────────────────────── */
 
 /**
@@ -58,6 +72,7 @@ const createLeadBody = z.object({
   firstName: z.string().trim().min(1).max(80),
   lastName: z.string().trim().min(1).max(80),
   email: z.string().trim().toLowerCase().email().max(200),
+  phone: phoneField.optional(),
   company: z.string().trim().min(1).max(160),
   teamSize: z.string().trim().max(40).optional(),
   message: z.string().trim().max(4000).optional(),
@@ -79,6 +94,7 @@ leadsRouter.post('/', leadLimiter, validate({ body: createLeadBody }), async (re
       firstName: body.firstName,
       lastName: body.lastName,
       email: body.email,
+      phone: blankToNull(body.phone),
       company: body.company,
       teamSize: body.teamSize ?? null,
       message: body.message ?? null,
@@ -128,6 +144,7 @@ const leadSelect = {
   firstName: true,
   lastName: true,
   email: true,
+  phone: true,
   company: true,
   teamSize: true,
   message: true,
@@ -201,6 +218,76 @@ leadsRouter.get(
     })
     if (!lead) throw new NotFoundError('Lead not found')
     res.json({ data: lead })
+  },
+)
+
+/**
+ * Admin-created leads — an enquiry that arrived somewhere the form is not.
+ *
+ * A call, a conference, an email to a salesperson: the pipeline is only worth
+ * measuring if every lead is in it, and until now the only way into this table
+ * was the marketing form. Same fields as that form, deliberately, so the two
+ * kinds of lead are comparable rather than two shapes of record.
+ *
+ * Separate from the public `POST /` rather than sharing it, because three
+ * things genuinely differ and each would be wrong the other way round:
+ *
+ *  - It authenticates and requires `lead.write`, where the public route cannot
+ *    authenticate at all.
+ *  - No rate limit. `leadLimiter` exists to stop a bot filling the table; an
+ *    admin typing in leads after a conference is exactly the traffic it would
+ *    block.
+ *  - No "New demo request" notification. It would tell the person who just
+ *    created the lead about their own typing, and bury the arrivals that
+ *    nobody has seen yet.
+ *
+ * No honeypot either: there is no bot on this side of the login.
+ */
+const createLeadByAdminBody = createLeadBody.omit({ honeypot: true, sourcePath: true }).extend({
+  status: z.nativeEnum(LeadStatus).optional(),
+  notes: z.string().trim().max(4000).optional(),
+})
+
+leadsRouter.post(
+  '/manual',
+  authenticate,
+  requirePermission(PERMISSIONS.LEAD_WRITE),
+  validate({ body: createLeadByAdminBody }),
+  async (req, res) => {
+    const body = req.body as z.infer<typeof createLeadByAdminBody>
+
+    const lead = await prisma.lead.create({
+      data: {
+        firstName: body.firstName,
+        lastName: body.lastName,
+        email: body.email,
+        phone: blankToNull(body.phone),
+        company: body.company,
+        teamSize: blankToNull(body.teamSize),
+        message: blankToNull(body.message),
+        marketingConsent: body.marketingConsent,
+        notes: blankToNull(body.notes),
+        status: body.status ?? LeadStatus.NEW,
+        /**
+         * How this lead got here, in the same field the form fills with the
+         * page it was submitted from. Without it a hand-entered lead is
+         * indistinguishable from a form submission, and conversion rates
+         * measured off this table would be quietly wrong.
+         */
+        sourcePath: 'admin',
+      },
+      select: leadSelect,
+    })
+
+    await recordAudit({
+      req,
+      action: 'lead.created',
+      entityType: 'Lead',
+      entityId: lead.id,
+      after: lead,
+    })
+
+    res.status(201).json({ data: lead })
   },
 )
 

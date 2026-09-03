@@ -47,6 +47,7 @@ interface LeadDetail {
   firstName: string
   lastName: string
   email: string
+  phone: string | null
   company: string
   teamSize: string | null
   message: string | null
@@ -305,6 +306,16 @@ export default async function LeadDetailPage({
               }}
             >
               <DetailRow label="Company" value={lead.company} />
+              {lead.phone ? (
+                <DetailRow
+                  label="Contact number"
+                  value={
+                    <a href={`tel:${lead.phone}`} style={{ color: 'var(--text-primary)' }}>
+                      {lead.phone}
+                    </a>
+                  }
+                />
+              ) : null}
               {lead.teamSize ? <DetailRow label="Team size" value={lead.teamSize} /> : null}
               <DetailRow
                 label="Marketing consent"

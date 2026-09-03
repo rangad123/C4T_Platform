@@ -6,6 +6,7 @@ import { Icon } from '../core/Icon'
 import { Checkbox } from '../forms/Checkbox'
 import { Field } from '../forms/Field'
 import { Input } from '../forms/Input'
+import { PhoneInput, PHONE_HINT } from '../forms/PhoneInput'
 import { Select } from '../forms/Select'
 import { Textarea } from '../forms/Textarea'
 import type { LeadState } from '@/app/(marketing)/contact/actions'
@@ -196,17 +197,30 @@ export function ContactForm({
         </Field>
       </div>
 
-      <Field label="Work email" required htmlFor="we" error={err.email}>
-        <Input
-          id="we"
-          name="email"
-          type="email"
-          autoComplete="email"
-          placeholder="you@company.com"
-          required
-          invalid={Boolean(err.email)}
-        />
-      </Field>
+      <div
+        className="c4t-form-row"
+        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}
+      >
+        <Field label="Work email" required htmlFor="we" error={err.email}>
+          <Input
+            id="we"
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="you@company.com"
+            required
+            invalid={Boolean(err.email)}
+          />
+        </Field>
+        {/*
+          Optional. A demo request is not worth losing over a phone number,
+          and the reply goes to the email either way — this is for the people
+          who would rather be called than written to.
+        */}
+        <Field label="Contact number" htmlFor="ph" hint={PHONE_HINT} error={err.phone}>
+          <PhoneInput id="ph" name="phone" invalid={Boolean(err.phone)} />
+        </Field>
+      </div>
 
       <div
         className="c4t-form-row"

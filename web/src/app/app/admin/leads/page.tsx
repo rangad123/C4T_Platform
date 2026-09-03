@@ -169,17 +169,31 @@ export default async function LeadsPage({
           gap: 'var(--space-7)',
         }}
       >
-        <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
-            Pipeline
-          </p>
-          <h1 className="c4t-display-md" style={{ margin: 0 }}>
-            Leads
-          </h1>
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-            Demo requests from the website, in arrival order. Open one to triage: change its status,
-            leave a note, or convert it into a customer organisation.
-          </p>
+        <header
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 'var(--space-5)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Pipeline
+            </p>
+            <h1 className="c4t-display-md" style={{ margin: 0 }}>
+              Leads
+            </h1>
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              Every enquiry, in arrival order — from the website form and from the ones you add by
+              hand. Open one to triage: change its status, leave a note, or convert it into a
+              customer organisation.
+            </p>
+          </div>
+          <Button href="/app/admin/leads/new" variant="primary" iconLeft="plus">
+            Add lead
+          </Button>
         </header>
 
         <LiveGetForm
