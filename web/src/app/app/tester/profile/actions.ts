@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
@@ -589,8 +590,25 @@ export async function deleteAccountAction(formData: FormData): Promise<void> {
     redirect(`${PROFILE_PATH}?section=about&notice=${failureNotice(error)}`)
   }
 
-  // The API has revoked every session, so there is nothing left to sign out
-  // of — go straight to the signed-out screen rather than a page that would
-  // only bounce.
+  /**
+   * Clear the cookies here too, not just server-side.
+   *
+   * `proxy.ts`'s guest-only guard reads `hasSession` from cookie PRESENCE,
+   * never validity — that is deliberate there, to avoid asking the API on
+   * every request. Left in place, this redirect landed on a `/login` the
+   * proxy itself immediately bounced to `/app` (still "signed in" by that
+   * cookie-only test), which then discovered the session was dead and bounced
+   * BACK to `/login` — this time with the confirmation's `?notice=` already
+   * stripped by the first hop. The visitor saw a plain sign-in form with no
+   * word that anything had happened.
+   *
+   * The API has already revoked the session row; deleting the cookies here is
+   * what makes `hasSession` agree with that immediately, the same two calls
+   * `logoutAction` already makes for the same reason.
+   */
+  const cookieStore = await cookies()
+  cookieStore.delete('c4t_access')
+  cookieStore.delete('c4t_refresh')
+
   redirect('/login?notice=account_deleted')
 }
