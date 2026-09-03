@@ -38,13 +38,6 @@
   box-shadow: var(--shadow-md);
 }
 
-/* The modal sits over a dimmed page, and takes the heavier shadow the design
-   system reserves for modals. `position: relative` anchors its back button. */
-.modal {
-  position: relative;
-  box-shadow: var(--shadow-lg);
-}
-
 /* ── Narrow viewports ────────────────────────────────────────────────────────
    40px of padding on each side of the card, plus 24px on each side of the page
    around it, is 128px of a 320px viewport — and the email field inside also

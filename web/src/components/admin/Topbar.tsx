@@ -29,7 +29,7 @@ const DEFAULT_ROOT: RootCrumb = { label: 'Admin', href: '/app/admin' }
  *
  * Sign-out is a real `<form action={logoutAction}>` — the action clears the
  * bridged cookies and calls the API's `/v1/auth/logout` to destroy the
- * server-side session row, then redirects to /login. The button is a submit,
+ * server-side session row, then redirects home. The button is a submit,
  * not a client handler, so there is no `"use client"` here.
  */
 export async function Topbar({ crumbs, root = DEFAULT_ROOT }: TopbarProps) {

@@ -11,23 +11,20 @@ import styles from './AuthCard.module.css'
  * responsive without editing five files — see the media query in the CSS
  * module for why it had to become responsive.
  *
- * `variant="page"` is the card as it appears in the marketing layout;
- * `variant="modal"` is the same card inside the `<dialog>`, which does its
- * own centring and so needs no wrapper. Use `AuthPage` for the wrapper.
+ * There was a second variant for the `<dialog>` that intercepted `/login`
+ * from the nav. That modal is gone — it could only ever appear on a soft
+ * navigation, which made signing in look different depending on how you got
+ * there — so the card has one form now. `AuthPage` is the wrapper.
  */
 export function AuthCard({
   children,
-  variant = 'page',
   raised = true,
 }: {
   children: ReactNode
-  /** `page` sits on the marketing background, `modal` over a dimmed page. */
-  variant?: 'page' | 'modal'
-  /** The two password screens render flat. Ignored for the modal. */
+  /** The two password screens render flat. */
   raised?: boolean
 }) {
-  const tone = variant === 'modal' ? styles.modal : raised ? styles.raised : ''
-  return <div className={`${styles.card} ${tone}`.trim()}>{children}</div>
+  return <div className={`${styles.card} ${raised ? styles.raised : ''}`.trim()}>{children}</div>
 }
 
 /**

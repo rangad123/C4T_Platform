@@ -39,6 +39,21 @@ const LeadSchema = z.object({
   firstName: z.string().trim().min(1, 'Enter your first name').max(80),
   lastName: z.string().trim().min(1, 'Enter your last name').max(80),
   email: z.string().trim().toLowerCase().email('Enter a valid work email').max(200),
+  /**
+   * Optional, and validated by shape rather than by country — the same rule
+   * `api/src/lib/phone.ts` applies on arrival, restated here only so the
+   * message names the field instead of coming back as a generic 422.
+   */
+  phone: z
+    .string()
+    .trim()
+    .max(24, 'Use at most 24 characters')
+    .refine((v) => v === '' || /^\+?[0-9][0-9\s().-]*$/.test(v), 'Enter a phone number')
+    .refine((v) => {
+      const digits = (v.match(/[0-9]/g) ?? []).length
+      return v === '' || (digits >= 7 && digits <= 15)
+    }, 'A phone number needs between 7 and 15 digits')
+    .optional(),
   company: z.string().trim().min(1, 'Enter your company').max(160),
   size: z.string().trim().max(40).optional(),
   message: z.string().trim().max(4000).optional(),
@@ -88,6 +103,7 @@ export async function submitLead(_prev: LeadState, formData: FormData): Promise<
         firstName: lead.firstName,
         lastName: lead.lastName,
         email: lead.email,
+        phone: lead.phone === '' ? undefined : lead.phone,
         company: lead.company,
         teamSize: lead.size,
         message: lead.message,

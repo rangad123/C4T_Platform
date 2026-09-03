@@ -136,13 +136,21 @@ export async function logoutAction(): Promise<void> {
     })
   } catch {
     // Even if the API is unreachable we still want to clear local cookies and
-    // send the visitor to the sign-in screen â€” being stuck on a logged-in page
+    // send the visitor away from the portal — being stuck on a logged-in page
     // is the worse failure mode.
   }
 
   cookieStore.delete('c4t_access')
   cookieStore.delete('c4t_refresh')
-  redirect('/login')
+  /**
+   * Home, not `/login`.
+   *
+   * Signing out and being shown a sign-in form reads as a failed sign-out —
+   * the same screen you would land on if the session had merely expired.
+   * Home is the unambiguous "you are signed out" state, and the nav there
+   * carries a Sign in button for anyone who meant to switch accounts.
+   */
+  redirect('/')
 }
 
 /**
