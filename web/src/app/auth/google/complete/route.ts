@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { env } from '@/lib/env'
 import { bridgeApiCookies } from '@/lib/auth/cookie-bridge'
 import { safeNextOrHome } from '@/lib/safe-redirect'
+import { authHeaders } from '@/lib/auth/request-context'
 
 /**
  * GET /auth/google/complete — where the API's Google OAuth callback sends the
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     response = await fetch(new URL('/v1/auth/google/exchange', env.API_ORIGIN), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(request.headers) },
       body: JSON.stringify({ code }),
       cache: 'no-store',
     })

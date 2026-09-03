@@ -7,6 +7,7 @@ import { ROLE_HOME, type Role } from '@/lib/api/types'
 import { safeNext } from '@/lib/safe-redirect'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { bridgeApiCookies } from '@/lib/auth/cookie-bridge'
+import { currentAuthHeaders } from '@/lib/auth/request-context'
 
 /**
  * Cookie bridging for Server Actions that call the auth API.
@@ -63,7 +64,7 @@ export async function loginAction(formData: FormData): Promise<void> {
   try {
     response = await fetch(new URL('/v1/auth/login', env.API_ORIGIN), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(await currentAuthHeaders()) },
       body: JSON.stringify({ email, password }),
       cache: 'no-store',
     })
@@ -186,7 +187,7 @@ export async function forgotPasswordAction(formData: FormData): Promise<void> {
   try {
     await fetch(new URL('/v1/auth/forgot-password', env.API_ORIGIN), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(await currentAuthHeaders()) },
       body: JSON.stringify({ email }),
       cache: 'no-store',
     })
@@ -223,7 +224,7 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
   try {
     response = await fetch(new URL('/v1/auth/reset-password', env.API_ORIGIN), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(await currentAuthHeaders()) },
       body: JSON.stringify({ token, password }),
       cache: 'no-store',
     })

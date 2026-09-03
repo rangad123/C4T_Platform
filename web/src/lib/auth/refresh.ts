@@ -2,6 +2,7 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { applySetCookies } from '@/lib/auth/cookie-bridge'
 import { spendRefreshToken } from '@/lib/auth/refresh-core'
+import { currentAuthHeaders } from '@/lib/auth/request-context'
 
 /**
  * Refreshes the session from a Server Action, persisting the rotated cookies.
@@ -32,7 +33,11 @@ export async function attemptRefresh(): Promise<boolean> {
   const refreshToken = cookieStore.get('c4t_refresh')?.value
   if (!refreshToken) return false
 
-  const setCookies = await spendRefreshToken(refreshToken, cookieStore.toString())
+  const setCookies = await spendRefreshToken(
+    refreshToken,
+    cookieStore.toString(),
+    await currentAuthHeaders(),
+  )
   if (!setCookies || setCookies.length === 0) return false
 
   // Applied per request even when this call joined an in-flight refresh: the

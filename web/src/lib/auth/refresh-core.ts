@@ -47,10 +47,22 @@ const JOIN_WINDOW_MS = 10_000
  * expired, revoked, reused, or the API being unreachable. `null` is not by
  * itself proof the user is signed out; callers decide that from the original
  * request's own status.
+ *
+ * `authHeaders` carries the visitor's real `user-agent`/IP through to the
+ * API (see `request-context.ts`) — without it, every silent refresh re-stamps
+ * the session's device info back to this server's own loopback address,
+ * *overwriting* whatever correct value login originally recorded. Optional,
+ * and only used on the branch that actually makes the call: a caller joining
+ * an in-flight exchange already under way rides whichever context the first
+ * caller sent. That is never wrong in practice — every realistic concurrent
+ * caller here is the same browser's own overlapping requests, so they would
+ * have sent the same values anyway — and this data is informational display
+ * only, never a security decision.
  */
 export function spendRefreshToken(
   refreshToken: string,
   cookieHeader: string,
+  authHeaders: Record<string, string> = {},
 ): Promise<string[] | null> {
   const existing = inFlight.get(refreshToken)
   if (existing) return existing
@@ -63,6 +75,7 @@ export function spendRefreshToken(
         headers: {
           'content-type': 'application/json',
           ...(cookieHeader ? { cookie: cookieHeader } : {}),
+          ...authHeaders,
         },
         body: '{}',
         cache: 'no-store',

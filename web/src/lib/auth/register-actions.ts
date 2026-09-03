@@ -6,6 +6,7 @@ import { ROLE_HOME, type Role } from '@/lib/api/types'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { safeNext } from '@/lib/safe-redirect'
 import { bridgeApiCookies } from './cookie-bridge'
+import { currentAuthHeaders } from './request-context'
 
 /**
  * Server Action for self-registration.
@@ -78,7 +79,7 @@ export async function registerAction(formData: FormData): Promise<void> {
   try {
     response = await fetch(new URL('/v1/auth/register', env.API_ORIGIN), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(await currentAuthHeaders()) },
       body: JSON.stringify({
         email,
         password,

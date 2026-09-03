@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { env } from '@/lib/env'
 import { spendRefreshToken } from '@/lib/auth/refresh-core'
 import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
+import { authHeaders } from '@/lib/auth/request-context'
 
 /**
  * Next 16 Proxy — formerly `middleware.ts`.
@@ -67,7 +68,11 @@ async function refreshIfExpired(
   if (!refreshToken) return []
 
   const cookieHeader = request.headers.get('cookie') ?? ''
-  const setCookies = await spendRefreshToken(refreshToken, cookieHeader)
+  const setCookies = await spendRefreshToken(
+    refreshToken,
+    cookieHeader,
+    authHeaders(request.headers),
+  )
   if (!setCookies || setCookies.length === 0) return []
 
   const isProduction = env.NEXT_PUBLIC_ENVIRONMENT === 'production'
