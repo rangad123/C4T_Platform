@@ -94,7 +94,11 @@ export async function generateMetadata({
       // Always explicit — Next replaces `openGraph` wholesale on override
       // rather than merging, so omitting `images` here would silently drop
       // the fallback and every share of this post would unfurl with none.
-      images: [post.featuredImageUrl ?? '/opengraph-image'],
+      // The secondary image wins where there is one: per the schema note it
+      // exists both for SPLIT and "as the social card when the featured image
+      // is the wrong crop for one", and an author who has set it has said
+      // which they would rather have unfurled.
+      images: [post.secondaryImageUrl ?? post.featuredImageUrl ?? '/opengraph-image'],
       publishedTime: post.publishedAt ?? undefined,
       authors: post.author ? [post.author] : undefined,
     },
@@ -167,6 +171,7 @@ export default async function BlogPostPage({
           title={post.title}
           featuredImageUrl={post.featuredImageUrl}
           secondaryImageUrl={post.secondaryImageUrl}
+          hasGallery={(post.galleryImages?.length ?? 0) > 0}
         >
           <nav
             aria-label="Breadcrumb"

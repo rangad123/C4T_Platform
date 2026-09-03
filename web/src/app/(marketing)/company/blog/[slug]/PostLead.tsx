@@ -6,6 +6,8 @@ export interface PostLeadProps {
   title: string
   featuredImageUrl: string | null
   secondaryImageUrl: string | null
+  /** Whether the post actually has gallery images to lead with. */
+  hasGallery: boolean
   /** The breadcrumb, meta line, title and excerpt — identical in every layout. */
   children: React.ReactNode
 }
@@ -41,6 +43,7 @@ export function PostLead({
   title,
   featuredImageUrl,
   secondaryImageUrl,
+  hasGallery,
   children,
 }: PostLeadProps) {
   // SPLIT prefers the second image — that is what the field is for — and falls
@@ -89,8 +92,15 @@ export function PostLead({
     )
   }
 
-  // GALLERY leads with its grid in the body, so no image here.
-  if (layout === 'GALLERY') return <>{children}</>
+  /**
+   * GALLERY leads with its grid in the body, so it wants no image here — but
+   * only if it actually has one. Switching a post to GALLERY before adding
+   * any images used to remove its picture altogether: this branch showed
+   * nothing and the empty grid rendered nothing, so a post with a perfectly
+   * good featured image displayed none at all. With no gallery it falls
+   * through and behaves as STANDARD.
+   */
+  if (layout === 'GALLERY' && hasGallery) return <>{children}</>
 
   return (
     <>

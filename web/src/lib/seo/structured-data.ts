@@ -131,6 +131,20 @@ export function breadcrumbFor(path: string, leafName?: string) {
  * yet, the same reasoning the old static blog's page-local `articleJsonLd`
  * followed.
  */
+function imageList(post: {
+  featuredImageUrl: string | null
+  secondaryImageUrl?: string | null
+  galleryImages?: { url: string }[]
+}): string[] | undefined {
+  const urls = [
+    post.secondaryImageUrl,
+    post.featuredImageUrl,
+    ...(post.galleryImages ?? []).map((image) => image.url),
+  ].filter((url): url is string => Boolean(url))
+  const unique = [...new Set(urls)]
+  return unique.length > 0 ? unique : undefined
+}
+
 export function blogPostingJsonLd(post: {
   title: string
   excerpt: string | null
@@ -138,6 +152,8 @@ export function blogPostingJsonLd(post: {
   publishedAt: string | null
   author: string | null
   featuredImageUrl: string | null
+  secondaryImageUrl?: string | null
+  galleryImages?: { url: string }[]
 }) {
   const url = new URL(`/company/blog/${post.slug}`, env.NEXT_PUBLIC_SITE_URL).toString()
   return {
@@ -145,7 +161,16 @@ export function blogPostingJsonLd(post: {
     '@type': 'BlogPosting',
     headline: post.title,
     description: post.excerpt ?? undefined,
-    image: post.featuredImageUrl ?? undefined,
+    /**
+     * Every image the post actually shows, most representative first.
+     *
+     * `image` accepts an array, and schema.org asks for the images a reader
+     * would recognise from the article. Emitting only the featured one
+     * described a picture the reader may never see first: a GALLERY post
+     * leads with its gallery, and a post with a second image has had one
+     * chosen deliberately for sharing.
+     */
+    image: imageList(post),
     url,
     mainEntityOfPage: url,
     datePublished: post.publishedAt ?? undefined,
