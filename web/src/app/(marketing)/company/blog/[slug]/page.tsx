@@ -168,87 +168,87 @@ export default async function BlogPostPage({
           featuredImageUrl={post.featuredImageUrl}
           secondaryImageUrl={post.secondaryImageUrl}
         >
-        <nav
-          aria-label="Breadcrumb"
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: 6,
-            marginBottom: 'var(--space-5)',
-            fontSize: 'var(--type-caption-size)',
-            color: 'var(--text-inverse-muted)',
-          }}
-        >
-          {breadcrumbTrail.slice(0, -1).map((crumb) => (
-            <span key={crumb.path} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Link href={crumb.path} style={{ color: 'inherit', textDecoration: 'none' }}>
-                {crumb.name}
-              </Link>
-              <span aria-hidden="true">/</span>
-            </span>
-          ))}
-          <span style={{ color: 'var(--text-inverse)' }} aria-current="page">
-            {post.title}
-          </span>
-        </nav>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span className="c4t-eyebrow" style={{ color: 'var(--text-inverse-muted)' }}>
-            {post.category?.name ?? 'Article'}
-          </span>
-          {!isLive ? (
-            <Badge tone="warning">
-              {post.status === 'DRAFT'
-                ? 'Draft — preview only'
-                : post.status === 'SCHEDULED'
-                  ? 'Scheduled — preview only'
-                  : 'Archived — preview only'}
-            </Badge>
-          ) : null}
-          {post.publishedAt ? (
-            <span
-              className="c4t-eyebrow"
-              style={{ color: 'var(--text-inverse-muted)', letterSpacing: '0.06em' }}
-            >
-              {formatDate(post.publishedAt)}
-            </span>
-          ) : null}
-          <span
+          <nav
+            aria-label="Breadcrumb"
             style={{
-              display: 'inline-flex',
+              display: 'flex',
+              flexWrap: 'wrap',
               alignItems: 'center',
-              gap: 5,
+              gap: 6,
+              marginBottom: 'var(--space-5)',
               fontSize: 'var(--type-caption-size)',
               color: 'var(--text-inverse-muted)',
             }}
           >
-            {post.readingTimeMinutes} min read
-          </span>
-        </div>
+            {breadcrumbTrail.slice(0, -1).map((crumb) => (
+              <span key={crumb.path} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Link href={crumb.path} style={{ color: 'inherit', textDecoration: 'none' }}>
+                  {crumb.name}
+                </Link>
+                <span aria-hidden="true">/</span>
+              </span>
+            ))}
+            <span style={{ color: 'var(--text-inverse)' }} aria-current="page">
+              {post.title}
+            </span>
+          </nav>
 
-        <h1
-          className="c4t-display-lg"
-          style={{
-            margin: '20px 0 0',
-            color: 'var(--text-inverse)',
-            maxWidth: 900,
-            textWrap: 'pretty',
-          }}
-        >
-          {post.title}
-        </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span className="c4t-eyebrow" style={{ color: 'var(--text-inverse-muted)' }}>
+              {post.category?.name ?? 'Article'}
+            </span>
+            {!isLive ? (
+              <Badge tone="warning">
+                {post.status === 'DRAFT'
+                  ? 'Draft — preview only'
+                  : post.status === 'SCHEDULED'
+                    ? 'Scheduled — preview only'
+                    : 'Archived — preview only'}
+              </Badge>
+            ) : null}
+            {post.publishedAt ? (
+              <span
+                className="c4t-eyebrow"
+                style={{ color: 'var(--text-inverse-muted)', letterSpacing: '0.06em' }}
+              >
+                {formatDate(post.publishedAt)}
+              </span>
+            ) : null}
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 'var(--type-caption-size)',
+                color: 'var(--text-inverse-muted)',
+              }}
+            >
+              {post.readingTimeMinutes} min read
+            </span>
+          </div>
 
-        {post.excerpt ? (
-          <p
-            className="c4t-body-lg"
-            style={{ margin: '24px 0 0', color: 'var(--text-inverse-muted)', maxWidth: 620 }}
+          <h1
+            className="c4t-display-lg"
+            style={{
+              margin: '20px 0 0',
+              color: 'var(--text-inverse)',
+              maxWidth: 900,
+              textWrap: 'pretty',
+            }}
           >
-            {post.excerpt}
-          </p>
-        ) : null}
+            {post.title}
+          </h1>
 
-        {/*
+          {post.excerpt ? (
+            <p
+              className="c4t-body-lg"
+              style={{ margin: '24px 0 0', color: 'var(--text-inverse-muted)', maxWidth: 620 }}
+            >
+              {post.excerpt}
+            </p>
+          ) : null}
+
+          {/*
           The featured image, on the post it belongs to.
 
           It was already being uploaded, stored and served — the index card
