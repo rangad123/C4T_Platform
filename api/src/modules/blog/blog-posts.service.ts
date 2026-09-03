@@ -34,6 +34,8 @@ const postAdminSelect = {
   authorId: true,
   authorDisplayName: true,
   featuredImageFileId: true,
+  secondaryImageFileId: true,
+  layout: true,
   isFeatured: true,
   readingTimeMinutes: true,
   viewCount: true,
@@ -48,17 +50,36 @@ const postAdminSelect = {
   category: { select: { id: true, name: true, slug: true } },
   author: { select: { id: true, firstName: true, lastName: true } },
   featuredImage: { select: { id: true, storageKey: true, originalName: true } },
+  secondaryImage: { select: { id: true, storageKey: true, originalName: true } },
+  galleryImages: {
+    select: {
+      id: true,
+      fileId: true,
+      caption: true,
+      position: true,
+      file: { select: { id: true, storageKey: true, originalName: true } },
+    },
+    // A nested to-many has NO default order in Prisma. Without this the
+    // gallery looks right in development and scrambles in production.
+    orderBy: { position: 'asc' },
+  },
   tags: { select: { tag: { select: { id: true, name: true, slug: true } } } },
 } satisfies Prisma.BlogPostSelect
 
 type AdminPostRow = Prisma.BlogPostGetPayload<{ select: typeof postAdminSelect }>
 
 function shapeAdminPost(post: AdminPostRow) {
-  const { tags, featuredImage, ...rest } = post
+  const { tags, featuredImage, secondaryImage, galleryImages, ...rest } = post
   return {
     ...rest,
     tags: tags.map((t) => t.tag),
     featuredImageUrl: featuredImage ? createPublicUrl(featuredImage.storageKey) : null,
+    secondaryImageUrl: secondaryImage ? createPublicUrl(secondaryImage.storageKey) : null,
+    galleryImages: galleryImages.map(({ file, ...image }) => ({
+      ...image,
+      url: createPublicUrl(file.storageKey),
+      originalName: file.originalName,
+    })),
   }
 }
 
@@ -101,18 +122,30 @@ const postPublicDetailSelect = {
   seoTitle: true,
   seoDescription: true,
   previousSlugs: true,
+  layout: true,
+  secondaryImage: { select: { storageKey: true } },
+  galleryImages: {
+    select: { caption: true, position: true, file: { select: { storageKey: true } } },
+    orderBy: { position: 'asc' },
+  },
   tags: { select: { tag: { select: { name: true, slug: true } } } },
 } satisfies Prisma.BlogPostSelect
 
 type PublicPostDetailRow = Prisma.BlogPostGetPayload<{ select: typeof postPublicDetailSelect }>
 
 function shapePublicDetail(post: PublicPostDetailRow) {
-  const { authorDisplayName, author, featuredImage, tags, ...rest } = post
+  const { authorDisplayName, author, featuredImage, secondaryImage, galleryImages, tags, ...rest } =
+    post
   return {
     ...rest,
     author:
       authorDisplayName ?? ([author.firstName, author.lastName].filter(Boolean).join(' ') || null),
     featuredImageUrl: featuredImage ? createPublicUrl(featuredImage.storageKey) : null,
+    secondaryImageUrl: secondaryImage ? createPublicUrl(secondaryImage.storageKey) : null,
+    galleryImages: galleryImages.map(({ file, ...image }) => ({
+      ...image,
+      url: createPublicUrl(file.storageKey),
+    })),
     tags: tags.map((t) => t.tag),
   }
 }
@@ -297,6 +330,10 @@ export async function updatePost(id: string, input: UpdatePostInput) {
         ...(input.featuredImageFileId !== undefined
           ? { featuredImageFileId: input.featuredImageFileId }
           : {}),
+        ...(input.secondaryImageFileId !== undefined
+          ? { secondaryImageFileId: input.secondaryImageFileId }
+          : {}),
+        ...(input.layout !== undefined ? { layout: input.layout } : {}),
         ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
         ...(input.authorDisplayName !== undefined
           ? { authorDisplayName: input.authorDisplayName }
@@ -305,6 +342,30 @@ export async function updatePost(id: string, input: UpdatePostInput) {
         ...(input.seoDescription !== undefined ? { seoDescription: input.seoDescription } : {}),
         ...(input.tagIds
           ? { tags: { deleteMany: {}, create: input.tagIds.map((tagId) => ({ tagId })) } }
+          : {}),
+        /**
+         * Replace the gallery wholesale, exactly as tags are replaced above.
+         *
+         * `@@unique([postId, position])` makes an in-place reorder a
+         * constraint violation — swapping two images by updating each row's
+         * position collides on the intermediate state. Delete-all-then-create
+         * in order is the only shape that cannot, and it runs inside the same
+         * interactive transaction as the rest of the update, so no partial
+         * gallery is ever visible to a concurrent public read.
+         *
+         * `position` comes from the array index, never from the client.
+         */
+        ...(input.galleryImages
+          ? {
+              galleryImages: {
+                deleteMany: {},
+                create: input.galleryImages.map((image, index) => ({
+                  fileId: image.fileId,
+                  caption: image.caption ?? null,
+                  position: index,
+                })),
+              },
+            }
           : {}),
       },
       select: postAdminSelect,

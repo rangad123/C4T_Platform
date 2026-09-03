@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { BlogPostStatus } from '@prisma/client'
+import { BlogPostLayout, BlogPostStatus } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
 export const BLOG_POST_SORT_FIELDS = [
@@ -55,6 +55,29 @@ export const updatePostSchema = z.object({
   content: z.string().max(200_000).optional(),
   categoryId: z.string().cuid().nullable().optional(),
   featuredImageFileId: z.string().cuid().nullable().optional(),
+  /** Nullable so it can be cleared, like featuredImageFileId and unlike excerpt. */
+  secondaryImageFileId: z.string().cuid().nullable().optional(),
+  layout: z.nativeEnum(BlogPostLayout).optional(),
+  /**
+   * The gallery, in the order it should render.
+   *
+   * `position` is derived from the array index server-side rather than
+   * accepted from the client: `BlogPostImage` has `@@unique([postId,
+   * position])`, so a client sending absolute positions can collide mid-write,
+   * and only the server can guarantee the gapless 0-based order the column
+   * promises. Capped for the same reason `tagIds` is — the whole gallery is
+   * replaced inside one interactive transaction, and an unbounded array is the
+   * one input that could push it past the timeout.
+   */
+  galleryImages: z
+    .array(
+      z.object({
+        fileId: z.string().cuid(),
+        caption: z.string().trim().max(300).nullable().optional(),
+      }),
+    )
+    .max(24)
+    .optional(),
   tagIds: z.array(z.string().cuid()).max(20).optional(),
   isFeatured: z.boolean().optional(),
   authorDisplayName: z.string().trim().max(120).nullable().optional(),

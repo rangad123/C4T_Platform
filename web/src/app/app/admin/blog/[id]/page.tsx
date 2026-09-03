@@ -16,6 +16,8 @@ import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { BlogEditor } from '@/components/admin/blog/BlogEditor'
 import { blogTemplateHtml } from '@/lib/admin/blog-templates'
+import type { BlogGalleryImage, BlogPostLayout } from '@/lib/blog/types'
+import { BLOG_LAYOUTS, BLOG_LAYOUT_OPTIONS } from '@/lib/admin/blog-layouts'
 import { TagCombobox, type TagOption } from '@/components/admin/blog/TagCombobox'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
@@ -55,6 +57,10 @@ interface PostDetail {
   authorDisplayName: string | null
   featuredImageFileId: string | null
   featuredImageUrl: string | null
+  secondaryImageFileId: string | null
+  secondaryImageUrl: string | null
+  layout: BlogPostLayout
+  galleryImages: (BlogGalleryImage & { id: string; fileId: string; originalName: string })[]
   isFeatured: boolean
   readingTimeMinutes: number
   viewCount: number
@@ -353,6 +359,26 @@ export default async function BlogPostDetailPage({
                   />
                 </Field>
               </div>
+
+              {/*
+                `defaultValue` is the post's own layout, not the first option.
+                Rendering the control without reading the current value would
+                mean saving anything else on this form silently reset a HERO
+                post to Standard — the same trap the category select's
+                fallback above exists to avoid.
+              */}
+              <Field
+                label="Layout"
+                htmlFor="layout"
+                hint={BLOG_LAYOUTS.find((l) => l.value === post.layout)?.description}
+              >
+                <Select
+                  id="layout"
+                  name="layout"
+                  defaultValue={post.layout}
+                  options={BLOG_LAYOUT_OPTIONS}
+                />
+              </Field>
 
               <Field label="Tags" htmlFor="tags">
                 <TagCombobox

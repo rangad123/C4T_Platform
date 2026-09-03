@@ -18,6 +18,14 @@ export interface BlogPostSummary {
   featuredImageUrl: string | null
 }
 
+export type BlogPostLayout = 'STANDARD' | 'HERO' | 'SPLIT' | 'GALLERY'
+
+export interface BlogGalleryImage {
+  url: string
+  caption: string | null
+  position: number
+}
+
 export interface BlogPostDetail extends BlogPostSummary {
   /**
    * Present on every response, but only meaningfully checked on a preview
@@ -30,6 +38,11 @@ export interface BlogPostDetail extends BlogPostSummary {
   seoDescription: string | null
   previousSlugs: string[]
   tags: { name: string; slug: string }[]
+  /** How the page arranges the post. See `BlogPostLayout` on the API. */
+  layout: BlogPostLayout
+  /** Used by SPLIT, and as the social card when the featured image is the wrong crop. */
+  secondaryImageUrl: string | null
+  galleryImages: BlogGalleryImage[]
 }
 
 export interface BlogCategorySummary {

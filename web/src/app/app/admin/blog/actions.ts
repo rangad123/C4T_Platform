@@ -76,6 +76,7 @@ export async function saveContentAction(formData: FormData): Promise<void> {
     content: formTrimmed(formData, 'content'),
     categoryId: formTrimmed(formData, 'categoryId') || null,
     authorDisplayName: formTrimmed(formData, 'authorDisplayName') || null,
+    layout: formTrimmed(formData, 'layout') || undefined,
     tagIds: formStringArray(formData, 'tagIds'),
   }
 

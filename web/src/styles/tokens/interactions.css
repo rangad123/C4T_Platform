@@ -79,3 +79,77 @@
      just without the motion a reduced-motion user asked not to see. */
   .c4t-spin { animation: none; }
 }
+
+/* ── Blog post layouts ───────────────────────────────────────────────────────
+   HERO, SPLIT and GALLERY, from `BlogPost.layout`. These live here rather than
+   in a CSS module because the elements they style are composed across
+   PostLead/PostGallery and the page, and because they need the same
+   `!important` responsive treatment the other `.c4t-*` helpers above use —
+   the header block they sit inside is inline-styled, and inline styles beat
+   module rules. */
+
+/* HERO — the title over the photograph. */
+.c4t-post-hero-overlay {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: var(--space-8);
+}
+
+.c4t-post-hero-scrim {
+  position: absolute;
+  inset: 0;
+  /* Clear at the top where the picture should be seen, and fully covered
+     across the band the text actually occupies — a single fade left the meta
+     line sitting on bare photograph, which is unreadable over a light one.
+
+     The same token layered twice rather than a darker colour invented for
+     this: `--surface-scrim` is what the design system uses for text over an
+     image, and compositing it with itself keeps the palette honest while
+     giving the text real contrast whatever the photo underneath. */
+  background:
+    linear-gradient(to top, var(--surface-scrim) 0%, var(--surface-scrim) 55%, transparent 100%),
+    linear-gradient(to top, var(--surface-scrim) 0%, transparent 70%);
+}
+
+/* SPLIT — title beside the image rather than above it. */
+.c4t-post-split {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 480px);
+  gap: var(--space-9);
+  align-items: center;
+}
+
+/* GALLERY and the trailing gallery on other layouts. */
+.c4t-post-gallery {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-grid-gap);
+}
+
+.c4t-post-gallery p {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+  color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  /* The overlay stops overlaying: a display title over a phone-width photo
+     does not fit, and the picture is worth more than the effect. */
+  .c4t-post-hero-overlay {
+    position: static;
+    padding: var(--space-7) 0 0;
+  }
+
+  .c4t-post-hero-scrim {
+    display: none;
+  }
+
+  .c4t-post-split {
+    grid-template-columns: 1fr;
+    gap: var(--space-7);
+  }
+}

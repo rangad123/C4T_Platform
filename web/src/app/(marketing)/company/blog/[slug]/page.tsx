@@ -9,7 +9,8 @@ import { JsonLd } from '@/components/seo/JsonLd'
 import { serverFetch } from '@/lib/api/server'
 import { publicFetchPage, publicFetchWithExtras } from '@/lib/api/public'
 import { ApiError } from '@/lib/api/types'
-import { SiteImage } from '@/components/ds/marketing/SiteImage'
+import { PostLead } from './PostLead'
+import { PostGallery } from './PostGallery'
 import { SITE_NAME } from '@/lib/seo/metadata'
 import { blogPostingJsonLd, breadcrumbJsonLd } from '@/lib/seo/structured-data'
 import { env } from '@/lib/env'
@@ -161,6 +162,12 @@ export default async function BlogPostPage({
       />
 
       <Section tone="inverse" className={s.deep} compact>
+        <PostLead
+          layout={post.layout ?? 'STANDARD'}
+          title={post.title}
+          featuredImageUrl={post.featuredImageUrl}
+          secondaryImageUrl={post.secondaryImageUrl}
+        >
         <nav
           aria-label="Breadcrumb"
           style={{
@@ -255,25 +262,30 @@ export default async function BlogPostPage({
           16/9 to match the shape the index card crops to, so the same
           upload reads the same way in both places.
         */}
-        {post.featuredImageUrl ? (
-          <SiteImage
-            src={post.featuredImageUrl}
-            alt={post.title}
-            fill
-            ratio="16 / 9"
-            priority
-            sizes="(max-width: 1200px) 100vw, 1200px"
-            style={{ marginTop: 'var(--space-8)' }}
-          />
-        ) : null}
+        </PostLead>
       </Section>
 
       <Section>
         {/* `--container-prose` caps the measure at ~75ch — long-form is the
             one place on this site where line length is the whole
             typographic problem. */}
+        {/*
+          A GALLERY post leads with its pictures; every other layout shows
+          them after the article, where they read as a set of supporting
+          images rather than the point of the page.
+        */}
+        {post.layout === 'GALLERY' ? (
+          <div style={{ marginBottom: 'var(--space-8)' }}>
+            <PostGallery images={post.galleryImages ?? []} title={post.title} lead />
+          </div>
+        ) : null}
+
         <div style={{ maxWidth: 'var(--container-prose)', margin: '0 auto' }}>
           <div className={styles.article} dangerouslySetInnerHTML={{ __html: post.content }} />
+
+          {post.layout !== 'GALLERY' ? (
+            <PostGallery images={post.galleryImages ?? []} title={post.title} />
+          ) : null}
 
           <div
             style={{
