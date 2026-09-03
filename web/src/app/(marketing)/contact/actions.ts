@@ -1,5 +1,6 @@
 'use server'
 
+import { headers } from 'next/headers'
 import { z } from 'zod'
 import { env } from '@/lib/env'
 
@@ -95,10 +96,33 @@ export async function submitLead(_prev: LeadState, formData: FormData): Promise<
 
   const lead = parsed.data
 
+  /**
+   * The visitor's address, for the API's rate limit and its abuse-triage
+   * column. `x-forwarded-for` is set by nginx in front of this server; the
+   * first entry is the client. Absent in local development, which is why the
+   * header is only sent when there is one.
+   */
+  const requestHeaders = await headers()
+  const clientIp = (requestHeaders.get('x-forwarded-for') ?? '').split(',')[0]?.trim() ?? ''
+
+  /** Set when the API refused for rate limiting, so the catch can say so. */
+  let rateLimited = false
+
   try {
     const response = await fetch(new URL('/v1/leads', env.API_ORIGIN), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        /**
+         * Who is actually submitting.
+         *
+         * This runs on the server, so the API sees our address, not theirs.
+         * Without this the lead endpoint's rate limit — five an hour — was
+         * one bucket for the entire site, and the abuse-triage column
+         * recorded this server on every row.
+         */
+        ...(clientIp ? { 'x-c4t-client-ip': clientIp } : {}),
+      },
       body: JSON.stringify({
         firstName: lead.firstName,
         lastName: lead.lastName,
@@ -120,14 +144,18 @@ export async function submitLead(_prev: LeadState, formData: FormData): Promise<
     })
 
     if (!response.ok) {
-      // 429 is the API's own rate limit — a real person who submitted twice, not
-      // an outage. Say so, rather than showing the generic failure.
-      if (response.status === 429) {
-        return {
-          status: 'error',
-          message: "We already have your request — we'll be in touch shortly.",
-        }
-      }
+      /**
+       * 429 is the API's own rate limit — the same person submitting again,
+       * not an outage — so the message says so rather than showing a generic
+       * failure.
+       *
+       * It deliberately falls through to the catch rather than returning
+       * here. Returning early skipped the recovery log below, so a
+       * rate-limited enquiry left no database row AND no log line: strictly
+       * less recoverable than an outage, which at least gets written down.
+       * `rateLimited` carries the wording through.
+       */
+      rateLimited = response.status === 429
       throw new Error(`Lead API responded ${response.status}`)
     }
 
@@ -161,6 +189,19 @@ export async function submitLead(_prev: LeadState, formData: FormData): Promise<
       receivedAt: new Date().toISOString(),
       cause: cause instanceof Error ? cause.message : String(cause),
     })
+
+    /**
+     * A rate-limited visitor is told the truth — we have their request — and
+     * that is now accurate rather than a guess: the enquiry is in the log
+     * above either way, and the limit keys on them individually, so reaching
+     * it means they really did submit several times.
+     */
+    if (rateLimited) {
+      return {
+        status: 'error',
+        message: "We already have your request — we'll be in touch shortly.",
+      }
+    }
 
     return { status: 'success', delivered: false }
   }

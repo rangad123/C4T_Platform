@@ -1,5 +1,20 @@
+import type { Request } from 'express'
 import rateLimit from 'express-rate-limit'
 import { env } from '../config/env.js'
+
+/**
+ * The address to attribute a public request to.
+ *
+ * `req.ip` is the web server for anything submitted through a server action,
+ * so the header the action sets is preferred where present. Trusted only
+ * because the sole route using this is reached from our own web tier; nothing
+ * downstream grants access on the strength of it.
+ */
+export function clientAddress(req: Request): string {
+  const forwarded = req.get('x-c4t-client-ip')?.trim()
+  if (forwarded) return forwarded.slice(0, 45)
+  return req.ip ?? 'unknown'
+}
 
 const shared = {
   standardHeaders: 'draft-7' as const,
@@ -97,5 +112,21 @@ export const paymentRevealLimiter = rateLimit({
 export const leadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
+  /**
+   * Key on the VISITOR, not on whoever delivered the request.
+   *
+   * The marketing form submits through a Next.js server action, so every
+   * enquiry reaches this service from the web server's own address. The
+   * default key is `req.ip`, which made all of them one bucket: five people
+   * filling in the form in the same hour was enough to start refusing the
+   * sixth, whoever they were. Measured, not assumed — five distinct
+   * submissions counted `remaining` down to zero and the sixth got a 429.
+   *
+   * The web action forwards the visitor's address in `x-c4t-client-ip`. It is
+   * read only as a rate-limit key and for abuse triage, never for
+   * authorisation, and it falls back to `req.ip` so a direct caller — which
+   * is what this limiter was written to stop — is still keyed on itself.
+   */
+  keyGenerator: (req) => clientAddress(req),
   ...shared,
 })

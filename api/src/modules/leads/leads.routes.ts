@@ -6,7 +6,7 @@ import { searchTerms } from '../../lib/search.js'
 import { param } from '../../lib/http.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission } from '../../middleware/authorize.js'
-import { leadLimiter } from '../../middleware/rateLimit.js'
+import { clientAddress, leadLimiter } from '../../middleware/rateLimit.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
 import { buildMeta, paginationQuery, toSkipTake } from '../../lib/pagination.js'
 import { phoneField } from '../../lib/phone.js'
@@ -103,7 +103,12 @@ leadsRouter.post('/', leadLimiter, validate({ body: createLeadBody }), async (re
       status: isSpam ? LeadStatus.SPAM : LeadStatus.NEW,
       // Personal data, kept for abuse triage only. Covered by the retention
       // policy — see the note on the model.
-      ipAddress: req.ip ?? null,
+      //
+      // `clientAddress`, not `req.ip`: the form submits through a server
+      // action, so `req.ip` is our own web tier and this column recorded the
+      // same address for every enquiry — useless for the one thing it exists
+      // for.
+      ipAddress: clientAddress(req),
       userAgent: req.get('user-agent')?.slice(0, 500) ?? null,
     },
     select: { id: true, status: true, createdAt: true },
