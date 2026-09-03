@@ -12,14 +12,12 @@ export const metadata: Metadata = {
 }
 
 /**
- * The full-page sign-in. Direct visits (refresh, URL paste, link-share)
- * land here. Client-side navigations from the top nav land on the
- * intercepting route `app/(marketing)/@auth/(.)login/page.tsx` instead,
- * which renders the same form inside a modal over the current page.
- *
- * The page is "full" in the sense that it sits within the marketing layout
- * (top nav + footer); the modal is "full" in the sense that it covers the
- * entire viewport. Both share the same form content.
+ * The full-page sign-in. `/login` used to have a modal variant, reachable
+ * only by a client-side navigation from inside the marketing layout — a
+ * refresh, a pasted URL, or the redirect after signing out all rendered the
+ * full page instead, so the same screen looked different depending on how you
+ * arrived at it. See the note on `AuthCard` for why the modal was removed;
+ * this is the only form now, for every path in.
  *
  * No `<main>` here: `MarketingShell` (via the route-group layout) already
  * renders `<main id="main">`, and the skip link targets that id. A second one

@@ -75,6 +75,7 @@ export default async function RegisterForm({
     firstName?: string
     lastName?: string
     organisationName?: string
+    next?: string
   }>
 } = {}) {
   const params = searchParams
@@ -87,6 +88,7 @@ export default async function RegisterForm({
         firstName: undefined,
         lastName: undefined,
         organisationName: undefined,
+        next: undefined,
       }
   const role: SignUpRole | null =
     params.role === 'customer' || params.role === 'tester' ? params.role : null
@@ -102,7 +104,7 @@ export default async function RegisterForm({
   return (
     <div>
       {role === null ? (
-        <RoleChooser message={message} email={params.email} />
+        <RoleChooser message={message} email={params.email} next={params.next} />
       ) : (
         <SignUpForm role={role} message={message} params={params} />
       )}
@@ -135,12 +137,23 @@ export default async function RegisterForm({
 
 /* ─── Step 1: which kind of account ──────────────────────────────────────── */
 
-function RoleChooser({ message, email }: { message: string | null; email?: string }) {
-  // Carries the Google email along so it survives into the form once a role
-  // is picked — RoleCard's href is a full navigation, so anything not in the
-  // query string here is lost, and re-typing an email you just signed into
-  // Google with would defeat the point of the button that got you here.
-  const carry = email ? `&email=${encodeURIComponent(email)}` : ''
+function RoleChooser({
+  message,
+  email,
+  next,
+}: {
+  message: string | null
+  email?: string
+  next?: string
+}) {
+  // Carries the Google email and `next` along so they survive into the form
+  // once a role is picked — RoleCard's href is a full navigation, so anything
+  // not in the query string here is lost. Losing `next` here would mean
+  // someone who followed an invitation link, and had no account, lands on
+  // their fresh dashboard after signing up rather than back at the invitation.
+  const carry =
+    (email ? `&email=${encodeURIComponent(email)}` : '') +
+    (next ? `&next=${encodeURIComponent(next)}` : '')
 
   return (
     <>
@@ -315,14 +328,20 @@ function SignUpForm({
 }: {
   role: SignUpRole
   message: string | null
-  params: { email?: string; firstName?: string; lastName?: string; organisationName?: string }
+  params: {
+    email?: string
+    firstName?: string
+    lastName?: string
+    organisationName?: string
+    next?: string
+  }
 }) {
   const copy = ROLE_COPY[role]
 
   return (
     <>
       <Link
-        href="/register"
+        href={`/register${params.next ? `?next=${encodeURIComponent(params.next)}` : ''}`}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -357,7 +376,7 @@ function SignUpForm({
         kind. An EXISTING Google account ignores it and signs into whatever it
         already is — the role only decides what to create.
       */}
-      <GoogleButton role={role} label="Sign up with Google" intent="register" />
+      <GoogleButton role={role} next={params.next} label="Sign up with Google" intent="register" />
 
       <AuthDivider />
 
@@ -366,6 +385,7 @@ function SignUpForm({
         style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
       >
         <input type="hidden" name="role" value={role} />
+        <input type="hidden" name="next" value={params.next ?? ''} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
           <Field label="First name" htmlFor="firstName" required>

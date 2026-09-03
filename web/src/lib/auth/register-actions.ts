@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { env } from '@/lib/env'
 import { ROLE_HOME, type Role } from '@/lib/api/types'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { safeNext } from '@/lib/safe-redirect'
 import { bridgeApiCookies } from './cookie-bridge'
 
 /**
@@ -42,14 +43,18 @@ export async function registerAction(formData: FormData): Promise<void> {
   const password = formString(formData, 'password')
   const organisationName = formTrimmed(formData, 'organisationName')
   const acceptedTerms = formString(formData, 'acceptedTerms') === 'on'
+  const next = formTrimmed(formData, 'next')
 
-  // Re-echoed on every failure path so a rejected form comes back filled in.
+  // Re-echoed on every failure path so a rejected form comes back filled in —
+  // `next` included, so someone signing up from an invitation link who typos
+  // their password does not lose the invitation on the retry.
   const echo = {
     role: role.toLowerCase(),
     email,
     firstName,
     lastName,
     organisationName,
+    next,
   }
 
   if (!ALLOWED_ROLES.has(role)) {
@@ -113,5 +118,16 @@ export async function registerAction(formData: FormData): Promise<void> {
 
   const body = (await response.json()) as { data?: { user?: { role?: Role } } }
   const created = body?.data?.user?.role
-  redirect(created ? ROLE_HOME[created] : '/app')
+  const home = created ? ROLE_HOME[created] : '/app'
+  /**
+   * `next` wins over the role home when it is safe.
+   *
+   * The invitation page's "Create an account" link is the reason this exists:
+   * without it, someone with no account yet who follows an invitation link
+   * signs up and lands on their fresh, empty dashboard — never back at the
+   * invitation they were trying to accept. `safeNext` rejects anything
+   * off-origin or pointed at another auth screen; on rejection this falls
+   * back to the same role home a plain sign-up already gets.
+   */
+  redirect(safeNext(next) ?? home)
 }

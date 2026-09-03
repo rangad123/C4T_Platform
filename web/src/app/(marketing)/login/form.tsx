@@ -6,12 +6,14 @@ import { AuthDivider, GoogleButton } from '@/components/auth/GoogleButton'
 import { loginAction } from '@/lib/auth/actions'
 
 /**
- * The shared sign-in form.
+ * The shared sign-in form, rendered by `/login`.
  *
- * Used by both `/login` (the full page) and `app/(marketing)/@auth/(.)login`
- * (the intercepting route that opens the form as a modal over the current
- * page). Same Server Component, same Server Action, same error mapping —
- * one source of truth for the form's behaviour.
+ * There used to be a second caller — an intercepting route that opened this
+ * same form as a modal over the current page — which is why this stayed a
+ * separate component from the page around it rather than being inlined. That
+ * modal is gone (see the note on `AuthCard`), but the split still earns its
+ * keep: the page handles the already-signed-in redirect and the wrapper
+ * chrome, this handles the form.
  *
  * The form is a Server Component bound to `loginAction`. There is no
  * `useFormState`, no client bundle — feedback rides on the `?error=` query

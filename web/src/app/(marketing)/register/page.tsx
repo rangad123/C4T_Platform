@@ -8,10 +8,11 @@ export const metadata: Metadata = {
 }
 
 /**
- * The full-page sign-up. Direct visits (refresh, URL paste, link-share)
- * land here. Client-side navigations from the login form's "Create an account"
- * link land on the intercepting route `app/(marketing)/@auth/(.)register/page.tsx`
- * instead, which renders the same form inside a modal over the login page.
+ * The full-page sign-up. `/register` used to have a modal variant, reachable
+ * only by a client-side navigation from inside the marketing layout — see the
+ * note on `AuthCard` for why that was removed. This is the only form now, for
+ * every path in: a refresh, a pasted URL, a link share, or the "Create an
+ * account" link from `/login`.
  *
  * No `<main>` here: `MarketingShell` (via the route-group layout) already
  * renders `<main id="main">`, and the skip link targets that id. A second one
@@ -29,6 +30,8 @@ export default async function RegisterPage({
     firstName?: string
     lastName?: string
     organisationName?: string
+    /** Where to land after a successful sign-up — e.g. an invitation link. */
+    next?: string
   }>
 }) {
   // Resolve the searchParams here so the page wrapper still has the await

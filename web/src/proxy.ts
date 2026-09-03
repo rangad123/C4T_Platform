@@ -116,12 +116,31 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
    *
    * The test is a dot in the LAST segment — i.e. a file extension. Page routes
    * in this app never contain one; every static asset does.
+   *
+   * ── OPAQUE TOKENS ARE EXEMPT TOO, for the identical reason
+   *
+   * `/invitations/:token` carries `generateOpaqueToken()` — 32 random bytes as
+   * base64url (api/src/lib/tokens.ts) — directly in the path, and only the
+   * token's HASH is stored. base64url is case-sensitive by design (A-Z, a-z,
+   * 0-9, -, _): of 20 tokens generated to check this, 20 contained an
+   * uppercase letter. Lowercasing one before it reaches the page changes what
+   * hashes to, which cannot match the row created from the original — every
+   * invitation link this platform sends was one redirect away from looking
+   * expired to its recipient, with nothing in the response to say why.
+   *
+   * Every OTHER dynamic segment in this app is either a Prisma `cuid()`
+   * (lowercase by construction) or a `[slug]` the API already constrains to
+   * `/^[a-z0-9]+(-[a-z0-9]+)*$/` — both already equal their own lowercase
+   * form, so this redirect was always a no-op for them. Naming the one route
+   * that actually needed the exemption, rather than loosening the check
+   * generally, keeps the legacy-path fix above doing only what it says.
    */
   const lastSegment = pathname.slice(pathname.lastIndexOf('/') + 1)
   const isStaticFile = lastSegment.includes('.')
+  const isOpaqueTokenPath = pathname.startsWith('/invitations/')
 
   const lower = pathname.toLowerCase()
-  if (!isStaticFile && pathname !== lower) {
+  if (!isStaticFile && !isOpaqueTokenPath && pathname !== lower) {
     const url = request.nextUrl.clone()
     url.pathname = lower
     return NextResponse.redirect(url, 308)

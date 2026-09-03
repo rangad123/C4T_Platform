@@ -56,9 +56,9 @@ const FOCUS_RESTORE_KEY = 'c4t-modal-restore-focus'
 
 /**
  * A button-triggered popup for an edit form that would otherwise sit
- * permanently inline (§10-11) — generalizes `AuthModal`
- * (`components/auth/AuthBackdrop.tsx`), the one native-`<dialog>` precedent
- * already in this codebase, rather than pulling in a dialog library.
+ * permanently inline (§10-11) — generalizes the native-`<dialog>` approach
+ * this codebase used first for the sign-in modal (since removed; see the
+ * note on `AuthCard` for why), rather than pulling in a dialog library.
  *
  * ── Why `open` is a prop, not local state
  *
@@ -70,8 +70,8 @@ const FOCUS_RESTORE_KEY = 'c4t-modal-restore-focus'
  * open/closed state is imperative DOM state, decoupled from React's
  * reconciliation, a `redirect()` does NOT close the dialog on its own — the
  * `useEffect` below is what turns the declarative `open` prop into the
- * imperative `showModal()`/`close()` call, same trick `AuthModal` already
- * uses for its own back-navigation case.
+ * imperative `showModal()`/`close()` call, the same trick the removed
+ * sign-in modal used for its own back-navigation case.
  *
  * ── Why validation errors still work without client form state
  *
