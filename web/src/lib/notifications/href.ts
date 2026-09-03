@@ -41,10 +41,36 @@ export function resolveNotificationHref(link: string | null, role: Role): string
 
   const rest = link.slice('/app/'.length)
 
-  // A thread is not a page of its own in any portal: it opens inside the
-  // conversation list, selected by query parameter.
+  /**
+   * A conversation, from `/app/messages/:id`.
+   *
+   * The admin portal gives a thread its own page; the customer and tester
+   * portals select one inside their conversation list by query parameter.
+   * Sending an admin the query form landed them on the broadcast composer —
+   * which declares no `thread` param and simply ignores it — so the
+   * notification opened a "send one message to many testers" form instead of
+   * the reply that prompted it.
+   */
   const message = /^messages\/([^/?#]+)/.exec(rest)
-  if (message) return `/app/${portal}/communication?thread=${message[1]}`
+  if (message) {
+    return portal === 'admin'
+      ? `/app/admin/communication/threads/${message[1]}`
+      : `/app/${portal}/communication?thread=${message[1]}`
+  }
+
+  /**
+   * A platform-wide announcement, from `/app/communication?announcement=:id`.
+   *
+   * Same split, and the same failure without it: the fallthrough below would
+   * hand an admin `/app/admin/communication?announcement=…`, which the
+   * composer also ignores.
+   */
+  const announcement = /^communication\?announcement=([^&#]+)/.exec(rest)
+  if (announcement) {
+    return portal === 'admin'
+      ? `/app/admin/communication/announcements/${announcement[1]}`
+      : `/app/${portal}/communication?announcement=${announcement[1]}`
+  }
 
   // Money reads differently per portal: admins run the ledger, testers see
   // their own balance on their profile's payment section.

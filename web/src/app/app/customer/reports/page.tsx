@@ -137,7 +137,7 @@ export default async function CustomerReportsPage({
       crumbs={[{ label: 'Reports' }]}
       eyebrow="Insights"
       title="Reports"
-      subtitle="Bug distributions for a project, a run of builds, or a period, with a CSV of the underlying reports."
+      subtitle="Bug distributions for a project, a run of builds, or a period."
       tabs={
         <SectionTabs basePath={BASE} tabs={SECTIONS} active={section} preserve={{ projectId }} />
       }

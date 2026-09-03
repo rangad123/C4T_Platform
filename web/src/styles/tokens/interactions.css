@@ -22,10 +22,17 @@
 
 .c4t-navlink:hover { color: var(--text-primary) !important; }
 .c4t-megalink:hover { background: var(--surface-sunken) !important; }
-/* A row in the dashboard's activity feed. Not --surface-sunken: an unread row
-   already sits on that, so hovering one would look like nothing happened. */
+/* A row in the dashboard's activity feed.
+
+   Hover is an outline, not a fill, because no fill can work here. A row is
+   either unread — sitting on --surface-sunken (--ink-100) — or read, showing
+   the panel's own --surface-raised (--ink-50) through. Any hover colour
+   therefore matches one of the two states and vanishes on those rows, and
+   worse, tinting a read row toward --surface-sunken makes it read as unread.
+   Two earlier attempts here did exactly that. A hairline is visible against
+   both and means only "this is the row you are pointing at". */
 .c4t-activity-row { transition: var(--transition-control); }
-.c4t-activity-row:hover { background: var(--action-ghost-bg-hover) !important; }
+.c4t-activity-row:hover { box-shadow: inset 0 0 0 1px var(--border-strong); }
 .c4t-footerlink:hover { color: var(--text-primary) !important; text-decoration: none; }
 /* PORT NOTE: was var(--white) — see rule 2. */
 .c4t-inverse-link:hover { color: var(--ink-50) !important; }
