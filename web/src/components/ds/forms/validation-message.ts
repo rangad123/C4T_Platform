@@ -38,6 +38,32 @@ export function validatableControls(form: HTMLFormElement): FormControl[] {
   )
 }
 
+/** Strips the required-marker asterisk/visually-hidden text a clone carries, then trims it. */
+function textOf(node: Node): string | null {
+  const clone = node.cloneNode(true) as HTMLElement
+  clone.querySelectorAll('[aria-hidden="true"], .c4t-visually-hidden').forEach((el) => {
+    el.remove()
+  })
+  return clone.textContent?.replace(/\s+/g, ' ').trim() || null
+}
+
+/**
+ * The question a radio group is answering, from its enclosing `<legend>`.
+ *
+ * `CustomFieldInput` groups a RADIO field's options in a `<fieldset>` whose
+ * `<legend>` names the QUESTION ("Where did you see it?"); each `<label>`
+ * inside it names an OPTION ("Web", "Android"). `control.labels` returns the
+ * option label, never the legend, so without this a required-but-unanswered
+ * group produced one message per option, each naming the option rather than
+ * the question. Tried first only for a radio — a checkbox's own label already
+ * names the right thing, and nothing else in this app groups controls this way.
+ */
+function legendFor(control: FormControl): string | null {
+  if (!(control instanceof HTMLInputElement) || control.type !== 'radio') return null
+  const legend = control.closest('fieldset')?.querySelector(':scope > legend')
+  return legend ? textOf(legend) : null
+}
+
 /**
  * The field's visible label text.
  *
@@ -47,13 +73,12 @@ export function validatableControls(form: HTMLFormElement): FormControl[] {
  * so the live DOM is untouched.
  */
 export function labelFor(control: FormControl): string {
+  const legend = legendFor(control)
+  if (legend) return legend
+
   const label = control.labels?.[0]
   if (label) {
-    const clone = label.cloneNode(true) as HTMLElement
-    clone.querySelectorAll('[aria-hidden="true"], .c4t-visually-hidden').forEach((node) => {
-      node.remove()
-    })
-    const text = clone.textContent?.replace(/\s+/g, ' ').trim()
+    const text = textOf(label)
     if (text) return text
   }
   const ariaLabel = control.getAttribute('aria-label')?.trim()

@@ -111,20 +111,53 @@ export function TrackedForm({
   }, [nativeValidation])
 
   const collect = useCallback((form: HTMLFormElement): Problem[] => {
-    return validatableControls(form)
-      .filter((control) => !control.checkValidity())
-      .map((control) => ({
-        id: control.id || null,
-        message: describeInvalid(control),
-        control,
-      }))
+    const invalid = validatableControls(form).filter((control) => !control.checkValidity())
+
+    /**
+     * One problem per required radio group, not one per option.
+     *
+     * The HTML spec makes EVERY radio in a group `valueMissing` when none is
+     * checked — a group is one question, so "pick one" answered with nothing
+     * was three lines in the summary for a three-option field, one per radio.
+     * Keeping the first (DOM order) per `name` is enough: the group is one
+     * control as far as the summary and `paint` below are concerned, and the
+     * radio it keeps is where the "focus" link should land — the top of the
+     * group is where the group starts.
+     */
+    const seenRadioGroups = new Set<string>()
+    const deduped = invalid.filter((control) => {
+      if (!(control instanceof HTMLInputElement) || control.type !== 'radio') return true
+      if (seenRadioGroups.has(control.name)) return false
+      seenRadioGroups.add(control.name)
+      return true
+    })
+
+    return deduped.map((control) => ({
+      id: control.id || null,
+      message: describeInvalid(control),
+      control,
+    }))
   }, [])
 
   /** Mark the bad controls and clear the rest. Cheap enough to redo wholesale. */
   const paint = useCallback((form: HTMLFormElement, found: Problem[]) => {
-    const bad = new Set(found.map((problem) => problem.control))
+    const badControls = new Set(found.map((problem) => problem.control))
+    // A radio group is one problem (see `collect`), but every radio in it
+    // should still read as invalid — a screen reader on the SECOND option of
+    // an unanswered group should not be told it is fine.
+    const badRadioNames = new Set(
+      found
+        .map((problem) => problem.control)
+        .filter((c): c is HTMLInputElement => c instanceof HTMLInputElement && c.type === 'radio')
+        .map((c) => c.name),
+    )
     for (const control of validatableControls(form)) {
-      if (bad.has(control)) control.setAttribute('aria-invalid', 'true')
+      const isRadioInBadGroup =
+        control instanceof HTMLInputElement &&
+        control.type === 'radio' &&
+        badRadioNames.has(control.name)
+      if (badControls.has(control) || isRadioInBadGroup)
+        control.setAttribute('aria-invalid', 'true')
       else control.removeAttribute('aria-invalid')
     }
   }, [])
