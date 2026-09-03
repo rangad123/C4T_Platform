@@ -12,6 +12,8 @@ import TableCell from '@tiptap/extension-table-cell'
 import Youtube from '@tiptap/extension-youtube'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Callout } from './CalloutNode'
+import { FigureImage } from './FigureNode'
+import { ImageRow } from './ImageRowNode'
 import { BlogEditorToolbar } from './BlogEditorToolbar'
 import styles from './BlogEditor.module.css'
 
@@ -58,6 +60,8 @@ export function BlogEditor({ name, defaultValue }: BlogEditorProps) {
       Youtube.configure({ nocookie: true, width: 640, height: 360 }),
       Placeholder.configure({ placeholder: 'Write the article…' }),
       Callout,
+      FigureImage,
+      ImageRow,
     ],
     content: defaultValue || '<p></p>',
     onUpdate: ({ editor }) => {

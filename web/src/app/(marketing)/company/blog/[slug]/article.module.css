@@ -158,3 +158,63 @@
 .article :global(a:hover) {
   color: var(--teal-600);
 }
+/* ── Captioned images, widths and the two-up row ─────────────────────────────
+   Mirrored in web/src/components/admin/blog/BlogEditor.module.css. The two
+   files are deliberate twins — a rule added to only one of them makes the
+   editor stop matching the page it is previewing. */
+
+/* An image inside a figure carries the figure's spacing, not its own. Without
+   this the img's `margin: var(--space-3)` stacks on the figure's
+   `var(--space-7)` and every captioned image sits in twice the gap. */
+.article :global(figure img) {
+  display: block;
+  width: 100%;
+  margin: 0;
+}
+
+/* Full is the default and needs no rule — it is the prose measure.
+   Wide breaks out of it. The measure is an inline `max-width` on the parent,
+   so no rule here can widen a child; it has to be pulled outwards by exactly
+   what it gains, in existing spacing tokens rather than an invented width. */
+.article :global(.c4t-w-wide) {
+  width: calc(100% + var(--space-11) * 2);
+  margin-inline: calc(var(--space-11) * -1);
+}
+
+/* Inline sits within the measure at a size that lets text breathe past it —
+   a screenshot of one control does not want to be 720px wide. */
+.article :global(.c4t-w-inline) {
+  width: 60%;
+  margin-inline: auto;
+}
+
+.article :global(.c4t-two-up) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-grid-gap);
+  margin: var(--space-7) 0;
+}
+
+.article :global(.c4t-two-up figure) {
+  margin: 0;
+}
+
+/* This file has no other media queries, and the global responsive helpers are
+   `!important` rules keyed to `.c4t-grid-*` names that do not match these. So
+   both variants have to collapse themselves. */
+@media (max-width: 860px) {
+  .article :global(.c4t-w-wide) {
+    width: 100%;
+    margin-inline: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .article :global(.c4t-w-inline) {
+    width: 100%;
+  }
+
+  .article :global(.c4t-two-up) {
+    grid-template-columns: 1fr;
+  }
+}

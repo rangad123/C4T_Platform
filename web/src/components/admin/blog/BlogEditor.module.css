@@ -208,3 +208,51 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* ── Captioned images, widths and the two-up row ─────────────────────────────
+   The twin of the block in
+   web/src/app/(marketing)/company/blog/[slug]/article.module.css. The editor
+   is a preview of the published page; these must stay in step.
+
+   The width variants render at their relative sizes rather than the page's
+   absolute ones — the editor column is not the article measure, so breaking
+   out by the page's amount would push images out of the panel. */
+
+.content :global(figure) {
+  margin: var(--space-6) 0;
+}
+
+.content :global(figure img) {
+  display: block;
+  width: 100%;
+  margin: 0;
+}
+
+.content :global(figcaption) {
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+  color: var(--text-muted);
+}
+
+/* Shown even when the author has not written one yet, so the caption is
+   visibly a thing that exists and is waiting to be filled in. */
+.content :global(figcaption:empty)::before {
+  content: 'Write a caption';
+  color: var(--text-disabled);
+}
+
+.content :global(.c4t-w-inline) {
+  width: 60%;
+  margin-inline: auto;
+}
+
+.content :global(.c4t-two-up) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  margin: var(--space-6) 0;
+}
+
+.content :global(.c4t-two-up figure) {
+  margin: 0;
+}

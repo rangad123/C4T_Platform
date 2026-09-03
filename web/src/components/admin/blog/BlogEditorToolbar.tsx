@@ -17,6 +17,15 @@ export function BlogEditorToolbar({ editor: editorProp }: { editor: Editor | nul
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [imageError, setImageError] = useState<string | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
+  /**
+   * What the file picker does with what it gets.
+   *
+   * One input serves three buttons rather than three hidden inputs: the mode
+   * is set just before the picker opens and read when it returns. Declared up
+   * here with the other hooks — the early return below is conditional, and a
+   * hook after it would not run on every render.
+   */
+  const imageModeRef = useRef<'plain' | 'caption' | 'row'>('plain')
 
   if (!editorProp) {
     return <div className={styles.toolbar} aria-hidden="true" />
@@ -28,21 +37,72 @@ export function BlogEditorToolbar({ editor: editorProp }: { editor: Editor | nul
   // on a `const` whose type is fixed at declaration.
   const editor = editorProp
 
-  async function handleImagePick(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
+  function pickImage(mode: 'plain' | 'caption' | 'row') {
+    imageModeRef.current = mode
+    imageInputRef.current?.click()
+  }
 
+  async function handleImagePick(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length === 0) return
+
+    const mode = imageModeRef.current
     setImageError(null)
     setImageBusy(true)
     try {
-      const { url, alt } = await uploadEditorImage(file)
-      editor.chain().focus().setImage({ src: url, alt }).run()
+      if (mode === 'row') {
+        // A row holds exactly two images, so it needs two files. Asking for
+        // both in one pick beats opening the picker twice and leaving a
+        // half-built row behind if the second one is cancelled.
+        if (files.length < 2) {
+          setImageError('Choose two images for a side-by-side row.')
+          return
+        }
+        const [first, second] = files
+        const [left, right] = await Promise.all([
+          uploadEditorImage(first!),
+          uploadEditorImage(second!),
+        ])
+        editor
+          .chain()
+          .focus()
+          .setImageRow({ src: left.url, alt: '' }, { src: right.url, alt: '' })
+          .run()
+        return
+      }
+
+      const { url, alt } = await uploadEditorImage(files[0]!)
+      if (mode === 'caption') {
+        // Alt is deliberately left empty rather than seeded with the
+        // filename the upload returns: "hero-shot-final-2.png" read aloud is
+        // worse than nothing, and the caption below the image is what a
+        // sighted reader gets. Set a real description with the button beside
+        // this one.
+        editor.chain().focus().setFigureImage({ src: url, alt: '' }).run()
+      } else {
+        editor.chain().focus().setImage({ src: url, alt }).run()
+      }
     } catch (error) {
       setImageError(error instanceof Error ? error.message : 'That image could not be uploaded.')
     } finally {
       setImageBusy(false)
     }
+  }
+
+  /**
+   * The description a screen reader announces for the selected image.
+   *
+   * Uses `prompt` for the same reason `insertLink` does — one value, and a
+   * dialog for it would be more chrome than the field deserves.
+   */
+  function editImageDescription() {
+    const node = editor.isActive('figureImage') ? 'figureImage' : 'image'
+    const current = (editor.getAttributes(node).alt as string | undefined) ?? ''
+    // eslint-disable-next-line no-alert -- see insertLink above.
+    const next = window.prompt('Describe this image for someone who cannot see it', current)
+    if (next === null) return
+    editor.chain().focus().updateAttributes(node, { alt: next.trim() }).run()
   }
 
   function insertLink() {
@@ -191,8 +251,63 @@ export function BlogEditorToolbar({ editor: editorProp }: { editor: Editor | nul
             label="Insert image"
             size="sm"
             disabled={imageBusy}
-            onClick={() => imageInputRef.current?.click()}
+            onClick={() => pickImage('plain')}
           />
+          <IconButton
+            icon="captions"
+            label="Insert image with a caption"
+            size="sm"
+            disabled={imageBusy}
+            onClick={() => pickImage('caption')}
+          />
+          <IconButton
+            icon="columns-2"
+            label="Insert two images side by side"
+            size="sm"
+            disabled={imageBusy}
+            onClick={() => pickImage('row')}
+          />
+          <IconButton
+            icon="images"
+            label="Describe the selected image"
+            size="sm"
+            disabled={!editor.isActive('figureImage') && !editor.isActive('image')}
+            onClick={editImageDescription}
+          />
+        </div>
+
+        {/*
+          Width applies to a captioned image only — the class it sets lives on
+          the <figure>, which a bare <img> does not have. Shown only when one
+          is selected rather than disabled, so the toolbar does not carry three
+          dead controls for the whole time nobody is editing an image.
+        */}
+        {editor.isActive('figureImage') ? (
+          <>
+            <span className={styles.divider} aria-hidden="true" />
+            <div className={styles.group}>
+              {(['full', 'wide', 'inline'] as const).map((width) => (
+                <button
+                  key={width}
+                  type="button"
+                  className={[
+                    styles.textButton,
+                    editor.isActive('figureImage', { width }) ? styles.active : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  aria-label={`Image width: ${width}`}
+                  aria-pressed={editor.isActive('figureImage', { width })}
+                  onClick={() => editor.chain().focus().setFigureWidth(width).run()}
+                >
+                  {width === 'full' ? 'Full' : width === 'wide' ? 'Wide' : 'Inline'}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+
+        <div className={styles.group}>
           <IconButton icon="table" label="Insert table" size="sm" onClick={insertTable} />
           <IconButton icon="video" label="Embed video" size="sm" onClick={insertVideo} />
           <IconButton
@@ -207,6 +322,7 @@ export function BlogEditorToolbar({ editor: editorProp }: { editor: Editor | nul
           ref={imageInputRef}
           type="file"
           accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
           onChange={handleImagePick}
           hidden
           aria-hidden="true"

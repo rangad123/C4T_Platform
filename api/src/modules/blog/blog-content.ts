@@ -47,9 +47,38 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     a: ['href', 'title', 'target', 'rel'],
     img: ['src', 'alt', 'title', 'width', 'height'],
     iframe: ['src', 'width', 'height', 'allow', 'allowfullscreen', 'frameborder'],
-    // The Callout node renders as `<div class="c4t-callout">` — the only
-    // attribute a `div` is ever allowed to carry.
+    // `div` carries the Callout's class and the two-up image row's. Note that
+    // `figure` is NOT listed here and does not need to be: naming a tag in
+    // `allowedClasses` below makes sanitize-html add `class` to that tag's
+    // attribute map on its own. Listing it here as well would allow the
+    // attribute WITHOUT the value filter, which is the opposite of the intent.
     div: ['class'],
+  },
+
+  /**
+   * Which class values may survive, per tag.
+   *
+   * ── Why only `figure`
+   *
+   * An image's width has to live on the `<figure>`: `img` is allowed exactly
+   * `src, alt, title, width, height` and a class on it is dropped silently, so
+   * a width expressed there would look right in the editor and be gone after
+   * the first save.
+   *
+   * There is deliberately NO `div` key. Adding one would switch `div` from
+   * "any class survives" to "only these survive", and every already-published
+   * `<div class="c4t-callout">` whose name was not in the list would lose its
+   * styling on the next save — silently, with a 200 and a "Changes saved."
+   * Verified both ways against the real options before writing this: with a
+   * `figure` key alone, `<div class="c4t-callout">` and even
+   * `<div class="random-thing">` pass through untouched.
+   *
+   * Exact strings only. A glob like `c4t-*` would re-open the hole this
+   * closes, on a string the marketing site injects with
+   * `dangerouslySetInnerHTML`.
+   */
+  allowedClasses: {
+    figure: ['c4t-w-full', 'c4t-w-wide', 'c4t-w-inline'],
   },
   // The only embeds the editor's YouTube extension can produce — never a
   // caller-supplied arbitrary host.
