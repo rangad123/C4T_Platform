@@ -170,13 +170,33 @@ const schema = z.object({
    */
   PUBLIC_ASSETS_BASE_URL: optionalUrl(),
 
-  MAIL_DRIVER: z.enum(['console', 'smtp']).default('console'),
+  /**
+   * How mail leaves the process.
+   *
+   * - `console` — logged, never sent. The development default.
+   * - `ses`     — Amazon SES through the AWS SDK, authenticated by IAM: the
+   *               same credential chain S3 already uses, so on EC2 it is the
+   *               instance role and there is no mail secret to hold at all.
+   *
+   * There is deliberately no SMTP option. SES's SMTP endpoint would need a
+   * separate long-lived username and password in this file, on top of the IAM
+   * identity the machine already has — a second credential to store, leak and
+   * rotate, buying nothing.
+   */
+  MAIL_DRIVER: z.enum(['console', 'ses']).default('console'),
   MAIL_FROM: z.string().default('Crowd4Test <no-reply@crowd4test.com>'),
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().positive().default(587),
-  SMTP_SECURE: bool.default('false'),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
+  /**
+   * SES is not necessarily in the same region as the bucket — it is verified
+   * per region, and an account is taken out of the sandbox per region too.
+   * Falls back to `AWS_REGION` when they do match.
+   */
+  SES_REGION: z.string().optional(),
+  /**
+   * An SES configuration set, if one exists. This is what routes bounce and
+   * complaint events somewhere you can see them; without it, a hard bounce is
+   * invisible here and only shows up as a falling reputation score.
+   */
+  SES_CONFIGURATION_SET: z.string().optional(),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
@@ -262,5 +282,20 @@ if (isProduction) {
     // Browsers reject `SameSite=None` without `Secure`, so this is a hard
     // error rather than a silent runtime failure. Caught at boot.
     throw new Error('COOKIE_SAME_SITE=none requires COOKIE_SECURE=true')
+  }
+  /**
+   * A warning, on the same reasoning as the two above: mail is one feature,
+   * and refusing to boot over it would take sign-in down with it.
+   *
+   * It is worth saying loudly, though. On the console driver everything
+   * *works* — accounts are created, invitations are recorded, notifications
+   * appear in the app — and the only symptom is that nobody outside the app
+   * ever hears about any of it. That is a failure with no error attached to
+   * it, which is the kind that survives longest in production.
+   */
+  if (env.MAIL_DRIVER === 'console') {
+    console.warn(
+      '[config] MAIL_DRIVER=console on a production server. No email is sent — verification, password resets and every notification are only written to the log. Set MAIL_DRIVER=ses.',
+    )
   }
 }

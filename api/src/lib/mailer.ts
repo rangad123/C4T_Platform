@@ -1,4 +1,5 @@
-import nodemailer from 'nodemailer'
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
+import type { MessageHeader } from '@aws-sdk/client-sesv2'
 import { env } from '../config/env.js'
 import { logger } from './logger.js'
 import { renderEmail } from './email/layout.js'
@@ -8,17 +9,28 @@ import { renderEmail } from './email/layout.js'
  *
  * SCOPE NOTE: this module used to say email automation was out of scope and
  * that it covered only what authentication cannot work without. That is no
- * longer true: platform notifications now go out as mail as well, via
+ * longer true: platform notifications go out as mail as well, via
  * `lib/email/dispatch.ts`. This file stayed a thin transport — one `sendMail`,
- * one transport, no policy — and the fan-out, the recipient rules and the
- * per-event copy live next door under `lib/email/`.
+ * no policy — and the fan-out, the recipient rules and the per-event copy live
+ * next door under `lib/email/`.
+ *
+ * ── AMAZON SES, OVER IAM, AND NOTHING ELSE
+ *
+ * There is no SMTP path and no mail library. The platform already runs on AWS
+ * and already authenticates to S3 with IAM, so mail uses the same credential
+ * chain: explicit keys when the environment carries them, otherwise the EC2
+ * instance role. On a properly provisioned box that means there is no mail
+ * credential stored anywhere — nothing in a `.env` file to leak, and nothing
+ * to rotate by hand, which is exactly the failure mode a long-lived SMTP
+ * username and password invites.
+ *
+ * SES composes the MIME itself from the parts below. `Charset: 'UTF-8'` on
+ * each part is what allows a non-ASCII subject or body — an accented project
+ * title, a true minus sign — to arrive intact; SES applies the RFC 2047
+ * encoding a raw message would otherwise have to carry.
  *
  * MAIL_DRIVER=console logs the message instead of sending, so development and
- * demos work with no provider configured at all.
- *
- * The provider is reached over SMTP, which is deliberately boring: SES,
- * Postmark, Mailgun and a plain relay all speak it, so moving between them is
- * a change of `SMTP_*` values and nothing else.
+ * demos need no AWS access at all.
  */
 
 export interface MailMessage {
@@ -39,16 +51,33 @@ export interface MailMessage {
   unsubscribeToken?: string
 }
 
-let transport: nodemailer.Transporter | null = null
+let client: SESv2Client | null = null
 
-function getTransport(): nodemailer.Transporter {
-  transport ??= nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_SECURE,
-    auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+/**
+ * The SES client, built the same way `lib/storage.ts` builds the S3 one.
+ *
+ * Omitting `credentials` is not an oversight — it is the point. The SDK then
+ * walks its default chain and, on EC2, finds the instance role, so the box
+ * sends mail with an identity AWS rotates and nobody writes down. Explicit
+ * keys are honoured when present, for running against SES from a laptop.
+ *
+ * `SES_REGION` is separate from `AWS_REGION` because SES identities, sandbox
+ * status and sending quotas are all per region, and there is no reason the
+ * bucket and the mail domain have to live in the same one.
+ */
+function getClient(): SESv2Client {
+  client ??= new SESv2Client({
+    region: env.SES_REGION ?? env.AWS_REGION,
+    ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+      ? {
+          credentials: {
+            accessKeyId: env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+          },
+        }
+      : {}),
   })
-  return transport
+  return client
 }
 
 /**
@@ -58,12 +87,12 @@ function getTransport(): nodemailer.Transporter {
  * human-facing link in the email footer points at the page instead, so
  * clicking it explains what happened.
  */
-function unsubscribeHeaders(token: string): Record<string, string> {
+function unsubscribeHeaders(token: string): MessageHeader[] {
   const url = `${env.WEB_PUBLIC_URL}/api/email/unsubscribe?token=${encodeURIComponent(token)}`
-  return {
-    'List-Unsubscribe': `<${url}>`,
-    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-  }
+  return [
+    { Name: 'List-Unsubscribe', Value: `<${url}>` },
+    { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' },
+  ]
 }
 
 export async function sendMail(message: MailMessage): Promise<void> {
@@ -76,16 +105,35 @@ export async function sendMail(message: MailMessage): Promise<void> {
   }
 
   try {
-    await getTransport().sendMail({
-      from: env.MAIL_FROM,
-      to: message.to,
-      subject: message.subject,
-      text: message.text,
-      html: message.html,
-      ...(message.unsubscribeToken
-        ? { headers: unsubscribeHeaders(message.unsubscribeToken) }
-        : {}),
-    })
+    await getClient().send(
+      new SendEmailCommand({
+        /**
+         * The envelope sender SES checks the sending identity against. An
+         * address on an unverified domain fails here, by name, rather than
+         * somewhere less obvious later.
+         */
+        FromEmailAddress: env.MAIL_FROM,
+        Destination: { ToAddresses: [message.to] },
+        Content: {
+          Simple: {
+            Subject: { Data: message.subject, Charset: 'UTF-8' },
+            Body: {
+              Text: { Data: message.text, Charset: 'UTF-8' },
+              ...(message.html ? { Html: { Data: message.html, Charset: 'UTF-8' } } : {}),
+            },
+            ...(message.unsubscribeToken
+              ? { Headers: unsubscribeHeaders(message.unsubscribeToken) }
+              : {}),
+          },
+        },
+        /**
+         * Optional, and worth setting: without a configuration set, a hard
+         * bounce or a complaint is invisible here and shows up only as a
+         * falling reputation score in the SES console.
+         */
+        ...(env.SES_CONFIGURATION_SET ? { ConfigurationSetName: env.SES_CONFIGURATION_SET } : {}),
+      }),
+    )
   } catch (error) {
     // Never let a mail failure break the request that triggered it. A user who
     // cannot receive a verification email must still get a created account.
