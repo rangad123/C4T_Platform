@@ -1,4 +1,4 @@
-import type { CSSProperties, InputHTMLAttributes } from 'react'
+import type { CSSProperties, InputHTMLAttributes, ReactNode } from 'react'
 import { Icon } from '../core/Icon'
 
 export interface CheckboxProps extends Omit<
@@ -8,6 +8,20 @@ export interface CheckboxProps extends Omit<
   label: string
   /** Second line under the label. */
   description?: string
+  /**
+   * Extra content rendered INLINE after the label — links, typically.
+   *
+   * Exists because anchors cannot go in `label`: it is typed as a string
+   * deliberately, since assistive tech announces a control's label as one
+   * string and burying links in it produces a run-on name and traps focus
+   * between the box and the anchors.
+   *
+   * When this is set the wrapper stops being a `<label>` and becomes a
+   * `<span>`, with an explicit `<label htmlFor>` around the text only — so the
+   * links sit beside the label rather than inside it, stay individually
+   * focusable, and the announced name is still just `label`. Requires `id`.
+   */
+  labelSuffix?: ReactNode
   /**
    * Surface the checkbox sits on. `inverse` for the dark bands.
    *
@@ -49,6 +63,7 @@ export interface CheckboxProps extends Omit<
 export function Checkbox({
   label,
   description,
+  labelSuffix,
   tone = 'canvas',
   disabled,
   id,
@@ -57,9 +72,12 @@ export function Checkbox({
   ...rest
 }: CheckboxProps) {
   const inverse = tone === 'inverse'
+  /* A wrapping <label> cannot contain the links, so it becomes a span and the
+     text gets its own `htmlFor` label. Clicking the words still toggles. */
+  const Wrapper = labelSuffix ? 'span' : 'label'
 
   return (
-    <label
+    <Wrapper
       className={['c4t-checkbox', inverse ? 'c4t-checkbox--inverse' : null, className]
         .filter(Boolean)
         .join(' ')}
@@ -127,7 +145,16 @@ export function Checkbox({
             color: inverse ? 'var(--text-inverse)' : 'var(--text-primary)',
           }}
         >
-          {label}
+          {labelSuffix ? (
+            <>
+              <label htmlFor={id} style={{ cursor: 'inherit' }}>
+                {label}
+              </label>{' '}
+              {labelSuffix}
+            </>
+          ) : (
+            label
+          )}
         </span>
         {description ? (
           <span
@@ -142,6 +169,6 @@ export function Checkbox({
           </span>
         ) : null}
       </span>
-    </label>
+    </Wrapper>
   )
 }

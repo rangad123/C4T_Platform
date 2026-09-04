@@ -389,18 +389,42 @@ function SignUpForm({
           </Field>
         </div>
 
-        <Field label="Work email" htmlFor="email" required>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            defaultValue={params.email ?? ''}
-            placeholder="you@company.com"
-            iconLeft="mail"
-          />
-        </Field>
+        {/* Email and password pair up, the same as the two name fields — the
+            dialog is wide enough for both and it keeps the form to four rows
+            instead of six. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+          <Field label="Work email" htmlFor="email" required>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              defaultValue={params.email ?? ''}
+              placeholder="you@company.com"
+              iconLeft="mail"
+            />
+          </Field>
+
+          <Field label="Password" htmlFor="password" required hint="At least 12 characters.">
+            {/*
+              Every other password field in the app can be revealed; this one
+              could not. Sign-up is where it matters most — the field asks for
+              at least twelve characters, autocomplete has nothing to offer on
+              a new account, and there is no second field to catch a typo.
+            */}
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={12}
+              iconLeft="lock"
+              showPasswordToggle
+            />
+          </Field>
+        </div>
 
         {role === 'customer' ? (
           <Field label="Company" htmlFor="organisationName" required>
@@ -415,63 +439,36 @@ function SignUpForm({
           </Field>
         ) : null}
 
-        <Field
-          label="Password"
-          htmlFor="password"
-          required
-          hint="At least 12 characters. Length beats complexity."
-        >
-          {/*
-            Every other password field in the app can be revealed; this one
-            could not. Sign-up is where it matters most — the field asks for
-            at least twelve characters, autocomplete has nothing to offer on
-            a new account, and there is no second field to catch a typo.
-          */}
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={12}
-            iconLeft="lock"
-            showPasswordToggle
-          />
-        </Field>
-
         {/*
-          The consent links sit BESIDE the checkbox, not inside its label.
-          `Checkbox` takes `label` as a string, deliberately — a control label
-          is announced as one string by assistive tech, and burying anchors in
-          it produces a label that reads as a run-on sentence and traps focus
-          between the box and the links. So the box carries the plain sentence
-          and the documents are linked underneath, where they are reachable in
-          their own right.
+          One line, not two. The second line repeated the first almost word for
+          word — "I accept the Terms of Use and Privacy Policy" above "Read the
+          Terms of Use and Privacy Policy" — so the documents are simply linked
+          where they are named.
+
+          `labelSuffix` rather than putting anchors in `label`: that prop keeps
+          the announced name the plain sentence and the links individually
+          focusable beside it, which is the reason the two were split apart in
+          the first place.
         */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <Checkbox
-            name="acceptedTerms"
-            required
-            label="I accept the Terms of Use and Privacy Policy"
-          />
-          <span
-            style={{
-              fontSize: 'var(--type-caption-size)',
-              color: 'var(--text-muted)',
-              paddingLeft: 28,
-            }}
-          >
-            Read the{' '}
-            <Link href="/legal/terms" style={{ color: 'var(--text-brand)' }}>
-              Terms of Use
-            </Link>{' '}
-            and{' '}
-            <Link href="/legal/privacy" style={{ color: 'var(--text-brand)' }}>
-              Privacy Policy
-            </Link>
-            .
-          </span>
-        </div>
+        <Checkbox
+          id="acceptedTerms"
+          name="acceptedTerms"
+          required
+          label="I accept the"
+          labelSuffix={
+            <>
+              <Link href="/legal/terms" style={{ color: 'var(--text-brand)' }}>
+                Terms of Use
+              </Link>{' '}
+              and{' '}
+              <Link href="/legal/privacy" style={{ color: 'var(--text-brand)' }}>
+                Privacy Policy
+              </Link>
+              .
+            </>
+          }
+          aria-label="I accept the Terms of Use and Privacy Policy"
+        />
 
         <SubmitButton
           variant="primary"

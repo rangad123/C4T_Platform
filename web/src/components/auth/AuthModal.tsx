@@ -34,7 +34,18 @@ import styles from './AuthModal.module.css'
  * usually gets wrong. `showModal()` is imperative, so it is called from an
  * effect on mount; React never renders `open` itself.
  */
-export function AuthModal({ children }: { children: ReactNode }) {
+export function AuthModal({
+  children,
+  wide = false,
+}: {
+  children: ReactNode
+  /**
+   * The register dialog's wider measure. Sign-in stays at the standard one —
+   * it holds an email and a password, and widening it only stretched two
+   * fields across space they did not need.
+   */
+  wide?: boolean
+}) {
   const router = useRouter()
   const ref = useRef<HTMLDialogElement>(null)
 
@@ -57,7 +68,7 @@ export function AuthModal({ children }: { children: ReactNode }) {
   return (
     <dialog
       ref={ref}
-      className={styles.dialog}
+      className={`${styles.dialog} ${wide ? styles.wide : ''}`.trim()}
       aria-label="Account"
       /* Escape fires `cancel`; preventing the default close keeps the DOM and
          the URL in step, since `router.back()` is what actually unmounts this. */
