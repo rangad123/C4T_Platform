@@ -45,10 +45,17 @@ export default function PricingPage() {
         ]}
       />
 
+      {/*
+        `compact` because this hero carries no media: with `media={false}` the
+        band's full 96px bottom padding sat directly on the next section's
+        96px top padding, leaving 192px of empty colour between the CTA and
+        the first heading. 64px is the system's own compact rhythm.
+      */}
       <Hero
         className={s.deep}
         tone="inverse"
         align="center"
+        compact
         media={false}
         eyebrow={PRICING_PAGE.hero.eyebrow}
         title={PRICING_PAGE.hero.title}
@@ -60,7 +67,9 @@ export default function PricingPage() {
       />
 
       {/* ─── How pricing works ───────────────────────────────────────────── */}
-      <Section>
+      {/* Compact on its top edge for the same reason — this is the other half
+          of that 192px gap. The sections below keep the full rhythm. */}
+      <Section compact>
         <SectionHeader {...HUB_SECTIONS.pricingComponents} />
         <div
           className="c4t-grid-2"

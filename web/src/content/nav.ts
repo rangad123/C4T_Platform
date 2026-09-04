@@ -337,8 +337,12 @@ export const FOOTER_COLUMNS: FooterColumn[] = [
 ]
 
 /**
- * Copy from content.md §3.1, verbatim. Rendered in the strip above the nav bar.
- * The team count is a placeholder resolved from content/stats.ts.
+ * Copy from content.md §3.1, verbatim.
+ *
+ * NOT CURRENTLY RENDERED. The strip above the nav bar was removed — it
+ * advertised one blog post on every page of the site. Kept because the copy is
+ * transcribed from content.md and `TopNav` still accepts an `announcement`,
+ * so putting a real announcement back is passing this to `MarketingShell`.
  */
 export const ANNOUNCEMENT = {
   text: `New: The State of AI Quality 2026 report is out. ${STATS.surveyedTeams} teams told us how they test AI. Read it`,

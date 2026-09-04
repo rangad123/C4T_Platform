@@ -41,20 +41,29 @@ const LeadSchema = z.object({
   lastName: z.string().trim().min(1, 'Enter your last name').max(80),
   email: z.string().trim().toLowerCase().email('Enter a valid work email').max(200),
   /**
-   * Optional, and validated by shape rather than by country — the same rule
+   * Required, and validated by shape rather than by country — the same rule
    * `api/src/lib/phone.ts` applies on arrival, restated here only so the
    * message names the field instead of coming back as a generic 422.
+   *
+   * This is the server-side half of the field being mandatory. The `required`
+   * attribute on the input is a courtesy; it is removed with two clicks in
+   * devtools, so the check that counts is here.
+   *
+   * The API keeps `phone` optional on purpose — the admin's manual-lead form
+   * posts to the same endpoint for enquiries that arrived by email, where
+   * there may genuinely be no number. This rule belongs to the website form,
+   * so it lives with the website form.
    */
   phone: z
     .string()
     .trim()
+    .min(1, 'Enter a contact number')
     .max(24, 'Use at most 24 characters')
-    .refine((v) => v === '' || /^\+?[0-9][0-9\s().-]*$/.test(v), 'Enter a phone number')
+    .refine((v) => /^\+?[0-9][0-9\s().-]*$/.test(v), 'Enter a phone number')
     .refine((v) => {
       const digits = (v.match(/[0-9]/g) ?? []).length
-      return v === '' || (digits >= 7 && digits <= 15)
-    }, 'A phone number needs between 7 and 15 digits')
-    .optional(),
+      return digits >= 7 && digits <= 15
+    }, 'A phone number needs between 7 and 15 digits'),
   company: z.string().trim().min(1, 'Enter your company').max(160),
   size: z.string().trim().max(40).optional(),
   message: z.string().trim().max(4000).optional(),
@@ -127,7 +136,7 @@ export async function submitLead(_prev: LeadState, formData: FormData): Promise<
         firstName: lead.firstName,
         lastName: lead.lastName,
         email: lead.email,
-        phone: lead.phone === '' ? undefined : lead.phone,
+        phone: lead.phone,
         company: lead.company,
         teamSize: lead.size,
         message: lead.message,

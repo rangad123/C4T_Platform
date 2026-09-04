@@ -3,7 +3,6 @@
 import { useActionState, useEffect, useRef } from 'react'
 import { SubmitButton } from '../core/SubmitButton'
 import { Icon } from '../core/Icon'
-import { Checkbox } from '../forms/Checkbox'
 import { Field } from '../forms/Field'
 import { Input } from '../forms/Input'
 import { PhoneInput } from '../forms/PhoneInput'
@@ -17,7 +16,6 @@ export interface ContactFormProps {
   title?: string
   description?: string
   submitLabel?: string
-  consentLabel: string
   footnote?: string
   teamSizes: readonly string[]
   success: { title: string; body: string }
@@ -55,7 +53,6 @@ export function ContactForm({
   title,
   description,
   submitLabel = 'Request my demo',
-  consentLabel,
   footnote,
   teamSizes,
   success,
@@ -219,9 +216,10 @@ export function ContactForm({
           />
         </Field>
         {/*
-          Optional. A demo request is not worth losing over a phone number,
-          and the reply goes to the email either way — this is for the people
-          who would rather be called than written to.
+          Required. It used to be optional, on the reasoning that a demo
+          request is not worth losing over a phone number — but a booking is
+          arranged by call, so the number is what the next step actually
+          needs.
         */}
         {/*
           No visible hint. The constraint is unchanged: `PhoneInput` keeps the
@@ -236,8 +234,8 @@ export function ContactForm({
           hint inline; this is the one form where a visitor is being asked to
           convert and the button had fallen below the fold.
         */}
-        <Field label="Contact number" htmlFor="ph" error={err.phone}>
-          <PhoneInput id="ph" name="phone" invalid={Boolean(err.phone)} />
+        <Field label="Contact number" required htmlFor="ph" error={err.phone}>
+          <PhoneInput id="ph" name="phone" required invalid={Boolean(err.phone)} />
         </Field>
       </div>
 
@@ -262,8 +260,6 @@ export function ContactForm({
       <Field label="What do you need tested?" htmlFor="msg" error={err.message}>
         <Textarea id="msg" name="message" rows={3} invalid={Boolean(err.message)} />
       </Field>
-
-      <Checkbox name="consent" label={consentLabel} />
 
       {/* Bot trap. Hidden from sight AND from assistive technology, and excluded
           from tab order — a real user can neither see nor reach it, so anything

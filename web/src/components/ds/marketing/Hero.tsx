@@ -53,6 +53,15 @@ export interface HeroProps {
   mediaWidth?: 'default' | 'wide' | 'copy-led'
   tone?: 'canvas' | 'sunken' | 'inverse'
   align?: 'split' | 'center'
+  /**
+   * 64px vertical rhythm instead of 96px, mirroring `Section`'s prop of the
+   * same name and using the same sanctioned token.
+   *
+   * For a centred hero with `media={false}` there is nothing under the CTAs
+   * but padding, so the full 96px lands directly on top of the next section's
+   * own 96px — 192px of empty band between the button and the next heading.
+   */
+  compact?: boolean
   /** Small line under the CTAs — compliance or social proof. */
   trustLine?: string
   style?: CSSProperties
@@ -87,6 +96,7 @@ export function Hero({
   mediaWidth = 'default',
   tone = 'canvas',
   align = 'split',
+  compact,
   trustLine,
   style,
   className,
@@ -320,7 +330,7 @@ export function Hero({
             ? 'var(--surface-sunken)'
             : 'var(--surface-canvas)',
         color: inverse ? 'var(--text-inverse)' : 'var(--text-primary)',
-        paddingBlock: 'var(--space-13)',
+        paddingBlock: compact ? 'var(--space-section-y-compact)' : 'var(--space-13)',
         borderBottom: inverse ? 'none' : '1px solid var(--border-subtle)',
         ...style,
       }}

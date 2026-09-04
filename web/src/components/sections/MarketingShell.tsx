@@ -1,11 +1,10 @@
-import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { SkipLink } from '@/components/a11y/SkipLink'
 import { Analytics } from '@/components/analytics/Analytics'
 import { CookieBanner } from '@/components/analytics/CookieBanner'
 import { Footer, TopNav } from '@/components/ds'
 import { JsonLd } from '@/components/seo/JsonLd'
-import { ANNOUNCEMENT, FOOTER_COLUMNS, NAV } from '@/content'
+import { FOOTER_COLUMNS, NAV } from '@/content'
 import { organizationJsonLd, websiteJsonLd } from '@/lib/seo/structured-data'
 
 /**
@@ -33,20 +32,13 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           pages themselves. */}
       <JsonLd schema={[organizationJsonLd(), websiteJsonLd()]} />
 
-      <TopNav
-        items={NAV}
-        announcement={
-          <>
-            {ANNOUNCEMENT.text}{' '}
-            <Link
-              href={ANNOUNCEMENT.href}
-              style={{ color: 'inherit', fontWeight: 'var(--fw-medium)' }}
-            >
-              →
-            </Link>
-          </>
-        }
-      />
+      {/*
+        No announcement strip. It advertised one blog post on every page of the
+        site and cost a band of vertical space above the nav on all of them.
+        `TopNav`'s `announcement` prop is still there for when there is
+        genuinely something to announce; the copy remains in content.md §3.1.
+      */}
+      <TopNav items={NAV} />
       <SkipLink />
       <main id="main">{children}</main>
       <Footer columns={FOOTER_COLUMNS} />

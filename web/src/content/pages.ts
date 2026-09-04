@@ -575,6 +575,11 @@ export const CONTACT_FORM = {
   submitLabel: 'Book my demo',
   /** Label above the agenda table. */
   agendaLabel: 'What happens on the call',
+  /**
+   * Only the admin's manual-lead form uses this now. The public demo form no
+   * longer offers the opt-in, so a lead from the website is recorded with
+   * `marketingConsent: false` — nothing is claimed that nobody agreed to.
+   */
   consentLabel: 'Email me the quarterly QE benchmark report.',
   success: {
     title: "Thanks — we'll be in touch",

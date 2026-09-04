@@ -84,7 +84,6 @@ export default function ContactPage() {
           action={submitLead}
           title={CONTACT_FORM.title}
           submitLabel={CONTACT_FORM.submitLabel}
-          consentLabel={CONTACT_FORM.consentLabel}
           teamSizes={CONTACT_FORM.teamSizes}
           success={CONTACT_FORM.success}
         />
