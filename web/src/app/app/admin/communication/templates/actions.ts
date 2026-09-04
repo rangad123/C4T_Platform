@@ -55,7 +55,7 @@ export async function createTemplateAction(formData: FormData): Promise<void> {
   }
 
   revalidateAll()
-  redirect(reason ? `${LIST_PATH}?error=${reason}` : LIST_PATH)
+  redirect(reason ? `${LIST_PATH}?error=${reason}` : LIST_PATH, 'replace')
 }
 
 /**
@@ -101,9 +101,9 @@ export async function updateTemplateAction(formData: FormData): Promise<void> {
   */
   if (reason) {
     const echo = new URLSearchParams({ edit: id, error: reason, name, subject })
-    redirect(`${LIST_PATH}?${echo.toString()}`)
+    redirect(`${LIST_PATH}?${echo.toString()}`, 'replace')
   }
-  redirect(LIST_PATH)
+  redirect(LIST_PATH, 'replace')
 }
 
 export async function deleteTemplateAction(formData: FormData): Promise<void> {
@@ -126,5 +126,5 @@ export async function deleteTemplateAction(formData: FormData): Promise<void> {
   }
 
   revalidateAll()
-  redirect(reason ? `${LIST_PATH}?error=${reason}` : LIST_PATH)
+  redirect(reason ? `${LIST_PATH}?error=${reason}` : LIST_PATH, 'replace')
 }

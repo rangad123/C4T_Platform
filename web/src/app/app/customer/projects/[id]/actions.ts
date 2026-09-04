@@ -56,11 +56,11 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   try {
     await actionFetch(`projects/${id}`, { method: 'PATCH', body })
   } catch {
-    redirect(`/app/customer/projects/${id}?notice=brief-save-failed`)
+    redirect(`/app/customer/projects/${id}?notice=brief-save-failed`, 'replace')
   }
 
   revalidateProject(id)
-  redirect(`/app/customer/projects/${id}?notice=brief-saved`)
+  redirect(`/app/customer/projects/${id}?notice=brief-saved`, 'replace')
 }
 
 export async function updateProjectDelivery(formData: FormData): Promise<void> {
@@ -85,7 +85,7 @@ export async function updateProjectDelivery(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(`/app/customer/projects/${id}?notice=${notice}`)
+  redirect(`/app/customer/projects/${id}?notice=${notice}`, 'replace')
 }
 
 /**
@@ -124,7 +124,7 @@ export async function changeProjectStatus(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(buildHref(id, buildId, notice, { section: 'build' }))
+  redirect(buildHref(id, buildId, notice, { section: 'build' }), 'replace')
 }
 
 /**
@@ -157,8 +157,10 @@ export async function addMaterial(formData: FormData): Promise<void> {
   const fileId = formTrimmed(formData, 'fileId')
   const buildId = formTrimmed(formData, 'buildId')
 
-  if (!title) redirect(buildHref(id, buildId, 'material-title', { section: 'materials' }))
-  if (!url && !fileId) redirect(buildHref(id, buildId, 'material-empty', { section: 'materials' }))
+  if (!title)
+    redirect(buildHref(id, buildId, 'material-title', { section: 'materials' }), 'replace')
+  if (!url && !fileId)
+    redirect(buildHref(id, buildId, 'material-empty', { section: 'materials' }), 'replace')
 
   let notice = 'material-added'
   try {
@@ -178,7 +180,7 @@ export async function addMaterial(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(buildHref(id, buildId, notice, { section: 'materials' }))
+  redirect(buildHref(id, buildId, notice, { section: 'materials' }), 'replace')
 }
 
 export async function removeMaterial(formData: FormData): Promise<void> {
@@ -194,7 +196,7 @@ export async function removeMaterial(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(`/app/customer/projects/${id}?section=materials&notice=${notice}`)
+  redirect(`/app/customer/projects/${id}?section=materials&notice=${notice}`, 'replace')
 }
 
 export async function addFeature(formData: FormData): Promise<void> {
@@ -215,7 +217,7 @@ export async function addFeature(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(buildHref(id, buildId, notice, { section: 'settings' }))
+  redirect(buildHref(id, buildId, notice, { section: 'settings' }), 'replace')
 }
 
 export async function removeFeature(formData: FormData): Promise<void> {
@@ -231,7 +233,7 @@ export async function removeFeature(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(`/app/customer/projects/${id}?section=settings&notice=${notice}`)
+  redirect(`/app/customer/projects/${id}?section=settings&notice=${notice}`, 'replace')
 }
 
 // ─── Builds ────────────────────────────────────────────────────────────────
@@ -280,11 +282,11 @@ export async function createBuild(formData: FormData): Promise<void> {
     const notice = status === 409 ? 'build-name-taken' : 'build-create-failed'
     const params = new URLSearchParams({ section, notice })
     if (status === 409) params.set('edit', 'new-build')
-    redirect(`/app/customer/projects/${id}?${params.toString()}`)
+    redirect(`/app/customer/projects/${id}?${params.toString()}`, 'replace')
   }
 
   revalidateProject(id)
-  redirect(buildHref(id, build.id, 'build-created', { section }))
+  redirect(buildHref(id, build.id, 'build-created', { section }), 'replace')
 }
 
 /**
@@ -345,13 +347,16 @@ export async function renameBuild(formData: FormData): Promise<void> {
     // project. Keep the dialog open for it so the name can be corrected
     // without retyping anything else.
     if (status === 409) {
-      redirect(buildHref(id, buildId, 'build-name-taken', { section, edit: 'rename-build', name }))
+      redirect(
+        buildHref(id, buildId, 'build-name-taken', { section, edit: 'rename-build', name }),
+        'replace',
+      )
     }
-    redirect(buildHref(id, buildId, 'build-rename-failed', { section }))
+    redirect(buildHref(id, buildId, 'build-rename-failed', { section }), 'replace')
   }
 
   revalidateProject(id)
-  redirect(buildHref(id, buildId, 'build-renamed', { section }))
+  redirect(buildHref(id, buildId, 'build-renamed', { section }), 'replace')
 }
 
 export async function updateBuild(formData: FormData): Promise<void> {
@@ -388,13 +393,16 @@ export async function updateBuild(formData: FormData): Promise<void> {
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 0
     if (status === 409) {
-      redirect(buildHref(id, buildId, 'build-name-taken', { section, edit: 'build-details' }))
+      redirect(
+        buildHref(id, buildId, 'build-name-taken', { section, edit: 'build-details' }),
+        'replace',
+      )
     }
-    redirect(buildHref(id, buildId, 'build-save-failed', { section }))
+    redirect(buildHref(id, buildId, 'build-save-failed', { section }), 'replace')
   }
 
   revalidateProject(id)
-  redirect(buildHref(id, buildId, 'build-saved', { section }))
+  redirect(buildHref(id, buildId, 'build-saved', { section }), 'replace')
 }
 
 // ─── Custom bug fields (§36-38) ──────────────────────────────────────────────
@@ -418,11 +426,11 @@ export async function setBugCustomization(formData: FormData): Promise<void> {
       body: { bugCustomizationEnabled: formTrimmed(formData, 'enabled') === 'yes' },
     })
   } catch {
-    redirect(buildHref(id, buildId, 'settings-save-failed', { section: 'settings' }))
+    redirect(buildHref(id, buildId, 'settings-save-failed', { section: 'settings' }), 'replace')
   }
 
   revalidateProject(id)
-  redirect(buildHref(id, buildId, 'settings-saved', { section: 'settings' }))
+  redirect(buildHref(id, buildId, 'settings-saved', { section: 'settings' }), 'replace')
 }
 
 export async function addBugCustomField(formData: FormData): Promise<void> {
@@ -464,11 +472,17 @@ export async function addBugCustomField(formData: FormData): Promise<void> {
      */
     const status = error instanceof ApiError ? error.status : 0
     const code = status === 409 ? 'field-exists' : status === 400 ? 'field-invalid' : 'field-failed'
-    redirect(`/app/customer/projects/${id}?section=${section}&buildId=${buildId}&notice=${code}`)
+    redirect(
+      `/app/customer/projects/${id}?section=${section}&buildId=${buildId}&notice=${code}`,
+      'replace',
+    )
   }
 
   revalidateProject(id)
-  redirect(`/app/customer/projects/${id}?section=${section}&buildId=${buildId}&notice=field-added`)
+  redirect(
+    `/app/customer/projects/${id}?section=${section}&buildId=${buildId}&notice=field-added`,
+    'replace',
+  )
 }
 
 export async function removeBugCustomField(formData: FormData): Promise<void> {
@@ -487,5 +501,6 @@ export async function removeBugCustomField(formData: FormData): Promise<void> {
   revalidateProject(id)
   redirect(
     `/app/customer/projects/${id}?section=settings${buildId ? `&buildId=${buildId}` : ''}&notice=${notice}`,
+    'replace',
   )
 }

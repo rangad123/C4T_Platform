@@ -50,7 +50,7 @@ const REASON_COPY: Record<string, string> = {
   conflict: 'That move is not legal from the current status. Reload the page and try again.',
   forbidden: 'That change is not yours to make on this report.',
   missing: 'That record is no longer there. Reload the page.',
-  invalid: 'The API rejected that. Check the values and try again.',
+  invalid: 'That was not accepted.',
   failed: 'The bugs service did not accept the change. Try again in a moment.',
   'occurrence-pair':
     'Give both how many times it happened and how many attempts you made, or leave both blank.',
@@ -173,6 +173,42 @@ function panelError(raw: string | undefined, panel: string): string | undefined 
   return REASON_COPY[raw.slice(separator + 1)]
 }
 
+/**
+ * Human labels for the fields a rejection can name.
+ *
+ * The action passes a TOKEN, never the API's sentence, so this map is what
+ * turns it into words — keeping `panelError`'s rule that nothing from the
+ * query string reaches the reader. A token that is not in here renders
+ * nothing, so a hand-built URL cannot invent a field.
+ */
+const FIELD_LABELS: Record<string, string> = {
+  title: 'Title',
+  description: 'Description',
+  preCondition: 'Pre-condition',
+  stepsToReproduce: 'Steps to reproduce',
+  expectedResult: 'Expected result',
+  actualResult: 'Actual result',
+  severity: 'Severity',
+  reproducibility: 'Reproducibility',
+  occurrence: 'Occurrence',
+  outOf: 'Out of',
+  type: 'Type',
+  featureId: 'Feature',
+  videoUrl: 'Video URL',
+  deviceModel: 'Device model',
+  osName: 'OS name',
+  osVersion: 'OS version',
+  browser: 'Browser',
+  appVersion: 'App version',
+  networkType: 'Network type',
+}
+
+/** This page's own words, from a token it recognises. */
+function fieldHint(token: string | undefined): string {
+  const label = token ? FIELD_LABELS[token] : undefined
+  return label ? ` Check the ${label} field.` : ' Check the values and try again.'
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—'
   if (bytes < 1024) return `${bytes} B`
@@ -236,12 +272,12 @@ export default async function TesterBugDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; section?: string; edit?: string }>
+  searchParams: Promise<{ error?: string; section?: string; edit?: string; field?: string }>
 }) {
   await requireRole(['TESTER'])
 
   const { id } = await params
-  const { error, section: rawSection, edit } = await searchParams
+  const { error, section: rawSection, edit, field } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let bug: BugDetail
@@ -573,7 +609,21 @@ export default async function TesterBugDetailPage({
         <Modal open={reportModalOpen} closedHref={closedHref} title="Edit report">
           <TrackedForm action={updateBugAction} style={FORM_STYLE}>
             <input type="hidden" name="id" value={bug.id} />
-            <FormError message={panelError(error, 'report')} />
+            {/*
+              The report panel is the one with nineteen fields, so a bare
+              "the API rejected that" left the reader hunting. When the API
+              named a field, the hint says which — in this page's own words,
+              from a token the map above has to recognise.
+            */}
+            <FormError
+              message={(() => {
+                const base = panelError(error, 'report')
+                if (!base) return undefined
+                // Only the generic rejection gains a field hint; the specific
+                // reasons already say exactly what is wrong.
+                return error?.endsWith(':invalid') ? `${base}${fieldHint(field)}` : base
+              })()}
+            />
 
             <Field label="Title" htmlFor="editTitle" required>
               <Input

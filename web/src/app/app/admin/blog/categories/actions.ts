@@ -22,12 +22,12 @@ export async function createCategoryAction(formData: FormData): Promise<void> {
     await actionFetch<CategoryResponse>('blog/categories', { method: 'POST', body })
   } catch (err) {
     const code = err instanceof ApiError && err.status === 409 ? 'duplicate' : 'failed'
-    redirect(`${BASE}?new=1&error=${code}&name=${encodeURIComponent(body.name)}`)
+    redirect(`${BASE}?new=1&error=${code}&name=${encodeURIComponent(body.name)}`, 'replace')
   }
 
   revalidatePath(BASE)
   updateTag('blog-categories')
-  redirect(`${BASE}?notice=created`)
+  redirect(`${BASE}?notice=created`, 'replace')
 }
 
 export async function updateCategoryAction(formData: FormData): Promise<void> {
@@ -41,12 +41,12 @@ export async function updateCategoryAction(formData: FormData): Promise<void> {
     await actionFetch<CategoryResponse>(`blog/categories/${id}`, { method: 'PATCH', body })
   } catch (err) {
     const code = err instanceof ApiError && err.status === 409 ? 'duplicate' : 'failed'
-    redirect(`${BASE}?edit=${id}&error=${code}`)
+    redirect(`${BASE}?edit=${id}&error=${code}`, 'replace')
   }
 
   revalidatePath(BASE)
   updateTag('blog-categories')
-  redirect(`${BASE}?notice=updated`)
+  redirect(`${BASE}?notice=updated`, 'replace')
 }
 
 export async function toggleCategoryActiveAction(formData: FormData): Promise<void> {
@@ -59,10 +59,10 @@ export async function toggleCategoryActiveAction(formData: FormData): Promise<vo
       body: { isActive },
     })
   } catch {
-    redirect(`${BASE}?error=failed`)
+    redirect(`${BASE}?error=failed`, 'replace')
   }
 
   revalidatePath(BASE)
   updateTag('blog-categories')
-  redirect(`${BASE}?notice=${isActive ? 'reactivated' : 'retired'}`)
+  redirect(`${BASE}?notice=${isActive ? 'reactivated' : 'retired'}`, 'replace')
 }

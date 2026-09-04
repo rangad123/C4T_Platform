@@ -83,10 +83,10 @@ export async function updateBasicInfoAction(formData: FormData): Promise<void> {
     both this way; this one did not.
   */
   if (!firstName) {
-    redirect(`${PROFILE_PATH}?notice=name-required`)
+    redirect(`${PROFILE_PATH}?notice=name-required`, 'replace')
   }
   if (!phone) {
-    redirect(`${PROFILE_PATH}?notice=phone-required`)
+    redirect(`${PROFILE_PATH}?notice=phone-required`, 'replace')
   }
 
   let notice = 'about-saved'
@@ -126,7 +126,7 @@ export async function updateBasicInfoAction(formData: FormData): Promise<void> {
   // echoed back: nothing here is sensitive, but the codebase does not yet
   // have that mechanism, and re-entering an aborted profile edit is a small
   // ask next to inventing a new pattern for one form.
-  redirect(`${PROFILE_PATH}?section=about&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=about&notice=${notice}`, 'replace')
 }
 
 /**
@@ -151,7 +151,7 @@ export async function setNdaDocumentAction(formData: FormData): Promise<void> {
   }
 
   revalidatePath(PROFILE_PATH)
-  redirect(`${PROFILE_PATH}?notice=${notice}`)
+  redirect(`${PROFILE_PATH}?notice=${notice}`, 'replace')
 }
 
 /** Sets the account avatar from an already-uploaded file. */
@@ -169,7 +169,7 @@ export async function setAvatarAction(formData: FormData): Promise<void> {
   }
 
   revalidatePath(PROFILE_PATH)
-  redirect(`${PROFILE_PATH}?notice=${notice}`)
+  redirect(`${PROFILE_PATH}?notice=${notice}`, 'replace')
 }
 
 /**
@@ -237,7 +237,7 @@ export async function addDeviceAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`, 'replace')
 }
 
 export async function updateDeviceAction(formData: FormData): Promise<void> {
@@ -257,7 +257,7 @@ export async function updateDeviceAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`, 'replace')
 }
 
 export async function removeDeviceAction(formData: FormData): Promise<void> {
@@ -276,7 +276,7 @@ export async function removeDeviceAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`, 'replace')
 }
 
 // ─── Browsers ────────────────────────────────────────────────────────────────
@@ -336,7 +336,7 @@ export async function addBrowserAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`, 'replace')
 }
 
 export async function updateBrowserAction(formData: FormData): Promise<void> {
@@ -356,7 +356,7 @@ export async function updateBrowserAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`, 'replace')
 }
 
 export async function removeBrowserAction(formData: FormData): Promise<void> {
@@ -375,7 +375,7 @@ export async function removeBrowserAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=assets&notice=${notice}`, 'replace')
 }
 
 /**
@@ -397,7 +397,7 @@ export async function setSkillsAction(formData: FormData): Promise<void> {
     notice = failureNotice(error)
   }
 
-  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`, 'replace')
 }
 
 /** Parses the hidden `current` snapshot shared by add/remove — see the doc comment above. */
@@ -437,7 +437,7 @@ export async function addLanguageAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`, 'replace')
 }
 
 export async function removeLanguageAction(formData: FormData): Promise<void> {
@@ -455,7 +455,7 @@ export async function removeLanguageAction(formData: FormData): Promise<void> {
     notice = failureNotice(error)
   }
 
-  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=skills&notice=${notice}`, 'replace')
 }
 
 const WORK_HISTORY_PATH = `${PROFILE_PATH}?section=work&view=employment`
@@ -490,7 +490,7 @@ export async function addWorkHistoryAction(formData: FormData): Promise<void> {
     }
   }
 
-  redirect(`${WORK_HISTORY_PATH}&notice=${notice}`)
+  redirect(`${WORK_HISTORY_PATH}&notice=${notice}`, 'replace')
 }
 
 export async function removeWorkHistoryAction(formData: FormData): Promise<void> {
@@ -510,7 +510,7 @@ export async function removeWorkHistoryAction(formData: FormData): Promise<void>
     }
   }
 
-  redirect(`${WORK_HISTORY_PATH}&notice=${notice}`)
+  redirect(`${WORK_HISTORY_PATH}&notice=${notice}`, 'replace')
 }
 
 export async function acceptNdaAction(_formData: FormData): Promise<void> {
@@ -523,7 +523,7 @@ export async function acceptNdaAction(_formData: FormData): Promise<void> {
   }
 
   revalidatePath(PROFILE_PATH)
-  redirect(`${PROFILE_PATH}?notice=${notice}`)
+  redirect(`${PROFILE_PATH}?notice=${notice}`, 'replace')
 }
 
 const PAYMENT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const
@@ -582,7 +582,7 @@ export async function savePaymentAccountAction(formData: FormData): Promise<void
   // server logs and browser history. The user re-enters payment details
   // from a blank form either way; nothing here was ever pre-filled with the
   // real saved values (§20).
-  redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`, 'replace')
 }
 
 /**
@@ -608,7 +608,7 @@ export async function requestPayoutFromProfileAction(): Promise<void> {
     notice = failureNotice(error, { 400: 'payout-rejected' })
   }
 
-  redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`)
+  redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`, 'replace')
 }
 
 /**
@@ -629,13 +629,13 @@ export async function deleteAccountAction(formData: FormData): Promise<void> {
 
   const typed = formTrimmed(formData, 'confirmEmail').toLowerCase()
   if (typed !== user.email.toLowerCase()) {
-    redirect(`${PROFILE_PATH}?section=about&notice=delete-mismatch`)
+    redirect(`${PROFILE_PATH}?section=about&notice=delete-mismatch`, 'replace')
   }
 
   try {
     await actionFetch('users/me', { method: 'DELETE' })
   } catch (error) {
-    redirect(`${PROFILE_PATH}?section=about&notice=${failureNotice(error)}`)
+    redirect(`${PROFILE_PATH}?section=about&notice=${failureNotice(error)}`, 'replace')
   }
 
   /**
@@ -658,5 +658,5 @@ export async function deleteAccountAction(formData: FormData): Promise<void> {
   cookieStore.delete('c4t_access')
   cookieStore.delete('c4t_refresh')
 
-  redirect('/login?notice=account_deleted')
+  redirect('/login?notice=account_deleted', 'replace')
 }

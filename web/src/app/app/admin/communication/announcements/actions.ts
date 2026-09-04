@@ -114,8 +114,8 @@ export async function createAnnouncement(formData: FormData): Promise<void> {
 
   revalidatePath(LIST_PATH)
   // Outside any try/catch on purpose — `redirect` works by throwing.
-  if (reason) redirect(`${LIST_PATH}/new?error=${reason}`)
-  redirect(LIST_PATH)
+  if (reason) redirect(`${LIST_PATH}/new?error=${reason}`, 'replace')
+  redirect(LIST_PATH, 'replace')
 }
 
 /**
@@ -164,7 +164,7 @@ export async function updateAnnouncement(formData: FormData): Promise<void> {
 
   revalidatePath(LIST_PATH)
   revalidatePath(detail)
-  redirect(reason ? `${detail}?edit=1&error=${reason}` : detail)
+  redirect(reason ? `${detail}?edit=1&error=${reason}` : detail, 'replace')
 }
 
 /**
@@ -193,7 +193,7 @@ export async function publishAnnouncement(formData: FormData): Promise<void> {
 
   revalidatePath(LIST_PATH)
   revalidatePath(detail)
-  redirect(reason ? `${detail}?error=${reason}` : `${detail}?published=1`)
+  redirect(reason ? `${detail}?error=${reason}` : `${detail}?published=1`, 'replace')
 }
 
 /** Remove an announcement. The API route existed; nothing ever called it. */
@@ -211,5 +211,5 @@ export async function deleteAnnouncement(formData: FormData): Promise<void> {
   }
 
   revalidatePath(LIST_PATH)
-  redirect(reason ? `${LIST_PATH}/${id}?error=${reason}` : `${LIST_PATH}?deleted=1`)
+  redirect(reason ? `${LIST_PATH}/${id}?error=${reason}` : `${LIST_PATH}?deleted=1`, 'replace')
 }

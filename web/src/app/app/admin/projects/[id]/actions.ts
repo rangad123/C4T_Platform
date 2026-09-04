@@ -116,11 +116,14 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   try {
     await actionFetch(`projects/${id}`, { method: 'PATCH', body })
   } catch {
-    redirect(projectHref(id, { section, buildId, edit: 'brief', error: 'brief-save-failed' }))
+    redirect(
+      projectHref(id, { section, buildId, edit: 'brief', error: 'brief-save-failed' }),
+      'replace',
+    )
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section, buildId }))
+  redirect(projectHref(id, { section, buildId }), 'replace')
 }
 
 /** Priority and reported progress. One PATCH, one panel. */
@@ -145,11 +148,14 @@ export async function updateProjectDelivery(formData: FormData): Promise<void> {
   try {
     await actionFetch(`projects/${id}`, { method: 'PATCH', body })
   } catch {
-    redirect(projectHref(id, { section, buildId, edit: 'brief', error: 'brief-save-failed' }))
+    redirect(
+      projectHref(id, { section, buildId, edit: 'brief', error: 'brief-save-failed' }),
+      'replace',
+    )
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section, buildId }))
+  redirect(projectHref(id, { section, buildId }), 'replace')
 }
 
 /**
@@ -202,7 +208,7 @@ export async function changeProjectStatus(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { notice }))
+  redirect(projectHref(id, { notice }), 'replace')
 }
 
 /**
@@ -250,11 +256,12 @@ export async function inviteTesters(formData: FormData): Promise<void> {
         notice: 'invite-failed',
         detail,
       }),
+      'replace',
     )
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'testers', buildId, notice: 'invited' }))
+  redirect(projectHref(id, { section: 'testers', buildId, notice: 'invited' }), 'replace')
 }
 
 /** Activate, complete or remove one tester on the roster. */
@@ -299,7 +306,7 @@ export async function updateAssignment(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'testers', buildId, notice }))
+  redirect(projectHref(id, { section: 'testers', buildId, notice }), 'replace')
 }
 
 /**
@@ -336,7 +343,7 @@ export async function addMaterial(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'materials', buildId, notice }))
+  redirect(projectHref(id, { section: 'materials', buildId, notice }), 'replace')
 }
 
 export async function removeMaterial(formData: FormData): Promise<void> {
@@ -352,7 +359,7 @@ export async function removeMaterial(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'materials', notice }))
+  redirect(projectHref(id, { section: 'materials', notice }), 'replace')
 }
 
 /** §2.2 Build Settings "Feature Lists" — the tags a bug can be filed against. */
@@ -374,7 +381,7 @@ export async function addFeature(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'build', buildId, notice }))
+  redirect(projectHref(id, { section: 'build', buildId, notice }), 'replace')
 }
 
 export async function removeFeature(formData: FormData): Promise<void> {
@@ -390,7 +397,7 @@ export async function removeFeature(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'build', notice }))
+  redirect(projectHref(id, { section: 'build', notice }), 'replace')
 }
 
 /**
@@ -422,8 +429,8 @@ export async function archiveProject(formData: FormData): Promise<void> {
   revalidateProject(id)
   // `redirect` throws to unwind — it must be the last statement and must not sit
   // inside a try/catch.
-  if (failed) redirect(projectHref(id, { section: 'settings', notice: failed }))
-  redirect('/app/admin/projects')
+  if (failed) redirect(projectHref(id, { section: 'settings', notice: failed }), 'replace')
+  redirect('/app/admin/projects', 'replace')
 }
 
 // ─── Builds ────────────────────────────────────────────────────────────────
@@ -470,6 +477,7 @@ export async function createBuild(formData: FormData): Promise<void> {
         name,
         error: code === 409 ? 'build-name-taken' : 'build-create-failed',
       }),
+      'replace',
     )
   }
 
@@ -516,7 +524,7 @@ export async function createBuild(formData: FormData): Promise<void> {
   const params = new URLSearchParams({ buildId: build.id })
   if (section) params.set('section', section)
   if (!detailsSaved) params.set('notice', 'build-details-unsaved')
-  redirect(`/app/admin/projects/${id}?${params.toString()}`)
+  redirect(`/app/admin/projects/${id}?${params.toString()}`, 'replace')
 }
 
 export async function renameBuild(formData: FormData): Promise<void> {
@@ -545,11 +553,12 @@ export async function renameBuild(formData: FormData): Promise<void> {
         error: status === 409 ? 'build-name-taken' : 'build-rename-failed',
         name,
       }),
+      'replace',
     )
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section, buildId }))
+  redirect(projectHref(id, { section, buildId }), 'replace')
 }
 
 /**
@@ -597,11 +606,12 @@ export async function updateBuild(formData: FormData): Promise<void> {
         edit: 'build-details',
         error: status === 409 ? 'build-name-taken' : 'build-save-failed',
       }),
+      'replace',
     )
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section, buildId }))
+  redirect(projectHref(id, { section, buildId }), 'replace')
 }
 
 // ─── Structured testing workflow ──────────────────────────────────────────
@@ -628,7 +638,7 @@ export async function createTestCase(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'test-cases', buildId, notice }))
+  redirect(projectHref(id, { section: 'test-cases', buildId, notice }), 'replace')
 }
 
 export async function assignTestCase(formData: FormData): Promise<void> {
@@ -648,5 +658,5 @@ export async function assignTestCase(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'test-cases', notice }))
+  redirect(projectHref(id, { section: 'test-cases', notice }), 'replace')
 }

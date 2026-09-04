@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
+import { closeModal } from '@/lib/navigation/close-modal'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -41,6 +42,57 @@ function detailPath(id: string): string {
 
 function failurePath(id: string, panel: string, reason: string): string {
   return `${detailPath(id)}?error=${panel}:${reason}`
+}
+
+/**
+ * Fields the edit form actually has, so a rejection can name one.
+ *
+ * An allow-list, not free text. `ApiError` carries the API's own sentences,
+ * and echoing one through the URL would break this page's rule that nothing
+ * from the query string reaches the reader (see `panelError`) — a crafted
+ * link could otherwise put any words in the app's mouth. Passing a token the
+ * page must recognise keeps that guarantee: the page still renders only copy
+ * it owns, and an unknown token renders nothing.
+ */
+const EDITABLE_FIELDS: readonly string[] = [
+  'title',
+  'description',
+  'preCondition',
+  'stepsToReproduce',
+  'expectedResult',
+  'actualResult',
+  'severity',
+  'reproducibility',
+  'occurrence',
+  'outOf',
+  'type',
+  'featureId',
+  'videoUrl',
+  'deviceModel',
+  'osName',
+  'osVersion',
+  'browser',
+  'appVersion',
+  'networkType',
+]
+
+/**
+ * Which field the API rejected, if it named one this form has.
+ *
+ * Nothing read `error.details` before, so a rejected save said only "The API
+ * rejected that. Check the values and try again." on a form with nineteen
+ * fields — leaving the reader to hunt. The API knows exactly which field, and
+ * now the page can say so in its own words.
+ */
+function rejectedField(error: unknown): string | null {
+  if (!(error instanceof ApiError) || !Array.isArray(error.details)) return null
+  for (const d of error.details) {
+    if (d && typeof d === 'object' && 'field' in d) {
+      const field = String((d as { field: unknown }).field)
+      if (EDITABLE_FIELDS.includes(field)) return field
+    }
+  }
+  return null
 }
 
 function reasonFor(error: unknown): string {
@@ -157,15 +209,16 @@ export async function updateBugAction(formData: FormData): Promise<void> {
   const occurrenceRaw = formTrimmed(formData, 'occurrence')
   const outOfRaw = formTrimmed(formData, 'outOf')
   if (Boolean(occurrenceRaw) !== Boolean(outOfRaw)) {
-    redirect(failurePath(id, 'report', 'occurrence-pair'))
+    closeModal(failurePath(id, 'report', 'occurrence-pair'))
   }
   const occurrence = occurrenceRaw ? Number(occurrenceRaw) : undefined
   const outOf = outOfRaw ? Number(outOfRaw) : undefined
   if (occurrence !== undefined && outOf !== undefined && occurrence > outOf) {
-    redirect(failurePath(id, 'report', 'occurrence-range'))
+    closeModal(failurePath(id, 'report', 'occurrence-range'))
   }
 
   let reason: string | null = null
+  let caught: unknown = null
   try {
     await actionFetch(`bugs/${id}`, {
       method: 'PATCH',
@@ -192,9 +245,22 @@ export async function updateBugAction(formData: FormData): Promise<void> {
     })
   } catch (error) {
     reason = reasonFor(error)
+    caught = error
   }
-  if (reason) redirect(failurePath(id, 'report', reason))
+  if (reason) {
+    const field = rejectedField(caught)
+    closeModal(
+      field
+        ? `${failurePath(id, 'report', reason)}&field=${field}`
+        : failurePath(id, 'report', reason),
+    )
+  }
 
   revalidatePath(detailPath(id))
-  redirect(detailPath(id))
+  /*
+    `closeModal`, not `redirect`: this save was submitted from the Edit report
+    modal, whose open state IS the URL. A pushed redirect left that URL in
+    history, so Back reopened the modal on changes already saved.
+  */
+  closeModal(detailPath(id))
 }
