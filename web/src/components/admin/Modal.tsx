@@ -451,9 +451,6 @@ export function Modal({
         </div>
         {confirmingClose ? (
           <div
-            ref={confirmRef}
-            role="alertdialog"
-            aria-label="Discard changes?"
             style={{
               /*
                * Pinned to the bottom of the panel's own scrollport.
@@ -465,48 +462,85 @@ export function Modal({
                * wherever they were when they pressed Cancel, and keeps it
                * there if they scroll while deciding.
                *
-               * The negative bottom offset is the panel's own padding, so the
-               * banner sits flush with the bottom edge instead of leaving a
-               * strip the form scrolls through underneath it.
+               * ── WHY A WRAPPER, AND WHY IT IS THE ONE THAT GOES FLUSH
+               *
+               * The negative bottom offset is the panel's own padding, so this
+               * reaches the panel's true bottom edge — otherwise the form
+               * scrolls through the strip underneath, which reads as the
+               * banner floating over moving content.
+               *
+               * The card inside used to be this element, which meant "flush
+               * with the bottom edge" was literal: its border sat on the
+               * panel's border with nothing between them, and the two edges
+               * read as one thick line. Now the WRAPPER is flush and paints
+               * the panel's own colour, while its bottom padding lifts the
+               * visible card clear of the edge. The strip stays covered; the
+               * card stops touching.
                */
               position: 'sticky',
               bottom: 'calc(var(--space-7) * -1)',
               zIndex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-4)',
-              padding: 'var(--space-5)',
-              background: 'var(--surface-sunken)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-card)',
+              paddingBottom: 'var(--space-5)',
+              background: 'var(--surface-raised)',
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              <p className="c4t-heading-sm" style={{ margin: 0 }}>
-                Discard changes?
-              </p>
-              <p
-                style={{
-                  margin: 0,
-                  color: 'var(--text-secondary)',
-                  fontSize: 'var(--type-body-sm-size)',
-                }}
-              >
-                You have unsaved changes. Are you sure you want to close?
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setConfirmingClose(false)}
-              >
-                Continue editing
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => ref.current?.close()}>
-                Discard changes
-              </Button>
+            <div
+              ref={confirmRef}
+              role="alertdialog"
+              aria-label="Discard changes?"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-4)',
+                padding: 'var(--space-5)',
+                background: 'var(--surface-sunken)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-card)',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                <p className="c4t-heading-sm" style={{ margin: 0 }}>
+                  Discard changes?
+                </p>
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--text-secondary)',
+                    fontSize: 'var(--type-body-sm-size)',
+                  }}
+                >
+                  You have unsaved changes. Are you sure you want to close?
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setConfirmingClose(false)}
+                >
+                  Continue editing
+                </Button>
+                {/*
+                  `primary` — the teal fill, matching every other confirming
+                  action in the app.
+
+                  Worth knowing what this trades away: it makes the
+                  DESTRUCTIVE choice the visually loudest one, and the
+                  convention it breaks is that the safe option carries the
+                  emphasis so a hurried click lands on "keep my work". The
+                  wording still says plainly which is which, and the dialog
+                  only ever appears in answer to a close the user asked for.
+                */}
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => ref.current?.close()}
+                >
+                  Discard changes
+                </Button>
+              </div>
             </div>
           </div>
         ) : null}
