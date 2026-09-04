@@ -25,20 +25,31 @@ export function AuthCard({
   children,
   raised = true,
   wide = false,
+  inDialog = false,
 }: {
   children: ReactNode
   /** The two password screens render flat. */
   raised?: boolean
   /** The dialog's wider measure — see `.wide` in the CSS module. */
   wide?: boolean
+  /**
+   * Set by the two intercepted routes. `AuthModal` floats a close button over
+   * this card's top-right corner, so the first row has to start below it —
+   * register's header row put a "Sign in" link exactly there and the two
+   * collided. The standalone pages have no close button and no such band.
+   */
+  inDialog?: boolean
 }) {
-  return (
-    <div
-      className={`${styles.card} ${raised ? styles.raised : ''} ${wide ? styles.wide : ''}`.trim()}
-    >
-      {children}
-    </div>
-  )
+  const classes = [
+    styles.card,
+    raised && styles.raised,
+    wide && styles.wide,
+    inDialog && styles.inDialog,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return <div className={classes}>{children}</div>
 }
 
 /**

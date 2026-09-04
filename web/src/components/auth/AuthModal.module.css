@@ -14,7 +14,9 @@
      came out ~100px narrower than register, and the two looked like different
      dialogs when you moved between them. */
   width: min(100vw - var(--space-7) * 2, var(--container-form));
-  max-height: calc(100vh - var(--space-9) * 2);
+  /* The gap left around the dialog. It was --space-9 on each side, which cost
+     80px of height the register form needed more than the backdrop did. */
+  max-height: calc(100vh - var(--space-7) * 2);
   padding: 0;
   border: none;
   background: transparent;
@@ -36,17 +38,33 @@
   position: relative;
   width: 100%;
   /* The card inside scrolls rather than the page behind it, so a short
-     viewport still reaches the submit button. */
-  max-height: calc(100vh - var(--space-9) * 2);
+     viewport still reaches the submit button. Kept in step with the dialog's
+     own cap above, including the short-viewport one below. */
+  max-height: calc(100vh - var(--space-7) * 2);
   overflow-y: auto;
 }
 
-/* Sits over the card's own padding rather than taking a row of its own. */
+/* Sits in the band the card leaves clear above its first row — see
+   `.inDialog` in AuthCard's module, which reserves exactly this height.
+
+   It used to overlap the card's ordinary top padding, which was fine while
+   nothing lived up there. Register's header row put a "Sign in" link in the
+   top-right corner, and the two landed on top of each other. */
 .dismiss {
   position: absolute;
-  top: var(--space-4);
-  right: var(--space-4);
+  top: var(--space-3);
+  right: var(--space-3);
   z-index: 1;
+}
+
+/* On a laptop the register form was taller than the room this left it, so the
+   card scrolled inside the dialog. The surround shrinks first — it is only
+   dimmed page — before the card gives up any of its own padding. */
+@media (max-height: 760px) {
+  .dialog,
+  .panel {
+    max-height: calc(100vh - var(--space-3) * 2);
+  }
 }
 
 @media (max-width: 480px) {

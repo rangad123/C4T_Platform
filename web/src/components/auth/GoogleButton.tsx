@@ -115,7 +115,7 @@ export function AuthDivider({ label = 'or' }: { label?: string }) {
         display: 'flex',
         alignItems: 'center',
         gap: 'var(--space-4)',
-        margin: 'var(--space-6) 0',
+        margin: 'var(--space-5) 0',
       }}
     >
       <span style={{ flex: 1, height: 1, background: 'var(--border-default)' }} />

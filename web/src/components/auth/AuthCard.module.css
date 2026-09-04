@@ -40,7 +40,7 @@
 .card {
   width: 100%;
   max-width: var(--container-form);
-  padding: var(--space-9);
+  padding: var(--space-8);
   background: var(--surface-canvas);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-card);
@@ -98,5 +98,45 @@
   .card {
     padding-left: var(--space-5);
     padding-right: var(--space-5);
+  }
+}
+
+/* ── Short viewports ─────────────────────────────────────────────────────────
+   The register form is the tallest of these screens — two paired rows, a
+   company field, the Google button and the rule above it — and inside a
+   dialog it cannot grow past the viewport, so on a laptop it started
+   scrolling INSIDE the card. Scrolling a form to reach its own submit button
+   reads as the dialog being too small rather than as a page being long.
+
+   Vertical padding is what gives here, because it is the space that buys the
+   least: the card's border already separates it from the backdrop. Horizontal
+   padding is untouched — the width media queries above cut that for a
+   different reason, and the two should not compound. */
+
+@media (max-height: 760px) {
+  .card {
+    padding-top: var(--space-6);
+    padding-bottom: var(--space-5);
+  }
+}
+
+/* ── The dialog's close button ───────────────────────────────────────────────
+   `AuthModal` floats an X over this card's top-right corner. The button is a
+   32px box inset by 8px, so it ends 40px down; the first row of content has to
+   clear that or the two overlap — which is exactly what happened once
+   register's header row put a "Sign in" link in that corner.
+
+   Declared after the short-viewport rule above on purpose: a media query adds
+   no specificity, so source order is what lets this override the padding-top
+   set there. The short-viewport value below is the 40px minimum; the roomier
+   one is for viewports tall enough to afford it. */
+
+.inDialog {
+  padding-top: var(--space-10);
+}
+
+@media (max-height: 760px) {
+  .inDialog {
+    padding-top: var(--space-9);
   }
 }

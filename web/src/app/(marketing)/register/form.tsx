@@ -102,20 +102,62 @@ export default async function RegisterForm({
       ) : (
         <SignUpForm role={role} message={message} params={params} />
       )}
+    </div>
+  )
+}
 
-      <div
+/* ─── Step 1: which kind of account ──────────────────────────────────────── */
+
+/**
+ * The row above each step's heading: where you came from on the left, the way
+ * out to sign-in on the right.
+ *
+ * The sign-in link used to sit in a bordered footer under the whole form,
+ * which put the "I already have one of these" escape hatch at the end of a
+ * long sign-up — past the button, where someone who took a wrong turn would
+ * only find it after scrolling the form they did not want. Level with the
+ * back link it is visible the moment the step opens, and it costs no vertical
+ * space of its own.
+ *
+ * Both links `replace` rather than push. Every step of registration, and
+ * sign-in beside it, is one modal as far as the reader is concerned — so
+ * moving between them must not stack history entries, or closing the dialog
+ * walks back through each screen visited instead of returning to the page it
+ * opened over.
+ */
+function StepHeader({ backHref, backLabel }: { backHref: string; backLabel: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 'var(--space-4)',
+        flexWrap: 'wrap',
+        marginBottom: 'var(--space-4)',
+      }}
+    >
+      <Link
+        href={backHref}
+        replace
         style={{
-          marginTop: 'var(--space-7)',
-          paddingTop: 'var(--space-6)',
-          borderTop: '1px solid var(--border-default)',
-          fontSize: 'var(--type-body-sm-size)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
           color: 'var(--text-secondary)',
-          textAlign: 'center',
+          fontSize: 'var(--type-body-sm-size)',
+          textDecoration: 'none',
         }}
       >
+        <Icon name="arrow-left" size={16} />
+        {backLabel}
+      </Link>
+
+      <span style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}>
         Already have an account?{' '}
         <Link
           href="/login"
+          replace
           style={{
             color: 'var(--text-brand)',
             textDecoration: 'underline',
@@ -124,12 +166,10 @@ export default async function RegisterForm({
         >
           Sign in
         </Link>
-      </div>
+      </span>
     </div>
   )
 }
-
-/* ─── Step 1: which kind of account ──────────────────────────────────────── */
 
 function RoleChooser({
   message,
@@ -151,21 +191,7 @@ function RoleChooser({
 
   return (
     <>
-      <Link
-        href="/"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          color: 'var(--text-secondary)',
-          fontSize: 'var(--type-body-sm-size)',
-          textDecoration: 'none',
-          marginBottom: 'var(--space-5)',
-        }}
-      >
-        <Icon name="arrow-left" size={16} />
-        Back to home
-      </Link>
+      <StepHeader backHref="/" backLabel="Back to home" />
 
       <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
         Create an account
@@ -241,6 +267,7 @@ function RoleCard({
   return (
     <Link
       href={href}
+      replace
       className="c4t-card-hover"
       style={{
         display: 'flex',
@@ -325,21 +352,10 @@ function SignUpForm({
 
   return (
     <>
-      <Link
-        href={`/register${params.next ? `?next=${encodeURIComponent(params.next)}` : ''}`}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          color: 'var(--text-secondary)',
-          fontSize: 'var(--type-body-sm-size)',
-          textDecoration: 'none',
-          marginBottom: 'var(--space-5)',
-        }}
-      >
-        <Icon name="arrow-left" size={16} />
-        Change account type
-      </Link>
+      <StepHeader
+        backHref={`/register${params.next ? `?next=${encodeURIComponent(params.next)}` : ''}`}
+        backLabel="Change account type"
+      />
 
       {/*
         No blurb under the heading. It restated the choice the reader had just
@@ -347,7 +363,7 @@ function SignUpForm({
         "Submit projects, track defects and work with our testers" — and the
         role cards already carry that description, where it helps decide.
       */}
-      <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-7)' }}>
+      <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-4)' }}>
         {copy.title}
       </h1>
 
@@ -364,7 +380,7 @@ function SignUpForm({
 
       <form
         action={registerAction}
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
       >
         <input type="hidden" name="role" value={role} />
         <input type="hidden" name="next" value={params.next ?? ''} />

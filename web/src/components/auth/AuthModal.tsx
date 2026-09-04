@@ -83,8 +83,12 @@ export function AuthModal({
       }}
     >
       <div className={styles.panel}>
+        {/* `sm`, not the default `md`. The card reserves a band above its
+            first row for this button (see `.inDialog` in AuthCard's module);
+            a 40px box would have cost 8px more of the register form's height
+            than a 32px one, and 32px is still a comfortable target. */}
         <div className={styles.dismiss}>
-          <IconButton icon="x" label="Close" onClick={close} />
+          <IconButton icon="x" label="Close" size="sm" onClick={close} />
         </div>
         {children}
       </div>

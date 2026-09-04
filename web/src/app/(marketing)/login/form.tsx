@@ -190,6 +190,11 @@ export default async function LoginForm({
         </Link>
         <Link
           href="/register"
+          /* `replace`, not a push. Sign-in and register are two faces of ONE
+             modal, so moving between them should not leave the other on the
+             history stack — otherwise closing the register dialog reopens
+             sign-in instead of returning to the page underneath. */
+          replace
           style={{
             color: 'var(--text-brand)',
             textDecoration: 'underline',
