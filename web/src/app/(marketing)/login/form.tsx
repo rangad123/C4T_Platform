@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
@@ -174,7 +175,19 @@ export default async function LoginForm({
           color: 'var(--text-secondary)',
         }}
       >
-        <a
+        {/*
+          `Link`, not a bare `<a>`. A plain anchor is a full page load, and an
+          intercepting route only fires on a CLIENT-SIDE navigation — so from
+          inside the sign-in dialog, "Create an account" tore the whole page
+          down and rebuilt it as the standalone register screen. Through
+          `Link` it swaps the dialog's contents instead, and the page behind
+          stays where it was.
+
+          `/forgot-password` has no intercepting route, so that one still
+          lands on its own page — which is right: resetting a password is a
+          detour out of signing in, not a step within it.
+        */}
+        <Link
           href="/forgot-password"
           style={{
             color: 'var(--text-brand)',
@@ -183,8 +196,8 @@ export default async function LoginForm({
           }}
         >
           Forgot password
-        </a>
-        <a
+        </Link>
+        <Link
           href="/register"
           style={{
             color: 'var(--text-brand)',
@@ -193,7 +206,7 @@ export default async function LoginForm({
           }}
         >
           Create an account
-        </a>
+        </Link>
       </div>
     </div>
   )
