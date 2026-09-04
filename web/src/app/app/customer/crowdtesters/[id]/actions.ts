@@ -16,9 +16,10 @@ import { ApiError } from '@/lib/api/types'
  * one piece of work, never to a person in the abstract. Duplicates come back
  * as a 409 because one author rates one subject once per project.
  *
- * Administrators cannot post ratings at all; that is the API's rule too, and
- * the reason there is no equivalent of this on the admin side. They moderate
- * ratings instead.
+ * The delivery team has its own copy of this in the admin portal, gated on
+ * `rating.write` — `assertWorkedTogether` admits admin-side authors who hold
+ * that permission, so the difference between the two is where they redirect
+ * back to, not what they are allowed to say.
  */
 export async function rateTesterAction(formData: FormData): Promise<void> {
   await requireRole(['CUSTOMER'])
@@ -81,4 +82,55 @@ export async function rateTesterAction(formData: FormData): Promise<void> {
 
   revalidatePath(base)
   redirect(withNotice('rating-saved'))
+}
+
+/**
+ * Award a badge to a tester you have worked with.
+ *
+ * Same rules, same enforcement point, same `returnTo` reasoning as
+ * `rateTesterAction` above: on the API a badge goes through
+ * `assertWorkedTogether` exactly as a rating does, so a customer can
+ * recognise the testers who worked their own organisation's projects and
+ * nobody else's.
+ */
+export async function awardBadgeAction(formData: FormData): Promise<void> {
+  await requireRole(['CUSTOMER'])
+
+  const testerProfileId = formTrimmed(formData, 'testerProfileId')
+  const testerUserId = formTrimmed(formData, 'testerUserId')
+  const projectId = formTrimmed(formData, 'projectId')
+  const badgeId = formTrimmed(formData, 'badgeId')
+  const note = formTrimmed(formData, 'note')
+
+  const requested = formTrimmed(formData, 'returnTo')
+  const returnTo =
+    requested.startsWith('/app/customer/') && !requested.startsWith('//') ? requested : null
+
+  const base = returnTo ?? `/app/customer/crowdtesters/${testerProfileId}`
+  const withNotice = (notice: string) => `${base}${base.includes('?') ? '&' : '?'}notice=${notice}`
+
+  if (!testerUserId) return
+  if (!returnTo && !testerProfileId) return
+  if (!projectId || !badgeId) redirect(withNotice('badge-invalid'))
+
+  try {
+    await actionFetch('badges/awards', {
+      method: 'POST',
+      body: { badgeId, testerUserId, projectId, ...(note ? { note } : {}) },
+    })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    const notice =
+      status === 409
+        ? 'badge-duplicate'
+        : status === 400
+          ? 'badge-not-worked-together'
+          : status === 403
+            ? 'badge-forbidden'
+            : 'badge-failed'
+    redirect(withNotice(notice))
+  }
+
+  revalidatePath(base)
+  redirect(withNotice('badge-awarded'))
 }

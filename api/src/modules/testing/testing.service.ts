@@ -233,13 +233,16 @@ export async function assignTesters(
 ) {
   const testCase = await loadForWrite(user, testCaseId)
 
-  // Only testers with a live assignment on this build's project may be
-  // handed a test case — same eligibility bar as inviting them onto the
-  // roster in the first place.
+  // Only testers with a live assignment on THIS BUILD may be handed a test
+  // case — same eligibility bar as inviting them onto the roster in the
+  // first place. Scoped to `testCase.buildId`, not the project generally: a
+  // tester can now be active on a different build of the same project
+  // without that making them eligible for THIS build's test cases.
   const { projectId } = await projectIdForBuild(testCase.buildId)
   const eligible = await prisma.projectAssignment.findMany({
     where: {
       projectId,
+      buildId: testCase.buildId,
       testerId: { in: testerIds },
       status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] },
     },
@@ -249,7 +252,7 @@ export async function assignTesters(
   const ineligible = testerIds.filter((id) => !eligibleIds.has(id))
   if (ineligible.length > 0) {
     throw new BadRequestError(
-      'Every tester must have an accepted or active assignment on this project',
+      'Every tester must have an accepted or active assignment on this build',
     )
   }
 
@@ -261,7 +264,18 @@ export async function assignTesters(
   await createNotifications(testerIds, {
     type: 'PROJECT_ASSIGNED',
     title: 'A test case has been assigned to you',
-    link: `/app/tester/test-cases/${testCaseId}`,
+    /**
+     * `/app/tester/test-cases/:id` never existed — there is no per-test-case
+     * route in any portal, so this notification was a 404 for its whole life.
+     * A tester reads test cases on the build's own Testing tab, and both ids
+     * needed to reach it are already resolved above.
+     *
+     * Unlike the other notification links this one is corrected at the
+     * source rather than through a resolver, because the destination needs a
+     * `projectId` the link never carried — a resolver would have to look the
+     * test case up again to find something this function already knows.
+     */
+    link: `/app/tester/projects/${projectId}?buildId=${testCase.buildId}&section=testing`,
   })
 
   return prisma.testCase.findUniqueOrThrow({ where: { id: testCaseId }, select: testCaseSelect })

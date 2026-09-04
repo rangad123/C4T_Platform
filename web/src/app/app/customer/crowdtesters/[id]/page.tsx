@@ -55,6 +55,7 @@ interface TesterProfileDetail {
   experienceYears: number | null
   skills: readonly { id: string; name: string; slug: string }[]
   platforms: readonly string[]
+  browsers: readonly string[]
 }
 
 /**
@@ -369,6 +370,20 @@ export default async function CrowdtesterProfilePage({
           </div>
         ) : (
           <Muted>No devices listed.</Muted>
+        )}
+      </Panel>
+
+      <Panel title="Browsers">
+        {tester.browsers.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            {tester.browsers.map((browser) => (
+              <Badge key={browser} tone="neutral" uppercase={false}>
+                {browser}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <Muted>No browsers listed.</Muted>
         )}
       </Panel>
     </DetailShell>

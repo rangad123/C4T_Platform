@@ -22,16 +22,34 @@ export type ProjectStatusValue = (typeof PROJECT_STATUSES)[number]
 export const PROJECT_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const
 export type ProjectPriorityValue = (typeof PROJECT_PRIORITIES)[number]
 
-/** Mirrors `STATUS_TRANSITIONS` in `api/src/modules/projects/projects.service.ts`. */
+/**
+ * What a CUSTOMER may move a project to — deliberately NOT the full matrix.
+ *
+ * `STATUS_TRANSITIONS` in `api/src/modules/projects/projects.service.ts` says
+ * which moves are structurally legal. The service then applies a role rule on
+ * top of it:
+ *
+ *     const customerMaySubmit = project.status === DRAFT && status === SUBMITTED
+ *     if (!isPlatformSide && !customerMaySubmit) throw new ForbiddenError(...)
+ *
+ * — so a customer may make exactly ONE move, and everything else is the
+ * delivery team's call ("approving your own project would be meaningless").
+ *
+ * This file used to mirror the structural matrix alone, role rule and all
+ * omitted. That offered a customer "Cancelled" from a draft, "Approved" from
+ * submitted, and so on — every one of which came back 403, and with no catch
+ * in `changeProjectStatus` each rendered as a crash screen rather than a
+ * refusal. Offer only what the API will actually accept.
+ */
 export const STATUS_TRANSITIONS: Readonly<
   Record<ProjectStatusValue, readonly ProjectStatusValue[]>
 > = {
-  DRAFT: ['SUBMITTED', 'CANCELLED'],
-  SUBMITTED: ['APPROVED', 'DRAFT', 'CANCELLED'],
-  APPROVED: ['IN_PROGRESS', 'PAUSED', 'CANCELLED'],
-  IN_PROGRESS: ['PAUSED', 'COMPLETED', 'CANCELLED'],
-  PAUSED: ['IN_PROGRESS', 'CANCELLED'],
-  COMPLETED: ['IN_PROGRESS'],
+  DRAFT: ['SUBMITTED'],
+  SUBMITTED: [],
+  APPROVED: [],
+  IN_PROGRESS: [],
+  PAUSED: [],
+  COMPLETED: [],
   CANCELLED: [],
 }
 
@@ -115,6 +133,15 @@ export interface ProjectRatingRow {
   score: number
   author: { id: string } | null
   subjectUser: { id: string } | null
+}
+
+/** One entry of the seeded badge catalogue, from `GET /v1/badges`. */
+export interface BadgeOption {
+  id: string
+  slug: string
+  name: string
+  description: string | null
+  icon: string
 }
 
 export interface ProjectManagerRow {

@@ -12,7 +12,7 @@ import { requirePermission } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { createAnnouncement } from '../actions'
 
-const LIST_PATH = '/app/admin/communication'
+const LIST_PATH = '/app/admin/communication/announcements'
 
 /**
  * The four `AnnouncementAudience` values, with what each one actually means for
@@ -80,8 +80,21 @@ const RADIO_SIZE = 20
  * and a checkbox labelled "publish" would leave the button's own label lying
  * about what it does half the time.
  */
-export default async function NewAnnouncementPage() {
+const ERROR_MESSAGES: Record<string, string> = {
+  denied: 'Your session is no longer valid. Sign in again, then post this announcement.',
+  invalid: 'Some values were not accepted. Check the title, body and expiry, then try again.',
+  failed: 'The announcement could not be saved. Try again.',
+}
+
+export default async function NewAnnouncementPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>
+}) {
   await requirePermission('announcement.write')
+
+  const params = await searchParams
+  const errorMessage = params.error ? (ERROR_MESSAGES[params.error] ?? ERROR_MESSAGES.failed) : null
 
   // The project picker is a list, not a search — the platform has few enough
   // projects that a Select with all of them is fine, and avoids pulling in an
@@ -98,7 +111,11 @@ export default async function NewAnnouncementPage() {
 
   return (
     <DetailShell
-      crumbs={[{ label: 'Communication', href: LIST_PATH }, { label: 'New announcement' }]}
+      crumbs={[
+        { label: 'Communication', href: '/app/admin/communication' },
+        { label: 'Announcements', href: LIST_PATH },
+        { label: 'New announcement' },
+      ]}
       eyebrow="Operations"
       title="Compose an announcement"
       subtitle="One author, many readers. Pick the audience carefully — the API has no edit route, so a published announcement can only be deleted."
@@ -145,6 +162,20 @@ export default async function NewAnnouncementPage() {
         action={createAnnouncement}
         style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
       >
+        {errorMessage ? (
+          <p
+            role="alert"
+            style={{
+              margin: 0,
+              padding: 'var(--space-4) var(--space-5)',
+              borderRadius: 'var(--radius-card)',
+              background: 'var(--status-error-bg)',
+              color: 'var(--status-error-fg)',
+            }}
+          >
+            {errorMessage}
+          </p>
+        ) : null}
         <Panel
           title="What it says"
           actions={

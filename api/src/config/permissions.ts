@@ -349,6 +349,14 @@ export const DEFAULT_SUBADMIN_PERMISSIONS: string[] = [
   PERMISSIONS.BUG_READ,
   PERMISSIONS.COMMUNICATION_READ,
   PERMISSIONS.RATING_READ,
+  /**
+   * A manager runs the project day to day, so recognising the crowd who
+   * worked it — a rating, and the badges that share this permission — is
+   * part of the job rather than something to escalate to a full admin. The
+   * write is still bounded by `assertWorkedTogether`: they can only speak
+   * about testers who genuinely worked the project.
+   */
+  PERMISSIONS.RATING_WRITE,
   PERMISSIONS.STATS_READ,
   // A sub-admin who cannot see incoming enquiries cannot do sales triage, which
   // is most of what the role is for.

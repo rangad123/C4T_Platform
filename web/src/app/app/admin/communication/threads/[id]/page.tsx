@@ -94,10 +94,26 @@ function threadTitle(thread: Pick<ThreadDetail, 'subject' | 'type'>): string {
  * the caller is a participant, which the participants panel discloses rather
  * than leaving as a surprise.
  */
-export default async function ThreadDetailPage({ params }: { params: Promise<{ id: string }> }) {
+const ERROR_MESSAGES: Record<string, string> = {
+  'too-long': 'That message is longer than 5,000 characters. Shorten it and post again.',
+  closed: 'This conversation is closed, so no more messages can be posted to it.',
+  denied: 'Your session is no longer valid. Sign in again, then post your message.',
+  missing: 'This conversation no longer exists.',
+  failed: 'The message could not be posted. Try again.',
+}
+
+export default async function ThreadDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ error?: string }>
+}) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
   const { id } = await params
+  const { error: errorCode } = await searchParams
+  const errorMessage = errorCode ? (ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES.failed) : null
 
   let thread: ThreadDetail | null = null
   let loadError: 'forbidden' | 'unknown' | null = null
@@ -276,6 +292,20 @@ export default async function ThreadDetailPage({ params }: { params: Promise<{ i
         </>
       }
     >
+      {errorMessage ? (
+        <p
+          role="alert"
+          style={{
+            margin: 0,
+            padding: 'var(--space-4) var(--space-5)',
+            borderRadius: 'var(--radius-card)',
+            background: 'var(--status-error-bg)',
+            color: 'var(--status-error-fg)',
+          }}
+        >
+          {errorMessage}
+        </p>
+      ) : null}
       <Panel
         title="Messages"
         description="Oldest first, as the API returns them. Deleted messages are not shown."

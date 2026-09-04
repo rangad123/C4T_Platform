@@ -15,7 +15,7 @@ import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { SingleFileUpload } from '@/components/admin/SingleFileUpload'
-import { DownloadLink } from '@/components/tester/DownloadLink'
+import { DownloadLink } from '@/components/admin/DownloadLink'
 import { PaymentMethodFields, type PaymentType } from '@/components/tester/PaymentMethodFields'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
@@ -196,6 +196,7 @@ interface TesterBrowser {
   browser: { id: string; name: string }
   browserVersion: { id: string; version: string } | null
   operatingSystem: { id: string; name: string; kind: string } | null
+  osVersionRef: { id: string; version: string; operatingSystem: { id: string; name: string } } | null
 }
 
 interface Catalog {
@@ -289,6 +290,14 @@ const CHIP = {
  */
 const NOTICES: Record<string, NoticeCopy> = {
   'about-saved': { tone: 'success', message: 'Your profile is up to date.' },
+  'avatar-saved': { tone: 'success', message: 'Your profile picture has been updated.' },
+  'nda-accepted': { tone: 'success', message: 'Thanks — your NDA acceptance is recorded.' },
+  'nda-document-saved': { tone: 'success', message: 'Your signed NDA has been attached.' },
+  'name-required': { tone: 'error', message: 'Enter your first name — it cannot be blank.' },
+  'phone-required': {
+    tone: 'error',
+    message: 'Enter a contact number — it cannot be blank. Nothing else on the form was saved.',
+  },
   'payout-requested': {
     tone: 'success',
     message: 'Your payout request has been submitted. It will show below once it settles.',
@@ -826,8 +835,13 @@ export default async function TesterProfilePage({
                 >
                   <Input id="email" name="email" defaultValue={profile.user.email} disabled />
                 </Field>
-                <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
-                  <PhoneInput id="phone" name="phone" defaultValue={profile.user.phone ?? ''} />
+                <Field label="Phone" htmlFor="phone" hint={PHONE_HINT} required>
+                  <PhoneInput
+                    id="phone"
+                    name="phone"
+                    required
+                    defaultValue={profile.user.phone ?? ''}
+                  />
                 </Field>
                 <Field label="Skype" htmlFor="skype">
                   <Input
@@ -928,6 +942,7 @@ export default async function TesterProfilePage({
                       <DownloadLink
                         fileId={profile.ndaFile.id}
                         name={profile.ndaFile.originalName}
+                        basePath="/app/tester/download"
                       />
                     ) : (
                       'Not uploaded'
@@ -954,7 +969,7 @@ export default async function TesterProfilePage({
               {ndaTemplate ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                   <Muted>Blank copy to print and sign</Muted>
-                  <DownloadLink fileId={ndaTemplate.fileId} name={ndaTemplate.name} />
+                  <DownloadLink fileId={ndaTemplate.fileId} name={ndaTemplate.name} basePath="/app/tester/download" />
                 </div>
               ) : null}
             </div>
@@ -1368,7 +1383,11 @@ export default async function TesterProfilePage({
                       title={[row.browser.name, row.browserVersion?.version]
                         .filter(Boolean)
                         .join(' ')}
-                      meta={row.operatingSystem?.name ?? 'Any operating system'}
+                      meta={
+                        row.osVersionRef
+                          ? `${row.osVersionRef.operatingSystem.name} ${row.osVersionRef.version}`
+                          : (row.operatingSystem?.name ?? 'Any operating system')
+                      }
                       actions={
                         <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
                           <Button
@@ -1440,6 +1459,20 @@ export default async function TesterProfilePage({
                       options={[{ value: '', label: 'Any operating system' }, ...osOptions]}
                     />
                   </Field>
+                  {osVersionOptions.length > 0 ? (
+                    <Field
+                      label="Operating system version"
+                      htmlFor="browserOsVersionRefId"
+                      hint="Optional. Picking one also sets the operating system above."
+                    >
+                      <Select
+                        id="browserOsVersionRefId"
+                        name="browserOsVersionRefId"
+                        defaultValue=""
+                        options={[{ value: '', label: 'Any version' }, ...osVersionOptions]}
+                      />
+                    </Field>
+                  ) : null}
                 </div>
                 <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
                   <SubmitButton variant="primary" iconLeft="plus" pendingLabel="Adding…">
@@ -1491,6 +1524,20 @@ export default async function TesterProfilePage({
                     options={[{ value: '', label: 'Any operating system' }, ...osOptions]}
                   />
                 </Field>
+                {osVersionOptions.length > 0 ? (
+                  <Field
+                    label="Operating system version"
+                    htmlFor={`browserOsVersionRefId-${row.id}`}
+                    hint="Optional. Picking one also sets the operating system above."
+                  >
+                    <Select
+                      id={`browserOsVersionRefId-${row.id}`}
+                      name="browserOsVersionRefId"
+                      defaultValue={row.osVersionRef?.id ?? ''}
+                      options={[{ value: '', label: 'Any version' }, ...osVersionOptions]}
+                    />
+                  </Field>
+                ) : null}
                 <div>
                   <SubmitButton variant="primary" pendingLabel="Saving…">
                     Save browser
@@ -1742,8 +1789,15 @@ export default async function TesterProfilePage({
                 <Table
                   columns={assignmentColumns}
                   rows={[...assignments].filter((a) => a.project !== null)}
-                  rowKey={(row) => row.project!.id}
-                  rowHref={(row) => `/app/tester/projects/${row.project!.id}`}
+                  // Project + build together — a tester can hold two rows on
+                  // the same project (one per build) since project id alone
+                  // would collide.
+                  rowKey={(row) => `${row.project!.id}:${row.build?.id ?? 'none'}`}
+                  rowHref={(row) =>
+                    row.build
+                      ? `/app/tester/projects/${row.project!.id}?buildId=${row.build.id}`
+                      : `/app/tester/projects/${row.project!.id}`
+                  }
                 />
               )}
             </Panel>

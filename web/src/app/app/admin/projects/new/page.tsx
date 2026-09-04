@@ -37,8 +37,21 @@ interface OrganisationOption {
   name: string
 }
 
-export default async function NewProjectPage() {
+const CREATE_ERRORS: Record<string, string> = {
+  forbidden: 'You do not have permission to create a project for that organisation.',
+  invalid: 'Some values were not accepted. Check the organisation, dates and targets.',
+  failed: 'The project could not be created. Try again in a moment.',
+}
+
+export default async function NewProjectPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>
+}) {
   await requirePermission('project.write')
+
+  const { error } = await searchParams
+  const createError = error ? (CREATE_ERRORS[error] ?? CREATE_ERRORS.failed) : null
 
   /**
    * The list of organisations an admin can choose from. Failures are
@@ -74,6 +87,20 @@ export default async function NewProjectPage() {
         description="The minimum needed to open a project. Start date defaults to today; end date to one month later."
       >
         <TrackedForm action={createProjectAction} style={formStyle}>
+          {createError ? (
+            <p
+              role="alert"
+              style={{
+                margin: 0,
+                padding: 'var(--space-4) var(--space-5)',
+                borderRadius: 'var(--radius-card)',
+                background: 'var(--status-error-bg)',
+                color: 'var(--status-error-fg)',
+              }}
+            >
+              {createError}
+            </p>
+          ) : null}
           <Field
             label="Organisation"
             htmlFor="organisationId"

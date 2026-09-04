@@ -37,6 +37,10 @@ export async function saveProfile(formData: FormData): Promise<void> {
   const timezone = formTrimmed(formData, 'timezone')
 
   if (!firstName) back('name_required', 'error')
+  // The form marks this required, but a form is not a security boundary — and
+  // `users/me` accepts an absent phone, so without this a hand-built post
+  // would still blank it.
+  if (!phone) back('phone_required', 'error')
   if (countryCode && countryCode.length !== 2) back('country_code', 'error')
 
   const body: Record<string, string> = { firstName, lastName, phone, timezone }

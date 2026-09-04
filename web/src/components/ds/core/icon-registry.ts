@@ -5,11 +5,13 @@ import {
   ArrowLeft,
   ArrowRight,
   BadgeCheck,
+  Award,
   Banknote,
   Bell,
   Bold,
   BookOpen,
   Bot,
+  Bug,
   Captions,
   Briefcase,
   Building2,
@@ -109,6 +111,7 @@ import {
   Pencil,
   Trash2,
   Upload,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -152,6 +155,12 @@ export const ICON_REGISTRY = {
   'chevron-right': ChevronRight,
   'circle-help': CircleHelp,
   clapperboard: Clapperboard,
+  // Badge catalogue icons — see the seeded `Badge` rows in the API. An
+  // unregistered name renders nothing at all, so a badge whose icon is not
+  // here shows as an unexplained gap on the tester's dashboard.
+  award: Award,
+  bug: Bug,
+  zap: Zap,
   'clipboard-check': ClipboardCheck,
   clock: Clock,
   cloud: Cloud,

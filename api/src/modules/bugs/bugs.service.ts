@@ -1,4 +1,10 @@
-import { type Prisma, BugStatus, type BugSeverity, OrgMemberRole } from '@prisma/client'
+import {
+  type Prisma,
+  BugStatus,
+  type BugSeverity,
+  OrgMemberRole,
+  AssignmentStatus,
+} from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, ForbiddenError, BadRequestError, ConflictError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
@@ -342,10 +348,25 @@ export async function createBug(
     throw new ConflictError('This project is not currently accepting bug reports')
   }
 
-  // The tester portal has no build switcher — a report always lands on the
-  // project's default build unless a build-aware caller (the admin panel)
-  // names one explicitly.
   const buildId = await resolveBuildId(projectId, requestedBuildId)
+
+  // `bug.create` only ever comes from `project:tester_active`, i.e. the
+  // caller is a tester active on SOME build of this project — but that does
+  // not mean THIS build. A tester can now hold several assignment rows on
+  // one project, so the specific build being written to needs its own,
+  // separate check: an accepted/active row for exactly this `buildId`.
+  const activeOnThisBuild = await prisma.projectAssignment.findFirst({
+    where: {
+      projectId,
+      buildId,
+      testerId: user.id,
+      status: { in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE] },
+    },
+    select: { id: true },
+  })
+  if (!activeOnThisBuild) {
+    throw new ForbiddenError('You are not assigned to that build')
+  }
 
   if (attachmentFileIds.length > 0) {
     const files = await prisma.fileObject.findMany({

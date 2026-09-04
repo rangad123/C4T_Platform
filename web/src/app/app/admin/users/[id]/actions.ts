@@ -219,8 +219,24 @@ export async function archiveUserAccount(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   if (!id) return
 
-  await actionFetch<unknown>(`users/${id}`, { method: 'DELETE' })
+  /*
+    On failure the reader stays on the account with a reason, rather than
+    being sent to the list as though the archive had worked.
+  */
+  let failed: string | null = null
+  try {
+    await actionFetch<unknown>(`users/${id}`, { method: 'DELETE' })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    failed =
+      code === 403
+        ? 'archive-forbidden'
+        : code === 409 || code === 400
+          ? 'archive-blocked'
+          : 'archive-failed'
+  }
 
   revalidateUser(id)
+  if (failed) redirect(`${LIST_PATH}/${id}?notice=${failed}`)
   redirect(LIST_PATH)
 }

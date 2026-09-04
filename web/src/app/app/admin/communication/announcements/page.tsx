@@ -9,7 +9,15 @@ import type { TableColumn } from '@/components/ds/admin/Table'
 import { CommunicationTabs } from '../tabs'
 
 const PAGE_SIZE = 25
-const BASE = '/app/admin/communication'
+/**
+ * This list's own path — NOT `/app/admin/communication`.
+ *
+ * `pageHrefBuilder` builds the pagination links from this, so pointing it at
+ * the module root meant "next page" of the announcements list navigated out of
+ * announcements entirely, landing on whatever the module's landing page
+ * happened to be.
+ */
+const BASE = '/app/admin/communication/announcements'
 
 interface AnnouncementRow {
   id: string
@@ -47,7 +55,7 @@ const AUDIENCE_TONE: Record<string, 'neutral' | 'brand' | 'info' | 'accent'> = {
 export default async function CommunicationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>
+  searchParams: Promise<{ page?: string; deleted?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
@@ -139,14 +147,30 @@ export default async function CommunicationPage({
         /* The cross-links that used to live here — broadcast, threads,
            templates — are the section tabs above now. What stays is the one
            action that belongs to this list rather than to the module. */
-        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-          <Button
-            href="/app/admin/communication/announcements/new"
-            variant="primary"
-            iconLeft="plus"
-          >
-            Compose announcement
-          </Button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {params.deleted ? (
+            <p
+              role="status"
+              style={{
+                margin: 0,
+                padding: 'var(--space-4) var(--space-5)',
+                borderRadius: 'var(--radius-card)',
+                background: 'var(--status-success-bg)',
+                color: 'var(--status-success-fg)',
+              }}
+            >
+              Announcement deleted.
+            </p>
+          ) : null}
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Button
+              href="/app/admin/communication/announcements/new"
+              variant="primary"
+              iconLeft="plus"
+            >
+              Compose announcement
+            </Button>
+          </div>
         </div>
       }
     />

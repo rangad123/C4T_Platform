@@ -116,7 +116,7 @@ export default async function CrowdtestersPage({
           <Field
             label="Search"
             htmlFor="search"
-            hint="Matches headline, profession and skills."
+            hint="Matches name, headline, profession and skills."
             style={{ flex: '2 1 240px' }}
           >
             <Input

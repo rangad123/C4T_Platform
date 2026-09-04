@@ -23,6 +23,18 @@ import { formTrimmed } from '@/lib/form-data'
 const DETAIL_BASE = '/app/tester/bugs'
 const PROJECTS_PATH = '/app/tester/projects'
 
+const SEVERITIES: readonly string[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+const REPRODUCIBILITIES: readonly string[] = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE']
+const BUG_TYPES: readonly string[] = [
+  'CRASH',
+  'APP_FREEZE',
+  'FUNCTIONAL',
+  'UI',
+  'UX',
+  'SECURITY',
+  'PERFORMANCE',
+]
+
 function detailPath(id: string): string {
   return `${DETAIL_BASE}/${id}`
 }
@@ -96,6 +108,93 @@ export async function moveBugStatus(formData: FormData): Promise<void> {
   if (reason) redirect(failurePath(id, 'status', reason))
 
   revalidatePath(`${DETAIL_BASE}/${id}`)
+  revalidatePath(detailPath(id))
+  redirect(detailPath(id))
+}
+
+/**
+ * Correct the report itself — everything `updateBugSchema` allows a
+ * reporter to touch. The API is what actually enforces the "still NEW"
+ * window (`canReporterEdit`); the page only shows the "Edit" button when
+ * `capabilities.canEdit` said so, and this action re-posts whatever the
+ * modal held, exactly like `moveBugStatus` above.
+ *
+ * Every field is sent, blank or not — same reasoning as
+ * `updateBasicInfoAction` on the tester profile: omitting a cleared field
+ * would silently leave the old value in place instead of erasing it. The
+ * exception is `occurrence`/`outOf`, which the schema has no way to null out
+ * (`z.coerce.number().optional()`, not nullable) — so, as on creation, they
+ * are sent only as a matched pair and otherwise left untouched.
+ */
+export async function updateBugAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const id = formTrimmed(formData, 'id')
+  if (!id) redirect(PROJECTS_PATH)
+
+  const title = formTrimmed(formData, 'title')
+  const description = formTrimmed(formData, 'description')
+  const stepsToReproduce = formTrimmed(formData, 'stepsToReproduce')
+  const expectedResult = formTrimmed(formData, 'expectedResult')
+  const actualResult = formTrimmed(formData, 'actualResult')
+  const preCondition = formTrimmed(formData, 'preCondition')
+  const videoUrl = formTrimmed(formData, 'videoUrl')
+  const featureId = formTrimmed(formData, 'featureId')
+  const deviceModel = formTrimmed(formData, 'deviceModel')
+  const osName = formTrimmed(formData, 'osName')
+  const osVersion = formTrimmed(formData, 'osVersion')
+  const browser = formTrimmed(formData, 'browser')
+  const appVersion = formTrimmed(formData, 'appVersion')
+  const networkType = formTrimmed(formData, 'networkType')
+
+  const severityInput = formTrimmed(formData, 'severity')
+  const severity = SEVERITIES.includes(severityInput) ? severityInput : undefined
+  const reproInput = formTrimmed(formData, 'reproducibility')
+  const reproducibility = REPRODUCIBILITIES.includes(reproInput) ? reproInput : undefined
+  const typeInput = formTrimmed(formData, 'type')
+  const type = typeInput && BUG_TYPES.includes(typeInput) ? typeInput : null
+
+  const occurrenceRaw = formTrimmed(formData, 'occurrence')
+  const outOfRaw = formTrimmed(formData, 'outOf')
+  if (Boolean(occurrenceRaw) !== Boolean(outOfRaw)) {
+    redirect(failurePath(id, 'report', 'occurrence-pair'))
+  }
+  const occurrence = occurrenceRaw ? Number(occurrenceRaw) : undefined
+  const outOf = outOfRaw ? Number(outOfRaw) : undefined
+  if (occurrence !== undefined && outOf !== undefined && occurrence > outOf) {
+    redirect(failurePath(id, 'report', 'occurrence-range'))
+  }
+
+  let reason: string | null = null
+  try {
+    await actionFetch(`bugs/${id}`, {
+      method: 'PATCH',
+      body: {
+        title,
+        description,
+        stepsToReproduce,
+        expectedResult,
+        actualResult,
+        preCondition,
+        videoUrl,
+        featureId: featureId || null,
+        type,
+        deviceModel,
+        osName,
+        osVersion,
+        browser,
+        appVersion,
+        networkType,
+        ...(severity ? { severity } : {}),
+        ...(reproducibility ? { reproducibility } : {}),
+        ...(occurrence !== undefined && outOf !== undefined ? { occurrence, outOf } : {}),
+      },
+    })
+  } catch (error) {
+    reason = reasonFor(error)
+  }
+  if (reason) redirect(failurePath(id, 'report', reason))
+
   revalidatePath(detailPath(id))
   redirect(detailPath(id))
 }

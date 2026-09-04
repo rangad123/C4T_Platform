@@ -57,6 +57,12 @@ const BASE = '/app/admin/users'
 
 const NOTICES: Record<string, NoticeCopy> = {
   'identity-saved': { tone: 'success', message: 'Identity updated.' },
+  'archive-forbidden': { tone: 'error', message: 'This account is not yours to archive.' },
+  'archive-blocked': {
+    tone: 'error',
+    message: 'This account cannot be archived — it may be the last administrator.',
+  },
+  'archive-failed': { tone: 'error', message: 'The account could not be archived. Try again.' },
   'role-saved': { tone: 'success', message: 'Role updated.' },
   'status-saved': { tone: 'success', message: 'Status updated.' },
   'permissions-saved': { tone: 'success', message: 'Permissions updated.' },

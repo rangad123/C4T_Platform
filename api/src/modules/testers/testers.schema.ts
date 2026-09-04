@@ -40,6 +40,12 @@ export const listTestersQuery = paginationQuery.extend({
     ),
   deviceType: z.nativeEnum(DeviceType).optional(),
   minRating: z.coerce.number().min(0).max(5).optional(),
+  /** Free text — `city` is typed by the tester, so there is no code to match on. */
+  city: z.string().trim().max(120).optional(),
+  /** Matched against a tester's devices AND their browsers' operating systems. */
+  osName: z.string().trim().max(60).optional(),
+  /** Matched against the browsers a tester has registered under Assets. */
+  browser: z.string().trim().max(80).optional(),
   search: z.string().trim().max(120).optional(),
   sort: z.enum(TESTER_SORT_FIELDS).optional(),
 })
@@ -222,5 +228,39 @@ export const discoverTestersQuery = paginationQuery.extend({
     ),
 })
 
+/**
+ * The assignment picker's read: the same tester filters, plus the build whose
+ * roster each result is reported against.
+ *
+ * `buildId` is required rather than optional. Without it the endpoint would
+ * answer a subtly different question — "testers" rather than "testers I could
+ * put on this build" — and the caller would have no way to tell an
+ * already-invited tester from a fresh one.
+ */
+export const assignmentCandidatesQuery = listTestersQuery.extend({
+  buildId: z.string().cuid(),
+})
+
 export type ListTestersQuery = z.infer<typeof listTestersQuery>
+export type AssignmentCandidatesQuery = z.infer<typeof assignmentCandidatesQuery>
+
+/**
+ * The filter vocabulary shared by the admin tester list and the
+ * assignment-candidate picker. Derived from `listTestersQuery` rather than
+ * declared separately, so a filter can never exist on one and not the other
+ * without the compiler saying so.
+ */
+export type TesterFilterQuery = Pick<
+  ListTestersQuery,
+  | 'status'
+  | 'countryCode'
+  | 'city'
+  | 'minRating'
+  | 'deviceType'
+  | 'languages'
+  | 'osName'
+  | 'browser'
+  | 'skills'
+  | 'search'
+>
 export type ListGlobalDevicesQuery = z.infer<typeof listGlobalDevicesQuery>

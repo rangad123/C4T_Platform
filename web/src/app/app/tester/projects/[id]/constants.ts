@@ -33,8 +33,12 @@ export interface ProjectBuild {
  * not accepted yet, so they get the shape of the work but not the script),
  * `materials` is empty for the same reason and filtered to `activeBuildId`
  * otherwise, `managers` is always empty, and `assignments` holds exactly the
- * caller's own row. `activeBuildId` is the build THIS tester is on — a
- * tester cannot pass `?buildId=` to look at another.
+ * caller's own row FOR THE ACTIVE BUILD. `activeBuildId` is the build
+ * currently selected — a tester can now hold a row on more than one build of
+ * this project, and `?buildId=` picks among the ones they actually hold
+ * (anything else is ignored server-side, falling back to their most
+ * relevant row). `myAssignments` lists every build they hold a row on, for
+ * rendering a switcher — see `BuildSwitcher`.
  */
 export interface ProjectDetail {
   id: string
@@ -68,6 +72,8 @@ export interface ProjectDetail {
     notes: string | null
     tester: Person
   }[]
+  /** Every build this tester holds a row on — the material for a build switcher. */
+  myAssignments: readonly { buildId: string; status: string }[]
   capabilities: {
     canReadBrief: boolean
     canUpdate: boolean

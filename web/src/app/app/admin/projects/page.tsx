@@ -45,6 +45,12 @@ interface ProjectRow {
   organisation: { id: string; name: string; slug: string } | null
   createdBy: { id: string; firstName: string | null; lastName: string | null } | null
   _count: { bugs: number; assignments: number }
+  /**
+   * People, not roster rows — a tester on two builds of this project counts
+   * once here, matching every other headcount on the platform. `_count.
+   * assignments` above stays a literal row count for anything that wants it.
+   */
+  distinctTesterCount: number
 }
 
 /**
@@ -146,7 +152,7 @@ export default async function ProjectsPage({
       key: 'testers',
       header: 'Testers',
       align: 'right',
-      render: (row) => row._count.assignments,
+      render: (row) => row.distinctTesterCount,
     },
     {
       key: 'start',

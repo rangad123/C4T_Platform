@@ -29,6 +29,7 @@ export const runtime = 'nodejs'
 const SCOPES = {
   'platform-document': 'PLATFORM_DOCUMENT',
   'blog-featured-image': 'BLOG_FEATURED_IMAGE',
+  'test-document': 'PROJECT_MATERIAL',
 } as const
 
 /** Matches the API's own `UPLOAD_MAX_BYTES` default. */
@@ -37,11 +38,21 @@ const MAX_BYTES = 52_428_800
 const ALLOWED: Record<keyof typeof SCOPES, readonly string[]> = {
   'platform-document': ['application/pdf'],
   'blog-featured-image': ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+  'test-document': [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/plain',
+    'text/csv',
+  ],
 }
 
 const MIME_ERROR: Record<keyof typeof SCOPES, string> = {
   'platform-document': 'That document has to be a PDF.',
   'blog-featured-image': 'Use a PNG, JPEG, WebP or GIF image.',
+  'test-document': 'Use a PDF, Word, Excel, CSV or plain-text file.',
 }
 
 export async function POST(request: Request): Promise<Response> {

@@ -68,6 +68,7 @@ const NOTICES: Record<string, Notice> = {
   session_revoked: { tone: 'success', text: 'That session has been signed out.' },
 
   name_required: { tone: 'error', text: 'Enter a first name — it cannot be blank.' },
+  phone_required: { tone: 'error', text: 'Enter a phone number — it cannot be blank.' },
   country_code: {
     tone: 'error',
     text: 'Give the country as a two-letter code, for example IN or US.',
@@ -404,8 +405,8 @@ export default async function CustomerProfilePage({
                     autoComplete="family-name"
                   />
                 </Field>
-                <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
-                  <PhoneInput id="phone" name="phone" defaultValue={profile.phone ?? ''} />
+                <Field label="Phone" htmlFor="phone" hint={PHONE_HINT} required>
+                  <PhoneInput id="phone" name="phone" required defaultValue={profile.phone ?? ''} />
                 </Field>
                 <Field
                   label="Country"

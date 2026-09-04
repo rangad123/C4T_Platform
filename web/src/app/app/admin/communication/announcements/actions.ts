@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { actionFetch } from '@/lib/api/action-fetch'
+import { ApiError } from '@/lib/api/types'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 
@@ -20,7 +21,21 @@ import { formTrimmed } from '@/lib/form-data'
  * — which is the one that writes the audit record — is the real boundary.
  */
 
-const LIST_PATH = '/app/admin/communication'
+/**
+ * Where a saved announcement lands — the ANNOUNCEMENTS list, not the module
+ * root. Publishing one and being dropped on a different tab's list, with no
+ * sign of what was just written, reads as though the save failed.
+ */
+const LIST_PATH = '/app/admin/communication/announcements'
+
+/** Turns an API refusal into one of the pages' known reason codes. */
+function failureReason(error: unknown): string {
+  const status = error instanceof ApiError ? error.status : 0
+  if (status === 401 || status === 403) return 'denied'
+  if (status === 404) return 'missing'
+  if (status === 422) return 'invalid'
+  return 'failed'
+}
 
 /** Mirrors the AnnouncementAudience enum in the API's Prisma schema. */
 const AUDIENCES: readonly string[] = ['ALL', 'CUSTOMERS', 'TESTERS', 'ADMINS']
@@ -73,19 +88,128 @@ export async function createAnnouncement(formData: FormData): Promise<void> {
       ? parsedExpiry.toISOString()
       : null
 
-  await actionFetch<{ id: string }>('communication/announcements', {
-    method: 'POST',
-    body: {
-      title,
-      body,
-      audience,
-      publishNow,
-      ...(projectIdInput ? { projectId: projectIdInput } : {}),
-      ...(expiresAt === null ? {} : { expiresAt }),
-    },
-  })
+  /*
+    Wrapped, because an unhandled ApiError from a Server Action reaches Next's
+    error boundary as a crash screen — and takes the composed announcement
+    with it. A refusal here (an expired session, a project the caller cannot
+    post to) is something the writer can act on, so it is carried back to the
+    composer as a message instead.
+  */
+  let reason: string | null = null
+  try {
+    await actionFetch<{ id: string }>('communication/announcements', {
+      method: 'POST',
+      body: {
+        title,
+        body,
+        audience,
+        publishNow,
+        ...(projectIdInput ? { projectId: projectIdInput } : {}),
+        ...(expiresAt === null ? {} : { expiresAt }),
+      },
+    })
+  } catch (error) {
+    reason = failureReason(error)
+  }
 
   revalidatePath(LIST_PATH)
   // Outside any try/catch on purpose — `redirect` works by throwing.
+  if (reason) redirect(`${LIST_PATH}/new?error=${reason}`)
   redirect(LIST_PATH)
+}
+
+/**
+ * Correct an announcement, and publish a draft.
+ *
+ * ── THE THREE GAPS THIS CLOSES
+ *
+ * Announcements could be created and nothing else. A draft could never be
+ * published (the API set `publishedAt` only at create time, and had no PATCH
+ * and no publish route), nothing could be corrected, and although the API has
+ * always had a DELETE route no page ever called it — so the composer's own
+ * warning that an announcement "can only be deleted" pointed at something the
+ * panel could not do either.
+ *
+ * The audience is deliberately NOT editable, and the API refuses the field
+ * outright: notifications go out once, to the recipient set computed from the
+ * audience at publish time, so re-targeting afterwards would leave the
+ * notified set and the visible set disagreeing.
+ */
+export async function updateAnnouncement(formData: FormData): Promise<void> {
+  await requirePermission('announcement.write')
+
+  const id = formTrimmed(formData, 'id')
+  const title = formTrimmed(formData, 'title')
+  const body = formTrimmed(formData, 'body')
+  const expiresAtInput = formTrimmed(formData, 'expiresAt')
+  if (!id || title.length < 3 || body.length === 0) return
+
+  const parsed = expiresAtInput ? new Date(expiresAtInput) : null
+  /*
+    Explicit null clears the expiry; omitting it would mean "leave it alone"
+    to the API's partial schema, so a set expiry could never be removed.
+  */
+  const expiresAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : null
+
+  const detail = `${LIST_PATH}/${id}`
+  let reason: string | null = null
+  try {
+    await actionFetch(`communication/announcements/${id}`, {
+      method: 'PATCH',
+      body: { title, body, expiresAt },
+    })
+  } catch (error) {
+    reason = failureReason(error)
+  }
+
+  revalidatePath(LIST_PATH)
+  revalidatePath(detail)
+  redirect(reason ? `${detail}?edit=1&error=${reason}` : detail)
+}
+
+/**
+ * Publish a draft.
+ *
+ * Separate from editing, because it is a different act: it makes the
+ * announcement visible and notifies every reader in its audience, and that
+ * cannot be undone from here. The page asks before calling this.
+ */
+export async function publishAnnouncement(formData: FormData): Promise<void> {
+  await requirePermission('announcement.write')
+
+  const id = formTrimmed(formData, 'id')
+  if (!id) return
+
+  const detail = `${LIST_PATH}/${id}`
+  let reason: string | null = null
+  try {
+    await actionFetch(`communication/announcements/${id}`, {
+      method: 'PATCH',
+      body: { publishNow: true },
+    })
+  } catch (error) {
+    reason = failureReason(error)
+  }
+
+  revalidatePath(LIST_PATH)
+  revalidatePath(detail)
+  redirect(reason ? `${detail}?error=${reason}` : `${detail}?published=1`)
+}
+
+/** Remove an announcement. The API route existed; nothing ever called it. */
+export async function deleteAnnouncement(formData: FormData): Promise<void> {
+  await requirePermission('announcement.write')
+
+  const id = formTrimmed(formData, 'id')
+  if (!id) return
+
+  let reason: string | null = null
+  try {
+    await actionFetch(`communication/announcements/${id}`, { method: 'DELETE' })
+  } catch (error) {
+    reason = failureReason(error)
+  }
+
+  revalidatePath(LIST_PATH)
+  redirect(reason ? `${LIST_PATH}/${id}?error=${reason}` : `${LIST_PATH}?deleted=1`)
 }

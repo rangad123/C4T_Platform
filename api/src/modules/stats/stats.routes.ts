@@ -171,9 +171,15 @@ statsRouter.get('/customer', async (req, res) => {
         status: { in: [BugStatus.NEW, BugStatus.TRIAGED, BugStatus.CONFIRMED, BugStatus.REOPENED] },
       },
     }),
-    prisma.projectAssignment.count({
-      where: { status: 'ACTIVE', project: { deletedAt: null, ...scope } },
-    }),
+    // Distinct testers, not roster rows — one person active on two builds
+    // across this customer's projects is still one active tester.
+    prisma.projectAssignment
+      .findMany({
+        where: { status: 'ACTIVE', project: { deletedAt: null, ...scope } },
+        select: { testerId: true },
+        distinct: ['testerId'],
+      })
+      .then((rows) => rows.length),
   ])
 
   res.json({

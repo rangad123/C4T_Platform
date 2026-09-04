@@ -4,7 +4,11 @@ import { recordAudit } from '../../lib/audit.js'
 import { validatedQuery } from '../../middleware/validate.js'
 import * as service from './testers.service.js'
 import { isAdminSide } from '../../middleware/authorize.js'
-import type { ListTestersQuery, ListGlobalDevicesQuery } from './testers.schema.js'
+import type {
+  ListTestersQuery,
+  ListGlobalDevicesQuery,
+  AssignmentCandidatesQuery,
+} from './testers.schema.js'
 
 export async function discover(_req: Request, res: Response): Promise<void> {
   const result = await service.discoverTesters(
@@ -52,6 +56,27 @@ export async function discoverEngagements(req: Request, res: Response): Promise<
 export async function list(_req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListTestersQuery>(res)
   const { items, meta } = await service.listTesters(query)
+  res.json({ data: items, meta })
+}
+
+/**
+ * Candidates for one build's roster.
+ *
+ * The build is resolved before the search runs so a `buildId` that does not
+ * exist is a 404 rather than an empty tester list — an empty list reads as
+ * "nobody matches your filters", which would be a lie, and would hide a
+ * caller pointing at a build that was deleted underneath them.
+ */
+export async function assignmentCandidates(_req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<AssignmentCandidatesQuery>(res)
+  const { items, meta } = await service.listAssignmentCandidates(query.buildId, query)
+  res.json({ data: items, meta })
+}
+
+/** The message composer's recipient picker. Lean by design — see the service. */
+export async function messageRecipients(_req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<ListTestersQuery>(res)
+  const { items, meta } = await service.listMessageRecipients(query)
   res.json({ data: items, meta })
 }
 

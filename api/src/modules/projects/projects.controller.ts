@@ -124,6 +124,7 @@ export async function assignTesters(req: Request, res: Response): Promise<void> 
     req.body.testerIds,
     req.body.notes,
     req.body.buildId,
+    req.body.configurations,
   )
   await recordAudit({
     req,
@@ -139,6 +140,7 @@ export async function respondToAssignment(req: Request, res: Response): Promise<
   const assignment = await service.respondToAssignment(
     req.user!.id,
     param(req, 'id'),
+    req.body.buildId as string,
     req.body.response as 'ACCEPTED' | 'DECLINED',
     req.body.notes,
   )
@@ -148,6 +150,7 @@ export async function respondToAssignment(req: Request, res: Response): Promise<
 export async function updateAssignment(req: Request, res: Response): Promise<void> {
   const assignment = await service.updateAssignment(
     param(req, 'id'),
+    req.body.buildId as string,
     param(req, 'testerId'),
     req.body.status,
     req.body.notes,

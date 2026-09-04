@@ -2,7 +2,17 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+import { ApiError } from '@/lib/api/types'
+/**
+ * `actionFetch`, not `serverFetch`.
+ *
+ * The access cookie lives 15 minutes. `serverFetch` cannot refresh it — it
+ * has no way to persist a rotated cookie — so a Server Action using it simply
+ * fails once the reader has had the page open longer than that, with no
+ * retry. `actionFetch` refreshes and retries once. Every other Server Action
+ * in this app already uses it; these did not.
+ */
+import { actionFetch } from '@/lib/api/action-fetch'
 import { getUser } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { parseCommaList } from '@/lib/admin/csv'
@@ -54,10 +64,30 @@ export async function createProjectAction(formData: FormData): Promise<void> {
     ...(maxTesters ? { maxTesters } : {}),
   }
 
-  const { id } = await serverFetch<ProjectResponse>('projects', {
-    method: 'POST',
-    body,
-  })
+  /*
+    The create is fatal — with no project there is nowhere to send the reader
+    — so a refusal returns them to the form with the reason rather than
+    replacing it with Next's crash screen and losing everything typed.
+
+    The `testType` follow-up below is deliberately NOT fatal, and already
+    wasn't: the project exists either way, and losing it over one optional
+    field would be the worse outcome.
+  */
+  let id: string
+  try {
+    ;({ id } = await actionFetch<ProjectResponse>('projects', { method: 'POST', body }))
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    redirect(
+      `/app/admin/projects/new?error=${
+        code === 403
+          ? 'forbidden'
+          : code === 400 || code === 422
+            ? 'invalid'
+            : 'failed'
+      }`,
+    )
+  }
 
   /**
    * Type of testing belongs to the BUILD, not the project.
@@ -76,10 +106,10 @@ export async function createProjectAction(formData: FormData): Promise<void> {
   let notice = ''
   if (testType) {
     try {
-      const detail = await serverFetch<ProjectBuilds>(`projects/${id}`)
+      const detail = await actionFetch<ProjectBuilds>(`projects/${id}`)
       const buildId = detail.builds?.find((b) => b.isDefault)?.id ?? detail.builds?.[0]?.id
       if (!buildId) throw new Error('no build on the new project')
-      await serverFetch(`projects/${id}/builds/${buildId}`, {
+      await actionFetch(`projects/${id}/builds/${buildId}`, {
         method: 'PATCH',
         body: { testType },
       })

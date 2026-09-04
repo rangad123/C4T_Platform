@@ -71,14 +71,30 @@ export async function updateBasicInfoAction(formData: FormData): Promise<void> {
   const experienceYears = formTrimmed(formData, 'experienceYears')
   const countryCode = formTrimmed(formData, 'countryCode')
 
+  /*
+    Refused, not skipped.
+
+    This used to write the account half only `if (firstName && phone)`, so a
+    blank phone silently dropped the name change too — and the page still
+    reported "Your profile is up to date." The profile half saved, the account
+    half did not, and nothing said so. A form marked required is not a
+    security boundary either: `users/me` accepts an absent phone, so a
+    hand-built post could still blank it. The customer profile already checks
+    both this way; this one did not.
+  */
+  if (!firstName) {
+    redirect(`${PROFILE_PATH}?notice=name-required`)
+  }
+  if (!phone) {
+    redirect(`${PROFILE_PATH}?notice=phone-required`)
+  }
+
   let notice = 'about-saved'
   try {
-    if (firstName) {
-      await actionFetch('users/me', {
-        method: 'PATCH',
-        body: { firstName, lastName, phone },
-      })
-    }
+    await actionFetch('users/me', {
+      method: 'PATCH',
+      body: { firstName, lastName, phone },
+    })
 
     await actionFetch('testers/me', {
       method: 'PATCH',
@@ -127,8 +143,15 @@ export async function setNdaDocumentAction(formData: FormData): Promise<void> {
   const fileId = formTrimmed(formData, 'fileId')
   if (!fileId) return
 
-  await actionFetch('testers/me/nda/document', { method: 'POST', body: { fileId } })
+  let notice = 'nda-document-saved'
+  try {
+    await actionFetch('testers/me/nda/document', { method: 'POST', body: { fileId } })
+  } catch (error) {
+    notice = failureNotice(error)
+  }
+
   revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?notice=${notice}`)
 }
 
 /** Sets the account avatar from an already-uploaded file. */
@@ -138,8 +161,15 @@ export async function setAvatarAction(formData: FormData): Promise<void> {
   const fileId = formTrimmed(formData, 'fileId')
   if (!fileId) return
 
-  await actionFetch('users/me', { method: 'PATCH', body: { avatarFileId: fileId } })
+  let notice = 'avatar-saved'
+  try {
+    await actionFetch('users/me', { method: 'PATCH', body: { avatarFileId: fileId } })
+  } catch (error) {
+    notice = failureNotice(error)
+  }
+
   revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?notice=${notice}`)
 }
 
 /**
@@ -262,6 +292,12 @@ function browserBody(formData: FormData): Record<string, unknown> | null {
 
   const browserVersionId = formTrimmed(formData, 'browserVersionId')
   const operatingSystemId = formTrimmed(formData, 'operatingSystemId')
+  // The form field is named `browserOsVersionRefId`, not `osVersionRefId` —
+  // the device form on this same page already has a field with that bare
+  // name, and two elements sharing one `id` breaks `getElementById` and the
+  // `<label htmlFor>` association for both of them. The API's own field name
+  // is unaffected; only this page's internal wiring needed the prefix.
+  const osVersionRefId = formTrimmed(formData, 'browserOsVersionRefId')
 
   return {
     browserId,
@@ -270,6 +306,11 @@ function browserBody(formData: FormData): Record<string, unknown> | null {
     // old one in place.
     browserVersionId: browserVersionId || null,
     operatingSystemId: operatingSystemId || null,
+    // A specific (OS, version) pair — "Windows 11" rather than just
+    // "Windows". When set, the API derives `operatingSystemId` from it, so
+    // whatever `operatingSystemId` above holds is only what actually applies
+    // when this is left unset.
+    osVersionRefId: osVersionRefId || null,
   }
 }
 
@@ -474,8 +515,15 @@ export async function removeWorkHistoryAction(formData: FormData): Promise<void>
 
 export async function acceptNdaAction(_formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
-  await actionFetch('testers/me/nda', { method: 'POST', body: { accepted: true } })
+  let notice = 'nda-accepted'
+  try {
+    await actionFetch('testers/me/nda', { method: 'POST', body: { accepted: true } })
+  } catch (error) {
+    notice = failureNotice(error)
+  }
+
   revalidatePath(PROFILE_PATH)
+  redirect(`${PROFILE_PATH}?notice=${notice}`)
 }
 
 const PAYMENT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const

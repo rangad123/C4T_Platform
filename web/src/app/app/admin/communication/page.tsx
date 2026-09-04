@@ -1,259 +1,260 @@
-import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
-import { Avatar } from '@/components/admin/Avatar'
-import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Panel } from '@/components/admin/Panel'
-import { TemplatePicker } from '@/components/admin/TemplatePicker'
-import { SubmitButton } from '@/components/ds/core/SubmitButton'
-import { Field } from '@/components/ds/forms/Field'
-import { Input } from '@/components/ds/forms/Input'
-import { Textarea } from '@/components/ds/forms/Textarea'
+import { Badge } from '@/components/ds/core/Badge'
+import { Button } from '@/components/ds/core/Button'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { personName, searchTerm, hasFilter, formatRating } from '@/lib/admin/format'
-import { serverFetchOrNull } from '@/lib/api/server'
+import { searchTerm } from '@/lib/admin/format'
+import { requirePermission } from '@/lib/auth/session'
 import type { TableColumn } from '@/components/ds/admin/Table'
-import { sendBroadcastAction } from './broadcast-actions'
 import { CommunicationTabs } from './tabs'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/communication'
-const STATUSES = ['APPLIED', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED', 'SUSPENDED'] as const
-const SORT_OPTIONS = [
-  { value: 'ratingAverage', label: 'Rating' },
-  { value: 'createdAt', label: 'Applied' },
-  { value: 'bugsReportedCount', label: 'Bugs reported' },
-] as const
-const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
+const TABS = ['SENT', 'DRAFT'] as const
 
-interface TesterRow {
+interface BroadcastRow {
   id: string
-  status: string
-  headline: string | null
-  /** Prisma Decimal — arrives as a STRING. Never call .toFixed() on it directly. */
-  ratingAverage: string | number | null
-  ratingCount: number
-  bugsReportedCount: number
-  user: {
-    id: string
-    email: string
-    firstName: string | null
-    lastName: string | null
-    avatarFileId: string | null
-  }
+  subject: string | null
+  body: string
+  status: 'DRAFT' | 'SENT'
+  sentAt: string | null
+  createdAt: string
+  updatedAt: string
+  template: { id: string; name: string } | null
+  _count: { recipients: number }
+  /** Derived from `ThreadParticipant.lastReadAt`. Never stored, never guessed. */
+  readCount: number
 }
 
 /**
- * `/app/admin/communication` — send one message to many testers.
+ * `/app/admin/communication` — everything you have sent, and everything you
+ * have not sent yet.
  *
- * This is the module's landing page. Opening Communication almost always means
- * wanting to say something, so the composer is the first thing on screen and
- * the recipient picker sits directly under it; the archive of past
- * announcements, the thread list and the templates are one tab away.
+ * ── WHY THE LANDING PAGE IS A LIST AND NOT THE COMPOSER
  *
- * There is no group-broadcast entity on the API — this composes the same
- * `POST /threads` call the one-to-one messaging UI would use, once per
- * selected tester, so each recipient gets a private conversation with the
- * sender rather than a shared group thread. See `sendBroadcastAction` for
- * why that fan-out shape was chosen over one big thread.
+ * It used to be the composer: a textarea above a paginated table of every
+ * tester, with a checkbox column. That screen could only answer one question
+ * ("who do I send this to right now") and had no answer at all for the one
+ * asked far more often — "what did I send, to whom, and did they read it".
+ * Nothing recorded a send, so nothing could.
  *
- * Selection is checkbox-per-row via the native `form="broadcast-form"`
- * attribute — the checkboxes live inside the table `AdminListPage` renders,
- * the compose form lives beside it, and the browser submits both together
- * without any client-side state. Selection only covers the current page:
- * there is no cross-page "select all 400 testers" here, matching the same
- * scoping the bulk bug-status action uses.
+ * Now the archive is the landing page and composing is a route of its own,
+ * because sending is a task with steps and reading back what you sent is a
+ * list. `Broadcast` is what made this possible: it owns the private threads
+ * it created, so a row here is one message rather than N unrelated
+ * conversations that happen to share a timestamp.
+ *
+ * ── WHAT THE COLUMNS DO NOT SAY
+ *
+ * There is no "delivered" and no "pending". Nothing in this platform observes
+ * either, and a column that always reads 100% is not information. Recipients
+ * is how many threads were created; Read is how many of those people have
+ * actually opened theirs, taken live from `ThreadParticipant.lastReadAt`. A
+ * failure is reported per recipient on the message itself, where the reason
+ * can be shown.
  */
-export default async function BroadcastPage({
+export default async function CommunicationPage({
   searchParams,
 }: {
   searchParams: Promise<{
+    tab?: string
     search?: string
-    status?: string
-    sort?: string
-    order?: string
     page?: string
-    sent?: string
-    of?: string
+    deleted?: string
+    error?: string
   }>
 }) {
   await requirePermission('communication.read')
 
   const params = await searchParams
+  const tab = TABS.includes(params.tab as (typeof TABS)[number])
+    ? (params.tab as (typeof TABS)[number])
+    : 'SENT'
   const search = searchTerm(params.search)
-  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
-    ? params.status
-    : 'VERIFIED'
-  const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
-    ? params.sort
-    : 'ratingAverage'
-  const order = params.order === 'asc' ? 'asc' : 'desc'
   const page = parsePage(params.page)
-  const sentNotice =
-    params.sent !== undefined && params.of !== undefined
-      ? { sent: Number(params.sent), of: Number(params.of) }
-      : null
-  const templates =
-    await serverFetchOrNull<
-      readonly { id: string; name: string; subject: string | null; body: string }[]
-    >('communication/templates')
 
-  const result = await loadList<TesterRow>('testers', {
+  const result = await loadList<BroadcastRow>('communication/broadcasts', {
     page,
     limit: PAGE_SIZE,
-    query: { search, status, sort, order },
+    query: { status: tab, search },
   })
 
-  const columns: readonly TableColumn<TesterRow>[] = [
+  const columns: readonly TableColumn<BroadcastRow>[] = [
     {
-      key: 'select',
-      header: '',
-      width: 36,
-      render: (row) => (
-        <input
-          type="checkbox"
-          name="testerIds"
-          value={row.user.id}
-          form="broadcast-form"
-          aria-label={`Select ${personName(row.user)}`}
-          style={{ margin: 0, cursor: 'pointer' }}
-        />
-      ),
+      key: 'subject',
+      header: 'Message',
+      render: (row) => row.subject?.trim() || 'No subject',
+      // The first line of the body, so a subject-less message is still
+      // recognisable without opening it.
+      renderSecondary: (row) => firstLine(row.body),
     },
     {
-      key: 'name',
-      header: 'Tester',
-      render: (row) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <Avatar name={personName(row.user)} fileId={row.user.avatarFileId} size="sm" />
-          {personName(row.user)}
-        </span>
-      ),
-      renderSecondary: (row) => row.user.email,
-    },
-    { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
-    {
-      key: 'rating',
-      header: 'Rating',
+      key: 'recipients',
+      header: 'Recipients',
       align: 'right',
-      render: (row) => formatRating(row.ratingAverage, { suffix: false }),
-      renderSecondary: (row) => (row.ratingCount > 0 ? `${row.ratingCount} reviews` : undefined),
+      render: (row) => row._count.recipients,
     },
     {
-      key: 'bugs',
-      header: 'Bugs reported',
+      key: 'read',
+      header: 'Read',
       align: 'right',
-      render: (row) => row.bugsReportedCount,
+      /*
+        Only meaningful once something has been sent. A draft shows an em dash
+        rather than "0 read", which would imply it went out and nobody opened
+        it.
+      */
+      render: (row) => (row.status === 'SENT' ? row.readCount : '—'),
+      renderSecondary: (row) =>
+        row.status === 'SENT' && row._count.recipients > 0
+          ? `of ${row._count.recipients}`
+          : undefined,
+    },
+    {
+      key: 'template',
+      header: 'Template',
+      render: (row) => row.template?.name ?? '—',
+    },
+    {
+      key: 'when',
+      header: tab === 'SENT' ? 'Sent' : 'Last edited',
+      align: 'right',
+      render: (row) => formatWhen(row.status === 'SENT' ? row.sentAt : row.updatedAt),
     },
   ]
 
-  /*
-    The composer is declared before the recipient list so the table below it
-    reads as "now choose who gets this" — but the <form> tag itself only has
-    to exist somewhere in the DOM for the table's checkboxes to target it via
-    `form="broadcast-form"`, and tag order does not affect that association.
-
-    It goes through `toolbar` rather than beside the shell so that it renders
-    inside <main>, under the topbar and the section tabs, instead of above
-    them.
-  */
-  const compose = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-      {sentNotice ? (
-        <div
-          role="status"
-          style={{
-            padding: 'var(--space-4) var(--space-5)',
-            borderRadius: 'var(--radius-card)',
-            background: 'var(--status-success-bg)',
-            color: 'var(--status-success-fg)',
-          }}
-        >
-          Sent to {sentNotice.sent} of {sentNotice.of} selected tester
-          {sentNotice.of === 1 ? '' : 's'}
-          {sentNotice.sent < sentNotice.of
-            ? ' — the rest could not be reached, most likely because the account changed between loading this page and sending.'
-            : '.'}
-        </div>
-      ) : null}
-
-      <Panel
-        title="Compose"
-        description="Sent as a private one-to-one conversation with each tester you select below — nobody sees who else received it."
-        actions={
-          templates && templates.length > 0 ? (
-            <TemplatePicker templates={templates} subjectFieldId="subject" bodyFieldId="message" />
-          ) : undefined
-        }
-      >
-        <form
-          id="broadcast-form"
-          action={sendBroadcastAction}
-          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
-        >
-          <Field label="Subject" htmlFor="subject" hint="Optional.">
-            <Input
-              id="subject"
-              name="subject"
-              maxLength={200}
-              placeholder="Update on this week's builds"
-            />
-          </Field>
-          <Field label="Message" htmlFor="message" required>
-            <Textarea
-              id="message"
-              name="message"
-              rows={5}
-              required
-              maxLength={5000}
-              placeholder="What you want every selected tester to know."
-            />
-          </Field>
-          <div>
-            <SubmitButton variant="primary" iconLeft="message-square" pendingLabel="Sending…">
-              Send to selected testers
-            </SubmitButton>
-          </div>
-        </form>
-      </Panel>
-    </div>
-  )
+  const notice = params.deleted
+    ? { tone: 'success' as const, text: 'Draft deleted.' }
+    : params.error
+      ? { tone: 'error' as const, text: params.error }
+      : null
 
   return (
     <AdminListPage
       eyebrow="Operations"
       title="Communication"
-      description="Write the message first, then pick who receives it. Verified testers are listed by default — widen the status filter to reach applicants or suspended accounts."
+      description="Messages you have sent to testers, and the drafts you have not. Each recipient gets a private conversation, so a reply comes back as an ordinary thread."
       crumbs={[{ label: 'Communication' }]}
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
-      hrefFor={pageHrefBuilder(BASE, { search, status, sort, order })}
-      filtered={hasFilter([search, status !== 'VERIFIED' ? status : undefined])}
-      permission="tester.read"
-      emptyIcon="users"
-      emptyTitle="No testers match"
-      emptyDescription="Widen the status filter or clear the search to find recipients."
-      tabs={<CommunicationTabs active="compose" />}
+      rowHref={(row) => `${BASE}/messages/${row.id}`}
+      hrefFor={pageHrefBuilder(BASE, { tab, search })}
+      filtered={Boolean(search)}
+      permission="communication.read"
+      emptyIcon="message-square"
+      emptyTitle={tab === 'SENT' ? 'Nothing sent yet' : 'No drafts'}
+      emptyDescription={
+        tab === 'SENT'
+          ? 'Messages you send to testers are kept here, with how many people opened each one.'
+          : 'A message you save without sending waits here until you come back to it.'
+      }
+      tabs={<CommunicationTabs active="messages" />}
       toolbar={
-        <>
-          {compose}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {notice ? (
+            <p
+              role={notice.tone === 'error' ? 'alert' : 'status'}
+              style={{
+                margin: 0,
+                padding: 'var(--space-4) var(--space-5)',
+                borderRadius: 'var(--radius-card)',
+                background:
+                  notice.tone === 'error' ? 'var(--status-error-bg)' : 'var(--status-success-bg)',
+                color:
+                  notice.tone === 'error' ? 'var(--status-error-fg)' : 'var(--status-success-fg)',
+              }}
+            >
+              {notice.text}
+            </p>
+          ) : null}
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--space-4)',
+              flexWrap: 'wrap',
+            }}
+          >
+            {/*
+              Sent and Drafts are one list filtered two ways, not two pages —
+              the same columns answer both, and the API takes a status filter.
+            */}
+            <nav aria-label="Message status" style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              {TABS.map((value) => (
+                <Button
+                  key={value}
+                  href={value === 'SENT' ? BASE : `${BASE}?tab=${value}`}
+                  variant={tab === value ? 'secondary' : 'ghost'}
+                  size="sm"
+                >
+                  {value === 'SENT' ? 'Sent' : 'Drafts'}
+                </Button>
+              ))}
+            </nav>
+            <Button href={`${BASE}/compose`} variant="primary" iconLeft="message-square">
+              New message
+            </Button>
+          </div>
+
           <ListFilters
             action={BASE}
-            search={{ value: search, placeholder: 'Name, email or headline' }}
-            selects={[
-              {
-                name: 'status',
-                label: 'Status',
-                options: STATUSES,
-                value: status,
-                allLabel: 'All statuses',
-              },
-            ]}
-            sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
+            hidden={{ tab }}
+            search={{ value: search, placeholder: 'Subject or message text' }}
           />
-        </>
+        </div>
+      }
+      summary={
+        'items' in result && result.items.length > 0 && tab === 'SENT' ? (
+          <ReadSummary rows={result.items} />
+        ) : undefined
       }
     />
   )
+}
+
+/**
+ * How much of what is on this page has been read.
+ *
+ * Real numbers or nothing: both sides come from the same rows the table is
+ * showing, and neither is a projection.
+ */
+function ReadSummary({ rows }: { rows: readonly BroadcastRow[] }) {
+  const recipients = rows.reduce((sum, r) => sum + r._count.recipients, 0)
+  const read = rows.reduce((sum, r) => sum + r.readCount, 0)
+  if (recipients === 0) return null
+
+  return (
+    <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+      {rows.length === 1 ? 'This message' : `Across these ${rows.length} messages`}: {recipients}{' '}
+      recipient{recipients === 1 ? '' : 's'},{' '}
+      <Badge tone={read === recipients ? 'success' : 'neutral'} uppercase={false}>
+        {read} read
+      </Badge>
+    </p>
+  )
+}
+
+/** The message's opening line, for rows whose subject is blank. */
+function firstLine(body: string): string {
+  const line = body.split('\n').find((l) => l.trim().length > 0) ?? ''
+  return line.length > 120 ? `${line.slice(0, 119)}…` : line
+}
+
+/**
+ * Day and time, not just the day — two messages that both say "14 Aug 2026"
+ * tell you nothing about which went out first.
+ */
+function formatWhen(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }

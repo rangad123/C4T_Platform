@@ -9,12 +9,15 @@ import { SectionTabs, type SectionTab } from '@/components/admin/SectionTabs'
  * whichever one you actually wanted. So the tabs link, and each tab passes its
  * own `active` value.
  *
- * Compose is first and is the module's landing page: the reason to open
- * Communication is almost always to say something, and the previous landing —
- * a list of past announcements — put the archive in front of the action.
+ * Messages is first and is the module's landing page. It used to be the
+ * composer itself, which meant Communication opened on a form and there was
+ * no way to look at anything already sent — because nothing recorded a send.
+ * Now the archive is the landing and composing is a route off it, reached by
+ * the "New message" button rather than by a tab: a three-step task is not a
+ * peer of three lists.
  */
 const TABS: readonly SectionTab[] = [
-  { value: 'compose', label: 'Compose', icon: 'message-square', href: '/app/admin/communication' },
+  { value: 'messages', label: 'Messages', icon: 'message-square', href: '/app/admin/communication' },
   {
     value: 'announcements',
     label: 'Announcements',

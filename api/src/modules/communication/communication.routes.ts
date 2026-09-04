@@ -461,11 +461,25 @@ communicationRouter.get(
       })
     }
 
+    /**
+     * Publication and expiry gate READERS, not the people managing the list.
+     *
+     * Applying them to the admin side made drafts unreachable: `publishedAt`
+     * was null, so a draft vanished from the only list that could open it —
+     * it could not be published, edited or even deleted, which is how "Save
+     * as draft" came to write a row nobody would ever see again. Expired
+     * announcements disappeared the same way, taking their history with them.
+     *
+     * The admin list therefore returns every row and shows each one's state;
+     * customers and testers still see only what is live for them.
+     */
+    const adminSide = isAdminSide(req.user!)
+
     const where: Prisma.AnnouncementWhereInput = {
       audience: { in: announcementAudienceFor(req.user!.role) },
-      publishedAt: { not: null, lte: now },
+      ...(adminSide ? {} : { publishedAt: { not: null, lte: now } }),
       AND: [
-        { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+        adminSide ? {} : { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
         { OR: projectScopeOr },
         /**
          * `projectId` and `buildId` are CONTEXT filters, not equality filters:
@@ -631,6 +645,129 @@ communicationRouter.get(
   },
 )
 
+/**
+ * Fields an announcement may be corrected on after it exists.
+ *
+ * `audience`, `projectId` and `buildId` are absent on purpose — see the
+ * handler for why changing who an announcement is for is not an edit.
+ */
+const announcementPatchSchema = z.object({
+  title: z.string().trim().min(3).max(200).optional(),
+  body: z.string().trim().min(1).max(10_000).optional(),
+  /** Explicit null clears the expiry. Omitted leaves it as it is. */
+  expiresAt: z.coerce.date().nullable().optional(),
+  /** Publish a draft. Never un-publishes — see the handler. */
+  publishNow: z.boolean().optional(),
+})
+  /*
+    Strict, so sending `audience` is a clear 400 rather than a silent no-op.
+    Zod strips unknown keys by default, which would have answered 200 to a
+    caller trying to re-target a published announcement and left them
+    believing it had worked.
+  */
+  .strict()
+
+/**
+ * Correct an announcement, and publish a draft.
+ *
+ * ── THE GAP THIS CLOSES
+ *
+ * `publishedAt` was only ever set at create time, and there was no PATCH and
+ * no publish route. So "Save as draft" wrote a row that could never become
+ * visible to anyone: the only thing that could be done to a draft afterwards
+ * was delete it. Publishing here is what makes the draft option mean
+ * something, and it notifies exactly as creating a published one does —
+ * publishing is what makes an announcement visible, so publishing is what
+ * rings the bell.
+ *
+ * ── WHY THE AUDIENCE CANNOT BE EDITED
+ *
+ * Notifications are sent once, to the recipient set computed from the
+ * audience at the moment of publishing. Changing the audience afterwards
+ * would leave the notified set and the visible set disagreeing: people who
+ * were rung can no longer see it, or people who can see it were never told.
+ * The audience is chosen at compose time and stays chosen. To reach a
+ * different group, post a different announcement.
+ *
+ * Un-publishing is likewise not offered. Readers have already been notified,
+ * and quietly withdrawing something they were told about is a retraction, not
+ * an edit — deleting it is the honest way to do that, and is audited as such.
+ */
+communicationRouter.patch(
+  '/announcements/:id',
+  requirePermission(PERMISSIONS.ANNOUNCEMENT_WRITE),
+  validate({ params: threadIdParam, body: announcementPatchSchema }),
+  async (req, res) => {
+    const input = req.body as z.infer<typeof announcementPatchSchema>
+    const id = param(req, 'id')
+
+    const existing = await prisma.announcement.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        audience: true,
+        projectId: true,
+        buildId: true,
+        publishedAt: true,
+        expiresAt: true,
+      },
+    })
+    if (!existing) throw new NotFoundError('Announcement')
+
+    /*
+      Publishing is a one-way door and only from unpublished. Asking to
+      publish something already published is a no-op rather than an error —
+      it is the state the caller wanted — but it must NOT re-notify, or a
+      typo fix on a live announcement would ring every reader a second time.
+    */
+    const publishingNow = input.publishNow === true && existing.publishedAt === null
+
+    const announcement = await prisma.announcement.update({
+      where: { id },
+      data: {
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.body !== undefined ? { body: input.body } : {}),
+        ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+        ...(publishingNow ? { publishedAt: new Date() } : {}),
+      },
+    })
+
+    await recordAudit({
+      req,
+      action: publishingNow ? 'announcement.published' : 'announcement.updated',
+      entityType: 'Announcement',
+      entityId: announcement.id,
+      before: { title: existing.title, body: existing.body, publishedAt: existing.publishedAt },
+      after: { title: announcement.title, body: announcement.body, publishedAt: announcement.publishedAt },
+    })
+
+    if (publishingNow) {
+      const recipients = await announcementRecipients({
+        id: announcement.id,
+        authorId: announcement.authorId,
+        audience: announcement.audience,
+        projectId: announcement.projectId,
+        buildId: announcement.buildId,
+      })
+      await createNotifications(recipients, {
+        type: NotificationType.ANNOUNCEMENT,
+        title: announcement.title,
+        body: announcement.body.slice(0, 300),
+        link: announcementLink(announcement),
+        metadata: {
+          announcementId: announcement.id,
+          projectId: announcement.projectId,
+          buildId: announcement.buildId,
+        },
+      })
+    }
+
+    res.json({ data: announcement })
+  },
+)
+
 communicationRouter.delete(
   '/announcements/:id',
   requirePermission(PERMISSIONS.ANNOUNCEMENT_WRITE),
@@ -709,6 +846,69 @@ communicationRouter.post(
     })
 
     res.status(201).json({ data: template })
+  },
+)
+
+/**
+ * Edit a template.
+ *
+ * The one operation this set was missing. Without it a typo in a template —
+ * the piece of text specifically written to be reused — could only be fixed
+ * by deleting and retyping it, which silently detaches every broadcast that
+ * had recorded using it (`Broadcast.template` is `SetNull`), losing the
+ * reporting link for a spelling correction.
+ *
+ * Editing deliberately does NOT touch messages already sent. The body is
+ * copied into the broadcast at compose time, so a sent message stays the
+ * record of what actually went out — see the note on `Broadcast.templateId`.
+ */
+communicationRouter.patch(
+  '/templates/:id',
+  requirePermission(PERMISSIONS.COMMUNICATION_WRITE),
+  validate({ params: threadIdParam, body: templateSchema.partial() }),
+  async (req, res) => {
+    const input = req.body as Partial<z.infer<typeof templateSchema>>
+    const id = param(req, 'id')
+
+    const existing = await prisma.messageTemplate.findUnique({
+      where: { id },
+      select: { id: true, name: true, subject: true, body: true },
+    })
+    if (!existing) throw new NotFoundError('Template')
+
+    /*
+      Uniqueness is checked against everyone ELSE. Comparing against the whole
+      table would make saving a template without renaming it collide with
+      itself, so every edit would be refused as a duplicate of the row being
+      edited.
+    */
+    if (input.name && input.name !== existing.name) {
+      const clash = await prisma.messageTemplate.findUnique({
+        where: { name: input.name },
+        select: { id: true },
+      })
+      if (clash) throw new BadRequestError('A template with this name already exists')
+    }
+
+    const template = await prisma.messageTemplate.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.subject !== undefined ? { subject: input.subject || null } : {}),
+        ...(input.body !== undefined ? { body: input.body } : {}),
+      },
+    })
+
+    await recordAudit({
+      req,
+      action: 'message_template.updated',
+      entityType: 'MessageTemplate',
+      entityId: template.id,
+      before: { name: existing.name, subject: existing.subject, body: existing.body },
+      after: { name: template.name, subject: template.subject, body: template.body },
+    })
+
+    res.json({ data: template })
   },
 )
 

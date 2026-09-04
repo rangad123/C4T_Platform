@@ -103,6 +103,19 @@ export interface ProjectAssignmentRow {
   respondedAt: string | null
   completedAt: string | null
   notes: string | null
+  /** What this tester was asked to cover, if the invitation specified it. */
+  assignedDevice: {
+    id: string
+    type: string
+    manufacturer: string | null
+    model: string | null
+    osName: string | null
+  } | null
+  assignedBrowser: {
+    id: string
+    browser: { name: string }
+    browserVersion: { version: string } | null
+  } | null
   tester: ProjectPerson & {
     testerProfile: {
       id: string
@@ -325,4 +338,13 @@ export interface ProjectRatingRow {
   score: number
   author: { id: string } | null
   subjectUser: { id: string } | null
+}
+
+/** One entry of the seeded badge catalogue, from `GET /v1/badges`. */
+export interface BadgeOption {
+  id: string
+  slug: string
+  name: string
+  description: string | null
+  icon: string
 }

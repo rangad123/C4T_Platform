@@ -13,6 +13,9 @@ import { createNotification } from '../notifications/notifications.service.js'
 import { refreshTesterAggregates } from '../testers/testers.service.js'
 import { PERMISSIONS } from '../../config/permissions.js'
 import { ratingScope } from '../../lib/access/scopes.js'
+// Shared with the badges module — one "did these two actually work together"
+// rule, so a badge can never be awarded where a rating would be refused.
+import { assertWorkedTogether } from '../../lib/access/worked-together.js'
 
 /**
  * §2.2 "Ratings & Reviews" — ratings given to Testers and/or by Customers.
@@ -106,100 +109,6 @@ const createRatingSchema = z
     path: ['subjectUserId'],
   })
 
-/**
- * Confirms the author and the subject genuinely shared the given project.
- * Customer → Tester: the tester was assigned to a project in the customer's org.
- * Tester → Customer: the tester was assigned to a project in that customer's org.
- */
-async function assertWorkedTogether(
-  author: Express.AuthenticatedUser,
-  subjectUserId: string,
-  projectId: string,
-): Promise<void> {
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, deletedAt: null },
-    select: { id: true, organisationId: true },
-  })
-  if (!project) throw new BadRequestError('Project does not exist')
-
-  /**
-   * The delivery team — admins, sub-admins, and the project managers among
-   * them, who are admin-side users with a ManagerAssignment rather than a
-   * role of their own.
-   *
-   * They did not "work with" the tester the way a customer did, so the
-   * co-membership half of the rule cannot apply to them. What still applies,
-   * and is the part that matters, is that the rating has to describe real
-   * work: the tester must actually have been on this project. Without that,
-   * `ratingAverage` stops meaning anything, and it is a sort key in the
-   * crowd tester pool.
-   *
-   * Gated on a permission rather than on the role, so a sub-admin can be
-   * given read-and-moderate without also being able to author. ADMIN passes
-   * everything, matching `requirePermission`, which cannot be used here —
-   * it is middleware that rejects customers and testers outright, and they
-   * post to this route too.
-   */
-  if (isAdminSide(author)) {
-    const mayWrite =
-      author.role === Role.ADMIN || (author.permissions ?? []).includes(PERMISSIONS.RATING_WRITE)
-    if (!mayWrite) {
-      throw new ForbiddenError('You do not have permission to leave ratings')
-    }
-    const wasAssigned = await prisma.projectAssignment.findFirst({
-      where: {
-        projectId,
-        testerId: subjectUserId,
-        status: { in: [AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED] },
-      },
-      select: { id: true },
-    })
-    if (!wasAssigned) throw new BadRequestError('That tester did not work on this project')
-    return
-  }
-
-  if (author.role === Role.CUSTOMER) {
-    const [isMember, wasAssigned] = await Promise.all([
-      prisma.organisationMember.findFirst({
-        where: { organisationId: project.organisationId, userId: author.id },
-        select: { id: true },
-      }),
-      prisma.projectAssignment.findFirst({
-        where: {
-          projectId,
-          testerId: subjectUserId,
-          status: { in: [AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED] },
-        },
-        select: { id: true },
-      }),
-    ])
-    if (!isMember) throw new ForbiddenError('That project does not belong to your organisation')
-    if (!wasAssigned) throw new BadRequestError('That tester did not work on this project')
-    return
-  }
-
-  if (author.role === Role.TESTER) {
-    const [wasAssigned, subjectIsMember] = await Promise.all([
-      prisma.projectAssignment.findFirst({
-        where: {
-          projectId,
-          testerId: author.id,
-          status: { in: [AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED] },
-        },
-        select: { id: true },
-      }),
-      prisma.organisationMember.findFirst({
-        where: { organisationId: project.organisationId, userId: subjectUserId },
-        select: { id: true },
-      }),
-    ])
-    if (!wasAssigned) throw new BadRequestError('You did not work on this project')
-    if (!subjectIsMember) throw new BadRequestError('That customer is not on this project')
-    return
-  }
-
-  throw new ForbiddenError('Your role cannot leave ratings')
-}
 
 ratingsRouter.post('/', validate({ body: createRatingSchema }), async (req, res) => {
   const input = req.body as z.infer<typeof createRatingSchema>

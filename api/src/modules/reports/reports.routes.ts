@@ -3,11 +3,11 @@ import { z } from 'zod'
 import { AssignmentStatus, type Prisma } from '@prisma/client'
 import { authenticate } from '../../middleware/authenticate.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
-import { isAdminSide } from '../../middleware/authorize.js'
 import { prisma } from '../../lib/prisma.js'
 import { param } from '../../lib/http.js'
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors.js'
 import { projectRelations } from '../../lib/access/relations.js'
+import { bugScope } from '../../lib/access/scopes.js'
 import { authorize } from '../../lib/access/policy.js'
 import * as testingService from '../testing/testing.service.js'
 
@@ -51,6 +51,8 @@ async function testersByCountry(projectId: string): Promise<Record<string, numbe
       },
     },
     select: { tester: { select: { testerProfile: { select: { countryCode: true } } } } },
+    // One tester on two builds of this project must count once, not twice.
+    distinct: ['testerId'],
   })
   const counts: Record<string, number> = {}
   for (const row of rows) {
@@ -104,14 +106,20 @@ reportsRouter.get(
     })
 
     const [testerCount, testCaseCount, bugs, byCountry] = await Promise.all([
-      prisma.projectAssignment.count({
-        where: {
-          projectId,
-          status: {
-            in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED],
+      // Distinct testers, not roster rows — one person on two builds of this
+      // project is still one tester.
+      prisma.projectAssignment
+        .findMany({
+          where: {
+            projectId,
+            status: {
+              in: [AssignmentStatus.ACCEPTED, AssignmentStatus.ACTIVE, AssignmentStatus.COMPLETED],
+            },
           },
-        },
-      }),
+          select: { testerId: true },
+          distinct: ['testerId'],
+        })
+        .then((rows) => rows.length),
       prisma.testCase.count({ where: { build: { projectId }, deletedAt: null } }),
       bugBreakdown({ projectId, deletedAt: null }),
       testersByCountry(projectId),
@@ -158,10 +166,22 @@ reportsRouter.get('/by-build/:buildId', validate({ params: buildIdParam }), asyn
 
 // ─── By date ─────────────────────────────────────────────────────────────────
 //
-// Spans every project the caller can see rather than one — admin-side only
-// (a customer's or manager's `report.generate` grant is scoped to THEIR
-// project, not the whole platform), matching how the dashboard's stats
-// endpoint is gated.
+// Spans every project the caller can see rather than one.
+//
+// This used to be admin-side only, on the reasoning that reporting "across
+// every project" is a platform privilege. That was right about the danger and
+// wrong about the fix: it refused the caller instead of narrowing the query,
+// so the customer portal's own "By date" tab — whose copy promises
+// "everything reported across YOUR projects between two dates" — called this,
+// got a 403 on every request, and rendered the swallowed failure as
+// "That period could not be reported on. Refresh in a moment." It had never
+// worked for a customer.
+//
+// `bugScope` is the module's existing answer to "which bugs may this user
+// see", and it already agrees with `bugRelations`. It returns `{}` for
+// platform users, so admin-side behaviour is unchanged; a customer gets their
+// organisations' projects, and a tester their own reports. Composed under
+// `AND` rather than spread, so it cannot collide with the keys set here.
 
 const dateRangeQuery = z
   .object({ startDate: z.coerce.date(), endDate: z.coerce.date() })
@@ -171,13 +191,12 @@ const dateRangeQuery = z
   })
 
 reportsRouter.get('/by-date', validate({ query: dateRangeQuery }), async (req, res) => {
-  if (!isAdminSide(req.user!))
-    throw new ForbiddenError('Only the platform side can report across every project')
   const { startDate, endDate } = validatedQuery<z.infer<typeof dateRangeQuery>>(res)
 
   const where: Prisma.BugWhereInput = {
     deletedAt: null,
     createdAt: { gte: startDate, lte: endDate },
+    AND: [bugScope(req.user!)],
   }
   const [bugs, byProject] = await Promise.all([
     bugBreakdown(where),

@@ -38,12 +38,15 @@ function reasonFor(error: unknown): string {
 }
 
 /**
- * Accept or decline an invitation.
+ * Accept or decline an invitation to one specific build.
  *
  * `POST /v1/projects/:id/respond` only accepts ACCEPTED or DECLINED, and only
  * while the assignment is still INVITED — the API owns both rules. This
  * narrows the value so a hand-posted body cannot smuggle e.g. `COMPLETED`
  * through a field the page never rendered.
+ *
+ * `buildId` names WHICH invitation: a tester can now hold more than one row
+ * on the same project, so the project id alone no longer identifies one.
  */
 export async function respondToInvitation(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
@@ -51,9 +54,12 @@ export async function respondToInvitation(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   if (!id) redirect(LIST_PATH)
 
+  const buildId = formTrimmed(formData, 'buildId')
+  if (!buildId) redirect(`${detailPath(id)}?notice=invalid`)
+
   const raw = formTrimmed(formData, 'response')
   if (raw !== 'ACCEPTED' && raw !== 'DECLINED') {
-    redirect(`${detailPath(id)}?notice=invalid`)
+    redirect(`${detailPath(id)}?buildId=${buildId}&notice=invalid`)
   }
 
   const notes = formTrimmed(formData, 'notes')
@@ -62,7 +68,7 @@ export async function respondToInvitation(formData: FormData): Promise<void> {
   try {
     await actionFetch(`projects/${id}/respond`, {
       method: 'POST',
-      body: { response: raw, ...(notes ? { notes } : {}) },
+      body: { buildId, response: raw, ...(notes ? { notes } : {}) },
     })
     revalidatePath(LIST_PATH)
     revalidatePath(detailPath(id))
@@ -70,7 +76,10 @@ export async function respondToInvitation(formData: FormData): Promise<void> {
     notice = reasonFor(error)
   }
 
-  redirect(`${detailPath(id)}?notice=${notice}`)
+  // Carries the build back so accepting/declining one of several invitations
+  // lands the tester back on THAT build, not whichever the project defaults
+  // to — most relevant right after they answered it.
+  redirect(`${detailPath(id)}?buildId=${buildId}&notice=${notice}`)
 }
 
 /**
@@ -92,7 +101,9 @@ export async function reportTestResult(formData: FormData): Promise<void> {
   const testCaseId = formTrimmed(formData, 'testCaseId')
   if (!id || !testCaseId) redirect(LIST_PATH)
 
-  const back = (notice: string) => `${detailPath(id)}?section=testing&notice=${notice}`
+  const buildId = formTrimmed(formData, 'buildId')
+  const back = (notice: string) =>
+    `${detailPath(id)}?section=testing${buildId ? `&buildId=${buildId}` : ''}&notice=${notice}`
 
   const result = formTrimmed(formData, 'result')
   if (!['PASS', 'FAIL', 'BLOCKED', 'NOT_TESTED'].includes(result)) {

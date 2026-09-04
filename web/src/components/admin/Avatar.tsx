@@ -50,7 +50,14 @@ const SIZE_PX: Record<AvatarSize, number> = {
 export function Avatar({ name, fileId, size = 'md', style, tint }: AvatarProps) {
   const px = SIZE_PX[size]
   const initials = pickInitials(name)
-  const background = tint ?? pickTint(name)
+  // The per-user tint is only ever meant to separate two people who share
+  // initials — it has no business showing through a real photo. Plenty of
+  // "white background" uploads are actually transparent PNGs (background
+  // removers, some export tools), and `object-fit: cover` leaves transparent
+  // pixels transparent, so whatever sits behind them shows through. A real
+  // photo gets a neutral mat instead, the same one an image sits on anywhere
+  // else in the app.
+  const background = fileId ? 'var(--surface-sunken)' : (tint ?? pickTint(name))
 
   return (
     <span

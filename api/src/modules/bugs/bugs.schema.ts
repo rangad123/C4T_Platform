@@ -107,8 +107,12 @@ export const createBugSchema = z
       .trim()
       .min(5, 'Steps to reproduce are required — another person must be able to follow them')
       .max(10_000),
-    expectedResult: z.string().trim().max(4000).optional(),
-    actualResult: z.string().trim().max(4000).optional(),
+    expectedResult: z
+      .string()
+      .trim()
+      .min(5, 'Say what should have happened')
+      .max(4000),
+    actualResult: z.string().trim().min(5, 'Say what happened instead').max(4000),
     severity: z.nativeEnum(BugSeverity),
     reproducibility: z.nativeEnum(BugReproducibility).default(BugReproducibility.ALWAYS),
     ...occurrenceFields,
@@ -146,8 +150,11 @@ export const updateBugSchema = z
     description: z.string().trim().min(10).max(10_000).optional(),
     preCondition: z.string().trim().max(4000).optional(),
     stepsToReproduce: z.string().trim().min(5).max(10_000).optional(),
-    expectedResult: z.string().trim().max(4000).optional(),
-    actualResult: z.string().trim().max(4000).optional(),
+    // Optional to omit from a PATCH (a reporter correcting just the title
+    // shouldn't have to retype everything else) — but if included, it cannot
+    // be blanked out, for the same reason `createBugSchema` requires it.
+    expectedResult: z.string().trim().min(5, 'Say what should have happened').max(4000).optional(),
+    actualResult: z.string().trim().min(5, 'Say what happened instead').max(4000).optional(),
     severity: z.nativeEnum(BugSeverity).optional(),
     reproducibility: z.nativeEnum(BugReproducibility).optional(),
     ...occurrenceFields,

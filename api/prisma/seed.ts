@@ -74,6 +74,72 @@ async function main() {
   })
   console.log(`  admin: ${admin.email}`)
 
+  /**
+   * The badge catalogue — platform configuration, not demo data, so it is
+   * seeded above the `SEED_DEMO` guard: a production install needs these
+   * rows to exist or the award control has nothing to offer. `upsert` on
+   * the slug keeps re-running the seed idempotent and lets the wording be
+   * corrected later without orphaning awards already made.
+   */
+  console.log('Seeding badge catalogue…')
+  const BADGES = [
+    {
+      slug: 'bug-hunter',
+      name: 'Bug hunter',
+      description: 'Found defects that mattered, not just defects.',
+      icon: 'bug',
+      position: 10,
+    },
+    {
+      slug: 'clear-reporter',
+      name: 'Clear reporter',
+      description: 'Reports another person can reproduce without asking a question.',
+      icon: 'file-text',
+      position: 20,
+    },
+    {
+      slug: 'thorough-tester',
+      name: 'Thorough tester',
+      description: 'Covered the scope properly, including the parts nobody enjoys.',
+      icon: 'clipboard-check',
+      position: 30,
+    },
+    {
+      slug: 'fast-responder',
+      name: 'Fast responder',
+      description: 'Answered questions and retested quickly.',
+      icon: 'zap',
+      position: 40,
+    },
+    {
+      slug: 'great-communicator',
+      name: 'Great communicator',
+      description: 'Kept the team informed and asked the right questions early.',
+      icon: 'message-square',
+      position: 50,
+    },
+    {
+      slug: 'edge-case-finder',
+      name: 'Edge case finder',
+      description: 'Went looking where the product had not been tried before.',
+      icon: 'search',
+      position: 60,
+    },
+  ]
+  for (const badge of BADGES) {
+    await prisma.badge.upsert({
+      where: { slug: badge.slug },
+      create: badge,
+      update: {
+        name: badge.name,
+        description: badge.description,
+        icon: badge.icon,
+        position: badge.position,
+      },
+    })
+  }
+  console.log(`  ${BADGES.length} badges`)
+
   if (!SEED_DEMO) {
     console.log('NODE_ENV=production — skipping demo data.')
     return

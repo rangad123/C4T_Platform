@@ -1,4 +1,6 @@
 import { requireRole } from '@/lib/auth/session'
+import { Modal } from '@/components/admin/Modal'
+import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Panel } from '@/components/admin/Panel'
 import { Card, CardGrid } from '@/components/admin/Card'
@@ -10,7 +12,7 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { formatDate, personName } from '@/lib/admin/format'
-import { createTemplateAction, deleteTemplateAction } from './actions'
+import { createTemplateAction, updateTemplateAction, deleteTemplateAction } from './actions'
 import { CommunicationTabs } from '../tabs'
 
 interface TemplateRow {
@@ -22,8 +24,12 @@ interface TemplateRow {
   createdBy: { id: string; firstName: string | null; lastName: string | null } | null
 }
 
+const BASE = '/app/admin/communication/templates'
+
 const ERROR_MESSAGES: Record<string, string> = {
   duplicate: 'A template with that name already exists — pick a different name.',
+  missing: 'That template no longer exists — someone may have deleted it.',
+  denied: 'Your session is no longer valid. Sign in again.',
   failed: 'Could not save the template. Try again.',
 }
 
@@ -39,7 +45,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 export default async function TemplatesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>
+  searchParams: Promise<{ error?: string; edit?: string; name?: string; subject?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
@@ -47,6 +53,15 @@ export default async function TemplatesPage({
   const errorMessage = params.error ? (ERROR_MESSAGES[params.error] ?? ERROR_MESSAGES.failed) : null
 
   const templates = await serverFetchOrNull<readonly TemplateRow[]>('communication/templates')
+
+  /*
+    The modal is URL-driven (`?edit=<id>`), the same mechanism the blog
+    categories and build-rename modals use: opening is a navigation, and a
+    successful save redirects to a URL without `edit`, which is what closes
+    it. An `edit` naming a template that no longer exists simply resolves to
+    nothing and the modal stays shut.
+  */
+  const editing = params.edit ? templates?.find((t) => t.id === params.edit) : undefined
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
@@ -141,17 +156,28 @@ export default async function TemplatesPage({
                 title={t.name}
                 meta={t.subject ? `Subject: ${t.subject}` : undefined}
                 actions={
-                  <form action={deleteTemplateAction}>
-                    <input type="hidden" name="id" value={t.id} />
-                    <Button
-                      type="submit"
-                      variant="ghost"
-                      size="sm"
-                      style={{ color: 'var(--status-error-fg)' }}
-                    >
-                      Delete
+                  <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
+                    <Button href={`${BASE}?edit=${t.id}`} variant="ghost" size="sm" iconLeft="pencil">
+                      Edit
                     </Button>
-                  </form>
+                    {/*
+                      Arm-then-confirm, where this used to be a bare Delete
+                      button that fired on the first click. A template is
+                      shared text other people rely on, and deleting one also
+                      detaches it from every broadcast that recorded using it.
+                    */}
+                    <form action={deleteTemplateAction}>
+                      <input type="hidden" name="id" value={t.id} />
+                      <ConfirmSubmit
+                        question={`Delete the template “${t.name}”?`}
+                        confirmLabel="Yes, delete it"
+                        iconLeft="trash-2"
+                        size="sm"
+                      >
+                        Delete
+                      </ConfirmSubmit>
+                    </form>
+                  </span>
                 }
               >
                 <p
@@ -173,6 +199,77 @@ export default async function TemplatesPage({
           </CardGrid>
         )}
       </Panel>
+
+      {editing ? (
+        <Modal open closedHref={BASE} title="Edit template">
+          {errorMessage ? (
+            <p
+              role="alert"
+              style={{
+                margin: '0 0 var(--space-5)',
+                padding: 'var(--space-3) var(--space-4)',
+                borderRadius: 'var(--radius-input)',
+                background: 'var(--status-error-bg)',
+                color: 'var(--status-error-fg)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
+              {errorMessage}
+            </p>
+          ) : null}
+          <form
+            action={updateTemplateAction}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+          >
+            <input type="hidden" name="id" value={editing.id} />
+            <Field label="Name" htmlFor="edit-name" required>
+              <Input
+                id="edit-name"
+                name="name"
+                required
+                maxLength={120}
+                defaultValue={params.name ?? editing.name}
+              />
+            </Field>
+            <Field label="Subject" htmlFor="edit-subject" hint="Optional. Clear it to remove it.">
+              <Input
+                id="edit-subject"
+                name="subject"
+                maxLength={200}
+                defaultValue={params.subject ?? editing.subject ?? ''}
+              />
+            </Field>
+            <Field label="Body" htmlFor="edit-body" required>
+              <Textarea
+                id="edit-body"
+                name="body"
+                rows={8}
+                required
+                maxLength={10000}
+                defaultValue={editing.body}
+              />
+            </Field>
+            {/*
+              Said out loud, because the opposite is the reasonable guess.
+              Editing a template changes what the NEXT message starts from; it
+              does not rewrite anything already sent, since the body is copied
+              into the message at compose time.
+            */}
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              Changes apply to messages written from here on. Messages already sent keep the wording
+              they went out with.
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+              <SubmitButton variant="primary" iconLeft="save" pendingLabel="Saving…">
+                Save changes
+              </SubmitButton>
+              <Button href={BASE} variant="secondary">
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
     </div>
   )
 }

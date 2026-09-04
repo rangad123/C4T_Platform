@@ -84,6 +84,9 @@ function formatDateTime(iso: string): string {
 
 const NOTICES: Record<string, NoticeCopy> = {
   'status-saved': { tone: 'success', message: 'Status updated.' },
+  'lead-forbidden': { tone: 'error', message: 'This lead is not yours to change.' },
+  'lead-missing': { tone: 'error', message: 'This lead no longer exists.' },
+  'lead-failed': { tone: 'error', message: 'That change could not be saved. Try again.' },
   'notes-saved': { tone: 'success', message: 'Notes updated.' },
   forbidden: { tone: 'error', message: 'You are not able to change that right now.' },
   invalid: { tone: 'error', message: 'That status was not recognised.' },

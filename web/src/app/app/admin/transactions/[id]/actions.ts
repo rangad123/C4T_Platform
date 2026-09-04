@@ -1,6 +1,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+import { ApiError } from '@/lib/api/types'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
@@ -52,6 +54,22 @@ function isStatus(value: string): boolean {
   return (STATUSES as readonly string[]).includes(value)
 }
 
+/**
+ * Module-private: a `'use server'` file may only export async functions, so a
+ * shared helper has to stay unexported or every action in the file silently
+ * stops being registered.
+ */
+const BASE = '/app/admin/transactions'
+
+function saveFailure(error: unknown): string {
+  const code = error instanceof ApiError ? error.status : 0
+  if (code === 403) return 'tx-forbidden'
+  if (code === 404) return 'tx-missing'
+  if (code === 409) return 'tx-conflict'
+  if (code === 400 || code === 422) return 'tx-invalid'
+  return 'tx-failed'
+}
+
 function revalidate(id: string): void {
   revalidatePath('/app/admin/transactions')
   revalidatePath(`/app/admin/transactions/${id}`)
@@ -82,8 +100,15 @@ export async function saveTransactionStatus(formData: FormData): Promise<void> {
   if (clear) body.settledAt = null
   else if (DATE_ONLY.test(settledAt)) body.settledAt = settledAt
 
-  await actionFetch<{ id: string }>(`transactions/${id}`, { method: 'PATCH', body })
+  let notice = 'tx-status-saved'
+  try {
+    await actionFetch<{ id: string }>(`transactions/${id}`, { method: 'PATCH', body })
+  } catch (error) {
+    notice = saveFailure(error)
+  }
+
   revalidate(id)
+  redirect(`${BASE}/${id}?notice=${notice}`)
 }
 
 /**
@@ -100,15 +125,21 @@ export async function saveTransactionDetails(formData: FormData): Promise<void> 
   const id = formTrimmed(formData, 'id')
   if (!id) return
 
-  await actionFetch<{ id: string }>(`transactions/${id}`, {
-    method: 'PATCH',
-    body: {
-      description: formTrimmed(formData, 'description').slice(0, 1000),
-      externalRef: formTrimmed(formData, 'externalRef').slice(0, 120),
-    },
-  })
+  let notice = 'tx-details-saved'
+  try {
+    await actionFetch<{ id: string }>(`transactions/${id}`, {
+      method: 'PATCH',
+      body: {
+        description: formTrimmed(formData, 'description').slice(0, 1000),
+        externalRef: formTrimmed(formData, 'externalRef').slice(0, 120),
+      },
+    })
+  } catch (error) {
+    notice = saveFailure(error)
+  }
 
   revalidate(id)
+  redirect(`${BASE}/${id}?notice=${notice}`)
 }
 
 /**
@@ -129,15 +160,21 @@ export async function savePayoutDetails(formData: FormData): Promise<void> {
   const tdsAmountMinor = toMinorUnitsOrNull(formTrimmed(formData, 'tdsAmount'))
   const buildOrContestRef = formTrimmed(formData, 'buildOrContestRef')
 
-  await actionFetch<{ id: string }>(`transactions/${id}`, {
-    method: 'PATCH',
-    body: {
-      ...((PAYMENT_METHODS as readonly string[]).includes(paymentMethod) ? { paymentMethod } : {}),
-      ...(paidAmountMinor ? { paidAmountMinor } : {}),
-      ...(tdsAmountMinor ? { tdsAmountMinor } : {}),
-      buildOrContestRef: buildOrContestRef.slice(0, 160),
-    },
-  })
+  let notice = 'tx-payout-saved'
+  try {
+    await actionFetch<{ id: string }>(`transactions/${id}`, {
+      method: 'PATCH',
+      body: {
+        ...((PAYMENT_METHODS as readonly string[]).includes(paymentMethod) ? { paymentMethod } : {}),
+        ...(paidAmountMinor ? { paidAmountMinor } : {}),
+        ...(tdsAmountMinor ? { tdsAmountMinor } : {}),
+        buildOrContestRef: buildOrContestRef.slice(0, 160),
+      },
+    })
+  } catch (error) {
+    notice = saveFailure(error)
+  }
 
   revalidate(id)
+  redirect(`${BASE}/${id}?notice=${notice}`)
 }

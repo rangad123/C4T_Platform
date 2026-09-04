@@ -2,7 +2,14 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { serverFetch } from '@/lib/api/server'
+/**
+ * `actionFetch`, not `serverFetch` — the access cookie lives 15 minutes and
+ * `serverFetch` cannot refresh it, so this Server Action simply failed for
+ * anyone who had the form open longer than that. The try/catch below already
+ * turned that into a message; it was the wrong message, blaming the input for
+ * an expired session.
+ */
+import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { getUser } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -46,7 +53,7 @@ export async function createLeadAction(formData: FormData): Promise<void> {
 
   let id: string
   try {
-    const response = await serverFetch<LeadResponse>('leads/manual', { method: 'POST', body })
+    const response = await actionFetch<LeadResponse>('leads/manual', { method: 'POST', body })
     id = response.id
   } catch (err) {
     const code =

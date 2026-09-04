@@ -20,11 +20,46 @@ import {
   deviceIdParam,
   workHistoryIdParam,
   discoverTestersQuery,
+  assignmentCandidatesQuery,
 } from './testers.schema.js'
 
 export const testersRouter = Router()
 
 testersRouter.use(authenticate)
+
+/**
+ * Who could be put on this build, and where each of them already stands on it.
+ *
+ * Declared before `/:id` for the same reason `/discover` is — otherwise
+ * "assignment-candidates" is read as a tester id.
+ *
+ * Guarded with exactly the permission `POST /projects/:id/assignments` uses.
+ * Discovery and the act it leads to must agree about who may do it: a picker
+ * that lists people the caller cannot actually assign is a worse failure than
+ * no picker, because it only refuses at the end.
+ */
+testersRouter.get(
+  '/assignment-candidates',
+  requirePermission(PERMISSIONS.PROJECT_ASSIGN),
+  validate({ query: assignmentCandidatesQuery }),
+  controller.assignmentCandidates,
+)
+
+/**
+ * Who a message could be addressed to.
+ *
+ * Declared before `/:id` for the same reason as its neighbours. Gated on
+ * `communication.write`, not `tester.read`: this list exists to be messaged,
+ * so the permission that matches is the one for sending — someone who may
+ * read tester records but not write communications has no business paging
+ * through the crowd from the composer.
+ */
+testersRouter.get(
+  '/message-recipients',
+  requirePermission(PERMISSIONS.COMMUNICATION_WRITE),
+  validate({ query: listTestersQuery }),
+  controller.messageRecipients,
+)
 
 /**
  * §44 — customers browse the crowd. Declared before the admin-gated `/:id`

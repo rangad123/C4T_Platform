@@ -11,6 +11,8 @@ import {
 import { Modal } from '@/components/admin/Modal'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
+import { DownloadLink } from '@/components/admin/DownloadLink'
+import { InlineFileUpload } from '@/components/admin/InlineFileUpload'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
 import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
@@ -45,6 +47,7 @@ import {
   type ProjectDetail,
   type ProjectMaterial,
   type ProjectRatingRow,
+  type BadgeOption,
   type TestCaseRow,
   type ProjectReportSummary,
   BUG_FIELD_TYPE_LABEL,
@@ -74,7 +77,7 @@ import {
  * across rather than copied so both doors post the same body to the same
  * endpoint and cannot drift apart.
  */
-import { rateTesterAction } from '../../crowdtesters/[id]/actions'
+import { rateTesterAction, awardBadgeAction } from '../../crowdtesters/[id]/actions'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const BUG_PREVIEW_SIZE = 10
@@ -115,6 +118,62 @@ const NOTICES: Record<string, NoticeCopy> = {
   },
   'field-added': { tone: 'success', message: 'That field is now on the bug form for this build.' },
   'field-removed': { tone: 'success', message: 'That field has been removed.' },
+  'delivery-saved': { tone: 'success', message: 'The delivery details have been saved.' },
+  'material-removed': { tone: 'success', message: 'That material has been removed.' },
+  'feature-added': { tone: 'success', message: 'The feature has been added.' },
+  'feature-removed': { tone: 'success', message: 'The feature has been removed.' },
+  'feature-conflict': { tone: 'error', message: 'This build already has a feature with that name.' },
+  'delivery-forbidden': { tone: 'error', message: 'Those details are not yours to change.' },
+  'delivery-invalid': { tone: 'error', message: 'Those values were not accepted.' },
+  'delivery-missing': { tone: 'error', message: 'This project no longer exists.' },
+  'delivery-conflict': { tone: 'error', message: 'Those details could not be saved. Reload the page.' },
+  'delivery-failed': { tone: 'error', message: 'The delivery details could not be saved. Try again.' },
+  'material-forbidden': { tone: 'error', message: 'That material is not yours to remove.' },
+  'material-missing': {
+    tone: 'error',
+    message: 'That material no longer exists — someone may have removed it already.',
+  },
+  'field-missing': {
+    tone: 'error',
+    message: 'That field no longer exists — someone may have removed it already.',
+  },
+  'material-conflict': { tone: 'error', message: 'That material could not be removed. Reload the page.' },
+  'feature-forbidden': { tone: 'error', message: 'That feature is not yours to change.' },
+  'feature-invalid': { tone: 'error', message: 'That feature name was not accepted.' },
+  'feature-missing': {
+    tone: 'error',
+    message: 'That feature no longer exists — someone may have removed it already.',
+  },
+  'feature-failed': { tone: 'error', message: 'The feature could not be saved. Try again.' },
+  'field-forbidden': { tone: 'error', message: 'That field is not yours to remove.' },
+  'field-conflict': { tone: 'error', message: 'That field could not be removed. Reload the page.' },
+  'material-added': { tone: 'success', message: 'That material is attached to this build.' },
+  'material-title': { tone: 'error', message: 'Give the material a title before attaching it.' },
+  'material-empty': {
+    tone: 'error',
+    message: 'Upload a document or paste a link — a material needs one of the two.',
+  },
+  'material-invalid': {
+    tone: 'error',
+    message: 'That material was not accepted. Check the link is a full https:// URL.',
+  },
+  'material-failed': {
+    tone: 'error',
+    message: 'The material could not be attached. Try again in a moment.',
+  },
+  'status-changed': { tone: 'success', message: 'The project status has been updated.' },
+  'status-forbidden': {
+    tone: 'error',
+    message: 'That move is the delivery team’s to make, not yours.',
+  },
+  'status-stale': {
+    tone: 'warning',
+    message: 'That move is no longer legal from the current status. Reload and try again.',
+  },
+  'status-failed': {
+    tone: 'error',
+    message: 'The status could not be changed. Try again in a moment.',
+  },
   'field-exists': { tone: 'warning', message: 'A field with that name is already on this build.' },
   'field-invalid': {
     tone: 'error',
@@ -173,6 +232,21 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'error',
     message: 'That rating could not be saved. Try again in a moment.',
   },
+  'badge-awarded': { tone: 'success', message: 'Thanks — that badge has been awarded.' },
+  'badge-duplicate': {
+    tone: 'warning',
+    message: 'You have already awarded that badge to this tester on this project.',
+  },
+  'badge-not-worked-together': {
+    tone: 'warning',
+    message: 'You can only award a badge once the tester has actually worked on this project.',
+  },
+  'badge-invalid': { tone: 'warning', message: 'Choose a badge to award.' },
+  'badge-forbidden': { tone: 'error', message: 'You are not allowed to award badges here.' },
+  'badge-failed': {
+    tone: 'error',
+    message: 'That badge could not be awarded. Try again in a moment.',
+  },
   'settings-saved': { tone: 'success', message: 'That setting has been saved.' },
   'settings-save-failed': {
     tone: 'error',
@@ -229,6 +303,8 @@ export default async function CustomerProjectDetailPage({
     notice?: string
     /** The tester being rated, when the rating dialog is open. */
     rate?: string
+    /** Tester id whose "award a badge" modal is open. */
+    award?: string
     announcement?: string
     /** Echoed back when a rename is rejected, so the attempt isn't retyped. */
     name?: string
@@ -480,6 +556,23 @@ export default async function CustomerProjectDetailPage({
     ? project.assignments.find((a) => a.tester.id === resolvedSearchParams.rate)
     : undefined
 
+  /**
+   * Same gate as rating: the API runs a badge award through
+   * `assertWorkedTogether`, the rule behind a rating, so the two controls
+   * appear together rather than offering one where the other is refused.
+   */
+  /**
+   * The badge catalogue, for the award modal`s options. Seeded platform
+   * configuration rather than per-project data, so it is fetched only where
+   * the control that needs it renders.
+   */
+  const badgeCatalogue =
+    section === 'testers' ? await serverFetchOrNull<readonly BadgeOption[]>('badges') : null
+
+  const badgeTarget = resolvedSearchParams.award
+    ? project.assignments.find((a) => a.tester.id === resolvedSearchParams.award)
+    : undefined
+
   const testerColumns: readonly TableColumn<ProjectDetail['assignments'][number]>[] = [
     {
       key: 'tester',
@@ -548,6 +641,28 @@ export default async function CustomerProjectDetailPage({
             iconLeft="star"
           >
             Rate
+          </Button>
+        ) : null,
+    },
+    /**
+     * Award a badge — the named counterpart to the score beside it. No
+     * "already done" state, unlike Rate: a tester can earn several different
+     * badges on one project, and only a repeat of the SAME one is refused.
+     */
+    {
+      key: 'badge',
+      header: '',
+      align: 'right',
+      interactive: true,
+      render: (row) =>
+        RATEABLE.has(row.status) ? (
+          <Button
+            href={`${detailPath}?section=testers&buildId=${activeBuildId}&award=${row.tester.id}`}
+            variant="ghost"
+            size="sm"
+            iconLeft="award"
+          >
+            Badge
           </Button>
         ) : null,
     },
@@ -741,12 +856,22 @@ export default async function CustomerProjectDetailPage({
               {!capabilities.canChangeStatus ? (
                 <Muted>You can read this project but not move it.</Muted>
               ) : transitions.length === 0 ? (
+                /*
+                  Empty no longer means cancelled. A customer may only submit
+                  their own draft, so every other status has nothing for them
+                  to do — and telling an approved project's owner that it "is
+                  closed for good" would be plainly wrong.
+                */
                 <Muted>
-                  A cancelled project is closed for good. Raise a new one to run this scope again.
+                  {project.status === 'CANCELLED'
+                    ? 'A cancelled project is closed for good. Raise a new one to run this scope again.'
+                    : 'There is nothing for you to change from here. The delivery team moves it from now on.'}
                 </Muted>
               ) : (
                 <form action={changeProjectStatus} style={stackStyle}>
                   <input type="hidden" name="id" value={project.id} />
+                  {/* Carried so the redirect lands back on the build being viewed. */}
+                  <input type="hidden" name="buildId" value={activeBuildId} />
                   <Field label="Move to" htmlFor="status-next">
                     <Select
                       id="status-next"
@@ -1218,7 +1343,15 @@ export default async function CustomerProjectDetailPage({
                   },
                   {
                     label: 'Test document',
-                    value: buildDetail.testDocument ? buildDetail.testDocument.originalName : '—',
+                    value: buildDetail.testDocument ? (
+                      <DownloadLink
+                        fileId={buildDetail.testDocument.id}
+                        name={buildDetail.testDocument.originalName}
+                        basePath="/app/customer/download"
+                      />
+                    ) : (
+                      '—'
+                    ),
                   },
                   {
                     label: 'Target countries',
@@ -1487,7 +1620,7 @@ export default async function CustomerProjectDetailPage({
           {capabilities.canManageMaterials ? (
             <Panel
               title="Attach a material"
-              description="Give it a title and either a link or the id of a file already uploaded."
+              description="Give it a title, then either upload a document or paste a link."
             >
               <form action={addMaterial} style={stackStyle}>
                 <input type="hidden" name="id" value={project.id} />
@@ -1511,12 +1644,26 @@ export default async function CustomerProjectDetailPage({
                       placeholder="https://builds.example.com/4.2.1.apk"
                     />
                   </Field>
+                  {/*
+                    This was a text box asking for a raw `fileId` — an internal
+                    cuid a person has no way to know. Anything typed into it
+                    failed the API's `z.string().cuid()` with a 422, which the
+                    action then threw as a crash screen. Uploading the document
+                    here means the id is always one the uploads endpoint just
+                    minted, so that whole failure mode is gone.
+                  */}
                   <Field
-                    label="Uploaded file id"
+                    label="Document"
                     htmlFor="material-file"
-                    hint="Use instead of a link when the file came through the uploads endpoint."
+                    hint="Optional. Upload the file itself, or use a link instead."
                   >
-                    <Input id="material-file" name="fileId" placeholder="cl…" />
+                    <InlineFileUpload
+                      name="fileId"
+                      endpoint="/app/customer/upload"
+                      scope="test-document"
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                      label="Upload a document"
+                    />
                   </Field>
                 </div>
                 <Field
@@ -2088,6 +2235,71 @@ export default async function CustomerProjectDetailPage({
             <div>
               <SubmitButton variant="primary" pendingLabel="Saving…">
                 Submit rating
+              </SubmitButton>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
+
+      {badgeTarget ? (
+        <Modal
+          open
+          closedHref={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+          title={`Award a badge to ${personName(badgeTarget.tester)}`}
+        >
+          <form action={awardBadgeAction} style={stackStyle}>
+            <input type="hidden" name="testerUserId" value={badgeTarget.tester.id} />
+            <input
+              type="hidden"
+              name="testerProfileId"
+              value={badgeTarget.tester.testerProfile?.id ?? ''}
+            />
+            <input type="hidden" name="projectId" value={project.id} />
+            <input
+              type="hidden"
+              name="returnTo"
+              value={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+            />
+
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              For their work on {project.reference} · {project.title}. Badges show on the
+              tester&apos;s own dashboard and profile.
+            </p>
+
+            {badgeCatalogue && badgeCatalogue.length > 0 ? (
+              <Field label="Badge" htmlFor="badge-id" required>
+                <Select
+                  id="badge-id"
+                  name="badgeId"
+                  required
+                  placeholder="Choose a badge"
+                  options={badgeCatalogue.map((badge) => ({
+                    value: badge.id,
+                    label: badge.description ? `${badge.name} — ${badge.description}` : badge.name,
+                  }))}
+                />
+              </Field>
+            ) : (
+              <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                The badge catalogue is not reachable right now. Refresh in a moment.
+              </p>
+            )}
+
+            <Field
+              label="Note"
+              htmlFor="badge-note"
+              hint="Optional. Shared with the tester, so say what earned it."
+            >
+              <Textarea id="badge-note" name="note" rows={3} maxLength={1000} />
+            </Field>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <SubmitButton
+                variant="primary"
+                pendingLabel="Awarding…"
+                disabled={!badgeCatalogue || badgeCatalogue.length === 0}
+              >
+                Award badge
               </SubmitButton>
             </div>
           </form>

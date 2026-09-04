@@ -17,6 +17,12 @@ import { createNotification, createNotifications } from '../notifications/notifi
 import { nextReference } from '../../lib/reference.js'
 import { PROJECT_SORT_FIELDS, type ListProjectsQuery } from './projects.schema.js'
 
+/** Statuses that let a tester actually work a build — file bugs, see it as "active". */
+const ACTIVE_ASSIGNMENT_STATUSES: AssignmentStatus[] = [
+  AssignmentStatus.ACCEPTED,
+  AssignmentStatus.ACTIVE,
+]
+
 const projectSelect = {
   id: true,
   reference: true,
@@ -223,7 +229,20 @@ export async function listProjects(user: Express.AuthenticatedUser, query: ListP
     ...(query.status ? { status: query.status } : {}),
     ...(query.priority ? { priority: query.priority } : {}),
     ...(query.organisationId ? { organisationId: query.organisationId } : {}),
-    ...(query.testerId ? { assignments: { some: { testerId: query.testerId } } } : {}),
+    ...(query.testerId
+      ? {
+          assignments: {
+            some: {
+              testerId: query.testerId,
+              // Absent = "ever assigned", the work-history reading this filter
+              // was built for. See `testerAssignmentStatus` in the schema.
+              ...(query.testerAssignmentStatus?.length
+                ? { status: { in: query.testerAssignmentStatus } }
+                : {}),
+            },
+          },
+        }
+      : {}),
     ...(query.search
       ? {
           OR: [
@@ -245,7 +264,37 @@ export async function listProjects(user: Express.AuthenticatedUser, query: ListP
     prisma.project.count({ where }),
   ])
 
-  return { items, meta: buildMeta(query, total) }
+  /**
+   * `_count.assignments` on `projectSelect` is a literal roster-row count —
+   * left as-is, since "how many invitations exist" is a real number in its
+   * own right. The "Testers" column on the list wants PEOPLE, though: a
+   * tester on two builds of one project must count once there, matching
+   * every other headcount on the platform. `groupBy` on both columns is a
+   * distinct-pairs count with no `_count` needed — one row per person per
+   * project, tallied in JS.
+   */
+  const projectIds = items.map((p) => p.id)
+  const testerPairs = projectIds.length
+    ? await prisma.projectAssignment.groupBy({
+        by: ['projectId', 'testerId'],
+        where: { projectId: { in: projectIds } },
+      })
+    : []
+  const distinctTesterCountByProject = new Map<string, number>()
+  for (const pair of testerPairs) {
+    distinctTesterCountByProject.set(
+      pair.projectId,
+      (distinctTesterCountByProject.get(pair.projectId) ?? 0) + 1,
+    )
+  }
+
+  return {
+    items: items.map((p) => ({
+      ...p,
+      distinctTesterCount: distinctTesterCountByProject.get(p.id) ?? 0,
+    })),
+    meta: buildMeta(query, total),
+  }
 }
 
 /**
@@ -304,6 +353,21 @@ export async function getProject(
           respondedAt: true,
           completedAt: true,
           notes: true,
+          /**
+           * What this tester was asked to cover. Returned so the roster can
+           * show it — a configuration written at invite time and never
+           * displayed anywhere would be a column nobody can act on.
+           */
+          assignedDevice: {
+            select: { id: true, type: true, manufacturer: true, model: true, osName: true },
+          },
+          assignedBrowser: {
+            select: {
+              id: true,
+              browser: { select: { name: true } },
+              browserVersion: { select: { version: true } },
+            },
+          },
           tester: {
             select: {
               id: true,
@@ -329,17 +393,28 @@ export async function getProject(
   if (!project) throw new NotFoundError('Project')
 
   // Fetched unscoped by build (Prisma can't apply a build filter here AND
-  // still let the tester branch below fall back to "whichever build my own
-  // assignment is on") and filtered in JS instead, per branch, right below.
-  const myAssignment = project.assignments.find((a) => a.tester.id === user.id)
+  // still let the tester branch below choose among ALL of their own rows)
+  // and filtered in JS instead, per branch, right below.
+  const myAssignments = project.assignments.filter((a) => a.tester.id === user.id)
 
-  // The build switcher is an admin/manager/customer affordance — a tester has
-  // no concept of "the active build," only of their own single assignment, so
-  // their effective build is whichever one that assignment was made under,
-  // never a `?buildId=` they never had a UI to set.
+  // A tester can now hold a `ProjectAssignment` on more than one build of
+  // this project, so — like admin/manager/customer — they DO have a real
+  // "active build" choice, just constrained to builds they actually hold a
+  // row on: an unrecognised or absent `?buildId=` falls back to their most
+  // relevant row (an active one first, else a pending invitation, else
+  // whatever they have), never to a build they aren't on.
   const activeBuildId = seesTeam
     ? await resolveBuildId(id, requestedBuildId)
-    : (myAssignment?.buildId ?? (await resolveBuildId(id)))
+    : myAssignments.length > 0
+      ? (myAssignments.find((a) => a.buildId === requestedBuildId)?.buildId ??
+        myAssignments.find((a) =>
+          ACTIVE_ASSIGNMENT_STATUSES.includes(a.status),
+        )?.buildId ??
+        myAssignments.find((a) => a.status === AssignmentStatus.INVITED)?.buildId ??
+        myAssignments[0]!.buildId)
+      : await resolveBuildId(id)
+
+  const myAssignment = myAssignments.find((a) => a.buildId === activeBuildId) ?? null
 
   const contacts = seesContacts
     ? await projectContacts(id, project.organisation.id, {
@@ -354,13 +429,11 @@ export async function getProject(
     activeBuildId,
     instructions: seesBrief ? project.instructions : null,
     materials: seesBrief ? project.materials.filter((m) => m.buildId === activeBuildId) : [],
-    // A tester sees only their own assignment row, never the rest of the
-    // crowd — and never filtered by build, since it is their one row
-    // regardless of which build it belongs to.
     /**
-     * A tester sees only their own assignment row, never the rest of the
-     * crowd — and never filtered by build, since it is their one row
-     * regardless of which build it belongs to.
+     * A tester sees only their OWN row for the active build, never the rest
+     * of the crowd — matching `assignments`' shape for team-side callers,
+     * which is likewise scoped to the active build's roster, not the whole
+     * project's.
      *
      * The roster is stripped of tester email addresses for anyone who is not
      * admin-side. A customer needs to know WHO is on their build — name,
@@ -381,6 +454,14 @@ export async function getProject(
       const { email: _omit, ...tester } = a.tester
       return { ...a, tester }
     }),
+    // Every build THIS tester holds a row on — project-wide, not just the
+    // active one — so the frontend can render a build switcher (and a
+    // pending-invitation banner per build) without a second round trip.
+    // Empty for team-side callers, who already see every tester's build in
+    // `assignments` above and have their own `builds` list to switch with.
+    myAssignments: seesTeam
+      ? []
+      : myAssignments.map((a) => ({ buildId: a.buildId, status: a.status })),
     managers: seesTeam ? project.managers : [],
     contacts,
     capabilities: {
@@ -389,7 +470,13 @@ export async function getProject(
       canChangeStatus: can(user, 'project.change_status', relations),
       canAssignTesters: can(user, 'project.assign_testers', relations),
       canManageMaterials: can(user, 'project.manage_materials', relations),
-      canReportBug: can(user, 'bug.create', relations),
+      // Being active on SOME build grants the `bug.create` relation
+      // project-wide (see `projectRelations`), but filing must still target
+      // the build the tester is actually active on — the one selected here.
+      canReportBug:
+        can(user, 'bug.create', relations) &&
+        myAssignment !== null &&
+        ACTIVE_ASSIGNMENT_STATUSES.includes(myAssignment.status),
       myAssignmentStatus: myAssignment?.status ?? null,
     },
   }
@@ -916,11 +1003,74 @@ export async function removeFeature(
 
 // ─── Assignments (§2.2 Project Management → assign testers) ──────────────────
 
+export interface AssignmentConfiguration {
+  testerId: string
+  deviceId?: string | null
+  browserId?: string | null
+}
+
+/**
+ * Resolves what each tester was asked to cover, refusing anything they do not
+ * own.
+ *
+ * THE OWNERSHIP CHECK IS THE POINT. `deviceId` and `browserId` arrive from a
+ * client, and both tables are global — every tester's handsets live in
+ * `tester_devices`. Writing them unchecked would let a crafted request pin
+ * one tester's assignment to another tester's phone, which is both nonsense
+ * on the roster and a quiet read of someone else's asset list.
+ *
+ * One query per table for the whole batch rather than per tester: a hundred
+ * testers is one round trip, not two hundred.
+ */
+async function resolveAssignmentConfigurations(
+  configurations: AssignmentConfiguration[] | undefined,
+): Promise<Map<string, { deviceId: string | null; browserId: string | null }>> {
+  const resolved = new Map<string, { deviceId: string | null; browserId: string | null }>()
+  if (!configurations || configurations.length === 0) return resolved
+
+  const deviceIds = configurations.map((c) => c.deviceId).filter((v): v is string => Boolean(v))
+  const browserIds = configurations.map((c) => c.browserId).filter((v): v is string => Boolean(v))
+
+  const [devices, browsers] = await Promise.all([
+    deviceIds.length > 0
+      ? prisma.testerDevice.findMany({
+          where: { id: { in: deviceIds } },
+          select: { id: true, testerProfile: { select: { userId: true } } },
+        })
+      : Promise.resolve([]),
+    browserIds.length > 0
+      ? prisma.testerBrowser.findMany({
+          where: { id: { in: browserIds } },
+          select: { id: true, testerProfile: { select: { userId: true } } },
+        })
+      : Promise.resolve([]),
+  ])
+
+  const deviceOwner = new Map(devices.map((d) => [d.id, d.testerProfile.userId]))
+  const browserOwner = new Map(browsers.map((b) => [b.id, b.testerProfile.userId]))
+
+  for (const config of configurations) {
+    if (config.deviceId && deviceOwner.get(config.deviceId) !== config.testerId) {
+      throw new BadRequestError('That device does not belong to the tester it was chosen for')
+    }
+    if (config.browserId && browserOwner.get(config.browserId) !== config.testerId) {
+      throw new BadRequestError('That browser does not belong to the tester it was chosen for')
+    }
+    resolved.set(config.testerId, {
+      deviceId: config.deviceId ?? null,
+      browserId: config.browserId ?? null,
+    })
+  }
+
+  return resolved
+}
+
 export async function assignTesters(
   projectId: string,
   testerIds: string[],
   notes?: string,
   requestedBuildId?: string,
+  configurations?: AssignmentConfiguration[],
 ) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, deletedAt: null },
@@ -940,65 +1090,164 @@ export async function assignTesters(
     await assertAssignable(testerId)
   }
 
-  // A tester keeps exactly one roster row per PROJECT, not per build (see the
-  // schema comment on `ProjectAssignment.buildId`) — so someone already on
-  // the roster under a different build is skipped here, the same as someone
-  // already invited under this one. Moving a tester between builds is not
-  // exposed by this endpoint.
+  /**
+   * A tester keeps one roster row per (project, BUILD) — see the schema
+   * comment on `ProjectAssignment.buildId` — so someone already on THIS build
+   * gets no second row, while someone on a different build of this project is
+   * untouched: they can hold both.
+   *
+   * ── RE-INVITING SOMEONE WHO DECLINED OR WAS REMOVED
+   *
+   * Those two statuses are spent, not live: both are excluded from the
+   * `maxTesters` count, and neither gives the tester any access. Until now
+   * they were lumped in with "already assigned" and silently skipped, so a
+   * tester who declined in error, or was taken off and needed back, could
+   * never be invited again — the unique constraint forbids a second row and
+   * nothing revived the first. Reviving is the only shape this can take.
+   *
+   * A live row (INVITED, ACCEPTED, ACTIVE, COMPLETED) is still skipped:
+   * re-inviting someone who is already working on the build would reset
+   * their standing for no reason.
+   */
   const existing = await prisma.projectAssignment.findMany({
-    where: { projectId, testerId: { in: unique } },
-    select: { testerId: true },
+    where: { projectId, buildId, testerId: { in: unique } },
+    select: { id: true, testerId: true, status: true },
   })
-  const alreadyAssigned = new Set(existing.map((e) => e.testerId))
-  const toCreate = unique.filter((id) => !alreadyAssigned.has(id))
 
-  if (project.maxTesters !== null && toCreate.length > 0) {
-    // REMOVED/DECLINED testers freed up their slot; everything else still
-    // occupies one.
-    const currentlyOnRoster = await prisma.projectAssignment.count({
+  const REVIVABLE: AssignmentStatus[] = [AssignmentStatus.DECLINED, AssignmentStatus.REMOVED]
+  const revivable = existing.filter((e) => REVIVABLE.includes(e.status))
+  const blocking = existing.filter((e) => !REVIVABLE.includes(e.status))
+
+  const blocked = new Set(blocking.map((e) => e.testerId))
+  const toRevive = revivable.filter((e) => unique.includes(e.testerId))
+  const reviveIds = new Set(toRevive.map((e) => e.testerId))
+  const toCreate = unique.filter((id) => !blocked.has(id) && !reviveIds.has(id))
+
+  /** Everyone who ends up invited by this call, however they got there. */
+  const invitedTesterIds = [...toCreate, ...toRevive.map((e) => e.testerId)]
+
+  if (project.maxTesters !== null && invitedTesterIds.length > 0) {
+    // Maximum testers counts PEOPLE on the project, not roster rows — a
+    // tester already on one build who is now also being invited onto this
+    // one does not consume a second seat. REMOVED/DECLINED testers freed up
+    // their slot; everything else still occupies one.
+    const currentlyOnRoster = await prisma.projectAssignment.findMany({
       where: {
         projectId,
         status: { notIn: [AssignmentStatus.REMOVED, AssignmentStatus.DECLINED] },
       },
+      select: { testerId: true },
+      distinct: ['testerId'],
     })
-    const remaining = project.maxTesters - currentlyOnRoster
-    if (remaining <= 0) {
+    const occupiedSeats = new Set(currentlyOnRoster.map((r) => r.testerId))
+    /**
+     * Only testers genuinely NEW to the project (not already occupying a seat
+     * via a different build) draw down the remaining count.
+     *
+     * A revived tester counts here too, and must: DECLINED and REMOVED are
+     * excluded from `occupiedSeats` above, so bringing one back re-occupies a
+     * seat that the cap had already handed to someone else. Counting only
+     * `toCreate` would let a project quietly exceed its own limit by reviving.
+     */
+    const newSeatsNeeded = invitedTesterIds.filter((id) => !occupiedSeats.has(id)).length
+    const remaining = project.maxTesters - occupiedSeats.size
+    // Guarded on `newSeatsNeeded > 0`: someone already occupying a seat
+    // (via a different build) draws down nothing by joining another one,
+    // even if the roster is already over cap for unrelated reasons — only a
+    // genuinely NEW person can be refused here.
+    if (newSeatsNeeded > 0 && newSeatsNeeded > remaining) {
       throw new ConflictError(
-        `This project is already at its limit of ${project.maxTesters} tester${project.maxTesters === 1 ? '' : 's'}.`,
-      )
-    }
-    if (toCreate.length > remaining) {
-      throw new ConflictError(
-        `Only ${remaining} more tester${remaining === 1 ? '' : 's'} can be added — this project is capped at ${project.maxTesters}.`,
+        remaining <= 0
+          ? `This project is already at its limit of ${project.maxTesters} tester${project.maxTesters === 1 ? '' : 's'}.`
+          : `Only ${remaining} more tester${remaining === 1 ? '' : 's'} can be added — this project is capped at ${project.maxTesters}.`,
       )
     }
   }
 
-  if (toCreate.length > 0) {
-    await prisma.projectAssignment.createMany({
-      data: toCreate.map((testerId) => ({
-        projectId,
-        buildId,
-        testerId,
-        status: AssignmentStatus.INVITED,
-        notes: notes ?? null,
-      })),
-    })
+  /**
+   * Resolved before the write, so a configuration naming someone else's
+   * device fails the whole batch rather than inviting half of it and then
+   * throwing — the same all-or-nothing the tester validation above gives.
+   */
+  const configured = await resolveAssignmentConfigurations(configurations)
 
-    await createNotifications(toCreate, {
+  /**
+   * Creating and reviving in one transaction.
+   *
+   * Both are the same act from the reader's side — "invite these people" —
+   * so a batch that half-applies would leave a roster nobody asked for. The
+   * notifications go out afterwards, outside the transaction, because a
+   * notification failing is not a reason to un-invite anyone.
+   */
+  if (toCreate.length > 0 || toRevive.length > 0) {
+    await prisma.$transaction([
+      ...(toCreate.length > 0
+        ? [
+            prisma.projectAssignment.createMany({
+              data: toCreate.map((testerId) => ({
+                projectId,
+                buildId,
+                testerId,
+                status: AssignmentStatus.INVITED,
+                notes: notes ?? null,
+                assignedDeviceId: configured.get(testerId)?.deviceId ?? null,
+                assignedBrowserId: configured.get(testerId)?.browserId ?? null,
+              })),
+            }),
+          ]
+        : []),
+      /**
+       * A revival is a fresh invitation on the row that already exists, so
+       * every trace of the previous outcome is cleared: `respondedAt` and
+       * `removedAt` described a decision that no longer stands, and leaving
+       * them would make the row read as both newly invited and already
+       * declined. `invitedAt` moves to now for the same reason — the tester's
+       * "invited" date is the one they are being asked about.
+       */
+      ...toRevive.map((row) =>
+        prisma.projectAssignment.update({
+          where: { id: row.id },
+          data: {
+            status: AssignmentStatus.INVITED,
+            invitedAt: new Date(),
+            respondedAt: null,
+            removedAt: null,
+            completedAt: null,
+            ...(notes ? { notes } : {}),
+            assignedDeviceId: configured.get(row.testerId)?.deviceId ?? null,
+            assignedBrowserId: configured.get(row.testerId)?.browserId ?? null,
+          },
+        }),
+      ),
+    ])
+
+    await createNotifications(invitedTesterIds, {
       type: 'PROJECT_ASSIGNED',
       title: `You have been invited to test "${project.title}"`,
       body: notes,
-      link: `/app/tester/projects/${projectId}`,
+      // Carries the build so a tester invited onto two builds of the same
+      // project gets two notifications that actually land on the right one,
+      // rather than both pointing at whichever build the project defaults
+      // to.
+      link: `/app/tester/projects/${projectId}?buildId=${buildId}`,
     })
   }
 
   return {
     invited: toCreate.length,
-    skipped: unique.length - toCreate.length,
+    /**
+     * Reported separately from `invited` because the two read differently to
+     * whoever pressed the button: "3 invited" and "3 invited, 1 brought back"
+     * are different facts, and a revived tester is one the reader had
+     * previously taken off or been turned down by.
+     */
+    reinvited: toRevive.length,
+    /** Only genuinely untouched rows — someone already live on this build. */
+    skipped: blocked.size,
     assignments: await prisma.projectAssignment.findMany({
-      where: { projectId },
+      where: { projectId, buildId },
       select: {
+        buildId: true,
         status: true,
         invitedAt: true,
         respondedAt: true,
@@ -1008,15 +1257,22 @@ export async function assignTesters(
   }
 }
 
-/** §2.3 — a tester accepts or declines their invitation. */
+/**
+ * §2.3 — a tester accepts or declines their invitation to a specific build.
+ *
+ * `buildId` is required now that a tester can hold more than one row on the
+ * same project: `(projectId, testerId)` alone no longer names a single
+ * invitation to answer.
+ */
 export async function respondToAssignment(
   testerId: string,
   projectId: string,
+  buildId: string,
   response: 'ACCEPTED' | 'DECLINED',
   notes?: string,
 ) {
-  const assignment = await prisma.projectAssignment.findUnique({
-    where: { projectId_testerId: { projectId, testerId } },
+  const assignment = await prisma.projectAssignment.findFirst({
+    where: { projectId, buildId, testerId },
     select: { id: true, status: true, project: { select: { title: true, createdById: true } } },
   })
   if (!assignment) throw new NotFoundError('Assignment')
@@ -1043,26 +1299,41 @@ export async function respondToAssignment(
   return updated
 }
 
-/** Admin-side change to an assignment: activate, complete or remove a tester. */
+/**
+ * Admin-side change to an assignment: activate, complete or remove a tester
+ * FROM ONE BUILD. `buildId` is required for the same reason it is on
+ * `respondToAssignment` — the tester may hold several rows on this project.
+ */
 export async function updateAssignment(
   projectId: string,
+  buildId: string,
   testerId: string,
   status: AssignmentStatus,
   notes?: string,
 ) {
-  const assignment = await prisma.projectAssignment.findUnique({
-    where: { projectId_testerId: { projectId, testerId } },
+  const assignment = await prisma.projectAssignment.findFirst({
+    where: { projectId, buildId, testerId },
     select: { id: true },
   })
   if (!assignment) throw new NotFoundError('Assignment')
 
+  /**
+   * The two stamps track the status, in BOTH directions.
+   *
+   * They used to be set on the way in and never cleared, so a tester taken
+   * off a build and then put back kept a `removedAt` while reading as
+   * ACCEPTED — a row that says it was removed at a timestamp and is currently
+   * active. Anything reporting on either field had to know to ignore it,
+   * which is the kind of thing nothing ever remembers to do.
+   */
+  const now = new Date()
   return prisma.projectAssignment.update({
     where: { id: assignment.id },
     data: {
       status,
       ...(notes ? { notes } : {}),
-      ...(status === AssignmentStatus.COMPLETED ? { completedAt: new Date() } : {}),
-      ...(status === AssignmentStatus.REMOVED ? { removedAt: new Date() } : {}),
+      completedAt: status === AssignmentStatus.COMPLETED ? now : null,
+      removedAt: status === AssignmentStatus.REMOVED ? now : null,
     },
   })
 }
@@ -1110,7 +1381,13 @@ export async function listMyAssignments(
   ])
 
   /**
-   * What the tester actually did on each project, for the work-history view.
+   * What the tester actually did on each BUILD, for the work-history view.
+   *
+   * Grouped by (projectId, buildId) rather than projectId alone — a tester
+   * can now hold two assignment rows on the same project, and without the
+   * build in the key both rows would show the SAME project-wide total,
+   * reading as double-counting rather than two builds' real, different
+   * counts.
    *
    * Two grouped counts rather than a per-row subquery: one round trip each
    * regardless of how many assignments come back, instead of 2N. Both are
@@ -1125,12 +1402,12 @@ export async function listMyAssignments(
   const [reported, accepted] = projectIds.length
     ? await Promise.all([
         prisma.bug.groupBy({
-          by: ['projectId'],
+          by: ['projectId', 'buildId'],
           where: { reportedById: testerId, deletedAt: null, projectId: { in: projectIds } },
           _count: { _all: true },
         }),
         prisma.bug.groupBy({
-          by: ['projectId'],
+          by: ['projectId', 'buildId'],
           where: {
             reportedById: testerId,
             deletedAt: null,
@@ -1142,14 +1419,15 @@ export async function listMyAssignments(
       ])
     : [[], []]
 
-  const reportedBy = new Map(reported.map((r) => [r.projectId, r._count._all]))
-  const acceptedBy = new Map(accepted.map((r) => [r.projectId, r._count._all]))
+  const key = (projectId: string, buildId: string): string => `${projectId}:${buildId}`
+  const reportedBy = new Map(reported.map((r) => [key(r.projectId, r.buildId), r._count._all]))
+  const acceptedBy = new Map(accepted.map((r) => [key(r.projectId, r.buildId), r._count._all]))
 
   return {
     items: items.map((a) => ({
       ...a,
-      bugsReported: reportedBy.get(a.project.id) ?? 0,
-      bugsAccepted: acceptedBy.get(a.project.id) ?? 0,
+      bugsReported: reportedBy.get(key(a.project.id, a.build.id)) ?? 0,
+      bugsAccepted: acceptedBy.get(key(a.project.id, a.build.id)) ?? 0,
     })),
     meta: buildMeta(query, total),
   }

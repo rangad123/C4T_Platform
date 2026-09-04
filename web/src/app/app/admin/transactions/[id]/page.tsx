@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
 import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
@@ -101,15 +102,39 @@ const recordLink = {
   textUnderlineOffset: 3,
 }
 
+/**
+ * What each write on this page can come back with.
+ *
+ * The three save actions used to post straight through, so an API refusal —
+ * a status the ledger will not allow, a row someone else settled first —
+ * reached Next's error boundary as a crash screen. They now land here.
+ */
+const NOTICES: Record<string, NoticeCopy> = {
+  'tx-status-saved': { tone: 'success', message: 'The transaction status has been updated.' },
+  'tx-details-saved': { tone: 'success', message: 'The details have been saved.' },
+  'tx-payout-saved': { tone: 'success', message: 'The payout details have been saved.' },
+  'tx-forbidden': { tone: 'error', message: 'This transaction is not yours to change.' },
+  'tx-missing': { tone: 'error', message: 'This transaction no longer exists.' },
+  'tx-conflict': {
+    tone: 'error',
+    message: 'That change is no longer allowed from this status. Reload the page.',
+  },
+  'tx-invalid': { tone: 'error', message: 'Some values were not accepted. Check the amounts and dates.' },
+  'tx-failed': { tone: 'error', message: 'That change could not be saved. Try again in a moment.' },
+}
+
 export default async function TransactionDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ notice?: string }>
 }) {
   const user = await requirePermission('transaction.read')
   const canWrite = hasPermission(user, 'transaction.write')
 
   const { id } = await params
+  const { notice } = await searchParams
 
   let tx: TransactionDetail | null = null
   let loadError: 'forbidden' | 'unknown' | null = null
@@ -315,6 +340,7 @@ export default async function TransactionDetailPage({
         </>
       }
     >
+      <Notice code={notice} notices={NOTICES} />
       <Panel title="Ledger entry">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>

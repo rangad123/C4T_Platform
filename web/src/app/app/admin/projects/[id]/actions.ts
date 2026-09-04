@@ -153,8 +153,30 @@ export async function updateProjectDelivery(formData: FormData): Promise<void> {
 }
 
 /**
- * A lifecycle move. The select on the page only offers legal destinations, so
- * this normally cannot 409 — the enum check is the backstop for a posted body.
+ * One mapping from an API refusal to a notice code, for every action on this
+ * page that has no more specific story to tell.
+ *
+ * `prefix` names the thing being acted on, so the reader is told what failed
+ * rather than that "something" did. The codes are resolved to sentences by
+ * `PAGE_NOTICES` on the project page.
+ */
+function noticeFor(error: unknown, prefix: string): string {
+  const code = error instanceof ApiError ? error.status : 0
+  if (code === 404) return `${prefix}-missing`
+  if (code === 403) return `${prefix}-forbidden`
+  if (code === 409) return `${prefix}-conflict`
+  if (code === 400 || code === 422) return `${prefix}-invalid`
+  return `${prefix}-failed`
+}
+
+/**
+ * A lifecycle move.
+ *
+ * The select only offers destinations the API accepts, so a refusal here is
+ * not the reader's mistake — it is a transition that became illegal while
+ * they had the page open, most often because someone else moved the project
+ * first. Unguarded, that answered with Next's crash screen; the twin of this
+ * action in the customer portal was fixed and this one was not.
  */
 export async function changeProjectStatus(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
@@ -162,11 +184,25 @@ export async function changeProjectStatus(formData: FormData): Promise<void> {
   if (!id || !isProjectStatus(status)) return
 
   const note = formTrimmed(formData, 'note')
-  await actionFetch(`projects/${id}/status`, {
-    method: 'POST',
-    body: { status, ...(note ? { note } : {}) },
-  })
+
+  let notice = 'status-changed'
+  try {
+    await actionFetch(`projects/${id}/status`, {
+      method: 'POST',
+      body: { status, ...(note ? { note } : {}) },
+    })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    notice =
+      code === 409 || code === 400
+        ? 'status-illegal'
+        : code === 403
+          ? 'status-forbidden'
+          : 'status-failed'
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { notice }))
 }
 
 /**
@@ -222,18 +258,48 @@ export async function inviteTesters(formData: FormData): Promise<void> {
 }
 
 /** Activate, complete or remove one tester on the roster. */
+/**
+ * Move one tester's standing on this build — activate them, mark them done,
+ * or take them off it.
+ *
+ * REMOVING IS A STATUS CHANGE, NOT A DELETE. The API sets `status: REMOVED`
+ * and stamps `removedAt`, keeping the row: the bug reports, payments and work
+ * history that point at this assignment all depend on it still existing. The
+ * seat is freed (the `maxTesters` count skips REMOVED and DECLINED), but the
+ * record stays.
+ *
+ * The catch is not decoration. Like `addMaterial` and `changeProjectStatus`
+ * in this same file, this action posted straight through, so a 404 from a
+ * roster the reader had open while someone else changed it came back as
+ * Next's crash screen instead of a sentence.
+ */
 export async function updateAssignment(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   const testerId = formTrimmed(formData, 'testerId')
   const status = formTrimmed(formData, 'status')
-  if (!id || !testerId || !isAssignmentStatus(status)) return
+  const buildId = formTrimmed(formData, 'buildId')
+  if (!id || !testerId || !buildId || !isAssignmentStatus(status)) return
 
   const notes = formTrimmed(formData, 'notes')
-  await actionFetch(`projects/${id}/assignments/${testerId}`, {
-    method: 'PATCH',
-    body: { status, ...(notes ? { notes } : {}) },
-  })
+
+  let notice = status === 'REMOVED' ? 'assignment-removed' : 'assignment-updated'
+  try {
+    await actionFetch(`projects/${id}/assignments/${testerId}`, {
+      method: 'PATCH',
+      body: { buildId, status, ...(notes ? { notes } : {}) },
+    })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    notice =
+      code === 404
+        ? 'assignment-missing'
+        : code === 403
+          ? 'assignment-forbidden'
+          : 'assignment-failed'
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'testers', buildId, notice }))
 }
 
 /**
@@ -252,17 +318,25 @@ export async function addMaterial(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!url && !fileId) return
 
-  await actionFetch(`projects/${id}/materials`, {
-    method: 'POST',
-    body: {
-      title,
-      ...(description ? { description } : {}),
-      ...(url ? { url } : {}),
-      ...(fileId ? { fileId } : {}),
-      ...(buildId ? { buildId } : {}),
-    },
-  })
+  let notice = 'material-added'
+  try {
+    await actionFetch(`projects/${id}/materials`, {
+      method: 'POST',
+      body: {
+        title,
+        ...(description ? { description } : {}),
+        ...(url ? { url } : {}),
+        ...(fileId ? { fileId } : {}),
+        ...(buildId ? { buildId } : {}),
+      },
+    })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    notice = code === 422 || code === 400 ? 'material-invalid' : 'material-failed'
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'materials', buildId, notice }))
 }
 
 export async function removeMaterial(formData: FormData): Promise<void> {
@@ -270,8 +344,15 @@ export async function removeMaterial(formData: FormData): Promise<void> {
   const materialId = formTrimmed(formData, 'materialId')
   if (!id || !materialId) return
 
-  await actionFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
+  let notice = 'material-removed'
+  try {
+    await actionFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
+  } catch (error) {
+    notice = noticeFor(error, 'material')
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'materials', notice }))
 }
 
 /** §2.2 Build Settings "Feature Lists" — the tags a bug can be filed against. */
@@ -281,11 +362,19 @@ export async function addFeature(formData: FormData): Promise<void> {
   if (!id || !name) return
 
   const buildId = formTrimmed(formData, 'buildId')
-  await actionFetch(`projects/${id}/features`, {
-    method: 'POST',
-    body: { name, ...(buildId ? { buildId } : {}) },
-  })
+
+  let notice = 'feature-added'
+  try {
+    await actionFetch(`projects/${id}/features`, {
+      method: 'POST',
+      body: { name, ...(buildId ? { buildId } : {}) },
+    })
+  } catch (error) {
+    notice = noticeFor(error, 'feature')
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'build', buildId, notice }))
 }
 
 export async function removeFeature(formData: FormData): Promise<void> {
@@ -293,8 +382,15 @@ export async function removeFeature(formData: FormData): Promise<void> {
   const featureId = formTrimmed(formData, 'featureId')
   if (!id || !featureId) return
 
-  await actionFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
+  let notice = 'feature-removed'
+  try {
+    await actionFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
+  } catch (error) {
+    notice = noticeFor(error, 'feature')
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'build', notice }))
 }
 
 /**
@@ -312,10 +408,21 @@ export async function archiveProject(formData: FormData): Promise<void> {
   if (!id || !reference) return
   if (confirmation.toUpperCase() !== reference.toUpperCase()) return
 
-  await actionFetch(`projects/${id}`, { method: 'DELETE' })
+  /*
+    On failure the reader stays on the project with a reason, rather than
+    being sent to the list as though the archive had worked.
+  */
+  let failed: string | null = null
+  try {
+    await actionFetch(`projects/${id}`, { method: 'DELETE' })
+  } catch (error) {
+    failed = noticeFor(error, 'archive')
+  }
+
   revalidateProject(id)
   // `redirect` throws to unwind — it must be the last statement and must not sit
   // inside a try/catch.
+  if (failed) redirect(projectHref(id, { section: 'settings', notice: failed }))
   redirect('/app/admin/projects')
 }
 
@@ -341,41 +448,74 @@ export async function createBuild(formData: FormData): Promise<void> {
 
   const section = formTrimmed(formData, 'section')
 
-  const build = await actionFetch<{ id: string }>(`projects/${id}/builds`, {
-    method: 'POST',
-    body: { name },
-  })
+  /*
+    Two calls, and they fail differently.
 
+    The create is fatal: with no build there is nothing to configure and
+    nowhere to send the reader, so a refusal (a duplicate name, most often)
+    reopens the modal with the reason and the typed name still in it.
+  */
+  let build: { id: string }
+  try {
+    build = await actionFetch<{ id: string }>(`projects/${id}/builds`, {
+      method: 'POST',
+      body: { name },
+    })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    redirect(
+      projectHref(id, {
+        section: section || 'build',
+        edit: 'new-build',
+        name,
+        error: code === 409 ? 'build-name-taken' : 'build-create-failed',
+      }),
+    )
+  }
+
+  /*
+    The follow-up PATCH is not fatal. The build exists either way, and losing
+    it over one unsaved field would be the worse outcome — so the reader is
+    taken to the new build and told the details did not stick, exactly as the
+    project-create flow handles its own optional second call.
+  */
   const maxTesters = formTrimmed(formData, 'maxTesters')
-  await actionFetch(`projects/${id}/builds/${build.id}`, {
-    method: 'PATCH',
-    body: {
-      status: formTrimmed(formData, 'status'),
-      testType: formTrimmed(formData, 'testType') || null,
-      description: formTrimmed(formData, 'description') || null,
-      appUrl: formTrimmed(formData, 'appUrl') || null,
-      releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
-      instructions: formTrimmed(formData, 'instructions') || null,
-      specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
-      targetDevices: parseList(formString(formData, 'targetDevices')),
-      targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
-      targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
-      targetCountries: parseList(formString(formData, 'targetCountries')).map((c) =>
-        c.toUpperCase(),
-      ),
-      targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) =>
-        l.toLowerCase(),
-      ),
-      startDate: formTrimmed(formData, 'startDate') || null,
-      endDate: formTrimmed(formData, 'endDate') || null,
-      maxTesters: maxTesters ? maxTesters : null,
-      testersCanSeeOtherBugs: formData.has('testersCanSeeOtherBugs'),
-    },
-  })
+  let detailsSaved = true
+  try {
+    await actionFetch(`projects/${id}/builds/${build.id}`, {
+      method: 'PATCH',
+      body: {
+        status: formTrimmed(formData, 'status'),
+        testType: formTrimmed(formData, 'testType') || null,
+        description: formTrimmed(formData, 'description') || null,
+        appUrl: formTrimmed(formData, 'appUrl') || null,
+        releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
+        instructions: formTrimmed(formData, 'instructions') || null,
+        specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
+        targetDevices: parseList(formString(formData, 'targetDevices')),
+        targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
+        targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
+        targetCountries: parseList(formString(formData, 'targetCountries')).map((c) =>
+          c.toUpperCase(),
+        ),
+        targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) =>
+          l.toLowerCase(),
+        ),
+        startDate: formTrimmed(formData, 'startDate') || null,
+        endDate: formTrimmed(formData, 'endDate') || null,
+        maxTesters: maxTesters ? maxTesters : null,
+        testersCanSeeOtherBugs: formData.has('testersCanSeeOtherBugs'),
+      },
+    })
+  } catch {
+    detailsSaved = false
+  }
+
   revalidateProject(id)
 
   const params = new URLSearchParams({ buildId: build.id })
   if (section) params.set('section', section)
+  if (!detailsSaved) params.set('notice', 'build-details-unsaved')
   redirect(`/app/admin/projects/${id}?${params.toString()}`)
 }
 
@@ -428,6 +568,7 @@ export async function updateBuild(formData: FormData): Promise<void> {
     testType: formTrimmed(formData, 'testType') || null,
     description: formTrimmed(formData, 'description') || null,
     appUrl: formTrimmed(formData, 'appUrl') || null,
+    testDocumentFileId: formTrimmed(formData, 'testDocumentFileId') || null,
     releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
     instructions: formTrimmed(formData, 'instructions') || null,
     specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
@@ -475,11 +616,19 @@ export async function createTestCase(formData: FormData): Promise<void> {
   if (!id || !buildId || !title || !description || !steps || !expectedResult) return
 
   const feature = formTrimmed(formData, 'feature')
-  await actionFetch('test-cases', {
-    method: 'POST',
-    body: { buildId, title, description, steps, expectedResult, ...(feature ? { feature } : {}) },
-  })
+
+  let notice = 'test-case-created'
+  try {
+    await actionFetch('test-cases', {
+      method: 'POST',
+      body: { buildId, title, description, steps, expectedResult, ...(feature ? { feature } : {}) },
+    })
+  } catch (error) {
+    notice = noticeFor(error, 'test-case')
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'test-cases', buildId, notice }))
 }
 
 export async function assignTestCase(formData: FormData): Promise<void> {
@@ -488,9 +637,16 @@ export async function assignTestCase(formData: FormData): Promise<void> {
   const testerId = formTrimmed(formData, 'testerId')
   if (!id || !testCaseId || !testerId) return
 
-  await actionFetch(`test-cases/${testCaseId}/assignments`, {
-    method: 'POST',
-    body: { testerIds: [testerId] },
-  })
+  let notice = 'test-case-assigned'
+  try {
+    await actionFetch(`test-cases/${testCaseId}/assignments`, {
+      method: 'POST',
+      body: { testerIds: [testerId] },
+    })
+  } catch (error) {
+    notice = noticeFor(error, 'test-case')
+  }
+
   revalidateProject(id)
+  redirect(projectHref(id, { section: 'test-cases', notice }))
 }

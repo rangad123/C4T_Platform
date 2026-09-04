@@ -1,8 +1,10 @@
 import type { CSSProperties } from 'react'
 import { requireRole } from '@/lib/auth/session'
-import { serverFetchOrNull } from '@/lib/api/server'
+import { serverFetchOrNull, serverFetchPage } from '@/lib/api/server'
 import { Topbar } from '@/components/admin/Topbar'
 import { Card, CardGrid } from '@/components/admin/Card'
+import { ActivityFeed, type ActivityItem } from '@/components/admin/ActivityFeed'
+import { resolveNotificationHref } from '@/lib/notifications/href'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Icon } from '@/components/ds/core/Icon'
 import { Button } from '@/components/ds/core/Button'
@@ -10,7 +12,7 @@ import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
-import { formatDate, formatMoney, titleCase } from '@/lib/admin/format'
+import { formatDate, formatMoney, formatRating, titleCase } from '@/lib/admin/format'
 import { requestPayoutAction } from './actions'
 
 const ROOT = { label: 'Tester', href: '/app/tester' }
@@ -87,10 +89,38 @@ interface TransactionRow {
   occurredAt: string
 }
 
+/**
+ * `GET /v1/testers/me` — only the standing figures this page shows. The
+ * profile page reads the same endpoint for the whole record.
+ */
+interface TesterStanding {
+  /**
+   * A Prisma `Decimal`, so it arrives as a STRING — never call `toFixed` on
+   * it directly. `formatRating` coerces; see its own note, which exists
+   * because this is an easy thing to get wrong.
+   */
+  ratingAverage: string | number | null
+  ratingCount: number
+  bugsAcceptedCount: number
+  projectsCompletedCount: number
+}
+
+/** A row of `GET /v1/badges/awards/mine` — recognition this tester has earned. */
+interface BadgeAward {
+  id: string
+  note: string | null
+  createdAt: string
+  badge: { id: string; slug: string; name: string; description: string | null; icon: string }
+  project: { id: string; reference: string; title: string } | null
+  awardedBy: { id: string; firstName: string | null; lastName: string | null; role: string } | null
+}
+
 /** A row of `GET /v1/projects/my-assignments` — the tester's own standing. */
 interface AssignmentRow {
   status: string
   invitedAt: string
+  /** Which build THIS row is on — a tester can hold one row per build now. */
+  build: { id: string; name: string }
   project: {
     id: string
     reference: string
@@ -192,14 +222,39 @@ export default async function TesterHomePage({
   const user = await requireRole(['TESTER'], '/app/tester')
   const { notice } = await searchParams
 
-  const [summary, transactions, assignments, payout] = await Promise.all([
+  const [summary, transactions, assignments, payout, standing, badges] = await Promise.all([
     serverFetchOrNull<EarningsSummary>('transactions/summary/mine'),
     serverFetchOrNull<readonly TransactionRow[]>(
       'transactions?limit=50&sort=occurredAt&order=desc',
     ),
     serverFetchOrNull<readonly AssignmentRow[]>('projects/my-assignments?limit=6'),
     serverFetchOrNull<PayoutState>('transactions/payouts/mine'),
+    serverFetchOrNull<TesterStanding>('testers/me'),
+    serverFetchOrNull<readonly BadgeAward[]>('badges/awards/mine'),
   ])
+
+  /**
+   * The activity feed's rows. Read AND unread, unlike the bell — see
+   * `ActivityFeed` for why a dashboard wants the ones already seen.
+   *
+   * Its own try/catch, matching the admin dashboard: a dashboard that renders
+   * nothing because one panel's endpoint is briefly unavailable is worse than
+   * a dashboard missing one panel, and `serverFetchPage` throws where
+   * `serverFetchOrNull` would not.
+   */
+  let activity: ActivityItem[] = []
+  try {
+    const { data } = await serverFetchPage<Omit<ActivityItem, 'href'> & { link: string | null }>(
+      'notifications',
+      { query: { page: 1, limit: 30 } },
+    )
+    activity = data.map(({ link, ...row }) => ({
+      ...row,
+      href: resolveNotificationHref(link, user.role),
+    }))
+  } catch {
+    activity = []
+  }
 
   /**
    * An invitation needs answering before anything else on this page matters,
@@ -320,10 +375,10 @@ export default async function TesterHomePage({
             <CardGrid min={260}>
               {liveAssignments.map((a) => (
                 <Card
-                  key={a.project!.id}
-                  href={`/app/tester/projects/${a.project!.id}`}
+                  key={`${a.project!.id}:${a.build.id}`}
+                  href={`/app/tester/projects/${a.project!.id}?buildId=${a.build.id}`}
                   title={a.project!.title}
-                  meta={[a.project!.reference, a.project!.organisation?.name]
+                  meta={[a.project!.reference, a.project!.organisation?.name, a.build.name]
                     .filter(Boolean)
                     .join(' · ')}
                 >
@@ -348,6 +403,164 @@ export default async function TesterHomePage({
               ))}
             </CardGrid>
           )}
+        </section>
+
+        {/*
+          How the work has been received — the rating the crowd pool sorts on,
+          and the badges the delivery team and customers have handed over.
+          Above Earnings on purpose: this is the part of the record a tester
+          can still influence, and the money below is its consequence.
+        */}
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 'var(--space-4)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 'var(--type-body-md-size)',
+                fontWeight: 'var(--fw-semibold)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              Ratings and badges
+            </h2>
+            <Button
+              href="/app/tester/profile"
+              variant="link"
+              size="sm"
+              iconRight="arrow-right"
+            >
+              View your profile
+            </Button>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 'var(--space-4)',
+            }}
+          >
+            <StatTile
+              label="Rating"
+              value={
+                standing?.ratingAverage != null
+                  ? formatRating(standing.ratingAverage, { suffix: false })
+                  : 'Not rated yet'
+              }
+              hint={
+                standing?.ratingCount
+                  ? `Across ${standing.ratingCount} rating${standing.ratingCount === 1 ? '' : 's'}`
+                  : 'Given by the teams you work with'
+              }
+            />
+            <StatTile
+              label="Badges earned"
+              value={String(badges?.length ?? 0)}
+              hint="Recognition for specific work"
+            />
+            <StatTile
+              label="Bugs accepted"
+              value={String(standing?.bugsAcceptedCount ?? 0)}
+              hint="Reports the team acted on"
+            />
+            <StatTile
+              label="Projects completed"
+              value={String(standing?.projectsCompletedCount ?? 0)}
+              hint="Finished engagements"
+            />
+          </div>
+
+          {badges && badges.length > 0 ? (
+            <ul
+              style={{
+                listStyle: 'none',
+                margin: 0,
+                padding: 0,
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 'var(--space-3)',
+              }}
+            >
+              {badges.map((award) => (
+                <li
+                  key={award.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-3) var(--space-4)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 'var(--radius-card)',
+                    background: 'var(--surface-raised)',
+                  }}
+                  /* The project and the note are the whole story of why this
+                     was given, and they do not fit on the chip itself. */
+                  title={[
+                    award.badge.description,
+                    award.project ? `Earned on ${award.project.title}` : null,
+                    award.note,
+                  ]
+                    .filter(Boolean)
+                    .join(' — ')}
+                >
+                  <Icon name={award.badge.icon} size={20} />
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span
+                      style={{
+                        fontSize: 'var(--type-body-sm-size)',
+                        fontWeight: 'var(--fw-semibold)',
+                      }}
+                    >
+                      {award.badge.name}
+                    </span>
+                    {award.project ? (
+                      <span
+                        style={{
+                          fontSize: 'var(--type-caption-size)',
+                          color: 'var(--text-muted)',
+                        }}
+                      >
+                        {award.project.reference}
+                      </span>
+                    ) : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-secondary)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
+              No badges yet. Project teams award these for work on a specific build — thorough
+              coverage, clear reports, quick turnarounds.
+            </p>
+          )}
+        </section>
+
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 'var(--type-body-md-size)',
+              fontWeight: 'var(--fw-semibold)',
+              color: 'var(--text-primary)',
+            }}
+          >
+            Latest activity
+          </h2>
+          <ActivityFeed items={activity} />
         </section>
 
         <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>

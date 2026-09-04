@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { BuildSwitcher } from '@/components/admin/BuildSwitcher'
 import { InboxList } from '@/components/admin/InboxList'
 import { MarkReadOnView } from '@/components/admin/MarkReadOnView'
 import { buildAnnouncementItems, loadBroadcastReads } from '@/lib/communication/inbox'
@@ -24,7 +25,7 @@ import { loadList } from '@/lib/admin/list'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
-import { DownloadLink } from '@/components/tester/DownloadLink'
+import { DownloadLink } from '@/components/admin/DownloadLink'
 import { reportTestResult, respondToInvitation } from './actions'
 import type {
   AnnouncementRow,
@@ -49,13 +50,16 @@ const BUG_PAGE_SIZE = 50
  * fetches) so a tester and an admin looking at the same project recognise
  * the same furniture.
  *
- * ── One build, not a switcher
+ * ── The build switcher, tester-scoped
  *
- * The admin page carries a `BuildSwitcher` because an admin owns every build
- * on a project. A tester is assigned to exactly ONE — `ProjectAssignment` is
- * unique on `[projectId, testerId]` — and the API returns it as
- * `activeBuildId` regardless of what `?buildId=` says. So there is no
- * switcher here: showing one would imply a choice the tester does not have.
+ * A tester can now hold one `ProjectAssignment` row per BUILD on this
+ * project — `ProjectAssignment` is unique on `[projectId, buildId,
+ * testerId]` — so `?buildId=` is a real choice, just narrower than the
+ * admin's: `BuildSwitcher` here is handed only the builds this tester
+ * actually holds a row on (`project.myAssignments`), never every build on
+ * the project. It renders only when there is more than one to choose
+ * between; with exactly one, showing a one-option `<select>` would offer a
+ * choice that does not exist.
  *
  * ── Why the fetches are section-gated
  *
@@ -101,17 +105,29 @@ export default async function TesterProjectWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string; notice?: string; announcement?: string }>
+  searchParams: Promise<{
+    section?: string
+    notice?: string
+    announcement?: string
+    buildId?: string
+  }>
 }) {
   const user = await requireRole(['TESTER'])
   const { id } = await params
-  const { section: rawSection, notice, announcement: announcementId } = await searchParams
+  const {
+    section: rawSection,
+    notice,
+    announcement: announcementId,
+    buildId: requestedBuildId,
+  } = await searchParams
 
   let project: ProjectDetail | null = null
   let loadError: 'forbidden' | 'unknown' | null = null
 
   try {
-    project = await serverFetch<ProjectDetail>(`projects/${id}`)
+    project = await serverFetch<ProjectDetail>(`projects/${id}`, {
+      query: { buildId: requestedBuildId },
+    })
   } catch (err) {
     // The API answers an out-of-scope project with 404 rather than 403 on
     // purpose — a 403 would confirm the project exists to someone who has no
@@ -155,6 +171,11 @@ export default async function TesterProjectWorkspacePage({
   const activeBuildId = project.activeBuildId
   const activeBuild = project.builds.find((b) => b.id === activeBuildId)
   const myAssignment = project.assignments[0] ?? null
+  // Only the builds this tester actually holds a row on — never every build
+  // on the project, which `project.builds` covers but a tester never sees.
+  const myBuilds = project.builds.filter((b) =>
+    project.myAssignments.some((a) => a.buildId === b.id),
+  )
   const assignmentStatus = capabilities.myAssignmentStatus ?? myAssignment?.status ?? null
   const isInvited = assignmentStatus === 'INVITED'
 
@@ -256,9 +277,10 @@ export default async function TesterProjectWorkspacePage({
     basePath: detailPath,
     announcements: relevantAnnouncements,
     reads,
-    // The tab has to survive the click, or opening a notice would bounce the
-    // reader back to the project's first section.
-    carry: { section: 'announcements' },
+    // The tab AND the selected build have to survive the click, or opening a
+    // notice would bounce the reader back to the project's first section (or
+    // silently switch them off the build they were looking at).
+    carry: { section: 'announcements', buildId: activeBuildId },
   })
 
   const openAnnouncement = announcementId
@@ -317,8 +339,26 @@ export default async function TesterProjectWorkspacePage({
         </>
       }
       tabs={
-        isInvited ? undefined : (
-          <SectionTabs basePath={detailPath} tabs={SECTIONS} active={section} />
+        myBuilds.length <= 1 && isInvited ? undefined : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            {/*
+              Shown regardless of whether the SELECTED build is invited — a
+              tester invited to Build B but already working Build A must be
+              able to switch to A rather than being stuck on B's invitation
+              screen with no way out.
+            */}
+            {myBuilds.length > 1 ? (
+              <BuildSwitcher basePath={detailPath} builds={myBuilds} activeBuildId={activeBuildId} />
+            ) : null}
+            {isInvited ? null : (
+              <SectionTabs
+                basePath={detailPath}
+                tabs={SECTIONS}
+                active={section}
+                preserve={{ buildId: requestedBuildId }}
+              />
+            )}
+          </div>
         )
       }
       aside={
@@ -400,6 +440,7 @@ export default async function TesterProjectWorkspacePage({
               style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
             >
               <input type="hidden" name="id" value={project.id} />
+              <input type="hidden" name="buildId" value={activeBuildId} />
               <Field
                 label="Note"
                 htmlFor="respond-notes"
@@ -475,6 +516,7 @@ export default async function TesterProjectWorkspacePage({
                       <DownloadLink
                         fileId={buildDetail.testDocument.id}
                         name={buildDetail.testDocument.originalName}
+                        basePath="/app/tester/download"
                       />
                     ) : (
                       '—'
@@ -746,6 +788,7 @@ export default async function TesterProjectWorkspacePage({
                       }}
                     >
                       <input type="hidden" name="id" value={project.id} />
+                      <input type="hidden" name="buildId" value={activeBuildId} />
                       <input type="hidden" name="testCaseId" value={tc.id} />
                       <Field label="Result" htmlFor={`result-${tc.id}`} required>
                         <Select
@@ -800,7 +843,7 @@ export default async function TesterProjectWorkspacePage({
                   .join(' · ')}
                 actions={
                   <Button
-                    href={`${detailPath}?section=announcements`}
+                    href={`${detailPath}?section=announcements&buildId=${activeBuildId}`}
                     variant="secondary"
                     size="sm"
                     iconLeft="arrow-left"
@@ -902,7 +945,13 @@ function TokenList({
 /** A material points at either an uploaded file or an external link, never both. */
 function MaterialTarget({ material }: { material: ProjectMaterial }) {
   if (material.file) {
-    return <DownloadLink fileId={material.file.id} name={material.file.originalName} />
+    return (
+      <DownloadLink
+        fileId={material.file.id}
+        name={material.file.originalName}
+        basePath="/app/tester/download"
+      />
+    )
   }
   if (material.url) {
     return (

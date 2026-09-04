@@ -12,14 +12,15 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Field } from '@/components/ds/forms/Field'
+import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
-import { serverFetch } from '@/lib/api/server'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, formatDateTime, personName } from '@/lib/admin/format'
-import { addBugComment, moveBugStatus } from './actions'
+import { addBugComment, moveBugStatus, updateBugAction } from './actions'
 
 const ROOT = { label: 'Tester', href: '/app/tester' }
 const DETAIL_BASE = '/app/tester/bugs'
@@ -51,7 +52,21 @@ const REASON_COPY: Record<string, string> = {
   missing: 'That record is no longer there. Reload the page.',
   invalid: 'The API rejected that. Check the values and try again.',
   failed: 'The bugs service did not accept the change. Try again in a moment.',
+  'occurrence-pair': 'Give both how many times it happened and how many attempts you made, or leave both blank.',
+  'occurrence-range': 'It cannot have happened more times than you tried.',
 }
+
+const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
+const REPRODUCIBILITIES = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE'] as const
+const BUG_TYPES = [
+  'CRASH',
+  'APP_FREEZE',
+  'FUNCTIONAL',
+  'UI',
+  'UX',
+  'SECURITY',
+  'PERFORMANCE',
+] as const
 
 interface BugPerson {
   id: string
@@ -269,7 +284,20 @@ export default async function TesterBugDetailPage({
   const detailPath = `${DETAIL_BASE}/${bug.id}`
   const closedHref = section === SECTIONS[0].value ? detailPath : `${detailPath}?section=${section}`
   const statusModalOpen = edit === 'status' || Boolean(error?.startsWith('status:'))
+  const reportModalOpen = edit === 'edit-report' || Boolean(error?.startsWith('report:'))
   const projectHref = `/app/tester/projects/${bug.project.id}`
+
+  /**
+   * Only fetched when the edit form can actually render — `capabilities`
+   * already told us `canEdit` is API-enforced (still `NEW`), so a bug past
+   * that window never pays for a features lookup it cannot use.
+   */
+  const features = capabilities.canEdit
+    ? await serverFetchOrNull<readonly { id: string; name: string }[]>(
+        `projects/${bug.project.id}/features`,
+        bug.build ? { query: { buildId: bug.build.id } } : undefined,
+      )
+    : null
 
   // Internal notes are invisible to a tester by API design; this is belt and
   // braces so a shape change upstream can never leak one into the thread.
@@ -475,7 +503,22 @@ export default async function TesterBugDetailPage({
       }
     >
       {section === 'report' ? (
-        <Panel title="Report" description="The defect as you filed it.">
+        <Panel
+          title="Report"
+          description="The defect as you filed it."
+          actions={
+            capabilities.canEdit ? (
+              <Button
+                href={`${detailPath}?section=${section}&edit=edit-report`}
+                variant="primary"
+                size="sm"
+                iconLeft="pencil"
+              >
+                Edit
+              </Button>
+            ) : undefined
+          }
+        >
           <DescriptionList items={reportItems} />
           <div
             style={{
@@ -523,6 +566,245 @@ export default async function TesterBugDetailPage({
             </div>
           ) : null}
         </Panel>
+      ) : null}
+
+      {capabilities.canEdit ? (
+        <Modal open={reportModalOpen} closedHref={closedHref} title="Edit report">
+          <TrackedForm action={updateBugAction} style={FORM_STYLE}>
+            <input type="hidden" name="id" value={bug.id} />
+            <FormError message={panelError(error, 'report')} />
+
+            <Field label="Title" htmlFor="editTitle" required>
+              <Input
+                id="editTitle"
+                name="title"
+                required
+                minLength={5}
+                maxLength={200}
+                defaultValue={bug.title}
+              />
+            </Field>
+            <Field label="Description" htmlFor="editDescription" required>
+              <Textarea
+                id="editDescription"
+                name="description"
+                rows={4}
+                required
+                minLength={10}
+                maxLength={10_000}
+                defaultValue={bug.description}
+              />
+            </Field>
+            <Field label="Pre-condition" htmlFor="editPreCondition">
+              <Textarea
+                id="editPreCondition"
+                name="preCondition"
+                rows={2}
+                maxLength={4000}
+                defaultValue={bug.preCondition ?? ''}
+              />
+            </Field>
+            <Field label="Steps to reproduce" htmlFor="editStepsToReproduce" required>
+              <Textarea
+                id="editStepsToReproduce"
+                name="stepsToReproduce"
+                rows={6}
+                required
+                minLength={5}
+                maxLength={10_000}
+                defaultValue={bug.stepsToReproduce}
+              />
+            </Field>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                gap: 'var(--space-5)',
+              }}
+            >
+              <Field label="Expected result" htmlFor="editExpectedResult" required>
+                <Textarea
+                  id="editExpectedResult"
+                  name="expectedResult"
+                  rows={3}
+                  required
+                  minLength={5}
+                  maxLength={4000}
+                  defaultValue={bug.expectedResult ?? ''}
+                />
+              </Field>
+              <Field label="Actual result" htmlFor="editActualResult" required>
+                <Textarea
+                  id="editActualResult"
+                  name="actualResult"
+                  rows={3}
+                  required
+                  minLength={5}
+                  maxLength={4000}
+                  defaultValue={bug.actualResult ?? ''}
+                />
+              </Field>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: 'var(--space-5)',
+              }}
+            >
+              <Field label="Severity" htmlFor="editSeverity" required>
+                <Select
+                  id="editSeverity"
+                  name="severity"
+                  required
+                  defaultValue={bug.severity}
+                  options={SEVERITIES.map((value) => ({ value, label: titleCase(value) }))}
+                />
+              </Field>
+              <Field label="Reproducibility" htmlFor="editReproducibility" required>
+                <Select
+                  id="editReproducibility"
+                  name="reproducibility"
+                  required
+                  defaultValue={bug.reproducibility}
+                  options={REPRODUCIBILITIES.map((value) => ({ value, label: titleCase(value) }))}
+                />
+              </Field>
+              <Field
+                label="Times it happened"
+                htmlFor="editOccurrence"
+                hint="Optional. Leave both blank if you didn't count."
+              >
+                <Input
+                  id="editOccurrence"
+                  name="occurrence"
+                  type="number"
+                  min={0}
+                  max={10_000}
+                  defaultValue={bug.occurrence ?? ''}
+                />
+              </Field>
+              <Field
+                label="Out of attempts"
+                htmlFor="editOutOf"
+                hint="Optional, but required if you filled the field to the left."
+              >
+                <Input
+                  id="editOutOf"
+                  name="outOf"
+                  type="number"
+                  min={1}
+                  max={10_000}
+                  defaultValue={bug.outOf ?? ''}
+                />
+              </Field>
+              <Field label="Type" htmlFor="editType" hint="Optional.">
+                <Select
+                  id="editType"
+                  name="type"
+                  defaultValue={bug.type ?? ''}
+                  options={[
+                    { value: '', label: 'Not sure' },
+                    ...BUG_TYPES.map((value) => ({ value, label: titleCase(value) })),
+                  ]}
+                />
+              </Field>
+              {features && features.length > 0 ? (
+                <Field label="Feature" htmlFor="editFeatureId" hint="Optional.">
+                  <Select
+                    id="editFeatureId"
+                    name="featureId"
+                    defaultValue={bug.feature?.id ?? ''}
+                    options={[
+                      { value: '', label: 'Not sure' },
+                      ...features.map((f) => ({ value: f.id, label: f.name })),
+                    ]}
+                  />
+                </Field>
+              ) : null}
+            </div>
+
+            <h3 className="c4t-heading-sm" style={{ margin: 0 }}>
+              Where you saw it
+            </h3>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 'var(--space-5)',
+              }}
+            >
+              <Field label="Device" htmlFor="editDeviceModel">
+                <Input
+                  id="editDeviceModel"
+                  name="deviceModel"
+                  maxLength={120}
+                  defaultValue={bug.deviceModel ?? ''}
+                />
+              </Field>
+              <Field label="OS" htmlFor="editOsName">
+                <Input
+                  id="editOsName"
+                  name="osName"
+                  maxLength={60}
+                  defaultValue={bug.osName ?? ''}
+                />
+              </Field>
+              <Field label="OS version" htmlFor="editOsVersion">
+                <Input
+                  id="editOsVersion"
+                  name="osVersion"
+                  maxLength={40}
+                  defaultValue={bug.osVersion ?? ''}
+                />
+              </Field>
+              <Field label="Browser" htmlFor="editBrowser">
+                <Input
+                  id="editBrowser"
+                  name="browser"
+                  maxLength={80}
+                  defaultValue={bug.browser ?? ''}
+                />
+              </Field>
+              <Field label="App version" htmlFor="editAppVersion">
+                <Input
+                  id="editAppVersion"
+                  name="appVersion"
+                  maxLength={60}
+                  defaultValue={bug.appVersion ?? ''}
+                />
+              </Field>
+              <Field label="Network" htmlFor="editNetworkType">
+                <Input
+                  id="editNetworkType"
+                  name="networkType"
+                  maxLength={40}
+                  defaultValue={bug.networkType ?? ''}
+                />
+              </Field>
+            </div>
+
+            <Field
+              label="Video link"
+              htmlFor="editVideoUrl"
+              hint="A publicly reachable recording — Loom, Drive, anything the team can open without an account."
+            >
+              <Input
+                id="editVideoUrl"
+                name="videoUrl"
+                type="url"
+                maxLength={2000}
+                defaultValue={bug.videoUrl ?? ''}
+              />
+            </Field>
+
+            <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">
+              Save report
+            </SubmitButton>
+          </TrackedForm>
+        </Modal>
       ) : null}
 
       {section === 'attachments' ? (

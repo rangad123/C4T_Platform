@@ -14,3 +14,23 @@ export function param(req: Request, name: string): string {
   }
   return value
 }
+
+/**
+ * The address to attribute a request to, for rate-limiting and for
+ * account-owner-facing display (an "Active sessions" row, an abuse-triage
+ * column) — never for authorisation.
+ *
+ * `req.ip` is this API's own web server for anything reached through a
+ * relayed server-to-server call, which is most of this app's traffic by
+ * design (see `web/src/lib/api/server.ts`'s doc comment: the browser never
+ * talks to this service directly). `x-c4t-client-ip` is what the web tier
+ * sends instead — see `web/src/lib/auth/request-context.ts` for the callers
+ * that set it and why. Trusted only because the header can only be set by
+ * that server's own outbound calls, never by a public caller reaching this
+ * API through the one path that is actually exposed to the internet.
+ */
+export function clientAddress(req: Request): string {
+  const forwarded = req.get('x-c4t-client-ip')?.trim()
+  if (forwarded) return forwarded.slice(0, 45)
+  return req.ip ?? 'unknown'
+}

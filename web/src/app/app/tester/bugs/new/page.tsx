@@ -43,6 +43,8 @@ const CAN_REPORT: readonly string[] = ['ACCEPTED', 'ACTIVE']
 
 interface Assignment {
   status: string
+  /** Which build THIS row is for — a tester can hold one row per build now. */
+  build: { id: string; name: string }
   project: {
     id: string
     reference: string
@@ -126,9 +128,19 @@ export default async function NewTesterBugPage({
    * swapped for a different project. There is deliberately no "first
    * reportable project" fallback: with no visible picker, defaulting would
    * file the report against a project nobody chose.
+   *
+   * The same principle now applies one level down: a tester can hold more
+   * than one reportable assignment on the same project (one per build), so a
+   * `?buildId=` — every real entry point sends one — must match too, not
+   * just `projectId`. Missing a `buildId` (an older link) falls back to the
+   * first reportable assignment on that project, same as before.
    */
-  const preselected = reportable.find((a) => a.project?.id === params.projectId) ?? null
+  const preselected = params.buildId
+    ? (reportable.find((a) => a.project?.id === params.projectId && a.build.id === params.buildId) ??
+      null)
+    : (reportable.find((a) => a.project?.id === params.projectId) ?? null)
   const activeProjectId = preselected?.project?.id ?? ''
+  const activeBuildId = preselected?.build.id
 
   /**
    * Features and the tester's registered browsers make the report specific:
@@ -141,7 +153,7 @@ export default async function NewTesterBugPage({
     activeProjectId
       ? serverFetchOrNull<readonly { id: string; name: string }[]>(
           `projects/${activeProjectId}/features`,
-          params.buildId ? { query: { buildId: params.buildId } } : undefined,
+          activeBuildId ? { query: { buildId: activeBuildId } } : undefined,
         )
       : Promise.resolve(null),
     serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers'),
@@ -156,7 +168,7 @@ export default async function NewTesterBugPage({
     activeProjectId
       ? serverFetchOrNull<readonly BugCustomField[]>(
           `projects/${activeProjectId}/custom-fields`,
-          params.buildId ? { query: { buildId: params.buildId } } : undefined,
+          activeBuildId ? { query: { buildId: activeBuildId } } : undefined,
         )
       : Promise.resolve(null),
   ])
@@ -175,7 +187,7 @@ export default async function NewTesterBugPage({
         preselected?.project
           ? {
               label: preselected.project.title,
-              href: `/app/tester/projects/${preselected.project.id}?section=bugs`,
+              href: `/app/tester/projects/${preselected.project.id}?section=bugs&buildId=${preselected.build.id}`,
             }
           : { label: 'Projects', href: '/app/tester/projects' },
         { label: 'Report a bug' },
@@ -239,8 +251,8 @@ export default async function NewTesterBugPage({
                 The API re-resolves it and refuses a build that isn't on the
                 named project.
               */}
-              {params.buildId ? (
-                <input type="hidden" name="buildId" value={params.buildId} />
+              {activeBuildId ? (
+                <input type="hidden" name="buildId" value={activeBuildId} />
               ) : null}
 
               {/*
@@ -265,7 +277,8 @@ export default async function NewTesterBugPage({
                     fontSize: 'var(--type-body-md-size)',
                   }}
                 >
-                  {preselected.project!.reference} — {preselected.project!.title}
+                  {preselected.project!.reference} — {preselected.project!.title} ·{' '}
+                  {preselected.build.name}
                 </p>
               </div>
 
@@ -353,11 +366,25 @@ export default async function NewTesterBugPage({
                   gap: 'var(--space-5)',
                 }}
               >
-                <Field label="Expected result" htmlFor="expectedResult">
-                  <Textarea id="expectedResult" name="expectedResult" rows={3} maxLength={4000} />
+                <Field label="Expected result" htmlFor="expectedResult" required>
+                  <Textarea
+                    id="expectedResult"
+                    name="expectedResult"
+                    rows={3}
+                    required
+                    minLength={5}
+                    maxLength={4000}
+                  />
                 </Field>
-                <Field label="Actual result" htmlFor="actualResult">
-                  <Textarea id="actualResult" name="actualResult" rows={3} maxLength={4000} />
+                <Field label="Actual result" htmlFor="actualResult" required>
+                  <Textarea
+                    id="actualResult"
+                    name="actualResult"
+                    rows={3}
+                    required
+                    minLength={5}
+                    maxLength={4000}
+                  />
                 </Field>
               </div>
             </div>
@@ -531,7 +558,7 @@ export default async function NewTesterBugPage({
               variant="secondary"
               href={
                 preselected?.project
-                  ? `/app/tester/projects/${preselected.project.id}?section=bugs`
+                  ? `/app/tester/projects/${preselected.project.id}?section=bugs&buildId=${preselected.build.id}`
                   : '/app/tester/projects'
               }
             >

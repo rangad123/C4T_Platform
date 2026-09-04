@@ -85,6 +85,15 @@ export interface ProjectContext {
  * Resolves every relationship the user has to a project in ONE round trip.
  * Returns null when the project does not exist or is soft-deleted, so callers
  * can 404 without a second query.
+ *
+ * A tester can now hold one `ProjectAssignment` row per BUILD on this
+ * project, not one for the whole project — so every row is read (no more
+ * `take: 1`) and each contributes its own relation. Being active on any one
+ * build is enough to grant `project:tester_active` project-wide (reading the
+ * brief, seeing the roster), which is deliberately generous: a build-specific
+ * gate (e.g. "may this tester file a bug against BUILD X") is a separate,
+ * narrower check the caller makes itself against that one row — see
+ * `bugRelations` below, which does exactly that for a bug's own build.
  */
 export async function projectRelations(
   user: Express.AuthenticatedUser,
@@ -99,7 +108,6 @@ export async function projectRelations(
       assignments: {
         where: { testerId: user.id },
         select: { status: true },
-        take: 1,
       },
       managers: {
         where: { managerId: user.id },
@@ -126,8 +134,7 @@ export async function projectRelations(
 
   if (project.managers.length > 0) relations.push('project:manager')
 
-  const assignment = project.assignments[0]
-  if (assignment) {
+  for (const assignment of project.assignments) {
     if (assignment.status === AssignmentStatus.INVITED) {
       relations.push('project:tester_invited')
     } else if (ACTIVE_ASSIGNMENT.includes(assignment.status)) {
@@ -171,7 +178,13 @@ export async function bugRelations(
         select: {
           organisationId: true,
           testersCanSeeOtherBugs: true,
-          assignments: { where: { testerId: user.id }, select: { status: true }, take: 1 },
+          // Every assignment row on the project, not just this bug's build —
+          // `project:tester_active` from ANY of them still unlocks reading a
+          // bug this tester reported themselves (bug:reporter already covers
+          // that anyway) and the general project-level checks below. The
+          // build-specific decision (seeing OTHER testers' bugs on THIS
+          // build) is made separately, from the row matching `bug.buildId`.
+          assignments: { where: { testerId: user.id }, select: { status: true, buildId: true } },
           managers: { where: { managerId: user.id }, select: { id: true }, take: 1 },
           organisation: {
             select: {
@@ -197,13 +210,16 @@ export async function bugRelations(
 
   if (bug.project.managers.length > 0) relations.push('project:manager')
 
-  const assignment = bug.project.assignments[0]
-  if (assignment) {
+  for (const assignment of bug.project.assignments) {
     if (assignment.status === AssignmentStatus.INVITED) {
       relations.push('project:tester_invited')
     } else if (ACTIVE_ASSIGNMENT.includes(assignment.status)) {
       relations.push('project:tester_active')
-      if (bug.project.testersCanSeeOtherBugs) relations.push('bug:project_tester')
+      // Seeing bugs OTHER testers filed is a per-build privilege: being
+      // active on Build A must not expose Build B's roster of reports.
+      if (assignment.buildId === bug.buildId && bug.project.testersCanSeeOtherBugs) {
+        relations.push('bug:project_tester')
+      }
     } else if (assignment.status === AssignmentStatus.COMPLETED) {
       relations.push('project:tester_past')
     }

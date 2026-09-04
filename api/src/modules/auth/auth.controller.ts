@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express'
-import { param } from '../../lib/http.js'
+import { param, clientAddress } from '../../lib/http.js'
 import { env, isProduction, googleOAuthEnabled } from '../../config/env.js'
 import { UnauthorizedError, ForbiddenError, ServiceUnavailableError } from '../../lib/errors.js'
 import { recordAudit } from '../../lib/audit.js'
@@ -59,8 +59,21 @@ function clearAuthCookies(res: Response): void {
   res.clearCookie(REFRESH_COOKIE, { ...base, path: env.REFRESH_COOKIE_PATH })
 }
 
+/**
+ * What a session/audit record remembers about where a request came from.
+ *
+ * `ipAddress` goes through `clientAddress`, not raw `req.ip` — every route
+ * that calls this is reached through the web app's own relayed call (see
+ * `clientAddress`'s doc comment), so `req.ip` alone was this server's own
+ * loopback address for every visitor alike. "Active sessions" showed every
+ * session, on every account, as the same unrecognisable device for exactly
+ * this reason. `userAgent` needs no equivalent fix: the web app now forwards
+ * the visitor's real header as `user-agent` on its own outbound call (see
+ * `web/src/lib/auth/request-context.ts`), so `req.header('user-agent')`
+ * already reads the true value once that arrives.
+ */
 function requestContext(req: Request) {
-  return { userAgent: req.header('user-agent') ?? undefined, ipAddress: req.ip ?? undefined }
+  return { userAgent: req.header('user-agent') ?? undefined, ipAddress: clientAddress(req) }
 }
 
 export async function register(req: Request, res: Response): Promise<void> {
@@ -331,10 +344,11 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
 
     const signUpRole = roleCookie === Role.TESTER ? Role.TESTER : Role.CUSTOMER
 
-    const { user, tokens, created } = await authService.signInWithGoogle(identity, signUpRole, {
-      userAgent: req.header('user-agent') ?? undefined,
-      ipAddress: req.ip ?? undefined,
-    })
+    const { user, tokens, created } = await authService.signInWithGoogle(
+      identity,
+      signUpRole,
+      requestContext(req),
+    )
 
     /**
      * If the caller was already signed in when they clicked "Continue with

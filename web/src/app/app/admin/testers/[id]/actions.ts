@@ -48,14 +48,26 @@ async function patchTesterStatus(
   status: TesterStatusValue,
   reason?: string,
 ): Promise<void> {
-  await actionFetch<unknown>(`testers/${id}/status`, {
-    method: 'PATCH',
-    body: reason ? { status, reason } : { status },
-  })
+  let notice = 'tester-status-saved'
+  try {
+    await actionFetch<unknown>(`testers/${id}/status`, {
+      method: 'PATCH',
+      body: reason ? { status, reason } : { status },
+    })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    notice =
+      code === 403
+        ? 'tester-status-forbidden'
+        : code === 409 || code === 400 || code === 422
+          ? 'tester-status-illegal'
+          : 'tester-status-failed'
+  }
 
   // The pool list shows status, and the detail page shows the whole workflow.
   revalidatePath('/app/admin/testers')
   revalidatePath(`/app/admin/testers/${id}`)
+  redirect(`/app/admin/testers/${id}?notice=${notice}`)
 }
 
 /**
@@ -200,4 +212,55 @@ export async function rateTesterAction(formData: FormData): Promise<void> {
 
   revalidatePath(base)
   redirect(withNotice('rating-saved'))
+}
+
+/**
+ * Award a badge to a tester for their work on a project.
+ *
+ * The same shape as `rateTesterAction` above, and deliberately the same
+ * permission: on the API a badge goes through `assertWorkedTogether`, the
+ * very rule that governs a rating, so anyone entitled to rate is entitled to
+ * recognise, and nobody else is. The API remains the enforcement point —
+ * this only shapes the body and maps a refusal onto a notice code.
+ */
+export async function awardBadgeAction(formData: FormData): Promise<void> {
+  await requirePermission('rating.write')
+
+  const testerProfileId = formTrimmed(formData, 'testerProfileId')
+  const testerUserId = formTrimmed(formData, 'testerUserId')
+  const projectId = formTrimmed(formData, 'projectId')
+  const badgeId = formTrimmed(formData, 'badgeId')
+  const note = formTrimmed(formData, 'note')
+
+  const requested = formTrimmed(formData, 'returnTo')
+  const returnTo =
+    requested.startsWith('/app/admin/') && !requested.startsWith('//') ? requested : null
+
+  const base = returnTo ?? `/app/admin/testers/${testerProfileId}?section=ratings`
+  const withNotice = (notice: string) => `${base}${base.includes('?') ? '&' : '?'}notice=${notice}`
+
+  if (!testerUserId) return
+  if (!returnTo && !testerProfileId) return
+  if (!projectId || !badgeId) redirect(withNotice('badge-invalid'))
+
+  try {
+    await actionFetch('badges/awards', {
+      method: 'POST',
+      body: { badgeId, testerUserId, projectId, ...(note ? { note } : {}) },
+    })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    const notice =
+      status === 409
+        ? 'badge-duplicate'
+        : status === 400
+          ? 'badge-not-worked-together'
+          : status === 403
+            ? 'badge-forbidden'
+            : 'badge-failed'
+    redirect(withNotice(notice))
+  }
+
+  revalidatePath(base)
+  redirect(withNotice('badge-awarded'))
 }

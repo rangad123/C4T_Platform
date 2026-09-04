@@ -364,6 +364,19 @@ interface TesterEngagement {
 /** What each outcome of the rating form says. The page owns this copy. */
 const RATING_NOTICES: Record<string, { tone: 'success' | 'error'; message: string }> = {
   'rating-saved': { tone: 'success', message: 'Your rating has been saved.' },
+  'tester-status-saved': { tone: 'success', message: 'The tester status has been updated.' },
+  'tester-status-forbidden': {
+    tone: 'error',
+    message: 'You do not have permission to change a tester status.',
+  },
+  'tester-status-illegal': {
+    tone: 'error',
+    message: 'That status change was not accepted — reload the page and try again.',
+  },
+  'tester-status-failed': {
+    tone: 'error',
+    message: 'The tester status could not be changed. Try again.',
+  },
   'rating-duplicate': {
     tone: 'error',
     message: 'You have already rated this tester on that project.',
@@ -1242,7 +1255,10 @@ export default async function TesterDetailPage({
                   ariaLabel="Projects available to rate"
                   columns={engagementColumns}
                   rows={[...engagements]}
-                  rowKey={(row) => `${row.project.id}-${row.status}`}
+                  // A tester can hold two engagements on the same project
+                  // (one per build) with the same status, so the build has
+                  // to be part of the key too.
+                  rowKey={(row) => `${row.project.id}-${row.build?.id ?? 'none'}-${row.status}`}
                 />
               )}
             </Panel>

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge, RoleBadge } from '@/components/admin/StatusBadge'
@@ -76,9 +77,28 @@ interface ProjectListEnvelope {
   data: ProjectOption[]
 }
 
-export default async function ManagerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+const NOTICES: Record<string, NoticeCopy> = {
+  'assign-saved': { tone: 'success', message: 'The project has been assigned to this manager.' },
+  'unassign-saved': { tone: 'success', message: 'The project has been unassigned.' },
+  'assign-duplicate': {
+    tone: 'warning',
+    message: 'This manager already has that project.',
+  },
+  'assign-forbidden': { tone: 'error', message: 'That assignment is not yours to change.' },
+  'assign-missing': { tone: 'error', message: 'That manager or project no longer exists.' },
+  'assign-failed': { tone: 'error', message: 'The assignment could not be saved. Try again.' },
+}
+
+export default async function ManagerDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ notice?: string }>
+}) {
   await requirePermission('manager.read')
   const { id } = await params
+  const { notice } = await searchParams
 
   /**
    * Fetch the manager up front. 404 here means the URL is wrong — the
@@ -178,6 +198,7 @@ export default async function ManagerDetailPage({ params }: { params: Promise<{ 
         </>
       }
     >
+      <Notice code={notice} notices={NOTICES} />
       <Panel title="Personal details" description="What the platform knows about this manager.">
         <DescriptionList
           items={[

@@ -97,11 +97,78 @@ export default async function BugsPage({
      * accepts this on `listBugsQuery`.
      */
     projectId?: string
+    /** Set by `bulkChangeBugStatusAction` — see the notice strip below. */
+    notice?: string
+    moved?: string
+    skipped?: string
   }>
 }) {
   await requirePermission('bug.read')
 
   const params = await searchParams
+
+  /*
+    What the bulk action actually did.
+
+    The API reports `updated` and `skipped` per row — a bug already in the
+    target status, or one the caller may not move, is skipped rather than
+    failing the batch. Reporting only "done" made moving six of ten look
+    identical to moving all ten.
+  */
+  const bulkNoticeCopy = ((): { tone: 'success' | 'warning' | 'error'; message: string } | null => {
+    const p = params
+    if (!p.notice) return null
+    if (p.notice === 'bulk-forbidden') {
+      return { tone: 'error', message: 'You do not have permission to change those bugs.' }
+    }
+    if (p.notice === 'bulk-invalid') {
+      return { tone: 'error', message: 'That change was not accepted. Pick a status or a severity.' }
+    }
+    if (p.notice === 'bulk-failed') {
+      return { tone: 'error', message: 'Those bugs could not be updated. Try again in a moment.' }
+    }
+    if (p.notice !== 'bulk-applied') return null
+    const moved = Number(p.moved ?? 0)
+    const skipped = Number(p.skipped ?? 0)
+    if (moved === 0 && skipped > 0) {
+      return {
+        tone: 'warning',
+        message: `Nothing changed — all ${skipped} were already in that state or are not yours to move.`,
+      }
+    }
+    return {
+      tone: skipped > 0 ? 'warning' : 'success',
+      message:
+        skipped > 0
+          ? `${moved} bug${moved === 1 ? '' : 's'} updated. ${skipped} skipped — already in that state, or not yours to move.`
+          : `${moved} bug${moved === 1 ? '' : 's'} updated.`,
+    }
+  })()
+
+  const bulkNotice = bulkNoticeCopy ? (
+    <p
+      role={bulkNoticeCopy.tone === 'success' ? 'status' : 'alert'}
+      style={{
+        margin: 0,
+        padding: 'var(--space-4) var(--space-5)',
+        borderRadius: 'var(--radius-card)',
+        background:
+          bulkNoticeCopy.tone === 'success'
+            ? 'var(--status-success-bg)'
+            : bulkNoticeCopy.tone === 'warning'
+              ? 'var(--status-warning-bg)'
+              : 'var(--status-error-bg)',
+        color:
+          bulkNoticeCopy.tone === 'success'
+            ? 'var(--status-success-fg)'
+            : bulkNoticeCopy.tone === 'warning'
+              ? 'var(--status-warning-fg)'
+              : 'var(--status-error-fg)',
+      }}
+    >
+      {bulkNoticeCopy.message}
+    </p>
+  ) : null
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? params.status
     : undefined
@@ -233,6 +300,7 @@ export default async function BugsPage({
       }
       toolbar={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {bulkNotice}
           <div
             style={{
               display: 'flex',

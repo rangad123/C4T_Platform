@@ -77,45 +77,108 @@ export async function updateProjectDelivery(formData: FormData): Promise<void> {
   }
   if (Object.keys(body).length === 0) return
 
-  await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  let notice = 'delivery-saved'
+  try {
+    await actionFetch(`projects/${id}`, { method: 'PATCH', body })
+  } catch (error) {
+    notice = noticeFor(error, 'delivery')
+  }
+
   revalidateProject(id)
+  redirect(`/app/customer/projects/${id}?notice=${notice}`)
 }
 
+/**
+ * Move the project through its lifecycle.
+ *
+ * The picker offers only `DRAFT → SUBMITTED`, because that is the only move
+ * the API grants a customer — see `STATUS_TRANSITIONS` in `./constants`. It
+ * used to offer the whole structural matrix, so choosing "Cancelled" on a
+ * draft returned 403 ("Only the delivery team can make that status change")
+ * and, with no catch here, Next rendered its crash screen: "This page hit a
+ * problem", reference number and all, for what was a perfectly good refusal.
+ *
+ * The catch stays even though the menu no longer offers the impossible: an
+ * admin moving the project in another tab changes what is legal underneath
+ * this form, and a stale tab must get a sentence, not a stack trace.
+ */
 export async function changeProjectStatus(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   const status = formTrimmed(formData, 'status')
   if (!id || !isProjectStatus(status)) return
 
   const note = formTrimmed(formData, 'note')
-  await actionFetch(`projects/${id}/status`, {
-    method: 'POST',
-    body: { status, ...(note ? { note } : {}) },
-  })
+  const buildId = formTrimmed(formData, 'buildId')
+
+  let notice = 'status-changed'
+  try {
+    await actionFetch(`projects/${id}/status`, {
+      method: 'POST',
+      body: { status, ...(note ? { note } : {}) },
+    })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    // 403 is "not yours to make"; 409 is "no longer legal from here", which is
+    // what a stale tab hits. Neither is a fault worth a crash screen.
+    notice = code === 403 ? 'status-forbidden' : code === 409 ? 'status-stale' : 'status-failed'
+  }
+
   revalidateProject(id)
+  redirect(buildHref(id, buildId, notice, { section: 'build' }))
 }
 
+/**
+ * Attach a material to the build.
+ *
+ * Two things used to go wrong here, and they compounded.
+ *
+ * The form asked for a raw `fileId` — an internal cuid — so whatever a person
+ * typed there failed the API's `z.string().cuid()` with a 422. And this action
+ * had no try/catch, so that 422 escaped into Next's error boundary: clicking
+ * "Attach material" produced "This page hit a problem" with a reference
+ * number, which reads as the platform breaking rather than as a rejected
+ * value. Same failure the build actions above already guard against.
+ *
+ * The file id now comes from `InlineFileUpload`, so it is always one the
+ * uploads endpoint just minted. The catch stays regardless — an upload whose
+ * file was swept, or a project archived in another tab, must still land as a
+ * sentence rather than a crash.
+ *
+ * The two "nothing to do" cases used to `return` silently, which is its own
+ * small bug: the button appeared to do nothing at all. They now say why.
+ */
 export async function addMaterial(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   const title = formTrimmed(formData, 'title')
-  if (!id || !title) return
+  if (!id) return
 
   const description = formTrimmed(formData, 'description')
   const url = formTrimmed(formData, 'url')
   const fileId = formTrimmed(formData, 'fileId')
   const buildId = formTrimmed(formData, 'buildId')
-  if (!url && !fileId) return
 
-  await actionFetch(`projects/${id}/materials`, {
-    method: 'POST',
-    body: {
-      title,
-      ...(description ? { description } : {}),
-      ...(url ? { url } : {}),
-      ...(fileId ? { fileId } : {}),
-      ...(buildId ? { buildId } : {}),
-    },
-  })
+  if (!title) redirect(buildHref(id, buildId, 'material-title', { section: 'materials' }))
+  if (!url && !fileId) redirect(buildHref(id, buildId, 'material-empty', { section: 'materials' }))
+
+  let notice = 'material-added'
+  try {
+    await actionFetch(`projects/${id}/materials`, {
+      method: 'POST',
+      body: {
+        title,
+        ...(description ? { description } : {}),
+        ...(url ? { url } : {}),
+        ...(fileId ? { fileId } : {}),
+        ...(buildId ? { buildId } : {}),
+      },
+    })
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : 0
+    notice = status === 422 || status === 400 ? 'material-invalid' : 'material-failed'
+  }
+
   revalidateProject(id)
+  redirect(buildHref(id, buildId, notice, { section: 'materials' }))
 }
 
 export async function removeMaterial(formData: FormData): Promise<void> {
@@ -123,8 +186,15 @@ export async function removeMaterial(formData: FormData): Promise<void> {
   const materialId = formTrimmed(formData, 'materialId')
   if (!id || !materialId) return
 
-  await actionFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
+  let notice = 'material-removed'
+  try {
+    await actionFetch(`projects/${id}/materials/${materialId}`, { method: 'DELETE' })
+  } catch (error) {
+    notice = noticeFor(error, 'material')
+  }
+
   revalidateProject(id)
+  redirect(`/app/customer/projects/${id}?section=materials&notice=${notice}`)
 }
 
 export async function addFeature(formData: FormData): Promise<void> {
@@ -133,11 +203,19 @@ export async function addFeature(formData: FormData): Promise<void> {
   if (!id || !name) return
 
   const buildId = formTrimmed(formData, 'buildId')
-  await actionFetch(`projects/${id}/features`, {
-    method: 'POST',
-    body: { name, ...(buildId ? { buildId } : {}) },
-  })
+
+  let notice = 'feature-added'
+  try {
+    await actionFetch(`projects/${id}/features`, {
+      method: 'POST',
+      body: { name, ...(buildId ? { buildId } : {}) },
+    })
+  } catch (error) {
+    notice = noticeFor(error, 'feature')
+  }
+
   revalidateProject(id)
+  redirect(buildHref(id, buildId, notice, { section: 'settings' }))
 }
 
 export async function removeFeature(formData: FormData): Promise<void> {
@@ -145,8 +223,15 @@ export async function removeFeature(formData: FormData): Promise<void> {
   const featureId = formTrimmed(formData, 'featureId')
   if (!id || !featureId) return
 
-  await actionFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
+  let notice = 'feature-removed'
+  try {
+    await actionFetch(`projects/${id}/features/${featureId}`, { method: 'DELETE' })
+  } catch (error) {
+    notice = noticeFor(error, 'feature')
+  }
+
   revalidateProject(id)
+  redirect(`/app/customer/projects/${id}?section=settings&notice=${notice}`)
 }
 
 // ─── Builds ────────────────────────────────────────────────────────────────
@@ -217,6 +302,20 @@ export async function createBuild(formData: FormData): Promise<void> {
  * screen over the whole page, losing what the user typed. Mapping it to a
  * notice keeps them on the page with a sentence about the actual problem.
  */
+/**
+ * One mapping from an API refusal to a notice code, shared by the actions on
+ * this page that have no more specific story than "that did not work".
+ * Resolved to a sentence by `NOTICES` on the project page.
+ */
+function noticeFor(error: unknown, prefix: string): string {
+  const code = error instanceof ApiError ? error.status : 0
+  if (code === 404) return `${prefix}-missing`
+  if (code === 403) return `${prefix}-forbidden`
+  if (code === 409) return `${prefix}-conflict`
+  if (code === 400 || code === 422) return `${prefix}-invalid`
+  return `${prefix}-failed`
+}
+
 function buildHref(
   id: string,
   buildId: string,
@@ -378,9 +477,15 @@ export async function removeBugCustomField(formData: FormData): Promise<void> {
   const buildId = formTrimmed(formData, 'buildId')
   if (!id || !fieldId) return
 
-  await actionFetch(`projects/${id}/custom-fields/${fieldId}`, { method: 'DELETE' })
+  let notice = 'field-removed'
+  try {
+    await actionFetch(`projects/${id}/custom-fields/${fieldId}`, { method: 'DELETE' })
+  } catch (error) {
+    notice = noticeFor(error, 'field')
+  }
+
   revalidateProject(id)
   redirect(
-    `/app/customer/projects/${id}?section=settings${buildId ? `&buildId=${buildId}` : ''}&notice=field-removed`,
+    `/app/customer/projects/${id}?section=settings${buildId ? `&buildId=${buildId}` : ''}&notice=${notice}`,
   )
 }

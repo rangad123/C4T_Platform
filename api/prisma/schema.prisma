@@ -366,6 +366,8 @@ model User {
 
   ratingsGiven    Rating[] @relation("RatingAuthor")
   ratingsReceived Rating[] @relation("RatingSubjectUser")
+  badgesAwarded   TesterBadge[] @relation("TesterBadgeAuthor")
+  badgesReceived  TesterBadge[] @relation("TesterBadgeSubject")
 
   transactionsAsCounterparty Transaction[]   @relation("TransactionCounterparty")
   transactionsRecorded       Transaction[]   @relation("TransactionRecordedBy")
@@ -376,6 +378,8 @@ model User {
   auditLogs                AuditLog[]
   filesUploaded            FileObject[]             @relation("FileUploader")
   messageTemplatesAuthored MessageTemplate[]        @relation("MessageTemplateAuthor")
+  broadcastsSent           Broadcast[]              @relation("BroadcastSender")
+  broadcastsReceived       BroadcastRecipient[]     @relation("BroadcastRecipient")
   orgInvitationsSent       OrganisationInvitation[] @relation("OrgInvitationAuthor")
   platformSettingsEdited   PlatformSetting[]        @relation("PlatformSettingEditor")
   blogPostsAuthored        BlogPost[]               @relation("BlogPostAuthor")
@@ -738,6 +742,9 @@ model TesterDevice {
   primaryNetwork   NetworkProvider? @relation("DevicePrimaryNetwork", fields: [primaryNetworkId], references: [id], onDelete: SetNull)
   secondaryNetwork NetworkProvider? @relation("DeviceSecondaryNetwork", fields: [secondaryNetworkId], references: [id], onDelete: SetNull)
 
+  /// Roster rows that asked this tester to cover this device.
+  assignments ProjectAssignment[]
+
   @@index([testerProfileId])
   @@index([type])
   @@index([deviceModelId])
@@ -813,6 +820,7 @@ model OsVersion {
 
   operatingSystem OperatingSystem @relation(fields: [operatingSystemId], references: [id], onDelete: Cascade)
   testerDevices   TesterDevice[]
+  testerBrowsers  TesterBrowser[]
 
   @@unique([operatingSystemId, version])
   @@index([operatingSystemId])
@@ -899,16 +907,28 @@ model TesterBrowser {
   browserId         String   @map("browser_id")
   browserVersionId  String?  @map("browser_version_id")
   operatingSystemId String?  @map("operating_system_id")
+  /// A SPECIFIC (OS, version) pair, e.g. "Windows 11" — `operatingSystemId`
+  /// above only ever named the OS family. When this is set the service keeps
+  /// `operatingSystemId` in sync from it (see `resolveBrowserOsMirror` in
+  /// catalog.routes.ts): the two cannot legitimately disagree, since a
+  /// version implies exactly one OS, so the ref is the source of truth
+  /// whenever both are present.
+  osVersionRefId    String?  @map("os_version_ref_id")
   createdAt         DateTime @default(now()) @map("created_at")
 
   testerProfile   TesterProfile    @relation(fields: [testerProfileId], references: [id], onDelete: Cascade)
   browser         Browser          @relation(fields: [browserId], references: [id], onDelete: Cascade)
   browserVersion  BrowserVersion?  @relation(fields: [browserVersionId], references: [id], onDelete: SetNull)
   operatingSystem OperatingSystem? @relation(fields: [operatingSystemId], references: [id], onDelete: SetNull)
+  osVersionRef    OsVersion?       @relation(fields: [osVersionRefId], references: [id], onDelete: SetNull)
+
+  /// Roster rows that asked this tester to cover this browser.
+  assignments ProjectAssignment[]
 
   @@unique([testerProfileId, browserId, browserVersionId])
   @@index([testerProfileId])
   @@index([browserId])
+  @@index([osVersionRefId])
   @@map("tester_browsers")
 }
 
@@ -1235,6 +1255,7 @@ model Project {
   features      Feature[]
   threads       Thread[]
   ratings       Rating[]
+  testerBadges  TesterBadge[]
   transactions  Transaction[]
   announcements Announcement[]
   builds        Build[]
@@ -1289,12 +1310,11 @@ model ProjectMaterial {
 model ProjectAssignment {
   id        String           @id @default(cuid())
   projectId String           @map("project_id")
-  /// Deliberately NOT part of a unique constraint with `testerId`: a tester
-  /// keeps exactly one roster row per PROJECT (matching the existing
-  /// accept/decline flow, which a tester reaches by project, not by build),
-  /// tagged with whichever build they were invited under. Moving a tester to
-  /// a different build re-tags this same row rather than creating a second
-  /// one.
+  /// A tester now keeps one roster row per (project, build) pair, not per
+  /// project — they can be invited onto, and work, several builds of the
+  /// same project at once. `[projectId, buildId, testerId]` is the row's
+  /// real identity; `respondToAssignment`/`updateAssignment` address one
+  /// specific row by all three, never by project+tester alone.
   buildId   String           @map("build_id")
   testerId  String           @map("tester_id") // User.id where role = TESTER
   status    AssignmentStatus @default(INVITED)
@@ -1305,12 +1325,28 @@ model ProjectAssignment {
   removedAt   DateTime? @map("removed_at")
   notes       String?
 
+  /// What this tester was asked to cover, chosen from the assets they have
+  /// actually registered — never free text, so "test it on Chrome" cannot
+  /// name a browser the tester does not own.
+  ///
+  /// Both nullable, and staying that way: a build with no device or browser
+  /// targets does not need either, and the existing invite path sets neither.
+  /// `onDelete: SetNull` because a tester retiring a handset must not delete
+  /// the record that they were on this build — the roster row is history the
+  /// payments and bug reports hang off.
+  assignedDeviceId  String? @map("assigned_device_id")
+  assignedBrowserId String? @map("assigned_browser_id")
+
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   build   Build   @relation(fields: [buildId], references: [id], onDelete: Cascade)
   tester  User    @relation(fields: [testerId], references: [id], onDelete: Cascade)
 
-  @@unique([projectId, testerId])
+  assignedDevice  TesterDevice?  @relation(fields: [assignedDeviceId], references: [id], onDelete: SetNull)
+  assignedBrowser TesterBrowser? @relation(fields: [assignedBrowserId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, buildId, testerId])
   @@index([testerId, status])
+  @@index([projectId, testerId])
   @@index([buildId])
   @@map("project_assignments")
 }
@@ -1486,6 +1522,10 @@ model Thread {
   participants ThreadParticipant[]
   messages     Message[]
 
+  /// Set when this thread was created by a broadcast rather than by someone
+  /// starting a conversation directly.
+  broadcastRecipients BroadcastRecipient[]
+
   @@index([projectId])
   @@index([lastMessageAt])
   @@map("threads")
@@ -1632,9 +1672,82 @@ model MessageTemplate {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  createdBy User @relation("MessageTemplateAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy User        @relation("MessageTemplateAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  broadcasts Broadcast[]
 
   @@map("message_templates")
+}
+
+/// One act of broadcasting — the thing an admin composes once and sends to
+/// many testers.
+///
+/// ── WHY THIS EXISTS
+///
+/// Sending to 24 testers creates 24 private `Thread`s, deliberately: nobody
+/// should see who else received a message or how they replied. But that left
+/// no record of the SEND. The composed subject and body existed only as 24
+/// copies, and "who did I write to, and have they read it" was unanswerable
+/// without guessing which threads belonged together by timestamp.
+///
+/// This groups them. The threads stay exactly as they were — this owns them
+/// rather than replacing them — so the tester's side of the conversation is
+/// untouched and two-way replies still work.
+///
+/// It is also what makes drafts possible: a broadcast with `status = DRAFT`
+/// has composed content and chosen recipients but no threads behind it yet.
+model Broadcast {
+  id         String          @id @default(cuid())
+  senderId   String          @map("sender_id")
+  subject    String?
+  body       String
+  /// The template the body started from, if any. Kept for reporting: the
+  /// body is copied at compose time, so editing a template later must not
+  /// rewrite messages that were already sent.
+  templateId String?         @map("template_id")
+  status     BroadcastStatus @default(DRAFT)
+  sentAt     DateTime?       @map("sent_at")
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+
+  sender     User                 @relation("BroadcastSender", fields: [senderId], references: [id], onDelete: Restrict)
+  template   MessageTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  recipients BroadcastRecipient[]
+
+  @@index([senderId, status, createdAt])
+  @@map("broadcasts")
+}
+
+/// One intended recipient of a broadcast, and what became of their copy.
+///
+/// `threadId` is the conversation actually created for them — null while the
+/// broadcast is a draft, and null too if their send failed. `failedAt` and
+/// `failureReason` record a genuine per-recipient failure, which is a real
+/// state the fan-out can produce; there is deliberately no "delivered" or
+/// "pending" here, because nothing in this platform observes either.
+///
+/// Read status is NOT duplicated onto this row. It already lives on
+/// `ThreadParticipant.lastReadAt`, and a second copy would drift the moment a
+/// tester opened the conversation.
+model BroadcastRecipient {
+  id            String    @id @default(cuid())
+  broadcastId   String    @map("broadcast_id")
+  userId        String    @map("user_id")
+  threadId      String?   @map("thread_id")
+  failedAt      DateTime? @map("failed_at")
+  failureReason String?   @map("failure_reason")
+
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  user      User      @relation("BroadcastRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  thread    Thread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
+
+  @@unique([broadcastId, userId])
+  @@index([userId])
+  @@map("broadcast_recipients")
+}
+
+enum BroadcastStatus {
+  DRAFT
+  SENT
 }
 
 /// Platform-wide settings an admin controls, as a small key/value store.
@@ -1652,6 +1765,63 @@ model PlatformSetting {
   updatedBy User? @relation("PlatformSettingEditor", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@map("platform_settings")
+}
+
+// ─── Badges ──────────────────────────────────────────────────────────────────
+//
+// Recognition the delivery team and customers hand a tester for work on a
+// project — the qualitative counterpart to `Rating`'s single number. Split in
+// two on purpose: `Badge` is the platform's catalogue of what CAN be awarded,
+// so the wording and icon stay consistent across everyone who awards one,
+// while `TesterBadge` is one act of awarding, tied to the project it was
+// earned on exactly as a rating is.
+
+/// One kind of badge the platform offers. Seeded, not user-created.
+model Badge {
+  id          String  @id @default(cuid())
+  /// Stable identifier for seeding and for referring to one in code.
+  slug        String  @unique
+  name        String
+  description String?
+  /// A `lucide-react` icon name — the same vocabulary the rest of the UI uses.
+  icon        String  @default("award")
+  /// Retire a badge without deleting the awards already made under it.
+  isActive    Boolean @default(true) @map("is_active")
+
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  awards TesterBadge[]
+
+  @@map("badges")
+}
+
+/// One badge, awarded to one tester, for their work on one project.
+model TesterBadge {
+  id       String @id @default(cuid())
+  badgeId  String @map("badge_id")
+  /// User.id where role = TESTER — the person recognised.
+  testerId String @map("tester_id")
+  /// Who awarded it: an admin, a project manager, or the customer.
+  awardedById String @map("awarded_by_id")
+  /// The work it was earned on. Required, because the same rule that governs
+  /// a rating governs this: you may only recognise work that happened.
+  projectId String  @map("project_id")
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  badge     Badge   @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  tester    User    @relation("TesterBadgeSubject", fields: [testerId], references: [id], onDelete: Cascade)
+  awardedBy User    @relation("TesterBadgeAuthor", fields: [awardedById], references: [id], onDelete: Restrict)
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// One of each badge per tester per project, per awarder — mirroring
+  /// `Rating`'s "one per author, per subject, per project".
+  @@unique([badgeId, testerId, projectId, awardedById])
+  @@index([testerId])
+  @@index([projectId])
+  @@map("tester_badges")
 }
 
 // ─── Ratings ─────────────────────────────────────────────────────────────────

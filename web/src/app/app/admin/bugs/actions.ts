@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { ApiError } from '@/lib/api/types'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
@@ -60,26 +61,42 @@ export async function bulkChangeBugStatusAction(formData: FormData): Promise<voi
     : undefined
   if (!status && !severity) return
 
-  const result = await actionFetch<{
-    updated: string[]
-    skipped: { id: string; reason: string }[]
-  }>('bugs/bulk-status', {
-    method: 'POST',
-    body: {
-      ids,
-      ...(status ? { status } : {}),
-      ...(severity ? { severity } : {}),
-      ...(note ? { note } : {}),
-    },
-  })
+  /*
+    The response is the point, not a side effect.
 
-  // The bulk-status response is informational — every row's outcome is in
-  // `updated` and `skipped`. For the moment we don't surface per-row
-  // results to the user (would need a flash banner); the page revalidation
-  // below is enough for them to see the moved rows.
-  void result
+    `updated` and `skipped` are what the API actually did, per row — and this
+    used to `void result` and redirect, so selecting ten bugs and moving six
+    of them looked identical to moving all ten. The reader was left to spot
+    the difference by re-reading the table. Both counts now ride back on the
+    URL and are reported.
+  */
+  let outcome: { updated: string[]; skipped: { id: string; reason: string }[] } | null = null
+  let failure: string | null = null
+  try {
+    outcome = await actionFetch<{
+      updated: string[]
+      skipped: { id: string; reason: string }[]
+    }>('bugs/bulk-status', {
+      method: 'POST',
+      body: {
+        ids,
+        ...(status ? { status } : {}),
+        ...(severity ? { severity } : {}),
+        ...(note ? { note } : {}),
+      },
+    })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    failure = code === 403 ? 'bulk-forbidden' : code === 422 ? 'bulk-invalid' : 'bulk-failed'
+  }
 
   revalidatePath(LIST_PATH)
   // Outside any try/catch on purpose — `redirect` works by throwing.
-  redirect(LIST_PATH)
+  if (failure) redirect(`${LIST_PATH}?notice=${failure}`)
+  const params = new URLSearchParams({
+    notice: 'bulk-applied',
+    moved: String(outcome?.updated.length ?? 0),
+    skipped: String(outcome?.skipped.length ?? 0),
+  })
+  redirect(`${LIST_PATH}?${params.toString()}`)
 }

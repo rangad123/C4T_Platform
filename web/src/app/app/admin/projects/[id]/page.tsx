@@ -5,6 +5,7 @@ import { DetailShell } from '@/components/admin/DetailShell'
 import { Modal } from '@/components/admin/Modal'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
+import { DownloadLink } from '@/components/admin/DownloadLink'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
 import {
@@ -22,6 +23,7 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
 import { Field } from '@/components/ds/forms/Field'
+import { InlineFileUpload } from '@/components/admin/InlineFileUpload'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
@@ -30,7 +32,7 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { loadList } from '@/lib/admin/list'
 import { requireRole, hasPermission } from '@/lib/auth/session'
-import { rateTesterAction } from '../../testers/[id]/actions'
+import { rateTesterAction, awardBadgeAction } from '../../testers/[id]/actions'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, personName, titleCase } from '@/lib/admin/format'
 import { BuildSwitcher } from '@/components/admin/BuildSwitcher'
@@ -51,6 +53,7 @@ import {
   type TestCaseRow,
   type VerifiedTesterRow,
   type ProjectRatingRow,
+  type BadgeOption,
 } from './constants'
 import { BarChart } from '@/components/admin/charts/BarChart'
 import { DonutChart } from '@/components/admin/charts/DonutChart'
@@ -123,9 +126,14 @@ export default async function ProjectDetailPage({
     error?: string
     name?: string
     rate?: string
+    /** Tester id whose "award a badge" modal is open. */
+    award?: string
     notice?: string
     detail?: string
     testerSearch?: string
+    /** Narrow the roster panel itself — distinct from `testerSearch`, which searches the invite pool. */
+    rosterSearch?: string
+    rosterStatus?: string
   }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
@@ -291,10 +299,34 @@ export default async function ProjectDetailPage({
           })
         : Promise.resolve(null),
     ])
-  const assignedTesterIds = new Set(project.assignments.map((row) => row.tester.id))
+
+  /**
+   * The badge catalogue, for the award modal's options. Seeded platform
+   * configuration rather than per-project data, so it is fetched only where
+   * the control that needs it renders.
+   */
+  const badgeCatalogue =
+    section === 'testers'
+      ? await serverFetchOrNull<readonly BadgeOption[]>('badges')
+      : null
+  /**
+   * Testers this panel should not offer, because inviting them would do
+   * nothing.
+   *
+   * Only LIVE standings count. A tester who declined or was removed holds a
+   * row on this build but no seat and no access, and `assignTesters` now
+   * revives such a row rather than skipping it — so hiding them here would
+   * put someone in the roster's list of "on this build" while removing the
+   * only control that could bring them back.
+   */
+  const assignedTesterIds = new Set(
+    project.assignments
+      .filter((row) => row.status !== 'DECLINED' && row.status !== 'REMOVED')
+      .map((row) => row.tester.id),
+  )
   // `assertAssignable` on the API rejects a tester who is not ACTIVE or has not
   // accepted the NDA, so those are filtered out here rather than offered and
-  // then refused. Already-assigned testers are dropped for the same reason.
+  // then refused. Testers with a live standing are dropped for the same reason.
   const invitable =
     'items' in testerPool
       ? testerPool.items.filter(
@@ -328,10 +360,100 @@ export default async function ProjectDetailPage({
    * a paused, completed or cancelled project" tells the reader what to do and
    * a generic retry message does not.
    */
-  const PAGE_NOTICES: Record<string, { tone: 'success' | 'error'; message: string }> = {
+  /*
+    Three tones, not two. "Created, but one optional field did not save" is
+    neither a success nor a failure, and painting it red made a working build
+    look broken — `test-type-unset` and `build-details-unsaved` are both that
+    shape.
+  */
+  const PAGE_NOTICES: Record<string, { tone: 'success' | 'error' | 'warning'; message: string }> = {
     invited: { tone: 'success', message: 'The testers have been invited.' },
-    'test-type-unset': {
+    'status-changed': { tone: 'success', message: 'The project status has been updated.' },
+    'status-illegal': {
       tone: 'error',
+      message:
+        'That status change is no longer allowed — someone may have moved this project already. Reload the page.',
+    },
+    'status-forbidden': {
+      tone: 'error',
+      message: 'That status change is not yours to make on this project.',
+    },
+    'status-failed': {
+      tone: 'error',
+      message: 'The status could not be changed. Try again in a moment.',
+    },
+    'material-added': { tone: 'success', message: 'The material has been attached.' },
+    'material-removed': { tone: 'success', message: 'The material has been removed.' },
+    'material-missing': {
+      tone: 'error',
+      message: 'That material no longer exists — someone may have removed it already.',
+    },
+    'material-forbidden': { tone: 'error', message: 'That material is not yours to change.' },
+    'material-conflict': { tone: 'error', message: 'That material could not be changed. Reload the page.' },
+    'feature-added': { tone: 'success', message: 'The feature has been added.' },
+    'feature-removed': { tone: 'success', message: 'The feature has been removed.' },
+    'feature-invalid': { tone: 'error', message: 'That feature name was not accepted.' },
+    'feature-conflict': {
+      tone: 'error',
+      message: 'This build already has a feature with that name.',
+    },
+    'feature-missing': {
+      tone: 'error',
+      message: 'That feature no longer exists — someone may have removed it already.',
+    },
+    'feature-forbidden': { tone: 'error', message: 'That feature is not yours to change.' },
+    'feature-failed': { tone: 'error', message: 'The feature could not be saved. Try again.' },
+    'archive-forbidden': { tone: 'error', message: 'This project is not yours to archive.' },
+    'archive-conflict': {
+      tone: 'error',
+      message: 'This project cannot be archived in its current state.',
+    },
+    'archive-missing': { tone: 'error', message: 'This project no longer exists.' },
+    'archive-invalid': { tone: 'error', message: 'This project could not be archived.' },
+    'archive-failed': { tone: 'error', message: 'The project could not be archived. Try again.' },
+    'build-details-unsaved': {
+      tone: 'warning',
+      message:
+        'The build was created, but its details did not save. Open Build details and set them.',
+    },
+    'test-case-created': { tone: 'success', message: 'The test case has been created.' },
+    'test-case-assigned': { tone: 'success', message: 'The test case has been assigned.' },
+    'test-case-invalid': { tone: 'error', message: 'That test case was not accepted. Check the fields.' },
+    'test-case-conflict': {
+      tone: 'error',
+      message: 'That tester already has this test case.',
+    },
+    'test-case-missing': { tone: 'error', message: 'That test case no longer exists.' },
+    'test-case-forbidden': { tone: 'error', message: 'That test case is not yours to change.' },
+    'test-case-failed': { tone: 'error', message: 'The test case could not be saved. Try again.' },
+    'material-invalid': {
+      tone: 'error',
+      message: 'That material was not accepted. Check the title and the file or link.',
+    },
+    'material-failed': {
+      tone: 'error',
+      message: 'The material could not be attached. Try again in a moment.',
+    },
+    'assignment-updated': { tone: 'success', message: 'That assignment has been updated.' },
+    'assignment-removed': {
+      tone: 'success',
+      message:
+        'That tester is off this build. Their bug reports, payments and history are unchanged.',
+    },
+    'assignment-missing': {
+      tone: 'error',
+      message: 'That assignment no longer exists — someone may have changed it. Reload the page.',
+    },
+    'assignment-forbidden': {
+      tone: 'error',
+      message: 'That change is not yours to make on this project.',
+    },
+    'assignment-failed': {
+      tone: 'error',
+      message: 'The assignment could not be updated. Try again in a moment.',
+    },
+    'test-type-unset': {
+      tone: 'warning',
       message:
         'The project was created, but the type of testing did not save. Set it in Build details.',
     },
@@ -349,6 +471,18 @@ export default async function ProjectDetailPage({
     'rating-needs-project': { tone: 'error', message: 'Choose the project the rating is about.' },
     'rating-invalid': { tone: 'error', message: 'Give a score from 1 to 5.' },
     'rating-failed': { tone: 'error', message: 'The rating could not be saved. Try again.' },
+    'badge-awarded': { tone: 'success', message: 'The badge has been awarded.' },
+    'badge-duplicate': {
+      tone: 'error',
+      message: 'You have already awarded that badge to this tester on this project.',
+    },
+    'badge-not-worked-together': {
+      tone: 'error',
+      message: 'That tester did not work on this project.',
+    },
+    'badge-forbidden': { tone: 'error', message: 'You do not have permission to award badges.' },
+    'badge-invalid': { tone: 'error', message: 'Choose a badge to award.' },
+    'badge-failed': { tone: 'error', message: 'The badge could not be awarded. Try again.' },
   }
   const pageNotice = resolvedSearchParams.notice
     ? PAGE_NOTICES[resolvedSearchParams.notice]
@@ -356,6 +490,7 @@ export default async function ProjectDetailPage({
 
   const MODAL_ERRORS: Record<string, string> = {
     'build-name-taken': 'Another build on this project already uses that name.',
+    'build-create-failed': 'The build could not be created. Try again.',
     'build-rename-failed': 'The build could not be renamed. Try again.',
     'build-save-failed': 'The build could not be saved. Try again.',
     'brief-save-failed': 'The brief could not be saved. Try again.',
@@ -444,6 +579,28 @@ export default async function ProjectDetailPage({
   /** Mirrors `assertMayRate` on the API: an invitation never taken up is not work. */
   const RATEABLE_ASSIGNMENTS = new Set(['ACTIVE', 'COMPLETED'])
 
+  /**
+   * The roster, narrowed by the panel's own filters.
+   *
+   * Applied to the already-loaded array because `project.assignments` comes
+   * embedded in the project read and holds at most one row per tester per
+   * build — there is no page to fetch and nothing to paginate.
+   */
+  const rosterSearch = (resolvedSearchParams.rosterSearch ?? '').trim()
+  const rosterStatus = resolvedSearchParams.rosterStatus ?? ''
+  const rosterTerms = rosterSearch.toLowerCase().split(/\s+/).filter(Boolean)
+  const roster = project.assignments.filter((row) => {
+    if (rosterStatus && row.status !== rosterStatus) return false
+    if (rosterTerms.length === 0) return true
+    // Every term must match somewhere, so "priya sharma" finds a person whose
+    // name is split across two fields — the same rule the API's own search uses.
+    const haystack = [row.tester.firstName, row.tester.lastName, row.tester.email]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return rosterTerms.every((term) => haystack.includes(term))
+  })
+
   const canRate = hasPermission(user, 'rating.write')
   const canReadTesters = hasPermission(user, 'tester.read')
 
@@ -451,6 +608,19 @@ export default async function ProjectDetailPage({
     canRate && resolvedSearchParams.rate
       ? project.assignments.find(
           (a) => a.tester.id === resolvedSearchParams.rate && RATEABLE_ASSIGNMENTS.has(a.status),
+        )
+      : undefined
+
+  /**
+   * Same gate as rating, deliberately: the API runs a badge award through
+   * `assertWorkedTogether`, the very rule behind a rating, so the two
+   * controls appear and disappear together rather than offering one where
+   * the other would be refused.
+   */
+  const badgeTarget =
+    canRate && resolvedSearchParams.award
+      ? project.assignments.find(
+          (a) => a.tester.id === resolvedSearchParams.award && RATEABLE_ASSIGNMENTS.has(a.status),
         )
       : undefined
 
@@ -476,6 +646,61 @@ export default async function ProjectDetailPage({
       key: 'status',
       header: 'Assignment',
       render: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      /**
+       * Taking a tester off the build, on the row it belongs to.
+       *
+       * This replaces reaching for a dropdown of every tester in a panel
+       * underneath — picking the wrong name there was one mis-click, with
+       * nothing on screen to check it against.
+       *
+       * `ConfirmSubmit` arms first and asks second, and the question names
+       * both the person and what actually happens: the record is kept, which
+       * is the part someone hesitating over a trash icon needs to know.
+       */
+      key: 'remove',
+      header: '',
+      align: 'right' as const,
+      interactive: true,
+      render: (row: ProjectAssignmentRow) =>
+        capabilities.canAssignTesters && row.status !== 'REMOVED' ? (
+          <form action={updateAssignment}>
+            <input type="hidden" name="id" value={project.id} />
+            <input type="hidden" name="buildId" value={activeBuildId} />
+            <input type="hidden" name="testerId" value={row.tester.id} />
+            <input type="hidden" name="status" value="REMOVED" />
+            <ConfirmSubmit
+              question={`Take ${personName(row.tester)} off this build? Their bug reports, payments and history are kept.`}
+              confirmLabel="Yes, remove"
+              pendingLabel="Removing…"
+              iconLeft="user-minus"
+              size="sm"
+            >
+              Remove
+            </ConfirmSubmit>
+          </form>
+        ) : null,
+    },
+    {
+      /**
+       * What the invitation asked this tester to cover. Blank for the many
+       * assignments made before the workspace existed, and for any made
+       * without specifying — which stays a legitimate choice.
+       */
+      key: 'coverage',
+      header: 'Covers',
+      render: (row) => {
+        const device = row.assignedDevice
+          ? [row.assignedDevice.manufacturer, row.assignedDevice.model]
+              .filter(Boolean)
+              .join(' ') || row.assignedDevice.type
+          : null
+        const browser = row.assignedBrowser
+          ? `${row.assignedBrowser.browser.name}${row.assignedBrowser.browserVersion ? ` ${row.assignedBrowser.browserVersion.version}` : ''}`
+          : null
+        return [device, browser].filter(Boolean).join(' · ') || '—'
+      },
     },
     {
       key: 'country',
@@ -587,6 +812,29 @@ export default async function ProjectDetailPage({
                   iconLeft="star"
                 >
                   Rate
+                </Button>
+              ) : null,
+          },
+          /**
+           * Award a badge for this work — the named counterpart to the score
+           * beside it. Unlike Rate, this has no "already done" state: a
+           * tester can earn several different badges on one project, and the
+           * API refuses only a repeat of the SAME badge from the same person.
+           */
+          {
+            key: 'badge',
+            header: '',
+            align: 'right' as const,
+            interactive: true,
+            render: (row: ProjectAssignmentRow) =>
+              RATEABLE_ASSIGNMENTS.has(row.status) ? (
+                <Button
+                  href={`${detailPath}?section=testers&buildId=${activeBuildId}&award=${row.tester.id}`}
+                  variant="ghost"
+                  size="sm"
+                  iconLeft="award"
+                >
+                  Badge
                 </Button>
               ) : null,
           },
@@ -872,9 +1120,17 @@ export default async function ProjectDetailPage({
             padding: 'var(--space-4) var(--space-5)',
             borderRadius: 'var(--radius-card)',
             background:
-              pageNotice.tone === 'success' ? 'var(--status-success-bg)' : 'var(--status-error-bg)',
+              pageNotice.tone === 'success'
+                ? 'var(--status-success-bg)'
+                : pageNotice.tone === 'warning'
+                  ? 'var(--status-warning-bg)'
+                  : 'var(--status-error-bg)',
             color:
-              pageNotice.tone === 'success' ? 'var(--status-success-fg)' : 'var(--status-error-fg)',
+              pageNotice.tone === 'success'
+                ? 'var(--status-success-fg)'
+                : pageNotice.tone === 'warning'
+                  ? 'var(--status-warning-fg)'
+                  : 'var(--status-error-fg)',
             fontSize: 'var(--type-body-sm-size)',
           }}
         >
@@ -1313,7 +1569,15 @@ export default async function ProjectDetailPage({
                   },
                   {
                     label: 'Test document',
-                    value: buildDetail.testDocument ? buildDetail.testDocument.originalName : '—',
+                    value: buildDetail.testDocument ? (
+                      <DownloadLink
+                        fileId={buildDetail.testDocument.id}
+                        name={buildDetail.testDocument.originalName}
+                        basePath="/app/admin/download"
+                      />
+                    ) : (
+                      '—'
+                    ),
                   },
                   {
                     label: 'Target countries',
@@ -1450,6 +1714,22 @@ export default async function ProjectDetailPage({
               </Field>
             </div>
 
+            <Field
+              label="Test document"
+              htmlFor="build-testDocument"
+              hint="Optional. Assigned testers can download this."
+            >
+              <InlineFileUpload
+                name="testDocumentFileId"
+                endpoint="/app/admin/upload"
+                scope="test-document"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                label="Upload a document"
+                defaultFileId={buildDetail.testDocument?.id ?? ''}
+                defaultFileName={buildDetail.testDocument?.originalName ?? ''}
+              />
+            </Field>
+
             <div style={fieldGridStyle}>
               <Field
                 label="Target countries"
@@ -1553,15 +1833,55 @@ export default async function ProjectDetailPage({
         <>
           <Panel
             title="Tester roster"
-            description={`${project.assignments.length} tester${
-              project.assignments.length === 1 ? '' : 's'
-            } invited to ${activeBuild?.name ?? 'this build'}.`}
+            description={
+              rosterStatus || rosterSearch
+                ? `${roster.length} of ${project.assignments.length} on ${activeBuild?.name ?? 'this build'}.`
+                : `${project.assignments.length} tester${
+                    project.assignments.length === 1 ? '' : 's'
+                  } invited to ${activeBuild?.name ?? 'this build'}.`
+            }
             flush
           >
+            {/*
+              Filtered here rather than through the API: the roster arrives
+              embedded in the project read and is bounded by one row per
+              tester per build, so there is nothing to paginate and a round
+              trip would buy nothing. A GET form keeps this a Server
+              Component, the same shape every other filter on this page uses.
+            */}
+            <form method="get" style={ROSTER_FILTER_STYLE}>
+              <input type="hidden" name="section" value="testers" />
+              <input type="hidden" name="buildId" value={activeBuildId} />
+              <Field label="Search roster" htmlFor="rosterSearch">
+                <Input
+                  id="rosterSearch"
+                  name="rosterSearch"
+                  type="search"
+                  iconLeft="search"
+                  defaultValue={rosterSearch}
+                  placeholder="Name or email"
+                />
+              </Field>
+              <Field label="Status" htmlFor="rosterStatus">
+                <Select
+                  id="rosterStatus"
+                  name="rosterStatus"
+                  defaultValue={rosterStatus}
+                  options={[
+                    { value: '', label: 'Any status' },
+                    ...ASSIGNMENT_STATUSES.map((v) => ({ value: v, label: titleCase(v) })),
+                  ]}
+                />
+              </Field>
+              <Button type="submit" variant="secondary" size="sm">
+                Filter
+              </Button>
+            </form>
+
             <Table
               ariaLabel="Tester roster"
               columns={assignmentColumns}
-              rows={project.assignments}
+              rows={roster}
               rowKey={(row) => row.tester.id}
               /*
                 Straight to the tester's record, as the customer portal's own
@@ -1595,6 +1915,16 @@ export default async function ProjectDetailPage({
               <Panel
                 title="Invite testers"
                 description="Verified testers who have accepted the NDA and are not already on the roster."
+                actions={
+                  <Button
+                    href={`/app/admin/projects/${project.id}/assign?buildId=${activeBuildId}`}
+                    variant="primary"
+                    size="sm"
+                    iconLeft="users-round"
+                  >
+                    Open assignment workspace
+                  </Button>
+                }
               >
                 {/*
                   A GET form, so the term lives in the URL and this page stays
@@ -1708,6 +2038,15 @@ export default async function ProjectDetailPage({
                 >
                   <form action={updateAssignment} style={stackStyle}>
                     <input type="hidden" name="id" value={project.id} />
+                    {/*
+                      `project.assignments` is already scoped to the switcher's
+                      active build (see the roster Panel above), so this form
+                      only ever offers testers on THAT build — one hidden
+                      field for all of them is enough to tell the API which
+                      row each `testerId` below actually names, now that a
+                      tester can hold a row on more than one build.
+                    */}
+                    <input type="hidden" name="buildId" value={activeBuildId} />
                     <div style={fieldGridStyle}>
                       <Field label="Tester" htmlFor="assignment-tester" required>
                         <Select
@@ -2448,6 +2787,64 @@ export default async function ProjectDetailPage({
         </Modal>
       ) : null}
 
+      {badgeTarget ? (
+        <Modal
+          open
+          closedHref={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+          title={`Award a badge to ${personName(badgeTarget.tester)}`}
+        >
+          <form action={awardBadgeAction} style={stackStyle}>
+            <input type="hidden" name="testerUserId" value={badgeTarget.tester.id} />
+            <input
+              type="hidden"
+              name="testerProfileId"
+              value={badgeTarget.tester.testerProfile?.id ?? ''}
+            />
+            <input type="hidden" name="projectId" value={project.id} />
+            <input
+              type="hidden"
+              name="returnTo"
+              value={`${detailPath}?section=testers&buildId=${activeBuildId}`}
+            />
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              For their work on {project.reference} · {project.title}. Badges show on the tester&apos;s
+              own dashboard and profile.
+            </p>
+            {badgeCatalogue && badgeCatalogue.length > 0 ? (
+              <Field label="Badge" htmlFor="badge-id" required>
+                <Select
+                  id="badge-id"
+                  name="badgeId"
+                  required
+                  placeholder="Choose a badge"
+                  options={badgeCatalogue.map((badge) => ({
+                    value: badge.id,
+                    label: badge.description ? `${badge.name} — ${badge.description}` : badge.name,
+                  }))}
+                />
+              </Field>
+            ) : (
+              <Muted>The badge catalogue is not reachable right now. Refresh in a moment.</Muted>
+            )}
+            <Field
+              label="Note"
+              htmlFor="badge-note"
+              hint="Optional. Shared with the tester, so say what earned it."
+            >
+              <Textarea id="badge-note" name="note" rows={3} maxLength={1000} />
+            </Field>
+            <SubmitButton
+              variant="primary"
+              fullWidth
+              pendingLabel="Awarding…"
+              disabled={!badgeCatalogue || badgeCatalogue.length === 0}
+            >
+              Award badge
+            </SubmitButton>
+          </form>
+        </Modal>
+      ) : null}
+
       {capabilities.canUpdate && activeBuild ? (
         <Modal open={renameBuildModalOpen} closedHref={closedHref} title="Rename build">
           <form action={renameBuild} style={stackStyle}>
@@ -2480,6 +2877,16 @@ export default async function ProjectDetailPage({
 // ─── Local presentation helpers ──────────────────────────────────────────────
 // These are page-local on purpose: none of them is general enough to earn a
 // place in components/admin, and the shared shells already own the layout.
+
+/** The roster's own filter row — sits above the table, inside the flush panel. */
+const ROSTER_FILTER_STYLE = {
+  display: 'flex',
+  gap: 'var(--space-4)',
+  alignItems: 'flex-end',
+  flexWrap: 'wrap' as const,
+  padding: 'var(--space-5) var(--space-6)',
+  borderBottom: '1px solid var(--border-subtle)',
+}
 
 const stackStyle = {
   display: 'flex',

@@ -30,6 +30,12 @@ interface AssignmentRow {
   respondedAt: string | null
   completedAt: string | null
   notes: string | null
+  /**
+   * The build this ONE assignment row is on. A tester can now hold more than
+   * one row per project — each on a different build — so the same project
+   * can legitimately appear twice here, once per build.
+   */
+  build: { id: string; name: string }
   project: {
     id: string
     reference: string
@@ -82,8 +88,11 @@ export default async function TesterProjectsPage({
       key: 'project',
       header: 'Project',
       render: (row) => row.project?.title ?? 'Project unavailable',
+      // The build is what tells two rows for the same project apart.
       renderSecondary: (row) =>
-        [row.project?.reference, row.project?.organisation?.name].filter(Boolean).join(' · '),
+        [row.project?.reference, row.project?.organisation?.name, row.build.name]
+          .filter(Boolean)
+          .join(' · '),
     },
     {
       key: 'assignment',
@@ -126,11 +135,14 @@ export default async function TesterProjectsPage({
       crumbs={[{ label: 'Projects' }]}
       result={result}
       columns={columns}
-      rowKey={(row) => row.project?.id ?? row.invitedAt}
+      // Project + build together, since a tester can now hold two rows on
+      // the same project — the project id alone would collide.
+      rowKey={(row) => (row.project ? `${row.project.id}:${row.build.id}` : row.invitedAt)}
       /* A row without a project is a soft-deleted project the assignment
          outlived — there is nothing to open, so it stays unlinked rather
-         than pointing at a 404. */
-      rowHref={(row) => (row.project ? `${BASE}/${row.project.id}` : '')}
+         than pointing at a 404. The build id lands the tester straight on
+         the build this row is for, not whichever the project defaults to. */
+      rowHref={(row) => (row.project ? `${BASE}/${row.project.id}?buildId=${row.build.id}` : '')}
       hrefFor={pageHrefBuilder(BASE, { status })}
       filtered={hasFilter([status])}
       permission="project.read"

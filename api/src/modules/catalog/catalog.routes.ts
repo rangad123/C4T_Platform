@@ -554,6 +554,14 @@ const testerBrowserBody = z.object({
   browserId: z.string().cuid(),
   browserVersionId: z.string().cuid().nullable().optional(),
   operatingSystemId: z.string().cuid().nullable().optional(),
+  /**
+   * A specific (OS, version) pair — e.g. "Windows 11" — rather than just the
+   * OS family `operatingSystemId` names. When set, the handler derives
+   * `operatingSystemId` FROM it rather than trusting whatever the client
+   * also sent for that field: a version implies exactly one OS, so there is
+   * no legitimate case where the two should be allowed to disagree.
+   */
+  osVersionRefId: z.string().cuid().nullable().optional(),
 })
 
 /**
@@ -575,7 +583,32 @@ const testerBrowserSelect = {
   browser: { select: { id: true, name: true } },
   browserVersion: { select: { id: true, version: true } },
   operatingSystem: { select: { id: true, name: true, kind: true } },
+  osVersionRef: {
+    select: { id: true, version: true, operatingSystem: { select: { id: true, name: true } } },
+  },
 } satisfies Prisma.TesterBrowserSelect
+
+/**
+ * Keeps `operatingSystemId` truthful when a specific OS version is picked.
+ *
+ * `osVersionRefId` names an exact (OS, version) pair, which makes it strictly
+ * more specific than `operatingSystemId` (the OS family alone) — so when both
+ * are present the version wins, the same way `resolveDeviceCatalogMirror` in
+ * testers.service.ts lets a catalog ref win over the free-text fields it
+ * mirrors. Returns `null` (rather than throwing) for an id that does not
+ * exist; the route validates that separately with a proper 404, since a
+ * bad id here should fail the request, not silently drop the field.
+ */
+async function resolveBrowserOsMirror(
+  osVersionRefId: string | null | undefined,
+): Promise<{ operatingSystemId: string } | null> {
+  if (!osVersionRefId) return null
+  const version = await prisma.osVersion.findUnique({
+    where: { id: osVersionRefId },
+    select: { operatingSystemId: true },
+  })
+  return version ? { operatingSystemId: version.operatingSystemId } : null
+}
 
 catalogRouter.get('/me/browsers', requireRole(Role.TESTER), async (req, res) => {
   const testerProfileId = await ownProfileId(req.user!.id)
@@ -601,6 +634,9 @@ catalogRouter.post(
     })
     if (!browser) throw new NotFoundError('Browser')
 
+    const osMirror = await resolveBrowserOsMirror(input.osVersionRefId)
+    if (input.osVersionRefId && !osMirror) throw new NotFoundError('OS version')
+
     // The unique index covers (tester, browser, version) but treats NULL
     // versions as distinct in Postgres, so an explicit pre-check is what
     // actually stops "Chrome / no version" being added twice.
@@ -619,7 +655,8 @@ catalogRouter.post(
         testerProfileId,
         browserId: input.browserId,
         browserVersionId: input.browserVersionId ?? null,
-        operatingSystemId: input.operatingSystemId ?? null,
+        operatingSystemId: osMirror?.operatingSystemId ?? input.operatingSystemId ?? null,
+        osVersionRefId: input.osVersionRefId ?? null,
       },
       select: testerBrowserSelect,
     })
@@ -657,6 +694,9 @@ catalogRouter.patch(
     })
     if (!browser) throw new NotFoundError('Browser')
 
+    const osMirror = await resolveBrowserOsMirror(input.osVersionRefId)
+    if (input.osVersionRefId && !osMirror) throw new NotFoundError('OS version')
+
     // Same NULL-version caveat as the create path — and `id: { not }` so
     // saving a row without changing it is not a clash with itself.
     const clash = await prisma.testerBrowser.findFirst({
@@ -675,7 +715,8 @@ catalogRouter.patch(
       data: {
         browserId: input.browserId,
         browserVersionId: input.browserVersionId ?? null,
-        operatingSystemId: input.operatingSystemId ?? null,
+        operatingSystemId: osMirror?.operatingSystemId ?? input.operatingSystemId ?? null,
+        osVersionRefId: input.osVersionRefId ?? null,
       },
       select: testerBrowserSelect,
     })

@@ -7,7 +7,9 @@ import { projectsRouter } from '../modules/projects/projects.routes.js'
 import { bugsRouter } from '../modules/bugs/bugs.routes.js'
 import { managersRouter } from '../modules/managers/managers.routes.js'
 import { communicationRouter } from '../modules/communication/communication.routes.js'
+import { broadcastsRouter } from '../modules/communication/broadcasts.routes.js'
 import { ratingsRouter } from '../modules/ratings/ratings.routes.js'
+import { badgesRouter } from '../modules/badges/badges.routes.js'
 import { transactionsRouter } from '../modules/transactions/transactions.routes.js'
 import { settingsRouter } from '../modules/settings/settings.routes.js'
 import { notificationsRouter } from '../modules/notifications/notifications.routes.js'
@@ -34,8 +36,14 @@ v1Router.use('/catalog', catalogRouter)
 v1Router.use('/projects', projectsRouter)
 v1Router.use('/bugs', bugsRouter)
 v1Router.use('/managers', managersRouter)
+/**
+ * Mounted BEFORE `communicationRouter` so `/communication/broadcasts` is not
+ * swallowed by that router's own `/:id`-shaped routes.
+ */
+v1Router.use('/communication/broadcasts', broadcastsRouter)
 v1Router.use('/communication', communicationRouter)
 v1Router.use('/ratings', ratingsRouter)
+v1Router.use('/badges', badgesRouter)
 v1Router.use('/transactions', transactionsRouter)
 v1Router.use('/settings', settingsRouter)
 v1Router.use('/payment-accounts', paymentAccountsRouter)

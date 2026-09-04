@@ -256,6 +256,19 @@ async function loadRows<T>(
   }
 }
 
+/**
+ * One record, for a value the form carries rather than picks. Null on any
+ * failure — the caller falls back to naming the id, which is worse to read
+ * but still correct, rather than failing the whole page over a label.
+ */
+async function loadOne<T>(path: string): Promise<T | null> {
+  try {
+    return await serverFetch<T>(path)
+  } catch {
+    return null
+  }
+}
+
 /** 100 is the API's maximum page size, so a picker shows at most that many. */
 const PICKER_LIMIT = 100
 
@@ -288,15 +301,45 @@ export default async function NewTransactionPage({
   await requirePermission('transaction.write')
 
   const params = await searchParams
-  const [projects, testers] = await Promise.all([
-    loadRows<ProjectRow>('projects', { limit: PICKER_LIMIT, sort: 'title', order: 'asc' }),
-    loadRows<TesterRow>('users', {
+
+  /**
+   * Arrived from a tester's own record — the "Credit"/"Debit" buttons there
+   * link here with the tester already decided. That one fact changes two
+   * things below: the counterparty is carried rather than picked, and the
+   * project list narrows to the projects that tester is actually on.
+   */
+  const fixedTesterId = params.counterpartyId ?? ''
+
+  const [projects, testers, fixedTester] = await Promise.all([
+    loadRows<ProjectRow>('projects', {
       limit: PICKER_LIMIT,
-      role: 'TESTER',
-      status: 'ACTIVE',
-      sort: 'email',
+      sort: 'title',
       order: 'asc',
+      /**
+       * `GET /projects` already filters on assignment, so this needs no new
+       * endpoint. Offering every project on the platform invited an entry
+       * filed against work the tester was never on — and the list is long
+       * enough that picking the neighbouring row is easy to do by accident.
+       *
+       * The status narrowing matters as much as the filter: `testerId` alone
+       * means "ever assigned", which includes projects the tester was REMOVED
+       * from or only ever INVITED to. Neither is somewhere to send money.
+       */
+      ...(fixedTesterId
+        ? { testerId: fixedTesterId, testerAssignmentStatus: 'ACCEPTED,ACTIVE,COMPLETED' }
+        : {}),
     }),
+    // Only loaded when there is actually a picker to fill.
+    fixedTesterId
+      ? Promise.resolve({ rows: [] as TesterRow[], failed: false })
+      : loadRows<TesterRow>('users', {
+          limit: PICKER_LIMIT,
+          role: 'TESTER',
+          status: 'ACTIVE',
+          sort: 'email',
+          order: 'asc',
+        }),
+    fixedTesterId ? loadOne<TesterRow>(`users/${fixedTesterId}`) : Promise.resolve(null),
   ])
 
   const projectOptions: SelectOption[] = projects.rows.map((project) => ({
@@ -522,8 +565,12 @@ export default async function NewTransactionPage({
                 failed: projects.failed,
                 count: projectOptions.length,
                 permission: 'project.read',
-                empty: 'No projects exist yet.',
-                hint: 'Optional. Attach the entry to the project it was billed against.',
+                empty: fixedTesterId
+                  ? 'This tester is not on any project yet.'
+                  : 'No projects exist yet.',
+                hint: fixedTesterId
+                  ? 'Optional. Only the projects this tester is on.'
+                  : 'Optional. Attach the entry to the project it was billed against.',
               })}
             >
               <Select
@@ -545,25 +592,56 @@ export default async function NewTransactionPage({
             */}
             {params.buildId ? <input type="hidden" name="buildId" value={params.buildId} /> : null}
 
-            <Field
-              label="Counterparty"
-              htmlFor="counterpartyId"
-              hint={pickerHint({
-                failed: testers.failed,
-                count: testerOptions.length,
-                permission: 'tester.read',
-                empty: 'No active testers exist yet.',
-                hint: 'Active testers only. Required for a tester earning and a tester payout.',
-              })}
-            >
-              <Select
-                id="counterpartyId"
-                name="counterpartyId"
-                defaultValue={params.counterpartyId ?? ''}
-                placeholder="No counterparty"
-                options={testerOptions}
-              />
-            </Field>
+            {/*
+              Carried, not chosen — the same treatment `buildId` gets above.
+              This form is reached from the tester's own record, so who the
+              entry is for is already settled; re-asking turned a decided fact
+              back into a question, with every active tester listed as if any
+              of them were a plausible answer.
+
+              Still posted, as a hidden field: the action's own
+              `COUNTERPARTY_REQUIRED` check reads `counterpartyId`, and a
+              payout with no counterparty is refused there.
+            */}
+            {fixedTesterId ? (
+              <>
+                <input type="hidden" name="counterpartyId" value={fixedTesterId} />
+                <Field label="Counterparty" hint="Set by the tester record this was opened from.">
+                  <p
+                    style={{
+                      margin: 0,
+                      padding: 'var(--space-4) 0',
+                      color: 'var(--text-primary)',
+                      fontSize: 'var(--type-body-md-size)',
+                    }}
+                  >
+                    {fixedTester
+                      ? `${personName(fixedTester)} — ${fixedTester.email}`
+                      : 'The tester this entry is for.'}
+                  </p>
+                </Field>
+              </>
+            ) : (
+              <Field
+                label="Counterparty"
+                htmlFor="counterpartyId"
+                hint={pickerHint({
+                  failed: testers.failed,
+                  count: testerOptions.length,
+                  permission: 'tester.read',
+                  empty: 'No active testers exist yet.',
+                  hint: 'Active testers only. Required for a tester earning and a tester payout.',
+                })}
+              >
+                <Select
+                  id="counterpartyId"
+                  name="counterpartyId"
+                  defaultValue={params.counterpartyId ?? ''}
+                  placeholder="No counterparty"
+                  options={testerOptions}
+                />
+              </Field>
+            )}
 
             <Field
               label="Description"

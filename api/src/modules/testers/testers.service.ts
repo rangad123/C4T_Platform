@@ -8,6 +8,8 @@ import {
   DEVICE_SORT_FIELDS,
   type ListTestersQuery,
   type ListGlobalDevicesQuery,
+  type TesterFilterQuery,
+  type AssignmentCandidatesQuery,
 } from './testers.schema.js'
 import { createNotification } from '../notifications/notifications.service.js'
 
@@ -82,14 +84,59 @@ const profileSelect = {
 } satisfies Prisma.TesterProfileSelect
 
 /** §2.2 Crowd Tester Management — the admin-facing pool list. */
-export async function listTesters(query: ListTestersQuery) {
-  const where: Prisma.TesterProfileWhereInput = {
+/**
+ * The `where` behind every tester search — the admin tester list and the
+ * assignment-candidate picker both build on it.
+ *
+ * Extracted rather than copied: the picker needs the same country/skill/
+ * rating/device vocabulary the list already had, and two divergent copies of
+ * "how do you search a tester" is how the two ended up disagreeing about
+ * whether `profession` was searchable in the first place.
+ */
+export function testerFilterWhere(query: TesterFilterQuery): Prisma.TesterProfileWhereInput {
+  return {
     user: { deletedAt: null },
     ...(query.status ? { status: query.status } : {}),
     ...(query.countryCode ? { countryCode: query.countryCode } : {}),
+    ...(query.city ? { city: { contains: query.city, mode: 'insensitive' } } : {}),
     ...(query.minRating !== undefined ? { ratingAverage: { gte: query.minRating } } : {}),
     ...(query.deviceType ? { devices: { some: { type: query.deviceType } } } : {}),
     ...(query.languages?.length ? { languages: { some: { code: { in: query.languages } } } } : {}),
+    /**
+     * An OS a tester can actually test on. Checked against BOTH sides,
+     * because the two are recorded independently: a phone is a `TesterDevice`
+     * carrying its own `osName`, while a desktop browser carries its OS
+     * through the browser row. Matching only devices would hide every
+     * desktop-only tester from an OS filter.
+     */
+    ...(query.osName
+      ? {
+          OR: [
+            { devices: { some: { osName: { contains: query.osName, mode: 'insensitive' } } } },
+            {
+              browsers: {
+                some: {
+                  OR: [
+                    {
+                      operatingSystem: {
+                        name: { contains: query.osName, mode: 'insensitive' },
+                      },
+                    },
+                    {
+                      osVersionRef: {
+                        operatingSystem: { name: { contains: query.osName, mode: 'insensitive' } },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        }
+      : {}),
+    ...(query.browser
+      ? { browsers: { some: { browser: { name: { contains: query.browser, mode: 'insensitive' } } } } }
+      : {}),
     /**
      * Skills and search share one AND, because an object cannot carry the key
      * twice — the second would silently replace the first and drop whichever
@@ -99,6 +146,10 @@ export async function listTesters(query: ListTestersQuery) {
      * clause per search TERM, since every term must match some column: that
      * is what lets "devi madduri" find a person whose name is split across
      * two columns, in either order.
+     *
+     * `profession` is in the OR because the discoverable-tester search has
+     * always had it and this one never did — the same box answering two
+     * different questions depending on which page you typed it into.
      */
     ...(() => {
       const and: Prisma.TesterProfileWhereInput[] = [
@@ -109,12 +160,167 @@ export async function listTesters(query: ListTestersQuery) {
             { user: { firstName: { contains: term, mode: 'insensitive' as const } } },
             { user: { lastName: { contains: term, mode: 'insensitive' as const } } },
             { headline: { contains: term, mode: 'insensitive' as const } },
+            { profession: { contains: term, mode: 'insensitive' as const } },
           ],
         })),
       ]
       return and.length > 0 ? { AND: and } : {}
     })(),
   }
+}
+
+/**
+ * What a tester looks like when you are deciding whether to put them on a
+ * build — and nothing more.
+ *
+ * Deliberately NOT `profileSelect`. That one carries bio, gender, age group,
+ * Skype, LinkedIn, phone, timezone, NDA metadata and the tester's entire work
+ * history, which is right for one admin looking at one tester and wrong for a
+ * hundred rows in a picker: it is a large payload, most of it is personal
+ * detail nobody is reading at that moment, and none of it helps answer "can
+ * this person test this build".
+ *
+ * Browsers are here and absent from `profileSelect`, which is why the invite
+ * list could never show what a tester actually runs.
+ */
+const candidateSelect = {
+  id: true,
+  status: true,
+  headline: true,
+  profession: true,
+  city: true,
+  countryCode: true,
+  experienceYears: true,
+  ratingAverage: true,
+  ratingCount: true,
+  bugsAcceptedCount: true,
+  projectsCompletedCount: true,
+  user: {
+    select: { id: true, email: true, firstName: true, lastName: true, avatarFileId: true },
+  },
+  skills: { select: { skill: { select: { id: true, name: true, slug: true } } }, take: 12 },
+  languages: { select: { code: true, proficiency: true }, take: 8 },
+  devices: {
+    select: { id: true, type: true, manufacturer: true, model: true, osName: true, osVersion: true },
+    take: 12,
+  },
+  browsers: {
+    select: {
+      id: true,
+      browser: { select: { id: true, name: true } },
+      browserVersion: { select: { id: true, version: true } },
+      operatingSystem: { select: { id: true, name: true } },
+      osVersionRef: {
+        select: { id: true, version: true, operatingSystem: { select: { id: true, name: true } } },
+      },
+    },
+    take: 12,
+  },
+} satisfies Prisma.TesterProfileSelect
+
+/**
+ * Testers who could be put on a build, with their standing on it.
+ *
+ * The assignment picker's one read. `assignment` is the whole reason this is
+ * project-aware rather than a plain tester search: the caller has to be able
+ * to show "already on this build" without loading the roster separately and
+ * cross-referencing in the browser, which breaks the moment the list is
+ * paginated.
+ *
+ * Null `assignment` means never invited to THIS build. A tester on a
+ * different build of the same project is a legitimate candidate here — see
+ * the schema comment on `ProjectAssignment.buildId`.
+ */
+export async function listAssignmentCandidates(
+  buildId: string,
+  query: AssignmentCandidatesQuery,
+) {
+  /**
+   * Resolved first, so a build that does not exist (or was deleted while the
+   * picker was open) is a 404 rather than an empty result set. An empty list
+   * would read as "nobody matches", which is a different and misleading
+   * answer.
+   */
+  const build = await prisma.build.findFirst({
+    where: { id: buildId, deletedAt: null },
+    select: { id: true },
+  })
+  if (!build) throw new NotFoundError('Build')
+
+  const where = testerFilterWhere(query)
+
+  const [items, total] = await Promise.all([
+    prisma.testerProfile.findMany({
+      where,
+      select: {
+        ...candidateSelect,
+        /**
+         * Hung off `user`, not the profile: `ProjectAssignment.testerId` is a
+         * `User.id` (see the schema), so the roster relation lives there.
+         */
+        user: {
+          select: {
+            ...candidateSelect.user.select,
+            assignments: {
+              where: { buildId },
+              select: { id: true, status: true, invitedAt: true, respondedAt: true },
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: buildOrderBy(query.sort, query.order, TESTER_SORT_FIELDS, 'ratingAverage'),
+      ...toSkipTake(query),
+    }),
+    prisma.testerProfile.count({ where }),
+  ])
+
+  return {
+    items: items.map((tester) => {
+      const { assignments, ...user } = tester.user
+      return { ...tester, user, assignment: assignments[0] ?? null }
+    }),
+    meta: buildMeta(query, total),
+  }
+}
+
+/**
+ * Testers who could receive a message, and nothing else about them.
+ *
+ * The composer's recipient picker. Same filters as every other tester
+ * search — the useful question there is "everyone in Egypt who tests on
+ * Android", exactly as it is on the assignment picker — but deliberately on
+ * `candidateSelect` rather than `profileSelect`.
+ *
+ * That choice is the point of the endpoint existing at all. The composer used
+ * to page through `GET /testers`, which answers with `profileSelect`: bio,
+ * gender, age group, phone number, Skype and LinkedIn handles, timezone, NDA
+ * metadata and the tester's whole work history — for every row, on a screen
+ * whose only question is "who gets this message". None of it was displayed;
+ * all of it crossed the wire and sat in the page payload. Choosing a
+ * recipient does not require reading their private life.
+ *
+ * No `assignment` field here, unlike the assignment candidates: a broadcast
+ * is not build-scoped, so there is no roster to report anyone against.
+ */
+export async function listMessageRecipients(query: ListTestersQuery) {
+  const where = testerFilterWhere(query)
+
+  const [items, total] = await Promise.all([
+    prisma.testerProfile.findMany({
+      where,
+      select: candidateSelect,
+      orderBy: buildOrderBy(query.sort, query.order, TESTER_SORT_FIELDS, 'ratingAverage'),
+      ...toSkipTake(query),
+    }),
+    prisma.testerProfile.count({ where }),
+  ])
+
+  return { items, meta: buildMeta(query, total) }
+}
+
+export async function listTesters(query: ListTestersQuery) {
+  const where = testerFilterWhere(query)
 
   const [items, total] = await Promise.all([
     prisma.testerProfile.findMany({
@@ -589,7 +795,16 @@ export async function refreshTesterAggregates(userId: string): Promise<void> {
       _avg: { score: true },
       _count: { score: true },
     }),
-    prisma.projectAssignment.count({ where: { testerId: userId, status: 'COMPLETED' } }),
+    // Distinct PROJECTS, not roster rows — a tester who completed 2 builds
+    // of the same project has still completed 1 project, which is what this
+    // publicly-displayed figure claims to mean.
+    prisma.projectAssignment
+      .findMany({
+        where: { testerId: userId, status: 'COMPLETED' },
+        select: { projectId: true },
+        distinct: ['projectId'],
+      })
+      .then((rows) => rows.length),
   ])
 
   await prisma.testerProfile.update({
@@ -659,6 +874,13 @@ const DISCOVERABLE_TESTER_SELECT = {
   user: { select: { id: true, firstName: true, lastName: true, avatarFileId: true } },
   skills: { select: { skill: { select: { id: true, name: true, slug: true } } }, take: 8 },
   devices: { select: { type: true, osName: true }, take: 6 },
+  browsers: {
+    select: {
+      browser: { select: { name: true } },
+      browserVersion: { select: { version: true } },
+    },
+    take: 6,
+  },
 } satisfies Prisma.TesterProfileSelect
 
 type DiscoverableTesterRow = Prisma.TesterProfileGetPayload<{
@@ -686,6 +908,20 @@ function shapeDiscoverableTester(t: DiscoverableTesterRow) {
     skills: t.skills.map((s) => s.skill),
     /** Coarse device coverage — a type and an OS, never a specific handset. */
     platforms: [...new Set(t.devices.map((d) => d.osName ?? d.type).filter(Boolean))] as string[],
+    /**
+     * Browser coverage, as "Chrome 128" — the version is kept because it is
+     * the whole point of the field: "can this person test the browser we are
+     * about to ship on" is not answerable from the name alone. Deduplicated,
+     * since one browser registered against two operating systems is still one
+     * browser as far as a customer choosing a tester is concerned.
+     */
+    browsers: [
+      ...new Set(
+        t.browsers
+          .map((b) => [b.browser?.name, b.browserVersion?.version].filter(Boolean).join(' '))
+          .filter(Boolean),
+      ),
+    ] as string[],
   }
 }
 
@@ -803,7 +1039,10 @@ export async function getTesterEngagementsForOrganisation(
   })
 
   /**
-   * Bugs this tester filed on those same projects, counted per project.
+   * Bugs this tester filed on those same BUILDS, counted per (project,
+   * build) rather than per project — a tester can now hold two engagement
+   * rows for one project (one per build), and without the build in the key
+   * both would show the same, non-build-specific total.
    * Grouped in one query rather than counted per row — a customer with a
    * long history with one tester would otherwise cost a query per project.
    */
@@ -812,11 +1051,13 @@ export async function getTesterEngagementsForOrganisation(
     projectIds.length === 0
       ? []
       : await prisma.bug.groupBy({
-          by: ['projectId'],
+          by: ['projectId', 'buildId'],
           where: { projectId: { in: projectIds }, reportedById: tester.userId, deletedAt: null },
           _count: { _all: true },
         })
-  const bugsByProject = new Map(bugCounts.map((b) => [b.projectId, b._count._all]))
+  const bugsByEngagement = new Map(
+    bugCounts.map((b) => [`${b.projectId}:${b.buildId}`, b._count._all]),
+  )
 
   /**
    * Existing ratings this caller has already left, so the UI can offer to
@@ -844,7 +1085,7 @@ export async function getTesterEngagementsForOrganisation(
     completedAt: a.completedAt,
     project: a.project,
     build: a.build,
-    bugsReported: bugsByProject.get(a.project.id) ?? 0,
+    bugsReported: bugsByEngagement.get(`${a.project.id}:${a.build.id}`) ?? 0,
     /**
      * The subject of a rating is the person, not the profile. Returned here
      * rather than on the public profile shape because this list is already
@@ -873,22 +1114,44 @@ function discoverableTesterWhere(query: {
       ? { skills: { some: { skill: { slug: { in: query.skills } } } } }
       : {}),
     /**
-     * Search deliberately does NOT match on name or email — that would let a
-     * client confirm whether a specific person is on the platform. Headline,
-     * profession and skills are what a capability search needs.
+     * NAME IS MATCHED HERE. EMAIL IS NOT, AND THE ASYMMETRY IS THE POINT.
+     *
+     * This used to match neither, reasoning that it "would let a client
+     * confirm whether a specific person is on the platform". That protected
+     * nothing: `shapeDiscoverableTester` returns `displayName` for every row,
+     * so a client can already read the full name of every verified tester by
+     * paging this same list. Withholding name from the search box only made
+     * the directory hard to use — you could see someone on a card and then
+     * fail to find them by typing what the card said.
+     *
+     * An email is different in kind: it appears nowhere in this view, so
+     * matching one would turn the box into an oracle for "does this address
+     * belong to a tester" — a fact the client cannot otherwise obtain, and a
+     * useful one to an attacker. It stays out.
+     *
+     * One clause per search TERM, each of which must match SOME column — the
+     * pattern `searchTerms` exists for. Matching the whole string against each
+     * column on its own would mean "Hrvoje Nikolic" found nothing, because no
+     * column holds a full name.
      */
-    ...(query.search
-      ? {
+    ...(() => {
+      const terms = searchTerms(query.search)
+      if (terms.length === 0) return {}
+      return {
+        AND: terms.map((term) => ({
           OR: [
-            { headline: { contains: query.search, mode: 'insensitive' } },
-            { profession: { contains: query.search, mode: 'insensitive' } },
+            { user: { firstName: { contains: term, mode: 'insensitive' as const } } },
+            { user: { lastName: { contains: term, mode: 'insensitive' as const } } },
+            { headline: { contains: term, mode: 'insensitive' as const } },
+            { profession: { contains: term, mode: 'insensitive' as const } },
             {
               skills: {
-                some: { skill: { name: { contains: query.search, mode: 'insensitive' } } },
+                some: { skill: { name: { contains: term, mode: 'insensitive' as const } } },
               },
             },
           ],
-        }
-      : {}),
+        })),
+      }
+    })(),
   }
 }

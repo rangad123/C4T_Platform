@@ -131,7 +131,20 @@ export function Table<Row>({
                             textAlign: 'right',
                           }}
                         >
-                          {col.render(row)}
+                          {/*
+                            The secondary line belongs here too. This branch
+                            used to render `col.render(row)` alone, so every
+                            right-aligned column on a LINKED row silently lost
+                            its sub-line while the same column kept it on an
+                            unlinked one — "12 reviews" under a rating, "of 3"
+                            under a read count, the currency under an amount.
+                            Nothing errored; the text just never appeared, on
+                            seven pages.
+                          */}
+                          <span className={styles.cellPrimary}>{col.render(row)}</span>
+                          {col.renderSecondary ? (
+                            <span className={styles.cellSecondary}>{col.renderSecondary(row)}</span>
+                          ) : null}
                         </a>
                       ) : (
                         <a

@@ -24,6 +24,27 @@ export const listProjectsQuery = paginationQuery.extend({
   organisationId: z.string().cuid().optional(),
   /** Projects a given tester (User.id) has ever been assigned to — the Tester Details "work history". */
   testerId: z.string().cuid().optional(),
+  /**
+   * Narrows `testerId` to particular assignment statuses. Comma-separated.
+   *
+   * Without it `testerId` keeps its documented "ever assigned" meaning, which
+   * is what a work history wants. Callers that mean "is on this project NOW"
+   * pass the roster statuses — the transactions form does, so that crediting
+   * a tester's wallet never offers a project they were REMOVED from or only
+   * ever INVITED to as somewhere to send money.
+   */
+  testerAssignmentStatus: z
+    .string()
+    .optional()
+    .transform((v) =>
+      v
+        ? v
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined,
+    )
+    .pipe(z.array(z.nativeEnum(AssignmentStatus)).optional()),
   search: z.string().trim().max(160).optional(),
   sort: z.enum(PROJECT_SORT_FIELDS).optional(),
 })
@@ -100,6 +121,27 @@ export const assignTestersSchema = z.object({
   notes: z.string().trim().max(1000).optional(),
   /** Defaults to the project's default build when omitted. */
   buildId: z.string().cuid().optional(),
+  /**
+   * What each tester is being asked to cover, keyed by `testerId`.
+   *
+   * Entirely optional, and sparse: a tester with no entry is invited exactly
+   * as before. That keeps the older invite panel — which posts `testerIds`
+   * and nothing else — working untouched.
+   *
+   * The ids name rows the TESTER owns (`TesterDevice` / `TesterBrowser`), not
+   * catalog entries, and the service verifies that ownership before writing.
+   * Naming someone else's handset is the obvious way to abuse this.
+   */
+  configurations: z
+    .array(
+      z.object({
+        testerId: z.string().cuid(),
+        deviceId: z.string().cuid().nullable().optional(),
+        browserId: z.string().cuid().nullable().optional(),
+      }),
+    )
+    .max(200)
+    .optional(),
 })
 
 /** `GET /projects/:id` and `GET /projects/:id/features` — which build to scope to. */
@@ -153,13 +195,20 @@ export const createBuildSchema = updateBuildSchema.extend({
   name: z.string().trim().min(1).max(120),
 })
 
-/** Tester responding to an invitation (§2.3). */
+/**
+ * Tester responding to an invitation (§2.3). `buildId` names WHICH
+ * invitation — a tester can hold one `ProjectAssignment` row per build on
+ * this project, so `(projectId, testerId)` alone no longer identifies one.
+ */
 export const respondToAssignmentSchema = z.object({
+  buildId: z.string().cuid(),
   response: z.enum([AssignmentStatus.ACCEPTED, AssignmentStatus.DECLINED]),
   notes: z.string().trim().max(1000).optional(),
 })
 
+/** Same `buildId` requirement as above, for the admin-side status change. */
 export const updateAssignmentSchema = z.object({
+  buildId: z.string().cuid(),
   status: z.nativeEnum(AssignmentStatus),
   notes: z.string().trim().max(1000).optional(),
 })

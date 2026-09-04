@@ -1,20 +1,6 @@
-import type { Request } from 'express'
 import rateLimit from 'express-rate-limit'
 import { env } from '../config/env.js'
-
-/**
- * The address to attribute a public request to.
- *
- * `req.ip` is the web server for anything submitted through a server action,
- * so the header the action sets is preferred where present. Trusted only
- * because the sole route using this is reached from our own web tier; nothing
- * downstream grants access on the strength of it.
- */
-export function clientAddress(req: Request): string {
-  const forwarded = req.get('x-c4t-client-ip')?.trim()
-  if (forwarded) return forwarded.slice(0, 45)
-  return req.ip ?? 'unknown'
-}
+import { clientAddress } from '../lib/http.js'
 
 const shared = {
   standardHeaders: 'draft-7' as const,
@@ -42,11 +28,20 @@ export const globalLimiter = rateLimit({
  *
  * Capping at the same value as the per-account limit keeps a single host within
  * the same budget whether the attacker is targeting one account or many.
+ *
+ * `clientAddress`, not raw `req.ip`: every one of these routes is reached
+ * through the web app's own server-to-server relay (see `clientAddress`'s
+ * doc comment), so `req.ip` was this web server's own loopback address for
+ * every visitor alike — one shared budget for the entire platform's logins,
+ * not one per person. Verified directly: 20 different people, each
+ * attempting to sign in exactly once with no repeats, exhausted it together,
+ * and the 21st — regardless of who they were or whether their credentials
+ * were even correct — got a flat 429.
  */
 export const authIpLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   max: env.AUTH_RATE_LIMIT_MAX,
-  keyGenerator: (req) => req.ip ?? 'unknown',
+  keyGenerator: (req) => clientAddress(req),
   ...shared,
 })
 
@@ -58,6 +53,8 @@ export const authIpLimiter = rateLimit({
  * Failures and successes both count. The previous `skipSuccessfulRequests:
  * true` left a brute-force surface against stolen credentials — a successful
  * login was free as long as the email-and-IP pair was within budget.
+ *
+ * `clientAddress`, not raw `req.ip` — see `authIpLimiter` just above for why.
  */
 export const authLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
@@ -69,7 +66,7 @@ export const authLimiter = rateLimit({
       typeof body === 'object' && body !== null && 'email' in body && typeof body.email === 'string'
         ? body.email.toLowerCase()
         : ''
-    return `${req.ip ?? 'unknown'}:${email}`
+    return `${clientAddress(req)}:${email}`
   },
   ...shared,
 })
