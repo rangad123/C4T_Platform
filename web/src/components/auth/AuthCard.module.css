@@ -33,6 +33,14 @@
      can outgrow it, and without this the uncovered strip would show the page
      canvas through the scrim as a visibly lighter band. */
   background: var(--surface-inverse);
+  /* A STACKING CONTEXT, and the whole reason this layer behaves.
+     `position: absolute` with `z-index: auto` does not create one, so the
+     hero's own `.deep > * { z-index: 1 }` (sections.module.css) escaped into
+     the ROOT context and painted above the scrim and the card — the hero's
+     floating badges landed on top of the sign-up form, and the image showed
+     through it undimmed. An explicit z-index, even 0, confines every
+     descendant to this layer. */
+  z-index: 0;
   /* Taller than the stage on purpose: the hero is cropped rather than
      squashed, so it keeps the proportions it has on the homepage. */
   min-height: 100%;
@@ -44,6 +52,10 @@
    darkest surface, softened. */
 .scrim {
   position: relative;
+  /* Above the backdrop's layer. Paired with `z-index: 0` there, this is what
+     guarantees the order rather than relying on DOM position, which a
+     positive z-index inside the backdrop can otherwise override. */
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
