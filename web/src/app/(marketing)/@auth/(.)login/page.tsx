@@ -32,7 +32,7 @@ export default async function LoginModal({
 
   return (
     <AuthModal>
-      <AuthCard>
+      <AuthCard wide>
         <LoginForm searchParams={Promise.resolve(params)} />
       </AuthCard>
     </AuthModal>

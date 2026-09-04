@@ -28,7 +28,7 @@ export default async function RegisterModal({
   const params = await searchParams
   return (
     <AuthModal>
-      <AuthCard>
+      <AuthCard wide>
         <RegisterForm searchParams={Promise.resolve(params)} />
       </AuthCard>
     </AuthModal>

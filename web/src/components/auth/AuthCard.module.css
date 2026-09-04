@@ -51,6 +51,14 @@
   box-shadow: var(--shadow-md);
 }
 
+/* The dialog's measure. The card sets the width the dialog ends up at — the
+   dialog's own max-width never bit, because this cap is narrower. 384px left
+   the two-column name row cramped with a page around it to breathe into; the
+   dialog has none, so it gets a wider one. The standalone pages keep 384px. */
+.wide {
+  max-width: var(--container-form-wide);
+}
+
 /* ── Narrow viewports ────────────────────────────────────────────────────────
    40px of padding on each side of the card, plus 24px on each side of the page
    around it, is 128px of a 320px viewport — and the email field inside also

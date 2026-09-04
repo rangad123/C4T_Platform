@@ -29,6 +29,10 @@
   /* PORT ADDITION — not in the shipped token file. A single-column form width
      for the auth screens, which had no matching token. Confirmed 2026-08-07. */
   --container-form: 384px;
+  /* The auth dialog's measure. Wider than the standalone page's card because
+     it holds the same fields without a page around it to give them air — at
+     384px the two-column name row was cramped. */
+  --container-form-wide: 480px;
   --container-gutter: var(--space-7);
 
   --bp-mobile: 640px;

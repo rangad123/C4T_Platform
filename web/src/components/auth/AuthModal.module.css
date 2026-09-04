@@ -9,7 +9,11 @@
      only horizontally; the inset/margin pair here centres it on both axes. */
   inset: 0;
   margin: auto;
-  max-width: min(100vw - var(--space-7) * 2, 560px);
+  /* An explicit width, not just a cap. A <dialog> is shrink-to-fit, so with
+     only a max-width each screen sized itself to its own content — sign-in
+     came out ~100px narrower than register, and the two looked like different
+     dialogs when you moved between them. */
+  width: min(100vw - var(--space-7) * 2, var(--container-form-wide));
   max-height: calc(100vh - var(--space-9) * 2);
   padding: 0;
   border: none;
@@ -25,6 +29,7 @@
 
 .panel {
   position: relative;
+  width: 100%;
   /* The card inside scrolls rather than the page behind it, so a short
      viewport still reaches the submit button. */
   max-height: calc(100vh - var(--space-9) * 2);

@@ -24,12 +24,21 @@ import styles from './AuthCard.module.css'
 export function AuthCard({
   children,
   raised = true,
+  wide = false,
 }: {
   children: ReactNode
   /** The two password screens render flat. */
   raised?: boolean
+  /** The dialog's wider measure — see `.wide` in the CSS module. */
+  wide?: boolean
 }) {
-  return <div className={`${styles.card} ${raised ? styles.raised : ''}`.trim()}>{children}</div>
+  return (
+    <div
+      className={`${styles.card} ${raised ? styles.raised : ''} ${wide ? styles.wide : ''}`.trim()}
+    >
+      {children}
+    </div>
+  )
 }
 
 /**

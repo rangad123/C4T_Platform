@@ -31,20 +31,14 @@ import { registerAction } from '@/lib/auth/register-actions'
 
 type SignUpRole = 'customer' | 'tester'
 
-const ROLE_COPY: Record<
-  SignUpRole,
-  { title: string; blurb: string; cta: string; pendingCta: string }
-> = {
+const ROLE_COPY: Record<SignUpRole, { title: string; cta: string; pendingCta: string }> = {
   customer: {
     title: 'Create a customer account',
-    blurb: 'Submit projects, track defects and work with our testers.',
     cta: 'Create customer account',
     pendingCta: 'Creating account…',
   },
   tester: {
     title: 'Apply to test with us',
-    blurb:
-      'Join the tester community. Applications are reviewed before you are matched to projects.',
     cta: 'Submit application',
     pendingCta: 'Submitting application…',
   },
@@ -176,15 +170,6 @@ function RoleChooser({
       <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
         Create an account
       </h1>
-      <p
-        style={{
-          color: 'var(--text-secondary)',
-          fontSize: 'var(--type-body-sm-size)',
-          marginBottom: 'var(--space-5)',
-        }}
-      >
-        Tell us which describes you.
-      </p>
 
       {message ? <ErrorBanner>{message}</ErrorBanner> : null}
 
@@ -356,18 +341,15 @@ function SignUpForm({
         Change account type
       </Link>
 
-      <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
+      {/*
+        No blurb under the heading. It restated the choice the reader had just
+        made on the previous step — "Create a customer account" followed by
+        "Submit projects, track defects and work with our testers" — and the
+        role cards already carry that description, where it helps decide.
+      */}
+      <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-7)' }}>
         {copy.title}
       </h1>
-      <p
-        style={{
-          color: 'var(--text-secondary)',
-          fontSize: 'var(--type-body-sm-size)',
-          marginBottom: 'var(--space-7)',
-        }}
-      >
-        {copy.blurb}
-      </p>
 
       {message ? <ErrorBanner>{message}</ErrorBanner> : null}
 

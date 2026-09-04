@@ -66,15 +66,6 @@ export default async function LoginForm({
       <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
         Sign in
       </h1>
-      <p
-        style={{
-          color: 'var(--text-secondary)',
-          fontSize: 'var(--type-body-sm-size)',
-          marginBottom: 'var(--space-7)',
-        }}
-      >
-        Sign in to your Crowd4Test workspace.
-      </p>
 
       {params.notice === 'password_reset' ? (
         <div
