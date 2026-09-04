@@ -20,6 +20,7 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
 import { orDash, personName } from '@/lib/admin/format'
+import { EmailNotificationsPanel } from '@/components/settings/EmailNotificationsPanel'
 import { saveProfile, changePassword, revokeSession, signOutEverywhere } from './actions'
 
 export const metadata: Metadata = {
@@ -66,6 +67,18 @@ const NOTICES: Record<string, Notice> = {
     text: 'Your password has been changed. Every other device has been signed out.',
   },
   session_revoked: { tone: 'success', text: 'That session has been signed out.' },
+  email_prefs_on: {
+    tone: 'success',
+    text: 'Email notifications are on. We will email you when something needs your attention.',
+  },
+  email_prefs_off: {
+    tone: 'success',
+    text: 'Email notifications are off. You will still see everything under the bell, and payments and account changes are still emailed.',
+  },
+  email_prefs_failed: {
+    tone: 'error',
+    text: 'That preference could not be saved. Try again in a moment.',
+  },
 
   name_required: { tone: 'error', text: 'Enter a first name — it cannot be blank.' },
   phone_required: { tone: 'error', text: 'Enter a phone number — it cannot be blank.' },
@@ -225,6 +238,7 @@ const TIMEZONES: readonly string[] = Intl.supportedValuesOf('timeZone')
 const SECTIONS = [
   { value: 'profile', label: 'Profile', icon: 'user-check' },
   { value: 'password', label: 'Password', icon: 'lock' },
+  { value: 'notifications', label: 'Notifications', icon: 'bell' },
   { value: 'sessions', label: 'Active sessions', icon: 'monitor' },
 ] as const
 
@@ -448,6 +462,10 @@ export default async function CustomerProfilePage({
             </TrackedForm>
           </Modal>
         </>
+      ) : null}
+
+      {section === 'notifications' ? (
+        <EmailNotificationsPanel returnTo={`${PROFILE_PATH}?section=notifications`} />
       ) : null}
 
       {section === 'password' ? (

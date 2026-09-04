@@ -3,14 +3,24 @@ import { prisma } from '../../lib/prisma.js'
 import { logger } from '../../lib/logger.js'
 import { buildMeta, toSkipTake } from '../../lib/pagination.js'
 import { NotFoundError } from '../../lib/errors.js'
+import { dispatchNotificationEmails } from '../../lib/email/dispatch.js'
 
 /**
- * In-app notifications. Deliberately fire-and-forget: a notification failing to
- * write must never roll back the business action that triggered it.
+ * Notifications. Deliberately fire-and-forget: a notification failing to write
+ * must never roll back the business action that triggered it.
  *
- * Email fan-out is intentionally NOT wired here — §5 excludes email automation
- * from scope. The mailer is called explicitly at the few points authentication
- * requires it.
+ * ── EMAIL
+ *
+ * Email fan-out IS wired here, and here only. Every module that raises a
+ * notification already assembles exactly what an email needs — a title, an
+ * optional body, a link to the thing — so putting the fan-out at this one
+ * junction means a new notification is mailed by construction, and there is a
+ * single place to answer "why did this person get an email?".
+ *
+ * `lib/email/policy.ts` decides which types actually send; a type absent from
+ * that table stays in-app only. The dispatch is detached — see the note in
+ * `lib/email/dispatch.ts` for why an announcement to a thousand testers must
+ * not be sent inside the request that published it.
  */
 export async function createNotification(input: {
   userId: string
@@ -20,6 +30,10 @@ export async function createNotification(input: {
   link?: string
   metadata?: Prisma.InputJsonValue
 }): Promise<void> {
+  // Captured before the write — the throttle needs to tell an EARLIER unread
+  // nudge from the one being created right now. See `NotificationEmailInput`.
+  const cutoff = new Date()
+
   try {
     await prisma.notification.create({
       data: {
@@ -36,7 +50,18 @@ export async function createNotification(input: {
       { err: error, userId: input.userId, type: input.type },
       'Failed to create notification',
     )
+    // No row, no email. The two must agree.
+    return
   }
+
+  dispatchNotificationEmails({
+    userIds: [input.userId],
+    type: input.type,
+    title: input.title,
+    body: input.body,
+    link: input.link,
+    cutoff,
+  })
 }
 
 /** Bulk variant for fan-out to every participant on a project or thread. */
@@ -46,6 +71,9 @@ export async function createNotifications(
 ): Promise<void> {
   const unique = [...new Set(userIds)]
   if (unique.length === 0) return
+
+  const cutoff = new Date()
+
   try {
     await prisma.notification.createMany({
       data: unique.map((userId) => ({
@@ -62,7 +90,17 @@ export async function createNotifications(
       { err: error, count: unique.length, type: input.type },
       'Failed to create notifications',
     )
+    return
   }
+
+  dispatchNotificationEmails({
+    userIds: unique,
+    type: input.type,
+    title: input.title,
+    body: input.body,
+    link: input.link,
+    cutoff,
+  })
 }
 
 export async function listNotifications(

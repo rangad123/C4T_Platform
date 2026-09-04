@@ -16,6 +16,7 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { type ActiveSession } from '@/lib/api/types'
 import { formatDateTime } from '@/lib/admin/format'
+import { EmailNotificationsPanel } from '@/components/settings/EmailNotificationsPanel'
 import { changePassword, revokeSession, signOutEverywhere } from './actions'
 
 export const metadata: Metadata = {
@@ -44,6 +45,19 @@ const NOTICES: Record<string, NoticeCopy> = {
     message: 'Your password has been changed. Every other device has been signed out.',
   },
   session_revoked: { tone: 'success', message: 'That session has been signed out.' },
+  email_prefs_on: {
+    tone: 'success',
+    message: 'Email notifications are on. We will email you when something needs your attention.',
+  },
+  email_prefs_off: {
+    tone: 'success',
+    message:
+      'Email notifications are off. You will still see everything under the bell, and payments and account changes are still emailed.',
+  },
+  email_prefs_failed: {
+    tone: 'error',
+    message: 'That preference could not be saved. Try again in a moment.',
+  },
 
   password_missing: { tone: 'error', message: 'Fill in your current password and the new one.' },
   password_mismatch: {
@@ -184,6 +198,7 @@ const SESSION_COLUMNS: readonly TableColumn<ActiveSession>[] = [
 
 const SECTIONS = [
   { value: 'password', label: 'Password', icon: 'lock' },
+  { value: 'notifications', label: 'Notifications', icon: 'bell' },
   { value: 'sessions', label: 'Active sessions', icon: 'monitor' },
 ] as const
 
@@ -227,6 +242,10 @@ export default async function TesterSettingsPage({
       tabs={<SectionTabs basePath={SETTINGS_PATH} tabs={SECTIONS} active={section} />}
     >
       <Notice code={noticeCode} notices={NOTICES} param={noticeParam} />
+
+      {section === 'notifications' ? (
+        <EmailNotificationsPanel returnTo={`${SETTINGS_PATH}?section=notifications`} />
+      ) : null}
 
       {section === 'password' ? (
         <>

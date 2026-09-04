@@ -331,6 +331,19 @@ model User {
   failedLoginCount Int       @default(0) @map("failed_login_count")
   lockedUntil      DateTime? @map("locked_until")
 
+  /// Whether platform notifications are also emailed to this user.
+  ///
+  /// Defaults to on: someone invited to test a project needs to hear about it
+  /// somewhere other than a page they are not currently looking at. Cleared
+  /// from the account settings page or from the one-click unsubscribe link in
+  /// the footer of every non-essential email.
+  ///
+  /// It does NOT silence account mail (verification, password reset) or the
+  /// two kinds marked `essential` in `lib/email/policy.ts` — money and account
+  /// standing — which someone who muted us would still expect to be told
+  /// about.
+  emailNotifications Boolean @default(true) @map("email_notifications")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -364,8 +377,8 @@ model User {
   threadParticipations ThreadParticipant[]
   messagesSent         Message[]
 
-  ratingsGiven    Rating[] @relation("RatingAuthor")
-  ratingsReceived Rating[] @relation("RatingSubjectUser")
+  ratingsGiven    Rating[]      @relation("RatingAuthor")
+  ratingsReceived Rating[]      @relation("RatingSubjectUser")
   badgesAwarded   TesterBadge[] @relation("TesterBadgeAuthor")
   badgesReceived  TesterBadge[] @relation("TesterBadgeSubject")
 
@@ -1672,7 +1685,7 @@ model MessageTemplate {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  createdBy User        @relation("MessageTemplateAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy  User        @relation("MessageTemplateAuthor", fields: [createdById], references: [id], onDelete: Restrict)
   broadcasts Broadcast[]
 
   @@map("message_templates")
@@ -1798,16 +1811,16 @@ model Badge {
 
 /// One badge, awarded to one tester, for their work on one project.
 model TesterBadge {
-  id       String @id @default(cuid())
-  badgeId  String @map("badge_id")
+  id          String  @id @default(cuid())
+  badgeId     String  @map("badge_id")
   /// User.id where role = TESTER — the person recognised.
-  testerId String @map("tester_id")
+  testerId    String  @map("tester_id")
   /// Who awarded it: an admin, a project manager, or the customer.
-  awardedById String @map("awarded_by_id")
+  awardedById String  @map("awarded_by_id")
   /// The work it was earned on. Required, because the same rule that governs
   /// a rating governs this: you may only recognise work that happened.
-  projectId String  @map("project_id")
-  note      String?
+  projectId   String  @map("project_id")
+  note        String?
 
   createdAt DateTime @default(now()) @map("created_at")
 
