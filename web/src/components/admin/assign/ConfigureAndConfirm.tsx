@@ -2,9 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Avatar } from '@/components/admin/Avatar'
-import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
-import { Icon } from '@/components/ds/core/Icon'
 import { Spinner } from '@/components/ds/core/Spinner'
 import { Field } from '@/components/ds/forms/Field'
 import { Select } from '@/components/ds/forms/Select'
@@ -118,7 +116,15 @@ export function ConfigureAndConfirm({
 
       {problems.length > 0 || noAssets.length > 0 ? (
         <Panel title="Before you send">
-          <ul style={{ margin: 0, paddingLeft: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <ul
+            style={{
+              margin: 0,
+              paddingLeft: 'var(--space-5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-2)',
+            }}
+          >
             {noAssets.map((c) => (
               <li key={`assets-${c.user.id}`} style={{ color: 'var(--status-warning-fg)' }}>
                 <strong>{personLabel(c)}</strong> has no devices or browsers registered — nothing to
@@ -128,8 +134,12 @@ export function ConfigureAndConfirm({
             {problems
               .filter((p) => !noAssets.includes(p.candidate))
               .map((p) => (
-                <li key={`issue-${p.candidate.user.id}`} style={{ color: 'var(--status-warning-fg)' }}>
-                  <strong>{personLabel(p.candidate)}</strong> — {p.issues.map((i) => i.message).join(' ')}
+                <li
+                  key={`issue-${p.candidate.user.id}`}
+                  style={{ color: 'var(--status-warning-fg)' }}
+                >
+                  <strong>{personLabel(p.candidate)}</strong> —{' '}
+                  {p.issues.map((i) => i.message).join(' ')}
                 </li>
               ))}
           </ul>
@@ -140,8 +150,9 @@ export function ConfigureAndConfirm({
               fontSize: 'var(--type-body-sm-size)',
             }}
           >
-            These are warnings, not blocks — a tester may still be the right choice. The build&rsquo;s
-            targets are free text, so treat a mismatch as worth a look rather than a verdict.
+            These are warnings, not blocks — a tester may still be the right choice. The
+            build&rsquo;s targets are free text, so treat a mismatch as worth a look rather than a
+            verdict.
           </p>
         </Panel>
       ) : null}
@@ -150,7 +161,16 @@ export function ConfigureAndConfirm({
         title="What each tester covers"
         description="Chosen from the assets each tester has registered. Optional — leave as “Not specified” to let them choose."
       >
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <ul
+          style={{
+            listStyle: 'none',
+            margin: 0,
+            padding: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-4)',
+          }}
+        >
           {selected.map((candidate) => {
             const devices = relevantDevices(candidate, targets)
             const browsers = relevantBrowsers(candidate, targets)
@@ -167,15 +187,24 @@ export function ConfigureAndConfirm({
                   borderBottom: '1px solid var(--border-subtle)',
                 }}
               >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                  <Avatar name={personLabel(candidate)} fileId={candidate.user.avatarFileId} size="sm" />
+                <span
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}
+                >
+                  <Avatar
+                    name={personLabel(candidate)}
+                    fileId={candidate.user.avatarFileId}
+                    size="sm"
+                  />
                   <span style={{ minWidth: 0 }}>
                     <span style={{ display: 'block', fontWeight: 'var(--fw-medium)' }}>
                       {personLabel(candidate)}
                     </span>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+                    <span
+                      style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}
+                    >
                       {candidate.devices.length} device{candidate.devices.length === 1 ? '' : 's'} ·{' '}
-                      {candidate.browsers.length} browser{candidate.browsers.length === 1 ? '' : 's'}
+                      {candidate.browsers.length} browser
+                      {candidate.browsers.length === 1 ? '' : 's'}
                     </span>
                   </span>
                 </span>
@@ -185,7 +214,9 @@ export function ConfigureAndConfirm({
                     id={`device-${candidate.user.id}`}
                     value={current?.deviceId ?? ''}
                     disabled={devices.length === 0}
-                    onChange={(e) => onConfigChange(candidate.user.id, { deviceId: e.target.value })}
+                    onChange={(e) =>
+                      onConfigChange(candidate.user.id, { deviceId: e.target.value })
+                    }
                     options={[
                       {
                         value: '',
@@ -201,7 +232,9 @@ export function ConfigureAndConfirm({
                     id={`browser-${candidate.user.id}`}
                     value={current?.browserId ?? ''}
                     disabled={browsers.length === 0}
-                    onChange={(e) => onConfigChange(candidate.user.id, { browserId: e.target.value })}
+                    onChange={(e) =>
+                      onConfigChange(candidate.user.id, { browserId: e.target.value })
+                    }
                     options={[
                       {
                         value: '',
@@ -295,7 +328,13 @@ export function ConfigureAndConfirm({
           justifyContent: 'space-between',
         }}
       >
-        <Button type="button" variant="secondary" iconLeft="arrow-left" onClick={onBack} disabled={submitting}>
+        <Button
+          type="button"
+          variant="secondary"
+          iconLeft="arrow-left"
+          onClick={onBack}
+          disabled={submitting}
+        >
           Back to selection
         </Button>
         <Button
@@ -342,11 +381,23 @@ function Panel({
           borderBottom: '1px solid var(--border-subtle)',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 'var(--type-body-md-size)', fontWeight: 'var(--fw-semibold)' }}>
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 'var(--type-body-md-size)',
+            fontWeight: 'var(--fw-semibold)',
+          }}
+        >
           {title}
         </h2>
         {description ? (
-          <p style={{ margin: 'var(--space-1) 0 0', color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+          <p
+            style={{
+              margin: 'var(--space-1) 0 0',
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--type-body-sm-size)',
+            }}
+          >
             {description}
           </p>
         ) : null}

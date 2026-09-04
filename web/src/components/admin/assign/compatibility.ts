@@ -39,7 +39,9 @@ export function compatibilityIssues(
 
   const testerOperatingSystems = [
     ...candidate.devices.map((d) => d.osName),
-    ...candidate.browsers.map((b) => b.osVersionRef?.operatingSystem.name ?? b.operatingSystem?.name),
+    ...candidate.browsers.map(
+      (b) => b.osVersionRef?.operatingSystem.name ?? b.operatingSystem?.name,
+    ),
   ].filter((v): v is string => Boolean(v))
 
   const testerBrowsers = candidate.browsers.map((b) => b.browser.name)
@@ -47,7 +49,10 @@ export function compatibilityIssues(
     [d.manufacturer, d.model, d.type].filter(Boolean).join(' '),
   )
 
-  if (targets.operatingSystems.length > 0 && !overlaps(targets.operatingSystems, testerOperatingSystems)) {
+  if (
+    targets.operatingSystems.length > 0 &&
+    !overlaps(targets.operatingSystems, testerOperatingSystems)
+  ) {
     issues.push({
       kind: 'os',
       message: `No registered device or browser on ${list(targets.operatingSystems)}.`,
@@ -72,7 +77,9 @@ export function compatibilityIssues(
 /** Devices this tester owns that suit the build, most relevant first. */
 export function relevantDevices(candidate: Candidate, targets: BuildTargets) {
   if (targets.operatingSystems.length === 0) return candidate.devices
-  const matching = candidate.devices.filter((d) => d.osName && matchesAny(targets.operatingSystems, d.osName))
+  const matching = candidate.devices.filter(
+    (d) => d.osName && matchesAny(targets.operatingSystems, d.osName),
+  )
   return matching.length > 0 ? matching : candidate.devices
 }
 
@@ -85,7 +92,9 @@ export function relevantBrowsers(candidate: Candidate, targets: BuildTargets) {
 
 export function deviceLabel(device: Candidate['devices'][number]): string {
   const name = [device.manufacturer, device.model].filter(Boolean).join(' ') || device.type
-  const os = device.osName ? ` · ${device.osName}${device.osVersion ? ` ${device.osVersion}` : ''}` : ''
+  const os = device.osName
+    ? ` · ${device.osName}${device.osVersion ? ` ${device.osVersion}` : ''}`
+    : ''
   return `${name}${os}`
 }
 

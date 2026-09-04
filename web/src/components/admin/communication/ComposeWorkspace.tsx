@@ -272,7 +272,12 @@ export function ComposeWorkspace({
 
           <Footer
             left={
-              <SaveDraft busy={busy} saved={saved} disabled={!body.trim()} onSave={() => void save()} />
+              <SaveDraft
+                busy={busy}
+                saved={saved}
+                disabled={!body.trim()}
+                onSave={() => void save()}
+              />
             }
             right={
               <Button

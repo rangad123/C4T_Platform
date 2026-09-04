@@ -119,7 +119,10 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'error',
     message: 'That change is no longer allowed from this status. Reload the page.',
   },
-  'tx-invalid': { tone: 'error', message: 'Some values were not accepted. Check the amounts and dates.' },
+  'tx-invalid': {
+    tone: 'error',
+    message: 'Some values were not accepted. Check the amounts and dates.',
+  },
   'tx-failed': { tone: 'error', message: 'That change could not be saved. Try again in a moment.' },
 }
 

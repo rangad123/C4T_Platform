@@ -306,9 +306,7 @@ export default async function ProjectDetailPage({
    * the control that needs it renders.
    */
   const badgeCatalogue =
-    section === 'testers'
-      ? await serverFetchOrNull<readonly BadgeOption[]>('badges')
-      : null
+    section === 'testers' ? await serverFetchOrNull<readonly BadgeOption[]>('badges') : null
   /**
    * Testers this panel should not offer, because inviting them would do
    * nothing.
@@ -389,7 +387,10 @@ export default async function ProjectDetailPage({
       message: 'That material no longer exists — someone may have removed it already.',
     },
     'material-forbidden': { tone: 'error', message: 'That material is not yours to change.' },
-    'material-conflict': { tone: 'error', message: 'That material could not be changed. Reload the page.' },
+    'material-conflict': {
+      tone: 'error',
+      message: 'That material could not be changed. Reload the page.',
+    },
     'feature-added': { tone: 'success', message: 'The feature has been added.' },
     'feature-removed': { tone: 'success', message: 'The feature has been removed.' },
     'feature-invalid': { tone: 'error', message: 'That feature name was not accepted.' },
@@ -418,7 +419,10 @@ export default async function ProjectDetailPage({
     },
     'test-case-created': { tone: 'success', message: 'The test case has been created.' },
     'test-case-assigned': { tone: 'success', message: 'The test case has been assigned.' },
-    'test-case-invalid': { tone: 'error', message: 'That test case was not accepted. Check the fields.' },
+    'test-case-invalid': {
+      tone: 'error',
+      message: 'That test case was not accepted. Check the fields.',
+    },
     'test-case-conflict': {
       tone: 'error',
       message: 'That tester already has this test case.',
@@ -692,9 +696,8 @@ export default async function ProjectDetailPage({
       header: 'Covers',
       render: (row) => {
         const device = row.assignedDevice
-          ? [row.assignedDevice.manufacturer, row.assignedDevice.model]
-              .filter(Boolean)
-              .join(' ') || row.assignedDevice.type
+          ? [row.assignedDevice.manufacturer, row.assignedDevice.model].filter(Boolean).join(' ') ||
+            row.assignedDevice.type
           : null
         const browser = row.assignedBrowser
           ? `${row.assignedBrowser.browser.name}${row.assignedBrowser.browserVersion ? ` ${row.assignedBrowser.browserVersion.version}` : ''}`
@@ -2807,8 +2810,8 @@ export default async function ProjectDetailPage({
               value={`${detailPath}?section=testers&buildId=${activeBuildId}`}
             />
             <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              For their work on {project.reference} · {project.title}. Badges show on the tester&apos;s
-              own dashboard and profile.
+              For their work on {project.reference} · {project.title}. Badges show on the
+              tester&apos;s own dashboard and profile.
             </p>
             {badgeCatalogue && badgeCatalogue.length > 0 ? (
               <Field label="Badge" htmlFor="badge-id" required>

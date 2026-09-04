@@ -80,12 +80,9 @@ export default async function AnnouncementDetailPage({
 
   const detailPath = `${LIST_PATH}/${id}`
   const isDraft = announcement.publishedAt === null
-  const expired =
-    announcement.expiresAt !== null && new Date(announcement.expiresAt) < new Date()
+  const expired = announcement.expiresAt !== null && new Date(announcement.expiresAt) < new Date()
   const status = isDraft ? 'Draft' : expired ? 'Expired' : 'Published'
-  const errorMessage = query.error
-    ? (ERROR_MESSAGES[query.error] ?? ERROR_MESSAGES.failed)
-    : null
+  const errorMessage = query.error ? (ERROR_MESSAGES[query.error] ?? ERROR_MESSAGES.failed) : null
 
   return (
     <DetailShell
@@ -101,10 +98,7 @@ export default async function AnnouncementDetailPage({
           <Badge tone={audienceTone(announcement.audience)} uppercase={false}>
             {titleCase(announcement.audience)}
           </Badge>
-          <Badge
-            tone={isDraft ? 'neutral' : expired ? 'warning' : 'success'}
-            uppercase={false}
-          >
+          <Badge tone={isDraft ? 'neutral' : expired ? 'warning' : 'success'} uppercase={false}>
             {status}
           </Badge>
         </span>

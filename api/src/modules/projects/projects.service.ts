@@ -407,9 +407,7 @@ export async function getProject(
     ? await resolveBuildId(id, requestedBuildId)
     : myAssignments.length > 0
       ? (myAssignments.find((a) => a.buildId === requestedBuildId)?.buildId ??
-        myAssignments.find((a) =>
-          ACTIVE_ASSIGNMENT_STATUSES.includes(a.status),
-        )?.buildId ??
+        myAssignments.find((a) => ACTIVE_ASSIGNMENT_STATUSES.includes(a.status))?.buildId ??
         myAssignments.find((a) => a.status === AssignmentStatus.INVITED)?.buildId ??
         myAssignments[0]!.buildId)
       : await resolveBuildId(id)

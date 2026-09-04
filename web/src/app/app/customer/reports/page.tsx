@@ -194,7 +194,9 @@ export default async function CustomerReportsPage({
               title="Project report"
               description="Everything reported on one project, across every build."
               actions={
-                projectReport ? <DownloadCsv query={{ section: 'by-project', projectId }} /> : undefined
+                projectReport ? (
+                  <DownloadCsv query={{ section: 'by-project', projectId }} />
+                ) : undefined
               }
             >
               <LiveGetForm action={BASE} style={FORM_STYLE}>
@@ -289,9 +291,7 @@ async function BuildRangeReport({
       description="Everything reported between two builds of one project, inclusive."
       actions={
         report ? (
-          <DownloadCsv
-            query={{ section: 'by-build', projectId, startBuildId, endBuildId }}
-          />
+          <DownloadCsv query={{ section: 'by-build', projectId, startBuildId, endBuildId }} />
         ) : undefined
       }
     >

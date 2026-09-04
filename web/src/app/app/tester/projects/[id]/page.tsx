@@ -348,7 +348,11 @@ export default async function TesterProjectWorkspacePage({
               screen with no way out.
             */}
             {myBuilds.length > 1 ? (
-              <BuildSwitcher basePath={detailPath} builds={myBuilds} activeBuildId={activeBuildId} />
+              <BuildSwitcher
+                basePath={detailPath}
+                builds={myBuilds}
+                activeBuildId={activeBuildId}
+              />
             ) : null}
             {isInvited ? null : (
               <SectionTabs

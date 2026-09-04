@@ -126,7 +126,12 @@ function slug(value: string): string {
 function csvResponse(lines: string[], filename: string): Response {
   // A BOM so Excel reads it as UTF-8 rather than the local codepage — without
   // it a project title with an en dash or an accent arrives mangled.
-  const body = `﻿${lines.join('\r\n')}\r\n`
+  //
+  // Written as the escape `\uFEFF` rather than the literal character:
+  // identical bytes on the wire, but the source no longer carries an
+  // invisible zero-width mark that reads as a stray space to anyone editing
+  // this line (and that `no-irregular-whitespace` rightly flags).
+  const body = `\uFEFF${lines.join('\r\n')}\r\n`
   return new NextResponse(body, {
     headers: {
       'content-type': 'text/csv; charset=utf-8',

@@ -107,11 +107,7 @@ export const createBugSchema = z
       .trim()
       .min(5, 'Steps to reproduce are required — another person must be able to follow them')
       .max(10_000),
-    expectedResult: z
-      .string()
-      .trim()
-      .min(5, 'Say what should have happened')
-      .max(4000),
+    expectedResult: z.string().trim().min(5, 'Say what should have happened').max(4000),
     actualResult: z.string().trim().min(5, 'Say what happened instead').max(4000),
     severity: z.nativeEnum(BugSeverity),
     reproducibility: z.nativeEnum(BugReproducibility).default(BugReproducibility.ALWAYS),

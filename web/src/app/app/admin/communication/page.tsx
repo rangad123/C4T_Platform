@@ -83,7 +83,11 @@ export default async function CommunicationPage({
     {
       key: 'subject',
       header: 'Message',
-      render: (row) => row.subject?.trim() || 'No subject',
+      render: (row) => {
+        // Length-checked, not `??`: "   " trims to '', which is not nullish.
+        const trimmed = row.subject?.trim() ?? ''
+        return trimmed.length > 0 ? trimmed : 'No subject'
+      },
       // The first line of the body, so a subject-less message is still
       // recognisable without opening it.
       renderSecondary: (row) => firstLine(row.body),

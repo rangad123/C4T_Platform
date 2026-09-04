@@ -196,7 +196,11 @@ interface TesterBrowser {
   browser: { id: string; name: string }
   browserVersion: { id: string; version: string } | null
   operatingSystem: { id: string; name: string; kind: string } | null
-  osVersionRef: { id: string; version: string; operatingSystem: { id: string; name: string } } | null
+  osVersionRef: {
+    id: string
+    version: string
+    operatingSystem: { id: string; name: string }
+  } | null
 }
 
 interface Catalog {
@@ -969,7 +973,11 @@ export default async function TesterProfilePage({
               {ndaTemplate ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                   <Muted>Blank copy to print and sign</Muted>
-                  <DownloadLink fileId={ndaTemplate.fileId} name={ndaTemplate.name} basePath="/app/tester/download" />
+                  <DownloadLink
+                    fileId={ndaTemplate.fileId}
+                    name={ndaTemplate.name}
+                    basePath="/app/tester/download"
+                  />
                 </div>
               ) : null}
             </div>

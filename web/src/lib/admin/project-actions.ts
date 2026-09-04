@@ -80,11 +80,7 @@ export async function createProjectAction(formData: FormData): Promise<void> {
     const code = error instanceof ApiError ? error.status : 0
     redirect(
       `/app/admin/projects/new?error=${
-        code === 403
-          ? 'forbidden'
-          : code === 400 || code === 422
-            ? 'invalid'
-            : 'failed'
+        code === 403 ? 'forbidden' : code === 400 || code === 422 ? 'invalid' : 'failed'
       }`,
     )
   }

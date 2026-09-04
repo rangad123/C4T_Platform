@@ -122,7 +122,10 @@ export default async function BugsPage({
       return { tone: 'error', message: 'You do not have permission to change those bugs.' }
     }
     if (p.notice === 'bulk-invalid') {
-      return { tone: 'error', message: 'That change was not accepted. Pick a status or a severity.' }
+      return {
+        tone: 'error',
+        message: 'That change was not accepted. Pick a status or a severity.',
+      }
     }
     if (p.notice === 'bulk-failed') {
       return { tone: 'error', message: 'Those bugs could not be updated. Try again in a moment.' }

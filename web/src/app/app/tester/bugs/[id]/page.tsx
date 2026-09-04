@@ -52,7 +52,8 @@ const REASON_COPY: Record<string, string> = {
   missing: 'That record is no longer there. Reload the page.',
   invalid: 'The API rejected that. Check the values and try again.',
   failed: 'The bugs service did not accept the change. Try again in a moment.',
-  'occurrence-pair': 'Give both how many times it happened and how many attempts you made, or leave both blank.',
+  'occurrence-pair':
+    'Give both how many times it happened and how many attempts you made, or leave both blank.',
   'occurrence-range': 'It cannot have happened more times than you tried.',
 }
 

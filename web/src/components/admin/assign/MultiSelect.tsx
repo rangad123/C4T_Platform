@@ -49,13 +49,14 @@ export function MultiSelect({ label, options, selected, onChange }: MultiSelectP
   }, [open])
 
   function toggle(value: string) {
-    onChange(
-      selected.includes(value) ? selected.filter((s) => s !== value) : [...selected, value],
-    )
+    onChange(selected.includes(value) ? selected.filter((s) => s !== value) : [...selected, value])
   }
 
   return (
-    <div ref={wrapper} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div
+      ref={wrapper}
+      style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 }}
+    >
       <span
         id={`${id}-label`}
         style={{

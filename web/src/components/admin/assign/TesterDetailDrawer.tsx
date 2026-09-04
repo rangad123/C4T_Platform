@@ -128,7 +128,10 @@ export function TesterDetailDrawer({
         >
           <Facts
             items={[
-              { label: 'Location', value: [candidate.city, candidate.countryCode].filter(Boolean).join(', ') },
+              {
+                label: 'Location',
+                value: [candidate.city, candidate.countryCode].filter(Boolean).join(', '),
+              },
               {
                 label: 'Rating',
                 value: candidate.ratingAverage
@@ -155,7 +158,9 @@ export function TesterDetailDrawer({
           <Group title="Languages">
             {candidate.languages.length > 0 ? (
               <ChipRow
-                items={candidate.languages.map((l) => `${l.code.toUpperCase()} · ${l.proficiency.toLowerCase()}`)}
+                items={candidate.languages.map(
+                  (l) => `${l.code.toUpperCase()} · ${l.proficiency.toLowerCase()}`,
+                )}
               />
             ) : (
               <Muted>No languages listed.</Muted>
@@ -217,7 +222,13 @@ export function TesterDetailDrawer({
           }}
         >
           {blocked ? (
-            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--text-secondary)',
+                fontSize: 'var(--type-body-sm-size)',
+              }}
+            >
               Already on {buildName} — {projectLabel}.
             </p>
           ) : (

@@ -94,13 +94,18 @@ export function AssignWorkspace({
     const configurations = chosen
       .map((candidate) => {
         const entry = config.get(candidate.user.id)
+        /*
+          The select's "not chosen" value is an empty string, and the API
+          wants null for that — so this is a truthiness test, not a
+          null-check, and `??` would send `''` straight through.
+        */
         return {
           testerId: candidate.user.id,
-          deviceId: entry?.deviceId || null,
-          browserId: entry?.browserId || null,
+          deviceId: nullIfBlank(entry?.deviceId),
+          browserId: nullIfBlank(entry?.browserId),
         }
       })
-      .filter((c) => c.deviceId || c.browserId)
+      .filter((c) => c.deviceId !== null || c.browserId !== null)
 
     try {
       const outcome = await assignSelectedTesters({
@@ -186,6 +191,11 @@ export function AssignWorkspace({
   )
 }
 
+/** The picker's "not chosen" is an empty string; the API's is null. */
+function nullIfBlank(value: string | undefined): string | null {
+  return value && value.length > 0 ? value : null
+}
+
 /**
  * What happened, including what did not.
  *
@@ -224,7 +234,9 @@ function SuccessPanel({
         {total} invitation{total === 1 ? '' : 's'} sent
       </h2>
       <p style={{ margin: 'var(--space-2) 0 0', color: 'var(--text-secondary)' }}>
-        {total > 0 ? `They have been notified and now appear on ${buildName}.` : 'Nothing was sent.'}
+        {total > 0
+          ? `They have been notified and now appear on ${buildName}.`
+          : 'Nothing was sent.'}
         {/*
           Revivals are called out rather than folded into the total: bringing
           back someone who declined or was removed is a different act from

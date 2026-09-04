@@ -84,7 +84,12 @@ export default async function MessageDetailPage({ params }: { params: Promise<{ 
   const isDraft = message.status === 'DRAFT'
   const failed = message.recipients.filter((r) => r.failedAt)
   const opened = message.recipients.filter((r) => r.readAt)
-  const title = message.subject?.trim() || 'No subject'
+  /*
+    Length-checked, not `??`. A subject of "   " trims to an empty string,
+    which is not nullish — `??` would put a blank heading on the page.
+  */
+  const trimmedSubject = message.subject?.trim() ?? ''
+  const title = trimmedSubject.length > 0 ? trimmedSubject : 'No subject'
 
   return (
     <DetailShell
@@ -168,9 +173,7 @@ export default async function MessageDetailPage({ params }: { params: Promise<{ 
                     that was never sent reads as a failure rather than as
                     "not applicable".
                   */
-                  value: isDraft
-                    ? '—'
-                    : `${message.readCount} of ${message.recipients.length}`,
+                  value: isDraft ? '—' : `${message.readCount} of ${message.recipients.length}`,
                 },
                 { label: 'Template', value: message.template?.name ?? '—' },
                 { label: 'Created', value: formatWhen(message.createdAt) },

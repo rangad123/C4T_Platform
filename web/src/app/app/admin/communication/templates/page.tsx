@@ -157,7 +157,12 @@ export default async function TemplatesPage({
                 meta={t.subject ? `Subject: ${t.subject}` : undefined}
                 actions={
                   <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
-                    <Button href={`${BASE}?edit=${t.id}`} variant="ghost" size="sm" iconLeft="pencil">
+                    <Button
+                      href={`${BASE}?edit=${t.id}`}
+                      variant="ghost"
+                      size="sm"
+                      iconLeft="pencil"
+                    >
                       Edit
                     </Button>
                     {/*

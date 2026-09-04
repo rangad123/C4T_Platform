@@ -35,7 +35,13 @@ interface DraftPayload {
   status: string
   template: { id: string; name: string } | null
   recipients: readonly {
-    user: { id: string; email: string; firstName: string | null; lastName: string | null; avatarFileId: string | null }
+    user: {
+      id: string
+      email: string
+      firstName: string | null
+      lastName: string | null
+      avatarFileId: string | null
+    }
   }[]
 }
 

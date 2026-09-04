@@ -28,10 +28,7 @@ import { ROLE_HOME, type Role } from '@/lib/api/types'
  * which has no portal to send anyone into. Those fall through to
  * `ROLE_HOME`, which routes them to onboarding.
  */
-const DESTINATIONS: Record<
-  string,
-  Partial<Record<Role, (id: string) => string>>
-> = {
+const DESTINATIONS: Record<string, Partial<Record<Role, (id: string) => string>>> = {
   bugs: {
     ADMIN: (id: string) => `/app/admin/bugs/${id}`,
     SUB_ADMIN: (id: string) => `/app/admin/bugs/${id}`,

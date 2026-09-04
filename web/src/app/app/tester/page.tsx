@@ -431,12 +431,7 @@ export default async function TesterHomePage({
             >
               Ratings and badges
             </h2>
-            <Button
-              href="/app/tester/profile"
-              variant="link"
-              size="sm"
-              iconRight="arrow-right"
-            >
+            <Button href="/app/tester/profile" variant="link" size="sm" iconRight="arrow-right">
               View your profile
             </Button>
           </div>

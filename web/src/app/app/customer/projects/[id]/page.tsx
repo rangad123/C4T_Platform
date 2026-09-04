@@ -122,12 +122,21 @@ const NOTICES: Record<string, NoticeCopy> = {
   'material-removed': { tone: 'success', message: 'That material has been removed.' },
   'feature-added': { tone: 'success', message: 'The feature has been added.' },
   'feature-removed': { tone: 'success', message: 'The feature has been removed.' },
-  'feature-conflict': { tone: 'error', message: 'This build already has a feature with that name.' },
+  'feature-conflict': {
+    tone: 'error',
+    message: 'This build already has a feature with that name.',
+  },
   'delivery-forbidden': { tone: 'error', message: 'Those details are not yours to change.' },
   'delivery-invalid': { tone: 'error', message: 'Those values were not accepted.' },
   'delivery-missing': { tone: 'error', message: 'This project no longer exists.' },
-  'delivery-conflict': { tone: 'error', message: 'Those details could not be saved. Reload the page.' },
-  'delivery-failed': { tone: 'error', message: 'The delivery details could not be saved. Try again.' },
+  'delivery-conflict': {
+    tone: 'error',
+    message: 'Those details could not be saved. Reload the page.',
+  },
+  'delivery-failed': {
+    tone: 'error',
+    message: 'The delivery details could not be saved. Try again.',
+  },
   'material-forbidden': { tone: 'error', message: 'That material is not yours to remove.' },
   'material-missing': {
     tone: 'error',
@@ -137,7 +146,10 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'error',
     message: 'That field no longer exists — someone may have removed it already.',
   },
-  'material-conflict': { tone: 'error', message: 'That material could not be removed. Reload the page.' },
+  'material-conflict': {
+    tone: 'error',
+    message: 'That material could not be removed. Reload the page.',
+  },
   'feature-forbidden': { tone: 'error', message: 'That feature is not yours to change.' },
   'feature-invalid': { tone: 'error', message: 'That feature name was not accepted.' },
   'feature-missing': {

@@ -651,14 +651,15 @@ communicationRouter.get(
  * `audience`, `projectId` and `buildId` are absent on purpose — see the
  * handler for why changing who an announcement is for is not an edit.
  */
-const announcementPatchSchema = z.object({
-  title: z.string().trim().min(3).max(200).optional(),
-  body: z.string().trim().min(1).max(10_000).optional(),
-  /** Explicit null clears the expiry. Omitted leaves it as it is. */
-  expiresAt: z.coerce.date().nullable().optional(),
-  /** Publish a draft. Never un-publishes — see the handler. */
-  publishNow: z.boolean().optional(),
-})
+const announcementPatchSchema = z
+  .object({
+    title: z.string().trim().min(3).max(200).optional(),
+    body: z.string().trim().min(1).max(10_000).optional(),
+    /** Explicit null clears the expiry. Omitted leaves it as it is. */
+    expiresAt: z.coerce.date().nullable().optional(),
+    /** Publish a draft. Never un-publishes — see the handler. */
+    publishNow: z.boolean().optional(),
+  })
   /*
     Strict, so sending `audience` is a clear 400 rather than a silent no-op.
     Zod strips unknown keys by default, which would have answered 200 to a
@@ -740,7 +741,11 @@ communicationRouter.patch(
       entityType: 'Announcement',
       entityId: announcement.id,
       before: { title: existing.title, body: existing.body, publishedAt: existing.publishedAt },
-      after: { title: announcement.title, body: announcement.body, publishedAt: announcement.publishedAt },
+      after: {
+        title: announcement.title,
+        body: announcement.body,
+        publishedAt: announcement.publishedAt,
+      },
     })
 
     if (publishingNow) {

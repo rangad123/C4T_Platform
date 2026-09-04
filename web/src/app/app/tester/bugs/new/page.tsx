@@ -136,8 +136,9 @@ export default async function NewTesterBugPage({
    * first reportable assignment on that project, same as before.
    */
   const preselected = params.buildId
-    ? (reportable.find((a) => a.project?.id === params.projectId && a.build.id === params.buildId) ??
-      null)
+    ? (reportable.find(
+        (a) => a.project?.id === params.projectId && a.build.id === params.buildId,
+      ) ?? null)
     : (reportable.find((a) => a.project?.id === params.projectId) ?? null)
   const activeProjectId = preselected?.project?.id ?? ''
   const activeBuildId = preselected?.build.id
@@ -251,9 +252,7 @@ export default async function NewTesterBugPage({
                 The API re-resolves it and refuses a build that isn't on the
                 named project.
               */}
-              {activeBuildId ? (
-                <input type="hidden" name="buildId" value={activeBuildId} />
-              ) : null}
+              {activeBuildId ? <input type="hidden" name="buildId" value={activeBuildId} /> : null}
 
               {/*
                 The project travels as a hidden value, not a control. The

@@ -171,7 +171,8 @@ export async function sendBroadcastAction(input: ComposeInput): Promise<ComposeR
 export async function deleteDraftAction(formData: FormData): Promise<void> {
   await requirePermission('communication.write')
 
-  const id = String(formData.get('broadcastId') ?? '')
+  const raw = formData.get('broadcastId')
+  const id = typeof raw === 'string' ? raw : ''
   if (!id) redirect(`${BASE}?tab=DRAFT`)
 
   try {

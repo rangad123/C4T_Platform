@@ -125,11 +125,16 @@ export function TesterPicker({
   const requestSeq = useRef(0)
 
   /**
-   * Read through a ref so a caller passing an inline object literal does not
-   * re-create `load` on every render and re-fire the search forever.
+   * Serialised, not held in a ref.
+   *
+   * `fixedQuery` is usually an inline object literal, so using it directly as
+   * a `useCallback` dependency would re-create `load` every render and
+   * re-fire the search forever. Writing it to a ref during render fixes that
+   * but is a genuine React violation — a render must not mutate. Comparing
+   * the serialised form gives a stable primitive dependency with neither
+   * problem.
    */
-  const fixedRef = useRef(fixedQuery)
-  fixedRef.current = fixedQuery
+  const fixedKey = JSON.stringify(fixedQuery ?? {})
 
   const load = useCallback(
     async (nextFilters: Filters, nextPage: number) => {
@@ -138,7 +143,7 @@ export function TesterPicker({
       setError(null)
 
       const params = new URLSearchParams({
-        ...(fixedRef.current ?? {}),
+        ...(JSON.parse(fixedKey) as Record<string, string>),
         page: String(nextPage),
         limit: String(PAGE_SIZE),
         sort: 'ratingAverage',
@@ -176,7 +181,7 @@ export function TesterPicker({
         if (seq === requestSeq.current) setLoading(false)
       }
     },
-    [endpoint],
+    [endpoint, fixedKey],
   )
 
   /**

@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
-import { RatingSubjectType, Role, AssignmentStatus, type Prisma } from '@prisma/client'
+import { RatingSubjectType, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission, isAdminSide } from '../../middleware/authorize.js'
@@ -108,7 +108,6 @@ const createRatingSchema = z
     message: 'subjectUserId is required when rating a person',
     path: ['subjectUserId'],
   })
-
 
 ratingsRouter.post('/', validate({ body: createRatingSchema }), async (req, res) => {
   const input = req.body as z.infer<typeof createRatingSchema>

@@ -135,7 +135,11 @@ export function testerFilterWhere(query: TesterFilterQuery): Prisma.TesterProfil
         }
       : {}),
     ...(query.browser
-      ? { browsers: { some: { browser: { name: { contains: query.browser, mode: 'insensitive' } } } } }
+      ? {
+          browsers: {
+            some: { browser: { name: { contains: query.browser, mode: 'insensitive' } } },
+          },
+        }
       : {}),
     /**
      * Skills and search share one AND, because an object cannot carry the key
@@ -201,7 +205,14 @@ const candidateSelect = {
   skills: { select: { skill: { select: { id: true, name: true, slug: true } } }, take: 12 },
   languages: { select: { code: true, proficiency: true }, take: 8 },
   devices: {
-    select: { id: true, type: true, manufacturer: true, model: true, osName: true, osVersion: true },
+    select: {
+      id: true,
+      type: true,
+      manufacturer: true,
+      model: true,
+      osName: true,
+      osVersion: true,
+    },
     take: 12,
   },
   browsers: {
@@ -231,10 +242,7 @@ const candidateSelect = {
  * different build of the same project is a legitimate candidate here — see
  * the schema comment on `ProjectAssignment.buildId`.
  */
-export async function listAssignmentCandidates(
-  buildId: string,
-  query: AssignmentCandidatesQuery,
-) {
+export async function listAssignmentCandidates(buildId: string, query: AssignmentCandidatesQuery) {
   /**
    * Resolved first, so a build that does not exist (or was deleted while the
    * picker was open) is a 404 rather than an empty result set. An empty list

@@ -17,7 +17,12 @@ import { SectionTabs, type SectionTab } from '@/components/admin/SectionTabs'
  * peer of three lists.
  */
 const TABS: readonly SectionTab[] = [
-  { value: 'messages', label: 'Messages', icon: 'message-square', href: '/app/admin/communication' },
+  {
+    value: 'messages',
+    label: 'Messages',
+    icon: 'message-square',
+    href: '/app/admin/communication',
+  },
   {
     value: 'announcements',
     label: 'Announcements',
