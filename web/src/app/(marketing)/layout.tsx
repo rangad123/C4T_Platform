@@ -11,14 +11,36 @@ import { MarketingShell } from '@/components/sections/MarketingShell'
  * which belongs in TopNav via `usePathname` rather than here, since this is a
  * Server Component.
  *
- * Sign-in and register used to be intercepted here by an `@auth` slot, so
- * clicking "Sign in" in the nav opened a modal over the page while every
- * other route to the same screen rendered it in full. That could not be made
- * consistent: a modal needs a page underneath it, and there is none on a
- * refresh, a deep link, an invitation link, a protected route bouncing to
- * `/login`, or the redirect after signing out. The full page is the only form
- * that works from every entry, so it is now the only form.
+ * ── THE `@auth` SLOT
+ *
+ * Sign in and register are intercepted here, so clicking either in the nav
+ * opens a dialog over the page being read rather than navigating away from it.
+ * `@auth/(.)login` and `@auth/(.)register` render the same forms the
+ * standalone routes do — imported, not copied.
+ *
+ * This was tried once before and removed, because interception only happens on
+ * a client-side navigation: a refresh, a pasted or emailed link, an invitation
+ * link, a protected page bouncing to `/login`, and the redirect after signing
+ * out all arrive as hard loads with no page underneath, so they render the
+ * full page instead. The two looked like different products.
+ *
+ * That is now addressed rather than avoided. `@auth/default.tsx` renders
+ * nothing for those loads, and the standalone pages sit on the same dark band
+ * as the dialog's backdrop — so the fallback reads as the same screen arrived
+ * at differently, not as a blank white page.
  */
-export default function MarketingLayout({ children }: { children: React.ReactNode }) {
-  return <MarketingShell>{children}</MarketingShell>
+export default function MarketingLayout({
+  children,
+  auth,
+}: {
+  children: React.ReactNode
+  /** The intercepted sign-in / register dialog, or nothing. */
+  auth: React.ReactNode
+}) {
+  return (
+    <MarketingShell>
+      {children}
+      {auth}
+    </MarketingShell>
+  )
 }

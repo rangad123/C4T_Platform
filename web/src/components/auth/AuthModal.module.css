@@ -1,0 +1,49 @@
+/* The dialog that an intercepted /login or /register renders in.
+
+   Sized around `AuthCard`, which brings its own padding, border and shadow —
+   this supplies the backdrop, the centring and the close affordance, and
+   otherwise gets out of the card's way. */
+
+.dialog {
+  /* A native <dialog> is `position: fixed` with a UA margin that centres it
+     only horizontally; the inset/margin pair here centres it on both axes. */
+  inset: 0;
+  margin: auto;
+  max-width: min(100vw - var(--space-7) * 2, 560px);
+  max-height: calc(100vh - var(--space-9) * 2);
+  padding: 0;
+  border: none;
+  background: transparent;
+  overflow: visible;
+}
+
+.dialog::backdrop {
+  /* Deliberately not pure black — the ink ramp's darkest surface, softened.
+     See the no-pure-black rule. */
+  background: rgb(23 19 15 / 0.62);
+}
+
+.panel {
+  position: relative;
+  /* The card inside scrolls rather than the page behind it, so a short
+     viewport still reaches the submit button. */
+  max-height: calc(100vh - var(--space-9) * 2);
+  overflow-y: auto;
+}
+
+/* Sits over the card's own padding rather than taking a row of its own. */
+.dismiss {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 1;
+}
+
+@media (max-width: 480px) {
+  .dialog {
+    max-width: calc(100vw - var(--space-5) * 2);
+  }
+}
+
+/* `prefers-reduced-motion` is honoured by having no entrance animation at all
+   — the dialog appears. Nothing to zero out. */

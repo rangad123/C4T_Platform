@@ -1,14 +1,27 @@
 /* The panel every auth screen sits in — sign in, register, forgot and reset
-   password, and the modal that intercepts /login from the marketing nav.
+   password, and the dialog that intercepts /login and /register from the
+   marketing nav.
 
    All five had the same block of inline styles copied out, which is why the
    padding below could not be made responsive in one place. */
 
+/* The standalone pages sit on the dark band, not the page's default canvas.
+
+   A full-width sheet of near-white with one small card floating in it read as
+   an unstyled page rather than a screen — and it looked nothing like the same
+   form arriving as a dialog, which is dimmed over the site. Putting the page
+   on the same ground closes that gap: however you reach sign-in, it looks
+   like one thing.
+
+   The dialog does NOT use this wrapper — `AuthModal` supplies its own
+   centring — so this is the standalone form only. */
 .wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: var(--space-11) var(--space-7);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
 }
 
 /* Register sat closer to the nav than the other three. Kept rather than

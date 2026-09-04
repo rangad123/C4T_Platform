@@ -11,10 +11,15 @@ import styles from './AuthCard.module.css'
  * responsive without editing five files — see the media query in the CSS
  * module for why it had to become responsive.
  *
- * There was a second variant for the `<dialog>` that intercepted `/login`
- * from the nav. That modal is gone — it could only ever appear on a soft
- * navigation, which made signing in look different depending on how you got
- * there — so the card has one form now. `AuthPage` is the wrapper.
+ * The `<dialog>` that intercepts `/login` and `/register` from the nav reuses
+ * this same card — see `AuthModal`, which supplies the backdrop and centring
+ * where `AuthPage` supplies the page's. One card, two frames, so the dialog
+ * and the standalone page cannot drift apart.
+ *
+ * `AuthPage` puts the standalone form on the dark band. That is what closes
+ * the gap the earlier attempt at this fell into: the dialog is dimmed over the
+ * site, and a hard load — a refresh, an emailed link, a bounce from a
+ * protected route — now lands on the same ground rather than a sheet of white.
  */
 export function AuthCard({
   children,
@@ -46,7 +51,9 @@ export function AuthPage({
     <div className={`${styles.wrap} ${compact ? styles.compact : ''}`.trim()}>
       {withLogo ? (
         <div className={styles.logo}>
-          <Logo size={32} withWordmark />
+          {/* `inverse` because `.wrap` now sits on the dark band — the
+              default tone is ink, which would be invisible on it. */}
+          <Logo size={32} withWordmark tone="inverse" />
         </div>
       ) : null}
       {children}
