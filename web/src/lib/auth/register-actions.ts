@@ -1,6 +1,6 @@
 'use server'
 
-import { redirect } from 'next/navigation'
+import { redirect, RedirectType } from 'next/navigation'
 import { env } from '@/lib/env'
 import { ROLE_HOME, type Role } from '@/lib/api/types'
 import { formString, formTrimmed } from '@/lib/form-data'
@@ -33,7 +33,11 @@ function backToForm(params: Record<string, string | undefined>): never {
   for (const [key, value] of Object.entries(params)) {
     if (value) search.set(key, value)
   }
-  redirect(`/register?${search.toString()}`)
+  /* `replace` — the register dialog and every screen it bounces to are one
+     modal to the reader. See `authRedirect` in `actions.ts` for the whole
+     argument; a pushed error redirect here means closing the dialog reopens
+     it on the failed attempt. */
+  redirect(`/register?${search.toString()}`, RedirectType.replace)
 }
 
 export async function registerAction(formData: FormData): Promise<void> {

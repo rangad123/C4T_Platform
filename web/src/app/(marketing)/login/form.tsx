@@ -7,14 +7,14 @@ import { AuthDivider, GoogleButton } from '@/components/auth/GoogleButton'
 import { loginAction } from '@/lib/auth/actions'
 
 /**
- * The shared sign-in form, rendered by `/login`.
+ * The shared sign-in form, rendered by `/login` and by the dialog at
+ * `@auth/(.)login`.
  *
- * There used to be a second caller — an intercepting route that opened this
- * same form as a modal over the current page — which is why this stayed a
- * separate component from the page around it rather than being inlined. That
- * modal is gone (see the note on `AuthCard`), but the split still earns its
- * keep: the page handles the already-signed-in redirect and the wrapper
- * chrome, this handles the form.
+ * Two callers, one form. The page handles the already-signed-in redirect and
+ * the wrapper chrome; the dialog supplies a backdrop instead; this handles
+ * the fields. (An earlier note here said the modal had been removed — it is
+ * back, and the reason it was removed the first time is addressed rather than
+ * repeated: see the comment on `AuthModal`.)
  *
  * The form is a Server Component bound to `loginAction`. There is no
  * `useFormState`, no client bundle — feedback rides on the `?error=` query
@@ -180,6 +180,10 @@ export default async function LoginForm({
         */}
         <Link
           href="/forgot-password"
+          /* `replace`, for the same reason as the register link below: the
+             password screens are the same modal to the reader, so moving
+             between them must not stack history entries. */
+          replace
           style={{
             color: 'var(--text-brand)',
             textDecoration: 'underline',

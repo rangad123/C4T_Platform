@@ -1,13 +1,36 @@
 'use server'
 
 import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
+import { redirect, RedirectType } from 'next/navigation'
 import { env } from '@/lib/env'
 import { ROLE_HOME, type Role } from '@/lib/api/types'
 import { safeNext } from '@/lib/safe-redirect'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { bridgeApiCookies } from '@/lib/auth/cookie-bridge'
 import { currentAuthHeaders } from '@/lib/auth/request-context'
+
+/**
+ * A redirect that lands on another AUTH screen.
+ *
+ * `redirect()` inside a Server Action defaults to PUSH (confirmed in
+ * `node_modules/next/dist/docs/.../redirect.md`: "`push` (default in Server
+ * Actions)"). Sign-in, register and the two password screens are all one
+ * dialog to the reader — `@auth/(.)*` intercepts each of them — so a pushed
+ * redirect between them leaves the previous screen sitting on the history
+ * stack. Close the dialog and `router.back()` reopens it: three failed
+ * sign-in attempts means three presses to get out, each showing a stale form.
+ *
+ * Replacing keeps the whole auth flow to a single history entry, so closing
+ * returns to the page the dialog opened over.
+ *
+ * Deliberately NOT used for the two redirects that leave the flow — into the
+ * app after signing in, and to `/` after signing out. Those are real
+ * navigations, and where Back should go from them is a separate question from
+ * this one.
+ */
+function authRedirect(href: string): never {
+  redirect(href, RedirectType.replace)
+}
 
 /**
  * Cookie bridging for Server Actions that call the auth API.
@@ -55,7 +78,7 @@ export async function loginAction(formData: FormData): Promise<void> {
   const next = formString(formData, 'next')
 
   if (!email || !password) {
-    redirect(
+    authRedirect(
       `/login?error=missing${next ? `&next=${encodeURIComponent(next)}` : ''}&email=${encodeURIComponent(email)}`,
     )
   }
@@ -69,7 +92,7 @@ export async function loginAction(formData: FormData): Promise<void> {
       cache: 'no-store',
     })
   } catch {
-    redirect(
+    authRedirect(
       `/login?error=network${next ? `&next=${encodeURIComponent(next)}` : ''}&email=${encodeURIComponent(email)}`,
     )
   }
@@ -95,7 +118,7 @@ export async function loginAction(formData: FormData): Promise<void> {
     } catch {
       // Body wasn't JSON â€” keep the generic code.
     }
-    redirect(
+    authRedirect(
       `/login?error=${encodeURIComponent(code)}${next ? `&next=${encodeURIComponent(next)}` : ''}&email=${encodeURIComponent(email)}`,
     )
   }
@@ -181,7 +204,7 @@ export async function forgotPasswordAction(formData: FormData): Promise<void> {
   const email = formTrimmed(formData, 'email')
 
   if (!email) {
-    redirect('/forgot-password?error=missing')
+    authRedirect('/forgot-password?error=missing')
   }
 
   try {
@@ -197,7 +220,7 @@ export async function forgotPasswordAction(formData: FormData): Promise<void> {
 
   // Same 200 either way, per the API. Redirect to the success state —
   // the generic message tells the user to check their inbox regardless.
-  redirect(`/forgot-password?email=${encodeURIComponent(email)}`)
+  authRedirect(`/forgot-password?email=${encodeURIComponent(email)}`)
 }
 
 /**
@@ -213,11 +236,11 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
   const confirmPassword = formTrimmed(formData, 'confirmPassword')
 
   if (!token || !password) {
-    redirect(`/reset-password?error=missing${token ? '' : '&token=missing'}`)
+    authRedirect(`/reset-password?error=missing${token ? '' : '&token=missing'}`)
   }
 
   if (confirmPassword !== undefined && password !== confirmPassword) {
-    redirect(`/reset-password?token=${encodeURIComponent(token)}&error=password_mismatch`)
+    authRedirect(`/reset-password?token=${encodeURIComponent(token)}&error=password_mismatch`)
   }
 
   let response: Response
@@ -229,7 +252,7 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
       cache: 'no-store',
     })
   } catch {
-    redirect(`/reset-password?token=${encodeURIComponent(token)}&error=network`)
+    authRedirect(`/reset-password?token=${encodeURIComponent(token)}&error=network`)
   }
 
   if (!response.ok) {
@@ -243,8 +266,8 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
     } catch {
       // Body wasn't JSON — keep the generic code.
     }
-    redirect(`/reset-password?token=${encodeURIComponent(token)}&error=${code}`)
+    authRedirect(`/reset-password?token=${encodeURIComponent(token)}&error=${code}`)
   }
 
-  redirect('/login?notice=password_reset')
+  authRedirect('/login?notice=password_reset')
 }

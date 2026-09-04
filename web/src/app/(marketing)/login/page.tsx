@@ -12,12 +12,18 @@ export const metadata: Metadata = {
 }
 
 /**
- * The full-page sign-in. `/login` used to have a modal variant, reachable
- * only by a client-side navigation from inside the marketing layout — a
- * refresh, a pasted URL, or the redirect after signing out all rendered the
- * full page instead, so the same screen looked different depending on how you
- * arrived at it. See the note on `AuthCard` for why the modal was removed;
- * this is the only form now, for every path in.
+ * The full-page sign-in.
+ *
+ * `@auth/(.)login` renders the same form as a dialog whenever `/login` is
+ * reached by a client-side navigation. This page is what the other paths in
+ * get — a refresh, a pasted URL, an emailed link, a protected route bouncing
+ * here, the redirect after signing out — because interception cannot apply
+ * when there is no page underneath to sit over.
+ *
+ * That difference is why the modal was removed once before: the two looked
+ * like different products. It is now closed rather than avoided — this page
+ * sits on the same dark band as the dialog's backdrop, so both read as one
+ * screen arrived at differently.
  *
  * No `<main>` here: `MarketingShell` (via the route-group layout) already
  * renders `<main id="main">`, and the skip link targets that id. A second one
