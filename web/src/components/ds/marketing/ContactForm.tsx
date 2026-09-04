@@ -6,7 +6,7 @@ import { Icon } from '../core/Icon'
 import { Checkbox } from '../forms/Checkbox'
 import { Field } from '../forms/Field'
 import { Input } from '../forms/Input'
-import { PhoneInput, PHONE_HINT } from '../forms/PhoneInput'
+import { PhoneInput } from '../forms/PhoneInput'
 import { Select } from '../forms/Select'
 import { Textarea } from '../forms/Textarea'
 import type { LeadState } from '@/app/(marketing)/contact/actions'
@@ -18,7 +18,7 @@ export interface ContactFormProps {
   description?: string
   submitLabel?: string
   consentLabel: string
-  footnote: string
+  footnote?: string
   teamSizes: readonly string[]
   success: { title: string; body: string }
 }
@@ -134,15 +134,21 @@ export function ContactForm({
     <form
       action={formAction}
       noValidate
+      /*
+        Sized so the whole form — heading through submit — lands inside the
+        first screen on a laptop. It used to run past the fold, which meant the
+        button you are asked to press could not be seen without scrolling.
+        Tokens rather than the raw 32/16 that were here, per the token rule.
+      */
       style={{
-        padding: 32,
+        padding: 'var(--space-7)',
         background: 'var(--surface-canvas)',
         border: '1px solid var(--border-default)',
         borderRadius: 'var(--radius-panel)',
         boxShadow: 'var(--shadow-sm)',
         display: 'flex',
         flexDirection: 'column',
-        gap: 16,
+        gap: 'var(--space-4)',
       }}
     >
       {title ? (
@@ -187,7 +193,7 @@ export function ContactForm({
 
       <div
         className="c4t-form-row"
-        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}
+        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-5)' }}
       >
         <Field label="First name" required htmlFor="fn" error={err.firstName}>
           <Input id="fn" name="firstName" required invalid={Boolean(err.firstName)} />
@@ -199,7 +205,7 @@ export function ContactForm({
 
       <div
         className="c4t-form-row"
-        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}
+        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-5)' }}
       >
         <Field label="Work email" required htmlFor="we" error={err.email}>
           <Input
@@ -217,14 +223,27 @@ export function ContactForm({
           and the reply goes to the email either way — this is for the people
           who would rather be called than written to.
         */}
-        <Field label="Contact number" htmlFor="ph" hint={PHONE_HINT} error={err.phone}>
+        {/*
+          No visible hint. The constraint is unchanged: `PhoneInput` keeps the
+          pattern, and `phoneField` on the API is the half that actually
+          matters. PHONE_HINT is still attached as the input's `title`, which
+          the browser shows alongside its own message when the pattern
+          rejects — so the format is explained at the moment someone gets it
+          wrong, rather than spending three lines of the first screen on a
+          rule most people satisfy without being told.
+
+          Deliberately only here. The admin and portal forms still show the
+          hint inline; this is the one form where a visitor is being asked to
+          convert and the button had fallen below the fold.
+        */}
+        <Field label="Contact number" htmlFor="ph" error={err.phone}>
           <PhoneInput id="ph" name="phone" invalid={Boolean(err.phone)} />
         </Field>
       </div>
 
       <div
         className="c4t-form-row"
-        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}
+        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-5)' }}
       >
         <Field label="Company" required htmlFor="co" error={err.company}>
           <Input
@@ -240,13 +259,8 @@ export function ContactForm({
         </Field>
       </div>
 
-      <Field
-        label="What do you need tested?"
-        htmlFor="msg"
-        hint="A sentence is plenty — we'll take it from there."
-        error={err.message}
-      >
-        <Textarea id="msg" name="message" rows={4} invalid={Boolean(err.message)} />
+      <Field label="What do you need tested?" htmlFor="msg" error={err.message}>
+        <Textarea id="msg" name="message" rows={3} invalid={Boolean(err.message)} />
       </Field>
 
       <Checkbox name="consent" label={consentLabel} />
@@ -264,15 +278,17 @@ export function ContactForm({
         {submitLabel}
       </SubmitButton>
 
-      <p
-        style={{
-          fontSize: 'var(--type-caption-size)',
-          color: 'var(--text-muted)',
-          textAlign: 'center',
-        }}
-      >
-        {footnote}
-      </p>
+      {footnote ? (
+        <p
+          style={{
+            fontSize: 'var(--type-caption-size)',
+            color: 'var(--text-muted)',
+            textAlign: 'center',
+          }}
+        >
+          {footnote}
+        </p>
+      ) : null}
     </form>
   )
 }

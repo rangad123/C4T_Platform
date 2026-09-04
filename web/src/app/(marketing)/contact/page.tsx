@@ -83,10 +83,8 @@ export default function ContactPage() {
         <ContactForm
           action={submitLead}
           title={CONTACT_FORM.title}
-          description={CONTACT_FORM.description}
           submitLabel={CONTACT_FORM.submitLabel}
           consentLabel={CONTACT_FORM.consentLabel}
-          footnote={CONTACT_FORM.footnote}
           teamSizes={CONTACT_FORM.teamSizes}
           success={CONTACT_FORM.success}
         />

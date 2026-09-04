@@ -563,15 +563,19 @@ export const PRICING_TABLE_NOTE =
 /**
  * Copy for the form itself, transcribed from the `ContactForm` props in
  * `ContactPage` plus the component's own defaults.
+ *
+ * The `description` and `footnote` lines are gone on purpose. Both said the
+ * same thing ("we reply within one business day"), once above the fields and
+ * again under the button, and between them they pushed the submit button off
+ * the first screen — the form has to be scrolled past to be sent. The promise
+ * still appears once, on the confirmation, where it is actually load-bearing.
  */
 export const CONTACT_FORM = {
   title: 'Book my demo',
-  description: "We reply within one business day. We won't add you to a drip sequence.",
   submitLabel: 'Book my demo',
   /** Label above the agenda table. */
   agendaLabel: 'What happens on the call',
   consentLabel: 'Email me the quarterly QE benchmark report.',
-  footnote: 'We reply within one business day. No sales sequence.',
   success: {
     title: "Thanks — we'll be in touch",
     body: 'A quality engineer will reply within one business day with times that suit your team.',
