@@ -336,80 +336,18 @@ export default async function TesterHomePage({
         </header>
 
         {/*
-        Work first, money second. A tester opens this page to find out what
-        they are meant to be doing; the ledger below is the record of what
-        they already did.
-      */}
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 'var(--space-4)',
-              flexWrap: 'wrap',
-            }}
-          >
-            <h2
-              style={{
-                margin: 0,
-                fontSize: 'var(--type-body-md-size)',
-                fontWeight: 'var(--fw-semibold)',
-                color: 'var(--text-primary)',
-              }}
-            >
-              Your projects
-            </h2>
-            <Button href="/app/tester/projects" variant="link" size="sm" iconRight="arrow-right">
-              View all projects
-            </Button>
-          </div>
+          THE TOP OF THE PAGE, and deliberately so.
 
-          {liveAssignments.length === 0 ? (
-            <EmptyState
-              icon="briefcase"
-              title="No projects yet"
-              description="When a project invites you to test, it appears here."
-            />
-          ) : (
-            <CardGrid min={260}>
-              {liveAssignments.map((a) => (
-                <Card
-                  key={`${a.project!.id}:${a.build.id}`}
-                  href={`/app/tester/projects/${a.project!.id}?buildId=${a.build.id}`}
-                  title={a.project!.title}
-                  meta={[a.project!.reference, a.project!.organisation?.name, a.build.name]
-                    .filter(Boolean)
-                    .join(' · ')}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 'var(--space-2)',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <StatusBadge status={a.status} />
-                    {a.project!.endDate ? (
-                      <span
-                        style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
-                      >
-                        Ends {formatDate(a.project!.endDate)}
-                      </span>
-                    ) : null}
-                  </div>
-                </Card>
-              ))}
-            </CardGrid>
-          )}
-        </section>
-
-        {/*
           How the work has been received — the rating the crowd pool sorts on,
-          and the badges the delivery team and customers have handed over.
-          Above Earnings on purpose: this is the part of the record a tester
-          can still influence, and the money below is its consequence.
+          the badges the delivery team and customers have handed over, and the
+          notifications waiting underneath. This is the part of the record a
+          tester can still influence; earnings, at the foot of the page, are
+          its consequence rather than its driver.
+
+          This used to sit below "Your projects" on a work-first argument. The
+          order now leads with standing instead — a tester who opens this page
+          sees how they are doing and what needs their attention before the
+          list of what to do next.
         */}
         <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
           <div
@@ -556,6 +494,77 @@ export default async function TesterHomePage({
             Latest activity
           </h2>
           <ActivityFeed items={activity} />
+        </section>
+
+        {/*
+          The work itself, under the standing above it. Money stays last: a
+          tester opens this page to see where they stand and what needs
+          answering, then what they are meant to be doing — the ledger at the
+          foot is the record of what they already did.
+        */}
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 'var(--space-4)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 'var(--type-body-md-size)',
+                fontWeight: 'var(--fw-semibold)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              Your projects
+            </h2>
+            <Button href="/app/tester/projects" variant="link" size="sm" iconRight="arrow-right">
+              View all projects
+            </Button>
+          </div>
+
+          {liveAssignments.length === 0 ? (
+            <EmptyState
+              icon="briefcase"
+              title="No projects yet"
+              description="When a project invites you to test, it appears here."
+            />
+          ) : (
+            <CardGrid min={260}>
+              {liveAssignments.map((a) => (
+                <Card
+                  key={`${a.project!.id}:${a.build.id}`}
+                  href={`/app/tester/projects/${a.project!.id}?buildId=${a.build.id}`}
+                  title={a.project!.title}
+                  meta={[a.project!.reference, a.project!.organisation?.name, a.build.name]
+                    .filter(Boolean)
+                    .join(' · ')}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-2)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <StatusBadge status={a.status} />
+                    {a.project!.endDate ? (
+                      <span
+                        style={{ color: 'var(--text-muted)', fontSize: 'var(--type-caption-size)' }}
+                      >
+                        Ends {formatDate(a.project!.endDate)}
+                      </span>
+                    ) : null}
+                  </div>
+                </Card>
+              ))}
+            </CardGrid>
+          )}
         </section>
 
         <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
