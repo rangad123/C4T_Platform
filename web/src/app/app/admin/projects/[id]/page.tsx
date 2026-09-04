@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Modal } from '@/components/admin/Modal'
+import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
 import { DownloadLink } from '@/components/admin/DownloadLink'
@@ -52,6 +53,7 @@ import {
   type ProjectReportSummary,
   type TestCaseRow,
   type VerifiedTesterRow,
+  inviteBlockers,
   type ProjectRatingRow,
   type BadgeOption,
 } from './constants'
@@ -90,6 +92,15 @@ import {
 
 /** Verified testers offered per invite. Well under the API's 200-id ceiling. */
 const TESTER_POOL_SIZE = 40
+/**
+ * How many blocked-but-matching testers the panel will explain.
+ *
+ * Small on purpose. This is an answer to "where is the person I searched
+ * for", not a second directory — a search loose enough to return twenty
+ * blocked testers needs narrowing, and listing them all would bury the
+ * invitable ones above.
+ */
+const EXCLUDED_MATCH_LIMIT = 8
 /** Bugs shown inline. The full set lives on the bugs list. */
 const BUG_PREVIEW_SIZE = 10
 
@@ -239,66 +250,94 @@ export default async function ProjectDetailPage({
    * a visit only pays for the data it shows; `loading.tsx` already covers
    * the brief gap while that narrower set of fetches resolves.
    */
-  const [testerPool, bugs, features, buildSummaryData, testCases, projectReport, projectRatings] =
-    await Promise.all([
-      section === 'testers' && capabilities.canAssignTesters
-        ? /*
+  const [
+    testerPool,
+    excludedPool,
+    bugs,
+    features,
+    buildSummaryData,
+    testCases,
+    projectReport,
+    projectRatings,
+  ] = await Promise.all([
+    section === 'testers' && capabilities.canAssignTesters
+      ? /*
              The pool is the top 40 by rating UNLESS a search narrows it.
              Without the search, a tester outside that 40 simply could not be
              invited from here — the list was the whole interface and there
              was no way past it. `listTestersQuery` has taken a `search` since
              the module was written; nothing here asked for it.
            */
-          loadList<VerifiedTesterRow>('testers', {
-            page: 1,
-            limit: TESTER_POOL_SIZE,
-            query: {
-              status: 'VERIFIED',
-              sort: 'ratingAverage',
-              order: 'desc',
-              ...(testerSearch ? { search: testerSearch } : {}),
-            },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      section === 'bugs'
-        ? loadList<ProjectBugRow>('bugs', {
-            page: 1,
-            limit: BUG_PREVIEW_SIZE,
-            query: { projectId: project.id, buildId: activeBuildId },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      section === 'features'
-        ? serverFetchOrNull<
-            readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
-          >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
-        : Promise.resolve(null),
-      section === 'build'
-        ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
-        : Promise.resolve(null),
-      section === 'testing'
-        ? loadList<TestCaseRow>('test-cases', {
-            page: 1,
-            limit: 50,
-            query: { buildId: activeBuildId },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      // Same by-project report the Reports module's "By project" section
-      // renders — reused for the Overview tab's summary rather than a second
-      // aggregation. Rolled up across every build, unlike `buildSummaryData`.
-      section === 'dashboard'
-        ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
-        : Promise.resolve(null),
-      // Only the New build modal reads this, and that modal opens from every
-      /**
-       * Ratings already left on this project, so the roster can say which
-       * testers this viewer has rated. Only needed where the column renders.
-       */
-      section === 'testers'
-        ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
-            query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
-          })
-        : Promise.resolve(null),
-    ])
+        loadList<VerifiedTesterRow>('testers', {
+          page: 1,
+          limit: TESTER_POOL_SIZE,
+          query: {
+            status: 'VERIFIED',
+            sort: 'ratingAverage',
+            order: 'desc',
+            ...(testerSearch ? { search: testerSearch } : {}),
+          },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    /*
+         The same search, WITHOUT the `status=VERIFIED` filter above.
+
+         The pool read cannot answer "why is the person I searched for
+         missing?", because the API drops them before the page ever sees
+         them. This read is what turns an empty result into a sentence: it
+         finds the same name at any status, and `inviteBlockers` says which
+         gate each one failed.
+
+         Only when a search is actually running. Without one the list is the
+         top 40 by rating and "missing" carries no meaning, so a second query
+         on every page load would buy nothing.
+      */
+    section === 'testers' && capabilities.canAssignTesters && testerSearch
+      ? loadList<VerifiedTesterRow>('testers', {
+          page: 1,
+          limit: EXCLUDED_MATCH_LIMIT,
+          query: { search: testerSearch, sort: 'ratingAverage', order: 'desc' },
+        })
+      : Promise.resolve({ error: 'skipped' as const }),
+    section === 'bugs'
+      ? loadList<ProjectBugRow>('bugs', {
+          page: 1,
+          limit: BUG_PREVIEW_SIZE,
+          query: { projectId: project.id, buildId: activeBuildId },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    section === 'features'
+      ? serverFetchOrNull<
+          readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
+        >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
+      : Promise.resolve(null),
+    section === 'build'
+      ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
+      : Promise.resolve(null),
+    section === 'testing'
+      ? loadList<TestCaseRow>('test-cases', {
+          page: 1,
+          limit: 50,
+          query: { buildId: activeBuildId },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    // Same by-project report the Reports module's "By project" section
+    // renders — reused for the Overview tab's summary rather than a second
+    // aggregation. Rolled up across every build, unlike `buildSummaryData`.
+    section === 'dashboard'
+      ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
+      : Promise.resolve(null),
+    // Only the New build modal reads this, and that modal opens from every
+    /**
+     * Ratings already left on this project, so the roster can say which
+     * testers this viewer has rated. Only needed where the column renders.
+     */
+    section === 'testers'
+      ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
+          query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
+        })
+      : Promise.resolve(null),
+  ])
 
   /**
    * The badge catalogue, for the award modal's options. Seeded platform
@@ -333,6 +372,21 @@ export default async function ProjectDetailPage({
             tester.ndaAcceptedAt !== null &&
             !assignedTesterIds.has(tester.user.id),
         )
+      : []
+
+  /**
+   * Matches the search found that cannot be invited, each with its reason.
+   *
+   * Filtered against `invitable` by user id rather than recomputing the
+   * eligibility rules — one definition of "can be invited", used twice.
+   */
+  const invitableIds = new Set(invitable.map((tester) => tester.user.id))
+  const excludedMatches =
+    'items' in excludedPool
+      ? excludedPool.items
+          .filter((tester) => !invitableIds.has(tester.user.id))
+          .map((tester) => ({ tester, blockers: inviteBlockers(tester, assignedTesterIds) }))
+          .filter((row) => row.blockers.length > 0)
       : []
 
   const transitions = allowedTransitions(project.status)
@@ -1852,9 +1906,20 @@ export default async function ProjectDetailPage({
               trip would buy nothing. A GET form keeps this a Server
               Component, the same shape every other filter on this page uses.
             */}
-            <form method="get" style={ROSTER_FILTER_STYLE}>
+            <LiveGetForm action={detailPath} style={ROSTER_FILTER_STYLE}>
               <input type="hidden" name="section" value="testers" />
               <input type="hidden" name="buildId" value={activeBuildId} />
+              {/*
+                The OTHER filter's term, carried through.
+
+                Each form navigates using its own fields only, so without this
+                the two would clobber each other — filter the roster and the
+                invite search silently empties. That was true of the plain GET
+                forms these replaced, but it mattered less when applying took
+                a deliberate click; now that both apply as you type, wiping the
+                neighbouring filter would happen constantly and by accident.
+              */}
+              <input type="hidden" name="testerSearch" value={testerSearch} />
               <Field label="Search roster" htmlFor="rosterSearch">
                 <Input
                   id="rosterSearch"
@@ -1876,10 +1941,16 @@ export default async function ProjectDetailPage({
                   ]}
                 />
               </Field>
-              <Button type="submit" variant="secondary" size="sm">
-                Filter
-              </Button>
-            </form>
+              {/*
+                No submit button. Every field applies itself — the status
+                select the moment it changes, the text field a beat after the
+                last keystroke — so a "Filter" button would only be a second
+                way to do what already happened. `LiveFormStatus` takes its
+                place while an update is in flight, and renders nothing when
+                idle.
+              */}
+              <LiveFormStatus />
+            </LiveGetForm>
 
             <Table
               ariaLabel="Tester roster"
@@ -1935,10 +2006,11 @@ export default async function ProjectDetailPage({
                   the panel uses. The hidden fields carry the tab and build,
                   which would otherwise be dropped on submit.
                 */}
-                <form
-                  method="get"
+                <LiveGetForm
+                  action={detailPath}
                   style={{
                     display: 'flex',
+                    alignItems: 'center',
                     gap: 'var(--space-3)',
                     flexWrap: 'wrap',
                     marginBottom: 'var(--space-5)',
@@ -1946,6 +2018,10 @@ export default async function ProjectDetailPage({
                 >
                   <input type="hidden" name="section" value="testers" />
                   <input type="hidden" name="buildId" value={activeBuildId} />
+                  {/* The roster filter's state — see the note on the roster
+                      form above for why each carries the other's. */}
+                  <input type="hidden" name="rosterSearch" value={rosterSearch} />
+                  <input type="hidden" name="rosterStatus" value={rosterStatus} />
                   <Input
                     name="testerSearch"
                     defaultValue={testerSearch}
@@ -1953,9 +2029,15 @@ export default async function ProjectDetailPage({
                     aria-label="Search testers"
                     style={{ flex: '1 1 240px' }}
                   />
-                  <Button type="submit" variant="secondary" iconLeft="search">
-                    Search
-                  </Button>
+                  {/*
+                    The Search button is gone: the field applies itself a beat
+                    after the last keystroke, so pressing it could only repeat
+                    what had already happened. Enter still works — the form
+                    handles submit rather than letting the browser do a full
+                    page load with it, which is what used to throw away the
+                    reader's scroll position on every search.
+                  */}
+                  <LiveFormStatus />
                   {testerSearch ? (
                     <Button
                       href={`${detailPath}?section=testers&buildId=${activeBuildId}`}
@@ -1964,20 +2046,20 @@ export default async function ProjectDetailPage({
                       Clear
                     </Button>
                   ) : null}
-                </form>
+                </LiveGetForm>
 
                 {'error' in testerPool ? (
                   <Muted>
                     The tester pool could not be read. Inviting from here needs the tester.read
                     permission as well as project.assign.
                   </Muted>
-                ) : invitable.length === 0 ? (
+                ) : invitable.length === 0 && excludedMatches.length === 0 ? (
                   <Muted>
                     {testerSearch
-                      ? `No verified tester off this roster matches "${testerSearch}".`
+                      ? `No tester matches "${testerSearch}".`
                       : `Every verified tester in the top ${TESTER_POOL_SIZE} by rating is already on this roster. Search by name or email to reach one outside it.`}
                   </Muted>
-                ) : (
+                ) : invitable.length === 0 ? null : (
                   <form action={inviteTesters} style={stackStyle}>
                     <input type="hidden" name="id" value={project.id} />
                     <input type="hidden" name="buildId" value={activeBuildId} />
@@ -2032,6 +2114,100 @@ export default async function ProjectDetailPage({
                     </div>
                   </form>
                 )}
+
+                {/*
+                  The searched-for testers this panel is REFUSING to offer, and
+                  why.
+
+                  Rendered after the invitable list rather than instead of it,
+                  because a search can turn up one of each — and the reader
+                  asked about a person, not about a list. Without this the
+                  panel's only answer for a tester sitting in the review queue
+                  was to omit them silently, which reads as "no such tester"
+                  and sends an admin looking for a bug rather than clicking
+                  Review.
+                */}
+                {excludedMatches.length > 0 ? (
+                  <div
+                    style={{
+                      marginTop: invitable.length > 0 ? 'var(--space-6)' : 0,
+                      paddingTop: invitable.length > 0 ? 'var(--space-5)' : 0,
+                      borderTop:
+                        invitable.length > 0 ? '1px solid var(--border-subtle)' : undefined,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-4)',
+                    }}
+                  >
+                    <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
+                      Matches that cannot be invited
+                    </p>
+
+                    {excludedMatches.map(({ tester, blockers }) => (
+                      <div
+                        key={tester.user.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 'var(--space-4)',
+                          flexWrap: 'wrap',
+                          padding: 'var(--space-4) var(--space-5)',
+                          background: 'var(--surface-sunken)',
+                          borderRadius: 'var(--radius-card)',
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 'var(--fw-medium)' }}>
+                            {personName(tester.user)}
+                          </div>
+                          <div
+                            style={{
+                              color: 'var(--text-secondary)',
+                              fontSize: 'var(--type-body-sm-size)',
+                            }}
+                          >
+                            {tester.user.email}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 'var(--space-3)',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          {blockers.map((blocker) => (
+                            <Badge
+                              key={blocker.reason}
+                              tone={blocker.adminCanFix ? 'warning' : 'neutral'}
+                            >
+                              {blocker.reason}
+                            </Badge>
+                          ))}
+                          {/*
+                            Only where the admin is the one who can act. A
+                            "Review" button next to "NDA not signed" would
+                            promise a fix this page cannot deliver — that one
+                            is the tester's to do, and the honest next step is
+                            to chase them.
+                          */}
+                          {blockers.some((blocker) => blocker.adminCanFix) ? (
+                            <Button
+                              href={`/app/admin/testers/${tester.id}`}
+                              variant="secondary"
+                              size="sm"
+                            >
+                              Review
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </Panel>
 
               {project.assignments.length > 0 ? (

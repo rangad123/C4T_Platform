@@ -194,6 +194,77 @@ export interface VerifiedTesterRow {
 }
 
 /**
+ * Why a tester a search DID find cannot be invited.
+ *
+ * ── THE PROBLEM THIS SOLVES
+ *
+ * The invite list is filtered three times over: the API returns only
+ * `status=VERIFIED` profiles, and the page then drops anyone whose account is
+ * not ACTIVE, who has not signed the NDA, or who is already on the build. A
+ * tester failing any of those simply is not in the list — so searching for
+ * someone you know exists returns silence, and silence cannot tell you
+ * whether the name was wrong or the person is one click from being eligible.
+ *
+ * That is the common case, not an edge case: every self-registered tester
+ * lands in `APPLIED` and waits for review (§2.2), which is a gate an admin
+ * clears themselves. Returning "no match" for a person sitting in your own
+ * review queue sends you looking for a bug instead of a button.
+ *
+ * `adminCanFix` splits the reasons by who has to act. Verification and
+ * suspension are the admin's; email confirmation and the NDA belong to the
+ * tester, and the honest answer there is "chase them", not "click here".
+ */
+export interface InviteBlocker {
+  reason: string
+  adminCanFix: boolean
+}
+
+export function inviteBlockers(
+  tester: VerifiedTesterRow,
+  assignedTesterIds: ReadonlySet<string>,
+): InviteBlocker[] {
+  const blockers: InviteBlocker[] = []
+
+  if (assignedTesterIds.has(tester.user.id)) {
+    // Listed first and alone: it is not a problem, and pairing it with
+    // "awaiting review" would read as one.
+    return [{ reason: 'Already on this build', adminCanFix: false }]
+  }
+
+  if (tester.status !== 'VERIFIED') {
+    const byStatus: Record<string, InviteBlocker> = {
+      APPLIED: { reason: 'Awaiting review', adminCanFix: true },
+      UNDER_REVIEW: { reason: 'Review in progress', adminCanFix: true },
+      REJECTED: { reason: 'Application rejected', adminCanFix: true },
+      SUSPENDED: { reason: 'Tester suspended', adminCanFix: true },
+    }
+    blockers.push(
+      byStatus[tester.status] ?? { reason: `Status ${tester.status}`, adminCanFix: true },
+    )
+  }
+
+  if (tester.user.status !== 'ACTIVE') {
+    const byStatus: Record<string, InviteBlocker> = {
+      PENDING_VERIFICATION: { reason: 'Email not confirmed', adminCanFix: false },
+      SUSPENDED: { reason: 'Account suspended', adminCanFix: true },
+      DEACTIVATED: { reason: 'Account deactivated', adminCanFix: true },
+    }
+    blockers.push(
+      byStatus[tester.user.status] ?? {
+        reason: `Account ${tester.user.status}`,
+        adminCanFix: true,
+      },
+    )
+  }
+
+  if (tester.ndaAcceptedAt === null) {
+    blockers.push({ reason: 'NDA not signed', adminCanFix: false })
+  }
+
+  return blockers
+}
+
+/**
  * Loose platform-fit check for the invite picker — not enforced by the API,
  * since `platformTargets` is free text with no formal contract with
  * `DeviceType`. This is a hint for the admin, not a hard eligibility gate:
