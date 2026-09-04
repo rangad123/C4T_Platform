@@ -38,8 +38,8 @@ export default async function RegisterPage({
   // path Next expects, and the form below receives the awaited value.
   const params = await searchParams
   return (
-    <AuthPage withLogo compact>
-      <AuthCard>
+    <AuthPage wide>
+      <AuthCard wide>
         <RegisterForm searchParams={Promise.resolve(params)} />
       </AuthCard>
     </AuthPage>

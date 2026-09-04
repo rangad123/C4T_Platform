@@ -5,36 +5,61 @@
    All five had the same block of inline styles copied out, which is why the
    padding below could not be made responsive in one place. */
 
-/* The standalone pages sit on the dark band, not the page's default canvas.
+/* ── The standalone auth screens ─────────────────────────────────────────────
+   These look like the dialog rather than like a page, because they ARE the
+   dialog's screen — reached by a hard load, where interception cannot apply.
+   See the note on `AuthPage`.
 
-   A full-width sheet of near-white with one small card floating in it read as
-   an unstyled page rather than a screen — and it looked nothing like the same
-   form arriving as a dialog, which is dimmed over the site. Putting the page
-   on the same ground closes that gap: however you reach sign-in, it looks
-   like one thing.
+   `.stage` stacks two layers: real site content, and the card over it. */
 
-   The dialog does NOT use this wrapper — `AuthModal` supplies its own
-   centring — so this is the standalone form only. */
-.wrap {
+.stage {
+  position: relative;
+  /* One viewport, less the nav above it. A dialog reveals no more of the page
+     behind it than this, so the backdrop needs no more than this either. */
+  min-height: calc(100vh - var(--space-14));
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: var(--space-11) var(--space-7);
-  background: var(--surface-inverse);
-  color: var(--text-inverse);
-}
-
-/* Register sat closer to the nav than the other three. Kept rather than
-   unified, so this refactor changes no spacing at the widths it already
-   looked right on. */
-.compact {
-  padding-top: var(--space-9);
-}
-
-.logo {
-  display: flex;
   justify-content: center;
-  margin-bottom: var(--space-9);
+  overflow: hidden;
+}
+
+/* The page behind. Clipped by `.stage`, and pushed out of the accessibility
+   tree by `inert` + `aria-hidden` on the element itself — this is scenery. */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  /* The hero's own band colour, as a floor. The hero is normally taller than
+     this stage and covers it entirely — but a tall form on a narrow viewport
+     can outgrow it, and without this the uncovered strip would show the page
+     canvas through the scrim as a visibly lighter band. */
+  background: var(--surface-inverse);
+  /* Taller than the stage on purpose: the hero is cropped rather than
+     squashed, so it keeps the proportions it has on the homepage. */
+  min-height: 100%;
+  pointer-events: none;
+}
+
+/* The dim. Same value as the dialog's `::backdrop`, so arriving at sign-in by
+   either route looks identical. Deliberately not pure black — the ink ramp's
+   darkest surface, softened. */
+.scrim {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: inherit;
+  padding: var(--space-9) var(--space-7);
+  background: rgb(23 19 15 / 0.62);
+}
+
+.stageCard {
+  width: 100%;
+  max-width: var(--container-form);
+}
+
+/* Register only, matching `.wide` on the card and the dialog. */
+.stageCardWide {
+  max-width: var(--container-form-wide);
 }
 
 .card {
@@ -46,7 +71,8 @@
   border-radius: var(--radius-card);
 }
 
-/* Sign in and register carry a shadow; the two password screens do not. */
+/* Every auth card floats over a scrim or a backdrop, so every one is
+   raised. `raised={false}` remains available for a caller that isn't. */
 .raised {
   box-shadow: var(--shadow-md);
 }
@@ -73,7 +99,7 @@
    alone: it costs the field nothing. */
 
 @media (max-width: 480px) {
-  .wrap {
+  .scrim {
     padding-left: var(--space-5);
     padding-right: var(--space-5);
   }
@@ -90,7 +116,7 @@
    viewport leaves it 60px of slack. */
 
 @media (max-width: 380px) {
-  .wrap {
+  .scrim {
     padding-left: var(--space-4);
     padding-right: var(--space-4);
   }

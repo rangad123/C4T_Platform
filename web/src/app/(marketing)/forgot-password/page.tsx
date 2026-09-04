@@ -37,8 +37,8 @@ export default async function ForgotPasswordPage({
   const params = await searchParams
 
   return (
-    <AuthPage withLogo>
-      <AuthCard raised={false}>
+    <AuthPage>
+      <AuthCard>
         <ForgotPasswordForm searchParams={Promise.resolve(params)} />
       </AuthCard>
     </AuthPage>

@@ -41,7 +41,7 @@ export default async function EmailPreferencesPage({
   const state = parseState(raw, token)
 
   return (
-    <AuthPage compact>
+    <AuthPage>
       <AuthCard>
         {state === 'invalid' ? (
           <Panel

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Logo } from '@/components/ds/core/Logo'
+import { HomeHero } from '@/components/sections/HomeHero'
 import styles from './AuthCard.module.css'
 
 /**
@@ -28,7 +28,11 @@ export function AuthCard({
   inDialog = false,
 }: {
   children: ReactNode
-  /** The two password screens render flat. */
+  /**
+   * The card's shadow. Every screen carries it now that all of them float
+   * over a scrim; the two password screens used to render flat because they
+   * sat on a plain page instead.
+   */
   raised?: boolean
   /** The dialog's wider measure — see `.wide` in the CSS module. */
   wide?: boolean
@@ -53,30 +57,56 @@ export function AuthCard({
 }
 
 /**
- * The centred column an auth card sits in, with the page padding that shrinks
- * alongside the card's own on a narrow viewport.
+ * The standalone presentation of an auth screen — sign in, register, the two
+ * password screens, email preferences.
+ *
+ * ── IT LOOKS LIKE THE DIALOG, BECAUSE IT IS THE SAME SCREEN
+ *
+ * These routes exist for the arrivals a dialog cannot serve: a pasted or
+ * emailed link, a protected route bouncing to sign-in, the redirect after
+ * signing out, and the OAuth callback returning from Google. All are hard
+ * loads with no page underneath, so `@auth/(.)*` never intercepts them.
+ *
+ * The first attempt at closing that gap put the card on a full-bleed dark
+ * band. It matched the dialog's backdrop COLOUR, and it still read as a
+ * different screen — a black page rather than something opened over the
+ * site. So this now renders what a dialog actually renders over: real site
+ * content, dimmed, with the card floating on top. A dialog only ever reveals
+ * about one viewport of what is behind it, which is why the homepage HERO is
+ * enough and the whole homepage would be waste.
+ *
+ * The backdrop is `inert` and `aria-hidden`: it is a picture of the site, not
+ * a working copy of it. Nothing in it takes focus, answers a click, or
+ * reaches a screen reader, so the card is the only thing on the page in every
+ * sense that matters.
+ *
+ * `priority={false}` on the hero image. On the homepage that image is the LCP
+ * element and must never wait; here it is scenery behind a form, and
+ * preloading it would delay the one thing the visitor came for.
  */
 export function AuthPage({
   children,
-  withLogo = false,
-  compact = false,
+  wide = false,
 }: {
   children: ReactNode
-  /** The two password screens show the wordmark above the card. */
-  withLogo?: boolean
-  /** Register's smaller top padding, preserved from before this was shared. */
-  compact?: boolean
+  /**
+   * Register's wider measure, mirroring the dialog's `wide`. The two have to
+   * agree: the whole point of this presentation is that arriving at register
+   * by a hard load and by a click look like the same screen, and a card that
+   * changes width between them would give that away immediately.
+   */
+  wide?: boolean
 }) {
   return (
-    <div className={`${styles.wrap} ${compact ? styles.compact : ''}`.trim()}>
-      {withLogo ? (
-        <div className={styles.logo}>
-          {/* `inverse` because `.wrap` now sits on the dark band — the
-              default tone is ink, which would be invisible on it. */}
-          <Logo size={32} withWordmark tone="inverse" />
+    <div className={styles.stage}>
+      <div className={styles.backdrop} aria-hidden inert>
+        <HomeHero priority={false} />
+      </div>
+      <div className={styles.scrim}>
+        <div className={`${styles.stageCard} ${wide ? styles.stageCardWide : ''}`.trim()}>
+          {children}
         </div>
-      ) : null}
-      {children}
+      </div>
     </div>
   )
 }

@@ -61,7 +61,7 @@ export default async function LoginPage({
   if (user) redirect(safeNextOrHome(params.next, ROLE_HOME[user.role]))
 
   return (
-    <AuthPage withLogo>
+    <AuthPage>
       <AuthCard>
         <LoginForm searchParams={Promise.resolve(params)} />
       </AuthCard>

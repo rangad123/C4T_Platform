@@ -33,8 +33,8 @@ export default async function ResetPasswordPage({
   const params = await searchParams
 
   return (
-    <AuthPage withLogo>
-      <AuthCard raised={false}>
+    <AuthPage>
+      <AuthCard>
         <ResetPasswordForm searchParams={Promise.resolve(params)} />
       </AuthCard>
     </AuthPage>
