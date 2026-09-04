@@ -40,6 +40,13 @@ export type ProjectPriorityValue = (typeof PROJECT_PRIORITIES)[number]
  * submitted, and so on — every one of which came back 403, and with no catch
  * in `changeProjectStatus` each rendered as a crash screen rather than a
  * refusal. Offer only what the API will actually accept.
+ *
+ * A customer may now also cancel their own DRAFT, but that move is
+ * deliberately NOT listed here. `CANCELLED` is terminal — the API's matrix
+ * gives it no outbound transitions at all — so it does not belong in a
+ * dropdown beside "Submitted" under one generic "Change status" button, where
+ * a mis-pick would end the project for good. The page gives it its own
+ * confirmed control instead. This map stays the FORWARD moves.
  */
 export const STATUS_TRANSITIONS: Readonly<
   Record<ProjectStatusValue, readonly ProjectStatusValue[]>

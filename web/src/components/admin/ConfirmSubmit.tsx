@@ -11,6 +11,15 @@ export interface ConfirmSubmitProps {
   question: string
   /** Label on the button that actually submits. Defaults to "Yes, remove". */
   confirmLabel?: string
+  /**
+   * Label on the button that backs out. Defaults to "Cancel".
+   *
+   * Overridable because "Cancel" is ambiguous when the ACTION is also a
+   * cancellation — "Yes, cancel it" beside "Cancel" gives the reader two
+   * buttons that both read as cancelling, and the safe one is not obviously
+   * the safe one.
+   */
+  dismissLabel?: string
   /** Label while the form is in flight. */
   pendingLabel?: string
   /** Lucide icon on the resting button. Pass `""` for no icon. */
@@ -48,6 +57,7 @@ export function ConfirmSubmit({
   children,
   question,
   confirmLabel = 'Yes, remove',
+  dismissLabel = 'Cancel',
   pendingLabel = 'Removing…',
   iconLeft = 'trash-2',
   size = 'sm',
@@ -126,7 +136,7 @@ export function ConfirmSubmit({
         {confirmLabel}
       </SubmitButton>
       <Button type="button" variant="ghost" size={size} onClick={() => setArmed(false)}>
-        Cancel
+        {dismissLabel}
       </Button>
     </span>
   )

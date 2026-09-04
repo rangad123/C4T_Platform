@@ -907,6 +907,43 @@ export default async function CustomerProjectDetailPage({
                   </SubmitButton>
                 </form>
               )}
+
+              {/*
+                Cancelling is separate from the dropdown above on purpose.
+
+                `CANCELLED` is terminal — the API's transition matrix gives it
+                no outbound moves at all — so it is not a peer of "Submitted"
+                under one generic "Change status" button, where a mis-pick
+                would end the project for good. It is offered only from DRAFT,
+                which is the only status a customer owns outright: nobody has
+                approved it, no tester is rostered, and nothing is under way.
+              */}
+              {project.status === 'DRAFT' ? (
+                <form
+                  action={changeProjectStatus}
+                  style={{
+                    marginTop: 'var(--space-5)',
+                    paddingTop: 'var(--space-5)',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <input type="hidden" name="id" value={project.id} />
+                  <input type="hidden" name="buildId" value={activeBuildId} />
+                  <input type="hidden" name="status" value="CANCELLED" />
+                  <p style={{ margin: '0 0 var(--space-4)', color: 'var(--text-secondary)' }}>
+                    Changed your mind? A draft nobody has picked up yet is still yours to drop.
+                  </p>
+                  <ConfirmSubmit
+                    question={`Cancel “${project.title}”? A cancelled project cannot be reopened — you would have to raise a new one.`}
+                    confirmLabel="Yes, cancel the project"
+                    /* Not "Cancel" — that would read as cancelling the project. */
+                    dismissLabel="Keep it"
+                    iconLeft="x"
+                  >
+                    Cancel this project
+                  </ConfirmSubmit>
+                </form>
+              ) : null}
             </Panel>
 
             <Panel

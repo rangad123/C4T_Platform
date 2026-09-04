@@ -679,17 +679,28 @@ export async function changeStatus(
     )
   }
 
-  // A customer may submit their own draft. Everything past that is the
-  // delivery team's call — approving your own project would be meaningless.
+  /**
+   * What a customer may do to their own project's status.
+   *
+   * Both moves are from DRAFT, and that is the whole rule: a draft is the
+   * customer's own unsubmitted work. Nobody has been asked to approve it, no
+   * tester has been rostered, and no delivery commitment exists — so both
+   * sending it on and abandoning it are theirs to decide.
+   *
+   * Everything past DRAFT is the delivery team's call. Approving your own
+   * project would be meaningless, and cancelling one that testers are already
+   * working on is a conversation, not a button.
+   */
   const isPlatformSide =
     relations.has('platform:admin') ||
     relations.has('platform:subadmin') ||
     relations.has('project:manager')
 
   if (!isPlatformSide) {
-    const customerMaySubmit =
-      project.status === ProjectStatus.DRAFT && status === ProjectStatus.SUBMITTED
-    if (!customerMaySubmit) {
+    const fromDraft = project.status === ProjectStatus.DRAFT
+    const customerMayMove =
+      fromDraft && (status === ProjectStatus.SUBMITTED || status === ProjectStatus.CANCELLED)
+    if (!customerMayMove) {
       throw new ForbiddenError('Only the delivery team can make that status change')
     }
   }
