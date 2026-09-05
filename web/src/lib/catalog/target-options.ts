@@ -187,3 +187,41 @@ export async function loadBugEnvironmentOptions(): Promise<BugEnvironmentOptions
     networks: (catalog?.networks ?? []).map((n) => ({ value: n.name, label: n.name })),
   }
 }
+
+/**
+ * Professions and industries — two flat catalog lists.
+ *
+ * Both columns (`TesterProfile.profession`, `Organisation.industry`) store the
+ * NAME rather than a catalog id, which is why these options are keyed by name
+ * too. The catalog decides what is offered; it does not rewrite what is
+ * already stored, so a value an admin later deactivates still displays on the
+ * records that used it.
+ */
+export interface TermOptions {
+  professions: readonly TargetOption[]
+  industries: readonly TargetOption[]
+}
+
+interface TermCatalog {
+  professions?: readonly { name: string }[]
+  industries?: readonly { name: string }[]
+}
+
+export async function loadTermOptions(): Promise<TermOptions> {
+  const catalog = await serverFetchOrNull<TermCatalog>('catalog')
+  return {
+    professions: (catalog?.professions ?? []).map((p) => ({ value: p.name, label: p.name })),
+    industries: (catalog?.industries ?? []).map((i) => ({ value: i.name, label: i.name })),
+  }
+}
+
+/** Keeps a stored value that the catalog no longer offers. */
+export function withStored(
+  options: readonly TargetOption[],
+  current: string | null | undefined,
+): readonly TargetOption[] {
+  const value = (current ?? '').trim()
+  if (!value) return options
+  if (options.some((o) => o.value === value)) return options
+  return [{ value, label: value }, ...options]
+}

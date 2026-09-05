@@ -13,6 +13,7 @@ import { createOrganisationAction } from '@/lib/admin/organisation-actions'
 import { titleCase } from '@/lib/admin/format'
 import { LocationSelect } from '@/components/ds/forms/LocationSelect'
 import { countryOptions } from '@/lib/geo/source'
+import { loadTermOptions } from '@/lib/catalog/target-options'
 
 /**
  * `/app/admin/organisations/new` — create an organisation on behalf of a
@@ -40,6 +41,10 @@ export default async function NewOrganisationPage({
   const params = await searchParams
   const backHref = '/app/admin/organisations'
 
+  /* Profession and industry are catalog lists now — see
+     `lib/catalog/target-options`. Values are names, matching what
+     these columns have always stored. */
+  const terms = await loadTermOptions()
   return (
     <DetailShell
       crumbs={[{ label: 'Organisations', href: '/app/admin/organisations' }, { label: 'New' }]}
@@ -90,12 +95,14 @@ export default async function NewOrganisationPage({
           </div>
 
           <div style={fieldGrid}>
-            <Field
-              label="Industry"
-              htmlFor="industry"
-              hint="Free text — banking, retail, healthcare, etc."
-            >
-              <Input id="industry" name="industry" />
+            <Field label="Industry" htmlFor="industry">
+              <Select
+                id="industry"
+                name="industry"
+                defaultValue={''}
+                options={terms.industries}
+                placeholder="Not specified"
+              />
             </Field>
             <Field label="Website" htmlFor="website" hint="Full URL, including https://">
               <Input id="website" name="website" type="url" placeholder="https://" />

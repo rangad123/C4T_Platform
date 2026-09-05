@@ -120,3 +120,24 @@ export async function addSkillAction(formData: FormData): Promise<void> {
   if (!name || !categoryId) return
   await submit('catalog/skills', { name, categoryId })
 }
+
+/**
+ * Professions and industries — two flat name lists.
+ *
+ * `TesterProfile.profession` and `Organisation.industry` store the NAME, not
+ * an id, so adding an entry here changes what the pickers OFFER without
+ * touching a single existing record. That is also why retiring one is safe.
+ */
+export async function addProfessionAction(formData: FormData): Promise<void> {
+  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  const name = formTrimmed(formData, 'name')
+  if (!name) return
+  await submit('catalog/professions', { name })
+}
+
+export async function addIndustryAction(formData: FormData): Promise<void> {
+  await requireRole(['ADMIN', 'SUB_ADMIN'])
+  const name = formTrimmed(formData, 'name')
+  if (!name) return
+  await submit('catalog/industries', { name })
+}

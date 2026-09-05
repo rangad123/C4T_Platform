@@ -18,6 +18,8 @@ import {
   addBrowserVersionAction,
   addOsVersionAction,
   addNetworkAction,
+  addProfessionAction,
+  addIndustryAction,
   addSkillCategoryAction,
   addSkillAction,
 } from './actions'
@@ -42,6 +44,8 @@ const SECTIONS = [
   { value: 'networks', label: 'Network providers', icon: 'plug' },
   { value: 'skill-categories', label: 'Skill categories', icon: 'layout-grid' },
   { value: 'skills', label: 'Skills', icon: 'graduation-cap' },
+  { value: 'professions', label: 'Professions', icon: 'briefcase' },
+  { value: 'industries', label: 'Industries', icon: 'building-2' },
 ] as const
 
 /**
@@ -66,6 +70,15 @@ const GROUPS = [
     icon: 'graduation-cap',
     sections: ['skills', 'skill-categories'],
   },
+  /* Profession and industry are the vocabularies behind two fields that used
+     to be free text — a tester's line of work and an organisation's sector.
+     Their own family: neither describes a tester's kit or a skill. */
+  {
+    key: 'terms',
+    label: 'Professions & industries',
+    icon: 'briefcase',
+    sections: ['professions', 'industries'],
+  },
 ] as const satisfies readonly {
   key: string
   label: string
@@ -80,6 +93,8 @@ function groupFor(section: string): (typeof GROUPS)[number] {
 const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
 
 interface Catalog {
+  professions: readonly { id: string; name: string; isActive: boolean }[]
+  industries: readonly { id: string; name: string; isActive: boolean }[]
   brands: readonly { id: string; name: string; isActive: boolean }[]
   deviceModels: readonly {
     id: string
@@ -505,6 +520,64 @@ export default async function CatalogPage({
             </Field>
             <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
               Add browser
+            </SubmitButton>
+          </form>
+        </Panel>
+      ) : null}
+
+      {activeGroup.key === 'terms' && section === 'professions' ? (
+        <Panel
+          title="Professions"
+          description={`${catalog.professions.length} listed. Offered on a tester's profile.`}
+        >
+          <ul style={CHIP_LIST}>
+            {catalog.professions.map((p) => (
+              <li key={p.id} style={p.isActive ? CHIP : CHIP_RETIRED}>
+                {p.name}
+                {!p.isActive ? (
+                  <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <form action={addProfessionAction} style={INLINE_FORM}>
+            <Field label="Profession" htmlFor="professionName">
+              <Input
+                id="professionName"
+                name="name"
+                required
+                maxLength={120}
+                placeholder="QA engineer"
+              />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add profession
+            </SubmitButton>
+          </form>
+        </Panel>
+      ) : null}
+
+      {activeGroup.key === 'terms' && section === 'industries' ? (
+        <Panel
+          title="Industries"
+          description={`${catalog.industries.length} listed. Offered on an organisation.`}
+        >
+          <ul style={CHIP_LIST}>
+            {catalog.industries.map((i) => (
+              <li key={i.id} style={i.isActive ? CHIP : CHIP_RETIRED}>
+                {i.name}
+                {!i.isActive ? (
+                  <span style={{ fontSize: 'var(--type-caption-size)' }}>· Retired</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <form action={addIndustryAction} style={INLINE_FORM}>
+            <Field label="Industry" htmlFor="industryName">
+              <Input id="industryName" name="name" required maxLength={120} placeholder="Fintech" />
+            </Field>
+            <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
+              Add industry
             </SubmitButton>
           </form>
         </Panel>

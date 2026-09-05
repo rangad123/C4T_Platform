@@ -30,6 +30,7 @@ import {
   inviteTeamMemberAction,
   revokeInvitationAction,
 } from './actions'
+import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const DETAIL_PATH = '/app/customer/organisation'
@@ -316,6 +317,10 @@ export default async function CustomerOrganisationPage({
     },
   ]
 
+  /* Profession and industry are catalog lists now — see
+     `lib/catalog/target-options`. Values are names, matching what
+     these columns have always stored. */
+  const terms = await loadTermOptions()
   return (
     <DetailShell
       root={ROOT}
@@ -394,11 +399,12 @@ export default async function CustomerOrganisationPage({
                 />
               </Field>
               <Field label="Industry" htmlFor="industry">
-                <Input
+                <Select
                   id="industry"
                   name="industry"
                   defaultValue={organisation.industry ?? ''}
-                  maxLength={120}
+                  options={withStored(terms.industries, organisation.industry)}
+                  placeholder="Not specified"
                 />
               </Field>
               <Field

@@ -965,6 +965,38 @@ model TesterWorkHistory {
 /// Legacy `skill_categories`. Was a fixed 4-value enum on `Skill` in an
 /// earlier pass; promoted to a real catalog table so an admin can add a
 /// category without a schema migration, matching every other catalog entity.
+/// A tester's line of work — "QA engineer", "Developer", "Product manager".
+///
+/// Catalog rather than free text, and a catalog rather than an enum: the list
+/// is the client's to curate as they meet new kinds of tester, which is what
+/// the admin Catalog exists for. `TesterProfile.profession` still stores the
+/// NAME, not this id — the column predates the catalog and holds what testers
+/// typed, so switching to an id would render every existing row as a cuid.
+/// The catalog decides what is OFFERED; it does not rewrite what is stored.
+model Profession {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("professions")
+}
+
+/// An organisation's sector — "Fintech", "Healthcare", "Retail".
+///
+/// Same reasoning as `Profession`: `Organisation.industry` keeps storing the
+/// name, and this list decides what the pickers offer.
+model Industry {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("industries")
+}
+
 model SkillCategory {
   id        String   @id @default(cuid())
   name      String   @unique

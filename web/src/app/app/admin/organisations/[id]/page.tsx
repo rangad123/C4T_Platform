@@ -34,6 +34,7 @@ import {
 } from './actions'
 import { LocationSelect } from '@/components/ds/forms/LocationSelect'
 import { countryOptions, stateCodeForName } from '@/lib/geo/source'
+import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
 
 /**
  * `/app/admin/organisations/[id]` — one customer organisation (§2.2).
@@ -375,6 +376,10 @@ export default async function OrganisationDetailPage({
 
   const owners = organisation.members.filter((member) => member.orgRole === 'OWNER')
 
+  /* Profession and industry are catalog lists now — see
+     `lib/catalog/target-options`. Values are names, matching what
+     these columns have always stored. */
+  const terms = await loadTermOptions()
   return (
     <DetailShell
       crumbs={[{ label: 'Organisations', href: BASE }, { label: organisation.name }]}
@@ -518,11 +523,12 @@ export default async function OrganisationDetailPage({
               </Field>
 
               <Field label="Industry" htmlFor="industry">
-                <Input
+                <Select
                   id="industry"
                   name="industry"
                   defaultValue={organisation.industry ?? ''}
-                  maxLength={120}
+                  options={withStored(terms.industries, organisation.industry)}
+                  placeholder="Not specified"
                 />
               </Field>
 

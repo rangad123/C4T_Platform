@@ -67,78 +67,88 @@ catalogRouter.get('/', validate({ query: listQuery }), async (_req, res) => {
   const q = validatedQuery<ListQuery>(res)
   const where = activeFilter(q)
 
-  const [brands, deviceModels, operatingSystems, browsers, networks, skillCategories] =
-    await Promise.all([
-      prisma.deviceBrand.findMany({ where, orderBy: { name: 'asc' } }),
-      prisma.deviceModel.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          ramGb: true,
-          screenSize: true,
-          isActive: true,
-          brand: { select: { id: true, name: true } },
-          defaultOs: { select: { id: true, name: true, kind: true } },
+  const [
+    brands,
+    deviceModels,
+    operatingSystems,
+    browsers,
+    networks,
+    skillCategories,
+    professions,
+    industries,
+  ] = await Promise.all([
+    prisma.deviceBrand.findMany({ where, orderBy: { name: 'asc' } }),
+    prisma.deviceModel.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        ramGb: true,
+        screenSize: true,
+        isActive: true,
+        brand: { select: { id: true, name: true } },
+        defaultOs: { select: { id: true, name: true, kind: true } },
+      },
+      orderBy: [{ brand: { name: 'asc' } }, { name: 'asc' }],
+    }),
+    prisma.operatingSystem.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        kind: true,
+        isActive: true,
+        versions: {
+          where: activeFilter(q),
+          select: { id: true, version: true, isActive: true },
+          orderBy: { version: 'asc' },
         },
-        orderBy: [{ brand: { name: 'asc' } }, { name: 'asc' }],
-      }),
-      prisma.operatingSystem.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          kind: true,
-          isActive: true,
-          versions: {
-            where: activeFilter(q),
-            select: { id: true, version: true, isActive: true },
-            orderBy: { version: 'asc' },
+      },
+      orderBy: [{ kind: 'asc' }, { name: 'asc' }],
+    }),
+    prisma.browser.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+        versions: {
+          where: activeFilter(q),
+          select: { id: true, version: true, isActive: true },
+          orderBy: { version: 'asc' },
+        },
+      },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.networkProvider.findMany({
+      where,
+      orderBy: [{ countryCode: 'asc' }, { name: 'asc' }],
+    }),
+    prisma.skillCategory.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        isActive: true,
+        skills: {
+          where: activeFilter(q),
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            isActive: true,
+            _count: { select: { testers: true } },
           },
+          orderBy: { name: 'asc' },
         },
-        orderBy: [{ kind: 'asc' }, { name: 'asc' }],
-      }),
-      prisma.browser.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          isActive: true,
-          versions: {
-            where: activeFilter(q),
-            select: { id: true, version: true, isActive: true },
-            orderBy: { version: 'asc' },
-          },
-        },
-        orderBy: { name: 'asc' },
-      }),
-      prisma.networkProvider.findMany({
-        where,
-        orderBy: [{ countryCode: 'asc' }, { name: 'asc' }],
-      }),
-      prisma.skillCategory.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          isActive: true,
-          skills: {
-            where: activeFilter(q),
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              isActive: true,
-              _count: { select: { testers: true } },
-            },
-            orderBy: { name: 'asc' },
-          },
-        },
-        orderBy: { name: 'asc' },
-      }),
-    ])
+      },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.profession.findMany({ where, orderBy: { name: 'asc' } }),
+    prisma.industry.findMany({ where, orderBy: { name: 'asc' } }),
+  ])
 
   res.json({
     data: {
@@ -148,6 +158,8 @@ catalogRouter.get('/', validate({ query: listQuery }), async (_req, res) => {
       browsers,
       networks,
       skillCategories,
+      professions,
+      industries,
       // Static, not queried — see the doc comment on `ISO_639_1_LANGUAGES`.
       languages: ISO_639_1_LANGUAGES,
     },
@@ -739,3 +751,77 @@ catalogRouter.delete(
     res.status(204).send()
   },
 )
+
+// ─── Professions and industries ──────────────────────────────────────────────
+//
+// Two flat name lists behind one pair of handlers. They are separate tables
+// rather than one with a `kind` column because the rest of this catalog is
+// modelled that way — a `Browser` is not a `DeviceBrand` with a discriminator
+// — and because the admin screens read better when each has its own section.
+//
+// Neither is referenced by a foreign key: `TesterProfile.profession` and
+// `Organisation.industry` still store the NAME. See the model comments for
+// why. That makes deactivating an entry safe — it stops being offered, and
+// nothing that already used it breaks.
+
+const termBody = z.object({
+  name: z.string().trim().min(1).max(120),
+  isActive: z.boolean().optional(),
+})
+const termUpdateBody = z.object({ isActive: z.boolean() })
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+for (const [path, model, label] of [
+  ['professions', 'profession', 'Profession'],
+  ['industries', 'industry', 'Industry'],
+] as const) {
+  catalogRouter.post(`/${path}`, adminOnly, validate({ body: termBody }), async (req, res) => {
+    const input = req.body as z.infer<typeof termBody>
+    const slug = slugify(input.name)
+    const table = prisma[model] as typeof prisma.profession
+
+    const clash = await table.findUnique({ where: { slug }, select: { id: true } })
+    if (clash) throw new ConflictError(`A ${label.toLowerCase()} with this name already exists`)
+
+    const row = await table.create({ data: { name: input.name, slug } })
+    await recordAudit({
+      req,
+      action: `catalog.${model}_created`,
+      entityType: label,
+      entityId: row.id,
+      after: { name: row.name },
+    })
+    res.status(201).json({ data: row })
+  })
+
+  catalogRouter.patch(
+    `/${path}/:id`,
+    adminOnly,
+    validate({ params: idParam, body: termUpdateBody }),
+    async (req, res) => {
+      const input = req.body as z.infer<typeof termUpdateBody>
+      const table = prisma[model] as typeof prisma.profession
+      const id = param(req, 'id')
+
+      const existing = await table.findUnique({ where: { id }, select: { id: true } })
+      if (!existing) throw new NotFoundError(label)
+
+      const row = await table.update({ where: { id }, data: { isActive: input.isActive } })
+      await recordAudit({
+        req,
+        action: `catalog.${model}_updated`,
+        entityType: label,
+        entityId: row.id,
+        after: { isActive: row.isActive },
+      })
+      res.json({ data: row })
+    },
+  )
+}

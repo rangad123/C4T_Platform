@@ -50,6 +50,7 @@ import {
   requestPayoutFromProfileAction,
   deleteAccountAction,
 } from './actions'
+import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
 
 const PROFILE_PATH = '/app/tester/profile'
 const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
@@ -575,6 +576,18 @@ export default async function TesterProfilePage({
     label: `${m.brand.name} ${m.name}`,
   }))
   const browserOptions = (catalog?.browsers ?? []).map((b) => ({ value: b.id, label: b.name }))
+  /* Brand and the device's browser had no picker at all, though the catalog
+     carries both. Values are NAMES, not ids: these columns store what the
+     tester wrote, and an id would render as a cuid on every existing row. */
+  const brandNameOptions = (catalog?.brands ?? []).map((b) => ({ value: b.name, label: b.name }))
+  const browserNameOptions = (catalog?.browsers ?? []).flatMap((b) =>
+    b.versions.length > 0
+      ? b.versions.map((v) => ({
+          value: `${b.name} ${v.version}`,
+          label: `${b.name} ${v.version}`,
+        }))
+      : [{ value: b.name, label: b.name }],
+  )
   /**
    * Every version across every browser, one flat list.
    *
@@ -597,6 +610,10 @@ export default async function TesterProfilePage({
     .filter((l) => !myLanguageCodes.has(l.code))
     .map((l) => ({ value: l.code, label: l.name }))
 
+  /* Profession and industry are catalog lists now — see
+     `lib/catalog/target-options`. Values are names, matching what
+     these columns have always stored. */
+  const terms = await loadTermOptions()
   return (
     <DetailShell
       root={{ label: 'Tester', href: '/app/tester' }}
@@ -880,12 +897,12 @@ export default async function TesterProfilePage({
 
               <div style={FIELD_GRID}>
                 <Field label="Profession" htmlFor="profession">
-                  <Input
+                  <Select
                     id="profession"
                     name="profession"
-                    maxLength={120}
-                    placeholder="Software tester"
                     defaultValue={profile.profession ?? ''}
+                    options={withStored(terms.professions, profile.profession)}
+                    placeholder="Not specified"
                   />
                 </Field>
                 <Field label="Years of experience" htmlFor="experienceYears">
@@ -1182,7 +1199,12 @@ export default async function TesterProfilePage({
                   />
                 </Field>
                 <Field label="Brand" htmlFor="manufacturer">
-                  <Input id="manufacturer" name="manufacturer" maxLength={80} />
+                  <Select
+                    id="manufacturer"
+                    name="manufacturer"
+                    defaultValue=""
+                    options={[{ value: '', label: 'Not listed' }, ...brandNameOptions]}
+                  />
                 </Field>
                 <Field label="Model" htmlFor="model" required>
                   <Input id="model" name="model" required maxLength={120} placeholder="Pixel 7a" />
@@ -1245,7 +1267,12 @@ export default async function TesterProfilePage({
                   <Input id="network" name="network" maxLength={80} placeholder="5G" />
                 </Field>
                 <Field label="Browser" htmlFor="browser">
-                  <Input id="browser" name="browser" maxLength={80} placeholder="Chrome 128" />
+                  <Select
+                    id="browser"
+                    name="browser"
+                    defaultValue=""
+                    options={[{ value: '', label: 'Not specified' }, ...browserNameOptions]}
+                  />
                 </Field>
               </div>
               <Checkbox id="isPrimary" name="isPrimary" label="This is my primary device" />
@@ -1286,11 +1313,20 @@ export default async function TesterProfilePage({
                     />
                   </Field>
                   <Field label="Brand" htmlFor={`manufacturer-${device.id}`}>
-                    <Input
+                    <Select
                       id={`manufacturer-${device.id}`}
                       name="manufacturer"
-                      maxLength={80}
                       defaultValue={device.manufacturer ?? ''}
+                      options={[
+                        { value: '', label: 'Not listed' },
+                        // A brand the catalog no longer lists still has to
+                        // show, or editing the RAM would silently clear it.
+                        ...(device.manufacturer &&
+                        !brandNameOptions.some((b) => b.value === device.manufacturer)
+                          ? [{ value: device.manufacturer, label: device.manufacturer }]
+                          : []),
+                        ...brandNameOptions,
+                      ]}
                     />
                   </Field>
                   <Field label="Model" htmlFor={`model-${device.id}`} required>
@@ -1351,11 +1387,18 @@ export default async function TesterProfilePage({
                     />
                   </Field>
                   <Field label="Browser" htmlFor={`browser-${device.id}`}>
-                    <Input
+                    <Select
                       id={`browser-${device.id}`}
                       name="browser"
-                      maxLength={80}
                       defaultValue={device.browser ?? ''}
+                      options={[
+                        { value: '', label: 'Not specified' },
+                        ...(device.browser &&
+                        !browserNameOptions.some((b) => b.value === device.browser)
+                          ? [{ value: device.browser, label: device.browser }]
+                          : []),
+                        ...browserNameOptions,
+                      ]}
                     />
                   </Field>
                 </div>
