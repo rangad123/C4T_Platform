@@ -12,6 +12,9 @@ import { serverFetchPage } from '@/lib/api/server'
 import { createProjectAction } from '@/lib/admin/project-actions'
 import { TEST_TYPE_OPTIONS } from '@/lib/testing/test-types'
 import { titleCase } from '@/lib/admin/format'
+import { MultiSelect } from '@/components/admin/MultiSelect'
+import { loadTargetOptions } from '@/lib/catalog/target-options'
+import { countryOptions } from '@/lib/geo/source'
 
 /**
  * `/app/admin/projects/new` — create a project on behalf of any organisation.
@@ -22,15 +25,18 @@ import { titleCase } from '@/lib/admin/format'
  * non-custom platform. As admin, the organisation must be picked from the
  * list (the API infers it from the requester's membership for a customer).
  *
- * `platformTargets` / `targetCountries` / `targetLanguages` are comma-separated
- * rather than multi-select widgets, because that is what the data really is
- * and the multi-select UI would add client state for a form that otherwise
- * needs none.
+ * `platformTargets` / `targetCountries` / `targetLanguages` are pickers.
+ *
+ * They used to be comma-separated text, on the argument that the stored data
+ * is a list of strings and a multi-select would add client state to a form
+ * that otherwise needs none. Both halves were true and neither was the point:
+ * the values are drawn from fixed vocabularies — ISO 3166, ISO 639, and four
+ * platform names — so the text box was asking the reader to recall codes and
+ * accepting anything they typed. `MultiSelect` posts one hidden input per
+ * value, which is still a plain string list to the API.
  */
 const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const
 const PRIORITY_OPTIONS = PRIORITIES.map((value) => ({ value, label: titleCase(value) }))
-
-const COMMON_PLATFORMS = ['android', 'ios', 'web', 'desktop'] as const
 
 interface OrganisationOption {
   id: string
@@ -74,6 +80,9 @@ export default async function NewProjectPage({
   }
 
   const orgOptions = organisations.map((o) => ({ value: o.id, label: o.name }))
+
+  /* Platform and language vocabularies from the one shared source. */
+  const targets = await loadTargetOptions()
 
   return (
     <DetailShell
@@ -176,31 +185,46 @@ export default async function NewProjectPage({
             </Field>
           </div>
 
-          <Panel
-            title="Targets"
-            description="Where the project runs. Comma-separated values are simpler than picking chips and they round-trip to the API as strings."
-          >
+          <Panel title="Targets" description="Where the project runs.">
             <div style={fieldGrid}>
+              {/* Three comma-separated code boxes became three pickers. The
+                  hints used to have to teach ISO 3166 and ISO 639 because the
+                  reader was expected to recall a code; now they choose a name. */}
               <Field
                 label="Platforms"
                 htmlFor="platformTargets"
-                hint={`Common values: ${COMMON_PLATFORMS.join(', ')}. Comma-separated.`}
+                hint="The platforms this project is tested on."
               >
-                <Input id="platformTargets" name="platformTargets" placeholder="android, ios" />
+                <MultiSelect
+                  id="platformTargets"
+                  name="platformTargets"
+                  options={targets.platforms}
+                  max={40}
+                />
               </Field>
               <Field
                 label="Countries"
                 htmlFor="targetCountries"
-                hint="ISO 3166-1 alpha-2 country codes. IN, US, GB, etc. Comma-separated."
+                hint="Search and add. Leave empty for any country."
               >
-                <Input id="targetCountries" name="targetCountries" placeholder="IN, US" />
+                <MultiSelect
+                  id="targetCountries"
+                  name="targetCountries"
+                  options={countryOptions()}
+                  max={40}
+                />
               </Field>
               <Field
                 label="Languages"
                 htmlFor="targetLanguages"
-                hint="ISO 639-1 two-letter codes. en, hi, es, etc. Comma-separated."
+                hint="Search and add. Leave empty for any language."
               >
-                <Input id="targetLanguages" name="targetLanguages" placeholder="en, hi" />
+                <MultiSelect
+                  id="targetLanguages"
+                  name="targetLanguages"
+                  options={targets.languages}
+                  max={40}
+                />
               </Field>
             </div>
           </Panel>

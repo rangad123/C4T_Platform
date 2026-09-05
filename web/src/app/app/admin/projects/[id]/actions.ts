@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
-import { formString, formTrimmed } from '@/lib/form-data'
+import { formTrimmed, formList } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
 import { isAssignmentStatus, isProjectPriority, isProjectStatus } from './constants'
 
@@ -66,14 +66,6 @@ function projectHref(
   return qs ? `/app/admin/projects/${id}?${qs}` : `/app/admin/projects/${id}`
 }
 
-/** `Android, iOS , web` → `['Android', 'iOS', 'web']`. */
-function parseList(value: string): string[] {
-  return value
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean)
-}
-
 /**
  * The project brief — everything in `updateProjectSchema` except priority and
  * progress, which belong to the delivery panel in the aside.
@@ -90,13 +82,9 @@ export async function updateProjectBrief(formData: FormData): Promise<void> {
   const body: Record<string, unknown> = {
     summary: formTrimmed(formData, 'summary'),
     instructions: formTrimmed(formData, 'instructions'),
-    platformTargets: parseList(formString(formData, 'platformTargets')),
-    targetCountries: parseList(formString(formData, 'targetCountries')).map((code) =>
-      code.toUpperCase(),
-    ),
-    targetLanguages: parseList(formString(formData, 'targetLanguages')).map((code) =>
-      code.toLowerCase(),
-    ),
+    platformTargets: formList(formData, 'platformTargets'),
+    targetCountries: formList(formData, 'targetCountries').map((code) => code.toUpperCase()),
+    targetLanguages: formList(formData, 'targetLanguages').map((code) => code.toLowerCase()),
     startDate: formTrimmed(formData, 'startDate') || null,
     endDate: formTrimmed(formData, 'endDate') || null,
   }
@@ -500,15 +488,11 @@ export async function createBuild(formData: FormData): Promise<void> {
         releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
         instructions: formTrimmed(formData, 'instructions') || null,
         specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
-        targetDevices: parseList(formString(formData, 'targetDevices')),
-        targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
-        targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
-        targetCountries: parseList(formString(formData, 'targetCountries')).map((c) =>
-          c.toUpperCase(),
-        ),
-        targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) =>
-          l.toLowerCase(),
-        ),
+        targetDevices: formList(formData, 'targetDevices'),
+        targetBrowsers: formList(formData, 'targetBrowsers'),
+        targetOperatingSystems: formList(formData, 'targetOperatingSystems'),
+        targetCountries: formList(formData, 'targetCountries').map((c) => c.toUpperCase()),
+        targetLanguages: formList(formData, 'targetLanguages').map((l) => l.toLowerCase()),
         startDate: formTrimmed(formData, 'startDate') || null,
         endDate: formTrimmed(formData, 'endDate') || null,
         maxTesters: maxTesters ? maxTesters : null,
@@ -581,11 +565,11 @@ export async function updateBuild(formData: FormData): Promise<void> {
     releaseNotes: formTrimmed(formData, 'releaseNotes') || null,
     instructions: formTrimmed(formData, 'instructions') || null,
     specialRequirements: formTrimmed(formData, 'specialRequirements') || null,
-    targetDevices: parseList(formString(formData, 'targetDevices')),
-    targetBrowsers: parseList(formString(formData, 'targetBrowsers')),
-    targetOperatingSystems: parseList(formString(formData, 'targetOperatingSystems')),
-    targetCountries: parseList(formString(formData, 'targetCountries')).map((c) => c.toUpperCase()),
-    targetLanguages: parseList(formString(formData, 'targetLanguages')).map((l) => l.toLowerCase()),
+    targetDevices: formList(formData, 'targetDevices'),
+    targetBrowsers: formList(formData, 'targetBrowsers'),
+    targetOperatingSystems: formList(formData, 'targetOperatingSystems'),
+    targetCountries: formList(formData, 'targetCountries').map((c) => c.toUpperCase()),
+    targetLanguages: formList(formData, 'targetLanguages').map((l) => l.toLowerCase()),
     startDate: formTrimmed(formData, 'startDate') || null,
     endDate: formTrimmed(formData, 'endDate') || null,
     testersCanSeeOtherBugs: formData.has('testersCanSeeOtherBugs'),

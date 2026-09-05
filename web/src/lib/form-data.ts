@@ -31,3 +31,24 @@ export function formTrimmed(formData: FormData, key: string): string {
 export function formStringArray(formData: FormData, key: string): string[] {
   return formData.getAll(key).filter((v): v is string => typeof v === 'string')
 }
+
+/**
+ * Reads a list that may arrive in either of two shapes.
+ *
+ * `MultiSelect` emits one hidden input per chosen value; the text inputs it
+ * replaced emitted a single comma-separated string. Both shapes are accepted
+ * so a form can be converted on its own, without its Server Action having to
+ * change in the same commit — and so a form that has not been converted yet
+ * keeps working.
+ *
+ * The ambiguous case is one entry containing a comma, which is read as a
+ * comma-separated list. That is right for the fields this serves — language
+ * codes, browser and OS names, platform targets — none of which contain
+ * commas. It would be wrong for free text, which is why this is not the
+ * general-purpose reader.
+ */
+export function formList(formData: FormData, key: string): string[] {
+  const entries = formStringArray(formData, key)
+  const parts = entries.length > 1 ? entries : (entries[0] ?? '').split(',')
+  return parts.map((part) => part.trim()).filter(Boolean)
+}

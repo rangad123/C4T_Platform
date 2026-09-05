@@ -78,6 +78,10 @@ import {
  * endpoint and cannot drift apart.
  */
 import { rateTesterAction, awardBadgeAction } from '../../crowdtesters/[id]/actions'
+import { MultiSelect } from '@/components/admin/MultiSelect'
+import { TEST_TYPE_OPTIONS } from '@/lib/testing/test-types'
+import { loadTargetOptions, catalogHint } from '@/lib/catalog/target-options'
+import { countryOptions } from '@/lib/geo/source'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const BUG_PREVIEW_SIZE = 10
@@ -778,6 +782,12 @@ export default async function CustomerProjectDetailPage({
     { key: 'logged', header: 'Logged', align: 'right', render: (row) => formatDate(row.createdAt) },
   ]
 
+  /* One source for every "what should this be tested on" picker — see
+     `lib/catalog/target-options`. Countries come from the same list the
+     location pickers use, so a project target and an address agree on what a
+     country is. */
+  const targets = await loadTargetOptions()
+  const countries = countryOptions()
   return (
     <DetailShell
       root={ROOT}
@@ -1247,34 +1257,40 @@ export default async function CustomerProjectDetailPage({
                   <Field
                     label="Platform targets"
                     htmlFor="platformTargets"
-                    hint="Comma separated, for example: Android, iOS, Web."
+                    hint={'The platforms this project is tested on.'}
                   >
-                    <Input
+                    <MultiSelect
                       id="platformTargets"
                       name="platformTargets"
-                      defaultValue={project.platformTargets.join(', ')}
+                      options={targets.platforms}
+                      defaultValue={project.platformTargets}
+                      max={40}
                     />
                   </Field>
                   <Field
                     label="Target countries"
                     htmlFor="targetCountries"
-                    hint="Two-letter ISO codes, comma separated: IN, GB, US."
+                    hint={'Search and add. Leave empty for any country.'}
                   >
-                    <Input
+                    <MultiSelect
                       id="targetCountries"
                       name="targetCountries"
-                      defaultValue={project.targetCountries.join(', ')}
+                      options={countries}
+                      defaultValue={project.targetCountries}
+                      max={40}
                     />
                   </Field>
                   <Field
                     label="Target languages"
                     htmlFor="targetLanguages"
-                    hint="Two-letter ISO codes, comma separated: en, hi, ta."
+                    hint={'Search and add. Leave empty for any language.'}
                   >
-                    <Input
+                    <MultiSelect
                       id="targetLanguages"
                       name="targetLanguages"
-                      defaultValue={project.targetLanguages.join(', ')}
+                      options={targets.languages}
+                      defaultValue={project.targetLanguages}
+                      max={40}
                     />
                   </Field>
                   <Field label="Start date" htmlFor="startDate">
@@ -1481,16 +1497,12 @@ export default async function CustomerProjectDetailPage({
                   options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))}
                 />
               </Field>
-              <Field
-                label="Test type"
-                htmlFor="build-testType"
-                hint="Exploratory, regression, smoke, load..."
-              >
-                <Input
+              <Field label="Test type" htmlFor="build-testType">
+                <Select
                   id="build-testType"
                   name="testType"
-                  maxLength={120}
                   defaultValue={buildDetail.testType ?? ''}
+                  options={TEST_TYPE_OPTIONS}
                 />
               </Field>
               <Field label="Start date" htmlFor="build-startDate">
@@ -1537,48 +1549,66 @@ export default async function CustomerProjectDetailPage({
               <Field
                 label="Target countries"
                 htmlFor="build-targetCountries"
-                hint="Comma separated: IN, GB, US."
+                hint={'Search and add. Leave empty for any country.'}
               >
-                <Input
+                <MultiSelect
                   id="build-targetCountries"
                   name="targetCountries"
-                  defaultValue={buildDetail.targetCountries.join(', ')}
+                  options={countries}
+                  defaultValue={buildDetail.targetCountries}
+                  max={40}
                 />
               </Field>
               <Field
                 label="Target languages"
                 htmlFor="build-targetLanguages"
-                hint="Comma separated: en, hi, ta."
+                hint={'Search and add. Leave empty for any language.'}
               >
-                <Input
+                <MultiSelect
                   id="build-targetLanguages"
                   name="targetLanguages"
-                  defaultValue={buildDetail.targetLanguages.join(', ')}
+                  options={targets.languages}
+                  defaultValue={buildDetail.targetLanguages}
+                  max={40}
                 />
               </Field>
-              <Field label="Target devices" htmlFor="build-targetDevices" hint="Comma separated.">
-                <Input
+              <Field
+                label="Target devices"
+                htmlFor="build-targetDevices"
+                hint={catalogHint(targets.available, 'device')}
+              >
+                <MultiSelect
                   id="build-targetDevices"
                   name="targetDevices"
-                  defaultValue={buildDetail.targetDevices.join(', ')}
+                  options={targets.devices}
+                  defaultValue={buildDetail.targetDevices}
+                  max={40}
                 />
               </Field>
-              <Field label="Target browsers" htmlFor="build-targetBrowsers" hint="Comma separated.">
-                <Input
+              <Field
+                label="Target browsers"
+                htmlFor="build-targetBrowsers"
+                hint={catalogHint(targets.available, 'browser')}
+              >
+                <MultiSelect
                   id="build-targetBrowsers"
                   name="targetBrowsers"
-                  defaultValue={buildDetail.targetBrowsers.join(', ')}
+                  options={targets.browsers}
+                  defaultValue={buildDetail.targetBrowsers}
+                  max={40}
                 />
               </Field>
               <Field
                 label="Target operating systems"
                 htmlFor="build-targetOperatingSystems"
-                hint="Comma separated."
+                hint={catalogHint(targets.available, 'operating system')}
               >
-                <Input
+                <MultiSelect
                   id="build-targetOperatingSystems"
                   name="targetOperatingSystems"
-                  defaultValue={buildDetail.targetOperatingSystems.join(', ')}
+                  options={targets.operatingSystems}
+                  defaultValue={buildDetail.targetOperatingSystems}
+                  max={40}
                 />
               </Field>
             </div>
@@ -2088,16 +2118,12 @@ export default async function CustomerProjectDetailPage({
                   options={BUILD_STATUSES.map((v) => ({ value: v, label: titleCase(v) }))}
                 />
               </Field>
-              <Field
-                label="Test type"
-                htmlFor="new-build-testType"
-                hint="Exploratory, regression, smoke, load..."
-              >
-                <Input
+              <Field label="Test type" htmlFor="new-build-testType">
+                <Select
                   id="new-build-testType"
                   name="testType"
-                  maxLength={120}
                   defaultValue={buildDetail?.testType ?? ''}
+                  options={TEST_TYPE_OPTIONS}
                 />
               </Field>
               <Field label="Start date" htmlFor="new-build-startDate">
@@ -2134,56 +2160,66 @@ export default async function CustomerProjectDetailPage({
               <Field
                 label="Target countries"
                 htmlFor="new-build-targetCountries"
-                hint="Comma separated: IN, GB, US."
+                hint={'Search and add. Leave empty for any country.'}
               >
-                <Input
+                <MultiSelect
                   id="new-build-targetCountries"
                   name="targetCountries"
-                  defaultValue={buildDetail?.targetCountries.join(', ') ?? ''}
+                  options={countries}
+                  defaultValue={buildDetail?.targetCountries ?? []}
+                  max={40}
                 />
               </Field>
               <Field
                 label="Target languages"
                 htmlFor="new-build-targetLanguages"
-                hint="Comma separated: en, hi, ta."
+                hint={'Search and add. Leave empty for any language.'}
               >
-                <Input
+                <MultiSelect
                   id="new-build-targetLanguages"
                   name="targetLanguages"
-                  defaultValue={buildDetail?.targetLanguages.join(', ') ?? ''}
+                  options={targets.languages}
+                  defaultValue={buildDetail?.targetLanguages ?? []}
+                  max={40}
                 />
               </Field>
               <Field
                 label="Target devices"
                 htmlFor="new-build-targetDevices"
-                hint="Comma separated."
+                hint={catalogHint(targets.available, 'device')}
               >
-                <Input
+                <MultiSelect
                   id="new-build-targetDevices"
                   name="targetDevices"
-                  defaultValue={buildDetail?.targetDevices.join(', ') ?? ''}
+                  options={targets.devices}
+                  defaultValue={buildDetail?.targetDevices ?? []}
+                  max={40}
                 />
               </Field>
               <Field
                 label="Target browsers"
                 htmlFor="new-build-targetBrowsers"
-                hint="Comma separated."
+                hint={catalogHint(targets.available, 'browser')}
               >
-                <Input
+                <MultiSelect
                   id="new-build-targetBrowsers"
                   name="targetBrowsers"
-                  defaultValue={buildDetail?.targetBrowsers.join(', ') ?? ''}
+                  options={targets.browsers}
+                  defaultValue={buildDetail?.targetBrowsers ?? []}
+                  max={40}
                 />
               </Field>
               <Field
                 label="Target operating systems"
                 htmlFor="new-build-targetOperatingSystems"
-                hint="Comma separated."
+                hint={catalogHint(targets.available, 'operating system')}
               >
-                <Input
+                <MultiSelect
                   id="new-build-targetOperatingSystems"
                   name="targetOperatingSystems"
-                  defaultValue={buildDetail?.targetOperatingSystems.join(', ') ?? ''}
+                  options={targets.operatingSystems}
+                  defaultValue={buildDetail?.targetOperatingSystems ?? []}
+                  max={40}
                 />
               </Field>
             </div>
