@@ -2,6 +2,14 @@ import { NextResponse } from 'next/server'
 import { serverFetch } from '@/lib/api/server'
 import { getUser } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
+import {
+  type BugBreakdown,
+  breakdownBlocks,
+  countBlock,
+  csvResponse,
+  row,
+  slug,
+} from '@/lib/reports/report-csv'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,17 +18,9 @@ export const dynamic = 'force-dynamic'
  *
  * ── WHAT THIS DELIBERATELY DOES NOT CONTAIN
  *
- * CSV export was built once and removed platform-wide on 2026-09-02 as a PII
- * leak: the old `exportBugsCSV` emitted one row per bug INCLUDING the
- * reporter's email, and a customer-facing proxy meant a customer could
- * download testers' contact details from their own project page.
- *
- * This is not that export restored. It carries only the aggregate figures the
- * report page already renders — counts by severity, status, type and
- * reproducibility, plus the summary tiles. There is no per-bug row, no name,
- * no email, and no tester identity of any kind, so there is nothing here to
- * leak. Keep it that way: if a future change wants bug-level detail, that
- * needs its own decision about identity columns, not a quiet addition here.
+ * Aggregate counts only — no per-bug row, no name, no email, no tester
+ * identity. `lib/reports/report-csv.ts` carries the full argument for why,
+ * and it is worth reading before adding a column here.
  *
  * `testersByCountry` is available on the by-project payload and is left out on
  * purpose — it is not shown on the page, and a per-country head count is
@@ -34,14 +34,6 @@ export const dynamic = 'force-dynamic'
  * returns 404 rather than a report. The role check below only keeps
  * non-customers off a customer route; it is not what protects the data.
  */
-
-interface BugBreakdown {
-  total: number
-  bySeverity: Record<string, number>
-  byStatus: Record<string, number>
-  byType: Record<string, number>
-  byReproducibility: Record<string, number>
-}
 
 interface BuildOption {
   id: string
@@ -59,86 +51,6 @@ interface ByProjectReport {
 interface RangeReport {
   bugs: BugBreakdown
   builds?: BuildOption[]
-}
-
-/**
- * One CSV field.
- *
- * Two separate jobs. Quoting handles commas, quotes and newlines so the shape
- * survives. The leading apostrophe on `= + - @` handles the other thing: a
- * spreadsheet reads those as the start of a formula, so a project someone
- * named `=cmd|...` would execute on open. Neither is optional — this file is
- * built to be opened in Excel.
- */
-function field(value: string | number): string {
-  const raw = String(value ?? '')
-  const guarded = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw
-  return /[",\n\r]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded
-}
-
-function row(...cells: (string | number)[]): string {
-  return cells.map(field).join(',')
-}
-
-/** A count block, e.g. "Bugs by severity". Empty stays empty rather than lying with a zero. */
-function countBlock(heading: string, label: string, counts: Record<string, number>): string[] {
-  const entries = Object.entries(counts ?? {})
-  if (entries.length === 0) return [heading, row(label, 'Count'), row('None recorded', 0), '']
-  return [
-    heading,
-    row(label, 'Count'),
-    ...entries.map(([key, count]) => row(titleCase(key), count)),
-    '',
-  ]
-}
-
-/** `IN_PROGRESS` → `In progress`, matching how the page labels the same values. */
-function titleCase(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/_/g, ' ')
-    .replace(/^./, (c) => c.toUpperCase())
-}
-
-function breakdownBlocks(bugs: BugBreakdown): string[] {
-  return [
-    'Summary',
-    row('Metric', 'Value'),
-    row('Total bugs', bugs.total),
-    '',
-    ...countBlock('Bugs by severity', 'Severity', bugs.bySeverity),
-    ...countBlock('Bugs by status', 'Status', bugs.byStatus),
-    ...countBlock('Bugs by type', 'Type', bugs.byType),
-    ...countBlock('Bugs by reproducibility', 'Reproducibility', bugs.byReproducibility),
-  ]
-}
-
-/** Safe for a `filename=` — letters, digits and dashes only. */
-function slug(value: string): string {
-  return (
-    value
-      .replace(/[^a-zA-Z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || 'report'
-  )
-}
-
-function csvResponse(lines: string[], filename: string): Response {
-  // A BOM so Excel reads it as UTF-8 rather than the local codepage — without
-  // it a project title with an en dash or an accent arrives mangled.
-  //
-  // Written as the escape `\uFEFF` rather than the literal character:
-  // identical bytes on the wire, but the source no longer carries an
-  // invisible zero-width mark that reads as a stray space to anyone editing
-  // this line (and that `no-irregular-whitespace` rightly flags).
-  const body = `\uFEFF${lines.join('\r\n')}\r\n`
-  return new NextResponse(body, {
-    headers: {
-      'content-type': 'text/csv; charset=utf-8',
-      'content-disposition': `attachment; filename="${filename}"`,
-      'cache-control': 'no-store',
-    },
-  })
 }
 
 export async function GET(request: Request): Promise<Response> {

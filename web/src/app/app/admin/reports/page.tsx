@@ -308,6 +308,33 @@ export default async function ReportsPage({
   )
 }
 
+const DOWNLOAD_BASE = '/app/admin/reports/download'
+
+/**
+ * Download the figures currently on screen.
+ *
+ * Rendered only inside a report that actually loaded — a download button
+ * above "choose a project first", or above an empty state, offers a file that
+ * cannot be built.
+ *
+ * `prefetch={false}` is load-bearing, not tidiness: without it Next fetches
+ * the target on hover, so merely passing the cursor over this would generate
+ * a report. See the prop's own note on `Button`.
+ *
+ * The file carries aggregate counts only — see the route it points at, and
+ * `lib/reports/report-csv.ts` for why that boundary exists.
+ */
+function DownloadCsv({ query }: { query: Record<string, string> }) {
+  const href = `${DOWNLOAD_BASE}?${new URLSearchParams(query).toString()}`
+  return (
+    <div>
+      <Button href={href} prefetch={false} variant="secondary" size="sm" iconLeft="download">
+        Download CSV
+      </Button>
+    </div>
+  )
+}
+
 async function ByProject({ projectId }: { projectId: string }) {
   const report = await serverFetchOrNull<ByProjectReport>(`reports/by-project/${projectId}`)
   if (!report) {
@@ -333,6 +360,7 @@ async function ByProject({ projectId }: { projectId: string }) {
         </p>
       </div>
       <BugBreakdownView bugs={report.bugs} />
+      <DownloadCsv query={{ section: 'by-project', projectId }} />
     </div>
   )
 }
@@ -423,6 +451,7 @@ async function ByBuild({ buildId }: { buildId: string }) {
         {summary.testCaseCompletion !== null ? ` · ${summary.testCaseCompletion}% complete` : ''}
       </p>
       <BugBreakdownView bugs={bugs} />
+      <DownloadCsv query={{ section: 'by-build', buildId }} />
     </div>
   )
 }
@@ -467,6 +496,7 @@ async function ByDate({ startDate, endDate }: { startDate: string; endDate: stri
           />
         </div>
       ) : null}
+      <DownloadCsv query={{ section: 'by-date', startDate, endDate }} />
     </div>
   )
 }
@@ -562,6 +592,7 @@ async function ByBuildRange({
         {report.builds.map((b) => b.name).join(' → ')}
       </p>
       <BugBreakdownView bugs={report.bugs} />
+      <DownloadCsv query={{ section: 'by-build-range', projectId, startBuildId, endBuildId }} />
     </div>
   )
 }
