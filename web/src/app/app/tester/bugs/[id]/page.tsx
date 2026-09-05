@@ -23,6 +23,7 @@ import { titleCase, formatDate, formatDateTime, personName } from '@/lib/admin/f
 import { addBugComment, moveBugStatus, updateBugAction } from './actions'
 import { PairSelect } from '@/components/ds/forms/PairSelect'
 import { loadBugEnvironmentOptions } from '@/lib/catalog/target-options'
+import { BUG_REPRODUCIBILITIES, BUG_SEVERITIES, BUG_TYPES } from '@/lib/domain/enums'
 
 const ROOT = { label: 'Tester', href: '/app/tester' }
 const DETAIL_BASE = '/app/tester/bugs'
@@ -59,17 +60,7 @@ const REASON_COPY: Record<string, string> = {
   'occurrence-range': 'It cannot have happened more times than you tried.',
 }
 
-const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
-const REPRODUCIBILITIES = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE'] as const
-const BUG_TYPES = [
-  'CRASH',
-  'APP_FREEZE',
-  'FUNCTIONAL',
-  'UI',
-  'UX',
-  'SECURITY',
-  'PERFORMANCE',
-] as const
+const SEVERITIES = BUG_SEVERITIES
 
 interface BugPerson {
   id: string
@@ -730,7 +721,10 @@ export default async function TesterBugDetailPage({
                   name="reproducibility"
                   required
                   defaultValue={bug.reproducibility}
-                  options={REPRODUCIBILITIES.map((value) => ({ value, label: titleCase(value) }))}
+                  options={BUG_REPRODUCIBILITIES.map((value) => ({
+                    value,
+                    label: titleCase(value),
+                  }))}
                 />
               </Field>
               <Field

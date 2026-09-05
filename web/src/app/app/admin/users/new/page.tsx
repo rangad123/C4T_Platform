@@ -17,6 +17,7 @@ import { hasPermission, requirePermission } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { titleCase } from '@/lib/admin/format'
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
+import { ROLES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/users/new` — the admin-created account, including the Sub-Admin
@@ -37,7 +38,6 @@ import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 const BASE = '/app/admin/users'
 const MIN_PASSWORD_LENGTH = 12
 
-const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
 const ROLE_OPTIONS = ROLES.map((role) => ({ value: role, label: titleCase(role) }))
 
 type RoleValue = (typeof ROLES)[number]

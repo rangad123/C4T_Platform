@@ -15,6 +15,7 @@ import { titleCase } from '@/lib/admin/format'
 import { MultiSelect } from '@/components/admin/MultiSelect'
 import { loadTargetOptions } from '@/lib/catalog/target-options'
 import { countryOptions } from '@/lib/geo/source'
+import { PROJECT_PRIORITIES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/projects/new` — create a project on behalf of any organisation.
@@ -35,7 +36,7 @@ import { countryOptions } from '@/lib/geo/source'
  * accepting anything they typed. `MultiSelect` posts one hidden input per
  * value, which is still a plain string list to the API.
  */
-const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const
+const PRIORITIES = PROJECT_PRIORITIES
 const PRIORITY_OPTIONS = PRIORITIES.map((value) => ({ value, label: titleCase(value) }))
 
 interface OrganisationOption {

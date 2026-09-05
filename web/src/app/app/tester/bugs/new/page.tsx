@@ -16,18 +16,9 @@ import { titleCase } from '@/lib/admin/format'
 import { reportBugAction } from '../actions'
 import { PairSelect } from '@/components/ds/forms/PairSelect'
 import { loadBugEnvironmentOptions } from '@/lib/catalog/target-options'
+import { BUG_REPRODUCIBILITIES, BUG_SEVERITIES, BUG_TYPES } from '@/lib/domain/enums'
 
-const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
-const REPRODUCIBILITIES = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE'] as const
-const BUG_TYPES = [
-  'CRASH',
-  'APP_FREEZE',
-  'FUNCTIONAL',
-  'UI',
-  'UX',
-  'SECURITY',
-  'PERFORMANCE',
-] as const
+const SEVERITIES = BUG_SEVERITIES
 
 /**
  * Statuses in which the API accepts a report — mirrors `isProjectOpenForWork`
@@ -407,7 +398,10 @@ export default async function NewTesterBugPage({
                   name="reproducibility"
                   required
                   defaultValue="ALWAYS"
-                  options={REPRODUCIBILITIES.map((value) => ({ value, label: titleCase(value) }))}
+                  options={BUG_REPRODUCIBILITIES.map((value) => ({
+                    value,
+                    label: titleCase(value),
+                  }))}
                 />
               </Field>
               {/*

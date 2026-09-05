@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
+import { ORG_MEMBER_ROLES, isOneOf } from '@/lib/domain/enums'
 
 /**
  * Server Actions for the customer's own organisation (§2.4).
@@ -18,8 +19,6 @@ import { formTrimmed } from '@/lib/form-data'
  */
 
 const DETAIL_PATH = '/app/customer/organisation'
-
-const ORG_MEMBER_ROLES = ['OWNER', 'MEMBER']
 
 const CLEARABLE_PROFILE_FIELDS = [
   'website',
@@ -93,7 +92,7 @@ export async function addOrgMemberAction(formData: FormData): Promise<void> {
 
   if (!userId) {
     notice = 'member-missing-account'
-  } else if (!ORG_MEMBER_ROLES.includes(orgRole)) {
+  } else if (!isOneOf(ORG_MEMBER_ROLES, orgRole)) {
     notice = 'invalid'
   } else {
     try {
@@ -119,7 +118,7 @@ export async function updateOrgMemberAction(formData: FormData): Promise<void> {
   const orgRole = formTrimmed(formData, 'orgRole')
   let notice = 'member-role-saved'
 
-  if (!userId || !ORG_MEMBER_ROLES.includes(orgRole)) {
+  if (!userId || !isOneOf(ORG_MEMBER_ROLES, orgRole)) {
     notice = 'invalid'
   } else {
     try {

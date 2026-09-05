@@ -6,17 +6,9 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { DEVICE_TYPES, isOneOf } from '@/lib/domain/enums'
 
 const PATH = '/app/admin/catalog'
-
-const DEVICE_TYPES: readonly string[] = [
-  'MOBILE',
-  'TABLET',
-  'DESKTOP',
-  'SMART_TV',
-  'WEARABLE',
-  'OTHER',
-]
 
 /**
  * Server Actions for the device/browser catalog.
@@ -66,7 +58,7 @@ export async function addModelAction(formData: FormData): Promise<void> {
   await submit('catalog/models', {
     brandId,
     name,
-    type: DEVICE_TYPES.includes(typeInput) ? typeInput : 'MOBILE',
+    type: isOneOf(DEVICE_TYPES, typeInput) ? typeInput : 'MOBILE',
     ...(defaultOsId ? { defaultOsId } : {}),
     ...(ramGb ? { ramGb } : {}),
   })

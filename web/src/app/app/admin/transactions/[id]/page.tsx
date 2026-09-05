@@ -19,6 +19,7 @@ import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, titleCase } from '@/lib/admin/format'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
 import { saveTransactionDetails, saveTransactionStatus, savePayoutDetails } from './actions'
+import { TRANSACTION_STATUSES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/transactions/[id]` — one ledger entry.
@@ -42,12 +43,10 @@ const BASE = '/app/admin/transactions'
  * because every export of a `'use server'` module must be an async function —
  * exporting this array from there would unregister both actions.
  */
-const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'].map(
-  (status) => ({
-    value: status,
-    label: titleCase(status),
-  }),
-)
+const STATUS_OPTIONS = TRANSACTION_STATUSES.map((status) => ({
+  value: status,
+  label: titleCase(status),
+}))
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: '', label: 'Not set' },

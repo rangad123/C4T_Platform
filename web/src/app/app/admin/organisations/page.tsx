@@ -8,10 +8,11 @@ import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { ORGANISATION_STATUSES } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/organisations'
-const STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const
+const STATUSES = ORGANISATION_STATUSES
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Created' },
   { value: 'updatedAt', label: 'Last updated' },

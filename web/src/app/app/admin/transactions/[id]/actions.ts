@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api/types'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { PAYMENT_METHODS, TRANSACTION_STATUSES } from '@/lib/domain/enums'
 
 /**
  * Server Actions for a single ledger entry.
@@ -29,8 +30,7 @@ import { formString, formTrimmed } from '@/lib/form-data'
  * an ADJUSTMENT against it, which is what keeps the ledger auditable.
  */
 
-const STATUSES = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'] as const
-const PAYMENT_METHODS = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
+const STATUSES = TRANSACTION_STATUSES
 
 /**
  * Major units → minor units, by string surgery rather than `amount * 100` —

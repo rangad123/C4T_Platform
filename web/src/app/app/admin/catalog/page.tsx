@@ -23,6 +23,7 @@ import {
   addSkillCategoryAction,
   addSkillAction,
 } from './actions'
+import { DEVICE_TYPES } from '@/lib/domain/enums'
 
 /**
  * The catalog is seven independent reference lists. Stacked, they were one
@@ -89,8 +90,6 @@ const GROUPS = [
 function groupFor(section: string): (typeof GROUPS)[number] {
   return GROUPS.find((g) => (g.sections as readonly string[]).includes(section)) ?? GROUPS[0]
 }
-
-const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
 
 interface Catalog {
   professions: readonly { id: string; name: string; isActive: boolean }[]

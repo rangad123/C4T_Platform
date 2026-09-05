@@ -7,6 +7,12 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed, formStringArray } from '@/lib/form-data'
+import {
+  DEVICE_TYPES,
+  LANGUAGE_PROFICIENCIES,
+  PAYMENT_ACCOUNT_COUNTRIES,
+  PAYMENT_METHODS,
+} from '@/lib/domain/enums'
 
 const PROFILE_PATH = '/app/tester/profile'
 
@@ -42,8 +48,7 @@ function failureNotice(error: unknown, overrides: Record<number, string> = {}): 
  * contract requires, it isn't a workaround.
  */
 
-const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
-const PROFICIENCIES = ['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC'] as const
+const PROFICIENCIES = LANGUAGE_PROFICIENCIES
 
 /**
  * Saves the whole "About you" form.
@@ -526,8 +531,8 @@ export async function acceptNdaAction(_formData: FormData): Promise<void> {
   redirect(`${PROFILE_PATH}?notice=${notice}`, 'replace')
 }
 
-const PAYMENT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const
-const PAYMENT_TYPES = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
+const PAYMENT_COUNTRIES = PAYMENT_ACCOUNT_COUNTRIES
+const PAYMENT_TYPES = PAYMENT_METHODS
 
 /**
  * Full replacement, same convention as `setSkillsAction`/the language

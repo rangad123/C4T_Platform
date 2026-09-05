@@ -7,6 +7,7 @@ import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, formatMoney, hasFilter, personName, titleCase } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 import type { PageMeta } from '@/lib/api/types'
+import { PAYMENT_METHODS, TRANSACTION_STATUSES, isOneOf } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/transactions'
@@ -15,8 +16,7 @@ const BASE = '/app/admin/transactions'
 // underlying TransactionType enum and every existing CUSTOMER_* row are
 // untouched on the API side; this is a UI scope, not a schema change).
 const TYPES = ['TESTER_EARNING', 'TESTER_PAYOUT', 'ADJUSTMENT'] as const
-const STATUSES = ['PENDING', 'APPROVED', 'RELEASED', 'PAID', 'FAILED', 'CANCELLED'] as const
-const PAYMENT_METHODS = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
+const STATUSES = TRANSACTION_STATUSES
 const SORT_OPTIONS = [
   { value: 'occurredAt', label: 'Occurred' },
   { value: 'createdAt', label: 'Created' },
@@ -135,7 +135,8 @@ export default async function TransactionsPage({
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? params.status
     : undefined
-  const paymentMethod = PAYMENT_METHODS.includes(
+  const paymentMethod = isOneOf(
+    PAYMENT_METHODS,
     params.paymentMethod as (typeof PAYMENT_METHODS)[number],
   )
     ? params.paymentMethod

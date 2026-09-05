@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
+import { ORGANISATION_STATUSES, ORG_MEMBER_ROLES, isOneOf } from '@/lib/domain/enums'
 
 /**
  * Server Actions for organisation management (§2.2).
@@ -24,8 +25,9 @@ import { formTrimmed } from '@/lib/form-data'
 
 const LIST_PATH = '/app/admin/organisations'
 
-const ORG_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED']
-const ORG_MEMBER_ROLES = ['OWNER', 'MEMBER']
+/* Widened: the shared list is a literal tuple, and this is a membership
+   test against a string from a form. */
+const ORG_STATUSES: readonly string[] = ORGANISATION_STATUSES
 
 /**
  * Profile fields whose zod rule accepts an empty string, so submitting a blank
@@ -165,7 +167,7 @@ export async function addOrganisationMember(formData: FormData): Promise<void> {
 
   if (!userId) {
     notice = 'member-missing-account'
-  } else if (!ORG_MEMBER_ROLES.includes(orgRole)) {
+  } else if (!isOneOf(ORG_MEMBER_ROLES, orgRole)) {
     notice = 'invalid'
   } else {
     try {
@@ -191,7 +193,7 @@ export async function saveMemberRole(formData: FormData): Promise<void> {
   const orgRole = formTrimmed(formData, 'orgRole')
   let notice = 'member-role-saved'
 
-  if (!userId || !ORG_MEMBER_ROLES.includes(orgRole)) {
+  if (!userId || !isOneOf(ORG_MEMBER_ROLES, orgRole)) {
     notice = 'invalid'
   } else {
     try {

@@ -6,6 +6,7 @@ import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, personName, searchTerm, titleCase, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { BUG_SEVERITIES } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/customer/bugs'
@@ -23,7 +24,7 @@ const STATUSES = [
   'WONT_FIX',
   'FEATURE_REQUEST',
 ] as const
-const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
+const SEVERITIES = BUG_SEVERITIES
 
 interface BugRow {
   id: string

@@ -51,18 +51,23 @@ import {
   deleteAccountAction,
 } from './actions'
 import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
+import {
+  DEVICE_TYPES,
+  LANGUAGE_PROFICIENCIES,
+  PAYMENT_ACCOUNT_COUNTRIES,
+  PAYMENT_METHODS,
+} from '@/lib/domain/enums'
 
 const PROFILE_PATH = '/app/tester/profile'
-const DEVICE_TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
-const PAYMENT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const
-const PAYMENT_TYPES = ['IND_BANK_ACCOUNT', 'NON_IND_BANK_ACCOUNT', 'PAYPAL', 'PAYTM'] as const
+const PAYMENT_COUNTRIES = PAYMENT_ACCOUNT_COUNTRIES
+const PAYMENT_TYPES = PAYMENT_METHODS
 const PAYMENT_TYPE_LABEL: Record<(typeof PAYMENT_TYPES)[number], string> = {
   IND_BANK_ACCOUNT: 'Indian bank account',
   NON_IND_BANK_ACCOUNT: 'International bank account',
   PAYPAL: 'PayPal',
   PAYTM: 'Paytm',
 }
-const PROFICIENCIES = ['NATIVE', 'FLUENT', 'PROFESSIONAL', 'BASIC'] as const
+const PROFICIENCIES = LANGUAGE_PROFICIENCIES
 
 /**
  * The three free-text-in-the-database fields the API stores verbatim.

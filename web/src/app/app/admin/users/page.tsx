@@ -5,11 +5,11 @@ import { StatusBadge, RoleBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, personName, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { ROLES, USER_STATUSES, isOneOf } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/users'
-const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
-const STATUSES = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED'] as const
+const STATUSES = USER_STATUSES
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Created' },
   { value: 'email', label: 'Email' },
@@ -61,7 +61,7 @@ export default async function UsersPage({
   await requirePermission('user.read')
 
   const params = await searchParams
-  const role = ROLES.includes(params.role as (typeof ROLES)[number]) ? params.role : undefined
+  const role = isOneOf(ROLES, params.role as (typeof ROLES)[number]) ? params.role : undefined
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? params.status
     : undefined

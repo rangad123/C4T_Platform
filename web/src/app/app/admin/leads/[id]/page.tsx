@@ -15,6 +15,7 @@ import { updateLeadStatus, updateLeadNotes } from '@/lib/leads/actions'
 import { formString } from '@/lib/form-data'
 import { Modal } from '@/components/admin/Modal'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
+import { LEAD_STATUSES } from '@/lib/domain/enums'
 
 /**
  * The lead detail page. `/app/admin/leads/[id]`.
@@ -28,14 +29,7 @@ import { Notice, type NoticeCopy } from '@/components/admin/Notice'
  * `not-found.tsx`.
  */
 
-const LEAD_STATUS_VALUES: readonly LeadStatusValue[] = [
-  'NEW',
-  'CONTACTED',
-  'QUALIFIED',
-  'WON',
-  'LOST',
-  'SPAM',
-]
+const LEAD_STATUS_VALUES: readonly LeadStatusValue[] = LEAD_STATUSES
 
 const STATUS_OPTIONS = LEAD_STATUS_VALUES.map((s) => ({
   value: s,

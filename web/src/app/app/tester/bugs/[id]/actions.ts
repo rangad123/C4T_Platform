@@ -7,6 +7,7 @@ import { closeModal } from '@/lib/navigation/close-modal'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { BUG_REPRODUCIBILITIES, BUG_SEVERITIES, BUG_TYPES, isOneOf } from '@/lib/domain/enums'
 
 /**
  * Server Actions for a tester's own bug.
@@ -24,17 +25,7 @@ import { formTrimmed } from '@/lib/form-data'
 const DETAIL_BASE = '/app/tester/bugs'
 const PROJECTS_PATH = '/app/tester/projects'
 
-const SEVERITIES: readonly string[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
-const REPRODUCIBILITIES: readonly string[] = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE']
-const BUG_TYPES: readonly string[] = [
-  'CRASH',
-  'APP_FREEZE',
-  'FUNCTIONAL',
-  'UI',
-  'UX',
-  'SECURITY',
-  'PERFORMANCE',
-]
+const SEVERITIES: readonly string[] = BUG_SEVERITIES
 
 function detailPath(id: string): string {
   return `${DETAIL_BASE}/${id}`
@@ -202,9 +193,9 @@ export async function updateBugAction(formData: FormData): Promise<void> {
   const severityInput = formTrimmed(formData, 'severity')
   const severity = SEVERITIES.includes(severityInput) ? severityInput : undefined
   const reproInput = formTrimmed(formData, 'reproducibility')
-  const reproducibility = REPRODUCIBILITIES.includes(reproInput) ? reproInput : undefined
+  const reproducibility = isOneOf(BUG_REPRODUCIBILITIES, reproInput) ? reproInput : undefined
   const typeInput = formTrimmed(formData, 'type')
-  const type = typeInput && BUG_TYPES.includes(typeInput) ? typeInput : null
+  const type = typeInput && isOneOf(BUG_TYPES, typeInput) ? typeInput : null
 
   const occurrenceRaw = formTrimmed(formData, 'occurrence')
   const outOfRaw = formTrimmed(formData, 'outOf')

@@ -6,6 +6,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
+import { TESTER_STATUSES } from '@/lib/domain/enums'
 
 /**
  * Server Actions for the tester verification workflow (§2.2 "Onboard, verify,
@@ -29,8 +30,6 @@ import { ApiError } from '@/lib/api/types'
  * be here too. The API enforces `tester.verify` independently — this only avoids
  * a pointless round trip and sends the wrong role home.
  */
-
-const TESTER_STATUSES = ['APPLIED', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED', 'SUSPENDED'] as const
 
 type TesterStatusValue = (typeof TESTER_STATUSES)[number]
 

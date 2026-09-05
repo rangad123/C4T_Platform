@@ -6,6 +6,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { ANNOUNCEMENT_AUDIENCES } from '@/lib/domain/enums'
 
 /**
  * Server Actions for announcements.
@@ -38,7 +39,7 @@ function failureReason(error: unknown): string {
 }
 
 /** Mirrors the AnnouncementAudience enum in the API's Prisma schema. */
-const AUDIENCES: readonly string[] = ['ALL', 'CUSTOMERS', 'TESTERS', 'ADMINS']
+const AUDIENCES: readonly string[] = ANNOUNCEMENT_AUDIENCES
 
 /**
  * Creates an announcement, published immediately or held as a draft.

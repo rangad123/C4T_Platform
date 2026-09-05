@@ -6,19 +6,12 @@ import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, titleCase, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { PROJECT_PRIORITIES, PROJECT_STATUSES } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/projects'
-const STATUSES = [
-  'DRAFT',
-  'SUBMITTED',
-  'APPROVED',
-  'IN_PROGRESS',
-  'PAUSED',
-  'COMPLETED',
-  'CANCELLED',
-] as const
-const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const
+const STATUSES = PROJECT_STATUSES
+const PRIORITIES = PROJECT_PRIORITIES
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Created' },
   { value: 'updatedAt', label: 'Last updated' },

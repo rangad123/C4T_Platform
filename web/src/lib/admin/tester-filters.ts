@@ -1,5 +1,6 @@
 import 'server-only'
 import type { FilterOptions } from '@/components/admin/assign/types'
+import { countryOptions } from '@/lib/geo/source'
 
 /**
  * The filter vocabulary every tester picker offers.
@@ -9,6 +10,13 @@ import type { FilterOptions } from '@/components/admin/assign/types'
  * were about to hand-roll the same three `.map()` calls plus the same country
  * list. One transform means a country added here appears on both, and a
  * catalog shape change breaks in one place instead of silently diverging.
+ *
+ * Countries come from `lib/geo/source`, the same list every address and
+ * project-target picker uses. They used to be a hardcoded twelve — chosen,
+ * per the comment that stood here, because "the countries testers are
+ * actually in would need an aggregate the API does not expose". True, and it
+ * meant a tester in the thirteenth country could not be filtered for at all.
+ * Offering every country costs nothing and cannot hide anybody.
  *
  * Server-only: it is called during render and its output is serialised into
  * the client component's props, so there is no reason for the list itself to
@@ -27,7 +35,7 @@ export interface CatalogPayload {
 
 export function testerFilterOptions(catalog: CatalogPayload | null): FilterOptions {
   return {
-    countries: COUNTRIES,
+    countries: countryOptions(),
     operatingSystems: (catalog?.operatingSystems ?? []).map((o) => ({
       value: o.name,
       label: o.name,
@@ -40,23 +48,3 @@ export function testerFilterOptions(catalog: CatalogPayload | null): FilterOptio
     })),
   }
 }
-
-/**
- * The countries testers are actually in would need an aggregate the API does
- * not expose, so this is the ISO subset the rest of the admin already filters
- * by.
- */
-const COUNTRIES: readonly { value: string; label: string }[] = [
-  ['IN', 'India'],
-  ['US', 'United States'],
-  ['GB', 'United Kingdom'],
-  ['AE', 'United Arab Emirates'],
-  ['AU', 'Australia'],
-  ['CA', 'Canada'],
-  ['DE', 'Germany'],
-  ['FR', 'France'],
-  ['HR', 'Croatia'],
-  ['MX', 'Mexico'],
-  ['SG', 'Singapore'],
-  ['ZA', 'South Africa'],
-].map(([value, label]) => ({ value: value!, label: label! }))

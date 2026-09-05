@@ -9,6 +9,7 @@ import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, personName, searchTerm, titleCase, hasFilter } from '@/lib/admin/format'
 import { bulkChangeBugStatusAction } from './actions'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { BUG_SEVERITIES, isOneOf } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/bugs'
@@ -25,7 +26,7 @@ const STATUSES = [
   'WONT_FIX',
   'FEATURE_REQUEST',
 ] as const
-const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
+const SEVERITIES = BUG_SEVERITIES
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Reported' },
   { value: 'updatedAt', label: 'Last updated' },
@@ -182,7 +183,7 @@ export default async function BugsPage({
     ? params.sort
     : undefined
   const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
-  const type = BUG_TYPES.includes(params.type as (typeof BUG_TYPES)[number])
+  const type = isOneOf(BUG_TYPES, params.type as (typeof BUG_TYPES)[number])
     ? params.type
     : undefined
   const search = searchTerm(params.search)

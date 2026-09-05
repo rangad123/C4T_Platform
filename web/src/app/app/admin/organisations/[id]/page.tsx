@@ -35,6 +35,7 @@ import {
 import { LocationSelect } from '@/components/ds/forms/LocationSelect'
 import { countryOptions, stateCodeForName } from '@/lib/geo/source'
 import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
+import { ORGANISATION_STATUSES, ORG_MEMBER_ROLES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/organisations/[id]` — one customer organisation (§2.2).
@@ -52,11 +53,11 @@ import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
  */
 
 const BASE = '/app/admin/organisations'
-const STATUS_OPTIONS = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'].map((value) => ({
+const STATUS_OPTIONS = ORGANISATION_STATUSES.map((value) => ({
   value,
   label: titleCase(value),
 }))
-const MEMBER_ROLE_OPTIONS = ['OWNER', 'MEMBER'].map((value) => ({
+const MEMBER_ROLE_OPTIONS = ORG_MEMBER_ROLES.map((value) => ({
   value,
   label: titleCase(value),
 }))

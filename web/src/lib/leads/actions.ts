@@ -14,6 +14,7 @@ import { ApiError } from '@/lib/api/types'
  */
 import { actionFetch } from '@/lib/api/action-fetch'
 import type { LeadStatusValue } from '@/components/admin/LeadStatusBadge'
+import { LEAD_STATUSES } from '@/lib/domain/enums'
 
 /**
  * Server Actions for lead triage.
@@ -29,14 +30,7 @@ import type { LeadStatusValue } from '@/components/admin/LeadStatusBadge'
  * the right behaviour for a closed enum.
  */
 
-const LEAD_STATUS_VALUES: readonly LeadStatusValue[] = [
-  'NEW',
-  'CONTACTED',
-  'QUALIFIED',
-  'WON',
-  'LOST',
-  'SPAM',
-]
+const LEAD_STATUS_VALUES: readonly LeadStatusValue[] = LEAD_STATUSES
 
 interface LeadResponse {
   data: unknown

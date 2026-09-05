@@ -15,10 +15,11 @@ import {
   titleCase,
 } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { TESTER_STATUSES } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/testers'
-const STATUSES = ['APPLIED', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED', 'SUSPENDED'] as const
+const STATUSES = TESTER_STATUSES
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Applied' },
   { value: 'ratingAverage', label: 'Rating' },

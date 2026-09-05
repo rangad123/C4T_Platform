@@ -6,23 +6,14 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { BUG_REPRODUCIBILITIES, BUG_SEVERITIES, BUG_TYPES, isOneOf } from '@/lib/domain/enums'
 
 const NEW_PATH = '/app/tester/bugs/new'
 
 /** Where a report returns to: the project it was filed against. */
 const projectPath = (projectId: string): string => `/app/tester/projects/${projectId}?section=bugs`
 
-const SEVERITIES: readonly string[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
-const REPRODUCIBILITIES: readonly string[] = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE']
-const BUG_TYPES: readonly string[] = [
-  'CRASH',
-  'APP_FREEZE',
-  'FUNCTIONAL',
-  'UI',
-  'UX',
-  'SECURITY',
-  'PERFORMANCE',
-]
+const SEVERITIES: readonly string[] = BUG_SEVERITIES
 
 /**
  * Maps an API failure to one of the reason codes `new/page.tsx` renders.
@@ -76,9 +67,9 @@ export async function reportBugAction(formData: FormData): Promise<void> {
   const severityInput = formTrimmed(formData, 'severity')
   const severity = SEVERITIES.includes(severityInput) ? severityInput : 'MEDIUM'
   const reproInput = formTrimmed(formData, 'reproducibility')
-  const reproducibility = REPRODUCIBILITIES.includes(reproInput) ? reproInput : 'ALWAYS'
+  const reproducibility = isOneOf(BUG_REPRODUCIBILITIES, reproInput) ? reproInput : 'ALWAYS'
   const typeInput = formTrimmed(formData, 'type')
-  const type = BUG_TYPES.includes(typeInput) ? typeInput : undefined
+  const type = isOneOf(BUG_TYPES, typeInput) ? typeInput : undefined
 
   const preCondition = formTrimmed(formData, 'preCondition')
   const videoUrl = formTrimmed(formData, 'videoUrl')

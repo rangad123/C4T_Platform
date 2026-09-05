@@ -31,6 +31,7 @@ import {
   removeBugAttachment,
   deleteBug,
 } from './actions'
+import { BUG_SEVERITIES, BUG_TYPES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/bugs/[id]` — the bug detail and triage screen.
@@ -48,16 +49,7 @@ import {
 
 const LIST_PATH = '/app/admin/bugs'
 
-const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
-const BUG_TYPES = [
-  'CRASH',
-  'APP_FREEZE',
-  'FUNCTIONAL',
-  'UI',
-  'UX',
-  'SECURITY',
-  'PERFORMANCE',
-] as const
+const SEVERITIES = BUG_SEVERITIES
 
 /** Fixed copy for every reason code `./actions.ts` can redirect with. */
 const REASON_COPY: Record<string, string> = {

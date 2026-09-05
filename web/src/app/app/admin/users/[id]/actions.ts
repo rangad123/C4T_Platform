@@ -6,6 +6,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { ROLES, USER_STATUSES } from '@/lib/domain/enums'
 
 /**
  * Server Actions for one user account.
@@ -30,8 +31,7 @@ import { formTrimmed } from '@/lib/form-data'
 
 const LIST_PATH = '/app/admin/users'
 
-const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
-const STATUSES = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED'] as const
+const STATUSES = USER_STATUSES
 
 type RoleValue = (typeof ROLES)[number]
 type StatusValue = (typeof STATUSES)[number]

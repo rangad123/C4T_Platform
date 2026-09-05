@@ -6,10 +6,11 @@ import { CountryFlag } from '@/components/admin/CountryFlag'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { personName, searchTerm, hasFilter, titleCase, formatDate } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { DEVICE_TYPES } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/assets/devices'
-const TYPES = ['MOBILE', 'TABLET', 'DESKTOP', 'SMART_TV', 'WEARABLE', 'OTHER'] as const
+const TYPES = DEVICE_TYPES
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Added' },
   { value: 'model', label: 'Model' },

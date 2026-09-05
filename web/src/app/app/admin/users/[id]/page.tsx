@@ -34,6 +34,7 @@ import {
 } from './actions'
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 import { timezoneOptions, withCurrent } from '@/lib/geo/source'
+import { ROLES, USER_STATUSES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/users/[id]` — one account, everything an administrator can change
@@ -81,8 +82,7 @@ const NOTICES: Record<string, NoticeCopy> = {
   failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
 }
 
-const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
-const STATUSES = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED'] as const
+const STATUSES = USER_STATUSES
 
 const ROLE_OPTIONS = ROLES.map((role) => ({ value: role, label: titleCase(role) }))
 const STATUS_OPTIONS = STATUSES.map((status) => ({ value: status, label: titleCase(status) }))

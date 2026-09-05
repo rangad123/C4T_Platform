@@ -31,10 +31,11 @@ import {
   revokeInvitationAction,
 } from './actions'
 import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
+import { ORG_MEMBER_ROLES } from '@/lib/domain/enums'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const DETAIL_PATH = '/app/customer/organisation'
-const MEMBER_ROLE_OPTIONS = ['OWNER', 'MEMBER'].map((value) => ({ value, label: titleCase(value) }))
+const MEMBER_ROLE_OPTIONS = ORG_MEMBER_ROLES.map((value) => ({ value, label: titleCase(value) }))
 
 const SECTIONS = [
   { value: 'profile', label: 'Profile', icon: 'building-2' },

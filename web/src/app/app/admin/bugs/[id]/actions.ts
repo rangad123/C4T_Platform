@@ -6,6 +6,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { BUG_SEVERITIES } from '@/lib/domain/enums'
 
 /**
  * Server Actions for bug triage.
@@ -35,7 +36,7 @@ import { formString, formTrimmed } from '@/lib/form-data'
 
 const LIST_PATH = '/app/admin/bugs'
 
-const SEVERITIES: readonly string[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+const SEVERITIES: readonly string[] = BUG_SEVERITIES
 
 const STATUSES: readonly string[] = [
   'NEW',

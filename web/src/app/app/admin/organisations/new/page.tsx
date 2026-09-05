@@ -14,6 +14,7 @@ import { titleCase } from '@/lib/admin/format'
 import { LocationSelect } from '@/components/ds/forms/LocationSelect'
 import { countryOptions } from '@/lib/geo/source'
 import { loadTermOptions } from '@/lib/catalog/target-options'
+import { ORGANISATION_STATUSES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/organisations/new` — create an organisation on behalf of a
@@ -28,7 +29,7 @@ import { loadTermOptions } from '@/lib/catalog/target-options'
  * customer has an account can leave it blank and invite the owner afterwards
  * from the detail page's Members panel.
  */
-const STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const
+const STATUSES = ORGANISATION_STATUSES
 const STATUS_OPTIONS = STATUSES.map((value) => ({ value, label: titleCase(value) }))
 
 export default async function NewOrganisationPage({

@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api/types'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { BUG_SEVERITIES } from '@/lib/domain/enums'
 
 const LIST_PATH = '/app/admin/bugs'
 
@@ -25,7 +26,7 @@ const STATUSES = [
 ] as const
 
 /** Mirrors the API's BugSeverity enum. */
-const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
+const SEVERITIES = BUG_SEVERITIES
 
 /**
  * Bulk status / severity change for a checked selection of bugs.

@@ -12,6 +12,7 @@ import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { requirePermission } from '@/lib/auth/session'
 import { serverFetchPage } from '@/lib/api/server'
 import { ApiError, type PageMeta } from '@/lib/api/types'
+import { LEAD_STATUSES, isOneOf } from '@/lib/domain/enums'
 
 /** Rows per page. Mirrored into the API query and the Pagination summary. */
 const PAGE_SIZE = 25
@@ -29,15 +30,6 @@ const PAGE_SIZE = 25
  * message rather than throwing into the error boundary, because "you don't
  * have access" is a state, not a crash.
  */
-
-const LEAD_STATUSES: readonly LeadStatusValue[] = [
-  'NEW',
-  'CONTACTED',
-  'QUALIFIED',
-  'WON',
-  'LOST',
-  'SPAM',
-]
 
 const STATUS_FILTER_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -79,7 +71,7 @@ export default async function LeadsPage({
   await requirePermission('lead.read')
 
   const params = await searchParams
-  const status = LEAD_STATUSES.includes(params.status as LeadStatusValue)
+  const status = isOneOf(LEAD_STATUSES, params.status as LeadStatusValue)
     ? params.status
     : undefined
   const trimmedSearch = params.search?.trim()
