@@ -14,6 +14,8 @@ import { EvidenceUpload } from '@/components/tester/EvidenceUpload'
 import { EvidenceGuardedSubmit } from '@/components/tester/EvidenceGuardedSubmit'
 import { titleCase } from '@/lib/admin/format'
 import { reportBugAction } from '../actions'
+import { PairSelect } from '@/components/ds/forms/PairSelect'
+import { loadBugEnvironmentOptions } from '@/lib/catalog/target-options'
 
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const
 const REPRODUCIBILITIES = ['ALWAYS', 'SOMETIMES', 'RARELY', 'ONCE'] as const
@@ -54,13 +56,6 @@ interface Assignment {
 }
 
 /** A row of `GET /v1/catalog/me/browsers` — what this tester actually runs. */
-interface TesterBrowser {
-  id: string
-  browser: { id: string; name: string }
-  browserVersion: { id: string; version: string } | null
-  operatingSystem: { id: string; name: string; kind: string } | null
-}
-
 const ERROR_MESSAGES: Record<string, string> = {
   invalid: 'Some fields were missing or too short. Check the title, description and steps.',
   evidence:
@@ -150,14 +145,13 @@ export default async function NewTesterBugPage({
    * blocking the report, because an unfiled bug is worse than an unlabelled
    * one.
    */
-  const [features, myBrowsers, customFields] = await Promise.all([
+  const [features, customFields] = await Promise.all([
     activeProjectId
       ? serverFetchOrNull<readonly { id: string; name: string }[]>(
           `projects/${activeProjectId}/features`,
           activeBuildId ? { query: { buildId: activeBuildId } } : undefined,
         )
       : Promise.resolve(null),
-    serverFetchOrNull<readonly TesterBrowser[]>('catalog/me/browsers'),
     /**
      * The client's own extra questions for this build (§72).
      *
@@ -174,13 +168,14 @@ export default async function NewTesterBugPage({
       : Promise.resolve(null),
   ])
 
-  const browserOptions = (myBrowsers ?? []).map((b) => {
-    const label = [b.operatingSystem?.name, b.browser.name, b.browserVersion?.version]
-      .filter(Boolean)
-      .join(' · ')
-    return { value: label, label }
-  })
-
+  /* Device, OS, browser and network options — the tester's own kit first,
+     then the catalog. One loader, so the report form and the edit form
+     cannot offer different environments for the same bug. */
+  const environment = await loadBugEnvironmentOptions()
+  const deviceOptions = environment.devices
+  const osGroups = environment.osGroups
+  const browserOptions = environment.browsers
+  const networkOptions = environment.networks
   return (
     <DetailShell
       root={{ label: 'Tester', href: '/app/tester' }}
@@ -468,43 +463,49 @@ export default async function NewTesterBugPage({
                 gap: 'var(--space-5)',
               }}
             >
-              <Field label="Device" htmlFor="deviceModel">
-                <Input id="deviceModel" name="deviceModel" maxLength={120} placeholder="Pixel 7a" />
-              </Field>
-              <Field label="OS" htmlFor="osName">
-                <Input id="osName" name="osName" maxLength={60} placeholder="Android" />
-              </Field>
-              <Field label="OS version" htmlFor="osVersion">
-                <Input id="osVersion" name="osVersion" maxLength={40} placeholder="14" />
-              </Field>
               {/*
-                A tester who registered their browsers under Assets picks one
-                instead of retyping it — the string that reaches the API is
-                the same either way, so nothing downstream has to know which
-                path produced it. With no registered browsers this stays the
-                plain input it always was rather than an empty dropdown.
+                The environment a bug was seen in, from lists rather than five
+                text boxes. A tester's own registered kit comes first — they are
+                reporting from it — with the platform catalog behind it, so a
+                device nobody has registered yet is still reportable.
               */}
-              <Field
-                label="Browser"
-                htmlFor="browser"
-                hint={browserOptions.length > 0 ? 'From the browsers on your profile.' : undefined}
-              >
-                {browserOptions.length > 0 ? (
-                  <Select
-                    id="browser"
-                    name="browser"
-                    defaultValue=""
-                    options={[{ value: '', label: 'Not applicable' }, ...browserOptions]}
-                  />
-                ) : (
-                  <Input id="browser" name="browser" maxLength={80} placeholder="Chrome 128" />
-                )}
+              <Field label="Device" htmlFor="deviceModel">
+                <Select
+                  id="deviceModel"
+                  name="deviceModel"
+                  options={deviceOptions}
+                  placeholder="Not specified"
+                />
               </Field>
+              <PairSelect
+                groups={osGroups}
+                parentName="osName"
+                childName="osVersion"
+                parentLabel="OS"
+                childLabel="OS version"
+                idPrefix="bug-os"
+                emptyHint="The device catalog is unavailable right now."
+              />
+              <Field label="Browser" htmlFor="browser">
+                <Select
+                  id="browser"
+                  name="browser"
+                  options={browserOptions}
+                  placeholder="Not applicable"
+                />
+              </Field>
+              {/* App version stays text: it is the customer's own build
+                  number, which no catalog can know. */}
               <Field label="App version" htmlFor="appVersion">
                 <Input id="appVersion" name="appVersion" maxLength={60} placeholder="4.3.1" />
               </Field>
               <Field label="Network" htmlFor="networkType">
-                <Input id="networkType" name="networkType" maxLength={40} placeholder="5G" />
+                <Select
+                  id="networkType"
+                  name="networkType"
+                  options={networkOptions}
+                  placeholder="Not specified"
+                />
               </Field>
             </div>
           </Panel>

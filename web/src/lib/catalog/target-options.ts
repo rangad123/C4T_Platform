@@ -104,3 +104,86 @@ export function catalogHint(available: boolean, what: string): string {
     ? `From the platform ${what} catalog.`
     : `The ${what} catalog is unavailable right now — you can set this later.`
 }
+
+/**
+ * The environment lists a bug report offers: device, OS with its versions,
+ * browser and network.
+ *
+ * Separate from `loadTargetOptions` because the question is different. A
+ * build TARGET says what should be tested; this says what a bug was actually
+ * seen on, so the tester's own registered kit leads and the catalog follows.
+ * Reporting from a device nobody has registered yet is normal, which is why
+ * the catalog is appended rather than being the only source.
+ */
+export interface BugEnvironmentOptions {
+  devices: readonly TargetOption[]
+  osGroups: readonly { value: string; label: string; children: readonly TargetOption[] }[]
+  browsers: readonly TargetOption[]
+  networks: readonly TargetOption[]
+}
+
+interface EnvironmentCatalog {
+  operatingSystems: readonly {
+    name: string
+    versions: readonly { version: string }[]
+  }[]
+  browsers: readonly { name: string; versions: readonly { version: string }[] }[]
+  deviceModels: readonly { name: string; brand: { name: string } | null }[]
+  networks: readonly { name: string }[]
+}
+
+/** Own kit first, catalog behind it, no duplicates. */
+function merge(mine: readonly string[], catalog: readonly string[]): readonly TargetOption[] {
+  const seen = new Set<string>()
+  const out: TargetOption[] = []
+  for (const value of [...mine, ...catalog]) {
+    const trimmed = value.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    out.push({ value: trimmed, label: trimmed })
+  }
+  return out
+}
+
+export async function loadBugEnvironmentOptions(): Promise<BugEnvironmentOptions> {
+  const [catalog, myDevices, myBrowsers] = await Promise.all([
+    serverFetchOrNull<EnvironmentCatalog>('catalog'),
+    serverFetchOrNull<readonly { manufacturer: string | null; model: string }[]>(
+      'testers/me/devices',
+    ),
+    serverFetchOrNull<
+      readonly {
+        browser: { name: string }
+        browserVersion: { version: string } | null
+        operatingSystem: { name: string } | null
+      }[]
+    >('catalog/me/browsers'),
+  ])
+
+  const ownDevices = (myDevices ?? []).map((d) =>
+    [d.manufacturer, d.model].filter(Boolean).join(' ').trim(),
+  )
+  const catalogDevices = (catalog?.deviceModels ?? []).map((d) =>
+    d.brand ? `${d.brand.name} ${d.name}` : d.name,
+  )
+
+  const ownBrowsers = (myBrowsers ?? []).map((b) =>
+    [b.operatingSystem?.name, b.browser.name, b.browserVersion?.version]
+      .filter(Boolean)
+      .join(' · '),
+  )
+  const catalogBrowsers = (catalog?.browsers ?? []).flatMap((b) =>
+    b.versions.length > 0 ? b.versions.map((v) => `${b.name} ${v.version}`) : [b.name],
+  )
+
+  return {
+    devices: merge(ownDevices, catalogDevices),
+    osGroups: (catalog?.operatingSystems ?? []).map((os) => ({
+      value: os.name,
+      label: os.name,
+      children: os.versions.map((v) => ({ value: v.version, label: v.version })),
+    })),
+    browsers: merge(ownBrowsers, catalogBrowsers),
+    networks: (catalog?.networks ?? []).map((n) => ({ value: n.name, label: n.name })),
+  }
+}

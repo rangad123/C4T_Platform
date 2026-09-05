@@ -21,6 +21,8 @@ import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, formatDateTime, personName } from '@/lib/admin/format'
 import { addBugComment, moveBugStatus, updateBugAction } from './actions'
+import { PairSelect } from '@/components/ds/forms/PairSelect'
+import { loadBugEnvironmentOptions } from '@/lib/catalog/target-options'
 
 const ROOT = { label: 'Tester', href: '/app/tester' }
 const DETAIL_BASE = '/app/tester/bugs'
@@ -385,6 +387,14 @@ export default async function TesterBugDetailPage({
     { label: 'Network', value: bug.networkType },
   ]
 
+  /* Device, OS, browser and network options — the tester's own kit first,
+     then the catalog. One loader, so the report form and the edit form
+     cannot offer different environments for the same bug. */
+  const environment = await loadBugEnvironmentOptions()
+  const deviceOptions = environment.devices
+  const osGroups = environment.osGroups
+  const browserOptions = environment.browsers
+  const networkOptions = environment.networks
   return (
     <DetailShell
       root={ROOT}
@@ -787,38 +797,41 @@ export default async function TesterBugDetailPage({
                 gap: 'var(--space-5)',
               }}
             >
+              {/*
+                The environment, from lists rather than six text boxes. Editing an
+                old report must not rewrite what it was found on, so a stored value
+                the catalog no longer offers is kept — see `PairSelect`.
+              */}
               <Field label="Device" htmlFor="editDeviceModel">
-                <Input
+                <Select
                   id="editDeviceModel"
                   name="deviceModel"
-                  maxLength={120}
                   defaultValue={bug.deviceModel ?? ''}
+                  options={deviceOptions}
+                  placeholder="Not specified"
                 />
               </Field>
-              <Field label="OS" htmlFor="editOsName">
-                <Input
-                  id="editOsName"
-                  name="osName"
-                  maxLength={60}
-                  defaultValue={bug.osName ?? ''}
-                />
-              </Field>
-              <Field label="OS version" htmlFor="editOsVersion">
-                <Input
-                  id="editOsVersion"
-                  name="osVersion"
-                  maxLength={40}
-                  defaultValue={bug.osVersion ?? ''}
-                />
-              </Field>
+              <PairSelect
+                groups={osGroups}
+                parentName="osName"
+                childName="osVersion"
+                parentLabel="OS"
+                childLabel="OS version"
+                defaultParent={bug.osName}
+                defaultChild={bug.osVersion}
+                idPrefix="edit-bug-os"
+                emptyHint="The device catalog is unavailable right now."
+              />
               <Field label="Browser" htmlFor="editBrowser">
-                <Input
+                <Select
                   id="editBrowser"
                   name="browser"
-                  maxLength={80}
                   defaultValue={bug.browser ?? ''}
+                  options={browserOptions}
+                  placeholder="Not applicable"
                 />
               </Field>
+              {/* App version stays text: the customer's own build number. */}
               <Field label="App version" htmlFor="editAppVersion">
                 <Input
                   id="editAppVersion"
@@ -828,11 +841,12 @@ export default async function TesterBugDetailPage({
                 />
               </Field>
               <Field label="Network" htmlFor="editNetworkType">
-                <Input
+                <Select
                   id="editNetworkType"
                   name="networkType"
-                  maxLength={40}
                   defaultValue={bug.networkType ?? ''}
+                  options={networkOptions}
+                  placeholder="Not specified"
                 />
               </Field>
             </div>
