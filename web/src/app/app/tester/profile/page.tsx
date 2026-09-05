@@ -24,6 +24,8 @@ import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
 import { Select } from '@/components/ds/forms/Select'
+import { LocationSelect } from '@/components/ds/forms/LocationSelect'
+import { countryOptions } from '@/lib/geo/source'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
@@ -561,6 +563,10 @@ export default async function TesterProfilePage({
     profile.languages.map((l) => ({ code: l.code, proficiency: l.proficiency })),
   )
   const mySkillIds = new Set(profile.skills.map((s) => s.skill.id))
+  /* Server-side: `lib/geo/source` pulls in ~17MB of place data and is
+     `server-only`, so the list is built here and handed to the client picker
+     as a prop. See the note on `LocationSelect`. */
+  const countries = countryOptions()
   const osVersionOptions = (catalog?.operatingSystems ?? []).flatMap((os) =>
     os.versions.map((v) => ({ value: v.id, label: `${os.name} ${v.version}` })),
   )
@@ -817,18 +823,23 @@ export default async function TesterProfilePage({
                     ]}
                   />
                 </Field>
-                <Field label="City" htmlFor="city">
-                  <Input id="city" name="city" maxLength={120} defaultValue={profile.city ?? ''} />
-                </Field>
-                <Field label="Country" htmlFor="countryCode" hint="Two-letter code, e.g. IN.">
-                  <Input
-                    id="countryCode"
-                    name="countryCode"
-                    maxLength={2}
-                    defaultValue={profile.countryCode ?? ''}
-                    style={{ textTransform: 'uppercase' }}
-                  />
-                </Field>
+                {/*
+                  Country and city were free text — the country asked a tester
+                  to type a two-letter ISO code from memory, which is how
+                  "IN", "In", "India" and "Bharat" all end up in one column.
+
+                  `submitState={false}` because a tester profile stores only
+                  country and city. The state select still shows: a city list
+                  cannot be fetched without a state, and every city in a
+                  country is not a picker.
+                */}
+                <LocationSelect
+                  countryOptions={countries}
+                  defaultCountry={profile.countryCode}
+                  defaultCity={profile.city}
+                  submitState={false}
+                  idPrefix="tester"
+                />
               </div>
 
               <div style={FIELD_GRID}>
