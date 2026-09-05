@@ -6,24 +6,12 @@ import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, personName, searchTerm, titleCase, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
-import { BUG_SEVERITIES } from '@/lib/domain/enums'
+import { BUG_SEVERITIES, BUG_STATUSES } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/customer/bugs'
 const ROOT = { label: 'Customer', href: '/app/customer' }
-const STATUSES = [
-  'NEW',
-  'TRIAGED',
-  'CONFIRMED',
-  'IN_PROGRESS',
-  'FIXED',
-  'VERIFIED',
-  'REOPENED',
-  'REJECTED',
-  'DUPLICATE',
-  'WONT_FIX',
-  'FEATURE_REQUEST',
-] as const
+const STATUSES = BUG_STATUSES
 const SEVERITIES = BUG_SEVERITIES
 
 interface BugRow {

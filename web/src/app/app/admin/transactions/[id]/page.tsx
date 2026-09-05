@@ -19,7 +19,7 @@ import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, titleCase } from '@/lib/admin/format'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
 import { saveTransactionDetails, saveTransactionStatus, savePayoutDetails } from './actions'
-import { TRANSACTION_STATUSES } from '@/lib/domain/enums'
+import { PAYMENT_METHOD_OPTIONS, TRANSACTION_STATUSES } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/transactions/[id]` — one ledger entry.
@@ -47,14 +47,6 @@ const STATUS_OPTIONS = TRANSACTION_STATUSES.map((status) => ({
   value: status,
   label: titleCase(status),
 }))
-
-const PAYMENT_METHOD_OPTIONS = [
-  { value: '', label: 'Not set' },
-  { value: 'IND_BANK_ACCOUNT', label: 'Indian bank account' },
-  { value: 'NON_IND_BANK_ACCOUNT', label: 'International bank account' },
-  { value: 'PAYPAL', label: 'PayPal' },
-  { value: 'PAYTM', label: 'Paytm' },
-]
 
 interface TransactionDetail {
   id: string
@@ -494,7 +486,7 @@ export default async function TransactionDetailPage({
                   id="paymentMethod"
                   name="paymentMethod"
                   defaultValue={tx.paymentMethod ?? ''}
-                  options={PAYMENT_METHOD_OPTIONS}
+                  options={[{ value: '', label: 'Not set' }, ...PAYMENT_METHOD_OPTIONS]}
                 />
               </Field>
               <Field

@@ -6,24 +6,12 @@ import { ApiError } from '@/lib/api/types'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
-import { BUG_SEVERITIES } from '@/lib/domain/enums'
+import { BUG_SEVERITIES, BUG_STATUSES } from '@/lib/domain/enums'
 
 const LIST_PATH = '/app/admin/bugs'
 
 /** Mirrors the API's BugStatus enum. */
-const STATUSES = [
-  'NEW',
-  'TRIAGED',
-  'CONFIRMED',
-  'IN_PROGRESS',
-  'FIXED',
-  'VERIFIED',
-  'REOPENED',
-  'REJECTED',
-  'DUPLICATE',
-  'WONT_FIX',
-  'FEATURE_REQUEST',
-] as const
+const STATUSES = BUG_STATUSES
 
 /** Mirrors the API's BugSeverity enum. */
 const SEVERITIES = BUG_SEVERITIES

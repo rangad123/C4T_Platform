@@ -159,7 +159,25 @@ export const PAYMENT_ACCOUNT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const
 
 export const TRANSACTION_TYPE_OPTIONS = options(TRANSACTION_TYPES)
 export const TRANSACTION_STATUS_OPTIONS = options(TRANSACTION_STATUSES)
-export const PAYMENT_METHOD_OPTIONS = options(PAYMENT_METHODS)
+/**
+ * Hand-written labels, not `titleCase`.
+ *
+ * The generated version reads "Ind bank account", "Non ind bank account" and
+ * "Paypal" — an abbreviation nobody says aloud and a brand spelled wrong.
+ * Three files had already written these labels out by hand; this is where
+ * they live now, so the fourth caller does not have to guess.
+ */
+export const PAYMENT_METHOD_LABELS: Record<(typeof PAYMENT_METHODS)[number], string> = {
+  IND_BANK_ACCOUNT: 'Indian bank account',
+  NON_IND_BANK_ACCOUNT: 'International bank account',
+  PAYPAL: 'PayPal',
+  PAYTM: 'Paytm',
+}
+
+export const PAYMENT_METHOD_OPTIONS: readonly EnumOption[] = PAYMENT_METHODS.map((value) => ({
+  value,
+  label: PAYMENT_METHOD_LABELS[value],
+}))
 export const PAYMENT_ACCOUNT_COUNTRY_OPTIONS = options(PAYMENT_ACCOUNT_COUNTRIES)
 
 // ─── Elsewhere ───────────────────────────────────────────────────────────────

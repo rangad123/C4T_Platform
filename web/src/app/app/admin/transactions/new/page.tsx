@@ -14,6 +14,7 @@ import { ApiError, type ValidationDetail } from '@/lib/api/types'
 import { personName, titleCase } from '@/lib/admin/format'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { PAYMENT_METHOD_OPTIONS } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/transactions/new` — record a ledger entry.
@@ -88,14 +89,6 @@ const ECHO_KEYS = [
   'paymentMethod',
   'buildOrContestRef',
 ] as const
-
-const PAYMENT_METHOD_OPTIONS: readonly SelectOption[] = [
-  { value: '', label: 'Not set' },
-  { value: 'IND_BANK_ACCOUNT', label: 'Indian bank account' },
-  { value: 'NON_IND_BANK_ACCOUNT', label: 'International bank account' },
-  { value: 'PAYPAL', label: 'PayPal' },
-  { value: 'PAYTM', label: 'Paytm' },
-]
 
 type EchoKey = (typeof ECHO_KEYS)[number]
 type Echo = Partial<Record<EchoKey, string>>
@@ -530,7 +523,7 @@ export default async function NewTransactionPage({
                 id="paymentMethod"
                 name="paymentMethod"
                 defaultValue={params.paymentMethod ?? ''}
-                options={PAYMENT_METHOD_OPTIONS}
+                options={[{ value: '', label: 'Not set' }, ...PAYMENT_METHOD_OPTIONS]}
               />
             </Field>
 
