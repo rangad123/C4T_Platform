@@ -16,6 +16,7 @@ import { ApiError } from '@/lib/api/types'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { titleCase } from '@/lib/admin/format'
+import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 
 /**
  * `/app/admin/users/new` — the admin-created account, including the Sub-Admin
@@ -306,14 +307,8 @@ export default async function NewUserPage({
             <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
               <PhoneInput id="phone" name="phone" autoComplete="off" />
             </Field>
-            <Field label="Country" htmlFor="countryCode" hint="Two-letter code, for example IN.">
-              <Input
-                id="countryCode"
-                name="countryCode"
-                minLength={2}
-                maxLength={2}
-                autoComplete="off"
-              />
+            <Field label="Country" htmlFor="countryCode">
+              <CountrySelect id="countryCode" />
             </Field>
           </div>
         </Panel>

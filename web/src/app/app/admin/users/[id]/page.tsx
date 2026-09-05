@@ -32,6 +32,8 @@ import {
   setSubAdminPermissions,
   updateUserIdentity,
 } from './actions'
+import { CountrySelect } from '@/components/ds/forms/CountrySelect'
+import { timezoneOptions, withCurrent } from '@/lib/geo/source'
 
 /**
  * `/app/admin/users/[id]` — one account, everything an administrator can change
@@ -571,28 +573,17 @@ export default async function UserDetailPage({
                   <Field
                     label="Country"
                     htmlFor="countryCode"
-                    hint="Two-letter code, for example IN. It can be changed but not cleared."
+                    hint="It can be changed but not cleared."
                   >
-                    <Input
-                      id="countryCode"
-                      name="countryCode"
-                      defaultValue={user.countryCode ?? ''}
-                      minLength={2}
-                      maxLength={2}
-                      autoComplete="off"
-                    />
+                    <CountrySelect id="countryCode" defaultValue={user.countryCode} />
                   </Field>
-                  <Field
-                    label="Timezone"
-                    htmlFor="timezone"
-                    hint="An IANA name, for example Asia/Kolkata."
-                  >
-                    <Input
+                  <Field label="Timezone" htmlFor="timezone">
+                    <Select
                       id="timezone"
                       name="timezone"
                       defaultValue={user.timezone ?? ''}
-                      maxLength={60}
-                      autoComplete="off"
+                      placeholder="Not set"
+                      options={withCurrent(timezoneOptions(), user.timezone)}
                     />
                   </Field>
                 </div>

@@ -10,6 +10,7 @@ import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { titleCase } from '@/lib/admin/format'
+import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 import {
   addBrandAction,
   addModelAction,
@@ -542,17 +543,9 @@ export default async function CatalogPage({
               says "Orange" the same way; this now matches it.
             */}
             <Field label="Country" htmlFor="networkCountry">
-              <Input
-                id="networkCountry"
-                name="countryCode"
-                maxLength={2}
-                placeholder="GB"
-                aria-describedby="networkCountryFormat"
-                style={{ width: 90, textTransform: 'uppercase' }}
-              />
-              <span id="networkCountryFormat" className="c4t-visually-hidden">
-                Two-letter ISO country code.
-              </span>
+              {/* Was a 90px box wanting a two-letter code from memory, which
+                  is how one carrier ends up filed under GB, gb and UK. */}
+              <CountrySelect id="networkCountry" placeholder="Any country" />
             </Field>
             <SubmitButton variant="secondary" iconLeft="plus" pendingLabel="Adding…">
               Add carrier

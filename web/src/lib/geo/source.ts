@@ -97,29 +97,20 @@ export function stateCodeForName(countryCode: string, name: string): string | nu
 }
 
 /**
- * IANA time zones, from the country when one is known and the full set
- * otherwise. A country narrows ~400 zones to a handful, which is the
- * difference between a usable picker and a wall.
+ * IANA time zones.
+ *
+ * `Intl.supportedValuesOf` rather than the zone list hanging off each country
+ * in `country-state-city`: it is the platform's own list, needs no package to
+ * stay current, and is what two of the three pages that show this field were
+ * already using — each with its own private copy of the constant. This is
+ * that constant, once.
  */
-export function timezoneOptions(countryCode?: string | null): readonly Option[] {
-  if (countryCode) {
-    const zones = Country.getCountryByCode(countryCode)?.timezones ?? []
-    if (zones.length > 0) {
-      return zones
-        .map((z) => ({ value: z.zoneName, label: `${z.zoneName} (${z.gmtOffsetName})` }))
-        .sort((a, b) => a.label.localeCompare(b.label))
-    }
-  }
-  const seen = new Set<string>()
-  const all: Option[] = []
-  for (const country of Country.getAllCountries()) {
-    for (const zone of country.timezones ?? []) {
-      if (seen.has(zone.zoneName)) continue
-      seen.add(zone.zoneName)
-      all.push({ value: zone.zoneName, label: `${zone.zoneName} (${zone.gmtOffsetName})` })
-    }
-  }
-  return all.sort((a, b) => a.label.localeCompare(b.label))
+let zoneCache: readonly Option[] | null = null
+
+export function timezoneOptions(): readonly Option[] {
+  if (zoneCache) return zoneCache
+  zoneCache = Intl.supportedValuesOf('timeZone').map((zone) => ({ value: zone, label: zone }))
+  return zoneCache
 }
 
 /**

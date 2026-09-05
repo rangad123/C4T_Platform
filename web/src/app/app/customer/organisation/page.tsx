@@ -20,6 +20,8 @@ import { formatDate, personName, titleCase } from '@/lib/admin/format'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Badge } from '@/components/ds/core/Badge'
+import { LocationSelect } from '@/components/ds/forms/LocationSelect'
+import { countryOptions, stateCodeForName } from '@/lib/geo/source'
 import {
   addOrgMemberAction,
   removeOrgMemberAction,
@@ -180,6 +182,11 @@ export default async function CustomerOrganisationPage({
   }
 
   const isOwner = organisation.orgRole === 'OWNER'
+  /* Resolved server-side so the city list loads on first paint: the record
+     stores the state's NAME, and the city lookup needs its ISO code. */
+  const orgStateCode = organisation.countryCode
+    ? stateCodeForName(organisation.countryCode, organisation.state ?? '')
+    : null
   const closedHref =
     section === SECTIONS[0].value ? DETAIL_PATH : `${DETAIL_PATH}?section=${section}`
   const profileModalOpen = edit === 'profile'
@@ -415,19 +422,6 @@ export default async function CustomerOrganisationPage({
                   autoComplete="off"
                 />
               </Field>
-              <Field
-                label="Country"
-                htmlFor="countryCode"
-                hint="Two-letter code. Cannot be cleared once set."
-              >
-                <Input
-                  id="countryCode"
-                  name="countryCode"
-                  defaultValue={organisation.countryCode ?? ''}
-                  maxLength={2}
-                  style={{ textTransform: 'uppercase' }}
-                />
-              </Field>
               <Field label="Address line 1" htmlFor="addressLine1">
                 <Input
                   id="addressLine1"
@@ -444,22 +438,17 @@ export default async function CustomerOrganisationPage({
                   maxLength={255}
                 />
               </Field>
-              <Field label="City" htmlFor="city">
-                <Input
-                  id="city"
-                  name="city"
-                  defaultValue={organisation.city ?? ''}
-                  maxLength={120}
-                />
-              </Field>
-              <Field label="State" htmlFor="state">
-                <Input
-                  id="state"
-                  name="state"
-                  defaultValue={organisation.state ?? ''}
-                  maxLength={120}
-                />
-              </Field>
+              {/* Country, state and city as one dependent picker. The
+                  country was a two-letter code typed from memory; state and
+                  city were free text. */}
+              <LocationSelect
+                countryOptions={countryOptions()}
+                defaultCountry={organisation.countryCode}
+                defaultState={organisation.state}
+                defaultCity={organisation.city}
+                defaultStateCode={orgStateCode}
+                idPrefix="org"
+              />
               <Field label="Postal code" htmlFor="postalCode">
                 <Input
                   id="postalCode"

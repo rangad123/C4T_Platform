@@ -22,6 +22,8 @@ import { ApiError, type ActiveSession } from '@/lib/api/types'
 import { orDash, personName } from '@/lib/admin/format'
 import { EmailNotificationsPanel } from '@/components/settings/EmailNotificationsPanel'
 import { saveProfile, changePassword, revokeSession, signOutEverywhere } from './actions'
+import { CountrySelect } from '@/components/ds/forms/CountrySelect'
+import { timezoneOptions, withCurrent } from '@/lib/geo/source'
 
 export const metadata: Metadata = {
   title: 'Your profile',
@@ -233,8 +235,6 @@ const SESSION_COLUMNS: readonly TableColumn<ActiveSession>[] = [
   },
 ]
 
-const TIMEZONES: readonly string[] = Intl.supportedValuesOf('timeZone')
-
 const SECTIONS = [
   { value: 'profile', label: 'Profile', icon: 'user-check' },
   { value: 'password', label: 'Password', icon: 'lock' },
@@ -299,10 +299,7 @@ export default async function CustomerProfilePage({
   }
 
   const displayName = personName(profile)
-  const zoneOptions =
-    profile.timezone && !TIMEZONES.includes(profile.timezone)
-      ? [profile.timezone, ...TIMEZONES]
-      : TIMEZONES
+  const zoneOptions = withCurrent(timezoneOptions(), profile.timezone)
 
   return (
     <DetailShell
@@ -422,20 +419,8 @@ export default async function CustomerProfilePage({
                 <Field label="Phone" htmlFor="phone" hint={PHONE_HINT} required>
                   <PhoneInput id="phone" name="phone" required defaultValue={profile.phone ?? ''} />
                 </Field>
-                <Field
-                  label="Country"
-                  htmlFor="countryCode"
-                  hint="Two-letter code, for example IN or US."
-                >
-                  <Input
-                    id="countryCode"
-                    name="countryCode"
-                    defaultValue={profile.countryCode ?? ''}
-                    maxLength={2}
-                    pattern="[A-Za-z]{2}"
-                    autoComplete="country"
-                    style={{ textTransform: 'uppercase' }}
-                  />
+                <Field label="Country" htmlFor="countryCode">
+                  <CountrySelect id="countryCode" defaultValue={profile.countryCode} />
                 </Field>
                 <Field
                   label="Timezone"

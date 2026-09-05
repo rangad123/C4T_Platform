@@ -32,6 +32,8 @@ import {
   saveOrganisationProfile,
   saveOrganisationStatus,
 } from './actions'
+import { LocationSelect } from '@/components/ds/forms/LocationSelect'
+import { countryOptions, stateCodeForName } from '@/lib/geo/source'
 
 /**
  * `/app/admin/organisations/[id]` — one customer organisation (§2.2).
@@ -278,6 +280,12 @@ export default async function OrganisationDetailPage({
 
   const canWrite = hasPermission(user, 'organisation.write')
   const canArchive = hasPermission(user, 'organisation.delete')
+  const countries = countryOptions()
+  /* Resolved on the server so the city list loads on first paint. The record
+     stores the state's NAME; the city lookup needs its ISO code. */
+  const orgStateCode = organisation.countryCode
+    ? stateCodeForName(organisation.countryCode, organisation.state ?? '')
+    : null
   const detailHref = `${BASE}/${organisation.id}`
   const closedHref = section === SECTIONS[0].value ? detailHref : `${detailHref}?section=${section}`
   const profileModalOpen = edit === 'profile'
@@ -559,23 +567,20 @@ export default async function OrganisationDetailPage({
                 />
               </Field>
 
-              <Field label="City" htmlFor="city">
-                <Input
-                  id="city"
-                  name="city"
-                  defaultValue={organisation.city ?? ''}
-                  maxLength={120}
-                />
-              </Field>
-
-              <Field label="State" htmlFor="state">
-                <Input
-                  id="state"
-                  name="state"
-                  defaultValue={organisation.state ?? ''}
-                  maxLength={120}
-                />
-              </Field>
+              {/*
+                One picker for all three, replacing a city text box, a state
+                text box and a country field that asked for a two-letter code
+                from memory. The order is the picker's — country first,
+                because the other two depend on it.
+              */}
+              <LocationSelect
+                countryOptions={countries}
+                defaultCountry={organisation.countryCode}
+                defaultState={organisation.state}
+                defaultCity={organisation.city}
+                defaultStateCode={orgStateCode}
+                idPrefix="org"
+              />
 
               <Field label="Postal code" htmlFor="postalCode">
                 <Input
@@ -583,21 +588,6 @@ export default async function OrganisationDetailPage({
                   name="postalCode"
                   defaultValue={organisation.postalCode ?? ''}
                   maxLength={20}
-                />
-              </Field>
-
-              <Field
-                label="Country"
-                htmlFor="countryCode"
-                hint="Two-letter code, such as IN. Blank keeps the current code."
-              >
-                <Input
-                  id="countryCode"
-                  name="countryCode"
-                  defaultValue={organisation.countryCode ?? ''}
-                  minLength={2}
-                  maxLength={2}
-                  placeholder="IN"
                 />
               </Field>
 

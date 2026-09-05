@@ -11,6 +11,8 @@ import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission } from '@/lib/auth/session'
 import { createOrganisationAction } from '@/lib/admin/organisation-actions'
 import { titleCase } from '@/lib/admin/format'
+import { LocationSelect } from '@/components/ds/forms/LocationSelect'
+import { countryOptions } from '@/lib/geo/source'
 
 /**
  * `/app/admin/organisations/new` — create an organisation on behalf of a
@@ -127,26 +129,11 @@ export default async function NewOrganisationPage({
               </Field>
             </div>
             <div style={fieldGrid}>
-              <Field label="City" htmlFor="city">
-                <Input id="city" name="city" />
-              </Field>
-              <Field label="State / region" htmlFor="state">
-                <Input id="state" name="state" />
-              </Field>
+              {/* One picker for country, state and city — the country field
+                  used to ask for an ISO code from memory. */}
+              <LocationSelect countryOptions={countryOptions()} idPrefix="org" />
               <Field label="Postal code" htmlFor="postalCode">
                 <Input id="postalCode" name="postalCode" />
-              </Field>
-              <Field
-                label="Country"
-                htmlFor="countryCode"
-                hint="ISO 3166-1 alpha-2 — IN, US, GB, etc."
-              >
-                <Input
-                  id="countryCode"
-                  name="countryCode"
-                  maxLength={2}
-                  style={{ textTransform: 'uppercase' }}
-                />
               </Field>
             </div>
           </Panel>
