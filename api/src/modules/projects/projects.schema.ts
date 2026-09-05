@@ -7,6 +7,7 @@ import {
   BugFieldType,
 } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
+import { ISO_COUNTRY_CODES } from '../../lib/iso-countries.js'
 
 export const PROJECT_SORT_FIELDS = [
   'createdAt',
@@ -49,7 +50,12 @@ export const listProjectsQuery = paginationQuery.extend({
   sort: z.enum(PROJECT_SORT_FIELDS).optional(),
 })
 
-const isoCountry = z.string().trim().length(2).toUpperCase()
+const isoCountry = z
+  .string()
+  .trim()
+  .length(2)
+  .toUpperCase()
+  .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
 const isoLanguage = z.string().trim().length(2).toLowerCase()
 
 export const createProjectSchema = z

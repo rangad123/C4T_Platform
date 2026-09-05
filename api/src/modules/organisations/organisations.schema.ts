@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { phoneField } from '../../lib/phone.js'
 import { OrganisationStatus, OrgMemberRole } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
+import { ISO_COUNTRY_CODES } from '../../lib/iso-countries.js'
 
 export const ORG_SORT_FIELDS = ['createdAt', 'name', 'status', 'updatedAt'] as const
 
@@ -21,7 +22,13 @@ const orgProfileFields = {
   city: z.string().trim().max(120).optional(),
   state: z.string().trim().max(120).optional(),
   postalCode: z.string().trim().max(20).optional(),
-  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  countryCode: z
+    .string()
+    .trim()
+    .length(2)
+    .toUpperCase()
+    .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
+    .optional(),
   taxId: z.string().trim().max(40).optional(),
   logoFileId: z.string().cuid().optional().nullable(),
 }

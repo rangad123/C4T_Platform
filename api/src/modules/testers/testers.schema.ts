@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { TesterStatus, DeviceType } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 import { ISO_639_1_CODES } from '../../lib/languages.js'
+import { ISO_COUNTRY_CODES } from '../../lib/iso-countries.js'
 
 export const TESTER_SORT_FIELDS = [
   'createdAt',
@@ -13,7 +14,13 @@ export const TESTER_SORT_FIELDS = [
 
 export const listTestersQuery = paginationQuery.extend({
   status: z.nativeEnum(TesterStatus).optional(),
-  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  countryCode: z
+    .string()
+    .trim()
+    .length(2)
+    .toUpperCase()
+    .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
+    .optional(),
   /** Comma-separated skill slugs — all must be present. */
   skills: z
     .string()
@@ -70,7 +77,17 @@ export const updateTesterProfileSchema = z.object({
    * is what allows the field to be blanked at all — the same problem
    * `updateOwnOrganisationSchema` has with its own country code.
    */
-  countryCode: z.union([z.string().trim().length(2).toUpperCase(), z.literal('')]).optional(),
+  countryCode: z
+    .union([
+      z
+        .string()
+        .trim()
+        .length(2)
+        .toUpperCase()
+        .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code'),
+      z.literal(''),
+    ])
+    .optional(),
   gender: clearableText(40),
   ageGroup: clearableText(40),
   lookingFor: clearableText(60),
@@ -142,7 +159,13 @@ export const DEVICE_SORT_FIELDS = ['createdAt', 'model', 'manufacturer'] as cons
 export const listGlobalDevicesQuery = paginationQuery.extend({
   search: z.string().trim().max(120).optional(),
   type: z.nativeEnum(DeviceType).optional(),
-  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  countryCode: z
+    .string()
+    .trim()
+    .length(2)
+    .toUpperCase()
+    .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
+    .optional(),
   onlyWithBrowser: z
     .enum(['true', 'false'])
     .optional()
@@ -214,7 +237,13 @@ export const workHistoryIdParam = z.object({ workHistoryId: z.string().cuid() })
  */
 export const discoverTestersQuery = paginationQuery.extend({
   search: z.string().trim().max(120).optional(),
-  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  countryCode: z
+    .string()
+    .trim()
+    .length(2)
+    .toUpperCase()
+    .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
+    .optional(),
   skills: z
     .string()
     .optional()

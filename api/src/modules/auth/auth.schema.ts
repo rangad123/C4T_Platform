@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { phoneField } from '../../lib/phone.js'
 import { Role } from '@prisma/client'
+import { ISO_COUNTRY_CODES } from '../../lib/iso-countries.js'
 
 const email = z.string().trim().toLowerCase().email('Enter a valid email address').max(255)
 
@@ -24,7 +25,13 @@ export const registerSchema = z
     firstName: z.string().trim().min(1).max(80),
     lastName: z.string().trim().min(1).max(80).optional(),
     phone: phoneField.optional(),
-    countryCode: z.string().trim().length(2).toUpperCase().optional(),
+    countryCode: z
+      .string()
+      .trim()
+      .length(2)
+      .toUpperCase()
+      .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
+      .optional(),
     /**
      * SELF-REGISTRATION IS CUSTOMER OR TESTER ONLY, and the choice is required.
      *
