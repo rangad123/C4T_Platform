@@ -98,6 +98,26 @@ export async function runLoader(
       continue
     }
 
+    /*
+      Snapshot before the batch, so a rollback can discard exactly what THIS
+      batch counted and nothing else.
+
+      This used to assign 0 to inserted and updated, which threw away every
+      row counted by all the earlier batches of the same table as well. One
+      late failure in `users` was enough to under-report 5,446 migrated rows,
+      and the summary then declared counts unbalanced on a run that had
+      written the data correctly — the numbers were wrong, not the migration.
+      `skipped` is restored too, because the replay re-runs every row in the
+      batch — including the ones already counted before the error — so leaving
+      it would count those twice. `failed` is not: it is only ever incremented
+      by the replay itself.
+    */
+    const beforeBatch = {
+      inserted: counter.inserted,
+      updated: counter.updated,
+      skipped: counter.skipped,
+    }
+
     try {
       await ctx.prisma.$transaction(async (tx) => {
         for (const row of rows) {
@@ -107,8 +127,9 @@ export async function runLoader(
     } catch (error) {
       // The batch rolled back. Replay row by row so one bad record does not
       // cost the rest, and so the failure is attributable.
-      counter.inserted = 0
-      counter.updated = 0
+      counter.inserted = beforeBatch.inserted
+      counter.updated = beforeBatch.updated
+      counter.skipped = beforeBatch.skipped
       await replayIndividually(ctx, loader, mapping, rows, counter, error)
     }
   }
