@@ -155,8 +155,7 @@ export async function logoutAction(formData?: FormData): Promise<void> {
     slash is accepted, which cannot express another host.
   */
   const requested = formData?.get('next')
-  const next =
-    typeof requested === 'string' && /^\/(?!\/)/.test(requested) ? requested : null
+  const next = typeof requested === 'string' && /^\/(?!\/)/.test(requested) ? requested : null
 
   // Read the refresh cookie so the API can destroy the session row even if
   // the access cookie has already expired.

@@ -2,6 +2,7 @@ import { BroadcastStatus, DeviceType, FileScope, OsKind } from '@prisma/client'
 import { query } from '../legacy/client.js'
 import { DEVICE_TYPE } from '../mapping/lookups.js'
 import {
+  asText,
   enumValue,
   legacyRef,
   requiredText,
@@ -82,7 +83,7 @@ export const mobileOsVersionLoader: Loader = {
         legacyId,
         field: 'ost_id',
         referencedTable: 'mobile_os_type',
-        referencedId: String(row.mov_ost_id ?? row.ost_id ?? ''),
+        referencedId: asText(row.mov_ost_id ?? row.ost_id),
       })
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Version has no migrated OS.' }
     }
@@ -148,7 +149,7 @@ export const browserVersionLoader: Loader = {
         legacyId,
         field: 'brw_id',
         referencedTable: 'browsers',
-        referencedId: String(row.brw_id ?? ''),
+        referencedId: asText(row.brw_id),
       })
       return {
         kind: 'skipped',
@@ -232,7 +233,7 @@ export const testerDeviceLoader: Loader = {
         legacyId,
         field: 'dvc_add_by',
         referencedTable: 'users',
-        referencedId: String(row.dvc_add_by ?? row.dvc_user_id ?? ''),
+        referencedId: asText(row.dvc_add_by ?? row.dvc_user_id),
       })
       return {
         kind: 'skipped',
@@ -338,7 +339,7 @@ export const testerBrowserLoader: Loader = {
         legacyId,
         field: 'user_id',
         referencedTable: 'users',
-        referencedId: String(row.user_id ?? ''),
+        referencedId: asText(row.user_id),
       })
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'No migrated tester profile.' }
     }
@@ -442,7 +443,7 @@ function materialLoader(config: {
           legacyId,
           field: config.buildCol,
           referencedTable: 'builds',
-          referencedId: String(row[config.buildCol] ?? ''),
+          referencedId: asText(row[config.buildCol]),
         })
         return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'No build to attach to.' }
       }
@@ -593,7 +594,7 @@ export const broadcastLoader: Loader = {
         legacyId,
         field: 'creator_id',
         referencedTable: 'users',
-        referencedId: String(row.creator_id ?? ''),
+        referencedId: asText(row.creator_id),
       })
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Sender not migrated.' }
     }
@@ -643,7 +644,11 @@ export const broadcastRecipientLoader: Loader = {
         referencedTable: broadcastId ? 'users' : 'message',
         referencedId: String(broadcastId ? row.recipient_id : row.message_id),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Missing broadcast or recipient.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Missing broadcast or recipient.',
+      }
     }
 
     const existing = await tx.broadcastRecipient.findFirst({

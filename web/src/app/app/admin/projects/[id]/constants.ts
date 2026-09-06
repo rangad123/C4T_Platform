@@ -219,8 +219,6 @@ export interface InviteBlocker {
   adminCanFix: boolean
 }
 
-
-
 // ─── Build details, summary, structured testing ───────────────────────────
 // Response shapes taken from projects.service.ts's `buildSelect` and
 // testing.service.ts's `buildSummary`/`testCaseSelect`.

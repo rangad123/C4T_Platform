@@ -199,7 +199,6 @@ export async function changeProjectStatus(formData: FormData): Promise<void> {
   redirect(projectHref(id, { notice }), 'replace')
 }
 
-
 /** Activate, complete or remove one tester on the roster. */
 /**
  * Move one tester's standing on this build — activate them, mark them done,

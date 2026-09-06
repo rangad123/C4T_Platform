@@ -10,6 +10,7 @@ import {
   USER_STATUS,
 } from '../mapping/lookups.js'
 import {
+  asText,
   bool,
   countryCode,
   email as parseEmail,
@@ -23,7 +24,7 @@ import {
   timestampOr,
   url as parseUrl,
 } from '../transform/values.js'
-import type { Loader, LoadContext, RowOutcome } from './context.js'
+import type { Loader, RowOutcome } from './context.js'
 import { reportProblems } from './context.js'
 
 /**
@@ -62,8 +63,8 @@ function buildCountryIndex(): void {
     england: 'GB',
     uae: 'AE',
     'south korea': 'KR',
-    'russia': 'RU',
-    'vietnam': 'VN',
+    russia: 'RU',
+    vietnam: 'VN',
   }
   for (const [name, code] of Object.entries(aliases)) COUNTRY_BY_NAME.set(name, code)
 }
@@ -178,7 +179,7 @@ function resolveRole(row: LegacyRow, roleNames: Map<string, string>) {
     value: Role.USER,
     problem: {
       field: 'usr_role_id',
-      value: String(row.usr_role_id ?? ''),
+      value: asText(row.usr_role_id),
       problem: 'unknown legacy role; defaulted to USER',
     },
   }
@@ -214,7 +215,7 @@ export const userLoader: Loader = {
         code: 'INVALID_EMAIL',
         message: 'Cannot migrate a user without a usable email — it is the login identity.',
         field: 'usr_email',
-        value: String(row.usr_email ?? ''),
+        value: asText(row.usr_email),
       }
     }
 
@@ -322,8 +323,7 @@ export const userLoader: Loader = {
         skype: text(row.usr_skype),
         linkedinUrl: linkedin.value,
         profession: text(row.usr_desig),
-        ndaAcceptedAt:
-          text(row.usr_agreement_verification) === 'verified' ? createdAt : null,
+        ndaAcceptedAt: text(row.usr_agreement_verification) === 'verified' ? createdAt : null,
         createdAt,
         updatedAt,
       }
@@ -430,7 +430,7 @@ export const orgMemberLoader: Loader = {
         code: 'INACTIVE_MEMBERSHIP',
         message: 'uom_status=inactive and OrganisationMember has no inactive state.',
         field: 'uom_status',
-        value: String(row.uom_status ?? ''),
+        value: asText(row.uom_status),
       }
     }
 
@@ -459,7 +459,9 @@ export const orgMemberLoader: Loader = {
     const roleId = legacyRef(row.uom_role_id)
     // `??` alone would not catch the empty string `roleId &&` can produce, and
     // an empty orgRole is not a legal enum member.
-    const orgRole = roleId ? (ORG_MEMBER_ROLE_BY_LEGACY_ID[roleId] ?? OrgMemberRole.MEMBER) : OrgMemberRole.MEMBER
+    const orgRole = roleId
+      ? (ORG_MEMBER_ROLE_BY_LEGACY_ID[roleId] ?? OrgMemberRole.MEMBER)
+      : OrgMemberRole.MEMBER
     const joinedAt = timestampOr(row.uom_creation_date)
 
     const data = { orgRole, invitedAt: joinedAt, joinedAt }
@@ -480,13 +482,7 @@ export const orgMemberLoader: Loader = {
           select: { id: true },
         })
 
-    await ctx.idMap.remember(
-      tx,
-      'user_organisation_map',
-      legacyId,
-      'OrganisationMember',
-      member.id,
-    )
+    await ctx.idMap.remember(tx, 'user_organisation_map', legacyId, 'OrganisationMember', member.id)
     return { kind: 'written', created: !existing }
   },
 }
@@ -562,11 +558,7 @@ export const invitationLoader: Loader = {
       updatedAt: createdAt,
     }
 
-    const mapped = await ctx.idMap.resolve(
-      'user_invitation',
-      legacyId,
-      'OrganisationInvitation',
-    )
+    const mapped = await ctx.idMap.resolve('user_invitation', legacyId, 'OrganisationInvitation')
     const existing = mapped
       ? await tx.organisationInvitation.findUnique({ where: { id: mapped }, select: { id: true } })
       : null

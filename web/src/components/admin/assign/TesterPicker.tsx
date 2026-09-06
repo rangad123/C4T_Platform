@@ -376,7 +376,10 @@ export function TesterPicker({
                 const choice = SORT_CHOICES.find((c) => c.value === e.target.value)
                 if (!choice) return
                 setPage(1)
-                setSort({ field: choice.value.split(':')[0] ?? 'ratingAverage', direction: choice.direction })
+                setSort({
+                  field: choice.value.split(':')[0] ?? 'ratingAverage',
+                  direction: choice.direction,
+                })
               }}
               options={SORT_CHOICES.map((c) => ({ value: c.value, label: c.label }))}
             />

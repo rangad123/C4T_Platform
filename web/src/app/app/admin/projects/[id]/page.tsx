@@ -239,53 +239,47 @@ export default async function ProjectDetailPage({
    * a visit only pays for the data it shows; `loading.tsx` already covers
    * the brief gap while that narrower set of fetches resolves.
    */
-  const [
-    bugs,
-    features,
-    buildSummaryData,
-    testCases,
-    projectReport,
-    projectRatings,
-  ] = await Promise.all([
-    section === 'bugs'
-      ? loadList<ProjectBugRow>('bugs', {
-          page: 1,
-          limit: BUG_PREVIEW_SIZE,
-          query: { projectId: project.id, buildId: activeBuildId },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    section === 'features'
-      ? serverFetchOrNull<
-          readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
-        >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
-      : Promise.resolve(null),
-    section === 'build'
-      ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
-      : Promise.resolve(null),
-    section === 'testing'
-      ? loadList<TestCaseRow>('test-cases', {
-          page: 1,
-          limit: 50,
-          query: { buildId: activeBuildId },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    // Same by-project report the Reports module's "By project" section
-    // renders — reused for the Overview tab's summary rather than a second
-    // aggregation. Rolled up across every build, unlike `buildSummaryData`.
-    section === 'dashboard'
-      ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
-      : Promise.resolve(null),
-    // Only the New build modal reads this, and that modal opens from every
-    /**
-     * Ratings already left on this project, so the roster can say which
-     * testers this viewer has rated. Only needed where the column renders.
-     */
-    section === 'testers'
-      ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
-          query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
-        })
-      : Promise.resolve(null),
-  ])
+  const [bugs, features, buildSummaryData, testCases, projectReport, projectRatings] =
+    await Promise.all([
+      section === 'bugs'
+        ? loadList<ProjectBugRow>('bugs', {
+            page: 1,
+            limit: BUG_PREVIEW_SIZE,
+            query: { projectId: project.id, buildId: activeBuildId },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      section === 'features'
+        ? serverFetchOrNull<
+            readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
+          >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
+        : Promise.resolve(null),
+      section === 'build'
+        ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
+        : Promise.resolve(null),
+      section === 'testing'
+        ? loadList<TestCaseRow>('test-cases', {
+            page: 1,
+            limit: 50,
+            query: { buildId: activeBuildId },
+          })
+        : Promise.resolve({ error: 'forbidden' as const }),
+      // Same by-project report the Reports module's "By project" section
+      // renders — reused for the Overview tab's summary rather than a second
+      // aggregation. Rolled up across every build, unlike `buildSummaryData`.
+      section === 'dashboard'
+        ? serverFetchOrNull<ProjectReportSummary>(`reports/by-project/${project.id}`)
+        : Promise.resolve(null),
+      // Only the New build modal reads this, and that modal opens from every
+      /**
+       * Ratings already left on this project, so the roster can say which
+       * testers this viewer has rated. Only needed where the column renders.
+       */
+      section === 'testers'
+        ? serverFetchOrNull<readonly ProjectRatingRow[]>('ratings', {
+            query: { projectId: project.id, subjectType: 'TESTER', limit: 100 },
+          })
+        : Promise.resolve(null),
+    ])
 
   /**
    * The badge catalogue, for the award modal's options. Seeded platform

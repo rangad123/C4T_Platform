@@ -1,4 +1,5 @@
 import { PaymentAccountStatus, TransactionStatus, TransactionType } from '@prisma/client'
+import type { PrismaClient } from '@prisma/client'
 import {
   encryptPaymentDetails,
   maskPaymentDetails,
@@ -15,13 +16,14 @@ import {
   TRANSACTION_TYPE,
 } from '../mapping/lookups.js'
 import {
-  amountToMinor,
+  asText,
   enumValue,
   legacyRef,
   requiredText,
   text,
   timestamp,
   timestampOr,
+  amountToMinor,
 } from '../transform/values.js'
 import type { Loader, RowOutcome } from './context.js'
 import { reportProblems } from './context.js'
@@ -75,17 +77,16 @@ export const paymentAccountLoader: Loader = {
         legacyId,
         field: 'pmt_user_id',
         referencedTable: 'users',
-        referencedId: String(row.pmt_user_id ?? ''),
+        referencedId: asText(row.pmt_user_id),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Payment account has no migrated user.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Payment account has no migrated user.',
+      }
     }
 
-    const country = enumValue(
-      row.pmt_country,
-      PAYMENT_ACCOUNT_COUNTRY,
-      'INDIAN',
-      'pmt_country',
-    )
+    const country = enumValue(row.pmt_country, PAYMENT_ACCOUNT_COUNTRY, 'INDIAN', 'pmt_country')
     const method = enumValue(
       row.pmt_payment_type,
       PAYMENT_METHOD,
@@ -204,16 +205,11 @@ export const transactionLoader: Loader = {
         code: 'INVALID_AMOUNT',
         message: 'Transaction amount is not a number.',
         field: 'pmt_amount',
-        value: String(row.pmt_amount ?? ''),
+        value: asText(row.pmt_amount),
       }
     }
 
-    const type = enumValue(
-      row.pmt_type,
-      TRANSACTION_TYPE,
-      TransactionType.ADJUSTMENT,
-      'pmt_type',
-    )
+    const type = enumValue(row.pmt_type, TRANSACTION_TYPE, TransactionType.ADJUSTMENT, 'pmt_type')
     problems.push(type.problem)
 
     const status = enumValue(
@@ -298,9 +294,7 @@ export const transactionLoader: Loader = {
 }
 
 let cachedAdmin: string | null | undefined
-async function firstAdmin(ctx: {
-  prisma: { user: { findFirst: typeof import('@prisma/client').PrismaClient.prototype.user.findFirst } }
-}): Promise<string | null> {
+async function firstAdmin(ctx: { prisma: PrismaClient }): Promise<string | null> {
   if (cachedAdmin !== undefined) return cachedAdmin
   const admin = await ctx.prisma.user.findFirst({
     where: { role: 'ADMIN', deletedAt: null },
@@ -336,9 +330,13 @@ export const announcementLoader: Loader = {
         legacyId,
         field: 'A_added_by',
         referencedTable: 'users',
-        referencedId: String(row.A_added_by ?? ''),
+        referencedId: asText(row.A_added_by),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Announcement author not migrated.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Announcement author not migrated.',
+      }
     }
 
     const buildId = await ctx.idMap.resolve('builds', legacyRef(row.A_build_id), 'Build')

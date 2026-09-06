@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { migrationEnv } from '../config.js'
+import { asText } from '../transform/values.js'
 
 /**
  * Read-only access to the legacy MariaDB.
@@ -131,7 +132,7 @@ export async function* batches(
     const last = rows[rows.length - 1]
     const next = last?.[pk]
     if (next === undefined || next === null) return
-    cursor = String(next)
+    cursor = asText(next)
 
     if (rows.length < size) return
   }

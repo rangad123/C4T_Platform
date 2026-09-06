@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { asText } from '../transform/values.js'
 
 /**
  * Collects everything the run wants to say, and writes it out at the end.
@@ -89,9 +90,7 @@ export class Reporter {
   }
 
   allCounters(): TableCounters[] {
-    return [...this.counters.values()].sort((a, b) =>
-      a.legacyTable.localeCompare(b.legacyTable),
-    )
+    return [...this.counters.values()].sort((a, b) => a.legacyTable.localeCompare(b.legacyTable))
   }
 
   // ── Problems ──────────────────────────────────────────────────────────────
@@ -166,18 +165,23 @@ export class Reporter {
 
   // ── Output ────────────────────────────────────────────────────────────────
 
-  private static csvField(value: unknown): string {
-    const s = value === null || value === undefined ? '' : String(value)
+  private static readonly csvField = function (this: void, value: unknown): string {
+    const s = asText(value)
     // Formula injection: Excel treats these as executable on open.
     const guarded = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s
     return `"${guarded.replace(/"/g, '""')}"`
   }
 
   private static csv(headers: string[], rows: unknown[][]): string {
-    const lines = [headers.map(Reporter.csvField).join(',')]
-    for (const row of rows) lines.push(row.map(Reporter.csvField).join(','))
-    // BOM so Excel reads UTF-8 rather than the system codepage.
-    return `﻿${lines.join('\r\n')}\r\n`
+    const lines = [headers.map((h) => Reporter.csvField(h)).join(',')]
+    for (const row of rows) lines.push(row.map((v) => Reporter.csvField(v)).join(','))
+    /*
+      Written as an escape, not a literal. A raw BOM is an invisible
+      character in source that `no-irregular-whitespace` rightly refuses,
+      and that nobody can see when reading the file. Excel reads a UTF-8
+      CSV as the system codepage without it, mangling every accented name.
+    */
+    return `\uFEFF${lines.join('\r\n')}\r\n`
   }
 
   write(meta: {
@@ -198,7 +202,16 @@ export class Reporter {
     out(
       'table-counts.csv',
       Reporter.csv(
-        ['legacy_table', 'target_model', 'read', 'inserted', 'updated', 'skipped', 'failed', 'balanced'],
+        [
+          'legacy_table',
+          'target_model',
+          'read',
+          'inserted',
+          'updated',
+          'skipped',
+          'failed',
+          'balanced',
+        ],
         counters.map((c) => [
           c.legacyTable,
           c.targetModel,
@@ -215,10 +228,28 @@ export class Reporter {
     out(
       'migration-errors.csv',
       Reporter.csv(
-        ['legacy_table', 'legacy_id', 'target_model', 'code', 'field', 'value', 'message', 'action'],
+        [
+          'legacy_table',
+          'legacy_id',
+          'target_model',
+          'code',
+          'field',
+          'value',
+          'message',
+          'action',
+        ],
         this.problems
           .filter((p) => p.action === 'FAILED')
-          .map((p) => [p.legacyTable, p.legacyId, p.targetModel, p.code, p.field, p.value, p.message, p.action]),
+          .map((p) => [
+            p.legacyTable,
+            p.legacyId,
+            p.targetModel,
+            p.code,
+            p.field,
+            p.value,
+            p.message,
+            p.action,
+          ]),
       ),
     )
 
@@ -236,7 +267,13 @@ export class Reporter {
       'orphan-records.csv',
       Reporter.csv(
         ['legacy_table', 'legacy_id', 'field', 'referenced_table', 'referenced_id'],
-        this.orphans.map((o) => [o.legacyTable, o.legacyId, o.field, o.referencedTable, o.referencedId]),
+        this.orphans.map((o) => [
+          o.legacyTable,
+          o.legacyId,
+          o.field,
+          o.referencedTable,
+          o.referencedId,
+        ]),
       ),
     )
 
@@ -289,7 +326,9 @@ export class Reporter {
         (c) =>
           `| ${pad(c.legacyTable, 22)} | ${pad(c.targetModel, 20)} | ${String(c.read).padStart(7)} | ${String(
             c.inserted,
-          ).padStart(8)} | ${String(c.updated).padStart(7)} | ${String(c.skipped).padStart(7)} | ${String(
+          ).padStart(
+            8,
+          )} | ${String(c.updated).padStart(7)} | ${String(c.skipped).padStart(7)} | ${String(
             c.failed,
           ).padStart(6)} |`,
       )

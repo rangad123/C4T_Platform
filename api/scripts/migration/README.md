@@ -50,8 +50,8 @@ cannot leave a loader without being counted.
   that is not a `SELECT`.
 - **Never log a secret.** Password hashes are reported by length, bank details
   never at all.
-- **Report, do not guess.** An unmapped enum value returns the fallback *and* a
-  problem record. A truncation returns the shortened value *and* a problem
+- **Report, do not guess.** An unmapped enum value returns the fallback _and_ a
+  problem record. A truncation returns the shortened value _and_ a problem
   record.
 
 ## Tests

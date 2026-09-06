@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { query } from '../legacy/client.js'
 import { ASSIGNMENT_STATUS, TEST_CASE_RESULT } from '../mapping/lookups.js'
 import {
-  bool,
+  asText,
   enumValue,
   int,
   legacyRef,
@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   timestampOr,
+  bool,
 } from '../transform/values.js'
 import type { Loader, LoadContext, RowOutcome } from './context.js'
 
@@ -87,7 +88,7 @@ export const projectLoader: Loader = {
         legacyId,
         field: 'org_id',
         referencedTable: 'organisation',
-        referencedId: String(row.org_id ?? ''),
+        referencedId: asText(row.org_id),
       })
       return {
         kind: 'skipped',
@@ -116,7 +117,7 @@ export const projectLoader: Loader = {
           targetModel: 'Project',
           code: 'SUBSTITUTED_REFERENCE',
           field: 'project_created_by',
-          value: String(row.project_created_by ?? ''),
+          value: asText(row.project_created_by),
           message: 'Creator not migrated; attributed to the organisation owner.',
           action: 'REVIEW_REQUIRED',
         })
@@ -222,7 +223,11 @@ export const projectLoader: Loader = {
 
     await ctx.idMap.remember(tx, 'projects', buildKey, 'Build', build.id)
 
-    for (const field of ['project_cycle_type', 'project_pricing_model_id', 'export_project_key'] as const) {
+    for (const field of [
+      'project_cycle_type',
+      'project_pricing_model_id',
+      'export_project_key',
+    ] as const) {
       if (text(row[field])) {
         ctx.reporter.problem({
           legacyTable: 'projects',
@@ -265,7 +270,11 @@ export const buildLoader: Loader = {
         referencedTable: 'projects',
         referencedId: String(projectLegacy ?? ''),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Build has no migrated project.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Build has no migrated project.',
+      }
     }
 
     const createdAt = timestampOr(row.build_created_date, row.build_add_date)
@@ -439,9 +448,13 @@ export const testCaseLoader: Loader = {
         legacyId,
         field: 'case_build_id',
         referencedTable: 'builds',
-        referencedId: String(row.case_build_id ?? ''),
+        referencedId: asText(row.case_build_id),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Test case has no migrated build.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Test case has no migrated build.',
+      }
     }
 
     const createdById =
@@ -503,7 +516,11 @@ export const testReportLoader: Loader = {
         referencedTable: testCaseId ? 'users' : 'test_case',
         referencedId: String(testCaseId ? row.trep_tester_id : row.trep_case_id),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Report has no migrated case or tester.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Report has no migrated case or tester.',
+      }
     }
 
     const testCase = await tx.testCase.findUnique({
@@ -514,7 +531,12 @@ export const testReportLoader: Loader = {
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Test case vanished mid-run.' }
     }
 
-    const result = enumValue(row.trep_result ?? row.trep_status, TEST_CASE_RESULT, 'NOT_TESTED', 'trep_result')
+    const result = enumValue(
+      row.trep_result ?? row.trep_status,
+      TEST_CASE_RESULT,
+      'NOT_TESTED',
+      'trep_result',
+    )
 
     /*
       `trep_defect_id` is what makes a bug the OUTCOME of executing a test case
@@ -576,7 +598,7 @@ export const testReviewLoader: Loader = {
         legacyId,
         field: 'rvw_build_id',
         referencedTable: 'builds',
-        referencedId: String(row.rvw_build_id ?? ''),
+        referencedId: asText(row.rvw_build_id),
       })
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Review has no migrated build.' }
     }
@@ -602,7 +624,10 @@ export const testReviewLoader: Loader = {
 
     const review = existing
       ? await tx.testReview.update({ where: { id: existing.id }, data, select: { id: true } })
-      : await tx.testReview.create({ data: { ...data, buildId, createdById }, select: { id: true } })
+      : await tx.testReview.create({
+          data: { ...data, buildId, createdById },
+          select: { id: true },
+        })
 
     await ctx.idMap.remember(tx, 'test_review', legacyId, 'TestReview', review.id)
     return { kind: 'written', created: !existing }
@@ -652,13 +677,7 @@ export const testCaseAssignmentLoader: Loader = {
         select: { id: true },
       }))
 
-    await ctx.idMap.remember(
-      tx,
-      'assign_testCase',
-      legacyId,
-      'TestCaseAssignment',
-      assignment.id,
-    )
+    await ctx.idMap.remember(tx, 'assign_testCase', legacyId, 'TestCaseAssignment', assignment.id)
     return { kind: 'written', created: !existing }
   },
 }

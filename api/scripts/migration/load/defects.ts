@@ -1,4 +1,4 @@
-import { BugSeverity, BugStatus, FileScope, type Prisma } from '@prisma/client'
+import { BugSeverity, BugStatus, FileScope } from '@prisma/client'
 import {
   BUG_FIELD_TYPE,
   BUG_REPRODUCIBILITY,
@@ -8,6 +8,7 @@ import {
 } from '../mapping/lookups.js'
 import { query } from '../legacy/client.js'
 import {
+  asText,
   enumValue,
   int,
   legacyRef,
@@ -77,7 +78,7 @@ export const bugLoader: Loader = {
           targetModel: 'Bug',
           code: 'SUBSTITUTED_REFERENCE',
           field: 'bug_build_id',
-          value: String(row.bug_build_id ?? ''),
+          value: asText(row.bug_build_id),
           message: 'No migrated build; attached to the project default build.',
           action: 'REVIEW_REQUIRED',
         })
@@ -90,7 +91,7 @@ export const bugLoader: Loader = {
         legacyId,
         field: 'bug_build_id',
         referencedTable: 'builds',
-        referencedId: String(row.bug_build_id ?? ''),
+        referencedId: asText(row.bug_build_id),
       })
       return {
         kind: 'skipped',
@@ -118,7 +119,7 @@ export const bugLoader: Loader = {
         legacyId,
         field: 'bug_created_by',
         referencedTable: 'users',
-        referencedId: String(row.bug_created_by ?? row.bug_tester_id ?? ''),
+        referencedId: asText(row.bug_created_by ?? row.bug_tester_id),
       })
       return {
         kind: 'skipped',
@@ -251,7 +252,11 @@ export const bugCommentLoader: Loader = {
         referencedTable: bugId ? 'users' : 'bugs_report',
         referencedId: String(bugId ? row.written_by : row.bug_id),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Comment has no migrated bug or author.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Comment has no migrated bug or author.',
+      }
     }
 
     const body = text(row.comments_text ?? row.comment ?? row.comments_desc)
@@ -307,9 +312,13 @@ export const bugAttachmentLoader: Loader = {
         legacyId,
         field: 'attach_bugs_report_id',
         referencedTable: 'bugs_report',
-        referencedId: String(row.attach_bugs_report_id ?? ''),
+        referencedId: asText(row.attach_bugs_report_id),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Attachment has no migrated bug.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Attachment has no migrated bug.',
+      }
     }
 
     const filename = text(row.attach_filename)
@@ -435,9 +444,13 @@ export const bugCustomFieldLoader: Loader = {
         legacyId,
         field: 'cbf_build_id',
         referencedTable: 'builds',
-        referencedId: String(row.cbf_build_id ?? ''),
+        referencedId: asText(row.cbf_build_id),
       })
-      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Custom field has no migrated build.' }
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'Custom field has no migrated build.',
+      }
     }
 
     const name = text(row.cbf_name ?? row.cbf_label)

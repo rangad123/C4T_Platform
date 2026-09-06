@@ -5,7 +5,7 @@ import type { Reporter } from '../report/reporter.js'
 import type { TableMapping } from '../mapping/registry.js'
 import { batches, countRows, tableExists } from '../legacy/client.js'
 import type { LegacyRow } from '../legacy/client.js'
-import type { Problem } from '../transform/values.js'
+import { asText, type Problem } from '../transform/values.js'
 
 /** Everything a loader needs, passed once rather than threaded through calls. */
 export interface LoadContext {
@@ -206,7 +206,7 @@ class Rollback extends Error {}
 export function legacyIdOf(row: LegacyRow, mapping: TableMapping): string | null {
   if (!mapping.legacyPk) return null
   const v = row[mapping.legacyPk]
-  return v === null || v === undefined ? null : String(v)
+  return v === null || v === undefined ? null : asText(v)
 }
 
 export function messageOf(error: unknown): string {

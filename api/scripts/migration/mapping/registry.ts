@@ -30,13 +30,7 @@ export type Disposition =
   | 'DEPRECATED'
   | 'NO_EQUIVALENT'
 
-export type MappingKind =
-  | 'DIRECT'
-  | 'RENAMED'
-  | 'SPLIT'
-  | 'MERGED'
-  | 'JUNCTION'
-  | 'NOT_MIGRATED'
+export type MappingKind = 'DIRECT' | 'RENAMED' | 'SPLIT' | 'MERGED' | 'JUNCTION' | 'NOT_MIGRATED'
 
 export interface TableMapping {
   /** Legacy table name, exactly as it appears in the dump. */
@@ -540,7 +534,11 @@ export const REGISTRY: readonly TableMapping[] = [
   // ── Phase 6 · Contests ────────────────────────────────────────────────────
   ...(
     [
-      ['contests', 'contest_id', 'The contest itself — 34 columns including prizes, gender targeting and custom feedback.'],
+      [
+        'contests',
+        'contest_id',
+        'The contest itself — 34 columns including prizes, gender targeting and custom feedback.',
+      ],
       ['contest_tasks', 'task_id', 'Tasks within a contest.'],
       ['contest_question', 'question_id', 'Survey questions (survey_type, answer_type).'],
       ['contest_answers', 'answer_id', 'Participant answers.'],

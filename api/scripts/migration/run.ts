@@ -123,7 +123,9 @@ async function main(): Promise<void> {
         console.log(
           `read ${String(c.read).padStart(7)}  ins ${String(c.inserted).padStart(6)}  upd ${String(
             c.updated,
-          ).padStart(5)}  skip ${String(c.skipped).padStart(5)}  fail ${String(c.failed).padStart(4)}`,
+          ).padStart(
+            5,
+          )}  skip ${String(c.skipped).padStart(5)}  fail ${String(c.failed).padStart(4)}`,
         )
       } catch (error) {
         failedTables += 1

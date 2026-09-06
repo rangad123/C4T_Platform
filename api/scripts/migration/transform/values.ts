@@ -25,7 +25,7 @@ export interface Problem {
  */
 export function text(value: unknown): string | null {
   if (value === null || value === undefined) return null
-  const s = String(value).trim()
+  const s = asText(value).trim()
   if (s === '' || s === 'NULL' || s === 'null') return null
   return s
 }
@@ -190,7 +190,14 @@ export function list(value: unknown): string[] {
     }
   }
 
-  return [...new Set(s.split(/[,;|]/).map((p) => p.trim()).filter(Boolean))]
+  return [
+    ...new Set(
+      s
+        .split(/[,;|]/)
+        .map((p) => p.trim())
+        .filter(Boolean),
+    ),
+  ]
 }
 
 // ── Identity ─────────────────────────────────────────────────────────────────
@@ -237,7 +244,10 @@ export function countryCode(
 }
 
 /** A URL the new schema will accept, or null plus a problem. */
-export function url(value: unknown, field: string): { value: string | null; problem: Problem | null } {
+export function url(
+  value: unknown,
+  field: string,
+): { value: string | null; problem: Problem | null } {
   const s = text(value)
   if (s === null) return { value: null, problem: null }
   const candidate = /^https?:\/\//i.test(s) ? s : `https://${s}`
@@ -283,4 +293,32 @@ export function slugify(value: string): string {
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * A legacy cell rendered for a REPORT, never for storage.
+ *
+ * `String(row.some_column)` is what the reporting paths reached for, and on a
+ * `Record<string, unknown>` that is a promise to print `[object Object]` the
+ * first time a driver hands back a Buffer or a Date instead of a scalar — in
+ * the orphan and invalid-record CSVs, which exist precisely so a human can
+ * chase the value down. Anything that is not a scalar is described by its
+ * type instead, which is at least true.
+ */
+export function asText(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') {
+    return String(value)
+  }
+  if (value instanceof Date) return value.toISOString()
+  /*
+    Narrowed explicitly rather than falling through to `String(value)`. A
+    symbol throws on template interpolation, and an object stringifies to
+    `[object Object]` — the exact outcome this function exists to prevent. Both
+    are described by what they are instead.
+  */
+  if (typeof value === 'symbol') return value.toString()
+  if (typeof value === 'object') return `[${value.constructor.name}]`
+  return '[unprintable]'
 }
