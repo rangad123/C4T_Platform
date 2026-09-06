@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getUser } from '@/lib/auth/session'
+import { logoutAction } from '@/lib/auth/actions'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { Button } from '@/components/ds/core/Button'
@@ -51,10 +52,10 @@ export default async function InvitationPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>
-  searchParams: Promise<{ outcome?: string }>
+  searchParams: Promise<{ outcome?: string; detail?: string }>
 }) {
   const { token } = await params
-  const { outcome } = await searchParams
+  const { outcome, detail } = await searchParams
   const user = await getUser()
 
   /**
@@ -72,6 +73,20 @@ export default async function InvitationPage({
       redirect(`/app/customer/organisation?section=members&notice=joined-${result.organisation.id}`)
     } catch (error) {
       if (!(error instanceof ApiError)) throw error
+      /*
+        A 403 carries its own message and it is the useful one: the API names
+        the address the invitation went to, masked. The generic line here said
+        only "a different email address", which is why production logs show
+        the same person retrying six times — nothing on the page told them
+        which account to use. Passed through rather than mapped to a constant.
+      */
+      if (error.status === 403 && error.message) {
+        redirect(
+          `/invitations/${encodeURIComponent(token)}?outcome=mismatch&detail=${encodeURIComponent(
+            error.message,
+          )}`,
+        )
+      }
       const code =
         error.status === 404
           ? 'missing'
@@ -90,7 +105,7 @@ export default async function InvitationPage({
     }
   }
 
-  const problem = outcome ? OUTCOMES[outcome] : undefined
+  const problem = detail?.trim() ? detail : outcome ? OUTCOMES[outcome] : undefined
 
   return (
     <div
@@ -156,16 +171,36 @@ export default async function InvitationPage({
                 Accept the invitation
               </SubmitButton>
             </form>
-            <p
-              style={{
-                margin: 0,
-                color: 'var(--text-muted)',
-                fontSize: 'var(--type-body-sm-size)',
-              }}
-            >
-              Invited under a different address? Sign out and sign back in as that account, then
-              open this link again.
-            </p>
+            {/*
+              A control, not just an instruction.
+
+              This used to say "sign out and sign back in" and stop there —
+              but there is no sign-out anywhere in the marketing shell, so the
+              reader was told to do something the page gave them no way to do.
+              The button signs out and lands them on sign-in with this
+              invitation still queued as `next`, so the link survives the
+              round trip and they do not have to find the email again.
+            */}
+            <form action={logoutAction}>
+              <input
+                type="hidden"
+                name="next"
+                value={`/login?next=${encodeURIComponent(`/invitations/${token}`)}`}
+              />
+              <p
+                style={{
+                  margin: '0 0 var(--space-3)',
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                Invited under a different address? Switch accounts and you will come straight back
+                here.
+              </p>
+              <SubmitButton variant="secondary" pendingLabel="Signing out…">
+                Sign out and use another account
+              </SubmitButton>
+            </form>
           </>
         )}
       </div>

@@ -7,6 +7,21 @@ import { isAdminSide } from '../../middleware/authorize.js'
 import { organisationScope } from '../../lib/access/scopes.js'
 import { ORG_SORT_FIELDS, type ListOrganisationsQuery } from './organisations.schema.js'
 
+/**
+ * `kumar.shubham@corp.com` → `ku•••@corp.com`.
+ *
+ * Enough for the reader to recognise an address they own, not enough to learn
+ * one they do not. Two visible characters rather than one because a single
+ * letter is often ambiguous between a personal and a work address at the same
+ * domain; more than two starts giving the local part away.
+ */
+function maskEmail(email: string): string {
+  const [local = '', domain = ''] = email.split('@')
+  if (!domain) return '•••'
+  const visible = local.slice(0, 2)
+  return `${visible}${'•'.repeat(3)}@${domain}`
+}
+
 const orgSelect = {
   id: true,
   name: true,
@@ -535,7 +550,23 @@ export async function acceptInvitation(user: Express.AuthenticatedUser, rawToken
     select: { email: true },
   })
   if (account?.email.toLowerCase() !== row.email.toLowerCase()) {
-    throw new ForbiddenError('This invitation was sent to a different email address')
+    /*
+      Name the address, masked.
+
+      The refusal itself is correct and stays — an invitation to one person
+      must not be redeemable by another. What was wrong is that it did not say
+      WHICH address, so somebody who signed up with their Google account
+      instead of their work one had no way to work out what to do differently.
+      Production logs show the same person hitting this six times in a row.
+
+      Masked rather than plain because a link can be forwarded: the reader
+      already holds the token, but that is not a reason to hand a third party
+      a colleague's full address. `ku•••@corp.com` is enough to recognise an
+      address you own and not enough to learn one you do not.
+    */
+    throw new ForbiddenError(
+      `This invitation was sent to ${maskEmail(row.email)}. Sign in as that address to accept it.`,
+    )
   }
 
   await prisma.$transaction([

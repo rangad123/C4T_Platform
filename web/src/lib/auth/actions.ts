@@ -141,7 +141,23 @@ export async function loginAction(formData: FormData): Promise<void> {
  * cookies), then clears the bridged cookies on the Next.js response and
  * redirects to /login.
  */
-export async function logoutAction(): Promise<void> {
+export async function logoutAction(formData?: FormData): Promise<void> {
+  /*
+    Optional `next`, for the one case where home is the wrong place: somebody
+    signed in as the wrong account on an invitation link. Sending them to `/`
+    there loses the invitation and means digging the email out again, so the
+    invitation page posts the link back and they land on sign-in with it
+    waiting.
+
+    Guarded as a SAME-ORIGIN PATH. A `next` that a form controls is an open
+    redirect if it is trusted: `//evil.example` and `https://evil.example` are
+    both valid values of `next` and both leave the site. Only a single leading
+    slash is accepted, which cannot express another host.
+  */
+  const requested = formData?.get('next')
+  const next =
+    typeof requested === 'string' && /^\/(?!\/)/.test(requested) ? requested : null
+
   // Read the refresh cookie so the API can destroy the session row even if
   // the access cookie has already expired.
   const cookieStore = await cookies()
@@ -174,7 +190,7 @@ export async function logoutAction(): Promise<void> {
    * Home is the unambiguous "you are signed out" state, and the nav there
    * carries a Sign in button for anyone who meant to switch accounts.
    */
-  redirect('/')
+  redirect(next ?? '/')
 }
 
 /**
