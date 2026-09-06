@@ -3,7 +3,7 @@ import {
   BUG_FIELD_TYPE,
   BUG_REPRODUCIBILITY,
   BUG_SEVERITY,
-  BUG_STATUS,
+  BUG_STATUS_BY_LEGACY_ID,
   BUG_TYPE,
 } from '../mapping/lookups.js'
 import { query } from '../legacy/client.js'
@@ -44,9 +44,9 @@ export const bugLoader: Loader = {
   async prepare() {
     bugTypeNames.clear()
     try {
-      const rows = await query<Record<string, unknown>>('SELECT bt_id, bt_name FROM `bug_types`')
+      const rows = await query<Record<string, unknown>>('SELECT bt_id, bt_title FROM `bug_types`')
       for (const r of rows) {
-        const name = text(r.bt_name)
+        const name = text(r.bt_title)
         if (name) bugTypeNames.set(String(r.bt_id), name)
       }
     } catch {
@@ -135,7 +135,12 @@ export const bugLoader: Loader = {
     )
     problems.push(severity.problem)
 
-    const status = enumValue(row.bug_status, BUG_STATUS, BugStatus.NEW, 'bug_status')
+    /*
+      `bug_status` is an integer, not a name — see BUG_STATUS_BY_LEGACY_ID for
+      how the codes were recovered from the transition comments the old
+      application left on every bug.
+    */
+    const status = enumValue(row.bug_status, BUG_STATUS_BY_LEGACY_ID, BugStatus.NEW, 'bug_status')
     problems.push(status.problem)
 
     const reproducibility = enumValue(
@@ -151,9 +156,22 @@ export const bugLoader: Loader = {
       counterpart is left null and reported, rather than filed under whichever
       member looked closest — a wrong type is worse than no type, because it is
       indistinguishable from a real one when someone filters on it later.
+
+      Two columns describe a bug's kind, and the useful one is not the foreign
+      key. `bug_type_id` points at `bug_types`, which holds exactly two rows —
+      "Defect" and "Crash" — and neither "Defect" nor null says anything worth
+      migrating for the 12,939 bugs carrying id 1. `bug_typeofdefect` is free
+      text and far richer: Functionality, UI, Usability, localisation, UX,
+      compatibility, performance, crash. It is preferred, with the foreign key
+      as the fallback.
+
+      localisation and compatibility still have no BugType member and are left
+      null and reported.
     */
-    const typeLegacy = legacyRef(row.bug_type_id ?? row.bug_type)
-    const typeName = typeLegacy ? (bugTypeNames.get(typeLegacy) ?? typeLegacy) : null
+    const typeLegacy = legacyRef(row.bug_type_id)
+    const typeName =
+      text(row.bug_typeofdefect) ??
+      (typeLegacy ? (bugTypeNames.get(typeLegacy) ?? typeLegacy) : null)
     let bugType: (typeof BUG_TYPE)[string] | null = null
     if (typeName) {
       const key = typeName.toLowerCase().replace(/[\s-]+/g, '_')

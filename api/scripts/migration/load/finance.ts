@@ -271,7 +271,19 @@ export const transactionLoader: Loader = {
 
     const occurredAt = timestampOr(row.pmt_time)
     const orgLegacy = build?.project.organisation?.legacyId ?? null
-    const currency = (orgLegacy && currencyByOrgLegacyId.get(orgLegacy)) ?? 'INR'
+
+    /*
+      `pmt_in` names the currency this row was settled in — "INR" on 4,095 rows
+      and "$" on 645. Despite the name it is not a direction flag, which is how
+      it reads at a glance. It takes precedence over the organisation's default
+      currency: a row that says it was paid in dollars was paid in dollars,
+      whatever the organisation usually bills in.
+    */
+    const rowCurrency = text(row.pmt_in)
+    const currency =
+      (rowCurrency ? CURRENCY_BY_LEGACY_SYMBOL[rowCurrency.toLowerCase()] : null) ??
+      (orgLegacy ? currencyByOrgLegacyId.get(orgLegacy) : null) ??
+      'INR'
     const tds = tdsByPaymentId.get(legacyId) ?? null
 
     /*

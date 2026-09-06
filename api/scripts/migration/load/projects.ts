@@ -1,7 +1,7 @@
 import { BuildStatus, ProjectPriority, ProjectStatus } from '@prisma/client'
 import type { Prisma } from '@prisma/client'
 import { query } from '../legacy/client.js'
-import { ASSIGNMENT_STATUS, TEST_CASE_RESULT } from '../mapping/lookups.js'
+import { ASSIGNMENT_STATUS, BUILD_STATUS, TEST_CASE_RESULT } from '../mapping/lookups.js'
 import {
   asText,
   enumValue,
@@ -33,6 +33,8 @@ import type { Loader, LoadContext, RowOutcome } from './context.js'
 /** Cached per run: legacy lookup tables read once. */
 const appTypes = new Map<string, string>()
 const testTypes = new Map<string, string>()
+/** Legacy test_status id -> name, for assigned_tests.ast_test_status_id. */
+const testStatuses = new Map<string, string>()
 
 async function loadLookup(
   table: string,
@@ -279,6 +281,12 @@ export const buildLoader: Loader = {
 
     const createdAt = timestampOr(row.build_add_date)
     const testTypeId = legacyRef(row.build_test_type_id)
+    const buildStatus = enumValue(
+      row.build_test_status,
+      BUILD_STATUS,
+      BuildStatus.CLOSED,
+      'build_test_status',
+    )
 
     /*
       The legacy build carries a scope and an out-of-scope note; the new Build
@@ -298,7 +306,12 @@ export const buildLoader: Loader = {
       // Legacy builds are labelled by version, not by name.
       name: requiredText(row.build_version_no ?? row.build_version_desc, `Build ${legacyId}`),
       isDefault: false,
-      status: BuildStatus.CLOSED,
+      /*
+        `build_test_status` — new / assigned / tested / closed — maps one to one
+        onto BuildStatus. It used to be hardcoded CLOSED, which declared 687
+        builds finished that the old platform still had open.
+      */
+      status: buildStatus.value,
       testType: testTypeId ? (testTypes.get(testTypeId) ?? null) : null,
       description: text(row.build_desc),
       appUrl: text(row.build_app_link),
@@ -343,6 +356,16 @@ export const assignmentLoader: Loader = {
     { table: 'users', model: 'User' },
   ],
 
+  /*
+    `ast_test_status_id` is an id into `test_status`, not a name — 1 Assigned,
+    2 Tested, 3 Reviewed, 4 Closed, 5 invited, 6 joined. It was being handed
+    straight to a name-keyed table, so every one of the 4,548 assignments
+    missed and fell to the COMPLETED fallback. Resolved to its name first.
+  */
+  async prepare() {
+    await loadLookup('test_status', 'ts_id', 'ts_name', testStatuses)
+  },
+
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.ast_id)
 
@@ -373,8 +396,9 @@ export const assignmentLoader: Loader = {
     }
 
     const invitedAt = timestampOr(row.ast_add_date)
+    const statusId = legacyRef(row.ast_test_status_id)
     const status = enumValue(
-      row.ast_test_status_id,
+      statusId ? (testStatuses.get(statusId) ?? statusId) : null,
       ASSIGNMENT_STATUS,
       // A legacy assignment is finished history by definition.
       'COMPLETED',

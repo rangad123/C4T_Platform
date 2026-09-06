@@ -4,6 +4,7 @@ import {
   BugFieldType,
   BugSeverity,
   BugStatus,
+  BuildStatus,
   BugType,
   BugReproducibility,
   DeviceType,
@@ -40,16 +41,32 @@ import {
 // ── Identity ─────────────────────────────────────────────────────────────────
 
 /**
- * `roles.csv` from the legacy export. Ids are stable in the dump, and role is
- * too load-bearing to resolve by name — a renamed legacy role must not silently
- * become USER.
+ * The legacy `roles` table, read from the live database:
+ *
+ *   1 Admin · 2 Company · 3 Manager · 4 Beta Tester · 5 QA Tester
+ *   6 Developer · 7 Crowd Tester · 8 Sub Admin
+ *
+ * Ids are stable, and role is too load-bearing to resolve by name — a renamed
+ * legacy role must not silently become USER.
+ *
+ * This table was previously written from guesswork and had no entry for 7 at
+ * all, which is the id 6,357 of the 6,706 accounts carry. They all migrated as
+ * plain USER, and because a TesterProfile is only created for a TESTER, every
+ * one of their devices and browsers then orphaned for want of a profile.
+ *
+ * 6 (Developer, 11 accounts) stays USER deliberately: a developer on the old
+ * platform was somebody's engineer reading defect reports, not a crowd tester
+ * and not a customer, and USER is the role that grants neither.
  */
 export const ROLE_BY_LEGACY_ID: Record<string, Role> = {
   '1': Role.ADMIN,
   '2': Role.CUSTOMER,
-  '3': Role.TESTER,
-  '4': Role.SUB_ADMIN,
-  '5': Role.USER,
+  '3': Role.SUB_ADMIN,
+  '4': Role.TESTER,
+  '5': Role.TESTER,
+  '6': Role.USER,
+  '7': Role.TESTER,
+  '8': Role.SUB_ADMIN,
 }
 
 export const ROLE_BY_NAME: Record<string, Role> = {
@@ -87,6 +104,15 @@ export const USER_STATUS: Record<string, UserStatus> = {
  */
 export const ORG_MEMBER_ROLE_BY_LEGACY_ID: Record<string, OrgMemberRole> = {
   '2': OrgMemberRole.OWNER,
+  // The other legacy roles seen on this table — 3 Manager, 4 Beta Tester,
+  // 5 QA Tester, 6 Developer, 8 Sub Admin, and 9, which is not in `roles` at
+  // all — are all members. Listed rather than left to the default so an
+  // unmapped id still reports itself instead of passing silently as MEMBER.
+  '3': OrgMemberRole.MEMBER,
+  '4': OrgMemberRole.MEMBER,
+  '5': OrgMemberRole.MEMBER,
+  '6': OrgMemberRole.MEMBER,
+  '8': OrgMemberRole.MEMBER,
 }
 
 // ── Projects and builds ──────────────────────────────────────────────────────
@@ -99,6 +125,12 @@ export const ORG_MEMBER_ROLE_BY_LEGACY_ID: Record<string, OrgMemberRole> = {
 export const PROJECT_STATUS_FALLBACK = ProjectStatus.COMPLETED
 
 export const ASSIGNMENT_STATUS: Record<string, AssignmentStatus> = {
+  // From the legacy test_status table: 1 Assigned, 2 Tested, 3 Reviewed,
+  // 4 Closed, 5 invited, 6 joined.
+  assigned: AssignmentStatus.ACTIVE,
+  tested: AssignmentStatus.COMPLETED,
+  reviewed: AssignmentStatus.COMPLETED,
+  joined: AssignmentStatus.ACCEPTED,
   invited: AssignmentStatus.INVITED,
   pending: AssignmentStatus.INVITED,
   accepted: AssignmentStatus.ACCEPTED,
@@ -176,7 +208,53 @@ export const BUG_STATUS: Record<string, BugStatus> = {
   deferred: BugStatus.WONT_FIX,
   feature_request: BugStatus.FEATURE_REQUEST,
   enhancement: BugStatus.FEATURE_REQUEST,
+  need_more_info: BugStatus.TRIAGED,
+  cant_reproduce: BugStatus.REJECTED,
   suggestion: BugStatus.FEATURE_REQUEST,
+}
+
+/**
+ * `bugs_report.bug_status` → BugStatus. The column is an integer 0-8 and the
+ * legacy schema has no table naming those codes.
+ *
+ * The names were recovered from the data instead. The old application wrote a
+ * comment on every transition — "Status changed from New to Closed Fixed" —
+ * so joining each bug's last such comment to its stored code names the code.
+ * Every mapping below except 0 came back unanimous over thousands of rows:
+ *
+ *   0 New (default)   1 Duplicate  n=772   2 Invalid  n=1163
+ *   3 In Progress n=254   4 Fixed  n=270   5 Closed   n=1647
+ *   6 Need More Info   7 Feature Request   8 Cant Reproduce
+ *
+ * 6, 7 and 8 were added to the platform on the same day in September 2018 and
+ * carry 167 bugs between them; their names come from the transition comments
+ * on those bugs directly.
+ *
+ * Two do not have an exact counterpart. "Need More Info" is a wait-on-reporter
+ * state the new schema does not model, and TRIAGED is the nearest true reading
+ * — somebody has looked at it and responded. "Cant Reproduce" joins Invalid
+ * under REJECTED. Both are recorded in the report so the distinction is not
+ * lost silently.
+ */
+export const BUG_STATUS_BY_LEGACY_ID: Record<string, BugStatus> = {
+  '0': BugStatus.NEW,
+  '1': BugStatus.DUPLICATE,
+  '2': BugStatus.REJECTED,
+  '3': BugStatus.IN_PROGRESS,
+  '4': BugStatus.FIXED,
+  '5': BugStatus.VERIFIED,
+  '6': BugStatus.TRIAGED,
+  '7': BugStatus.FEATURE_REQUEST,
+  '8': BugStatus.REJECTED,
+}
+
+/** `builds.build_test_status` — enum('new','assigned','tested','closed'). */
+export const BUILD_STATUS: Record<string, BuildStatus> = {
+  new: BuildStatus.NEW,
+  assigned: BuildStatus.ASSIGNED,
+  tested: BuildStatus.TESTED,
+  reviewed: BuildStatus.REVIEWED,
+  closed: BuildStatus.CLOSED,
 }
 
 /**
@@ -231,6 +309,7 @@ export const BUG_FIELD_TYPE: Record<string, BugFieldType> = {
   dropdown: BugFieldType.SELECT,
   radio: BugFieldType.RADIO,
   checkbox: BugFieldType.CHECKBOX,
+  boolean: BugFieldType.CHECKBOX,
   multiselect: BugFieldType.CHECKBOX,
   date: BugFieldType.DATE,
   datetime: BugFieldType.DATE,
@@ -264,7 +343,9 @@ export const DEVICE_TYPE: Record<string, DeviceType> = {
 export const TRANSACTION_TYPE: Record<string, TransactionType> = {
   invoice: TransactionType.CUSTOMER_INVOICE,
   customer_invoice: TransactionType.CUSTOMER_INVOICE,
-  credit: TransactionType.CUSTOMER_PAYMENT,
+  // payment_history is tester-centric: pmt_user_id is the tester, so a credit
+  // is money earned and a debit is money paid out.
+  credit: TransactionType.TESTER_EARNING,
   payment: TransactionType.CUSTOMER_PAYMENT,
   customer_payment: TransactionType.CUSTOMER_PAYMENT,
   earning: TransactionType.TESTER_EARNING,
@@ -278,6 +359,9 @@ export const TRANSACTION_TYPE: Record<string, TransactionType> = {
 }
 
 export const TRANSACTION_STATUS: Record<string, TransactionStatus> = {
+  // The only value payment_history carries, on all 6,700 rows. The legacy
+  // ledger recorded movements that had already happened.
+  new: TransactionStatus.PAID,
   pending: TransactionStatus.PENDING,
   requested: TransactionStatus.PENDING,
   approved: TransactionStatus.APPROVED,
@@ -301,6 +385,8 @@ export const PAYMENT_METHOD: Record<string, PaymentMethod> = {
   international_bank: PaymentMethod.NON_IND_BANK_ACCOUNT,
   wire: PaymentMethod.NON_IND_BANK_ACCOUNT,
   swift: PaymentMethod.NON_IND_BANK_ACCOUNT,
+  // The spelling the legacy column actually uses.
+  ind_bank_acc: PaymentMethod.IND_BANK_ACCOUNT,
   paypal: PaymentMethod.PAYPAL,
   paytm: PaymentMethod.PAYTM,
 }
