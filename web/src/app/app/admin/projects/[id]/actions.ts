@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
-import { formTrimmed, formList } from '@/lib/form-data'
+import { formTrimmed, formList, formStringArray } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
 import { isAssignmentStatus, isProjectPriority, isProjectStatus } from './constants'
 
@@ -50,6 +50,9 @@ function projectHref(
     name?: string
     notice?: string
     detail?: string
+    /** Bulk outcome counts, so one notice can say how many of what. */
+    count?: number
+    failed?: number
   },
 ): string {
   const params = new URLSearchParams()
@@ -58,6 +61,8 @@ function projectHref(
   if (extra?.edit) params.set('edit', extra.edit)
   if (extra?.error) params.set('error', extra.error)
   if (extra?.notice) params.set('notice', extra.notice)
+  if (extra?.count !== undefined) params.set('count', String(extra.count))
+  if (extra?.failed) params.set('failed', String(extra.failed))
   // The API's own sentence, when it wrote one a reader can act on.
   if (extra?.detail) params.set('detail', extra.detail)
   // Echoed so a reopened dialog shows what was typed, not the stored value.
@@ -242,6 +247,81 @@ export async function updateAssignment(formData: FormData): Promise<void> {
 
   revalidateProject(id)
   redirect(projectHref(id, { section: 'testers', buildId, notice }), 'replace')
+}
+
+/**
+ * Move several assignments to the same status at once.
+ *
+ * ── WHY A LOOP AND NOT ONE CALL
+ *
+ * The API is `PATCH projects/:id/assignments/:testerId` — one row per request,
+ * with its own transition rules and its own audit entry. There is no bulk
+ * endpoint, and inventing one to save round trips would move that per-row
+ * validation server-side into something that has to decide what "half of it
+ * worked" means. Looping keeps each change exactly as authorised and audited
+ * as it is today.
+ *
+ * ── WHY IT REPORTS COUNTS
+ *
+ * Because some of them can fail while others succeed. An admin who selects
+ * forty testers and gets a flat "done" has no idea whether it was forty or
+ * thirty-seven, and the difference matters when the status is REMOVED. The
+ * redirect carries both numbers.
+ *
+ * Concurrency is capped: forty parallel PATCHes against one API process is a
+ * self-inflicted load spike, and this is a background-ish admin action where
+ * a second or two is not worth the risk.
+ */
+export async function updateAssignments(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  const status = formTrimmed(formData, 'status')
+  const testerIds = formStringArray(formData, 'testerIds').filter(Boolean)
+  if (!id || !buildId || !isAssignmentStatus(status)) return
+
+  if (testerIds.length === 0) {
+    redirect(
+      projectHref(id, { section: 'testers', buildId, notice: 'assignments-none' }),
+      'replace',
+    )
+  }
+
+  const notes = formTrimmed(formData, 'notes')
+  const body = { buildId, status, ...(notes ? { notes } : {}) }
+
+  const CONCURRENCY = 4
+  let updated = 0
+  let failed = 0
+
+  for (let i = 0; i < testerIds.length; i += CONCURRENCY) {
+    const slice = testerIds.slice(i, i + CONCURRENCY)
+    const outcomes = await Promise.all(
+      slice.map(async (testerId) => {
+        try {
+          await actionFetch(`projects/${id}/assignments/${testerId}`, { method: 'PATCH', body })
+          return true
+        } catch {
+          return false
+        }
+      }),
+    )
+    for (const ok of outcomes) {
+      if (ok) updated += 1
+      else failed += 1
+    }
+  }
+
+  revalidateProject(id)
+  redirect(
+    projectHref(id, {
+      section: 'testers',
+      buildId,
+      notice: failed === 0 ? 'assignments-updated' : 'assignments-partial',
+      count: updated,
+      failed,
+    }),
+    'replace',
+  )
 }
 
 /**

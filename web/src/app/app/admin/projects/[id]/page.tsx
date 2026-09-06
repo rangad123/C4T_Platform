@@ -5,6 +5,7 @@ import { DetailShell } from '@/components/admin/DetailShell'
 import { Modal } from '@/components/admin/Modal'
 import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
+import { AssignmentBulkUpdate } from '@/components/admin/AssignmentBulkUpdate'
 import { Panel } from '@/components/admin/Panel'
 import { DownloadLink } from '@/components/admin/DownloadLink'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
@@ -69,6 +70,7 @@ import {
   renameBuild,
   updateBuild,
   updateAssignment,
+  updateAssignments,
   updateProjectBrief,
   updateProjectDelivery,
 } from './actions'
@@ -134,6 +136,9 @@ export default async function ProjectDetailPage({
     /** Narrow the roster panel itself — distinct from `testerSearch`, which searches the invite pool. */
     rosterSearch?: string
     rosterStatus?: string
+    /** Bulk-update outcome counters — see `updateAssignments`. */
+    count?: string
+    failed?: string
   }>
 }) {
   const user = await requireRole(['ADMIN', 'SUB_ADMIN'])
@@ -398,6 +403,10 @@ export default async function ProjectDetailPage({
       message: 'The material could not be attached. Try again in a moment.',
     },
     'assignment-updated': { tone: 'success', message: 'That assignment has been updated.' },
+    'assignments-none': {
+      tone: 'warning',
+      message: 'Nothing was selected, so nothing changed.',
+    },
     'assignment-removed': {
       tone: 'success',
       message:
@@ -447,9 +456,27 @@ export default async function ProjectDetailPage({
     'badge-invalid': { tone: 'error', message: 'Choose a badge to award.' },
     'badge-failed': { tone: 'error', message: 'The badge could not be awarded. Try again.' },
   }
-  const pageNotice = resolvedSearchParams.notice
-    ? PAGE_NOTICES[resolvedSearchParams.notice]
-    : undefined
+  /*
+    The bulk update reports NUMBERS, so its two notices are built rather than
+    looked up. "Done" is not an answer when someone selected forty testers and
+    thirty-seven moved — especially when the status was REMOVED.
+  */
+  const bulkCount = Number(resolvedSearchParams.count ?? '0')
+  const bulkFailed = Number(resolvedSearchParams.failed ?? '0')
+  const plural = (n: number) => `${n} assignment${n === 1 ? '' : 's'}`
+  const bulkNotice: { tone: 'success' | 'error' | 'warning'; message: string } | undefined =
+    resolvedSearchParams.notice === 'assignments-updated'
+      ? { tone: 'success', message: `${plural(bulkCount)} updated.` }
+      : resolvedSearchParams.notice === 'assignments-partial'
+        ? {
+            tone: 'warning',
+            message: `${plural(bulkCount)} updated. ${bulkFailed} could not be changed — reload to see where they stand.`,
+          }
+        : undefined
+
+  const pageNotice =
+    bulkNotice ??
+    (resolvedSearchParams.notice ? PAGE_NOTICES[resolvedSearchParams.notice] : undefined)
 
   const MODAL_ERRORS: Record<string, string> = {
     'build-name-taken': 'Another build on this project already uses that name.',
@@ -1944,58 +1971,29 @@ export default async function ProjectDetailPage({
 
               {project.assignments.length > 0 ? (
                 <Panel
-                  title="Update an assignment"
-                  description="Activate a tester who accepted, mark their work complete, or take them off."
+                  title="Update assignments"
+                  description="Narrow by status, tick who you mean, and set them all at once."
                 >
-                  <form action={updateAssignment} style={stackStyle}>
-                    <input type="hidden" name="id" value={project.id} />
-                    {/*
-                      `project.assignments` is already scoped to the switcher's
-                      active build (see the roster Panel above), so this form
-                      only ever offers testers on THAT build — one hidden
-                      field for all of them is enough to tell the API which
-                      row each `testerId` below actually names, now that a
-                      tester can hold a row on more than one build.
-                    */}
-                    <input type="hidden" name="buildId" value={activeBuildId} />
-                    <div style={fieldGridStyle}>
-                      <Field label="Tester" htmlFor="assignment-tester" required>
-                        <Select
-                          id="assignment-tester"
-                          name="testerId"
-                          required
-                          options={project.assignments.map((row) => ({
-                            value: row.tester.id,
-                            label: `${personName(row.tester)} · ${titleCase(row.status)}`,
-                          }))}
-                        />
-                      </Field>
-                      <Field label="New assignment status" htmlFor="assignment-status" required>
-                        <Select
-                          id="assignment-status"
-                          name="status"
-                          required
-                          options={ASSIGNMENT_STATUSES.map((value) => ({
-                            value,
-                            label: titleCase(value),
-                          }))}
-                          defaultValue="ACTIVE"
-                        />
-                      </Field>
-                    </div>
-                    <Field
-                      label="Note"
-                      htmlFor="assignment-notes"
-                      hint="Replaces the note on that assignment. Leave blank to keep the current one."
-                    >
-                      <Textarea id="assignment-notes" name="notes" rows={3} maxLength={1000} />
-                    </Field>
-                    <div>
-                      <SubmitButton variant="secondary" pendingLabel="Updating…">
-                        Update assignment
-                      </SubmitButton>
-                    </div>
-                  </form>
+                  {/*
+                    Was a single `<select>` of every tester on the build plus
+                    one submit. A build can carry 150 testers, and moving them
+                    one at a time is 150 round trips to express what is nearly
+                    always one decision about a group — "everyone who accepted
+                    is now active". Same failure as the invite panel this page
+                    used to carry: a control that cannot describe the task.
+                  */}
+                  <AssignmentBulkUpdate
+                    projectId={project.id}
+                    buildId={activeBuildId}
+                    statuses={ASSIGNMENT_STATUSES}
+                    action={updateAssignments}
+                    assignments={project.assignments.map((row) => ({
+                      testerId: row.tester.id,
+                      name: personName(row.tester),
+                      email: row.tester.email,
+                      status: row.status,
+                    }))}
+                  />
                 </Panel>
               ) : null}
             </>
