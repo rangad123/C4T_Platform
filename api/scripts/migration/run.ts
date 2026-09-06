@@ -11,7 +11,7 @@ import { closeLegacyPool, query } from './legacy/client.js'
 import { REGISTRY_BY_TABLE, isMigrated, selectedMappings } from './mapping/registry.js'
 import { Reporter } from './report/reporter.js'
 import { estimate, runLoader, type LoadContext, type Loader } from './load/context.js'
-import { identityLoaders } from './load/identity.js'
+import { assignOrganisationOwners, identityLoaders } from './load/identity.js'
 import { projectLoaders } from './load/projects.js'
 import { defectLoaders, linkTestReportsToBugs } from './load/defects.js'
 import { communicationLoaders, financeLoaders } from './load/finance.js'
@@ -141,10 +141,15 @@ async function main(): Promise<void> {
       }
     }
 
-    // Deferred: the test-report → bug link points forward in phase order.
+    // Deferred: both of these point FORWARD in phase order — an organisation's
+    // creator is a user, and users load after organisations — so they can only
+    // run once every phase has been through.
     if (!dryRun) {
+      const owners = await assignOrganisationOwners(ctx)
+      if (owners > 0) console.log(`\n  gave ${owners} organisations their owner`)
+
       const linked = await linkTestReportsToBugs(ctx)
-      if (linked > 0) console.log(`\n  linked ${linked} test reports to their bugs`)
+      if (linked > 0) console.log(`  linked ${linked} test reports to their bugs`)
     }
 
     // ── Validation ────────────────────────────────────────────────────────

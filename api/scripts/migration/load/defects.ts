@@ -1,4 +1,5 @@
 import { BugSeverity, BugStatus, FileScope } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
 import {
   BUG_FIELD_TYPE,
   BUG_REPRODUCIBILITY,
@@ -29,6 +30,94 @@ import { reportProblems } from './context.js'
 
 /** Legacy bug-type id → name, so BUG_TYPE can be applied to a readable value. */
 const bugTypeNames = new Map<string, string>()
+
+interface InlineFile {
+  field: string
+  filename: string | null
+}
+
+interface InlineAttachmentArgs {
+  legacyTable: string
+  legacyId: string
+  bugId: string
+  uploadedById: string
+  createdAt: Date
+  files: InlineFile[]
+}
+
+/**
+ * Attaches files that the legacy schema stored as bare filenames on the row
+ * itself rather than in a join table.
+ *
+ * The filenames carry no directory — "1434206420Screenshot_2015-06-13.png" —
+ * because the old PHP knew the upload root and the database never recorded it.
+ * So without `LEGACY_FILE_ROOT` there is nothing to point a FileObject at, and
+ * inventing a storage key for bytes nobody has located would create rows that
+ * look like attachments and resolve to nothing. They are reported to
+ * `missing-files.csv` instead, which is the manifest the file-copying job
+ * needs and, until now, was empty.
+ *
+ * With the root configured the FileObject is written `isComplete: false`,
+ * exactly as the table-driven attachment loader does — the row is a pointer
+ * until the bytes are verified in place.
+ */
+async function attachInlineFiles(
+  ctx: LoadContext,
+  tx: Prisma.TransactionClient,
+  args: InlineAttachmentArgs,
+): Promise<void> {
+  const fileRoot = process.env.LEGACY_FILE_ROOT
+
+  for (const entry of args.files) {
+    if (!entry.filename || entry.filename === '0') continue
+
+    if (!fileRoot) {
+      ctx.reporter.missingFile({
+        legacyTable: args.legacyTable,
+        legacyId: args.legacyId,
+        field: entry.field,
+        path: entry.filename,
+        reason: 'LEGACY_FILE_ROOT not configured; file migration skipped.',
+      })
+      continue
+    }
+
+    const mapKey = `${args.legacyId}:${entry.field}`
+    const mapped = await ctx.idMap.resolve(args.legacyTable, mapKey, 'FileObject')
+    const file = mapped
+      ? await tx.fileObject.update({
+          where: { id: mapped },
+          data: { originalName: entry.filename },
+          select: { id: true },
+        })
+      : await tx.fileObject.create({
+          data: {
+            scope: FileScope.BUG_ATTACHMENT,
+            storageKey: `legacy/bug-attachments/${args.legacyId}/${entry.filename}`,
+            driver: 'legacy',
+            originalName: entry.filename,
+            mimeType: guessMime(entry.filename),
+            sizeBytes: 0,
+            uploadedById: args.uploadedById,
+            isComplete: false,
+            createdAt: args.createdAt,
+          },
+          select: { id: true },
+        })
+
+    await ctx.idMap.remember(tx, args.legacyTable, mapKey, 'FileObject', file.id)
+
+    const already = await tx.bugAttachment.findFirst({
+      where: { bugId: args.bugId, fileId: file.id },
+      select: { id: true },
+    })
+    if (!already) {
+      await tx.bugAttachment.create({
+        data: { bugId: args.bugId, fileId: file.id, createdAt: args.createdAt },
+      })
+    }
+  }
+}
 
 // ── bugs_report → Bug ────────────────────────────────────────────────────────
 
@@ -242,6 +331,47 @@ export const bugLoader: Loader = {
         })
 
     await ctx.idMap.remember(tx, 'bugs_report', legacyId, 'Bug', bug.id)
+
+    /*
+      `bug_feature` names the area of the product the defect was found in, on
+      7,869 bugs, and the new schema models exactly that as `Feature` hanging
+      off the build. Features are created on demand and shared by name within
+      a build, so twenty bugs against "Checkout" point at one Feature row.
+    */
+    const featureName = text(row.bug_feature)
+    if (featureName) {
+      const feature =
+        (await tx.feature.findFirst({
+          where: { buildId, name: featureName },
+          select: { id: true },
+        })) ??
+        (await tx.feature.create({
+          data: { buildId, projectId: build.projectId, name: featureName, createdAt },
+          select: { id: true },
+        }))
+      await tx.bug.update({ where: { id: bug.id }, data: { featureId: feature.id } })
+    }
+
+    /*
+      The `attachments` table is EMPTY — all 66 tables were checked and it has
+      no rows. Every bug attachment the old platform ever took is held inline
+      instead, in three columns: bug_screen1 (13,945 rows), bug_screen2 (1,937)
+      and bug_attachment (386). Reading only the empty table meant BugAttachment
+      received nothing and `missing-files.csv` reported zero unresolved files,
+      which was not true of a platform with ~16,000 of them.
+    */
+    await attachInlineFiles(ctx, tx, {
+      legacyTable: 'bugs_report',
+      legacyId,
+      bugId: bug.id,
+      uploadedById: reportedById,
+      createdAt,
+      files: [
+        { field: 'bug_screen1', filename: text(row.bug_screen1) },
+        { field: 'bug_screen2', filename: text(row.bug_screen2) },
+        { field: 'bug_attachment', filename: text(row.bug_attachment) },
+      ],
+    })
     reportProblems(ctx, 'bugs_report', legacyId, 'Bug', problems)
     return { kind: 'written', created: !existing }
   },
@@ -296,6 +426,20 @@ export const bugCommentLoader: Loader = {
       : await tx.bugComment.create({ data: { ...data, bugId, authorId }, select: { id: true } })
 
     await ctx.idMap.remember(tx, 'defect_comments', legacyId, 'BugComment', comment.id)
+
+    // Comment attachments are inline too — comments_attach1 (1,405 rows) and
+    // comments_attach2 (244). They belong to the bug the comment is on.
+    await attachInlineFiles(ctx, tx, {
+      legacyTable: 'defect_comments',
+      legacyId,
+      bugId,
+      uploadedById: authorId,
+      createdAt,
+      files: [
+        { field: 'comments_attach1', filename: text(row.comments_attach1) },
+        { field: 'comments_attach2', filename: text(row.comments_attach2) },
+      ],
+    })
     return { kind: 'written', created: !existing }
   },
 }

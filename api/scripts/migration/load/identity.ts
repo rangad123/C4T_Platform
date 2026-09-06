@@ -24,7 +24,7 @@ import {
   timestampOr,
   url as parseUrl,
 } from '../transform/values.js'
-import type { Loader, RowOutcome } from './context.js'
+import type { Loader, LoadContext, RowOutcome } from './context.js'
 import { reportProblems } from './context.js'
 
 /**
@@ -621,3 +621,76 @@ export const identityLoaders: Loader[] = [
   orgMemberLoader,
   invitationLoader,
 ]
+
+/**
+ * Gives every migrated organisation its owner.
+ *
+ * `organisation.org_created_by` names the person who created it, and it
+ * resolves to a real user for 265 of the 276 organisations. Nothing was
+ * reading it: organisations load in phase 2 and users in phase 3, so at the
+ * moment an organisation is written its creator does not exist yet, and the
+ * reference points forward exactly like `test_report.trep_defect_id` does.
+ * Hence a post-pass, run once both sides exist.
+ *
+ * Without it every organisation arrived ownerless — which is what the
+ * "organisations with no members" integrity check was reporting — and an
+ * organisation with no OWNER has nobody who can administer it.
+ *
+ * An existing membership is promoted rather than duplicated, and a member row
+ * is only created where the creator actually migrated.
+ */
+export async function assignOrganisationOwners(ctx: LoadContext): Promise<number> {
+  const rows = await query<Record<string, unknown>>(
+    'SELECT org_id, org_created_by, org_created_date FROM `organisation`',
+  )
+
+  let assigned = 0
+  for (const row of rows) {
+    const orgLegacyId = legacyRef(row.org_id)
+    const creatorLegacyId = legacyRef(row.org_created_by)
+    if (!orgLegacyId || !creatorLegacyId) continue
+
+    const organisationId = await ctx.idMap.resolve('organisation', orgLegacyId, 'Organisation')
+    const userId = await ctx.idMap.resolve('users', creatorLegacyId, 'User')
+    if (!organisationId || !userId) {
+      if (organisationId) {
+        ctx.reporter.orphan({
+          legacyTable: 'organisation',
+          legacyId: orgLegacyId,
+          field: 'org_created_by',
+          referencedTable: 'users',
+          referencedId: asText(row.org_created_by),
+        })
+      }
+      continue
+    }
+
+    const existing = await ctx.prisma.organisationMember.findFirst({
+      where: { organisationId, userId },
+      select: { id: true, orgRole: true },
+    })
+
+    if (existing) {
+      if (existing.orgRole !== OrgMemberRole.OWNER) {
+        await ctx.prisma.organisationMember.update({
+          where: { id: existing.id },
+          data: { orgRole: OrgMemberRole.OWNER },
+        })
+        assigned += 1
+      }
+      continue
+    }
+
+    await ctx.prisma.organisationMember.create({
+      data: {
+        organisationId,
+        userId,
+        orgRole: OrgMemberRole.OWNER,
+        createdAt: timestampOr(row.org_created_date),
+      },
+    })
+    assigned += 1
+  }
+
+  return assigned
+}

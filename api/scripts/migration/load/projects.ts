@@ -561,7 +561,16 @@ export const testReportLoader: Loader = {
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.trep_id)
 
-    const testCaseId = await ctx.idMap.resolve('test_case', legacyRef(row.trep_case_id), 'TestCase')
+    /*
+      Two columns point at the test case, and the obvious one is the worse one.
+      `trep_case_id` resolves for 43,324 of the 53,014 reports; `test_case_id`,
+      added later and populated on 50,507 rows, resolves for 50,467. Trying the
+      better column first rescues about 7,100 reports that were being skipped
+      as orphans. Both are kept: neither is a superset of the other.
+    */
+    const testCaseId =
+      (await ctx.idMap.resolve('test_case', legacyRef(row.test_case_id), 'TestCase')) ??
+      (await ctx.idMap.resolve('test_case', legacyRef(row.trep_case_id), 'TestCase'))
     const testerId = await ctx.idMap.resolve('users', legacyRef(row.trep_add_by), 'User')
     if (!testCaseId || !testerId) {
       ctx.reporter.orphan({
