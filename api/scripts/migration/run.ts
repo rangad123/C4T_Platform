@@ -11,7 +11,11 @@ import { closeLegacyPool, query } from './legacy/client.js'
 import { REGISTRY_BY_TABLE, isMigrated, selectedMappings } from './mapping/registry.js'
 import { Reporter } from './report/reporter.js'
 import { estimate, runLoader, type LoadContext, type Loader } from './load/context.js'
-import { assignOrganisationOwners, identityLoaders } from './load/identity.js'
+import {
+  assignOrganisationOwners,
+  identityLoaders,
+  refreshMigratedTesterAggregates,
+} from './load/identity.js'
 import { projectLoaders } from './load/projects.js'
 import { defectLoaders, linkTestReportsToBugs } from './load/defects.js'
 import { communicationLoaders, financeLoaders } from './load/finance.js'
@@ -150,6 +154,10 @@ async function main(): Promise<void> {
 
       const linked = await linkTestReportsToBugs(ctx)
       if (linked > 0) console.log(`  linked ${linked} test reports to their bugs`)
+
+      // Derived counters last: they count the rows every phase above wrote.
+      const counted = await refreshMigratedTesterAggregates(ctx)
+      if (counted > 0) console.log(`  recounted the aggregates on ${counted} tester profiles`)
     }
 
     // ── Validation ────────────────────────────────────────────────────────

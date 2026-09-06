@@ -1,6 +1,7 @@
 import { OrgMemberRole, Role, TesterStatus, UserStatus } from '@prisma/client'
 import { ISO_COUNTRY_CODES } from '../../../src/lib/iso-countries.js'
 import { detectLegacyAlgo } from '../../../src/lib/legacy-password.js'
+import { refreshTesterAggregates } from '../../../src/modules/testers/testers.service.js'
 import type { LegacyRow } from '../legacy/client.js'
 import { query } from '../legacy/client.js'
 import {
@@ -648,6 +649,35 @@ export const identityLoaders: Loader[] = [
   orgMemberLoader,
   invitationLoader,
 ]
+
+/**
+ * Recomputes the counters every migrated tester profile displays.
+ *
+ * `bugsReportedCount`, `bugsAcceptedCount`, `ratingAverage`, `ratingCount` and
+ * `projectsCompletedCount` are DERIVED — the platform maintains them as bugs
+ * and ratings are created through its own routes, and the migration writes
+ * neither through those routes. So after a migration every one of them reads
+ * zero, and 6,367 testers with 21,554 bugs and 622 ratings between them show
+ * "0 bugs reported, no rating" on every screen that displays a tester.
+ *
+ * The data is not missing, it is just not counted. `refreshTesterAggregates`
+ * is the function the platform already uses to recount one tester; this runs
+ * it across the migrated ones so the migration leaves the platform consistent
+ * rather than merely full.
+ */
+export async function refreshMigratedTesterAggregates(ctx: LoadContext): Promise<number> {
+  const profiles = await ctx.prisma.testerProfile.findMany({
+    where: { legacyId: { not: null } },
+    select: { userId: true },
+  })
+
+  let refreshed = 0
+  for (const profile of profiles) {
+    await refreshTesterAggregates(profile.userId)
+    refreshed += 1
+  }
+  return refreshed
+}
 
 /**
  * Gives every migrated organisation its owner.
