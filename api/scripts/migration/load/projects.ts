@@ -580,7 +580,42 @@ export const testCaseLoader: Loader = {
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.case_id)
 
-    const buildId = await ctx.idMap.resolve('builds', legacyRef(row.build_id), 'Build')
+    let buildId = await ctx.idMap.resolve('builds', legacyRef(row.build_id), 'Build')
+
+    /*
+      `build_id` is empty or dangling on 1,892 cases, but the table carries a
+      SECOND anchor nobody was reading. `test_id` resolves to a real build for
+      794 of them and to a project for another 122 — the legacy application
+      filed a case under either, depending on which screen created it.
+
+      Falling back to it is the same rule `bugs_report` already applies: try
+      the build, then the project's default build, which is where project-level
+      data lives in the new model. It matters out of proportion to its size,
+      because 7,667 test reports were being skipped for no reason other than
+      that their case had not migrated.
+    */
+    if (!buildId) {
+      const alternate = legacyRef(row.test_id)
+      if (alternate) {
+        buildId =
+          (await ctx.idMap.resolve('builds', alternate, 'Build')) ??
+          (await ctx.idMap.resolve('projects', defaultBuildKey(alternate), 'Build'))
+
+        if (buildId) {
+          ctx.reporter.problem({
+            legacyTable: 'test_case',
+            legacyId,
+            targetModel: 'TestCase',
+            code: 'SUBSTITUTED_REFERENCE',
+            field: 'build_id',
+            value: asText(row.build_id),
+            message: 'build_id did not resolve; attached via test_id instead.',
+            action: 'REVIEW_REQUIRED',
+          })
+        }
+      }
+    }
+
     if (!buildId) {
       ctx.reporter.orphan({
         legacyTable: 'test_case',
@@ -592,7 +627,7 @@ export const testCaseLoader: Loader = {
       return {
         kind: 'skipped',
         code: 'ORPHAN_REFERENCE',
-        message: 'Test case has no migrated build.',
+        message: 'Test case has no migrated build, and test_id does not resolve either.',
       }
     }
 
