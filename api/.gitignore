@@ -9,3 +9,9 @@ keys/
 coverage/
 .DS_Store
 prisma/migrations/**/shadow.db
+
+# Legacy migration output. MIGRATION_REPORT_DIR defaults to a path relative to
+# api/, so a migration run writes reports into the working tree — and the
+# deploy refuses to reset over anything uncommitted, untracked included. Left
+# untracked and ignored: the reports name real users and real payment rows.
+migration-report/
