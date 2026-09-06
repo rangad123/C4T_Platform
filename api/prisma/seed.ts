@@ -18,6 +18,7 @@ import {
 } from '@prisma/client'
 import argon2 from 'argon2'
 import { PERMISSION_CATALOGUE, DEFAULT_SUBADMIN_PERMISSIONS } from '../src/config/permissions.js'
+import { refreshTesterAggregates } from '../src/modules/testers/testers.service.js'
 import { seedCatalog } from './seed-catalog.js'
 
 const prisma = new PrismaClient()
@@ -896,6 +897,21 @@ async function main() {
       },
       update: {},
     })
+  }
+
+  /*
+    Recompute the denormalised rating counters.
+
+    `TesterProfile.ratingAverage` / `ratingCount` are denormalised copies that
+    the API refreshes through `refreshTesterAggregates` after every rating
+    write. Seeding writes the `Rating` rows straight to the database, which
+    skips that call — so without this the seeded ratings existed but every
+    profile still read "Not yet rated", and the tester dashboard's ratings
+    panel sat empty on a freshly seeded environment. The rows were there; the
+    numbers that display them were not.
+  */
+  for (const rated of [tester1, tester2]) {
+    if (rated) await refreshTesterAggregates(rated.id)
   }
 
   // ─── Transactions against the existing customer / projects ───────────────
