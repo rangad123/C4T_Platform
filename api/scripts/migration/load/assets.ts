@@ -98,6 +98,17 @@ export const mobileOsVersionLoader: Loader = {
 
 /** Browser name by legacy id, so a version can find its parent. */
 const browserNames = new Map<string, string>()
+/** Legacy mobile_brands id -> name, for devices.dvc_manufacturer. */
+const brandNames = new Map<string, string>()
+
+/**
+ * Text that is actually text. The legacy device rows use the string "0" where
+ * they mean "nothing", so `text()` alone hands back a brand called zero.
+ */
+function realText(value: unknown): string | null {
+  const s = text(value)
+  return s === null || s === '0' ? null : s
+}
 
 export const browserVersionLoader: Loader = {
   table: 'browser_versions',
@@ -211,6 +222,21 @@ export const testerDeviceLoader: Loader = {
   target: 'TesterDevice',
   dependsOn: [{ table: 'users', model: 'TesterProfile' }],
 
+  async prepare() {
+    brandNames.clear()
+    try {
+      const rows = await query<Record<string, unknown>>(
+        'SELECT mbr_id, mbr_name FROM `mobile_brands`',
+      )
+      for (const r of rows) {
+        const name = text(r.mbr_name)
+        if (name) brandNames.set(String(r.mbr_id), name)
+      }
+    } catch {
+      // Falls back to the free-text name, reported per row.
+    }
+  },
+
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.dvc_id)
 
@@ -274,7 +300,18 @@ export const testerDeviceLoader: Loader = {
     const createdAt = timestampOr(row.dvc_add_date)
     const data = {
       type,
-      manufacturer: text(row.dvc_manufacturer_name ?? row.dvc_manufacturer),
+      /*
+        `dvc_manufacturer` is an id into `mobile_brands`; `dvc_manufacturer_name`
+        is free text that reads "0" on 6,584 of the 6,665 rows. Reading the name
+        first with `??` therefore took the literal string "0" as the brand for
+        almost every device on the platform — `??` only falls through on null,
+        and "0" is not null. The id resolves for 6,633 of them (Apple 1,822,
+        Samsung 1,238, Xiaomi 721), so it leads. The free-text name is kept as
+        the fallback for the handful of rows carrying a real one, and "0" is
+        treated as the absence it is.
+      */
+      manufacturer:
+        brandNames.get(String(row.dvc_manufacturer)) ?? realText(row.dvc_manufacturer_name),
       model,
       osName: text(row.dvc_os_details),
       screenSize: text(row.dvc_screen),
