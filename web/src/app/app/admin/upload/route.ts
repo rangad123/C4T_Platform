@@ -30,6 +30,13 @@ const SCOPES = {
   'platform-document': 'PLATFORM_DOCUMENT',
   'blog-featured-image': 'BLOG_FEATURED_IMAGE',
   'test-document': 'PROJECT_MATERIAL',
+  /*
+    Added when the project wizard became shared with this portal. The customer
+    route has always allowed it; without the same entry here the logo step
+    would offer an upload that this route refuses as an unknown scope — the
+    one step of the wizard that would work in one portal and not the other.
+  */
+  'project-logo': 'PROJECT_LOGO',
 } as const
 
 /** Matches the API's own `UPLOAD_MAX_BYTES` default. */
@@ -38,6 +45,8 @@ const MAX_BYTES = 52_428_800
 const ALLOWED: Record<keyof typeof SCOPES, readonly string[]> = {
   'platform-document': ['application/pdf'],
   'blog-featured-image': ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+  // Mirrors the customer route exactly, SVG included.
+  'project-logo': ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'],
   'test-document': [
     'application/pdf',
     'application/msword',
@@ -52,6 +61,7 @@ const ALLOWED: Record<keyof typeof SCOPES, readonly string[]> = {
 const MIME_ERROR: Record<keyof typeof SCOPES, string> = {
   'platform-document': 'That document has to be a PDF.',
   'blog-featured-image': 'Use a PNG, JPEG, WebP or GIF image.',
+  'project-logo': 'Use a PNG, JPEG, WebP, GIF or SVG image.',
   'test-document': 'Use a PDF, Word, Excel, CSV or plain-text file.',
 }
 
