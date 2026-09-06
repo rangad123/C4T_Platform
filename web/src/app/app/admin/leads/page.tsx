@@ -198,10 +198,21 @@ export default async function LeadsPage({
           }}
         >
           <Field label="Search" htmlFor="search">
+            {/*
+              `autoComplete="off"` because this is a NAMED input inside a GET
+              form. The browser keeps a history of values submitted under a
+              given field name and offers them back as a native dropdown, so
+              searching for a lead's email once meant that address reappeared
+              as a suggestion for whoever used the box next — on a page that
+              lists sales enquiries, that is one operator's search terms
+              leaking to another. The form-history dropdown is also not the
+              app's own suggestion UI, so it looked like a bug either way.
+            */}
             <Input
               id="search"
               name="search"
               type="search"
+              autoComplete="off"
               defaultValue={search ?? ''}
               placeholder="Name, email or company"
               iconLeft="search"

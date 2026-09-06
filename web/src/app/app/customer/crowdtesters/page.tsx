@@ -123,6 +123,10 @@ export default async function CrowdtestersPage({
               id="search"
               name="search"
               type="search"
+              // See the note on the Leads search box: a named input in a GET
+              // form replays previously submitted values as a browser
+              // suggestion list, which is neither ours nor private.
+              autoComplete="off"
               defaultValue={search}
               placeholder="Payments, accessibility, automation…"
               iconLeft="search"
