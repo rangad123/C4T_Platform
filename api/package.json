@@ -2,7 +2,7 @@
   "name": "@crowd4test/api",
   "version": "0.1.0",
   "private": true,
-  "description": "Crowd4Test Platform — Express.js REST API (Milestone 2: Backend Core & Admin Panel)",
+  "description": "Crowd4Test Platform \u2014 Express.js REST API (Milestone 2: Backend Core & Admin Panel)",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
@@ -32,7 +32,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "legacy:verify": "tsx scripts/verify-legacy-login.ts"
+    "legacy:verify": "tsx scripts/verify-legacy-login.ts",
+    "migration:dry-run": "tsx scripts/migration/run.ts --mode=dry-run",
+    "migration:sample": "tsx scripts/migration/run.ts --mode=sample",
+    "migration": "tsx scripts/migration/run.ts --mode=full",
+    "migration:matrix": "tsx scripts/migration/report/matrix.ts ../docs/MIGRATION-MATRIX.md",
+    "migration:check-password": "tsx scripts/migration/check-password.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -52,6 +57,7 @@
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.24.3",
     "pino": "^9.5.0",
     "pino-http": "^10.3.0",
     "sanitize-html": "^2.17.7",

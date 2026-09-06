@@ -2367,3 +2367,132 @@ model BlogPostImage {
   @@index([postId])
   @@map("blog_post_images")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy migration metadata
+//
+// Bookkeeping for the MariaDB → PostgreSQL migration (§2.8). These three tables
+// hold no business data: drop them once the legacy platform is decommissioned
+// and nothing in the application breaks.
+//
+// WHY A CENTRAL MAP WHEN `legacyId` EXISTS
+//
+// Only eight models carry `legacyId` — User, Organisation, Project, Bug,
+// Rating, TesterProfile, Transaction, PaymentAccount. The rest of the graph
+// (Build, TestCase, TestReport, ProjectAssignment, BugComment, …) has nowhere
+// to record where a row came from, and those are exactly the rows whose parents
+// must be resolved from legacy integer ids. `MigrationRecordMap` is the
+// mechanism the brief calls for: one row per migrated record, so a re-run
+// updates rather than duplicates, and so a legacy foreign key can always be
+// translated without falling back to matching on names.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MigrationRunMode {
+  DRY_RUN
+  SAMPLE
+  FULL
+}
+
+enum MigrationRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  ABORTED
+}
+
+/// One invocation of the migration tool.
+model MigrationRun {
+  id          String             @id @default(cuid())
+  mode        MigrationRunMode
+  status      MigrationRunStatus @default(RUNNING)
+  startedAt   DateTime           @default(now()) @map("started_at")
+  completedAt DateTime?          @map("completed_at")
+
+  /// Host/database the rows were read from, for provenance. Never a password.
+  sourceDatabase String  @map("source_database")
+  /// Migration-tool version, so an old run stays interpretable.
+  toolVersion    String  @map("tool_version")
+  /// `prisma migrate` head at run time — proves which destination shape was targeted.
+  schemaVersion  String? @map("schema_version")
+
+  notes String?
+
+  tables MigrationTableStat[]
+  errors MigrationError[]
+
+  @@index([startedAt])
+  @@map("migration_runs")
+}
+
+/// Per-table counters for one run. The numbers behind `summary.md`.
+model MigrationTableStat {
+  id    String @id @default(cuid())
+  runId String @map("run_id")
+
+  legacyTable String @map("legacy_table")
+  targetModel String @map("target_model")
+
+  recordsRead     Int @default(0) @map("records_read")
+  recordsInserted Int @default(0) @map("records_inserted")
+  recordsUpdated  Int @default(0) @map("records_updated")
+  recordsSkipped  Int @default(0) @map("records_skipped")
+  recordsFailed   Int @default(0) @map("records_failed")
+
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  run MigrationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, legacyTable, targetModel])
+  @@map("migration_table_stats")
+}
+
+/// legacy (table, primary key) → new (model, id).
+///
+/// The join table the whole migration turns on. Written inside the same
+/// transaction as the record it describes, so a committed row always has a map
+/// entry and a rolled-back batch leaves none.
+model MigrationRecordMap {
+  id String @id @default(cuid())
+
+  legacyTable String @map("legacy_table")
+  /// Stringified so a composite or non-integer legacy key still fits.
+  legacyId    String @map("legacy_id")
+
+  targetModel String @map("target_model")
+  targetId    String @map("target_id")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastRunAt   DateTime @updatedAt @map("last_run_at")
+
+  @@unique([legacyTable, legacyId, targetModel])
+  @@index([targetModel, targetId])
+  @@map("migration_record_map")
+}
+
+/// A row that could not be migrated, and why. Nothing is dropped silently.
+model MigrationError {
+  id    String  @id @default(cuid())
+  runId String? @map("run_id")
+
+  legacyTable String  @map("legacy_table")
+  legacyId    String? @map("legacy_id")
+  targetModel String? @map("target_model")
+
+  /// Machine-readable: ORPHAN_REFERENCE, INVALID_VALUE, MISSING_REQUIRED, …
+  code    String
+  field   String?
+  /// Redacted before it reaches here — never a password hash or bank detail.
+  value   String?
+  message String
+  /// SKIPPED, FAILED or REVIEW_REQUIRED.
+  action  String
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  run MigrationRun? @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, legacyTable])
+  @@index([code])
+  @@map("migration_errors")
+}
