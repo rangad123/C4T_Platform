@@ -2,10 +2,15 @@
  * Shared shapes and enums for the customer project detail page.
  *
  * Subset of `admin/projects/[id]/constants.ts` — drops the tester-roster and
- * structured-testing shapes (`VerifiedTesterRow`, `deviceFitsTargets`,
- * `TestCaseRow`, `ASSIGNMENT_STATUSES`) since the customer page has no
- * Testers or Test reports tab. Everything kept is restated rather than
- * imported from the admin route so the two stay independently editable.
+ * structured-testing shapes (`VerifiedTesterRow`, `TestCaseRow`,
+ * `ASSIGNMENT_STATUSES`) since the customer page has no Testers or Test
+ * reports tab. Everything kept is restated rather than imported from the
+ * admin route so the two stay independently editable.
+ *
+ * `deviceFitsTargets` used to be on that list too. It now lives in
+ * `lib/admin/tester-fit`, because the inline invite panel it served was
+ * replaced by the assignment workspace and a component cannot import from a
+ * route folder.
  */
 
 export const PROJECT_STATUSES = [

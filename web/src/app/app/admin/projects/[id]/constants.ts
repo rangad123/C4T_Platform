@@ -219,78 +219,7 @@ export interface InviteBlocker {
   adminCanFix: boolean
 }
 
-export function inviteBlockers(
-  tester: VerifiedTesterRow,
-  assignedTesterIds: ReadonlySet<string>,
-): InviteBlocker[] {
-  const blockers: InviteBlocker[] = []
 
-  if (assignedTesterIds.has(tester.user.id)) {
-    // Listed first and alone: it is not a problem, and pairing it with
-    // "awaiting review" would read as one.
-    return [{ reason: 'Already on this build', adminCanFix: false }]
-  }
-
-  if (tester.status !== 'VERIFIED') {
-    const byStatus: Record<string, InviteBlocker> = {
-      APPLIED: { reason: 'Awaiting review', adminCanFix: true },
-      UNDER_REVIEW: { reason: 'Review in progress', adminCanFix: true },
-      REJECTED: { reason: 'Application rejected', adminCanFix: true },
-      SUSPENDED: { reason: 'Tester suspended', adminCanFix: true },
-    }
-    blockers.push(
-      byStatus[tester.status] ?? { reason: `Status ${tester.status}`, adminCanFix: true },
-    )
-  }
-
-  if (tester.user.status !== 'ACTIVE') {
-    const byStatus: Record<string, InviteBlocker> = {
-      PENDING_VERIFICATION: { reason: 'Email not confirmed', adminCanFix: false },
-      SUSPENDED: { reason: 'Account suspended', adminCanFix: true },
-      DEACTIVATED: { reason: 'Account deactivated', adminCanFix: true },
-    }
-    blockers.push(
-      byStatus[tester.user.status] ?? {
-        reason: `Account ${tester.user.status}`,
-        adminCanFix: true,
-      },
-    )
-  }
-
-  if (tester.ndaAcceptedAt === null) {
-    blockers.push({ reason: 'NDA not signed', adminCanFix: false })
-  }
-
-  return blockers
-}
-
-/**
- * Loose platform-fit check for the invite picker — not enforced by the API,
- * since `platformTargets` is free text with no formal contract with
- * `DeviceType`. This is a hint for the admin, not a hard eligibility gate:
- * a project with no targets, or a tester with no devices listed yet, always
- * reads as "no signal" rather than "ineligible."
- */
-export function deviceFitsTargets(
-  devices: readonly { type: string }[],
-  platformTargets: readonly string[],
-): 'match' | 'no-signal' | 'mismatch' {
-  if (platformTargets.length === 0 || devices.length === 0) return 'no-signal'
-
-  const wantsMobile = platformTargets.some((t) => /android|ios|mobile/i.test(t))
-  const wantsWeb = platformTargets.some((t) => /web|desktop|browser/i.test(t))
-  const wantsTablet = platformTargets.some((t) => /tablet/i.test(t))
-
-  if (!wantsMobile && !wantsWeb && !wantsTablet) return 'no-signal'
-
-  const hasMobile = devices.some((d) => d.type === 'MOBILE')
-  const hasTablet = devices.some((d) => d.type === 'TABLET')
-  const hasDesktop = devices.some((d) => d.type === 'DESKTOP')
-
-  const matches =
-    (wantsMobile && hasMobile) || (wantsWeb && hasDesktop) || (wantsTablet && hasTablet)
-  return matches ? 'match' : 'mismatch'
-}
 
 // ─── Build details, summary, structured testing ───────────────────────────
 // Response shapes taken from projects.service.ts's `buildSelect` and

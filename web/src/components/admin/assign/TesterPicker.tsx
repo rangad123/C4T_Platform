@@ -11,14 +11,17 @@ import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { TesterDetailDrawer } from './TesterDetailDrawer'
 import { MultiSelect } from './MultiSelect'
-import type { Candidate, CandidateMeta, FilterOptions, Filters } from './types'
+import type { Candidate, CandidateMeta, FilterOptions, Filters, SortState } from './types'
 import {
   ASSIGNABLE_AGAIN,
+  DEVICE_TYPES,
   RECIPIENT_STATUSES,
+  SORT_CHOICES,
   describeAssignment,
   filterChips,
   personLabel,
 } from './types'
+import { FIT_LABEL, deviceFitsTargets } from '@/lib/admin/tester-fit'
 
 /**
  * Find testers, look at them, choose some. Used by both places that do it.
@@ -58,6 +61,7 @@ export const EMPTY_FILTERS: Filters = {
   minRating: '',
   osName: '',
   browser: '',
+  deviceType: '',
   skills: [],
 }
 
@@ -92,6 +96,16 @@ export interface TesterPickerProps {
    * people the caller cannot actually assign.
    */
   showStatusFilter?: boolean
+  /**
+   * The project's platform targets, used only to LABEL each row with whether
+   * the tester owns matching hardware. The composer has no build in mind and
+   * leaves it unset, which renders no badge at all.
+   *
+   * Narrowing to that hardware is the `deviceType` filter, not this: a badge
+   * is computed from the fetched page and a filter has to be a real query, or
+   * the count above the list stops describing the list.
+   */
+  platformTargets?: readonly string[]
 }
 
 export function TesterPicker({
@@ -108,14 +122,18 @@ export function TesterPicker({
   emptyMessage = 'No testers are available yet.',
   idPrefix = 'picker',
   showStatusFilter = false,
+  platformTargets,
 }: TesterPickerProps) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
+  const [sort, setSort] = useState<SortState>({ field: 'ratingAverage', direction: 'desc' })
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<readonly Candidate[]>(initialCandidates)
   const [meta, setMeta] = useState<CandidateMeta>(initialMeta)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [detailOf, setDetailOf] = useState<Candidate | null>(null)
+  /** Whether the sticky bar is expanded to list who is actually selected. */
+  const [reviewing, setReviewing] = useState(false)
 
   /**
    * Guards against a slow response overwriting a fast one. Without it, typing
@@ -137,7 +155,7 @@ export function TesterPicker({
   const fixedKey = JSON.stringify(fixedQuery ?? {})
 
   const load = useCallback(
-    async (nextFilters: Filters, nextPage: number) => {
+    async (nextFilters: Filters, nextPage: number, nextSort: SortState) => {
       const seq = ++requestSeq.current
       setLoading(true)
       setError(null)
@@ -146,8 +164,8 @@ export function TesterPicker({
         ...(JSON.parse(fixedKey) as Record<string, string>),
         page: String(nextPage),
         limit: String(PAGE_SIZE),
-        sort: 'ratingAverage',
-        order: 'desc',
+        sort: nextSort.field,
+        order: nextSort.direction,
       })
       if (nextFilters.search) params.set('search', nextFilters.search)
       if (nextFilters.countryCode) params.set('countryCode', nextFilters.countryCode)
@@ -156,6 +174,7 @@ export function TesterPicker({
       if (nextFilters.minRating) params.set('minRating', nextFilters.minRating)
       if (nextFilters.osName) params.set('osName', nextFilters.osName)
       if (nextFilters.browser) params.set('browser', nextFilters.browser)
+      if (nextFilters.deviceType) params.set('deviceType', nextFilters.deviceType)
       if (nextFilters.skills.length > 0) params.set('skills', nextFilters.skills.join(','))
 
       try {
@@ -195,9 +214,9 @@ export function TesterPicker({
       firstRender.current = false
       return
     }
-    const timer = setTimeout(() => void load(filters, page), SEARCH_DEBOUNCE_MS)
+    const timer = setTimeout(() => void load(filters, page, sort), SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [filters, page, load])
+  }, [filters, page, sort, load])
 
   const update = useCallback((patch: Partial<Filters>) => {
     setPage(1)
@@ -328,6 +347,40 @@ export function TesterPicker({
               ]}
             />
           </Field>
+          <Field
+            label="Owns a"
+            htmlFor={`${idPrefix}-device-type`}
+            hint={
+              platformTargets && platformTargets.length > 0
+                ? `This build targets ${platformTargets.join(', ')}.`
+                : 'Narrows to testers with that kind of device registered.'
+            }
+          >
+            <Select
+              id={`${idPrefix}-device-type`}
+              value={filters.deviceType}
+              onChange={(e) => update({ deviceType: e.target.value })}
+              options={[{ value: '', label: 'Any device' }, ...DEVICE_TYPES]}
+            />
+          </Field>
+          {/*
+            Sort sits with the filters because that is where the reader is
+            already looking, but it is NOT one: it never changes which testers
+            match, so it gets no chip and survives "Clear all".
+          */}
+          <Field label="Sort by" htmlFor={`${idPrefix}-sort`}>
+            <Select
+              id={`${idPrefix}-sort`}
+              value={sort.direction === 'asc' ? `${sort.field}:asc` : sort.field}
+              onChange={(e) => {
+                const choice = SORT_CHOICES.find((c) => c.value === e.target.value)
+                if (!choice) return
+                setPage(1)
+                setSort({ field: choice.value.split(':')[0] ?? 'ratingAverage', direction: choice.direction })
+              }}
+              options={SORT_CHOICES.map((c) => ({ value: c.value, label: c.label }))}
+            />
+          </Field>
         </div>
 
         {/*
@@ -422,7 +475,7 @@ export function TesterPicker({
               variant="secondary"
               size="sm"
               style={{ marginTop: 'var(--space-4)' }}
-              onClick={() => void load(filters, page)}
+              onClick={() => void load(filters, page, sort)}
             >
               Try again
             </Button>
@@ -445,6 +498,7 @@ export function TesterPicker({
                 checked={selected.has(row.user.id)}
                 onToggle={() => toggle(row)}
                 onOpen={() => setDetailOf(row)}
+                platformTargets={platformTargets}
               />
             ))}
           </ul>
@@ -508,8 +562,36 @@ export function TesterPicker({
             boxShadow: 'var(--shadow-md)',
           }}
         >
-          <span style={{ fontWeight: 'var(--fw-medium)' }}>
-            {selected.size} tester{selected.size === 1 ? '' : 's'} selected
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-3)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <strong style={{ fontWeight: 'var(--fw-medium)' }}>
+              {selected.size} tester{selected.size === 1 ? '' : 's'} selected
+            </strong>
+            {/*
+              Selection survives searching, filtering and paging, which is the
+              whole point of holding it here — but that also means most of it
+              is off-screen most of the time. On a pool in the thousands the
+              count alone is not reviewable: it says eleven without saying
+              WHICH eleven, and the ones chosen four filters ago are exactly
+              the ones worth re-reading before inviting anybody.
+            */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              iconRight={reviewing ? 'chevron-up' : 'chevron-down'}
+              onClick={() => setReviewing((r) => !r)}
+              aria-expanded={reviewing}
+              aria-controls={`${idPrefix}-selection-review`}
+            >
+              {reviewing ? 'Hide' : 'Review'}
+            </Button>
           </span>
           <span style={{ display: 'inline-flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
             <Button
@@ -522,6 +604,68 @@ export function TesterPicker({
             </Button>
             {summaryAction}
           </span>
+
+          {reviewing ? (
+            <ul
+              id={`${idPrefix}-selection-review`}
+              style={{
+                listStyle: 'none',
+                margin: 0,
+                padding: 'var(--space-3) 0 0',
+                flexBasis: '100%',
+                maxHeight: 220,
+                overflowY: 'auto',
+                borderTop: '1px solid var(--border-strong)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-2)',
+              }}
+            >
+              {[...selected.values()].map((candidate) => (
+                <li
+                  key={candidate.user.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 'var(--space-3)',
+                  }}
+                >
+                  <span
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 'var(--type-body-sm-size)',
+                    }}
+                  >
+                    {personLabel(candidate)}
+                    <span style={{ opacity: 0.7 }}> · {candidate.user.email}</span>
+                  </span>
+                  {/*
+                    Removing from here rather than only from the list: the row
+                    this person came from may be twelve pages back behind a
+                    filter that no longer matches them, so unticking it is not
+                    something the reader can reliably get back to.
+                  */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    iconLeft="x"
+                    aria-label={`Remove ${personLabel(candidate)} from the selection`}
+                    onClick={() => {
+                      const next = new Map(selected)
+                      next.delete(candidate.user.id)
+                      onSelectionChange(next)
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 
@@ -543,15 +687,26 @@ function CandidateRow({
   checked,
   onToggle,
   onOpen,
+  platformTargets,
 }: {
   candidate: Candidate
   checked: boolean
   onToggle: () => void
   onOpen: () => void
+  platformTargets?: readonly string[]
 }) {
   const standing = describeAssignment(candidate.assignment)
   const blocked = Boolean(standing && !standing.assignableAgain)
   const skills = candidate.skills.slice(0, 3)
+
+  /*
+    A hint, never a gate. `no-signal` renders nothing rather than an
+    "unknown" badge — a tester who has not registered a device yet is not a
+    worse choice, just an unmeasured one, and a row of grey "unknown" chips
+    would train the reader to ignore the column entirely.
+  */
+  const fit = platformTargets ? deviceFitsTargets(candidate.devices, platformTargets) : 'no-signal'
+  const fitLabel = FIT_LABEL[fit]
 
   return (
     <li
@@ -587,6 +742,11 @@ function CandidateRow({
           {standing ? (
             <Badge tone={standing.tone} uppercase={false}>
               {standing.label}
+            </Badge>
+          ) : null}
+          {fitLabel ? (
+            <Badge tone={fit === 'match' ? 'success' : 'warning'} uppercase={false}>
+              {fitLabel}
             </Badge>
           ) : null}
         </div>

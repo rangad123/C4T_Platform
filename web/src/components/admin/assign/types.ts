@@ -69,7 +69,27 @@ export interface Filters {
   minRating: string
   osName: string
   browser: string
+  /**
+   * `DeviceType`, sent to the API as `deviceType`.
+   *
+   * The honest way to narrow to people who own the right hardware. A
+   * client-side filter over the fetched page could not do this: it would hide
+   * rows from the visible 25 while the count and page total still described
+   * the unfiltered set, so "3 of 7,412" would sit above three rows on page one
+   * of two hundred. This one is a real query parameter and pages correctly.
+   */
+  deviceType: string
   skills: string[]
+}
+
+/**
+ * Ordering. Separate from `Filters` because it does not narrow the set — it
+ * only rearranges it, so it gets no removable chip and does not belong in
+ * "clear all filters".
+ */
+export interface SortState {
+  field: string
+  direction: 'asc' | 'desc'
 }
 
 export interface FilterOptions {
@@ -163,6 +183,35 @@ const STATUS_LABELS: Record<string, string> = Object.fromEntries(
   RECIPIENT_STATUSES.map((s) => [s.value, s.label]),
 )
 
+/**
+ * `DeviceType`, as the picker offers it. SMART_TV and WEARABLE are omitted
+ * deliberately: nothing in the platform targets a build at either, so listing
+ * them would be two options that always return nobody.
+ */
+export const DEVICE_TYPES: readonly { value: string; label: string }[] = [
+  { value: 'MOBILE', label: 'Phone' },
+  { value: 'TABLET', label: 'Tablet' },
+  { value: 'DESKTOP', label: 'Desktop or laptop' },
+]
+
+const DEVICE_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  DEVICE_TYPES.map((d) => [d.value, d.label]),
+)
+
+/**
+ * How the candidate list can be ordered. Every field here is one the API
+ * actually accepts (`TESTER_SORT_FIELDS`); offering one it does not would
+ * fail the whole request rather than degrade.
+ */
+export const SORT_CHOICES: readonly { value: string; label: string; direction: 'asc' | 'desc' }[] =
+  [
+    { value: 'ratingAverage', label: 'Highest rated', direction: 'desc' },
+    { value: 'bugsReportedCount', label: 'Most bugs reported', direction: 'desc' },
+    { value: 'projectsCompletedCount', label: 'Most projects completed', direction: 'desc' },
+    { value: 'createdAt', label: 'Newest testers', direction: 'desc' },
+    { value: 'createdAt:asc', label: 'Longest on the platform', direction: 'asc' },
+  ]
+
 /** The active filters, as removable chips. */
 export function filterChips(
   filters: Filters,
@@ -195,6 +244,13 @@ export function filterChips(
     })
   }
   if (filters.osName) chips.push({ key: 'os', label: filters.osName, clear: { osName: '' } })
+  if (filters.deviceType) {
+    chips.push({
+      key: 'deviceType',
+      label: DEVICE_TYPE_LABELS[filters.deviceType] ?? filters.deviceType,
+      clear: { deviceType: '' },
+    })
+  }
   if (filters.browser) {
     chips.push({ key: 'browser', label: filters.browser, clear: { browser: '' } })
   }

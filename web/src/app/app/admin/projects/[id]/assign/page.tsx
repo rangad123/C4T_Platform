@@ -30,6 +30,7 @@ interface ProjectContext {
   title: string
   activeBuildId: string
   builds: readonly { id: string; name: string }[]
+  platformTargets: readonly string[]
   capabilities: { canAssignTesters: boolean }
 }
 
@@ -149,6 +150,7 @@ export default async function AssignTestersPage({
           buildName={build.name}
           projectLabel={projectLabel}
           options={options}
+          platformTargets={project.platformTargets ?? []}
           targets={{
             devices: buildDetail?.targetDevices ?? [],
             browsers: buildDetail?.targetBrowsers ?? [],

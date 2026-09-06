@@ -42,7 +42,6 @@ import {
   BUILD_STATUSES,
   PROJECT_PRIORITIES,
   allowedTransitions,
-  deviceFitsTargets,
   isProjectPriority,
   type BuildDetail,
   type BuildSummary,
@@ -52,8 +51,6 @@ import {
   type ProjectMaterial,
   type ProjectReportSummary,
   type TestCaseRow,
-  type VerifiedTesterRow,
-  inviteBlockers,
   type ProjectRatingRow,
   type BadgeOption,
 } from './constants'
@@ -67,7 +64,6 @@ import {
   createBuild,
   createTestCase,
   assignTestCase,
-  inviteTesters,
   removeFeature,
   removeMaterial,
   renameBuild,
@@ -94,17 +90,6 @@ import { countryOptions } from '@/lib/geo/source'
  * before hydration and needs no error-boundary-shaped client state.
  */
 
-/** Verified testers offered per invite. Well under the API's 200-id ceiling. */
-const TESTER_POOL_SIZE = 40
-/**
- * How many blocked-but-matching testers the panel will explain.
- *
- * Small on purpose. This is an answer to "where is the person I searched
- * for", not a second directory — a search loose enough to return twenty
- * blocked testers needs narrowing, and listing them all would bury the
- * invitable ones above.
- */
-const EXCLUDED_MATCH_LIMIT = 8
 /** Bugs shown inline. The full set lives on the bugs list. */
 const BUG_PREVIEW_SIZE = 10
 
@@ -255,8 +240,6 @@ export default async function ProjectDetailPage({
    * the brief gap while that narrower set of fetches resolves.
    */
   const [
-    testerPool,
-    excludedPool,
     bugs,
     features,
     buildSummaryData,
@@ -264,45 +247,6 @@ export default async function ProjectDetailPage({
     projectReport,
     projectRatings,
   ] = await Promise.all([
-    section === 'testers' && capabilities.canAssignTesters
-      ? /*
-             The pool is the top 40 by rating UNLESS a search narrows it.
-             Without the search, a tester outside that 40 simply could not be
-             invited from here — the list was the whole interface and there
-             was no way past it. `listTestersQuery` has taken a `search` since
-             the module was written; nothing here asked for it.
-           */
-        loadList<VerifiedTesterRow>('testers', {
-          page: 1,
-          limit: TESTER_POOL_SIZE,
-          query: {
-            status: 'VERIFIED',
-            sort: 'ratingAverage',
-            order: 'desc',
-            ...(testerSearch ? { search: testerSearch } : {}),
-          },
-        })
-      : Promise.resolve({ error: 'forbidden' as const }),
-    /*
-         The same search, WITHOUT the `status=VERIFIED` filter above.
-
-         The pool read cannot answer "why is the person I searched for
-         missing?", because the API drops them before the page ever sees
-         them. This read is what turns an empty result into a sentence: it
-         finds the same name at any status, and `inviteBlockers` says which
-         gate each one failed.
-
-         Only when a search is actually running. Without one the list is the
-         top 40 by rating and "missing" carries no meaning, so a second query
-         on every page load would buy nothing.
-      */
-    section === 'testers' && capabilities.canAssignTesters && testerSearch
-      ? loadList<VerifiedTesterRow>('testers', {
-          page: 1,
-          limit: EXCLUDED_MATCH_LIMIT,
-          query: { search: testerSearch, sort: 'ratingAverage', order: 'desc' },
-        })
-      : Promise.resolve({ error: 'skipped' as const }),
     section === 'bugs'
       ? loadList<ProjectBugRow>('bugs', {
           page: 1,
@@ -350,49 +294,6 @@ export default async function ProjectDetailPage({
    */
   const badgeCatalogue =
     section === 'testers' ? await serverFetchOrNull<readonly BadgeOption[]>('badges') : null
-  /**
-   * Testers this panel should not offer, because inviting them would do
-   * nothing.
-   *
-   * Only LIVE standings count. A tester who declined or was removed holds a
-   * row on this build but no seat and no access, and `assignTesters` now
-   * revives such a row rather than skipping it — so hiding them here would
-   * put someone in the roster's list of "on this build" while removing the
-   * only control that could bring them back.
-   */
-  const assignedTesterIds = new Set(
-    project.assignments
-      .filter((row) => row.status !== 'DECLINED' && row.status !== 'REMOVED')
-      .map((row) => row.tester.id),
-  )
-  // `assertAssignable` on the API rejects a tester who is not ACTIVE or has not
-  // accepted the NDA, so those are filtered out here rather than offered and
-  // then refused. Testers with a live standing are dropped for the same reason.
-  const invitable =
-    'items' in testerPool
-      ? testerPool.items.filter(
-          (tester) =>
-            tester.user.status === 'ACTIVE' &&
-            tester.ndaAcceptedAt !== null &&
-            !assignedTesterIds.has(tester.user.id),
-        )
-      : []
-
-  /**
-   * Matches the search found that cannot be invited, each with its reason.
-   *
-   * Filtered against `invitable` by user id rather than recomputing the
-   * eligibility rules — one definition of "can be invited", used twice.
-   */
-  const invitableIds = new Set(invitable.map((tester) => tester.user.id))
-  const excludedMatches =
-    'items' in excludedPool
-      ? excludedPool.items
-          .filter((tester) => !invitableIds.has(tester.user.id))
-          .map((tester) => ({ tester, blockers: inviteBlockers(tester, assignedTesterIds) }))
-          .filter((row) => row.blockers.length > 0)
-      : []
-
   /* One source for every "what should this be tested on" picker — see
      `lib/catalog/target-options`. Countries come from the same list the
      location pickers use, so a project target and an address agree on what a
@@ -2012,228 +1913,39 @@ export default async function ProjectDetailPage({
 
           {capabilities.canAssignTesters ? (
             <>
+              {/*
+                Staffing lives in the assignment workspace, not here.
+
+                This used to be a checkbox grid over the top 40 testers by
+                rating, with a search to reach anyone outside it. That is not
+                an interface for a pool in the thousands: it could not filter
+                by country, device, skill or availability, could not page, and
+                gave no way to review who had been picked before inviting
+                them. The workspace does all of it against the real query, so
+                keeping a second, weaker way to do the same job only split the
+                work between one surface that scales and one that does not.
+              */}
               <Panel
-                title="Invite testers"
-                description="Verified testers who have accepted the NDA and are not already on the roster."
-                actions={
-                  <Button
-                    href={`/app/admin/projects/${project.id}/assign?buildId=${activeBuildId}`}
-                    variant="primary"
-                    size="sm"
-                    iconLeft="users-round"
-                  >
-                    Open assignment workspace
-                  </Button>
-                }
+                title="Staff this build"
+                description="Search the whole tester pool, filter it, and invite in one pass."
               >
-                {/*
-                  A GET form, so the term lives in the URL and this page stays
-                  a Server Component — the same shape every other filter in
-                  the panel uses. The hidden fields carry the tab and build,
-                  which would otherwise be dropped on submit.
-                */}
-                <LiveGetForm
-                  action={detailPath}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-3)',
-                    flexWrap: 'wrap',
-                    marginBottom: 'var(--space-5)',
-                  }}
-                >
-                  <input type="hidden" name="section" value="testers" />
-                  <input type="hidden" name="buildId" value={activeBuildId} />
-                  {/* The roster filter's state — see the note on the roster
-                      form above for why each carries the other's. */}
-                  <input type="hidden" name="rosterSearch" value={rosterSearch} />
-                  <input type="hidden" name="rosterStatus" value={rosterStatus} />
-                  <Input
-                    name="testerSearch"
-                    defaultValue={testerSearch}
-                    placeholder="Search testers by name or email"
-                    aria-label="Search testers"
-                    style={{ flex: '1 1 240px' }}
-                  />
-                  {/*
-                    The Search button is gone: the field applies itself a beat
-                    after the last keystroke, so pressing it could only repeat
-                    what had already happened. Enter still works — the form
-                    handles submit rather than letting the browser do a full
-                    page load with it, which is what used to throw away the
-                    reader's scroll position on every search.
-                  */}
-                  <LiveFormStatus />
-                  {testerSearch ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                  <Muted>
+                    The assignment workspace searches every verified tester — by country, city,
+                    device, operating system, browser, skills and rating — and keeps your selection
+                    while you narrow it. Already-assigned testers are shown with their standing
+                    rather than hidden.
+                  </Muted>
+                  <div>
                     <Button
-                      href={`${detailPath}?section=testers&buildId=${activeBuildId}`}
-                      variant="ghost"
+                      href={`/app/admin/projects/${project.id}/assign?buildId=${activeBuildId}`}
+                      variant="primary"
+                      iconLeft="users-round"
                     >
-                      Clear
+                      Open assignment workspace
                     </Button>
-                  ) : null}
-                </LiveGetForm>
-
-                {'error' in testerPool ? (
-                  <Muted>
-                    The tester pool could not be read. Inviting from here needs the tester.read
-                    permission as well as project.assign.
-                  </Muted>
-                ) : invitable.length === 0 && excludedMatches.length === 0 ? (
-                  <Muted>
-                    {testerSearch
-                      ? `No tester matches "${testerSearch}".`
-                      : `Every verified tester in the top ${TESTER_POOL_SIZE} by rating is already on this roster. Search by name or email to reach one outside it.`}
-                  </Muted>
-                ) : invitable.length === 0 ? null : (
-                  <form action={inviteTesters} style={stackStyle}>
-                    <input type="hidden" name="id" value={project.id} />
-                    <input type="hidden" name="buildId" value={activeBuildId} />
-                    <fieldset style={fieldsetStyle}>
-                      <legend
-                        className="c4t-eyebrow"
-                        style={{ color: 'var(--text-muted)', padding: 0 }}
-                      >
-                        Choose testers
-                      </legend>
-                      <div style={checkboxGridStyle}>
-                        {invitable.map((tester) => {
-                          const fit = deviceFitsTargets(tester.devices, project.platformTargets)
-                          return (
-                            <Checkbox
-                              key={tester.user.id}
-                              id={`tester-${tester.user.id}`}
-                              name="testerIds"
-                              value={tester.user.id}
-                              label={personName(tester.user)}
-                              description={`${tester.user.email} · ${
-                                tester.countryCode ?? 'no country'
-                              } · ${formatRating(tester.ratingAverage)}${
-                                fit === 'mismatch' ? ' · no device on this platform' : ''
-                              }`}
-                            />
-                          )
-                        })}
-                      </div>
-                    </fieldset>
-                    <Field
-                      label="Note to the testers"
-                      htmlFor="invite-notes"
-                      hint="Sent with the invitation. Keep it to what they need to decide."
-                    >
-                      <Textarea
-                        id="invite-notes"
-                        name="notes"
-                        rows={3}
-                        maxLength={1000}
-                        placeholder="What is the ask, and by when?"
-                      />
-                    </Field>
-                    <div>
-                      <SubmitButton
-                        variant="primary"
-                        iconLeft="user-check"
-                        pendingLabel="Inviting…"
-                      >
-                        Invite selected testers
-                      </SubmitButton>
-                    </div>
-                  </form>
-                )}
-
-                {/*
-                  The searched-for testers this panel is REFUSING to offer, and
-                  why.
-
-                  Rendered after the invitable list rather than instead of it,
-                  because a search can turn up one of each — and the reader
-                  asked about a person, not about a list. Without this the
-                  panel's only answer for a tester sitting in the review queue
-                  was to omit them silently, which reads as "no such tester"
-                  and sends an admin looking for a bug rather than clicking
-                  Review.
-                */}
-                {excludedMatches.length > 0 ? (
-                  <div
-                    style={{
-                      marginTop: invitable.length > 0 ? 'var(--space-6)' : 0,
-                      paddingTop: invitable.length > 0 ? 'var(--space-5)' : 0,
-                      borderTop:
-                        invitable.length > 0 ? '1px solid var(--border-subtle)' : undefined,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 'var(--space-4)',
-                    }}
-                  >
-                    <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
-                      Matches that cannot be invited
-                    </p>
-
-                    {excludedMatches.map(({ tester, blockers }) => (
-                      <div
-                        key={tester.user.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 'var(--space-4)',
-                          flexWrap: 'wrap',
-                          padding: 'var(--space-4) var(--space-5)',
-                          background: 'var(--surface-sunken)',
-                          borderRadius: 'var(--radius-card)',
-                        }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 'var(--fw-medium)' }}>
-                            {personName(tester.user)}
-                          </div>
-                          <div
-                            style={{
-                              color: 'var(--text-secondary)',
-                              fontSize: 'var(--type-body-sm-size)',
-                            }}
-                          >
-                            {tester.user.email}
-                          </div>
-                        </div>
-
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 'var(--space-3)',
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          {blockers.map((blocker) => (
-                            <Badge
-                              key={blocker.reason}
-                              tone={blocker.adminCanFix ? 'warning' : 'neutral'}
-                            >
-                              {blocker.reason}
-                            </Badge>
-                          ))}
-                          {/*
-                            Only where the admin is the one who can act. A
-                            "Review" button next to "NDA not signed" would
-                            promise a fix this page cannot deliver — that one
-                            is the tester's to do, and the honest next step is
-                            to chase them.
-                          */}
-                          {blockers.some((blocker) => blocker.adminCanFix) ? (
-                            <Button
-                              href={`/app/admin/testers/${tester.id}`}
-                              variant="secondary"
-                              size="sm"
-                            >
-                              Review
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
                   </div>
-                ) : null}
+                </div>
               </Panel>
 
               {project.assignments.length > 0 ? (
@@ -3109,21 +2821,6 @@ const fieldGridStyle = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
   gap: 'var(--space-5)',
-}
-
-const checkboxGridStyle = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-  gap: 'var(--space-4)',
-}
-
-const fieldsetStyle = {
-  display: 'flex',
-  flexDirection: 'column' as const,
-  gap: 'var(--space-4)',
-  margin: 0,
-  padding: 0,
-  border: 'none',
 }
 
 const listResetStyle = {

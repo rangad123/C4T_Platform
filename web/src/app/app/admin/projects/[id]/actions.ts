@@ -199,58 +199,6 @@ export async function changeProjectStatus(formData: FormData): Promise<void> {
   redirect(projectHref(id, { notice }), 'replace')
 }
 
-/**
- * Invite one or more verified testers.
- *
- * The roster is a checkbox list, so `getAll` is what reads it — `formString`
- * would take only the first tick and quietly drop the rest of the batch. The API
- * validates every tester before writing any of them, so a partial batch never
- * half-applies.
- */
-export async function inviteTesters(formData: FormData): Promise<void> {
-  const id = formTrimmed(formData, 'id')
-  if (!id) return
-
-  const testerIds = formData
-    .getAll('testerIds')
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-  if (testerIds.length === 0) return
-
-  const notes = formTrimmed(formData, 'notes')
-  const buildId = formTrimmed(formData, 'buildId')
-
-  try {
-    await actionFetch(`projects/${id}/assignments`, {
-      method: 'POST',
-      body: { testerIds, ...(notes ? { notes } : {}), ...(buildId ? { buildId } : {}) },
-    })
-  } catch (error) {
-    /**
-     * The API writes these 4xx messages for people — "Testers cannot be added
-     * to a paused, completed or cancelled project" says exactly what to do
-     * about it. Throwing sent that to the page's crash screen instead, which
-     * replaced a sentence the reader could act on with a reference number
-     * they could not.
-     *
-     * Only 4xx text is passed through. A 5xx describes our internals.
-     */
-    const status = error instanceof ApiError ? error.status : 0
-    const detail =
-      status >= 400 && status < 500 && error instanceof ApiError ? error.message.slice(0, 200) : ''
-    redirect(
-      projectHref(id, {
-        section: 'testers',
-        buildId,
-        notice: 'invite-failed',
-        detail,
-      }),
-      'replace',
-    )
-  }
-
-  revalidateProject(id)
-  redirect(projectHref(id, { section: 'testers', buildId, notice: 'invited' }), 'replace')
-}
 
 /** Activate, complete or remove one tester on the roster. */
 /**

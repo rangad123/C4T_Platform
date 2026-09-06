@@ -35,6 +35,12 @@ export interface AssignWorkspaceProps {
   projectLabel: string
   options: FilterOptions
   targets: BuildTargets
+  /**
+   * The PROJECT's platform targets (Web, Android, iOS …), distinct from the
+   * build's device/browser/OS lists above. Only used to label each candidate
+   * with whether they own matching hardware — see `TesterPicker`.
+   */
+  platformTargets: readonly string[]
   templates: readonly { id: string; name: string; subject: string | null; body: string }[]
   /** Rendered by the server so the first paint has rows, not a spinner. */
   initialCandidates: Candidate[]
@@ -48,6 +54,7 @@ export function AssignWorkspace({
   projectLabel,
   options,
   targets,
+  platformTargets,
   templates,
   initialCandidates,
   initialMeta,
@@ -174,6 +181,7 @@ export function AssignWorkspace({
       onSelectionChange={setSelected}
       buildName={buildName}
       projectLabel={projectLabel}
+      platformTargets={platformTargets}
       idPrefix="assign"
       emptyMessage="No testers are available to assign yet."
       summaryAction={
