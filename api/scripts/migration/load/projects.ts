@@ -712,48 +712,96 @@ export const testCaseAssignmentLoader: Loader = {
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.Sno)
 
-    const testCaseId = await ctx.idMap.resolve('test_case', legacyRef(row.case_id), 'TestCase')
-    const testerId = await ctx.idMap.resolve(
-      'users',
-      legacyRef(row.tester_id ?? row.user_id),
-      'User',
-    )
-    if (!testCaseId || !testerId) {
+    /*
+      One row here is not one assignment. `case_id` and `tester_id` are both
+      comma-separated LISTS — a single row reads
+
+        case_id  = "1559,1560, … ,1679"   (121 cases)
+        tester_id = "600,690,1051"        (3 testers)
+
+      and means every one of those testers was given every one of those cases.
+      Read as scalars, `legacyRef` returns the whole string, nothing resolves,
+      and only a row that happened to hold exactly one of each ever produced an
+      assignment — one, out of 657 rows. So the row fans out to the cross
+      product, which is what the old platform meant by it.
+
+      A pair whose case or tester did not migrate is skipped individually
+      rather than costing the whole row.
+    */
+    const caseIds = list(row.case_id)
+    const testerIds = list(row.tester_id ?? row.user_id)
+    if (caseIds.length === 0 || testerIds.length === 0) {
       ctx.reporter.orphan({
         legacyTable: 'assign_testCase',
         legacyId,
-        field: testCaseId ? 'tester_id' : 'case_id',
-        referencedTable: testCaseId ? 'users' : 'test_case',
-        referencedId: String(testCaseId ? (row.tester_id ?? row.user_id) : row.case_id),
+        field: caseIds.length ? 'tester_id' : 'case_id',
+        referencedTable: caseIds.length ? 'users' : 'test_case',
+        referencedId: asText(caseIds.length ? row.tester_id : row.case_id),
       })
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Missing test case or tester.' }
     }
 
-    const existing = await tx.testCaseAssignment.findUnique({
-      where: { testCaseId_testerId: { testCaseId, testerId } },
-      select: { id: true },
-    })
+    const resolvedTesters: string[] = []
+    for (const legacyTester of testerIds) {
+      const id = await ctx.idMap.resolve('users', legacyTester, 'User')
+      if (id) resolvedTesters.push(id)
+      else
+        ctx.reporter.orphan({
+          legacyTable: 'assign_testCase',
+          legacyId,
+          field: 'tester_id',
+          referencedTable: 'users',
+          referencedId: legacyTester,
+        })
+    }
 
-    /*
-      `assign_testCase` is a bare join table — Sno, case_id, tester_id,
-      build_id — with no date at all. The assignment is dated from the test
-      case it points at rather than from `now()`, so a 2019 assignment does
-      not arrive stamped with the migration's own clock.
-    */
-    const assignedCase = await tx.testCase.findUnique({
-      where: { id: testCaseId },
-      select: { createdAt: true },
-    })
+    let created = 0
+    let matched = 0
+    for (const legacyCase of caseIds) {
+      const testCaseId = await ctx.idMap.resolve('test_case', legacyCase, 'TestCase')
+      if (!testCaseId) {
+        ctx.reporter.orphan({
+          legacyTable: 'assign_testCase',
+          legacyId,
+          field: 'case_id',
+          referencedTable: 'test_case',
+          referencedId: legacyCase,
+        })
+        continue
+      }
 
-    const assignment =
-      existing ??
-      (await tx.testCaseAssignment.create({
-        data: { testCaseId, testerId, assignedAt: assignedCase?.createdAt ?? timestampOr(null) },
-        select: { id: true },
-      }))
+      /*
+        `assign_testCase` is a bare join table — Sno, case_id, tester_id,
+        build_id — with no date at all. The assignment is dated from the test
+        case it points at rather than from `now()`, so a 2019 assignment does
+        not arrive stamped with the migration's own clock.
+      */
+      const assignedCase = await tx.testCase.findUnique({
+        where: { id: testCaseId },
+        select: { createdAt: true },
+      })
 
-    await ctx.idMap.remember(tx, 'assign_testCase', legacyId, 'TestCaseAssignment', assignment.id)
-    return { kind: 'written', created: !existing }
+      for (const testerId of resolvedTesters) {
+        const existing = await tx.testCaseAssignment.findUnique({
+          where: { testCaseId_testerId: { testCaseId, testerId } },
+          select: { id: true },
+        })
+        if (existing) {
+          matched += 1
+          continue
+        }
+        await tx.testCaseAssignment.create({
+          data: { testCaseId, testerId, assignedAt: assignedCase?.createdAt ?? timestampOr(null) },
+        })
+        created += 1
+      }
+    }
+
+    if (created === 0 && matched === 0) {
+      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Missing test case or tester.' }
+    }
+
+    return { kind: 'written', created: created > 0 }
   },
 }
 
