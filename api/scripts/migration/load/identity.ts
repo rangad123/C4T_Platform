@@ -196,6 +196,8 @@ function resolveRole(row: LegacyRow, roleNames: Map<string, string>) {
 }
 
 const roleNames = new Map<string, string>()
+/** Legacy skill id → name, so the seeded Skill catalog can be matched by name. */
+const skillNames = new Map<string, string>()
 
 export const userLoader: Loader = {
   table: 'users',
@@ -211,6 +213,17 @@ export const userLoader: Loader = {
       for (const r of rows) roleNames.set(String(r.rol_id), String(r.rol_name))
     } catch {
       // Falls back to ROLE_BY_LEGACY_ID; reported per row if that misses too.
+    }
+
+    skillNames.clear()
+    try {
+      const rows = await query<Record<string, unknown>>('SELECT sname_id, sname_name FROM `skills`')
+      for (const r of rows) {
+        const name = text(r.sname_name)
+        if (name) skillNames.set(String(r.sname_id), name)
+      }
+    } catch {
+      // Unresolved skills are reported per row as orphans.
     }
   },
 
@@ -351,10 +364,24 @@ export const userLoader: Loader = {
       })
       await ctx.idMap.remember(tx, 'users', legacyId, 'TesterProfile', profile.id)
 
-      // usr_skill_set is a comma-separated list of legacy skill ids.
+      /*
+        `usr_skill_set` is a list of legacy skill ids, pipe- or comma-separated
+        ("16|19"), held by 2,919 accounts.
+
+        They are resolved by NAME, not through the id map. `skills` is a
+        REFERENCE_LOOKUP — seeded from the CSV export by `seed-catalog.ts` and
+        never migrated — so it has no id-map entries at all, and asking the map
+        for one returned null every time. Every tester skill on the platform
+        was being dropped as an orphan. Same shape as the browser catalog, and
+        resolved the same way: legacy id → legacy name → seeded Skill.
+      */
       const skillIds = list(row.usr_skill_set)
       for (const skillLegacyId of skillIds) {
-        const skillId = await ctx.idMap.resolve('skills', skillLegacyId, 'Skill')
+        const skillName = skillNames.get(skillLegacyId)
+        const skill = skillName
+          ? await tx.skill.findFirst({ where: { name: skillName }, select: { id: true } })
+          : null
+        const skillId = skill?.id ?? null
         if (!skillId) {
           ctx.reporter.orphan({
             legacyTable: 'users',

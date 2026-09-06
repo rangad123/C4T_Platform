@@ -342,6 +342,26 @@ export const buildLoader: Loader = {
       : await tx.build.create({ data: { ...data, projectId }, select: { id: true } })
 
     await ctx.idMap.remember(tx, 'builds', legacyId, 'Build', build.id)
+
+    /*
+      `build_feature_list` is the comma-separated list of features the build
+      was to be tested against — "Login,Registration,Update Profile" — and the
+      new schema models each as a Feature row on the build. Nothing read it.
+      Shared by name with the features created from `bugs_report.bug_feature`,
+      so a bug filed against "Login" points at the same row the build declared.
+    */
+    for (const featureName of list(row.build_feature_list)) {
+      const already = await tx.feature.findFirst({
+        where: { buildId: build.id, name: featureName },
+        select: { id: true },
+      })
+      if (!already) {
+        await tx.feature.create({
+          data: { buildId: build.id, projectId, name: featureName, createdAt },
+        })
+      }
+    }
+
     return { kind: 'written', created: !existing }
   },
 }
@@ -438,8 +458,56 @@ export const assignmentLoader: Loader = {
       `rate_by` / `feedback`. Those are a separate model now, so the one row
       splits in two. Rating.legacyId keys on the assignment it came from.
     */
-    const score = int(row.rate)
-    const authorId = await ctx.idMap.resolve('users', legacyRef(row.rate_by), 'User')
+    /*
+      `rate` is stored as text and holds halves — "4", "3.5", "2.5" — while
+      Rating.score is an Int 1-5, so it rounds rather than truncating. `int()`
+      would have turned 3.5 into 3 silently.
+
+      `rate_by` is NOT a user id. It holds the ROLE of whoever did the rating:
+      "Admin" (762 rows), "Company" (76), "SubAdmin" (16). Resolving it through
+      the id map returned null every time, so all 918 real ratings — with their
+      feedback text — were being dropped. A role is not a person, so the rating
+      is attributed to the nearest true one: the organisation's owner when the
+      customer rated, otherwise the migrating admin. Recorded as a substitution
+      so it is never mistaken for the original author.
+    */
+    const rawScore = text(row.rate)
+    const scoreNumber = rawScore === null ? Number.NaN : Number(rawScore)
+    const score = Number.isFinite(scoreNumber) && scoreNumber > 0 ? Math.round(scoreNumber) : null
+
+    let authorId: string | null = null
+    if (score !== null) {
+      const raterRole = (text(row.rate_by) ?? '').toLowerCase()
+      if (raterRole === 'company') {
+        const project = await tx.project.findUnique({
+          where: { id: build.projectId },
+          select: { organisationId: true },
+        })
+        const owner = project
+          ? await tx.organisationMember.findFirst({
+              where: { organisationId: project.organisationId, orgRole: 'OWNER' },
+              select: { userId: true },
+            })
+          : null
+        authorId = owner?.userId ?? (await firstAdminId(ctx, tx))
+      } else {
+        authorId = await firstAdminId(ctx, tx)
+      }
+
+      if (authorId) {
+        ctx.reporter.problem({
+          legacyTable: 'assigned_tests',
+          legacyId,
+          targetModel: 'Rating',
+          code: 'SUBSTITUTED_REFERENCE',
+          field: 'rate_by',
+          value: asText(row.rate_by),
+          message: 'Legacy rate_by names a role, not a person; attributed to the nearest account.',
+          action: 'REVIEW_REQUIRED',
+        })
+      }
+    }
+
     if (score !== null && score > 0 && authorId) {
       const ratingLegacyId = `assigned_tests:${legacyId}`
       const existingRating = await tx.rating.findUnique({
@@ -458,9 +526,40 @@ export const assignmentLoader: Loader = {
       if (existingRating) {
         await tx.rating.update({ where: { id: existingRating.id }, data: ratingData })
       } else {
-        await tx.rating.create({
-          data: { ...ratingData, legacyId: ratingLegacyId, authorId },
+        /*
+          Rating is unique on (author, subjectType, subject, project). Because
+          the author is now a substituted account rather than the real rater,
+          two assignments of the same tester to the same project collapse onto
+          one key — which would abort the batch on a constraint violation. The
+          first rating wins and the second is reported rather than lost
+          silently.
+        */
+        const clash = await tx.rating.findFirst({
+          where: {
+            authorId,
+            subjectType: 'TESTER',
+            subjectUserId: testerId,
+            projectId: build.projectId,
+          },
+          select: { id: true },
         })
+        if (clash) {
+          ctx.reporter.problem({
+            legacyTable: 'assigned_tests',
+            legacyId,
+            targetModel: 'Rating',
+            code: 'DUPLICATE_RATING',
+            field: 'rate',
+            value: asText(row.rate),
+            message:
+              'This tester is already rated on this project by the substituted author; second rating not migrated.',
+            action: 'REVIEW_REQUIRED',
+          })
+        } else {
+          await tx.rating.create({
+            data: { ...ratingData, legacyId: ratingLegacyId, authorId },
+          })
+        }
       }
     }
 
