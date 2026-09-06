@@ -258,7 +258,15 @@ export default async function ProjectDetailPage({
             readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
           >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
         : Promise.resolve(null),
-      section === 'build'
+      /*
+        Fetched for the DASHBOARD, which is where the "Build summary" panel is
+        rendered. It used to be fetched for `build`, which renders "Build
+        details" and never reads this — so the panel had a null on every
+        dashboard and showed "Summary could not be loaded" permanently, on
+        every project, while the endpoint behind it was returning 200 the
+        whole time.
+      */
+      section === 'dashboard'
         ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
         : Promise.resolve(null),
       section === 'testing'
