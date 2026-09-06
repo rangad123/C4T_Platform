@@ -18,11 +18,43 @@ skills, OS versions and so on), and those are _already imported_ by
 `prisma/seed-catalog.ts`.
 
 So this pipeline reads from a **live MariaDB connection**, which is what
-`LEGACY_DB_*` configures. Until it is pointed at a real database it can be
-typechecked and reviewed but not exercised, and none of the numbers in this
-document have been observed — no row of business data has ever passed through
-it. Budget for a dry run against a restored copy of production as the first
-real test.
+`LEGACY_DB_*` configures.
+
+## What the first real run found
+
+This has now been run against the production legacy database. It is worth
+saying plainly what that exposed, because the pipeline typechecked, linted and
+passed its unit tests throughout the period when it was silently wrong.
+
+Written against the schema dump alone, it had:
+
+- **63 column names that do not exist** across 15 loaders — invented, not
+  stale. `test_case` read `case_title`, `case_desc`, `case_steps`; the table's
+  columns are `testCaseId`, `testCaseDesc`, `testCaseSteps`. All 35,754 test
+  cases would have migrated as empty shells.
+- **Enum tables built from guesses.** Legacy role 7 is Crowd Tester and 6,357
+  of 6,706 accounts carry it; the table had no entry for 7, so they all became
+  plain USER — and because a TesterProfile is only created for a TESTER, every
+  device and browser they owned then orphaned. Bug status is an integer 0-8 and
+  the table was keyed by name, so all 21,554 bugs defaulted to NEW.
+- **Reference lookups resolved through the id map.** `skills` is seeded from
+  CSV and never migrated, so it has no id-map entries; every one of 2,919
+  accounts' skills resolved to null.
+- **A role name read as a user id.** `assigned_tests.rate_by` holds "Admin",
+  "Company", "SubAdmin" — 918 ratings dropped.
+- **List columns read as scalars.** `assign_testCase.case_id` is
+  "1559,1560,…,1679"; 657 rows produced one assignment instead of 34,918.
+- **Epoch integers parsed as date strings.** `pmt_time` is a bigint; all 6,700
+  transactions were dated to the day the migration ran.
+
+None of these failed. They produced plausible, well-formed, wrong data, and a
+report that said everything was fine.
+
+**The lesson worth keeping: a schema dump tells you the shape of the data, not
+what is in it.** Every mapping in this pipeline was rewritten against values
+read from the live database — `SHOW COLUMNS`, `GROUP BY` on every enum column,
+and for the bug statuses, which no table names, a join of each bug to the
+"Status changed from X to Y" comment the old application left behind.
 
 ---
 

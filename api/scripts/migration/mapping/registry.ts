@@ -497,7 +497,7 @@ export const REGISTRY: readonly TableMapping[] = [
     phase: 5,
     transformation: 'attach_filename + attach_loc_server → FileObject; row → BugAttachment',
     notes:
-      'A BugAttachment cannot exist without a FileObject, so an attachment whose file cannot be located is reported in missing_files.csv and skipped rather than pointed at a URL that 404s.',
+      'THIS TABLE IS EMPTY — zero rows in the live database. Every attachment the platform ever took is held inline on the row instead: bugs_report.bug_screen1 (13,945), bug_screen2 (1,937), bug_attachment (386), and defect_comments.comments_attach1 (1,405) / attach2 (244). The bug and comment loaders read those columns, so BugAttachment is populated from there and not from here. A BugAttachment cannot exist without a FileObject, so an attachment whose file cannot be located is reported in missing-files.csv and skipped rather than pointed at a URL that 404s.',
   },
   {
     legacyTable: 'cust_bug_fields',
@@ -528,7 +528,7 @@ export const REGISTRY: readonly TableMapping[] = [
     phase: 5,
     transformation: '—',
     notes:
-      'Per-user read receipts for bug comments (user_read, written_to). BugComment has no read-tracking, and the notification feed is not a substitute — a receipt says "this person has seen it", a notification says "this person was told". Reported.',
+      'Looks like 99,862 per-user read receipts for bug comments. It is not: COUNT(DISTINCT user_read) = 1 against the live database — every row says 0, unread. The flag was never updated in the platform’s life, so the table records who a comment was addressed to and nothing about whether anyone read it. A model and 99,862 rows for a column with one value would be schema surface with no information in it. Not migrated on that evidence, not for want of a destination.',
   },
 
   // ── Phase 6 · Contests ────────────────────────────────────────────────────
