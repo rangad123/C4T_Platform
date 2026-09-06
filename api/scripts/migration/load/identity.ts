@@ -92,7 +92,13 @@ export const organisationLoader: Loader = {
     }
 
     const problems = []
-    const country = resolveCountry(row.org_country ?? null)
+    /*
+      The legacy `organisation` table records no country — it has an address
+      blob and a currency, and that is all. Left null rather than inferred
+      from `org_currency`, which would guess India for every INR account
+      including the ones billed in INR from elsewhere.
+    */
+    const country = resolveCountry(null)
     problems.push(country.problem)
 
     const createdAt = timestampOr(row.org_created_date)
@@ -108,7 +114,11 @@ export const organisationLoader: Loader = {
     // legacy id rather than silently merging two different companies.
     const base = slugify(name) || `org-${legacyId}`
     const existingSlug = await tx.organisation.findFirst({
-      where: { slug: base, legacyId: { not: legacyId } },
+      // NULL-safe on purpose. `legacy_id <> '42'` is NULL — not true — for a
+      // row whose legacyId is NULL, so a bare `not` matches no organisation
+      // created on the new platform. The clash would then surface as a unique
+      // constraint violation at insert time instead of a disambiguated slug.
+      where: { slug: base, OR: [{ legacyId: null }, { legacyId: { not: legacyId } }] },
       select: { id: true },
     })
     const slug = existingSlug ? `${base}-${legacyId}` : base
@@ -227,7 +237,12 @@ export const userLoader: Loader = {
       to reconcile.
     */
     const clash = await tx.user.findFirst({
-      where: { email: email.value, legacyId: { not: legacyId } },
+      // NULL-safe on purpose — see the slug guard above. A native account
+      // (legacyId NULL) holding this address is the commonest clash of all:
+      // the seeded admin owns admin@crowd4test.com, which legacy usr_id=11
+      // also claims. A bare `not` misses it and the row dies on the unique
+      // index instead of being skipped and reported.
+      where: { email: email.value, OR: [{ legacyId: null }, { legacyId: { not: legacyId } }] },
       select: { legacyId: true },
     })
     if (clash) {

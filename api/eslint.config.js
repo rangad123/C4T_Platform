@@ -104,6 +104,7 @@ export default tseslint.config(
       'scripts/**/*.ts',
       'prisma/seed.ts',
       'prisma/seed-catalog.ts',
+      'prisma/seed-catalog-only.ts',
       'prisma/backfill-builds.ts',
     ],
     rules: {

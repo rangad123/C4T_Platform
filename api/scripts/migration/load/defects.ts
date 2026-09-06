@@ -12,7 +12,6 @@ import {
   enumValue,
   int,
   legacyRef,
-  list,
   requiredText,
   text,
   timestamp,
@@ -171,29 +170,39 @@ export const bugLoader: Loader = {
     const video = parseUrl(row.bug_video_url ?? row.bug_video, 'bug_video_url')
     problems.push(video.problem)
 
-    const createdAt = timestampOr(row.bug_created_date, row.bug_add_date)
-    const updatedAt = timestamp(row.bug_update_date) ?? createdAt
+    const createdAt = timestampOr(row.bug_created_date)
+    const updatedAt = timestamp(row.bug_updated_date) ?? createdAt
 
+    /*
+      `sometimeFreq` / `sometimeTotal` are the legacy "happened N times out of
+      M" pair, recorded when reproducibility is SOMETIMES. They are the
+      occurrence/outOf columns under an older name.
+
+      Four of the new Bug's environment fields have no legacy source at all:
+      osName, osVersion, appVersion and networkType. The old form captured only
+      the device and the browser. They stay null rather than being filled from
+      a neighbouring column that means something else.
+    */
     const data = {
-      title: requiredText(row.bug_title ?? row.bug_summary, `Legacy bug ${legacyId}`),
-      description: requiredText(row.bug_desc ?? row.bug_description, ''),
-      preCondition: text(row.bug_precondition),
-      stepsToReproduce: requiredText(row.bug_steps ?? row.bug_steps_to_reproduce, ''),
-      expectedResult: text(row.bug_expected),
-      actualResult: text(row.bug_actual),
+      title: requiredText(row.bug_title, `Legacy bug ${legacyId}`),
+      description: requiredText(row.bug_desc, ''),
+      preCondition: text(row.bug_pre_condition),
+      stepsToReproduce: requiredText(row.bug_steps, ''),
+      expectedResult: text(row.bug_exp_result),
+      actualResult: text(row.bug_actual_result),
       severity: severity.value,
       status: status.value,
       reproducibility: reproducibility.value,
-      occurrence: int(row.bug_occurrence),
-      outOf: int(row.bug_outof),
+      occurrence: int(row.sometimeFreq),
+      outOf: int(row.sometimeTotal),
       type: bugType,
       videoUrl: video.value,
-      deviceModel: text(row.bug_device),
-      osName: text(row.bug_os),
-      osVersion: text(row.bug_os_version),
-      browser: text(row.bug_browser),
-      appVersion: text(row.bug_app_version),
-      networkType: text(row.bug_network),
+      deviceModel: text(row.bug_device_used),
+      osName: null,
+      osVersion: null,
+      browser: text(row.bug_browsers_used),
+      appVersion: null,
+      networkType: null,
       createdAt,
       updatedAt,
     }
@@ -233,24 +242,16 @@ export const bugCommentLoader: Loader = {
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.comments_id)
 
-    const bugId = await ctx.idMap.resolve(
-      'bugs_report',
-      legacyRef(row.bug_id ?? row.comments_bug_id),
-      'Bug',
-    )
-    const authorId = await ctx.idMap.resolve(
-      'users',
-      legacyRef(row.written_by ?? row.comments_created_by),
-      'User',
-    )
+    const bugId = await ctx.idMap.resolve('bugs_report', legacyRef(row.comments_bug_id), 'Bug')
+    const authorId = await ctx.idMap.resolve('users', legacyRef(row.comments_done_by), 'User')
 
     if (!bugId || !authorId) {
       ctx.reporter.orphan({
         legacyTable: 'defect_comments',
         legacyId,
-        field: bugId ? 'written_by' : 'bug_id',
+        field: bugId ? 'comments_done_by' : 'comments_bug_id',
         referencedTable: bugId ? 'users' : 'bugs_report',
-        referencedId: String(bugId ? row.written_by : row.bug_id),
+        referencedId: asText(bugId ? row.comments_done_by : row.comments_bug_id),
       })
       return {
         kind: 'skipped',
@@ -259,12 +260,12 @@ export const bugCommentLoader: Loader = {
       }
     }
 
-    const body = text(row.comments_text ?? row.comment ?? row.comments_desc)
+    const body = text(row.comments_comment)
     if (!body) {
       return { kind: 'skipped', code: 'EMPTY_BODY', message: 'Comment body is empty.' }
     }
 
-    const createdAt = timestampOr(row.created_date ?? row.comments_created_date)
+    const createdAt = timestampOr(row.comments_date)
     const data = { body, isInternal: false, createdAt, updatedAt: createdAt }
 
     const mapped = await ctx.idMap.resolve('defect_comments', legacyId, 'BugComment')
@@ -453,22 +454,40 @@ export const bugCustomFieldLoader: Loader = {
       }
     }
 
-    const name = text(row.cbf_name ?? row.cbf_label)
+    const name = text(row.cbf_name)
     if (!name) {
       return { kind: 'skipped', code: 'MISSING_REQUIRED', message: 'Custom field has no name.' }
     }
 
     const type = enumValue(row.cbf_type, BUG_FIELD_TYPE, 'TEXT', 'cbf_type')
-    const createdAt = timestampOr(row.cbf_created_date)
+    const createdAt = timestampOr(row.cbf_add_date)
+
+    /*
+      The legacy schema stores a select field's choices as six fixed columns,
+      `cbf_opt_A` through `cbf_opt_F` — not as a list. Blank ones are dropped,
+      so a three-option field migrates with three options and not with three
+      followed by three empty strings.
+    */
+    const options = [
+      row.cbf_opt_A,
+      row.cbf_opt_B,
+      row.cbf_opt_C,
+      row.cbf_opt_D,
+      row.cbf_opt_E,
+      row.cbf_opt_F,
+    ]
+      .map((value) => text(value))
+      .filter((value): value is string => value !== null)
 
     const data = {
       name,
       type: type.value,
-      options: list(row.cbf_options ?? row.cbf_values),
+      options,
       isRequired: false,
-      position: int(row.cbf_position) ?? 0,
+      // `cust_bug_fields` has no ordering column; A-F order is all there is.
+      position: 0,
       createdAt,
-      updatedAt: createdAt,
+      updatedAt: timestamp(row.cbf_upd_date) ?? createdAt,
     }
 
     const mapped = await ctx.idMap.resolve('cust_bug_fields', legacyId, 'BugCustomField')
@@ -500,9 +519,10 @@ export const bugCustomValueLoader: Loader = {
     const legacyId = String(row.cbfa_id)
 
     const bugId = await ctx.idMap.resolve('bugs_report', legacyRef(row.cbfa_bug_id), 'Bug')
+    // `cbfa_fid` is the field reference — the legacy name for it, not cbf_id.
     const fieldId = await ctx.idMap.resolve(
       'cust_bug_fields',
-      legacyRef(row.cbfa_cbf_id ?? row.cbf_id),
+      legacyRef(row.cbfa_fid),
       'BugCustomField',
     )
 
@@ -510,9 +530,9 @@ export const bugCustomValueLoader: Loader = {
       ctx.reporter.orphan({
         legacyTable: 'cust_bug_answers',
         legacyId,
-        field: bugId ? 'cbf_id' : 'cbfa_bug_id',
+        field: bugId ? 'cbfa_fid' : 'cbfa_bug_id',
         referencedTable: bugId ? 'cust_bug_fields' : 'bugs_report',
-        referencedId: String(bugId ? row.cbf_id : row.cbfa_bug_id),
+        referencedId: asText(bugId ? row.cbfa_fid : row.cbfa_bug_id),
       })
       return {
         kind: 'skipped',

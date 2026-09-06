@@ -75,10 +75,35 @@ const ZERO_DATE = /^0000-00-00([ T]00:00:00)?$/
  * local zone. Appending `Z` is what makes "2019-04-02 11:15:00" mean the
  * instant it meant in the legacy system, on any machine the migration runs on.
  */
+/**
+ * Bounds for treating a bare number as a Unix epoch: 1990-01-01 to 2100-01-01.
+ * Below the floor the value is far likelier to be an id or a count than a
+ * date, and the legacy platform did not exist before 2013.
+ */
+const EPOCH_MIN_SECONDS = 631_152_000
+const EPOCH_MAX_SECONDS = 4_102_444_800
+
 export function timestamp(value: unknown): Date | null {
   const s = text(value)
   if (s === null) return null
   if (ZERO_DATE.test(s)) return null
+
+  /*
+    Not every legacy date is a date. `payment_history.pmt_time` and
+    `payment_acc_details.pmt_timestamp` are `bigint` holding Unix epoch
+    seconds — the PHP wrote `time()` straight into the column. Parsed as a
+    string, "1442027582" is not a date at all, so the caller fell back to
+    `now()` and stamped every transaction with the migration's own clock.
+
+    Milliseconds are accepted too: the same codebase used `time()` in some
+    places and JavaScript's `Date.now()` in others.
+  */
+  if (/^\d+$/.test(s)) {
+    const n = Number(s)
+    if (n >= EPOCH_MIN_SECONDS && n <= EPOCH_MAX_SECONDS) return new Date(n * 1000)
+    if (n >= EPOCH_MIN_SECONDS * 1000 && n <= EPOCH_MAX_SECONDS * 1000) return new Date(n)
+    return null
+  }
 
   const iso = s.includes('T') ? s : s.replace(' ', 'T')
   const withZone = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`

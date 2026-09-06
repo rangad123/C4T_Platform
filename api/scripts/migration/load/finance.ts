@@ -95,11 +95,11 @@ export const paymentAccountLoader: Loader = {
     )
 
     const plain: PaymentDetailsPlain = {
-      accountName: text(row.pmt_acc_name) ?? undefined,
-      accountNumber: text(row.pmt_acc_number) ?? undefined,
-      ifscCode: text(row.pmt_ifsc ?? row.pmt_ifsc_code) ?? undefined,
-      paypalEmail: text(row.pmt_paypal_email ?? row.pmt_paypal) ?? undefined,
-      paytmNumber: text(row.pmt_paytm_number ?? row.pmt_paytm) ?? undefined,
+      accountName: text(row.pmt_account_name) ?? undefined,
+      accountNumber: text(row.pmt_account_no) ?? undefined,
+      ifscCode: text(row.pmt_ifsc_code) ?? undefined,
+      paypalEmail: text(row.pmt_paypal_email) ?? undefined,
+      paytmNumber: text(row.pmt_paytm_number) ?? undefined,
     }
 
     const masked = maskPaymentDetails(plain)
@@ -133,7 +133,7 @@ export const paymentAccountLoader: Loader = {
           legacyId,
           // Placeholder, replaced immediately below now that the id exists.
           secureDetails: Buffer.alloc(0),
-          createdAt: timestampOr(row.pmt_created_date),
+          createdAt: timestampOr(row.pmt_timestamp),
         },
         select: { id: true },
       }))
@@ -226,9 +226,33 @@ export const transactionLoader: Loader = {
     if (method) problems.push(method.problem)
 
     const counterpartyId = await ctx.idMap.resolve('users', legacyRef(row.pmt_user_id), 'User')
-    const orgLegacy = legacyRef(row.pmt_org_id)
-    const organisationId = await ctx.idMap.resolve('organisation', orgLegacy, 'Organisation')
-    const projectId = await ctx.idMap.resolve('projects', legacyRef(row.pmt_project_id), 'Project')
+
+    /*
+      `payment_history` names neither an organisation nor a project — it points
+      at a build (or a contest) and nothing else. Both are therefore derived
+      through the build, which is the only path the legacy data actually
+      supports. A payment against a contest has no build and stays unattached;
+      contests do not migrate, so there is nothing to point it at.
+    */
+    const buildLegacy = legacyRef(row.pmt_for_build_id)
+    const contestLegacy = legacyRef(row.pmt_for_contest_id)
+    const buildId = await ctx.idMap.resolve('builds', buildLegacy, 'Build')
+    const build = buildId
+      ? await tx.build.findUnique({
+          where: { id: buildId },
+          select: {
+            projectId: true,
+            project: {
+              select: {
+                organisationId: true,
+                organisation: { select: { legacyId: true } },
+              },
+            },
+          },
+        })
+      : null
+    const projectId = build?.projectId ?? null
+    const organisationId = build?.project.organisationId ?? null
 
     /*
       recordedById is required — the ledger records who entered the line. A
@@ -236,9 +260,7 @@ export const transactionLoader: Loader = {
       the migration; that is truthful (this row entered the new ledger through
       the migration) and keeps the audit trail honest.
     */
-    const recordedById =
-      (await ctx.idMap.resolve('users', legacyRef(row.pmt_created_by), 'User')) ??
-      (await firstAdmin(ctx))
+    const recordedById = await firstAdmin(ctx)
     if (!recordedById) {
       return {
         kind: 'skipped',
@@ -247,9 +269,19 @@ export const transactionLoader: Loader = {
       }
     }
 
-    const occurredAt = timestampOr(row.pmt_date, row.pmt_created_date)
+    const occurredAt = timestampOr(row.pmt_time)
+    const orgLegacy = build?.project.organisation?.legacyId ?? null
     const currency = (orgLegacy && currencyByOrgLegacyId.get(orgLegacy)) ?? 'INR'
     const tds = tdsByPaymentId.get(legacyId) ?? null
+
+    /*
+      `pmt_method_details` is the account the money moved through (a masked
+      card, a Paytm number). It is not an external reference — the legacy
+      ledger has no UTR or invoice number at all — so it joins the summary in
+      the description rather than being passed off as `externalRef`.
+    */
+    const details = text(row.pmt_method_details)
+    const summary = text(row.pmt_summary)
 
     const data = {
       type: type.value,
@@ -258,9 +290,16 @@ export const transactionLoader: Loader = {
       currency,
       organisationId,
       projectId,
+      buildId,
+      buildOrContestRef: buildLegacy
+        ? `build:${buildLegacy}`
+        : contestLegacy
+          ? `contest:${contestLegacy}`
+          : null,
       counterpartyId,
-      description: text(row.pmt_desc ?? row.pmt_remarks),
-      externalRef: text(row.pmt_txn_id ?? row.pmt_reference),
+      description:
+        [summary, details ? `Paid via ${details}` : null].filter(Boolean).join(' — ') || null,
+      externalRef: null,
       occurredAt,
       settledAt: status.value === TransactionStatus.PAID ? occurredAt : null,
       paymentMethod: method?.value ?? null,

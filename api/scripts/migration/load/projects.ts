@@ -277,30 +277,46 @@ export const buildLoader: Loader = {
       }
     }
 
-    const createdAt = timestampOr(row.build_created_date, row.build_add_date)
+    const createdAt = timestampOr(row.build_add_date)
     const testTypeId = legacyRef(row.build_test_type_id)
 
+    /*
+      The legacy build carries a scope and an out-of-scope note; the new Build
+      has neither field. They are folded into `specialRequirements` under their
+      own labels rather than dropped — it is the one free-text field with a
+      compatible meaning, and losing a project's stated scope would be a real
+      loss of record. Labelled so a reader can tell what came from where.
+    */
+    const scope = text(row.build_scope)
+    const outOfScope = text(row.build_outof_scope)
+    const specialRequirements =
+      [scope ? `Scope:\n${scope}` : null, outOfScope ? `Out of scope:\n${outOfScope}` : null]
+        .filter(Boolean)
+        .join('\n\n') || null
+
     const data = {
-      name: requiredText(row.build_name ?? row.build_title, `Build ${legacyId}`),
+      // Legacy builds are labelled by version, not by name.
+      name: requiredText(row.build_version_no ?? row.build_version_desc, `Build ${legacyId}`),
       isDefault: false,
       status: BuildStatus.CLOSED,
       testType: testTypeId ? (testTypes.get(testTypeId) ?? null) : null,
-      description: text(row.build_desc ?? row.build_description),
-      appUrl: text(row.build_url ?? row.build_app_url),
+      description: text(row.build_desc),
+      appUrl: text(row.build_app_link),
       releaseNotes: text(row.build_release_notes),
-      instructions: text(row.build_instructions ?? row.build_testdata),
-      specialRequirements: text(row.build_special_req ?? row.build_special_requirements),
+      instructions: text(row.build_testdata),
+      specialRequirements,
       targetDevices: list(row.build_devices),
       targetBrowsers: list(row.build_browsers),
       targetOperatingSystems: list(row.build_os),
-      targetCountries: list(row.build_countries),
-      targetLanguages: list(row.build_language ?? row.build_test_lang),
+      targetCountries: list(row.TestCountry),
+      targetLanguages: list(row.build_languages),
       maxTesters: int(row.build_testers),
       bugCustomizationEnabled: bool(row.build_customize_bug, false),
+      testersCanSeeOtherBugs: bool(row.others_bug_visibility, false),
       startDate: timestamp(row.build_start_date),
       endDate: timestamp(row.build_end_date),
       createdAt,
-      updatedAt: timestamp(row.build_update_date) ?? createdAt,
+      updatedAt: timestamp(row.build_upd_date) ?? createdAt,
     }
 
     const mapped = await ctx.idMap.resolve('builds', legacyId, 'Build')
@@ -441,14 +457,14 @@ export const testCaseLoader: Loader = {
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.case_id)
 
-    const buildId = await ctx.idMap.resolve('builds', legacyRef(row.case_build_id), 'Build')
+    const buildId = await ctx.idMap.resolve('builds', legacyRef(row.build_id), 'Build')
     if (!buildId) {
       ctx.reporter.orphan({
         legacyTable: 'test_case',
         legacyId,
-        field: 'case_build_id',
+        field: 'build_id',
         referencedTable: 'builds',
-        referencedId: asText(row.case_build_id),
+        referencedId: asText(row.build_id),
       })
       return {
         kind: 'skipped',
@@ -457,24 +473,39 @@ export const testCaseLoader: Loader = {
       }
     }
 
-    const createdById =
-      (await ctx.idMap.resolve('users', legacyRef(row.case_created_by), 'User')) ??
-      (await firstAdminId(ctx, tx))
+    /*
+      `test_case` records no author and no timestamp — it has nine columns and
+      none of them is a user or a date. So the case is attributed to an admin
+      and dated from its parent build, which is the narrowest true statement
+      available: this case belonged to that build, and cannot predate it.
+      Stamping `now()` instead would date a 2019 test case to the migration.
+    */
+    const createdById = await firstAdminId(ctx, tx)
     if (!createdById) {
       return {
         kind: 'skipped',
         code: 'ORPHAN_REFERENCE',
-        message: 'No migrated author and no admin to attribute the test case to.',
+        message: 'No admin to attribute the test case to.',
       }
     }
 
-    const createdAt = timestampOr(row.case_created_date)
+    const parent = await tx.build.findUnique({
+      where: { id: buildId },
+      select: { createdAt: true },
+    })
+    const createdAt = parent?.createdAt ?? timestampOr(null)
+
+    /*
+      `testCaseId` is the legacy human reference ("TC-014"), not a sentence —
+      but it is the only per-case label the old schema carries, and the new
+      TestCase.title is required. Description carries the real content.
+    */
     const data = {
-      title: requiredText(row.case_title, `Test case ${legacyId}`),
-      description: requiredText(row.case_desc, ''),
-      steps: requiredText(row.case_steps, ''),
-      expectedResult: requiredText(row.case_expected, ''),
-      feature: text(row.case_feature),
+      title: requiredText(row.testCaseId, `Test case ${legacyId}`),
+      description: requiredText(row.testCaseDesc, ''),
+      steps: requiredText(row.testCaseSteps, ''),
+      expectedResult: requiredText(row.expectedResult, ''),
+      feature: text(row.testCaseFeature),
       createdAt,
       updatedAt: createdAt,
     }
@@ -507,14 +538,14 @@ export const testReportLoader: Loader = {
     const legacyId = String(row.trep_id)
 
     const testCaseId = await ctx.idMap.resolve('test_case', legacyRef(row.trep_case_id), 'TestCase')
-    const testerId = await ctx.idMap.resolve('users', legacyRef(row.trep_tester_id), 'User')
+    const testerId = await ctx.idMap.resolve('users', legacyRef(row.trep_add_by), 'User')
     if (!testCaseId || !testerId) {
       ctx.reporter.orphan({
         legacyTable: 'test_report',
         legacyId,
-        field: testCaseId ? 'trep_tester_id' : 'trep_case_id',
+        field: testCaseId ? 'trep_add_by' : 'trep_case_id',
         referencedTable: testCaseId ? 'users' : 'test_case',
-        referencedId: String(testCaseId ? row.trep_tester_id : row.trep_case_id),
+        referencedId: String(testCaseId ? row.trep_add_by : row.trep_case_id),
       })
       return {
         kind: 'skipped',
@@ -531,12 +562,7 @@ export const testReportLoader: Loader = {
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Test case vanished mid-run.' }
     }
 
-    const result = enumValue(
-      row.trep_result ?? row.trep_status,
-      TEST_CASE_RESULT,
-      'NOT_TESTED',
-      'trep_result',
-    )
+    const result = enumValue(row.trep_result, TEST_CASE_RESULT, 'NOT_TESTED', 'trep_result')
 
     /*
       `trep_defect_id` is what makes a bug the OUTCOME of executing a test case
@@ -544,14 +570,17 @@ export const testReportLoader: Loader = {
       in the legacy testing workflow. Bugs migrate in phase 5, after this, so
       the link is resolved by `linkTestReportsToBugs` once both sides exist.
     */
-    const createdAt = timestampOr(row.trep_created_date, row.trep_add_date)
+    const createdAt = timestampOr(row.trep_add_date)
     const data = {
       result: result.value,
-      notes: text(row.trep_notes ?? row.trep_comment),
-      devices: text(row.trep_devices),
-      browsers: text(row.trep_browsers),
+      // `trep_desc` is the tester's write-up; `trep_steps` is what they did to
+      // get there. Both are free text and the new schema has one notes field,
+      // so they are joined rather than one being dropped.
+      notes: [text(row.trep_desc), text(row.trep_steps)].filter(Boolean).join('\n\n') || null,
+      devices: text(row.test_devices),
+      browsers: text(row.test_browsers),
       createdAt,
-      updatedAt: createdAt,
+      updatedAt: timestampOr(row.trep_upd_date ?? row.trep_add_date),
     }
 
     const mapped = await ctx.idMap.resolve('test_report', legacyId, 'TestReport')
@@ -604,15 +633,17 @@ export const testReviewLoader: Loader = {
     }
 
     const createdById =
-      (await ctx.idMap.resolve('users', legacyRef(row.rvw_created_by), 'User')) ??
+      (await ctx.idMap.resolve('users', legacyRef(row.rvw_add_by), 'User')) ??
       (await firstAdminId(ctx, tx))
     if (!createdById) {
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'No author for the review.' }
     }
 
-    const createdAt = timestampOr(row.rvw_created_date)
+    const createdAt = timestampOr(row.rvw_add_date)
     const data = {
-      summary: requiredText(row.rvw_summary ?? row.rvw_comment, `Legacy review ${legacyId}`),
+      // `rvw_summary` is the headline, `rvw_desc` the body. Summary is
+      // required here, so the body stands in when the headline is blank.
+      summary: requiredText(row.rvw_summary ?? row.rvw_desc, `Legacy review ${legacyId}`),
       rating: int(row.rvw_val),
       createdAt,
     }
@@ -670,10 +701,21 @@ export const testCaseAssignmentLoader: Loader = {
       select: { id: true },
     })
 
+    /*
+      `assign_testCase` is a bare join table — Sno, case_id, tester_id,
+      build_id — with no date at all. The assignment is dated from the test
+      case it points at rather than from `now()`, so a 2019 assignment does
+      not arrive stamped with the migration's own clock.
+    */
+    const assignedCase = await tx.testCase.findUnique({
+      where: { id: testCaseId },
+      select: { createdAt: true },
+    })
+
     const assignment =
       existing ??
       (await tx.testCaseAssignment.create({
-        data: { testCaseId, testerId, assignedAt: timestampOr(row.assigned_date) },
+        data: { testCaseId, testerId, assignedAt: assignedCase?.createdAt ?? timestampOr(null) },
         select: { id: true },
       }))
 

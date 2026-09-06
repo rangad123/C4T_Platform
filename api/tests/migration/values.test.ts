@@ -65,6 +65,25 @@ describe('timestamp', () => {
     expect(timestamp('')).toBeNull()
   })
 
+  it('reads a Unix epoch integer, which is how payment dates are stored', () => {
+    // payment_history.pmt_time is a bigint written by PHP's time().
+    // Parsed as a string this is not a date, and every transaction was
+    // falling back to the migration's own clock.
+    expect(timestamp(1442027582)?.toISOString()).toBe('2015-09-12T03:13:02.000Z')
+    expect(timestamp('1442027582')?.toISOString()).toBe('2015-09-12T03:13:02.000Z')
+  })
+
+  it('reads epoch milliseconds as well as seconds', () => {
+    expect(timestamp(1442027582000)?.toISOString()).toBe('2015-09-12T03:13:02.000Z')
+  })
+
+  it('does not mistake a small integer for a date', () => {
+    // An id or a count reaching a date column must not become 1970.
+    expect(timestamp(0)).toBeNull()
+    expect(timestamp(42)).toBeNull()
+    expect(timestamp('7103')).toBeNull()
+  })
+
   it('falls back in order, and never silently to now()', () => {
     const fallback = new Date('2020-01-01T00:00:00Z')
     expect(timestampOr('0000-00-00 00:00:00', fallback).toISOString()).toBe(

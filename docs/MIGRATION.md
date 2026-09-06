@@ -14,7 +14,7 @@ is the specification this tool implements.
 **The dump in `api/old sql/crowd4testDB.sql` contains no data.** It is a
 schema-only export: 66 `CREATE TABLE` statements, zero `INSERT`s. The
 `DataCSV/` folder beside it holds 11 reference/catalog exports (browsers,
-skills, OS versions and so on), and those are *already imported* by
+skills, OS versions and so on), and those are _already imported_ by
 `prisma/seed-catalog.ts`.
 
 So this pipeline reads from a **live MariaDB connection**, which is what
@@ -59,7 +59,19 @@ real test.
    The tool refuses to start if `migration_record_map` is missing, because
    without it idempotency silently degrades into duplication.
 
-4. **Environment.** Copy the block at the bottom of `api/.env.example` into
+4. **The device/browser/skill catalog.** The migration resolves browsers by
+   NAME against the seeded catalog rather than by legacy id, so those rows must
+   exist first or every `browser_versions` and `user_browsers` row orphans.
+
+   On a production database this is a trap: `seed.ts` calls `seedCatalog` from
+   BELOW its `NODE_ENV=production` guard, so `npm run db:seed` returns at
+   "skipping demo data" without ever seeding the catalog. Run it explicitly:
+
+   ```bash
+   npx tsx prisma/seed-catalog-only.ts
+   ```
+
+5. **Environment.** Copy the block at the bottom of `api/.env.example` into
    your `.env` and fill it in. Never commit real values.
 
 ---
@@ -80,22 +92,29 @@ npm run migration:check-password -- someone@example.com 'TheirPassword'
 
 Flags (all three modes):
 
-| Flag | Effect |
-| --- | --- |
-| `--only=users,projects` | Restrict to these legacy tables |
-| `--skip=attachments` | Skip these |
-| `--batch=1000` | Rows per batch |
-| `--sample=500` | Rows per table in sample/dry-run mode |
-| `--continue-on-error` | Carry on past a failing table |
-| `--report-dir=…` | Where reports are written |
+| Flag                    | Effect                                |
+| ----------------------- | ------------------------------------- |
+| `--only=users,projects` | Restrict to these legacy tables       |
+| `--skip=attachments`    | Skip these                            |
+| `--batch=1000`          | Rows per batch                        |
+| `--sample=500`          | Rows per table in sample/dry-run mode |
+| `--continue-on-error`   | Carry on past a failing table         |
+| `--report-dir=…`        | Where reports are written             |
 
 ---
 
 ## The order to run them in
 
-1. **`migration:dry-run`** — connects to both databases, streams every table
-   through the real transformers inside a transaction that is always rolled
-   back, and writes the full report set. Nothing is written to PostgreSQL.
+1. **`migration:dry-run`** — connects to both databases, streams rows through
+   the real transformers inside a transaction that is always rolled back, and
+   writes the full report set. Nothing is written to PostgreSQL.
+
+   **It is row-limited, like sample mode** — `MIGRATION_SAMPLE_SIZE` (100)
+   rows per table, not the whole table. Pass `--sample=1000000` for full
+   coverage. And read its skip counts with care: because every row is rolled
+   back individually, a parent never persists, so almost every child is
+   reported as an orphan. A dry run proves the transformers work; it cannot
+   prove the relationship graph resolves. Only a real run does that.
    Read `migration-report/summary.md`, then `invalid-records.csv` and
    `orphan-records.csv`. Expect orphans: the legacy schema has almost no
    declared foreign keys, so its referential integrity was only ever enforced
@@ -109,7 +128,7 @@ Flags (all three modes):
 
 3. **`migration`** — the production run, after a backup.
 
-Re-running is safe at every stage; see *Idempotency*.
+Re-running is safe at every stage; see _Idempotency_.
 
 ---
 
@@ -129,7 +148,7 @@ legacy MariaDB ──SELECT──> transform ──validate──> PostgreSQL
   file: zero dates, four spellings of boolean, comma-separated id lists, money
   from float to `BigInt` minor units.
 - **Load** (`load/*.ts`) — one loader per legacy table, each returning either
-  *written* or *skipped with a reason*.
+  _written_ or _skipped with a reason_.
 - **Map** (`idmap.ts`) — legacy `(table, id)` → new id, so a child row's
   parents resolve by id and never by name.
 - **Validate** (`validate/checks.ts`) — counts on both sides, plus relationship
@@ -143,7 +162,7 @@ children, and a loader's `dependsOn` is preloaded into the id cache before it
 runs.
 
 The one deliberate exception is `test_report.trep_defect_id`, which points
-*forward*: a test report is migrated before the bug it produced exists. That
+_forward_: a test report is migrated before the bug it produced exists. That
 link is resolved after phase 5 by `linkTestReportsToBugs`.
 
 ---
@@ -210,12 +229,13 @@ Two caveats:
   That reads the row from the legacy MySQL and reports which scheme reproduces
   the stored digest. Do not assume passwords carry over until it prints
   `MATCH`. (Note `npm run legacy:verify` is a different, weaker check: it
-  invents its own digest to prove the *upgrade mechanism* works, so it passes
+  invents its own digest to prove the _upgrade mechanism_ works, so it passes
   regardless of what the real database contains.)
+
 - If a site-wide pepper was used, set `LEGACY_PASSWORD_PEPPER`. Guessing it
   locks out every legacy user.
 
-A digest that is not clean hex migrates as *no password*, and that account uses
+A digest that is not clean hex migrates as _no password_, and that account uses
 the normal reset flow rather than being stranded behind a hash nothing can
 verify.
 
@@ -242,16 +262,16 @@ learn a new state.
 
 Written to `migration-report/` (configurable):
 
-| File | Contents |
-| --- | --- |
-| `summary.md` | Human-readable overview; read this first |
-| `summary.json` | The same, machine-readable |
-| `table-counts.csv` | Per table: read / inserted / updated / skipped / failed, and whether they balance |
-| `id-mappings.csv` | legacy id → new id |
-| `migration-errors.csv` | Rows that failed |
-| `invalid-records.csv` | Rows that were skipped, defaulted or truncated, and why |
-| `orphan-records.csv` | References to rows that do not exist |
-| `missing-files.csv` | Attachments whose bytes were not migrated |
+| File                   | Contents                                                                          |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `summary.md`           | Human-readable overview; read this first                                          |
+| `summary.json`         | The same, machine-readable                                                        |
+| `table-counts.csv`     | Per table: read / inserted / updated / skipped / failed, and whether they balance |
+| `id-mappings.csv`      | legacy id → new id                                                                |
+| `migration-errors.csv` | Rows that failed                                                                  |
+| `invalid-records.csv`  | Rows that were skipped, defaulted or truncated, and why                           |
+| `orphan-records.csv`   | References to rows that do not exist                                              |
+| `missing-files.csv`    | Attachments whose bytes were not migrated                                         |
 
 Every row read is accounted for as inserted, updated, skipped or failed. If
 those do not add up, `summary.md` says so in place of a total — nothing is
@@ -268,17 +288,17 @@ a formula-injection payload.
 These are capability gaps, not bugs. Each is a legacy feature with no
 counterpart in the new platform, so its data has nowhere to land.
 
-| Legacy area | Tables | Why it cannot migrate |
-| --- | --- | --- |
-| **Contests** | `contests`, `contest_tasks`, `contest_question`, `contest_answers`, `contest_participant`, `contest_feedback`, `cust_feedback_fields`, `cust_feedback_answers` | The new platform has no contest feature — no model, no route, no UI. Eight tables of real history; migrating them means building the feature first. |
-| **Test scenarios** | `test_scenarios`, `test_scenario_reports` | Scenarios group test cases in the legacy hierarchy. The new schema hangs cases directly off a build, so flattening would invent structure that was never there. |
-| **Timesheets** | `testing_time_sheet` | Logged time with `tts_approved_time`/`tts_approved_by`, so it fed billing. No timesheet model exists. **The most commercially significant gap.** |
-| **Automation** | `automation_modules`, `automation_reports` | No automation feature. |
-| **Plans and pricing** | `active_plans`, `pricing_models` | The platform does not model subscriptions; commercial terms live outside it. |
-| **Notification preferences** | `notification` | Per-organisation preferences (`allN`, `buildStatus`, `criticalDef`). The new platform has one per-user email flag and no per-event or per-org preferences. |
-| **Comment read receipts** | `comments_monitor` | `BugComment` has no read tracking. A notification is not a substitute: a receipt says someone *has seen* it, a notification says they *were told*. |
-| **Tester applications** | `applied_tests` | The new platform is invite-only. Turning applications into assignments would fabricate acceptances that never happened. |
-| **Site statistics** | `site_statistics` | A precomputed rollup of counts the new platform queries live. Importing it creates a second source that is stale on arrival. |
+| Legacy area                  | Tables                                                                                                                                                         | Why it cannot migrate                                                                                                                                           |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Contests**                 | `contests`, `contest_tasks`, `contest_question`, `contest_answers`, `contest_participant`, `contest_feedback`, `cust_feedback_fields`, `cust_feedback_answers` | The new platform has no contest feature — no model, no route, no UI. Eight tables of real history; migrating them means building the feature first.             |
+| **Test scenarios**           | `test_scenarios`, `test_scenario_reports`                                                                                                                      | Scenarios group test cases in the legacy hierarchy. The new schema hangs cases directly off a build, so flattening would invent structure that was never there. |
+| **Timesheets**               | `testing_time_sheet`                                                                                                                                           | Logged time with `tts_approved_time`/`tts_approved_by`, so it fed billing. No timesheet model exists. **The most commercially significant gap.**                |
+| **Automation**               | `automation_modules`, `automation_reports`                                                                                                                     | No automation feature.                                                                                                                                          |
+| **Plans and pricing**        | `active_plans`, `pricing_models`                                                                                                                               | The platform does not model subscriptions; commercial terms live outside it.                                                                                    |
+| **Notification preferences** | `notification`                                                                                                                                                 | Per-organisation preferences (`allN`, `buildStatus`, `criticalDef`). The new platform has one per-user email flag and no per-event or per-org preferences.      |
+| **Comment read receipts**    | `comments_monitor`                                                                                                                                             | `BugComment` has no read tracking. A notification is not a substitute: a receipt says someone _has seen_ it, a notification says they _were told_.              |
+| **Tester applications**      | `applied_tests`                                                                                                                                                | The new platform is invite-only. Turning applications into assignments would fabricate acceptances that never happened.                                         |
+| **Site statistics**          | `site_statistics`                                                                                                                                              | A precomputed rollup of counts the new platform queries live. Importing it creates a second source that is stale on arrival.                                    |
 
 Additionally, some columns are dropped from tables that otherwise migrate
 cleanly. The significant ones:
@@ -306,8 +326,8 @@ cleanly. The significant ones:
 ## Structural decisions worth knowing
 
 **Every legacy project gets a default build.** The legacy model hangs devices,
-browsers, languages and documents off the *project*; the new model hangs them
-off a *build*, and `Bug.buildId`, `ProjectMaterial.buildId` and
+browsers, languages and documents off the _project_; the new model hangs them
+off a _build_, and `Bug.buildId`, `ProjectMaterial.buildId` and
 `ProjectAssignment.buildId` are all required. The default build is where that
 project-level data lands. It is not invented data — it is the same data, in the
 place the new schema keeps it.
@@ -320,7 +340,7 @@ put it back into active queues and tester dashboards.
 
 **Timestamps are read as UTC strings.** The legacy dump sets
 `time_zone = "+00:00"`, and mysql2 would otherwise convert `DATETIME` using the
-*driver's* timezone — silently shifting a decade of history by however many
+_driver's_ timezone — silently shifting a decade of history by however many
 hours the operator's laptop is offset. `dateStrings: true` plus explicit UTC
 parsing is what prevents that.
 
@@ -353,4 +373,4 @@ report says which one.
 **A legacy user cannot sign in after migration** — confirm the password scheme
 with `npm run migration:check-password -- <email> '<password>'`. If the legacy
 application used a per-user salt, those accounts need a forced reset; see
-*Passwords*.
+_Passwords_.

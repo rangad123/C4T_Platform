@@ -1,14 +1,6 @@
 import { BroadcastStatus, DeviceType, FileScope, OsKind } from '@prisma/client'
 import { query } from '../legacy/client.js'
-import { DEVICE_TYPE } from '../mapping/lookups.js'
-import {
-  asText,
-  enumValue,
-  legacyRef,
-  requiredText,
-  text,
-  timestampOr,
-} from '../transform/values.js'
+import { asText, legacyRef, requiredText, text, timestampOr } from '../transform/values.js'
 import type { Loader, RowOutcome } from './context.js'
 
 /**
@@ -74,7 +66,7 @@ export const mobileOsVersionLoader: Loader = {
 
     const operatingSystemId = await ctx.idMap.resolve(
       'mobile_os_type',
-      legacyRef(row.mov_ost_id ?? row.ost_id),
+      legacyRef(row.mov_type_id),
       'OperatingSystem',
     )
     if (!operatingSystemId) {
@@ -83,7 +75,7 @@ export const mobileOsVersionLoader: Loader = {
         legacyId,
         field: 'ost_id',
         referencedTable: 'mobile_os_type',
-        referencedId: asText(row.mov_ost_id ?? row.ost_id),
+        referencedId: asText(row.mov_type_id),
       })
       return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'Version has no migrated OS.' }
     }
@@ -126,7 +118,7 @@ export const browserVersionLoader: Loader = {
 
   async row(ctx, tx, row): Promise<RowOutcome> {
     const legacyId = String(row.version_id)
-    const version = text(row.version ?? row.brw_version)
+    const version = text(row.version)
     if (!version) {
       return { kind: 'skipped', code: 'MISSING_REQUIRED', message: 'Version is empty.' }
     }
@@ -137,7 +129,7 @@ export const browserVersionLoader: Loader = {
       the one place in this pipeline where a name lookup is correct: the seed
       is the authority for browser rows, and it never recorded legacy ids.
     */
-    const brwId = legacyRef(row.brw_id)
+    const brwId = legacyRef(row.browser_id)
     const name = brwId ? browserNames.get(brwId) : null
     const browser = name
       ? await tx.browser.findFirst({ where: { name }, select: { id: true } })
@@ -149,7 +141,7 @@ export const browserVersionLoader: Loader = {
         legacyId,
         field: 'brw_id',
         referencedTable: 'browsers',
-        referencedId: asText(row.brw_id),
+        referencedId: asText(row.browser_id),
       })
       return {
         kind: 'skipped',
@@ -224,7 +216,7 @@ export const testerDeviceLoader: Loader = {
 
     const testerProfileId = await ctx.idMap.resolve(
       'users',
-      legacyRef(row.dvc_add_by ?? row.dvc_user_id),
+      legacyRef(row.dvc_add_by),
       'TesterProfile',
     )
     if (!testerProfileId) {
@@ -233,7 +225,7 @@ export const testerDeviceLoader: Loader = {
         legacyId,
         field: 'dvc_add_by',
         referencedTable: 'users',
-        referencedId: asText(row.dvc_add_by ?? row.dvc_user_id),
+        referencedId: asText(row.dvc_add_by),
       })
       return {
         kind: 'skipped',
@@ -256,7 +248,12 @@ export const testerDeviceLoader: Loader = {
       }
     }
 
-    const type = enumValue(row.dvc_type ?? 'mobile', DEVICE_TYPE, DeviceType.MOBILE, 'dvc_type')
+    /*
+      `devices` has no type column. Every row carries a mobile OS version and a
+      SIM network, so the legacy table only ever held handsets — MOBILE is the
+      accurate reading, not a default standing in for missing data.
+    */
+    const type = DeviceType.MOBILE
 
     const primaryNetworkId = await ctx.idMap.resolve(
       'network_providers',
@@ -276,7 +273,7 @@ export const testerDeviceLoader: Loader = {
 
     const createdAt = timestampOr(row.dvc_add_date)
     const data = {
-      type: type.value,
+      type,
       manufacturer: text(row.dvc_manufacturer_name ?? row.dvc_manufacturer),
       model,
       osName: text(row.dvc_os_details),
