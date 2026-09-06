@@ -1,4 +1,5 @@
 import { requireRole } from '@/lib/auth/session'
+import { DetailShell } from '@/components/admin/DetailShell'
 import { Modal } from '@/components/admin/Modal'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { serverFetchOrNull } from '@/lib/api/server'
@@ -63,25 +64,27 @@ export default async function TemplatesPage({
   */
   const editing = params.edit ? templates?.find((t) => t.id === params.edit) : undefined
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-      <header>
-        <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
-          Operations
-        </p>
-        <h1 className="c4t-display-md" style={{ margin: 'var(--space-2) 0 0' }}>
-          Message templates
-        </h1>
-        <p
-          style={{ margin: 'var(--space-3) 0 0', color: 'var(--text-secondary)', maxWidth: '75ch' }}
-        >
-          Reusable subject and body pairs. Once created, a template shows up as an &ldquo;Insert a
-          template&rdquo; option on both the announcement composer and the tester-broadcast composer
-          — picking one fills in the message; it does not lock the fields, so the sender can still
-          edit before sending.
-        </p>
-      </header>
+  /*
+    `DetailShell`, not a hand-rolled <header>.
 
+    This page used to build its own eyebrow, h1 and description, which looked
+    close enough in isolation but rendered NO BREADCRUMBS — so Templates was
+    the one tab under Communication with no trail back to it, while the
+    landing page and Announcements (AdminListPage) and Compose and the message
+    detail (DetailShell) all had one. Reported as "the UI is different here",
+    and it was: same words, different furniture.
+  */
+  return (
+    <DetailShell
+      root={{ label: 'Admin', href: '/app/admin' }}
+      crumbs={[
+        { label: 'Communication', href: '/app/admin/communication' },
+        { label: 'Templates' },
+      ]}
+      eyebrow="Operations"
+      title="Message templates"
+      subtitle="Reusable subject and body pairs. Once created, a template shows up as an “Insert a template” option on both the announcement composer and the tester-broadcast composer — picking one fills in the message; it does not lock the fields, so the sender can still edit before sending."
+    >
       <CommunicationTabs active="templates" />
 
       <Panel title="New template">
@@ -275,6 +278,6 @@ export default async function TemplatesPage({
           </form>
         </Modal>
       ) : null}
-    </div>
+    </DetailShell>
   )
 }

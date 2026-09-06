@@ -1,4 +1,5 @@
 import { requirePermission } from '@/lib/auth/session'
+import { DetailShell } from '@/components/admin/DetailShell'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { Panel } from '@/components/admin/Panel'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
@@ -226,52 +227,48 @@ export default async function CatalogPage({
 
   if (!catalog) {
     return (
-      <main id="main" style={{ padding: 'var(--space-9)' }}>
+      <DetailShell
+        root={{ label: 'Admin', href: '/app/admin' }}
+        crumbs={[{ label: 'Catalog' }]}
+        eyebrow="Operations"
+        title="Device & browser catalog"
+      >
         <EmptyState
           icon="alert-triangle"
           title="Could not load the catalog"
           description="The service is unreachable. Refresh in a moment."
         />
-      </main>
+      </DetailShell>
     )
   }
 
   const mobileOs = catalog.operatingSystems.filter((o) => o.kind === 'MOBILE')
   const desktopOs = catalog.operatingSystems.filter((o) => o.kind === 'DESKTOP')
 
+  /*
+    `DetailShell` renders the Topbar; the admin layout deliberately does not.
+    Hand-rolling the header here meant this page shipped with no Topbar at
+    all — no breadcrumb, no notification bell and no sign-out control. The
+    retired-entries toggle stays a child rather than becoming a `badge`,
+    because it is an action and badges are status.
+  */
   return (
-    <main
-      id="main"
-      style={{
-        padding: 'var(--space-9)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-6)',
-      }}
+    <DetailShell
+      root={{ label: 'Admin', href: '/app/admin' }}
+      crumbs={[{ label: 'Catalog' }]}
+      eyebrow="Operations"
+      title="Device & browser catalog"
+      subtitle="The controlled lists testers pick from when describing their kit. Keeping these structured is what makes “find every tester on Android 15” answerable — free-text device names never match reliably. Retiring an entry hides it from new selections without breaking testers who already reference it."
     >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
-          Operations
-        </p>
-        <h1 className="c4t-display-md" style={{ margin: 0 }}>
-          Device &amp; browser catalog
-        </h1>
-        <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}>
-          The controlled lists testers pick from when describing their kit. Keeping these structured
-          is what makes &ldquo;find every tester on Android 15&rdquo; answerable — free-text device
-          names never match reliably. Retiring an entry hides it from new selections without
-          breaking testers who already reference it.
-        </p>
-        <div style={{ marginTop: 'var(--space-2)' }}>
-          <Button
-            href={showAll ? '/app/admin/catalog' : '/app/admin/catalog?all=true'}
-            variant="secondary"
-            size="sm"
-          >
-            {showAll ? 'Hide retired entries' : 'Show retired entries'}
-          </Button>
-        </div>
-      </header>
+      <div>
+        <Button
+          href={showAll ? '/app/admin/catalog' : '/app/admin/catalog?all=true'}
+          variant="secondary"
+          size="sm"
+        >
+          {showAll ? 'Hide retired entries' : 'Show retired entries'}
+        </Button>
+      </div>
 
       <SectionTabs
         basePath="/app/admin/catalog"
@@ -728,6 +725,6 @@ export default async function CatalogPage({
           </form>
         </Panel>
       ) : null}
-    </main>
+    </DetailShell>
   )
 }

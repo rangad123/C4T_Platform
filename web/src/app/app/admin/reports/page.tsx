@@ -1,6 +1,7 @@
 import { requirePermission } from '@/lib/auth/session'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { loadList } from '@/lib/admin/list'
+import { DetailShell } from '@/components/admin/DetailShell'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { Panel } from '@/components/admin/Panel'
@@ -98,31 +99,23 @@ export default async function ReportsPage({
   })
   const projects = 'items' in projectsResult ? projectsResult.items : []
 
+  /*
+    `DetailShell` renders the Topbar, and the admin layout deliberately does
+    not. Building the header by hand here meant this page had no Topbar at
+    all: no breadcrumb, no notification bell, and no sign-out control — so
+    whoever opened Reports had no way out of it but the browser Back button.
+    The tabs go through `tabs` so they sit where every other tabbed page puts
+    them.
+  */
   return (
-    <main
-      id="main"
-      style={{
-        padding: 'var(--space-9)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-6)',
-      }}
+    <DetailShell
+      root={{ label: 'Admin', href: '/app/admin' }}
+      crumbs={[{ label: 'Reports' }]}
+      eyebrow="Reports"
+      title="Reports"
+      subtitle="Every report reuses the same bug data the Bugs module already tracks and the Build Summary already computes — scoped to a project, a build, a date range or a run of builds."
+      tabs={<SectionTabs basePath="/app/admin/reports" tabs={SECTIONS} active={section} />}
     >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <p className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
-          Reports
-        </p>
-        <h1 className="c4t-display-md" style={{ margin: 0 }}>
-          Reports
-        </h1>
-        <p style={{ margin: 0, color: 'var(--text-secondary)', maxWidth: '75ch' }}>
-          Every report reuses the same bug data the Bugs module already tracks and the Build Summary
-          already computes — scoped to a project, a build, a date range or a run of builds.
-        </p>
-      </header>
-
-      <SectionTabs basePath="/app/admin/reports" tabs={SECTIONS} active={section} />
-
       {section === 'by-project' ? (
         <Panel
           title="Report by project"
@@ -304,7 +297,7 @@ export default async function ReportsPage({
           )}
         </Panel>
       ) : null}
-    </main>
+    </DetailShell>
   )
 }
 
