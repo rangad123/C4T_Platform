@@ -54,6 +54,20 @@ export interface PairSelectProps {
   emptyHint?: string
 }
 
+/**
+ * The child's placeholder before a parent is chosen.
+ *
+ * Lowercasing the label outright reads as a typo on an acronym — the OS field
+ * offered "Choose a os first" — so an all-caps label is left alone and only
+ * an ordinary word is folded down to sit mid-sentence. The article follows
+ * the word that actually comes out, which is why it is picked here rather
+ * than written into the string: "an OS", but "a browser".
+ */
+function chooseParentFirst(parentLabel: string): string {
+  const word = /^[A-Z0-9]+$/.test(parentLabel) ? parentLabel : parentLabel.toLowerCase()
+  return `Choose ${/^[aeiou]/i.test(word) ? 'an' : 'a'} ${word} first`
+}
+
 function withCurrent(
   options: readonly SelectOption[],
   current: string | null | undefined,
@@ -91,6 +105,8 @@ export function PairSelect({
     parent === (defaultParent ?? '') ? defaultChild : null,
   )
 
+  const childDisabled = !parent || childOptions.length === 0
+
   return (
     <>
       <Field
@@ -112,14 +128,21 @@ export function PairSelect({
       </Field>
 
       <Field label={childLabel} htmlFor={`${idPrefix}-child`}>
+        {/*
+          A disabled control submits nothing, so a stored child with no parent
+          to hang it from — an old bug row with an OS version but no OS name,
+          say — would be cleared by any save that touched the form. Same hole
+          and same fix as `LocationSelect`'s city row.
+        */}
+        {childDisabled ? <input type="hidden" name={childName} value={child} /> : null}
         <Select
           id={`${idPrefix}-child`}
           name={childName}
           value={child}
           onChange={(e) => setChild(e.target.value)}
           options={childOptions}
-          placeholder={parent ? childPlaceholder : `Choose a ${parentLabel.toLowerCase()} first`}
-          disabled={!parent || childOptions.length === 0}
+          placeholder={parent ? childPlaceholder : chooseParentFirst(parentLabel)}
+          disabled={childDisabled}
         />
       </Field>
     </>

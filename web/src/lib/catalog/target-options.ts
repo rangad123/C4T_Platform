@@ -146,10 +146,17 @@ function merge(mine: readonly string[], catalog: readonly string[]): readonly Ta
 }
 
 export async function loadBugEnvironmentOptions(): Promise<BugEnvironmentOptions> {
-  const [catalog, myDevices, myBrowsers] = await Promise.all([
+  const [catalog, me, myBrowsers] = await Promise.all([
     serverFetchOrNull<EnvironmentCatalog>('catalog'),
-    serverFetchOrNull<readonly { manufacturer: string | null; model: string }[]>(
-      'testers/me/devices',
+    /*
+      The tester's devices arrive ON the profile, not from a route of their
+      own — `GET testers/me/devices` does not exist, and the API only ever
+      exposed POST/PATCH/DELETE under that path. Asking for it 404'd, which
+      `serverFetchOrNull` turned into null, so "own kit first" quietly never
+      happened and the list below was the catalog alone.
+    */
+    serverFetchOrNull<{ devices?: readonly { manufacturer: string | null; model: string }[] }>(
+      'testers/me',
     ),
     serverFetchOrNull<
       readonly {
@@ -160,7 +167,7 @@ export async function loadBugEnvironmentOptions(): Promise<BugEnvironmentOptions
     >('catalog/me/browsers'),
   ])
 
-  const ownDevices = (myDevices ?? []).map((d) =>
+  const ownDevices = (me?.devices ?? []).map((d) =>
     [d.manufacturer, d.model].filter(Boolean).join(' ').trim(),
   )
   const catalogDevices = (catalog?.deviceModels ?? []).map((d) =>

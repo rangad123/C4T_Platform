@@ -188,6 +188,15 @@ export function LocationSelect({
         ? 'This country has no states listed.'
         : undefined
 
+  /*
+    A record can hold a city without a state that resolves to a code — the
+    columns are independent, and most rows predate this picker. When that
+    happens the city select is disabled, and a disabled control submits
+    nothing, so the value below travels in a hidden input instead. See the
+    note beside it.
+  */
+  const cityDisabled = !stateCode || cityList.loading
+
   const cityHint = cityList.loading
     ? 'Loading cities…'
     : cityList.failed
@@ -232,6 +241,17 @@ export function LocationSelect({
 
       {withCity ? (
         <Field label="City" htmlFor={`${idPrefix}-city`} hint={cityHint}>
+          {/*
+            "Existing values survive" was only half true. The stored city was
+            prepended to the options and shown, exactly as the note at the top
+            of this file promises — and then dropped from the POST, because
+            the select around it was disabled and a disabled control submits
+            nothing. So opening this form to edit a phone number DID silently
+            blank the city. The state row was never affected: its value has
+            always gone through a hidden input, and this is the same device
+            for the same reason.
+          */}
+          {cityDisabled ? <input type="hidden" name={cityName} value={city} /> : null}
           <Select
             id={`${idPrefix}-city`}
             name={cityName}
@@ -239,7 +259,7 @@ export function LocationSelect({
             onChange={(e) => setCity(e.target.value)}
             options={withCurrent(cities, city)}
             placeholder={stateCode ? 'Select city' : 'Choose a state first'}
-            disabled={!stateCode || cityList.loading}
+            disabled={cityDisabled}
           />
         </Field>
       ) : null}
