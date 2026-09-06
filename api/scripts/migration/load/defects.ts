@@ -31,6 +31,32 @@ import { reportProblems } from './context.js'
 /** Legacy bug-type id → name, so BUG_TYPE can be applied to a readable value. */
 const bugTypeNames = new Map<string, string>()
 
+/**
+ * A title for a bug that was never given one.
+ *
+ * `bug_title` is empty on 21,214 of the 21,768 legacy bugs — the old platform
+ * did not require it, and the reporter put the whole defect in `bug_desc`.
+ * Falling back to "Legacy bug 22857" left 97% of the platform's bug list
+ * unreadable: every row identical except a number, with the actual content one
+ * click away.
+ *
+ * The first line of the description is used instead. That invents nothing — it
+ * is the bug's own words, and the description is still stored in full — and it
+ * is what a person skimming the list needs to see. 21,753 bugs have a
+ * description; the 14 with neither keep the numbered fallback.
+ */
+function titleFromDescription(description: string | null): string | null {
+  if (!description) return null
+  const firstLine = (description.split(/[\r\n]/)[0] ?? '').replace(/\s+/g, ' ').trim()
+  if (!firstLine) return null
+  if (firstLine.length <= 110) return firstLine
+
+  // Cut on a word boundary so a title does not end mid-word.
+  const cut = firstLine.slice(0, 110)
+  const lastSpace = cut.lastIndexOf(' ')
+  return `${lastSpace > 60 ? cut.slice(0, lastSpace) : cut}…`
+}
+
 interface InlineFile {
   field: string
   filename: string | null
@@ -294,7 +320,8 @@ export const bugLoader: Loader = {
       // The code the old platform showed for this bug, kept so that searching
       // for "CR_CONF001" still finds it. Not unique — see the schema.
       legacyReference: text(row.bug_defect_id),
-      title: requiredText(row.bug_title, `Legacy bug ${legacyId}`),
+      title:
+        text(row.bug_title) ?? titleFromDescription(text(row.bug_desc)) ?? `Legacy bug ${legacyId}`,
       description: requiredText(row.bug_desc, ''),
       preCondition: text(row.bug_pre_condition),
       stepsToReproduce: requiredText(row.bug_steps, ''),
