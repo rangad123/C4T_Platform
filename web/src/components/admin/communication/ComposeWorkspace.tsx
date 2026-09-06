@@ -89,6 +89,8 @@ export function ComposeWorkspace({
 
   const [busy, setBusy] = useState<'save' | 'send' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Why the reader cannot leave the write step yet. Shown on the field itself. */
+  const [bodyError, setBodyError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [result, setResult] = useState<ComposeResult | null>(null)
 
@@ -253,6 +255,7 @@ export function ComposeWorkspace({
               label="Message"
               htmlFor="compose-body"
               required
+              error={bodyError ?? undefined}
               hint={`${body.length} of 10,000 characters.`}
             >
               <Textarea
@@ -265,6 +268,8 @@ export function ComposeWorkspace({
                 onChange={(e) => {
                   setBody(e.target.value)
                   setSaved(false)
+                  // Clear the complaint as soon as they act on it.
+                  if (bodyError) setBodyError(null)
                 }}
               />
             </Field>
@@ -280,12 +285,35 @@ export function ComposeWorkspace({
               />
             }
             right={
+              /*
+                Deliberately NOT disabled when the message is empty.
+
+                It used to be, and that is what made this step look broken: the
+                only signal that a message is required was a "(required)"
+                marker beside a label further up the page, and a disabled
+                button cannot be clicked, hovered for a title, or focused — so
+                clicking it did nothing, said nothing, and gave the reader no
+                way to find out why. Several people reported the step as
+                non-functional.
+
+                Now the button always works and refuses out loud: it points at
+                the field that is missing and moves the cursor there.
+              */
               <Button
                 type="button"
                 variant="primary"
                 iconRight="arrow-right"
-                disabled={!body.trim()}
-                onClick={() => setStep('recipients')}
+                onClick={() => {
+                  if (!body.trim()) {
+                    setBodyError('Write the message before choosing who receives it.')
+                    const field = document.getElementById('compose-body')
+                    field?.focus()
+                    field?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                    return
+                  }
+                  setBodyError(null)
+                  setStep('recipients')
+                }}
               >
                 Choose recipients
               </Button>
