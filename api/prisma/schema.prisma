@@ -1417,10 +1417,17 @@ model ManagerAssignment {
 /// §2.3 — Testers log bugs with description, severity, steps to reproduce and
 /// supporting attachments. §2.4 — Customers view bugs against their projects.
 model Bug {
-  id           String  @id @default(cuid())
-  legacyId     String? @unique @map("legacy_id")
-  reference    String  @unique // e.g. "BUG-2026-00417"
-  projectId    String  @map("project_id")
+  id       String  @id @default(cuid())
+  legacyId String? @unique @map("legacy_id")
+  /// The reference the OLD platform showed for this bug — "CR_CONF001",
+  /// "DE_SAVA028". Deliberately not unique: the legacy column holds 13,993
+  /// distinct values across 21,768 bugs, so it cannot carry a unique index and
+  /// cannot be used as `reference`. Kept because it is the code people who
+  /// worked on those projects still know a bug by, and searching for it should
+  /// find the bug. Null for anything raised on this platform.
+  legacyReference String? @map("legacy_reference")
+  reference       String  @unique // e.g. "BUG-2026-00417"
+  projectId       String  @map("project_id")
   buildId      String  @map("build_id")
   reportedById String  @map("reported_by_id")
 
@@ -1498,6 +1505,9 @@ model Bug {
   @@index([featureId])
   @@index([severity])
   @@index([createdAt])
+  // Indexed so looking a bug up by the code the old platform showed is a
+  // lookup, not a scan of 21,768 rows.
+  @@index([legacyReference])
   @@map("bugs")
 }
 

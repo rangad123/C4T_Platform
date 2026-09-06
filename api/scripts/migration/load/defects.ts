@@ -291,6 +291,9 @@ export const bugLoader: Loader = {
       a neighbouring column that means something else.
     */
     const data = {
+      // The code the old platform showed for this bug, kept so that searching
+      // for "CR_CONF001" still finds it. Not unique — see the schema.
+      legacyReference: text(row.bug_defect_id),
       title: requiredText(row.bug_title, `Legacy bug ${legacyId}`),
       description: requiredText(row.bug_desc, ''),
       preCondition: text(row.bug_pre_condition),

@@ -61,6 +61,47 @@ function defaultBuildKey(projectLegacyId: string): string {
   return `project:${projectLegacyId}:default`
 }
 
+/**
+ * The one test case per build that holds reports whose own case is gone.
+ *
+ * Keyed deterministically so a re-run finds the same row instead of minting a
+ * second one, and named so nobody mistakes it for a case somebody wrote.
+ */
+async function placeholderCaseForBuild(
+  ctx: LoadContext,
+  tx: Prisma.TransactionClient,
+  buildId: string,
+): Promise<string | null> {
+  const key = `build:${buildId}:orphan-reports`
+  const existing = await ctx.idMap.resolve('test_case', key, 'TestCase')
+  if (existing) return existing
+
+  const build = await tx.build.findUnique({
+    where: { id: buildId },
+    select: { createdAt: true },
+  })
+  const createdById = await firstAdminId(ctx, tx)
+  if (!createdById) return null
+
+  const placeholder = await tx.testCase.create({
+    data: {
+      buildId,
+      createdById,
+      title: 'Legacy reports with no test case',
+      description:
+        'Holds test reports migrated from the old platform whose test case no longer exists there. Not a test case anybody wrote.',
+      steps: '',
+      expectedResult: '',
+      createdAt: build?.createdAt ?? timestampOr(null),
+      updatedAt: build?.createdAt ?? timestampOr(null),
+    },
+    select: { id: true },
+  })
+
+  await ctx.idMap.remember(tx, 'test_case', key, 'TestCase', placeholder.id)
+  return placeholder.id
+}
+
 // ── projects → Project (+ default Build) ─────────────────────────────────────
 
 export const projectLoader: Loader = {
@@ -702,10 +743,44 @@ export const testReportLoader: Loader = {
       better column first rescues about 7,100 reports that were being skipped
       as orphans. Both are kept: neither is a superset of the other.
     */
-    const testCaseId =
+    let testCaseId =
       (await ctx.idMap.resolve('test_case', legacyRef(row.test_case_id), 'TestCase')) ??
       (await ctx.idMap.resolve('test_case', legacyRef(row.trep_case_id), 'TestCase'))
     const testerId = await ctx.idMap.resolve('users', legacyRef(row.trep_add_by), 'User')
+
+    /*
+      249 reports name a test case that does not exist anywhere in the legacy
+      database — but 248 of them do name a build. They hold a tester's real
+      work: a result, what they did, and what they saw.
+
+      They are attached to a placeholder case on their own build rather than
+      dropped, and rather than making TestReport.testCaseId nullable. That
+      column being required says something true — a test report is the
+      execution OF a test case — and weakening it platform-wide for 0.5% of
+      rows is the worse trade. The placeholder follows the same pattern as the
+      default build this pipeline already creates for project-level data: one
+      per build, named for what it is, created only when something needs it.
+    */
+    if (!testCaseId && testerId) {
+      const buildId = await ctx.idMap.resolve('builds', legacyRef(row.trep_build_id), 'Build')
+      if (buildId) {
+        testCaseId = await placeholderCaseForBuild(ctx, tx, buildId)
+        if (testCaseId) {
+          ctx.reporter.problem({
+            legacyTable: 'test_report',
+            legacyId,
+            targetModel: 'TestReport',
+            code: 'SUBSTITUTED_REFERENCE',
+            field: 'trep_case_id',
+            value: asText(row.trep_case_id),
+            message:
+              'Test case does not exist in the legacy database; attached to the build placeholder case.',
+            action: 'REVIEW_REQUIRED',
+          })
+        }
+      }
+    }
+
     if (!testCaseId || !testerId) {
       ctx.reporter.orphan({
         legacyTable: 'test_report',
