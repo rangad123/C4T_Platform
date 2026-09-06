@@ -11,6 +11,7 @@ import {
 import { Modal } from '@/components/admin/Modal'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
+import Link from 'next/link'
 import { DownloadLink } from '@/components/admin/DownloadLink'
 import { InlineFileUpload } from '@/components/admin/InlineFileUpload'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
@@ -322,6 +323,8 @@ export default async function CustomerProjectDetailPage({
     /** Tester id whose "award a badge" modal is open. */
     award?: string
     announcement?: string
+    /** Test case id whose reports are open. See the Test reports tab. */
+    case?: string
     /** Echoed back when a rename is rejected, so the attempt isn't retyped. */
     name?: string
   }>
@@ -551,7 +554,26 @@ export default async function CustomerProjectDetailPage({
       key: 'reports',
       header: 'Reports',
       align: 'right',
-      render: (row) => String(row._count.reports),
+      /*
+        A link, not a number.
+
+        This column rendered `String(row._count.reports)` — so the table said
+        a test case had three reports and gave no way to read any of them.
+        Everything worth showing (result, notes, devices, browsers, who ran it,
+        and the bug it turned up) was already loaded on the row and simply not
+        rendered anywhere.
+      */
+      render: (row) =>
+        row._count.reports === 0 ? (
+          <Muted>0</Muted>
+        ) : (
+          <Link
+            href={`${detailPath}?section=testing&buildId=${activeBuildId}&case=${row.id}`}
+            style={{ color: 'var(--text-brand)', textDecoration: 'underline' }}
+          >
+            {row._count.reports}
+          </Link>
+        ),
     },
   ]
 
@@ -567,6 +589,16 @@ export default async function CustomerProjectDetailPage({
   const openAnnouncement = resolvedSearchParams.announcement
     ? ((announcements ?? []).find((a) => a.id === resolvedSearchParams.announcement) ?? null)
     : null
+
+  /*
+    The reports are already on the row — `TestCaseRow.reports` carries result,
+    notes, devices, browsers, tester and the linked bug. Opening one is a
+    filter over data the page has, not another request.
+  */
+  const openTestCase =
+    resolvedSearchParams.case && !('error' in testCases)
+      ? (testCases.items.find((c) => c.id === resolvedSearchParams.case) ?? null)
+      : null
 
   const ratingTarget = resolvedSearchParams.rate
     ? project.assignments.find((a) => a.tester.id === resolvedSearchParams.rate)
@@ -1906,6 +1938,106 @@ export default async function CustomerProjectDetailPage({
           which is admin-side. Notices to the crowd go out through the
           platform, so there is no compose form here — see the note in the
           page docblock. */}
+      {section === 'testing' && openTestCase ? (
+        <Panel
+          title={openTestCase.title}
+          description={[
+            openTestCase.feature,
+            `${openTestCase._count.reports} report${openTestCase._count.reports === 1 ? '' : 's'}`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+          actions={
+            <Button
+              href={`${detailPath}?section=testing&buildId=${activeBuildId}`}
+              variant="secondary"
+              size="sm"
+              iconLeft="arrow-left"
+            >
+              Back
+            </Button>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+            <DescriptionList
+              items={[
+                { label: 'What it checks', value: openTestCase.description || '—' },
+                { label: 'Steps', value: openTestCase.steps || '—' },
+                { label: 'Expected result', value: openTestCase.expectedResult || '—' },
+              ]}
+            />
+
+            {openTestCase.reports.length === 0 ? (
+              <Muted>Nobody has run this check yet.</Muted>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                {openTestCase.reports.map((report) => (
+                  <div
+                    key={report.id}
+                    style={{
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-card)',
+                      padding: 'var(--space-4)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-3)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-3)',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <StatusBadge status={report.result} />
+                      <span style={{ color: 'var(--text-secondary)' }}>
+                        {personName(report.tester)} · {formatDateTime(report.createdAt)}
+                      </span>
+                    </div>
+
+                    {report.notes ? <Prose>{report.notes}</Prose> : null}
+
+                    <DescriptionList
+                      items={[
+                        { label: 'Devices', value: report.devices?.trim() ? report.devices : '—' },
+                        {
+                          label: 'Browsers',
+                          value: report.browsers?.trim() ? report.browsers : '—',
+                        },
+                        {
+                          label: 'Bug raised',
+                          /*
+                            `trep_defect_id` in the old platform, and the whole
+                            point of the workflow: a bug here is the OUTCOME of
+                            running this check, not a free-floating report.
+                            Linked so the reader can go straight to it.
+                          */
+                          value: report.linkedBug ? (
+                            <Link
+                              href={`/app/customer/projects/${project.id}?section=bugs&buildId=${activeBuildId}`}
+                              style={{
+                                color: 'var(--text-brand)',
+                                textDecoration: 'underline',
+                              }}
+                            >
+                              {report.linkedBug.reference} · {report.linkedBug.title}
+                            </Link>
+                          ) : (
+                            '—'
+                          ),
+                        },
+                      ]}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Panel>
+      ) : null}
+
       {section === 'testing' ? (
         <Panel
           title="Test reports"
