@@ -1,4 +1,4 @@
-import { OrgMemberRole, Role, TesterStatus, UserStatus } from '@prisma/client'
+import { FileScope, OrgMemberRole, Role, TesterStatus, UserStatus } from '@prisma/client'
 import { ISO_COUNTRY_CODES } from '../../../src/lib/iso-countries.js'
 import { detectLegacyAlgo } from '../../../src/lib/legacy-password.js'
 import { refreshTesterAggregates } from '../../../src/modules/testers/testers.service.js'
@@ -26,7 +26,7 @@ import {
   url as parseUrl,
 } from '../transform/values.js'
 import type { Loader, LoadContext, RowOutcome } from './context.js'
-import { reportProblems } from './context.js'
+import { recordLegacyFile, reportProblems } from './context.js'
 
 /**
  * Phase 2 — identity: organisations, users, membership, invitations.
@@ -301,9 +301,17 @@ export const userLoader: Loader = {
       })
     }
 
+    /*
+      271 accounts have no first name at all, and the admin and customer
+      screens then show a blank where a person should be. 207 of them do have
+      a `usr_username` — "company123" — and 60-odd a company name, because the
+      old platform let you register with either. Neither is a first name, but
+      both identify the account, and a name a person recognises beats an empty
+      cell. Only used when the real name is absent.
+    */
     const userData = {
       email: email.value,
-      firstName: text(row.usr_firstname),
+      firstName: text(row.usr_firstname) ?? text(row.usr_username) ?? text(row.usr_companyname),
       lastName: text(row.usr_lastname),
       phone: text(row.usr_phone),
       countryCode: country.value,
@@ -323,6 +331,25 @@ export const userLoader: Loader = {
       : await tx.user.create({ data: { ...userData, legacyId }, select: { id: true } })
 
     await ctx.idMap.remember(tx, 'users', legacyId, 'User', user.id)
+
+    /*
+      741 accounts have a profile picture in `content/usr_profile_pic/`, and
+      nothing was reading the column, so every avatar on the platform was
+      blank. Recorded here; `sync-files` copies the bytes.
+    */
+    const avatarFileId = await recordLegacyFile(ctx, tx, {
+      legacyTable: 'users',
+      legacyId,
+      field: 'usr_profile_pic',
+      filename: text(row.usr_profile_pic),
+      scope: FileScope.AVATAR,
+      keyPrefix: 'avatars',
+      uploadedById: user.id,
+      createdAt,
+    })
+    if (avatarFileId) {
+      await tx.user.update({ where: { id: user.id }, data: { avatarFileId } })
+    }
 
     // ── TesterProfile ───────────────────────────────────────────────────────
     // Created for testers, and for anyone carrying tester-shaped data — the

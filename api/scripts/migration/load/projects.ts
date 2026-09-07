@@ -1,4 +1,4 @@
-import { BuildStatus, ProjectPriority, ProjectStatus } from '@prisma/client'
+import { BuildStatus, FileScope, ProjectPriority, ProjectStatus } from '@prisma/client'
 import type { Prisma } from '@prisma/client'
 import { query } from '../legacy/client.js'
 import { ASSIGNMENT_STATUS, BUILD_STATUS, TEST_CASE_RESULT } from '../mapping/lookups.js'
@@ -15,6 +15,7 @@ import {
   bool,
 } from '../transform/values.js'
 import type { Loader, LoadContext, RowOutcome } from './context.js'
+import { recordLegacyFile } from './context.js'
 
 /**
  * Phases 3–4 — projects, builds, assignments and the test-case workflow.
@@ -230,6 +231,26 @@ export const projectLoader: Loader = {
         })
 
     await ctx.idMap.remember(tx, 'projects', legacyId, 'Project', project.id)
+
+    /*
+      255 of the 258 projects have a logo in `content/tst_image_icon/`, and
+      nothing read `project_image_icon`, so every project in both portals
+      showed a blank where the product's own branding should be. Recorded
+      here; `sync-files` copies the bytes across.
+    */
+    const logoFileId = await recordLegacyFile(ctx, tx, {
+      legacyTable: 'projects',
+      legacyId,
+      field: 'project_image_icon',
+      filename: text(row.project_image_icon),
+      scope: FileScope.PROJECT_LOGO,
+      keyPrefix: 'project-logos',
+      uploadedById: createdById,
+      createdAt,
+    })
+    if (logoFileId) {
+      await tx.project.update({ where: { id: project.id }, data: { logoFileId } })
+    }
 
     // ── The default build ───────────────────────────────────────────────────
     const buildKey = defaultBuildKey(legacyId)

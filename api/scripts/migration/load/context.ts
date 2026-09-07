@@ -1,3 +1,4 @@
+import type { FileScope } from '@prisma/client'
 import type { Prisma, PrismaClient } from '@prisma/client'
 import type { MigrationOptions } from '../config.js'
 import type { IdMap } from '../idmap.js'
@@ -261,4 +262,97 @@ export function reportProblems(
 export async function estimate(table: string): Promise<number | null> {
   if (!(await tableExists(table))) return null
   return countRows(table)
+}
+
+/**
+ * Records a file the legacy schema stored as a bare filename on the row.
+ *
+ * The old platform kept uploads in `content/<folder>/` and wrote only the
+ * filename into the column — no directory, no id. Three different things are
+ * shaped that way: a bug's screenshots, a project's logo, a user's avatar. All
+ * of them need the same row written, so they share this.
+ *
+ * Returns the FileObject id, or null when there is nothing to record. The row
+ * is written `isComplete: false` with `driver: 'legacy'` because the bytes are
+ * not here yet — `scripts/migration/sync-files.ts` is what puts them in place
+ * and flips the row. Without `LEGACY_FILE_ROOT` the file is reported to
+ * missing-files.csv instead, which is the manifest that sync then works from.
+ */
+export async function recordLegacyFile(
+  ctx: LoadContext,
+  tx: Prisma.TransactionClient,
+  args: {
+    legacyTable: string
+    legacyId: string
+    field: string
+    filename: string | null
+    scope: FileScope
+    /** Distinguishes this file from others on the same legacy row. */
+    keyPrefix: string
+    uploadedById: string
+    createdAt: Date
+  },
+): Promise<string | null> {
+  const filename = args.filename?.trim()
+  if (!filename || filename === '0') return null
+
+  if (!process.env.LEGACY_FILE_ROOT) {
+    ctx.reporter.missingFile({
+      legacyTable: args.legacyTable,
+      legacyId: args.legacyId,
+      field: args.field,
+      path: filename,
+      reason: 'LEGACY_FILE_ROOT not configured; file migration skipped.',
+    })
+    return null
+  }
+
+  const mapKey = `${args.legacyId}:${args.field}`
+  const mapped = await ctx.idMap.resolve(args.legacyTable, mapKey, 'FileObject')
+  const file = mapped
+    ? await tx.fileObject.update({
+        where: { id: mapped },
+        data: { originalName: filename },
+        select: { id: true },
+      })
+    : await tx.fileObject.create({
+        data: {
+          scope: args.scope,
+          storageKey: `legacy/${args.keyPrefix}/${args.legacyId}/${filename}`,
+          driver: 'legacy',
+          originalName: filename,
+          mimeType: guessLegacyMime(filename),
+          sizeBytes: 0,
+          uploadedById: args.uploadedById,
+          isComplete: false,
+          createdAt: args.createdAt,
+        },
+        select: { id: true },
+      })
+
+  await ctx.idMap.remember(tx, args.legacyTable, mapKey, 'FileObject', file.id)
+  return file.id
+}
+
+/** Content type from the extension — the legacy rows never recorded one. */
+export function guessLegacyMime(filename: string): string {
+  const ext = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase()
+  const byExt: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    pdf: 'application/pdf',
+    zip: 'application/zip',
+    txt: 'text/plain',
+    csv: 'text/csv',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    mp4: 'video/mp4',
+  }
+  return byExt[ext] ?? 'application/octet-stream'
 }
