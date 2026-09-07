@@ -16,7 +16,7 @@ import {
   identityLoaders,
   refreshMigratedTesterAggregates,
 } from './load/identity.js'
-import { projectLoaders } from './load/projects.js'
+import { projectLoaders, pruneEmptyDefaultBuilds } from './load/projects.js'
 import { defectLoaders, linkTestReportsToBugs } from './load/defects.js'
 import { communicationLoaders, financeLoaders } from './load/finance.js'
 import { assetLoaders } from './load/assets.js'
@@ -154,6 +154,14 @@ async function main(): Promise<void> {
 
       const linked = await linkTestReportsToBugs(ctx)
       if (linked > 0) console.log(`  linked ${linked} test reports to their bugs`)
+
+      /*
+        Before the counters, because pruning changes what there is to count:
+        the synthetic default build only earns its place if something landed
+        on it.
+      */
+      const prunedBuilds = await pruneEmptyDefaultBuilds(ctx)
+      if (prunedBuilds > 0) console.log(`  removed ${prunedBuilds} empty default builds`)
 
       // Derived counters last: they count the rows every phase above wrote.
       const counted = await refreshMigratedTesterAggregates(ctx)

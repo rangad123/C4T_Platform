@@ -1066,3 +1066,70 @@ export const projectLoaders: Loader[] = [
   testReportLoader,
   testReviewLoader,
 ]
+
+/**
+ * Removes the synthetic default builds that turned out to hold nothing.
+ *
+ * Every legacy project gets a "Legacy build" so that project-level data — a
+ * bug filed with no build, a document, a roster row — has somewhere to live in
+ * a schema that hangs all of it off a build. That is necessary for the 12
+ * projects where something actually lands on it.
+ *
+ * For the other 245 it is an empty row that hijacks the screen. The build
+ * selector picks it, the dashboard reports on it, and a customer opening a
+ * project with 138 testers and 11 bugs across five real builds is told
+ * TESTERS 0, BUGS 0, TEST CASES 0 — because those numbers are true of the
+ * empty build the page happened to select.
+ *
+ * So it is created when needed and pruned when it was not. A default build is
+ * only removed when nothing at all references it, checked across every model
+ * that carries a buildId — deleting one that holds data would take the data
+ * with it.
+ */
+export async function pruneEmptyDefaultBuilds(ctx: LoadContext): Promise<number> {
+  const candidates = await ctx.prisma.build.findMany({
+    where: { isDefault: true, project: { legacyId: { not: null } } },
+    select: {
+      id: true,
+      _count: {
+        select: {
+          bugs: true,
+          assignments: true,
+          materials: true,
+          features: true,
+          announcements: true,
+          transactions: true,
+        },
+      },
+    },
+  })
+
+  let pruned = 0
+  for (const build of candidates) {
+    const direct = Object.values(build._count).reduce((sum, n) => sum + n, 0)
+    if (direct > 0) continue
+
+    /*
+      The counts above cover Build's own relations. These four carry a buildId
+      without being listed there, and a build referenced by any of them is in
+      use — TestCase in particular, since test cases are what a build is for.
+    */
+    const [testCases, testReports, testReviews, customFields] = await Promise.all([
+      ctx.prisma.testCase.count({ where: { buildId: build.id } }),
+      ctx.prisma.testReport.count({ where: { buildId: build.id } }),
+      ctx.prisma.testReview.count({ where: { buildId: build.id } }),
+      ctx.prisma.bugCustomField.count({ where: { buildId: build.id } }),
+    ])
+    if (testCases + testReports + testReviews + customFields > 0) continue
+
+    // The id map points at this row; leaving the mapping behind would make a
+    // re-run resolve to a build that no longer exists.
+    await ctx.prisma.migrationRecordMap.deleteMany({
+      where: { targetModel: 'Build', targetId: build.id },
+    })
+    await ctx.prisma.build.delete({ where: { id: build.id } })
+    pruned += 1
+  }
+
+  return pruned
+}
