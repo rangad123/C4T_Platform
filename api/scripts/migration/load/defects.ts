@@ -20,7 +20,7 @@ import {
   url as parseUrl,
 } from '../transform/values.js'
 import type { Loader, LoadContext, RowOutcome } from './context.js'
-import { reportProblems } from './context.js'
+import { recordLegacyFile, reportProblems } from './context.js'
 
 /**
  * Phase 5 — defects.
@@ -92,54 +92,26 @@ async function attachInlineFiles(
   tx: Prisma.TransactionClient,
   args: InlineAttachmentArgs,
 ): Promise<void> {
-  const fileRoot = process.env.LEGACY_FILE_ROOT
-
   for (const entry of args.files) {
-    if (!entry.filename || entry.filename === '0') continue
-
-    if (!fileRoot) {
-      ctx.reporter.missingFile({
-        legacyTable: args.legacyTable,
-        legacyId: args.legacyId,
-        field: entry.field,
-        path: entry.filename,
-        reason: 'LEGACY_FILE_ROOT not configured; file migration skipped.',
-      })
-      continue
-    }
-
-    const mapKey = `${args.legacyId}:${entry.field}`
-    const mapped = await ctx.idMap.resolve(args.legacyTable, mapKey, 'FileObject')
-    const file = mapped
-      ? await tx.fileObject.update({
-          where: { id: mapped },
-          data: { originalName: entry.filename },
-          select: { id: true },
-        })
-      : await tx.fileObject.create({
-          data: {
-            scope: FileScope.BUG_ATTACHMENT,
-            storageKey: `legacy/bug-attachments/${args.legacyId}/${entry.filename}`,
-            driver: 'legacy',
-            originalName: entry.filename,
-            mimeType: guessMime(entry.filename),
-            sizeBytes: 0,
-            uploadedById: args.uploadedById,
-            isComplete: false,
-            createdAt: args.createdAt,
-          },
-          select: { id: true },
-        })
-
-    await ctx.idMap.remember(tx, args.legacyTable, mapKey, 'FileObject', file.id)
+    const fileId = await recordLegacyFile(ctx, tx, {
+      legacyTable: args.legacyTable,
+      legacyId: args.legacyId,
+      field: entry.field,
+      filename: entry.filename,
+      scope: FileScope.BUG_ATTACHMENT,
+      keyPrefix: 'bug-attachments',
+      uploadedById: args.uploadedById,
+      createdAt: args.createdAt,
+    })
+    if (!fileId) continue
 
     const already = await tx.bugAttachment.findFirst({
-      where: { bugId: args.bugId, fileId: file.id },
+      where: { bugId: args.bugId, fileId },
       select: { id: true },
     })
     if (!already) {
       await tx.bugAttachment.create({
-        data: { bugId: args.bugId, fileId: file.id, createdAt: args.createdAt },
+        data: { bugId: args.bugId, fileId, createdAt: args.createdAt },
       })
     }
   }
