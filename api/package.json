@@ -36,6 +36,7 @@
     "migration:dry-run": "tsx scripts/migration/run.ts --mode=dry-run",
     "migration:sample": "tsx scripts/migration/run.ts --mode=sample",
     "migration": "tsx scripts/migration/run.ts --mode=full",
+    "migration:sync-files": "tsx scripts/migration/sync-files.ts",
     "migration:matrix": "tsx scripts/migration/report/matrix.ts ../docs/MIGRATION-MATRIX.md",
     "migration:check-password": "tsx scripts/migration/check-password.ts"
   },
