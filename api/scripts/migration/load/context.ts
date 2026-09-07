@@ -140,8 +140,16 @@ export async function runLoader(
         }
       }, BATCH_TRANSACTION)
     } catch (error) {
-      // The batch rolled back. Replay row by row so one bad record does not
-      // cost the rest, and so the failure is attributable.
+      /*
+        The batch rolled back. Replay row by row so one bad record does not
+        cost the rest, and so the failure is attributable.
+
+        The id cache has to go first. `remember` caches what it writes, and a
+        rollback cannot reach into memory to undo that — so without this the
+        replay resolves ids the database threw away, and rows that were never
+        wrong fail on a record "required but not found".
+      */
+      ctx.idMap.forget()
       counter.inserted = beforeBatch.inserted
       counter.updated = beforeBatch.updated
       counter.skipped = beforeBatch.skipped
@@ -332,7 +340,14 @@ export async function recordLegacyFile(
     : await tx.fileObject.create({
         data: {
           scope: args.scope,
-          storageKey: `legacy/${args.keyPrefix}/${args.legacyId}/${filename}`,
+          /*
+            The field is part of the key, not just the row id. A bug that
+            attached the same filename twice — bug_screen1 and bug_screen2
+            both "photo.png", which 189 of them do — produced one key for two
+            files and failed on the unique index, taking its whole batch down
+            with it.
+          */
+          storageKey: `legacy/${args.keyPrefix}/${args.legacyId}/${args.field}/${filename}`,
           driver: 'legacy',
           originalName: filename,
           mimeType: guessLegacyMime(filename),
