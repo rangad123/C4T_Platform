@@ -45,33 +45,73 @@ const prisma = new PrismaClient()
 interface Totals {
   considered: number
   uploaded: number
+  thumbnails: number
   missing: number
   ambiguous: number
   failed: number
 }
 
-/** Every file under `root`, indexed by lowercased basename. */
-async function indexFiles(root: string): Promise<Map<string, string[]>> {
-  const index = new Map<string, string[]>()
+interface Located {
+  path: string
+  /** Under a `thumb/` directory — a derived copy, not the original upload. */
+  isThumbnail: boolean
+}
 
-  async function walk(dir: string): Promise<void> {
+/**
+ * Every file under `root`, indexed by lowercased basename.
+ *
+ * Thumbnails are indexed but marked. The legacy host keeps a `thumb/`
+ * directory beside the screenshots, and for 2,038 attachments the thumbnail is
+ * the ONLY copy that survives — the full-size original was pruned years ago.
+ * A thumbnail is the right image at the wrong size, which is worth having for
+ * a defect from 2018 whose original is gone for good, but it must not pass
+ * silently as the original. The caller prefers full-size, falls back to a
+ * thumbnail, and says so on the attachment when it does.
+ */
+async function indexFiles(root: string): Promise<Map<string, Located[]>> {
+  const index = new Map<string, Located[]>()
+
+  async function walk(dir: string, underThumb: boolean): Promise<void> {
     const entries = await readdir(dir, { withFileTypes: true })
     for (const entry of entries) {
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) {
-        await walk(full)
+        await walk(full, underThumb || entry.name.toLowerCase() === 'thumb')
         continue
       }
       if (!entry.isFile()) continue
       const key = entry.name.toLowerCase()
+      const found: Located = { path: full, isThumbnail: underThumb }
       const existing = index.get(key)
-      if (existing) existing.push(full)
-      else index.set(key, [full])
+      if (existing) existing.push(found)
+      else index.set(key, [found])
     }
   }
 
-  await walk(root)
+  await walk(root, false)
   return index
+}
+
+/**
+ * Picks the one file to upload for a name, or explains why it cannot.
+ *
+ * Full-size wins over a thumbnail every time. Two files of the same kind and
+ * name are left alone rather than guessed between — choosing wrongly attaches
+ * somebody else's screenshot to a defect, which is worse than not attaching
+ * one at all.
+ */
+function chooseFile(matches: Located[]): { file: Located | null; reason?: string } {
+  if (matches.length === 0) return { file: null, reason: 'not found under LEGACY_FILE_ROOT' }
+
+  const fullSize = matches.filter((m) => !m.isThumbnail)
+  if (fullSize.length === 1) return { file: fullSize[0]! }
+  if (fullSize.length > 1) {
+    return { file: null, reason: `${fullSize.length} files share this name; not guessed` }
+  }
+
+  const thumbs = matches.filter((m) => m.isThumbnail)
+  if (thumbs.length === 1) return { file: thumbs[0]! }
+  return { file: null, reason: `${thumbs.length} thumbnails share this name; not guessed` }
 }
 
 async function main(): Promise<void> {
@@ -103,6 +143,7 @@ async function main(): Promise<void> {
   const totals: Totals = {
     considered: pending.length,
     uploaded: 0,
+    thumbnails: 0,
     missing: 0,
     ambiguous: 0,
     failed: 0,
@@ -111,21 +152,16 @@ async function main(): Promise<void> {
 
   for (const file of pending) {
     const matches = index.get(file.originalName.toLowerCase()) ?? []
+    const chosen = chooseFile(matches)
 
-    if (matches.length === 0) {
-      totals.missing += 1
-      unresolved.push(`"${file.id}","${file.originalName}","not found under LEGACY_FILE_ROOT"`)
-      continue
-    }
-    if (matches.length > 1) {
-      totals.ambiguous += 1
-      unresolved.push(
-        `"${file.id}","${file.originalName}","${matches.length} files share this name; not guessed"`,
-      )
+    if (!chosen.file) {
+      if (chosen.reason?.includes('not found')) totals.missing += 1
+      else totals.ambiguous += 1
+      unresolved.push(`"${file.id}","${file.originalName}","${chosen.reason ?? 'unresolved'}"`)
       continue
     }
 
-    const source = matches[0]!
+    const source = chosen.file.path
     try {
       const info = await stat(source)
       if (!dryRun) {
@@ -147,7 +183,22 @@ async function main(): Promise<void> {
           where: { id: file.id },
           data: { driver: 's3', isComplete: true, sizeBytes: info.size },
         })
+
+        /*
+          A thumbnail says so on the attachment itself. Anyone looking at a
+          low-resolution screenshot deserves to know it is not the original
+          rather than assume the tester uploaded something blurry.
+        */
+        if (chosen.file.isThumbnail) {
+          await prisma.bugAttachment.updateMany({
+            where: { fileId: file.id },
+            data: {
+              caption: 'Thumbnail — the full-size original is no longer on the legacy host.',
+            },
+          })
+        }
       }
+      if (chosen.file.isThumbnail) totals.thumbnails += 1
       totals.uploaded += 1
       if (totals.uploaded % 500 === 0) console.log(`  … ${totals.uploaded} uploaded`)
     } catch (error) {
