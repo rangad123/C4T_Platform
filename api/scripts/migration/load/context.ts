@@ -8,6 +8,20 @@ import { batches, countRows, tableExists } from '../legacy/client.js'
 import type { LegacyRow } from '../legacy/client.js'
 import { asText, type Problem } from '../transform/values.js'
 
+/*
+  Prisma gives an interactive transaction 5 seconds by default and waits 2 to
+  get a connection. That is generous for a web request and far too short here:
+  a batch is 500 rows, and rows that record a file — a bug screenshot, a
+  project logo, an avatar — do several queries each.
+
+  When the batch overran, it rolled back and replayed row by row, and the
+  replay met the same contention, so rows that migrate perfectly on their own
+  were counted as failures: 241 of 258 projects and 326 users in one run, all
+  of which succeeded when their table was run alone. The work was never the
+  problem; the clock was.
+*/
+const BATCH_TRANSACTION = { timeout: 180_000, maxWait: 30_000 }
+
 /** Everything a loader needs, passed once rather than threaded through calls. */
 export interface LoadContext {
   prisma: PrismaClient
@@ -124,7 +138,7 @@ export async function runLoader(
         for (const row of rows) {
           await applyRow(ctx, loader, mapping, tx, row, counter)
         }
-      })
+      }, BATCH_TRANSACTION)
     } catch (error) {
       // The batch rolled back. Replay row by row so one bad record does not
       // cost the rest, and so the failure is attributable.
@@ -209,7 +223,7 @@ async function replayIndividually(
     try {
       await ctx.prisma.$transaction(async (tx) => {
         await applyRow(ctx, loader, mapping, tx, row, counter)
-      })
+      }, BATCH_TRANSACTION)
     } catch (error) {
       counter.failed += 1
       ctx.reporter.fail(
