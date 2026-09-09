@@ -83,6 +83,8 @@ const bugSelect = {
       firstName: true,
       lastName: true,
       email: true,
+      /* Their picture, so a list of defects can show who filed each one. */
+      avatarFileId: true,
       testerProfile: { select: { countryCode: true } },
     },
   },

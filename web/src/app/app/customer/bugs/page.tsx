@@ -1,5 +1,6 @@
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
+import { Avatar } from '@/components/admin/Avatar'
 import { CountryFlag } from '@/components/admin/CountryFlag'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge, SeverityBadge } from '@/components/admin/StatusBadge'
@@ -27,6 +28,8 @@ interface BugRow {
     id: string
     firstName: string | null
     lastName: string | null
+    /** Their picture, when they have uploaded one. Absent falls back to initials. */
+    avatarFileId: string | null
     testerProfile: { countryCode: string | null } | null
   } | null
 }
@@ -86,6 +89,11 @@ export default async function CustomerBugsPage({
       header: 'Reported by',
       render: (row) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <Avatar
+            name={personName(row.reportedBy)}
+            fileId={row.reportedBy?.avatarFileId ?? null}
+            size="sm"
+          />
           <CountryFlag countryCode={row.reportedBy?.testerProfile?.countryCode ?? null} size={14} />
           <span>{personName(row.reportedBy)}</span>
         </span>

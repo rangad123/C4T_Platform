@@ -1,5 +1,6 @@
 import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
+import { Avatar } from '@/components/admin/Avatar'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge, RoleBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
@@ -27,6 +28,8 @@ interface UserRow {
   firstName: string | null
   lastName: string | null
   countryCode: string | null
+  /** Their picture, when they have uploaded one. Absent falls back to initials. */
+  avatarFileId: string | null
   emailVerifiedAt: string | null
   lastLoginAt: string | null
   createdAt: string
@@ -82,7 +85,12 @@ export default async function UsersPage({
     {
       key: 'name',
       header: 'Name',
-      render: (row) => personName(row),
+      render: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar name={personName(row)} fileId={row.avatarFileId} size="sm" />
+          {personName(row)}
+        </span>
+      ),
       renderSecondary: (row) => row.email,
     },
     { key: 'role', header: 'Role', render: (row) => <RoleBadge role={row.role} /> },
