@@ -232,7 +232,6 @@ async function main(): Promise<void> {
   }
 }
 
-
 /**
  * Drops the picture references whose bytes never arrived.
  *
