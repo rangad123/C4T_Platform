@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { notFound } from 'next/navigation'
 import { Avatar } from '@/components/admin/Avatar'
+import { Pagination } from '@/components/ds/admin/Pagination'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { InboxList } from '@/components/admin/InboxList'
 import { MarkReadOnView } from '@/components/admin/MarkReadOnView'
@@ -31,7 +32,7 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
-import { loadList } from '@/lib/admin/list'
+import { loadList, parsePage } from '@/lib/admin/list'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
@@ -86,7 +87,7 @@ import { loadTargetOptions, catalogHint } from '@/lib/catalog/target-options'
 import { countryOptions } from '@/lib/geo/source'
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
-const BUG_PREVIEW_SIZE = 10
+const BUGS_PER_PAGE = 25
 
 /**
  * `/app/customer/projects/[id]` — the customer's own project workbench.
@@ -315,6 +316,10 @@ export default async function CustomerProjectDetailPage({
 }: {
   params: Promise<{ id: string }>
   searchParams: Promise<{
+    /** Page of the Bugs tab. */
+    bugPage?: string
+    /** `build` narrows the Bugs tab to the active build; absent means all of them. */
+    bugScope?: string
     section?: string
     edit?: string
     buildId?: string
@@ -393,6 +398,27 @@ export default async function CustomerProjectDetailPage({
     `projects/${project.id}/builds/${activeBuildId}`,
   )
   const section = resolveSection(SECTIONS, resolvedSearchParams.section)
+  const bugPage = parsePage(resolvedSearchParams.bugPage)
+  /*
+    Project-wide by default — see the same note on the admin page. The Overview
+    counts every build's defects, so a build-scoped list underneath it looked
+    like most of them had gone missing.
+  */
+  const bugsScopedToBuild = resolvedSearchParams.bugScope === 'build'
+  const bugQueryString = (params: Record<string, string | undefined>): string => {
+    const sp = new URLSearchParams({ section: 'bugs' })
+    if (resolvedSearchParams.buildId) sp.set('buildId', resolvedSearchParams.buildId)
+    if (bugsScopedToBuild) sp.set('bugScope', 'build')
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined) sp.delete(key)
+      else sp.set(key, value)
+    }
+    return `/app/customer/projects/${id}?${sp.toString()}`
+  }
+  const bugPageHref = (target: number): string =>
+    bugQueryString({ bugPage: target > 1 ? String(target) : undefined })
+  const bugScopeHref = (scope: 'build' | 'project'): string =>
+    bugQueryString({ bugScope: scope === 'build' ? 'build' : undefined, bugPage: undefined })
   const newBuildModalOpen = edit === 'new-build'
 
   const [
@@ -423,9 +449,20 @@ export default async function CustomerProjectDetailPage({
           readonly { id: string; name: string; createdAt: string; _count: { bugs: number } }[]
         >(`projects/${project.id}/features`, { query: { buildId: activeBuildId } })
       : Promise.resolve(null),
+    /*
+      A page of bugs, through `loadList` so the total and page count come back
+      with them. This used to ask for ten and render whatever came, so a build
+      with 156 defects showed ten and offered no way to the rest — the
+      dashboard said 156, the tab said 10, and nothing explained the gap.
+    */
     section === 'bugs'
-      ? serverFetchOrNull<ProjectBugRow[]>('bugs', {
-          query: { projectId: project.id, buildId: activeBuildId, limit: BUG_PREVIEW_SIZE },
+      ? loadList<ProjectBugRow>('bugs', {
+          page: bugPage,
+          limit: BUGS_PER_PAGE,
+          query: {
+            projectId: project.id,
+            ...(bugsScopedToBuild ? { buildId: activeBuildId } : {}),
+          },
         })
       : Promise.resolve(null),
     /**
@@ -820,6 +857,17 @@ export default async function CustomerProjectDetailPage({
       render: (row) => <SeverityBadge severity={row.severity} />,
     },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+    // Only when the list spans them — inside a single build the column would
+    // repeat the same name down every row.
+    ...(bugsScopedToBuild
+      ? []
+      : [
+          {
+            key: 'build',
+            header: 'Build',
+            render: (row: ProjectBugRow) => row.build?.name ?? '—',
+          },
+        ]),
     { key: 'logged', header: 'Logged', align: 'right', render: (row) => formatDate(row.createdAt) },
   ]
 
@@ -1868,15 +1916,35 @@ export default async function CustomerProjectDetailPage({
         <Panel
           title="Bugs"
           description={
-            !bugs
-              ? "This build's reports."
-              : bugs.length >= BUG_PREVIEW_SIZE
-                ? `The ${BUG_PREVIEW_SIZE} most recent reports on ${activeBuild?.name ?? 'this build'}.`
-                : `${bugs.length} report${bugs.length === 1 ? '' : 's'} on ${activeBuild?.name ?? 'this build'}.`
+            !bugs || 'error' in bugs
+              ? 'Reports on this project.'
+              : `${bugs.meta.total} report${bugs.meta.total === 1 ? '' : 's'} on ${
+                  bugsScopedToBuild ? (activeBuild?.name ?? 'this build') : 'this project'
+                }.`
+          }
+          actions={
+            project.builds.length > 1 ? (
+              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                <Button
+                  href={bugScopeHref('project')}
+                  variant={bugsScopedToBuild ? 'ghost' : 'secondary'}
+                  size="sm"
+                >
+                  All builds
+                </Button>
+                <Button
+                  href={bugScopeHref('build')}
+                  variant={bugsScopedToBuild ? 'secondary' : 'ghost'}
+                  size="sm"
+                >
+                  This build
+                </Button>
+              </div>
+            ) : null
           }
           flush
         >
-          {!bugs ? (
+          {!bugs || 'error' in bugs ? (
             <div style={{ padding: 'var(--space-6)' }}>
               <Muted>The bugs service is unreachable. Refresh in a moment.</Muted>
             </div>
@@ -1884,7 +1952,7 @@ export default async function CustomerProjectDetailPage({
             <Table
               ariaLabel="Bugs on this project"
               columns={bugColumns}
-              rows={bugs}
+              rows={bugs.items}
               rowKey={(row) => row.id}
               rowHref={(row) => `/app/customer/bugs/${row.id}`}
               style={bareTableStyle}
@@ -1896,6 +1964,15 @@ export default async function CustomerProjectDetailPage({
             />
           )}
         </Panel>
+      ) : null}
+      {section === 'bugs' && bugs && !('error' in bugs) ? (
+        <Pagination
+          page={bugs.meta.page}
+          totalPages={Math.max(1, bugs.meta.totalPages)}
+          total={bugs.meta.total}
+          limit={bugs.meta.limit}
+          hrefFor={bugPageHref}
+        />
       ) : null}
 
       {/* ── Testers on this build ─────────────────────────────────────────

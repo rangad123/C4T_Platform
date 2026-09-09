@@ -283,6 +283,8 @@ export interface ProjectBugRow {
   status: string
   createdAt: string
   reportedBy: ProjectPerson | null
+  /** Which build it was logged against — the list can span all of them. */
+  build: { id: string; name: string } | null
 }
 
 /**

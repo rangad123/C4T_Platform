@@ -330,6 +330,8 @@ export interface ProjectBugRow {
   status: string
   createdAt: string
   reportedBy: ProjectPerson | null
+  /** Which build it was logged against — the list can span all of them. */
+  build: { id: string; name: string } | null
 }
 
 /** Just enough of a rating to know who has already rated whom on a project. */

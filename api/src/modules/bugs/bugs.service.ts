@@ -71,6 +71,12 @@ const bugSelect = {
   createdAt: true,
   updatedAt: true,
   project: { select: { id: true, reference: true, title: true, organisationId: true } },
+  /*
+    Named, not just referenced by id. A project's bug list is readable across
+    every build on it, and on a project carrying ninety-nine builds a row that
+    cannot say which one it belongs to is barely a row at all.
+  */
+  build: { select: { id: true, name: true } },
   reportedBy: {
     select: {
       id: true,

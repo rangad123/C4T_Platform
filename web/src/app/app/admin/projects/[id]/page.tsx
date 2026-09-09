@@ -33,7 +33,8 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
-import { loadList } from '@/lib/admin/list'
+import { Pagination } from '@/components/ds/admin/Pagination'
+import { parsePage, loadList } from '@/lib/admin/list'
 import { requireRole, hasPermission } from '@/lib/auth/session'
 import { rateTesterAction, awardBadgeAction } from '../../testers/[id]/actions'
 import { ApiError } from '@/lib/api/types'
@@ -94,7 +95,12 @@ import { countryOptions } from '@/lib/geo/source'
  */
 
 /** Bugs shown inline. The full set lives on the bugs list. */
-const BUG_PREVIEW_SIZE = 10
+/*
+  A page of bugs, not a teaser. This was 10 with no pager, so a build with 156
+  defects showed ten of them and no way to reach the rest — the dashboard said
+  156 and the tab showed 10, which reads as data loss rather than as a preview.
+*/
+const BUGS_PER_PAGE = 25
 
 /**
  * Sub-navigation for the record. The page carried fifteen panels in one
@@ -126,6 +132,10 @@ export default async function ProjectDetailPage({
     section?: string
     edit?: string
     buildId?: string
+    /** Page of the Bugs tab. Named so it cannot collide with another list. */
+    bugPage?: string
+    /** `build` narrows the Bugs tab to the active build; absent means all of them. */
+    bugScope?: string
     error?: string
     name?: string
     rate?: string
@@ -234,6 +244,37 @@ export default async function ProjectDetailPage({
   const isExploratory = (buildDetail?.testType ?? '').toLowerCase().includes('exploratory')
   const visibleSections = isExploratory ? SECTIONS.filter((s) => s.value !== 'testing') : SECTIONS
   const section = resolveSection(visibleSections, resolvedSearchParams.section)
+  const bugPage = parsePage(resolvedSearchParams.bugPage)
+  /*
+    ── WHY THE BUGS TAB SPANS THE PROJECT BY DEFAULT
+
+    Every other tab on this page is build-scoped, and the build switcher above
+    them is what makes that coherent. Bugs were too — but the Overview reports
+    `project._count.bugs`, which counts the whole project, so a project with a
+    hundred builds announced 2,280 defects and then showed the twenty logged
+    against whichever build happened to be selected. Two numbers that far apart
+    on one screen read as lost data, not as two different questions.
+
+    So this list answers the question the headline number asks, and the toggle
+    narrows it to one build for anyone who wants that instead.
+  */
+  const bugsScopedToBuild = resolvedSearchParams.bugScope === 'build'
+  const bugQueryString = (params: Record<string, string | undefined>): string => {
+    const sp = new URLSearchParams({ section: 'bugs' })
+    if (resolvedSearchParams.buildId) sp.set('buildId', resolvedSearchParams.buildId)
+    if (bugsScopedToBuild) sp.set('bugScope', 'build')
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined) sp.delete(key)
+      else sp.set(key, value)
+    }
+    return `/app/admin/projects/${id}?${sp.toString()}`
+  }
+  // Paging keeps the scope; changing the scope drops the page, because page 7
+  // of one build is not page 7 of the project.
+  const bugPageHref = (target: number): string =>
+    bugQueryString({ bugPage: target > 1 ? String(target) : undefined })
+  const bugScopeHref = (scope: 'build' | 'project'): string =>
+    bugQueryString({ bugScope: scope === 'build' ? 'build' : undefined, bugPage: undefined })
   const newBuildModalOpen = edit === 'new-build'
 
   /**
@@ -249,9 +290,12 @@ export default async function ProjectDetailPage({
     await Promise.all([
       section === 'bugs'
         ? loadList<ProjectBugRow>('bugs', {
-            page: 1,
-            limit: BUG_PREVIEW_SIZE,
-            query: { projectId: project.id, buildId: activeBuildId },
+            page: bugPage,
+            limit: BUGS_PER_PAGE,
+            query: {
+              projectId: project.id,
+              ...(bugsScopedToBuild ? { buildId: activeBuildId } : {}),
+            },
           })
         : Promise.resolve({ error: 'forbidden' as const }),
       section === 'features'
@@ -862,6 +906,17 @@ export default async function ProjectDetailPage({
       render: (row) => <SeverityBadge severity={row.severity} />,
     },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+    // Only when the list spans them — inside a single build the column would
+    // repeat the same name down every row.
+    ...(bugsScopedToBuild
+      ? []
+      : [
+          {
+            key: 'build',
+            header: 'Build',
+            render: (row: ProjectBugRow) => row.build?.name ?? '—',
+          },
+        ]),
     { key: 'reporter', header: 'Reported by', render: (row) => personName(row.reportedBy) },
     { key: 'logged', header: 'Logged', align: 'right', render: (row) => formatDate(row.createdAt) },
   ]
@@ -2408,10 +2463,30 @@ export default async function ProjectDetailPage({
             title="Bugs"
             description={
               'error' in bugs
-                ? 'This build’s reports.'
-                : bugs.meta.total > BUG_PREVIEW_SIZE
-                  ? `The ${BUG_PREVIEW_SIZE} most recent of ${bugs.meta.total} reports on ${activeBuild?.name ?? 'this build'}.`
-                  : `${bugs.meta.total} report${bugs.meta.total === 1 ? '' : 's'} on ${activeBuild?.name ?? 'this build'}.`
+                ? 'Reports on this project.'
+                : `${bugs.meta.total} report${bugs.meta.total === 1 ? '' : 's'} on ${
+                    bugsScopedToBuild ? (activeBuild?.name ?? 'this build') : 'this project'
+                  }.`
+            }
+            actions={
+              project.builds.length > 1 ? (
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <Button
+                    href={bugScopeHref('project')}
+                    variant={bugsScopedToBuild ? 'ghost' : 'secondary'}
+                    size="sm"
+                  >
+                    All builds
+                  </Button>
+                  <Button
+                    href={bugScopeHref('build')}
+                    variant={bugsScopedToBuild ? 'secondary' : 'ghost'}
+                    size="sm"
+                  >
+                    This build
+                  </Button>
+                </div>
+              ) : null
             }
             flush
           >
@@ -2433,12 +2508,30 @@ export default async function ProjectDetailPage({
                 style={bareTableStyle}
                 emptyState={
                   <div style={{ padding: 'var(--space-6)' }}>
-                    <Muted>No defect has been logged against this project yet.</Muted>
+                    <Muted>
+                      {bugsScopedToBuild
+                        ? 'No defect has been logged against this build yet.'
+                        : 'No defect has been logged against this project yet.'}
+                    </Muted>
                   </div>
                 }
               />
             )}
           </Panel>
+          {/*
+            `bugPage` rather than `page`: this page already carries a section
+            and a build in its query string, and a bare `page` would be claimed
+            by whichever list read it first.
+          */}
+          {'error' in bugs ? null : (
+            <Pagination
+              page={bugs.meta.page}
+              totalPages={Math.max(1, bugs.meta.totalPages)}
+              total={bugs.meta.total}
+              limit={bugs.meta.limit}
+              hrefFor={bugPageHref}
+            />
+          )}
         </>
       ) : null}
 
