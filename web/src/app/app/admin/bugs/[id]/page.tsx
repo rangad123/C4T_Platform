@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { AttachmentIdentity } from '@/components/admin/AttachmentIdentity'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { Panel } from '@/components/admin/Panel'
@@ -110,7 +111,8 @@ interface BugDetail {
       originalName: string
       mimeType: string
       sizeBytes: number
-      downloadUrl: string
+      /** Null when the bytes are not in the bucket — see `AttachmentIdentity`. */
+      downloadUrl: string | null
     }
   }[]
   comments: readonly {
@@ -179,19 +181,6 @@ function formatTimestamp(iso: string | null | undefined): string {
     hour: '2-digit',
     minute: '2-digit',
   })
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['kB', 'MB', 'GB']
-  let value = bytes / 1024
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit += 1
-  }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`
 }
 
 /**
@@ -815,23 +804,13 @@ export default async function BugDetailPage({
                           style={{ color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}
                         />
                         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                          <a
-                            href={attachment.file.downloadUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ ...LINK_STYLE, wordBreak: 'break-word' }}
-                          >
-                            {attachment.file.originalName}
-                          </a>
-                          <span
-                            style={{
-                              color: 'var(--text-muted)',
-                              fontSize: 'var(--type-body-sm-size)',
-                            }}
-                          >
-                            {formatBytes(attachment.file.sizeBytes)} · {attachment.file.mimeType} ·
-                            added {formatDate(attachment.createdAt)}
-                          </span>
+                          <AttachmentIdentity
+                            originalName={attachment.file.originalName}
+                            mimeType={attachment.file.mimeType}
+                            sizeBytes={attachment.file.sizeBytes}
+                            createdAt={attachment.createdAt}
+                            downloadUrl={attachment.file.downloadUrl}
+                          />
                           {attachment.caption ? (
                             <span
                               style={{

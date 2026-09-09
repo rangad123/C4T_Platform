@@ -190,6 +190,7 @@ export async function getBug(user: Express.AuthenticatedUser, id: string) {
               mimeType: true,
               sizeBytes: true,
               storageKey: true,
+              isComplete: true,
             },
           },
         },
@@ -222,7 +223,21 @@ export async function getBug(user: Express.AuthenticatedUser, id: string) {
 
   if (!bug) throw new NotFoundError('Bug')
 
-  // Attachments are private objects; hand back short-lived signed URLs.
+  /**
+   * Attachments are private objects; hand back short-lived signed URLs.
+   *
+   * `downloadUrl` is null when the bytes are not in the bucket. 4,377 of the
+   * migrated screenshots were pruned from the old GoDaddy host before anyone
+   * could copy them, and their rows survive as `isComplete: false` — the only
+   * remaining evidence that a tester attached something.
+   *
+   * Signing a key that holds no object does not fail here; it fails in the
+   * browser, and it fails as AWS's own XML. Worse, this bucket's role has no
+   * `s3:ListBucket`, so S3 masks the missing key as `AccessDenied` — a reader
+   * clicking a screenshot got an authorization error about a role ARN, which
+   * says nothing true about what happened. A null tells the caller to render
+   * the file as gone, which is what it is.
+   */
   const attachments = await Promise.all(
     bug.attachments.map(async (a) => ({
       id: a.id,
@@ -233,7 +248,9 @@ export async function getBug(user: Express.AuthenticatedUser, id: string) {
         originalName: a.file.originalName,
         mimeType: a.file.mimeType,
         sizeBytes: a.file.sizeBytes,
-        downloadUrl: await createDownloadUrl(a.file.storageKey, a.file.originalName),
+        downloadUrl: a.file.isComplete
+          ? await createDownloadUrl(a.file.storageKey, a.file.originalName)
+          : null,
       },
     })),
   )
