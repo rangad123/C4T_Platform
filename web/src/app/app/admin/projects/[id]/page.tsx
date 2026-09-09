@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { Avatar } from '@/components/admin/Avatar'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { Modal } from '@/components/admin/Modal'
 import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
@@ -637,7 +638,16 @@ export default async function ProjectDetailPage({
     {
       key: 'tester',
       header: 'Tester',
-      render: (row) => personName(row.tester),
+      render: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar
+            name={personName(row.tester)}
+            fileId={row.tester.avatarFileId ?? null}
+            size="sm"
+          />
+          <span>{personName(row.tester)}</span>
+        </span>
+      ),
       renderSecondary: (row) => row.tester.email,
     },
     {

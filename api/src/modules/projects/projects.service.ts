@@ -374,6 +374,8 @@ export async function getProject(
               firstName: true,
               lastName: true,
               email: true,
+              // The roster is a list of people; a list of people shows faces.
+              avatarFileId: true,
               testerProfile: { select: { id: true, ratingAverage: true, countryCode: true } },
             },
           },

@@ -4,6 +4,7 @@ import { Button } from '@/components/ds/core/Button'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
+import { Avatar } from '@/components/admin/Avatar'
 import { formatDate, titleCase, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 import { PROJECT_STATUSES } from '@/lib/domain/enums'
@@ -22,6 +23,8 @@ interface ProjectRow {
   startDate: string | null
   createdAt: string
   _count: { bugs: number; assignments: number }
+  /** The application under test, when one was uploaded. */
+  logo: { id: string } | null
 }
 
 /**
@@ -54,7 +57,17 @@ export default async function CustomerProjectsPage({
     {
       key: 'title',
       header: 'Project',
-      render: (row) => row.title,
+      render: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          {/*
+            The logo of the application under test, not of the organisation —
+            people recognise a list of their own products by the icon far
+            faster than by reading twenty titles.
+          */}
+          <Avatar name={row.title} fileId={row.logo?.id ?? null} size="sm" shape="rounded" />
+          <span>{row.title}</span>
+        </span>
+      ),
       renderSecondary: (row) => row.reference,
     },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },

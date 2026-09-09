@@ -17,6 +17,14 @@ export interface AvatarProps {
    * from email so the same person is always the same colour).
    */
   tint?: string
+  /**
+   * `circle` for a person, `rounded` for a thing.
+   *
+   * A product logo in a circle gets its corners cropped, and reads as somebody's
+   * face at a glance. Projects and applications use `rounded`; people keep the
+   * circle, which is why that is the default.
+   */
+  shape?: 'circle' | 'rounded'
 }
 
 const SIZE_PX: Record<AvatarSize, number> = {
@@ -47,7 +55,7 @@ const SIZE_PX: Record<AvatarSize, number> = {
  * Dimensions are explicit and the box is a fixed square, so there is no layout
  * shift for the optimizer to have prevented.
  */
-export function Avatar({ name, fileId, size = 'md', style, tint }: AvatarProps) {
+export function Avatar({ name, fileId, size = 'md', style, tint, shape = 'circle' }: AvatarProps) {
   const px = SIZE_PX[size]
   const initials = pickInitials(name)
   // The per-user tint is only ever meant to separate two people who share
@@ -69,7 +77,7 @@ export function Avatar({ name, fileId, size = 'md', style, tint }: AvatarProps) 
         flex: '0 0 auto',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: '50%',
+        borderRadius: shape === 'circle' ? '50%' : 'var(--radius-control)',
         overflow: 'hidden',
         background,
         color: 'var(--ink-50)',
@@ -91,7 +99,14 @@ export function Avatar({ name, fileId, size = 'md', style, tint }: AvatarProps) 
           height={px}
           loading="lazy"
           decoding="async"
-          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            // A face can be cropped to fill the circle; a logo cannot — crop a
+            // wordmark and it stops being the logo. Things are contained.
+            objectFit: shape === 'circle' ? 'cover' : 'contain',
+          }}
         />
       ) : (
         initials

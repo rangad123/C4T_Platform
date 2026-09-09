@@ -83,6 +83,8 @@ export interface ProjectPerson {
   firstName: string | null
   lastName: string | null
   email: string
+  /** Their picture, when they have uploaded one. Absent falls back to initials. */
+  avatarFileId?: string | null
 }
 
 export interface ProjectMaterial {

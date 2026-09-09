@@ -112,6 +112,8 @@ export interface ProjectAssignmentRow {
      * than a string the UI has to remember not to render.
      */
     email?: string
+    /** Their picture, when they have uploaded one. Initials otherwise. */
+    avatarFileId?: string | null
     testerProfile: {
       id: string
       /**

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { notFound } from 'next/navigation'
+import { Avatar } from '@/components/admin/Avatar'
 import { DetailShell } from '@/components/admin/DetailShell'
 import { InboxList } from '@/components/admin/InboxList'
 import { MarkReadOnView } from '@/components/admin/MarkReadOnView'
@@ -625,8 +626,16 @@ export default async function CustomerProjectDetailPage({
     {
       key: 'tester',
       header: 'Tester',
-      render: (row) =>
-        [row.tester.firstName, row.tester.lastName].filter(Boolean).join(' ') || 'Tester',
+      render: (row) => {
+        const name =
+          [row.tester.firstName, row.tester.lastName].filter(Boolean).join(' ') || 'Tester'
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+            <Avatar name={name} fileId={row.tester.avatarFileId ?? null} size="sm" />
+            <span>{name}</span>
+          </span>
+        )
+      },
       renderSecondary: (row) =>
         row.tester.testerProfile?.countryCode
           ? `From ${row.tester.testerProfile.countryCode}`

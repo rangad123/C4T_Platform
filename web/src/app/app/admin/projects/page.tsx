@@ -1,3 +1,4 @@
+import { Avatar } from '@/components/admin/Avatar'
 import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { Button } from '@/components/ds/core/Button'
@@ -36,6 +37,8 @@ interface ProjectRow {
   progressPercent: number
   createdAt: string
   organisation: { id: string; name: string; slug: string } | null
+  /** The application under test, when one was uploaded. */
+  logo: { id: string } | null
   createdBy: { id: string; firstName: string | null; lastName: string | null } | null
   _count: { bugs: number; assignments: number }
   /**
@@ -91,7 +94,12 @@ export default async function ProjectsPage({
     {
       key: 'title',
       header: 'Project',
-      render: (row) => row.title,
+      render: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar name={row.title} fileId={row.logo?.id ?? null} size="sm" shape="rounded" />
+          <span>{row.title}</span>
+        </span>
+      ),
       renderSecondary: (row) => [row.reference, row.organisation?.name].filter(Boolean).join(' · '),
     },
     { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
