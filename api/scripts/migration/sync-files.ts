@@ -213,6 +213,8 @@ async function main(): Promise<void> {
   console.log('  ambiguous :', totals.ambiguous)
   console.log('  failed    :', totals.failed)
 
+  await clearDanglingPictures(dryRun)
+
   if (unresolved.length > 1) {
     const { writeFile } = await import('node:fs/promises')
     const out = path.join(
@@ -228,6 +230,83 @@ async function main(): Promise<void> {
     await writeFile(out, `${bom}${unresolved.join('\n')}\n`, 'utf8')
     console.log(`\n  ${unresolved.length - 1} rows could not be synced — see ${out}`)
   }
+}
+
+
+/**
+ * Drops the picture references whose bytes never arrived.
+ *
+ * ── WHY A REFERENCE WITHOUT BYTES IS WORSE THAN NO REFERENCE
+ *
+ * 4,642 of the legacy uploads are simply gone — pruned from the old host years
+ * before anyone thought to copy it. The migration still wrote a FileObject for
+ * each, because the row is the only remaining evidence that a picture once
+ * existed; the sync above then found nothing to put in the bucket and left
+ * them `isComplete: false`.
+ *
+ * `GET /uploads/:id/download-url` 404s on an incomplete file, so
+ * `/app/files/:id` 404s too — but `Avatar` has already committed to an `<img>`
+ * by then. It decides between a photo and coloured initials on `fileId` alone,
+ * which is a decision it makes while rendering on the server, with no way to
+ * ask whether the bytes are really there. The result is 212 testers wearing a
+ * broken-image glyph instead of their initials.
+ *
+ * Clearing the pointer moves the decision to the only place that can make it
+ * correctly. The FileObject rows stay: they record that the picture was lost,
+ * not that it never existed.
+ *
+ * Scoped to `driver: 'legacy'` so a live upload — incomplete for the second
+ * between minting the row and confirming the PUT — is never caught by this.
+ */
+async function clearDanglingPictures(dryRun: boolean): Promise<void> {
+  const orphaned = await prisma.fileObject.findMany({
+    where: { driver: 'legacy', isComplete: false },
+    select: { id: true },
+  })
+  if (orphaned.length === 0) return
+
+  const ids = orphaned.map((file) => file.id)
+  console.log(`\n  ${ids.length} file rows still have no bytes; clearing what points at them`)
+
+  let avatars = 0
+  let orgLogos = 0
+  let projectLogos = 0
+
+  // Chunked rather than one statement per table: an `IN` list of several
+  // thousand ids is worth keeping off a single query's parameter budget.
+  for (let start = 0; start < ids.length; start += 500) {
+    const chunk = ids.slice(start, start + 500)
+
+    if (dryRun) {
+      avatars += await prisma.user.count({ where: { avatarFileId: { in: chunk } } })
+      orgLogos += await prisma.organisation.count({ where: { logoFileId: { in: chunk } } })
+      projectLogos += await prisma.project.count({ where: { logoFileId: { in: chunk } } })
+      continue
+    }
+
+    avatars += (
+      await prisma.user.updateMany({
+        where: { avatarFileId: { in: chunk } },
+        data: { avatarFileId: null },
+      })
+    ).count
+    orgLogos += (
+      await prisma.organisation.updateMany({
+        where: { logoFileId: { in: chunk } },
+        data: { logoFileId: null },
+      })
+    ).count
+    projectLogos += (
+      await prisma.project.updateMany({
+        where: { logoFileId: { in: chunk } },
+        data: { logoFileId: null },
+      })
+    ).count
+  }
+
+  console.log(`  avatars       : ${avatars} cleared`)
+  console.log(`  org logos     : ${orgLogos} cleared`)
+  console.log(`  project logos : ${projectLogos} cleared`)
 }
 
 main()
