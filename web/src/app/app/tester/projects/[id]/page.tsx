@@ -954,6 +954,7 @@ function MaterialTarget({ material }: { material: ProjectMaterial }) {
         fileId={material.file.id}
         name={material.file.originalName}
         basePath="/app/tester/download"
+        available={material.file.isComplete}
       />
     )
   }

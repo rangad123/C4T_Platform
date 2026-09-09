@@ -3045,7 +3045,7 @@ function MaterialTarget({ material }: { material: ProjectMaterial }) {
     return (
       <Caption>
         {material.file.originalName} · {material.file.mimeType} ·{' '}
-        {formatBytes(material.file.sizeBytes)}
+        {material.file.isComplete ? formatBytes(material.file.sizeBytes) : 'no longer available'}
       </Caption>
     )
   }

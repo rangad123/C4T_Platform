@@ -14,6 +14,15 @@ export interface DownloadLinkProps {
    * whichever portal was added next.
    */
   basePath: string
+  /**
+   * False when the file's bytes are not in the bucket.
+   *
+   * Defaults to true, so a caller that has no way to know keeps the link it
+   * always had. Pass it wherever the flag is available: the download route
+   * refuses an incomplete file with a 404, and a link that always 404s is a
+   * worse answer than saying the file is gone.
+   */
+  available?: boolean
 }
 
 /**
@@ -27,7 +36,25 @@ export interface DownloadLinkProps {
  * because this is an `<a>`, not a `next/link`: prefetching a download route
  * would burn a signed URL on hover.
  */
-export function DownloadLink({ fileId, name, basePath }: DownloadLinkProps) {
+export function DownloadLink({ fileId, name, basePath, available = true }: DownloadLinkProps) {
+  if (!available) {
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          color: 'var(--text-muted)',
+          fontSize: 'var(--type-body-sm-size)',
+          wordBreak: 'break-all',
+        }}
+      >
+        <Icon name="file-text" size={16} style={{ flex: 'none' }} />
+        {name} — no longer available
+      </span>
+    )
+  }
+
   return (
     <a
       href={`${basePath}/${fileId}`}

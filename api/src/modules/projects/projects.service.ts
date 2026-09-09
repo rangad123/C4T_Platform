@@ -342,7 +342,21 @@ export async function getProject(
           url: true,
           fileId: true,
           createdAt: true,
-          file: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true } },
+          /*
+            `isComplete` so a caller can tell a downloadable material from one
+            whose bytes never made it off the legacy host — 53 of these point
+            at a file that is not in the bucket, and only this flag separates
+            them from the rest.
+          */
+          file: {
+            select: {
+              id: true,
+              originalName: true,
+              mimeType: true,
+              sizeBytes: true,
+              isComplete: true,
+            },
+          },
         },
       },
       assignments: {

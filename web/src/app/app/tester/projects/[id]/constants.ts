@@ -93,7 +93,14 @@ export interface ProjectMaterial {
   url: string | null
   fileId: string | null
   createdAt: string
-  file: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
+  file: {
+    id: string
+    originalName: string
+    mimeType: string
+    sizeBytes: number
+    /** False when the bytes are not in the bucket — the file cannot be fetched. */
+    isComplete: boolean
+  } | null
 }
 
 /**
