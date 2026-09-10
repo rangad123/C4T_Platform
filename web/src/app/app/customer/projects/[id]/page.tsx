@@ -519,7 +519,26 @@ export default async function CustomerProjectDetailPage({
       : Promise.resolve({ error: 'forbidden' as const }),
   ])
   const priority = isProjectPriority(project.priority) ? project.priority : 'NORMAL'
-  const transitions = allowedTransitions(project.status)
+  /**
+   * What THIS reader may move the project to — not what the lifecycle allows.
+   *
+   * `allowedTransitions` is the platform's matrix, and the API applies a much
+   * narrower rule to a customer: only from DRAFT, and only to SUBMITTED or
+   * CANCELLED (`changeStatus` in `projects.service.ts`). Offering the raw
+   * matrix meant a SUBMITTED project showed its owner "Approved", "Draft" and
+   * "Cancelled", and every one of them came back 403 "Only the delivery team
+   * can make that status change".
+   *
+   * CANCELLED is excluded here even from DRAFT because it has its own
+   * confirmation below — see the note on that form for why it is not a peer
+   * of the others under one generic button.
+   *
+   * The panel's empty state already says the right thing for every other
+   * status; it just never got the chance to.
+   */
+  const transitions = allowedTransitions(project.status).filter(
+    (next) => project.status === 'DRAFT' && next === 'SUBMITTED',
+  )
   const detailPath = `/app/customer/projects/${project.id}`
   const closedHref = (() => {
     const sp = new URLSearchParams()
