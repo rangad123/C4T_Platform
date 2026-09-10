@@ -37,6 +37,7 @@
     "migration:sample": "tsx scripts/migration/run.ts --mode=sample",
     "migration": "tsx scripts/migration/run.ts --mode=full",
     "migration:sync-files": "tsx scripts/migration/sync-files.ts",
+    "migration:backfill-country": "tsx scripts/migration/backfill-country.ts",
     "migration:matrix": "tsx scripts/migration/report/matrix.ts ../docs/MIGRATION-MATRIX.md",
     "migration:check-password": "tsx scripts/migration/check-password.ts"
   },

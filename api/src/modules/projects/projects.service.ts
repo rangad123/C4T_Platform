@@ -12,7 +12,11 @@ import { isAdminSide } from '../../middleware/authorize.js'
 import { projectScope } from '../../lib/access/scopes.js'
 import { projectRelations } from '../../lib/access/relations.js'
 import { authorize, can } from '../../lib/access/policy.js'
-import { assertAssignable, ACCEPTED_BUG_STATUSES } from '../testers/testers.service.js'
+import {
+  assertAssignable,
+  refreshTesterAggregates,
+  ACCEPTED_BUG_STATUSES,
+} from '../testers/testers.service.js'
 import { createNotification, createNotifications } from '../notifications/notifications.service.js'
 import { nextReference } from '../../lib/reference.js'
 import { PROJECT_SORT_FIELDS, type ListProjectsQuery } from './projects.schema.js'
@@ -1246,6 +1250,16 @@ export async function assignTesters(
       ),
     ])
 
+    /*
+      A revived row may have been COMPLETED a moment ago, and is INVITED now,
+      so that tester's completed-project count has just gone down. Only the
+      revived ones need recounting — a brand new invitation cannot have been
+      counted yet.
+    */
+    for (const row of toRevive) {
+      await refreshTesterAggregates(row.testerId)
+    }
+
     await createNotifications(invitedTesterIds, {
       type: 'PROJECT_ASSIGNED',
       title: `You have been invited to test "${project.title}"`,
@@ -1352,7 +1366,7 @@ export async function updateAssignment(
    * which is the kind of thing nothing ever remembers to do.
    */
   const now = new Date()
-  return prisma.projectAssignment.update({
+  const updated = await prisma.projectAssignment.update({
     where: { id: assignment.id },
     data: {
       status,
@@ -1361,6 +1375,21 @@ export async function updateAssignment(
       removedAt: status === AssignmentStatus.REMOVED ? now : null,
     },
   })
+
+  /**
+   * `projectsCompletedCount` is denormalised onto the tester profile, and
+   * this is the only place it can change: it counts distinct projects with a
+   * COMPLETED assignment, so marking one complete — or taking that status
+   * away again — moves it.
+   *
+   * It used to be refreshed only after bug and rating writes, which meant a
+   * tester's dashboard kept whatever figure the last bug they filed happened
+   * to leave behind. Completing their work did not move it, and un-completing
+   * it did not either.
+   */
+  await refreshTesterAggregates(testerId)
+
+  return updated
 }
 
 /** §2.3 — projects available to, or assigned to, the calling tester. */

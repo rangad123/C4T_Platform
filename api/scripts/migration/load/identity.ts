@@ -79,6 +79,36 @@ function resolveCountry(value: unknown) {
   )
 }
 
+/**
+ * The country a user actually has, from whichever column holds it.
+ *
+ * `users` carries the country TWICE and the obvious column is the empty one:
+ * `usr_country` is set on 303 of 6,665 rows, while `country_flag` is set on
+ * 5,863. The old sign-up form used intl-tel-input, which stores its flag as a
+ * CSS class — `"iti-flag ar"` — and only a later, little-used profile screen
+ * ever wrote `usr_country`.
+ *
+ * Reading `usr_country` alone therefore threw away the country of 5,736
+ * testers, which is most of the pool, and made country filtering close to
+ * useless — searching for Argentina returned nobody though twenty testers
+ * are marked `iti-flag ar`.
+ *
+ * `usr_country` still wins where both are set: it is the one a person typed
+ * on purpose, and the flag can be left behind by a phone number's dial code.
+ */
+function resolveUserCountry(row: Record<string, unknown>) {
+  const explicit = resolveCountry(row.usr_country)
+  if (explicit.value) return explicit
+
+  // "iti-flag ar" → "AR". Anything not two letters is a class we do not know.
+  const flag = text(row.country_flag)
+  const suffix = flag?.trim().split(/\s+/).pop() ?? ''
+  if (!/^[a-z]{2}$/i.test(suffix)) return explicit
+
+  const fromFlag = resolveCountry(suffix.toUpperCase())
+  return fromFlag.value ? fromFlag : explicit
+}
+
 // ── organisation → Organisation ──────────────────────────────────────────────
 
 export const organisationLoader: Loader = {
@@ -275,7 +305,7 @@ export const userLoader: Loader = {
     const status = enumValue(row.usr_active, USER_STATUS, UserStatus.DEACTIVATED, 'usr_active')
     problems.push(status.problem)
 
-    const country = resolveCountry(row.usr_country)
+    const country = resolveUserCountry(row)
     problems.push(country.problem)
 
     const createdAt = timestampOr(row.usr_add_date)

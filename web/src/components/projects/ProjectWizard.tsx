@@ -260,7 +260,29 @@ export async function ProjectWizard({
   organisations,
   priorities,
 }: ProjectWizardProps) {
-  const step: Step = STEPS.some((s) => s.value === params.step) ? (params.step as Step) : 'type'
+  const requested: Step = STEPS.some((s) => s.value === params.step)
+    ? (params.step as Step)
+    : 'type'
+
+  /**
+   * An end date before the start date holds the reader on the step that owns
+   * those two fields.
+   *
+   * Both are `<input type="date">`, so their values are ISO `yyyy-mm-dd` and
+   * compare correctly as strings. The API refuses this range too — the create
+   * schema carries `endDate >= startDate` — but it is the last thing to see
+   * the form, so the reader got to fill in scope and tester requirements
+   * before being told, and the 422 came back as the generic "some values were
+   * not accepted" rather than naming the dates. `ERRORS.range` has been
+   * written this whole time with nothing to raise it; this raises it, at the
+   * step where the fields actually are.
+   */
+  const badDateRange =
+    Boolean(params.startDate) && Boolean(params.endDate) && params.endDate! < params.startDate!
+  const leavingGeneral = STEPS.findIndex((s) => s.value === requested) > 1
+  const step: Step = badDateRange && leavingGeneral ? 'general' : requested
+  const error = badDateRange && leavingGeneral ? 'range' : params.error
+
   /**
    * `findIndex` cannot miss — `step` is only ever one of `STEPS` — but it is
    * typed as possibly -1, so the current step is resolved by lookup instead
@@ -293,7 +315,7 @@ export async function ProjectWizard({
       title="Set up a test"
       subtitle={`Step ${stepIndex + 1} of ${STEPS.length} — ${current.label}.`}
     >
-      <Notice code={params.error} notices={ERRORS} param="error" />
+      <Notice code={error} notices={ERRORS} param="error" />
       {/*
         The reason, when there is one worth showing. It sits under the notice
         rather than inside it so the generic sentence still reads on its own,
@@ -579,12 +601,26 @@ export async function ProjectWizard({
                     defaultValue={params.startDate ?? ''}
                   />
                 </Field>
-                <Field label="Ends" htmlFor="endDate" required>
+                <Field
+                  label="Ends"
+                  htmlFor="endDate"
+                  required
+                  error={badDateRange ? 'The test cannot end before it starts.' : undefined}
+                >
                   <Input
                     id="endDate"
                     name="endDate"
                     type="date"
                     required
+                    /*
+                      Once a start date is on the URL the picker itself
+                      refuses anything earlier, so coming back to this step
+                      cannot repeat the mistake. Typing both fresh in one
+                      pass still needs the check above — `min` is only as old
+                      as the last render.
+                    */
+                    min={params.startDate || undefined}
+                    invalid={badDateRange}
                     defaultValue={params.endDate ?? ''}
                   />
                 </Field>
