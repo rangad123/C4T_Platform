@@ -205,6 +205,11 @@ export function ComposeWorkspace({
       <StepBar
         current={step}
         recipientCount={recipients.length}
+        canReach={(target) => {
+          if (target === 'write') return true
+          if (target === 'recipients') return body.trim().length > 0
+          return body.trim().length > 0 && recipients.length > 0
+        }}
         onGo={(next) => {
           setError(null)
           setStep(next)
@@ -476,16 +481,29 @@ export function ComposeWorkspace({
 /**
  * The steps, and where you are in them.
  *
- * Clickable backwards only. Jumping to the preview before there is anything
- * to preview would show an empty page and teach nothing.
+ * ── WHY A STEP AHEAD CAN BE CLICKED
+ *
+ * This bar used to disable every step past the current one, on the reasoning
+ * that previewing before there is anything to preview teaches nothing. True,
+ * but it made the bar lie: once recipients were chosen, "Review and send" was
+ * genuinely reachable and still rendered grey and dead. The only live way
+ * forward was a button in the sticky bar at the foot of a long, scrolling
+ * list of testers — so people picked their recipients, clicked the step that
+ * says "Review and send", got nothing, and reported the step as broken.
+ *
+ * `canReach` asks the composer whether the prerequisites for a step are
+ * actually met, rather than inferring it from position. A step is dead only
+ * while it would really show an empty page.
  */
 function StepBar({
   current,
   recipientCount,
+  canReach,
   onGo,
 }: {
   current: ComposeStep
   recipientCount: number
+  canReach: (step: ComposeStep) => boolean
   onGo: (step: ComposeStep) => void
 }) {
   const index = STEPS.findIndex((s) => s.key === current)
@@ -493,18 +511,19 @@ function StepBar({
     <ol style={STEP_BAR}>
       {STEPS.map((s, i) => {
         const state = i === index ? 'current' : i < index ? 'done' : 'upcoming'
+        const blocked = state === 'upcoming' && !canReach(s.key)
         return (
           <li key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
             <button
               type="button"
-              disabled={state === 'upcoming'}
+              disabled={blocked}
               onClick={() => onGo(s.key)}
               aria-current={state === 'current' ? 'step' : undefined}
               style={{
                 ...STEP_BUTTON,
-                color: state === 'upcoming' ? 'var(--text-muted)' : 'var(--text-primary)',
+                color: blocked ? 'var(--text-muted)' : 'var(--text-primary)',
                 fontWeight: state === 'current' ? 'var(--fw-medium)' : 'var(--fw-regular)',
-                cursor: state === 'upcoming' ? 'default' : 'pointer',
+                cursor: blocked ? 'default' : 'pointer',
               }}
             >
               <span style={{ ...STEP_NUMBER, ...(state === 'current' ? STEP_NUMBER_CURRENT : {}) }}>

@@ -42,21 +42,37 @@ export default async function NewProjectAsAdminPage({
   const params = await searchParams
 
   /**
+   * Every organisation, not the first hundred.
+   *
+   * `paginationQuery` caps `limit` at 100, and this used to ask for one page
+   * and stop. There are 276 organisations, so 176 of them simply had no entry
+   * in the select — a project could not be created for them here at all, and
+   * the field gave no sign that anything was missing.
+   *
    * Failures are swallowed into an empty list rather than a hard error. The
    * wizard still renders, the organisation select is simply empty, and the
    * step's own `required` refuses to advance — which is a better failure than
-   * a page that will not open at all.
+   * a page that will not open at all. A page that fails midway keeps the
+   * organisations already gathered, for the same reason.
    */
-  let organisations: readonly OrganisationOption[] = []
+  const organisations: OrganisationOption[] = []
   try {
-    const response = await serverFetchPage<OrganisationOption>('organisations', {
-      // 100 is the API's ceiling (`paginationQuery`).
-      query: { limit: 100, status: 'ACTIVE' },
-    })
-    organisations = response.data
+    // Bounded so a runaway `totalPages` cannot spin here forever; 50 pages is
+    // 5,000 organisations, far past anything this platform is going to hold.
+    for (let page = 1; page <= 50; page++) {
+      const response = await serverFetchPage<OrganisationOption>('organisations', {
+        query: { limit: 100, page, status: 'ACTIVE' },
+      })
+      organisations.push(...response.data)
+      if (response.meta && page >= response.meta.totalPages) break
+      if (!response.meta || response.data.length === 0) break
+    }
   } catch {
-    organisations = []
+    // Keep whatever arrived before the failure.
   }
+
+  // Alphabetical: a hundreds-long select is unusable in insertion order.
+  organisations.sort((a, b) => a.name.localeCompare(b.name))
 
   return (
     <ProjectWizard

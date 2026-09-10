@@ -138,6 +138,16 @@ export function ListFilters({
             id="search"
             name="search"
             type="search"
+            /*
+              The browser remembers what was submitted under a given field
+              name and offers it back on focus. Every list in the admin shares
+              this one component, so that history is shared too: opening Leads
+              and clicking into Search suggested names typed on the Users page,
+              which reads as stale data leaking between screens rather than as
+              the browser being helpful. The filter is in the URL — there is
+              nothing here worth remembering twice.
+            */
+            autoComplete="off"
             defaultValue={search.value ?? ''}
             placeholder={search.placeholder}
             iconLeft="search"
