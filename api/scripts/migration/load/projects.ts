@@ -31,6 +31,17 @@ import { recordLegacyFile } from './context.js'
  * relocated to where the new schema keeps it.
  */
 
+/**
+ * `documents.doc_id` → the stored filename, read once per run.
+ *
+ * A legacy build points at its test document through `builds.doc_id`; the
+ * filename lives on the `documents` row. 111 of 785 builds carry one and
+ * nothing ever read the column, so `Build.testDocumentFileId` was null on all
+ * 789 migrated builds and every portal showed a blank where the test document
+ * should be. 45 of the 111 still have their bytes on the old host.
+ */
+const documentFilenames = new Map<string, string>()
+
 /** Cached per run: legacy lookup tables read once. */
 const appTypes = new Map<string, string>()
 const testTypes = new Map<string, string>()
@@ -327,6 +338,7 @@ export const buildLoader: Loader = {
 
   async prepare() {
     await loadLookup('test_types', 'tt_id', 'tt_name', testTypes)
+    await loadLookup('documents', 'doc_id', 'doc_filename', documentFilenames)
   },
 
   async row(ctx, tx, row): Promise<RowOutcome> {
@@ -412,6 +424,42 @@ export const buildLoader: Loader = {
       : await tx.build.create({ data: { ...data, projectId }, select: { id: true } })
 
     await ctx.idMap.remember(tx, 'builds', legacyId, 'Build', build.id)
+
+    /*
+      The build's test document. `builds.doc_id` names a row in `documents`,
+      whose `doc_filename` is what sync-files looks for on disk.
+
+      Recorded under PROJECT_MATERIAL, but the scope is not what grants
+      access: `assertCanDownload` resolves a test document through the
+      `Build.testDocumentFileId` join and then `project.read`, deliberately
+      keyed on the join so the field accepts a file of any scope.
+    */
+    const docId = legacyRef(row.doc_id)
+    /*
+      Whoever added the build owns its document; a build whose creator did not
+      migrate falls back to the first admin, the same substitution the rest of
+      this file makes for a required author.
+    */
+    const uploadedById = docId
+      ? ((await ctx.idMap.resolve('users', legacyRef(row.build_add_by), 'User')) ??
+        (await firstAdminId(ctx, tx)))
+      : null
+    const testDocumentFileId =
+      docId && uploadedById
+        ? await recordLegacyFile(ctx, tx, {
+            legacyTable: 'builds',
+            legacyId,
+            field: 'doc_id',
+            filename: documentFilenames.get(String(docId)) ?? null,
+            scope: FileScope.PROJECT_MATERIAL,
+            keyPrefix: 'test-documents',
+            uploadedById,
+            createdAt,
+          })
+        : null
+    if (testDocumentFileId) {
+      await tx.build.update({ where: { id: build.id }, data: { testDocumentFileId } })
+    }
 
     /*
       `build_feature_list` is the comma-separated list of features the build
