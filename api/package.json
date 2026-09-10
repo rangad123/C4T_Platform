@@ -39,6 +39,7 @@
     "migration:sync-files": "tsx scripts/migration/sync-files.ts",
     "migration:backfill-country": "tsx scripts/migration/backfill-country.ts",
     "migration:backfill-progress": "tsx scripts/migration/backfill-progress.ts",
+    "migration:backfill-test-documents": "tsx scripts/migration/backfill-test-documents.ts",
     "migration:matrix": "tsx scripts/migration/report/matrix.ts ../docs/MIGRATION-MATRIX.md",
     "migration:check-password": "tsx scripts/migration/check-password.ts"
   },
