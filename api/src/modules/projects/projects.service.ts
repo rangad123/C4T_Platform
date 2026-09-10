@@ -731,16 +731,26 @@ export async function changeStatus(
       status,
       ...(status === ProjectStatus.SUBMITTED ? { submittedAt: new Date() } : {}),
       ...(status === ProjectStatus.APPROVED ? { approvedAt: new Date() } : {}),
-      // Reopening a completed project — clear `completedAt` so the column
-      // is honest. `progressPercent` is also reset so the timeline
-      // indicator in the admin UI does not stay pinned at 100.
+      /**
+       * Reopening a completed project — clear `completedAt` so the column is
+       * honest, and take `progressPercent` back off 100 so the timeline
+       * indicator does not stay pinned there.
+       *
+       * ZERO, NOT NULL. `progress_percent` is `Int @default(0)` and NOT NULL,
+       * so writing null was a NOT NULL violation the moment anyone reopened
+       * anything. It typechecked only because this object was cast to
+       * `ProjectUncheckedUpdateInput`; the cast turned out to be load-bearing
+       * for nothing else and is gone. Every project on this platform is
+       * currently COMPLETED, and COMPLETED → IN_PROGRESS is the only move it
+       * has, so this sat on the path of the only status change available.
+       */
       ...(project.status === ProjectStatus.COMPLETED && status !== ProjectStatus.COMPLETED
-        ? { completedAt: null, progressPercent: null }
+        ? { completedAt: null, progressPercent: 0 }
         : {}),
       ...(status === ProjectStatus.COMPLETED
         ? { completedAt: new Date(), progressPercent: 100 }
         : {}),
-    } as Prisma.ProjectUncheckedUpdateInput,
+    },
     select: projectSelect,
   })
 

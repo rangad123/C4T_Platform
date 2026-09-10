@@ -211,6 +211,14 @@ export const projectLoader: Loader = {
       targetLanguages: list(row.project_test_lang),
       maxTesters: int(row.project_testers),
       completedAt: updatedAt,
+      /*
+        A completed project reads 100%, the same as one the platform completes
+        itself (`changeStatus` sets exactly this). `progress_percent` defaults
+        to 0, so leaving it out gave every migrated project a status of
+        COMPLETED beside a progress bar at 0% — which is the kind of
+        contradiction that makes a reader distrust both numbers.
+      */
+      progressPercent: status === ProjectStatus.COMPLETED ? 100 : 0,
       createdAt,
       updatedAt,
     }
