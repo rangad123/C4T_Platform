@@ -618,8 +618,11 @@ export async function ProjectWizard({
                       cannot repeat the mistake. Typing both fresh in one
                       pass still needs the check above — `min` is only as old
                       as the last render.
+
+                      Passed straight through: absent omits the attribute,
+                      and an empty string is a `min` the browser ignores.
                     */
-                    min={params.startDate || undefined}
+                    min={params.startDate}
                     invalid={badDateRange}
                     defaultValue={params.endDate ?? ''}
                   />
