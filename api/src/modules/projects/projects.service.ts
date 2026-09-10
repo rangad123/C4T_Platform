@@ -87,7 +87,12 @@ const buildSelect = {
   bugCustomizationEnabled: true,
   testDocumentFileId: true,
   testDocument: {
-    select: { id: true, originalName: true, mimeType: true, sizeBytes: true },
+    /*
+      `isComplete` so the portals can tell a downloadable document from one
+      whose bytes never made it off the legacy host. 64 of the 108 test
+      documents recovered from `builds.doc_id` have no file behind them.
+    */
+    select: { id: true, originalName: true, mimeType: true, sizeBytes: true, isComplete: true },
   },
   createdAt: true,
   updatedAt: true,

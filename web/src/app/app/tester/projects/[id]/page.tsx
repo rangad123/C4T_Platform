@@ -521,6 +521,7 @@ export default async function TesterProjectWorkspacePage({
                         fileId={buildDetail.testDocument.id}
                         name={buildDetail.testDocument.originalName}
                         basePath="/app/tester/download"
+                        available={buildDetail.testDocument.isComplete}
                       />
                     ) : (
                       '—'

@@ -237,7 +237,14 @@ export interface BuildDetail {
   testDocumentFileId: string | null
   /** §36 — whether this build's bug form carries the client's extra fields. */
   bugCustomizationEnabled: boolean
-  testDocument: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
+  testDocument: {
+    id: string
+    originalName: string
+    mimeType: string
+    sizeBytes: number
+    /** False when the bytes are not in the bucket — the file cannot be fetched. */
+    isComplete: boolean
+  } | null
   createdAt: string
   updatedAt: string
   _count: {

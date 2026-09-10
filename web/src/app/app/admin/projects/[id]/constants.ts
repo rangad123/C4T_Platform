@@ -256,7 +256,14 @@ export interface BuildDetail {
   startDate: string | null
   endDate: string | null
   testDocumentFileId: string | null
-  testDocument: { id: string; originalName: string; mimeType: string; sizeBytes: number } | null
+  testDocument: {
+    id: string
+    originalName: string
+    mimeType: string
+    sizeBytes: number
+    /** False when the bytes are not in the bucket — the file cannot be fetched. */
+    isComplete: boolean
+  } | null
   createdAt: string
   updatedAt: string
   _count: {

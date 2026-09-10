@@ -1638,6 +1638,7 @@ export default async function ProjectDetailPage({
                         fileId={buildDetail.testDocument.id}
                         name={buildDetail.testDocument.originalName}
                         basePath="/app/admin/download"
+                        available={buildDetail.testDocument.isComplete}
                       />
                     ) : (
                       '—'
