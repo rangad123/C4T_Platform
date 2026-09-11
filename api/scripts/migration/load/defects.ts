@@ -8,6 +8,7 @@ import {
   BUG_TYPE,
 } from '../mapping/lookups.js'
 import { query } from '../legacy/client.js'
+import { loadLegacyLabels, type LegacyLabels } from '../mapping/legacy-labels.js'
 import {
   asText,
   enumValue,
@@ -30,6 +31,9 @@ import { recordLegacyFile, reportProblems } from './context.js'
 
 /** Legacy bug-type id → name, so BUG_TYPE can be applied to a readable value. */
 const bugTypeNames = new Map<string, string>()
+
+/** Device and browser labels for this run — see `mapping/legacy-labels.ts`. */
+let labels: LegacyLabels | null = null
 
 /**
  * A title for a bug that was never given one.
@@ -138,6 +142,17 @@ export const bugLoader: Loader = {
       }
     } catch {
       // Unmapped types are reported per row.
+    }
+
+    /*
+      `bug_device_used` and `bug_browsers_used` are ids, not text — see
+      `mapping/legacy-labels.ts`. Read once for the whole run.
+    */
+    try {
+      labels = await loadLegacyLabels()
+    } catch {
+      // Without them the two fields stay null, which is better than a number.
+      labels = null
     }
   },
 
@@ -283,11 +298,18 @@ export const bugLoader: Loader = {
       M" pair, recorded when reproducibility is SOMETIMES. They are the
       occurrence/outOf columns under an older name.
 
-      Four of the new Bug's environment fields have no legacy source at all:
-      osName, osVersion, appVersion and networkType. The old form captured only
-      the device and the browser. They stay null rather than being filled from
-      a neighbouring column that means something else.
+      The old form captured a device and a browser, and stored both as ids —
+      into `devices` and `user_browsers` respectively. Read as text they became
+      the literal strings "588" and "512" on every bug that had them, which is
+      what `mapping/legacy-labels.ts` exists to resolve.
+
+      `osName` comes from the browser's own row, the only place a legacy bug's
+      OS survives. `osVersion`, `appVersion` and `networkType` genuinely have
+      no legacy source and stay null rather than borrowing a neighbouring
+      column that means something else.
     */
+    const browserUsed = labels?.browsers.get(String(text(row.bug_browsers_used))) ?? null
+
     const data = {
       // The code the old platform showed for this bug, kept so that searching
       // for "CR_CONF001" still finds it. Not unique — see the schema.
@@ -306,10 +328,15 @@ export const bugLoader: Loader = {
       outOf: int(row.sometimeTotal),
       type: bugType,
       videoUrl: video.value,
-      deviceModel: text(row.bug_device_used),
-      osName: null,
+      deviceModel: labels?.devices.get(String(text(row.bug_device_used))) ?? null,
+      /*
+        Recovered from the browser, not invented: `user_browsers.os_id` names
+        the OS the tester registered that browser on, and `bugs_report` has no
+        OS column of its own.
+      */
+      osName: browserUsed?.osName ?? null,
       osVersion: null,
-      browser: text(row.bug_browsers_used),
+      browser: browserUsed?.label ?? null,
       appVersion: null,
       networkType: null,
       createdAt,
