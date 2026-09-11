@@ -31,7 +31,17 @@ const ERROR_MESSAGES: Record<string, string> = {
   email_not_verified: 'Verify your email before signing in. Check your inbox for the link we sent.',
   account_locked:
     'This account is temporarily locked after repeated failed attempts. Try again in a few minutes.',
-  rate_limited: 'Too many sign-in attempts. Wait a minute and try again.',
+  /*
+    `too_many_requests`, not `rate_limited`. The key here has to be the API's
+    own error code lowercased — see `lib/auth/actions.ts`, which passes
+    `body.error.code.toLowerCase()` straight through. `rate_limited` was never
+    a code this app emits, so a rate-limited sign-in fell through to the
+    generic "Sign-in failed. Please try again." and read as a wrong password.
+    That is the worst possible thing to say here: it invites more attempts,
+    and more attempts are exactly what the limiter is counting.
+  */
+  too_many_requests:
+    'Too many sign-in attempts from this device. Your password is fine — wait about 15 minutes and try again.',
   network: 'Could not reach the sign-in service. Check your connection and retry.',
   missing: 'Enter your email and password to continue.',
   google_unavailable:
