@@ -8,6 +8,7 @@ import {
 } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 import { ISO_COUNTRY_CODES } from '../../lib/iso-countries.js'
+import { ISO_639_1_CODES } from '../../lib/languages.js'
 
 export const PROJECT_SORT_FIELDS = [
   'createdAt',
@@ -56,7 +57,22 @@ const isoCountry = z
   .length(2)
   .toUpperCase()
   .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
-const isoLanguage = z.string().trim().length(2).toLowerCase()
+/*
+  Checked against the ISO 639-1 set, not merely two characters long.
+
+  `isoCountry` above has always refined against `ISO_COUNTRY_CODES`, and
+  `testers.schema.ts` already refines a tester's languages against
+  `ISO_639_1_CODES` — a project's languages were the one place that only
+  measured the length, so `targetLanguages=zz` was stored and offered as a
+  tester requirement nobody can satisfy. `lib/admin/locales.ts` on the web
+  side states that the API validates both; now it does.
+*/
+const isoLanguage = z
+  .string()
+  .trim()
+  .length(2)
+  .toLowerCase()
+  .refine((code) => ISO_639_1_CODES.has(code), 'Not a recognised ISO 639-1 language code')
 
 export const createProjectSchema = z
   .object({

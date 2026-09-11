@@ -40,6 +40,7 @@
     "migration:backfill-country": "tsx scripts/migration/backfill-country.ts",
     "migration:backfill-progress": "tsx scripts/migration/backfill-progress.ts",
     "migration:backfill-device-os": "tsx scripts/migration/backfill-device-os.ts",
+    "migration:backfill-language-codes": "tsx scripts/migration/backfill-language-codes.ts",
     "migration:backfill-org-contacts": "tsx scripts/migration/backfill-organisation-contacts.ts",
     "migration:backfill-nda": "tsx scripts/migration/backfill-nda-acceptance.ts",
     "migration:backfill-bug-environment": "tsx scripts/migration/backfill-bug-environment.ts",

@@ -14,6 +14,7 @@ import {
   timestampOr,
   bool,
 } from '../transform/values.js'
+import { toIsoLanguages } from '../transform/languages.js'
 import type { Loader, LoadContext, RowOutcome } from './context.js'
 import { recordLegacyFile } from './context.js'
 
@@ -219,7 +220,7 @@ export const projectLoader: Loader = {
       priority: ProjectPriority.NORMAL,
       platformTargets,
       targetCountries: [] as string[],
-      targetLanguages: list(row.project_test_lang),
+      targetLanguages: toIsoLanguages(list(row.project_test_lang)).codes,
       maxTesters: int(row.project_testers),
       completedAt: updatedAt,
       /*
@@ -287,7 +288,7 @@ export const projectLoader: Loader = {
       targetBrowsers: list(row.project_browsers),
       targetOperatingSystems: [] as string[],
       targetCountries: [] as string[],
-      targetLanguages: list(row.project_test_lang),
+      targetLanguages: toIsoLanguages(list(row.project_test_lang)).codes,
       maxTesters: int(row.project_testers),
       createdAt,
       updatedAt,
@@ -404,7 +405,13 @@ export const buildLoader: Loader = {
       targetBrowsers: list(row.build_browsers),
       targetOperatingSystems: list(row.build_os),
       targetCountries: list(row.TestCountry),
-      targetLanguages: list(row.build_languages),
+      /*
+        Codes, not the spelled-out names the legacy column holds. Everything
+        else on the platform treats `targetLanguages` as ISO 639-1 — the
+        catalog, the wizard's picker, and `updateBuildSchema`, which refuses
+        anything longer than two characters.
+      */
+      targetLanguages: toIsoLanguages(list(row.build_languages)).codes,
       maxTesters: int(row.build_testers),
       bugCustomizationEnabled: bool(row.build_customize_bug, false),
       testersCanSeeOtherBugs: bool(row.others_bug_visibility, false),
