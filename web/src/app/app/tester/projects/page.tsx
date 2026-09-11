@@ -101,7 +101,17 @@ export default async function TesterProjectsPage({
     },
     {
       key: 'projectStatus',
-      header: 'Project',
+      /*
+        "Project status", not "Project" — the title column is already headed
+        that, so the table carried two columns under one name and the second
+        of them was a status badge. Every migrated project reads COMPLETED
+        (the legacy schema had no project status, so they all came across
+        finished), which left a tester looking at a column headed "Project"
+        that said "Completed", filtering "Your status" for Completed, and
+        being told nothing matched — their own standing on the work is a
+        different thing, and usually ACTIVE.
+      */
+      header: 'Project status',
       render: (row) => (row.project ? <StatusBadge status={row.project.status} /> : '—'),
     },
     {
