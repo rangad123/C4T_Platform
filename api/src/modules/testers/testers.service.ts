@@ -439,6 +439,14 @@ const globalBrowserSelect = {
   },
 } satisfies Prisma.TesterBrowserSelect
 
+/** A version without its OS family repeated in front of it. */
+function stripFamily(version: string | null, family: string | null): string | null {
+  if (!version || !family) return version
+  if (!version.toLowerCase().startsWith(family.toLowerCase())) return version
+  const rest = version.slice(family.length).trim()
+  return rest.length > 0 ? rest : version
+}
+
 export async function listGlobalBrowsers(query: ListGlobalBrowsersQuery) {
   const where: Prisma.TesterBrowserWhereInput = {
     testerProfile: {
@@ -472,15 +480,24 @@ export async function listGlobalBrowsers(query: ListGlobalBrowsersQuery) {
     one browser is the API's shape, not something every caller should have to
     reassemble.
   */
-  const items = rows.map((row) => ({
-    id: row.id,
-    createdAt: row.createdAt,
-    browser: row.browser.name,
-    browserVersion: row.browserVersion?.version ?? null,
-    osName: row.osVersionRef?.operatingSystem.name ?? row.operatingSystem?.name ?? null,
-    osVersion: row.osVersionRef?.version ?? null,
-    testerProfile: row.testerProfile,
-  }))
+  const items = rows.map((row) => {
+    const osName = row.osVersionRef?.operatingSystem.name ?? row.operatingSystem?.name ?? null
+    return {
+      id: row.id,
+      createdAt: row.createdAt,
+      browser: row.browser.name,
+      browserVersion: row.browserVersion?.version ?? null,
+      osName,
+      /*
+        `OsVersion.version` carries the whole legacy string — "Windows 10",
+        "Android 11.0" — so returning it beside the family would read
+        "Windows · Windows 10". The family is stripped off the front, the
+        same way a tester's device reports its OS.
+      */
+      osVersion: stripFamily(row.osVersionRef?.version ?? null, osName),
+      testerProfile: row.testerProfile,
+    }
+  })
 
   return { items, meta: buildMeta(query, total) }
 }
