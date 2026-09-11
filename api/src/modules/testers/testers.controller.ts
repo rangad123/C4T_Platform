@@ -7,6 +7,7 @@ import { isAdminSide } from '../../middleware/authorize.js'
 import type {
   ListTestersQuery,
   ListGlobalDevicesQuery,
+  ListGlobalBrowsersQuery,
   AssignmentCandidatesQuery,
 } from './testers.schema.js'
 
@@ -84,6 +85,13 @@ export async function messageRecipients(_req: Request, res: Response): Promise<v
 export async function listGlobalDevices(_req: Request, res: Response): Promise<void> {
   const query = validatedQuery<ListGlobalDevicesQuery>(res)
   const { items, meta } = await service.listGlobalDevices(query)
+  res.json({ data: items, meta })
+}
+
+/** §18 Global Assets — every browser across every tester. */
+export async function listGlobalBrowsers(_req: Request, res: Response): Promise<void> {
+  const query = validatedQuery<ListGlobalBrowsersQuery>(res)
+  const { items, meta } = await service.listGlobalBrowsers(query)
   res.json({ data: items, meta })
 }
 

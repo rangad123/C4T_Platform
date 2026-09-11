@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { AssetsTabs } from '../tabs'
@@ -11,6 +12,13 @@ import { DEVICE_TYPES } from '@/lib/domain/enums'
 const PAGE_SIZE = 25
 const BASE = '/app/admin/assets/devices'
 const TYPES = DEVICE_TYPES
+/** Matches the inline link styling used across the admin detail pages. */
+const LINK_STYLE = {
+  color: 'var(--text-brand)',
+  textDecoration: 'underline',
+  textUnderlineOffset: 3,
+} as const
+
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Added' },
   { value: 'model', label: 'Model' },
@@ -95,7 +103,14 @@ export default async function DevicesAssetPage({
     {
       key: 'addedBy',
       header: 'Added by',
-      render: (row) => (row.testerProfile?.user ? personName(row.testerProfile.user) : '—'),
+      render: (row) =>
+        row.testerProfile?.user ? (
+          <Link href={`/app/admin/testers/${row.testerProfile.id}`} style={LINK_STYLE}>
+            {personName(row.testerProfile.user)}
+          </Link>
+        ) : (
+          '—'
+        ),
       renderSecondary: (row) =>
         row.testerProfile?.countryCode ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}>

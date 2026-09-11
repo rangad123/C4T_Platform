@@ -156,6 +156,25 @@ export const DEVICE_SORT_FIELDS = ['createdAt', 'model', 'manufacturer'] as cons
  * browser, so the two legacy tabs are one dataset with two lenses rather than
  * two separately-maintained tables.
  */
+/**
+ * §18 Global Assets — every browser across every tester.
+ *
+ * Separate from `listGlobalDevicesQuery` because a browser is its own record
+ * (`TesterBrowser`), not a column on a device. The Browsers page used to ask
+ * the devices endpoint for rows with a non-null `TesterDevice.browser`, a
+ * column nothing has ever written, so it always came back empty.
+ */
+export const listGlobalBrowsersQuery = paginationQuery.extend({
+  search: z.string().trim().max(120).optional(),
+  countryCode: z
+    .string()
+    .trim()
+    .length(2)
+    .toUpperCase()
+    .refine((c) => ISO_COUNTRY_CODES.has(c), 'Not a valid ISO 3166-1 country code')
+    .optional(),
+})
+
 export const listGlobalDevicesQuery = paginationQuery.extend({
   search: z.string().trim().max(120).optional(),
   type: z.nativeEnum(DeviceType).optional(),
@@ -293,3 +312,4 @@ export type TesterFilterQuery = Pick<
   | 'search'
 >
 export type ListGlobalDevicesQuery = z.infer<typeof listGlobalDevicesQuery>
+export type ListGlobalBrowsersQuery = z.infer<typeof listGlobalBrowsersQuery>

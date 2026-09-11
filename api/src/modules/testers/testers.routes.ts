@@ -16,6 +16,7 @@ import {
   ndaDocumentSchema,
   workHistorySchema,
   listGlobalDevicesQuery,
+  listGlobalBrowsersQuery,
   testerIdParam,
   deviceIdParam,
   workHistoryIdParam,
@@ -145,6 +146,14 @@ testersRouter.get(
   requirePermission(PERMISSIONS.TESTER_READ),
   validate({ query: listGlobalDevicesQuery }),
   controller.listGlobalDevices,
+)
+
+/** Declared before "/:id" too, for the same reason as "/devices". */
+testersRouter.get(
+  '/browsers',
+  requirePermission(PERMISSIONS.TESTER_READ),
+  validate({ query: listGlobalBrowsersQuery }),
+  controller.listGlobalBrowsers,
 )
 
 testersRouter.get(

@@ -8,6 +8,7 @@ import {
   DEVICE_SORT_FIELDS,
   type ListTestersQuery,
   type ListGlobalDevicesQuery,
+  type ListGlobalBrowsersQuery,
   type TesterFilterQuery,
   type AssignmentCandidatesQuery,
 } from './testers.schema.js'
@@ -404,6 +405,82 @@ export async function listGlobalDevices(query: ListGlobalDevicesQuery) {
     }),
     prisma.testerDevice.count({ where }),
   ])
+
+  return { items, meta: buildMeta(query, total) }
+}
+
+/**
+ * §18 Global Assets — every browser any tester has registered.
+ *
+ * ── WHY THIS EXISTS SEPARATELY FROM `listGlobalDevices`
+ *
+ * A browser is its own record. The admin Browsers page used to call the
+ * devices endpoint with `onlyWithBrowser`, which filters on
+ * `TesterDevice.browser` — a column nothing has ever written, so the page was
+ * empty on a platform holding 5,469 `TesterBrowser` rows.
+ *
+ * The OS is read from `osVersionRef` first and the family second: a version
+ * implies exactly one OS, so the ref is the source of truth whenever both are
+ * set (the same order the schema comment on `osVersionRefId` describes).
+ */
+const globalBrowserSelect = {
+  id: true,
+  createdAt: true,
+  browser: { select: { name: true } },
+  browserVersion: { select: { version: true } },
+  operatingSystem: { select: { name: true } },
+  osVersionRef: { select: { version: true, operatingSystem: { select: { name: true } } } },
+  testerProfile: {
+    select: {
+      id: true,
+      countryCode: true,
+      user: { select: { id: true, firstName: true, lastName: true } },
+    },
+  },
+} satisfies Prisma.TesterBrowserSelect
+
+export async function listGlobalBrowsers(query: ListGlobalBrowsersQuery) {
+  const where: Prisma.TesterBrowserWhereInput = {
+    testerProfile: {
+      user: { deletedAt: null },
+      ...(query.countryCode ? { countryCode: query.countryCode } : {}),
+    },
+    ...(query.search
+      ? {
+          OR: [
+            { browser: { name: { contains: query.search, mode: 'insensitive' } } },
+            { browserVersion: { version: { contains: query.search, mode: 'insensitive' } } },
+            { operatingSystem: { name: { contains: query.search, mode: 'insensitive' } } },
+            { osVersionRef: { version: { contains: query.search, mode: 'insensitive' } } },
+          ],
+        }
+      : {}),
+  }
+
+  const [rows, total] = await Promise.all([
+    prisma.testerBrowser.findMany({
+      where,
+      select: globalBrowserSelect,
+      orderBy: { createdAt: 'desc' },
+      ...toSkipTake(query),
+    }),
+    prisma.testerBrowser.count({ where }),
+  ])
+
+  /*
+    Flattened here rather than in the page: three nested relations describing
+    one browser is the API's shape, not something every caller should have to
+    reassemble.
+  */
+  const items = rows.map((row) => ({
+    id: row.id,
+    createdAt: row.createdAt,
+    browser: row.browser.name,
+    browserVersion: row.browserVersion?.version ?? null,
+    osName: row.osVersionRef?.operatingSystem.name ?? row.operatingSystem?.name ?? null,
+    osVersion: row.osVersionRef?.version ?? null,
+    testerProfile: row.testerProfile,
+  }))
 
   return { items, meta: buildMeta(query, total) }
 }

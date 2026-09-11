@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { AssetsTabs } from '../tabs'
@@ -9,6 +10,13 @@ import type { TableColumn } from '@/components/ds/admin/Table'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/assets/browsers'
+/** Matches the inline link styling used across the admin detail pages. */
+const LINK_STYLE = {
+  color: 'var(--text-brand)',
+  textDecoration: 'underline',
+  textUnderlineOffset: 3,
+} as const
+
 const SORT_OPTIONS = [{ value: 'createdAt', label: 'Added' }] as const
 const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
 
@@ -16,7 +24,9 @@ interface BrowserRow {
   id: string
   osName: string | null
   osVersion: string | null
-  browser: string | null
+  browser: string
+  /** Kept apart from `browser` — the catalog stores the two separately. */
+  browserVersion: string | null
   createdAt: string
   testerProfile: {
     id: string
@@ -29,12 +39,14 @@ interface BrowserRow {
  * `/app/admin/assets/browsers` — every browser a tester has recorded on a
  * registered device, across the whole platform.
  *
- * Same underlying data as `/app/admin/assets/devices`, filtered to rows that
- * carry a browser value (`onlyWithBrowser=true` on the API). There is no
- * separate `browserVersion` field — the schema captures browser name and
- * version together in one string (e.g. "Chrome 128"), so the legacy
- * checklist's "Browser Version" column is folded into the "Browser" column
- * here rather than fabricated as a second field with nothing to populate it.
+ * ── WHY THIS IS NOT THE DEVICES ENDPOINT
+ *
+ * It used to be: this page called `testers/devices` with
+ * `onlyWithBrowser=true`, which filters on `TesterDevice.browser`. Nothing
+ * has ever written that column, so the page was empty on a platform holding
+ * 5,469 `TesterBrowser` rows — a browser is its own record, not a field on a
+ * device. `testers/browsers` reads those rows, and returns the browser, its
+ * version and the OS it runs on as separate values.
  */
 export default async function BrowsersAssetPage({
   searchParams,
@@ -59,10 +71,10 @@ export default async function BrowsersAssetPage({
   const order = params.order === 'asc' ? 'asc' : params.order === 'desc' ? 'desc' : undefined
   const page = parsePage(params.page)
 
-  const result = await loadList<BrowserRow>('testers/devices', {
+  const result = await loadList<BrowserRow>('testers/browsers', {
     page,
     limit: PAGE_SIZE,
-    query: { search, countryCode, sort, order, onlyWithBrowser: true },
+    query: { search, countryCode },
   })
 
   const columns: readonly TableColumn<BrowserRow>[] = [
@@ -75,12 +87,20 @@ export default async function BrowsersAssetPage({
     {
       key: 'browser',
       header: 'Browser',
-      render: (row) => row.browser ?? '—',
+      render: (row) => row.browser,
+      renderSecondary: (row) => row.browserVersion ?? undefined,
     },
     {
       key: 'addedBy',
       header: 'Added by',
-      render: (row) => (row.testerProfile?.user ? personName(row.testerProfile.user) : '—'),
+      render: (row) =>
+        row.testerProfile?.user ? (
+          <Link href={`/app/admin/testers/${row.testerProfile.id}`} style={LINK_STYLE}>
+            {personName(row.testerProfile.user)}
+          </Link>
+        ) : (
+          '—'
+        ),
       renderSecondary: (row) =>
         row.testerProfile?.countryCode ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}>
