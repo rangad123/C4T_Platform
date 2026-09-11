@@ -10,10 +10,25 @@ const shared = {
   },
 }
 
-/** Broad limit applied to the whole API. */
+/**
+ * Broad limit applied to the whole API, per caller.
+ *
+ * `clientAddress`, not the default `req.ip`, for the same reason the auth
+ * limiters below use it — and this one was missed when they were fixed.
+ * Almost every request here arrives through the web tier's server-to-server
+ * relay, so `req.ip` was that server's own loopback address for every visitor
+ * alike: a single shared budget for the entire platform rather than one per
+ * person.
+ *
+ * It showed up as the platform breaking under ordinary use. One admin project
+ * page makes twelve API calls, so roughly twenty-five page views — across
+ * everybody, not each — exhausted the window, and the 429 surfaced in the
+ * browser as "Something broke on our side."
+ */
 export const globalLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   max: env.RATE_LIMIT_MAX,
+  keyGenerator: (req) => clientAddress(req),
   ...shared,
 })
 
