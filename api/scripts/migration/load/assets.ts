@@ -98,8 +98,103 @@ export const mobileOsVersionLoader: Loader = {
 
 /** Browser name by legacy id, so a version can find its parent. */
 const browserNames = new Map<string, string>()
+
+// ── The operating system behind a tester's browser ──────────────────────────
+
+/**
+ * `user_browsers.os_id` names a row in the legacy `os_versions` table — the
+ * specific OS, "Windows 10" — not the family in `os`. All 6,096 rows carry
+ * one and 6,095 of them join, but nothing read the column, so every one of
+ * the 5,469 migrated browsers arrived with no operating system at all. A
+ * browser with no OS beside it is most of what "browser data is not coming"
+ * meant.
+ *
+ * The catalog seed already holds these exact names — "Windows Xp",
+ * "Mac os X 10.6", "Ubuntu 12.04" — so this matches by name rather than
+ * inventing catalog rows.
+ */
+export interface LegacyOsMaps {
+  /** legacy `os_versions.os_id` → its own name and the family it belongs to. */
+  versions: Map<string, { name: string; familyId: string }>
+  /** legacy `os.os_id` → family name, e.g. "Windows". */
+  families: Map<string, string>
+}
+
+export async function loadLegacyOsMaps(): Promise<LegacyOsMaps> {
+  const versions = new Map<string, { name: string; familyId: string }>()
+  const families = new Map<string, string>()
+  const versionRows = await query<Record<string, unknown>>(
+    'SELECT os_id, os_name, os_type_id FROM `os_versions`',
+  )
+  for (const r of versionRows) {
+    const name = text(r.os_name)
+    if (name) versions.set(String(r.os_id), { name, familyId: String(r.os_type_id) })
+  }
+  const familyRows = await query<Record<string, unknown>>('SELECT os_id, os_name FROM `os`')
+  for (const r of familyRows) {
+    const name = text(r.os_name)
+    if (name) families.set(String(r.os_id), name)
+  }
+  return { versions, families }
+}
+
+/** The minimum of a Prisma client this resolver needs — loader tx or plain client. */
+interface OsCatalogReader {
+  osVersion: {
+    findFirst(args: unknown): Promise<{ id: string; operatingSystemId: string } | null>
+  }
+  operatingSystem: { findFirst(args: unknown): Promise<{ id: string } | null> }
+}
+
+/**
+ * The catalog OS version and family for a legacy `user_browsers.os_id`.
+ *
+ * `osVersionRefId` is the source of truth when both are set — a version
+ * implies exactly one OS — so the family is taken from the matched version
+ * rather than resolved separately. The family lookup is only a fallback for a
+ * version name the catalog does not carry.
+ *
+ * "Windows" exists twice in the catalog, as DESKTOP and as MOBILE, which is
+ * why the version match is scoped by family name rather than trusting the
+ * version string to be unique.
+ */
+export async function resolveBrowserOs(
+  db: OsCatalogReader,
+  maps: LegacyOsMaps,
+  legacyOsId: string | null,
+): Promise<{ osVersionRefId: string | null; operatingSystemId: string | null }> {
+  const empty = { osVersionRefId: null, operatingSystemId: null }
+  if (!legacyOsId) return empty
+
+  const version = maps.versions.get(legacyOsId)
+  if (!version) return empty
+  const familyName = maps.families.get(version.familyId) ?? null
+
+  const matched = await db.osVersion.findFirst({
+    where: {
+      version: version.name,
+      ...(familyName ? { operatingSystem: { name: familyName } } : {}),
+    },
+    select: { id: true, operatingSystemId: true },
+  })
+
+  if (matched) {
+    return { osVersionRefId: matched.id, operatingSystemId: matched.operatingSystemId }
+  }
+
+  // No such version in the catalog — name the family, which is still true.
+  if (!familyName) return empty
+  const family = await db.operatingSystem.findFirst({
+    where: { name: familyName },
+    select: { id: true },
+  })
+  return { osVersionRefId: null, operatingSystemId: family?.id ?? null }
+}
 /** Legacy mobile_brands id -> name, for devices.dvc_manufacturer. */
 const brandNames = new Map<string, string>()
+
+/** Filled by the tester-browser loader's `prepare`, read by its `row`. */
+let osMaps: LegacyOsMaps | null = null
 
 /**
  * Text that is actually text. The legacy device rows use the string "0" where
@@ -347,6 +442,7 @@ export const testerBrowserLoader: Loader = {
   ],
 
   async prepare() {
+    osMaps = await loadLegacyOsMaps()
     if (browserNames.size > 0) return
     try {
       const rows = await query<Record<string, unknown>>('SELECT brw_id, brw_name FROM `browsers`')
@@ -406,22 +502,31 @@ export const testerBrowserLoader: Loader = {
       cannot match a row whose version is null. `findFirst` with an explicit
       null is what actually finds it.
     */
+    const os = osMaps
+      ? await resolveBrowserOs(tx, osMaps, legacyRef(row.os_id))
+      : { osVersionRefId: null, operatingSystemId: null }
+
     const existing = await tx.testerBrowser.findFirst({
       where: { testerProfileId, browserId: browser.id, browserVersionId },
       select: { id: true },
     })
 
-    const record =
-      existing ??
-      (await tx.testerBrowser.create({
-        data: {
-          testerProfileId,
-          browserId: browser.id,
-          browserVersionId,
-          createdAt: timestampOr(row.created_date),
-        },
-        select: { id: true },
-      }))
+    const record = existing
+      ? await tx.testerBrowser.update({
+          where: { id: existing.id },
+          data: os,
+          select: { id: true },
+        })
+      : await tx.testerBrowser.create({
+          data: {
+            testerProfileId,
+            browserId: browser.id,
+            browserVersionId,
+            ...os,
+            createdAt: timestampOr(row.created_date),
+          },
+          select: { id: true },
+        })
 
     await ctx.idMap.remember(tx, 'user_browsers', legacyId, 'TesterBrowser', record.id)
     return { kind: 'written', created: !existing }
