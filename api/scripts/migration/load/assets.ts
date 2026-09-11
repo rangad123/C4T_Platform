@@ -205,6 +205,34 @@ function realText(value: unknown): string | null {
   return s === null || s === '0' ? null : s
 }
 
+/**
+ * The version without the family repeated in front of it.
+ *
+ * `OsVersion.version` holds the whole legacy `mov_name` — "Android 11.0",
+ * "iOS 10.3" — so a device rendered as `osName · osVersion` would otherwise
+ * read "Android · Android 11.0".
+ */
+export function versionWithoutFamily(version: string, family: string): string {
+  const lower = version.toLowerCase()
+  const prefix = family.toLowerCase()
+  if (!lower.startsWith(prefix)) return version
+  const rest = version.slice(family.length).trim()
+  return rest.length > 0 ? rest : version
+}
+
+/**
+ * `dvc_os_details` where it is actually an OS, not a date.
+ *
+ * The legacy column is free text and a large share of it holds the day the
+ * device was added — "11-03-2015" on a Dell, "10-05-2015" on an iPhone 5s.
+ * Migrated as-is, those became the device's operating system.
+ */
+export function osDetailsIfNotADate(value: unknown): string | null {
+  const s = realText(value)
+  if (!s) return null
+  return /^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(s.trim()) ? null : s
+}
+
 export const browserVersionLoader: Loader = {
   table: 'browser_versions',
   target: 'BrowserVersion',
@@ -392,6 +420,24 @@ export const testerDeviceLoader: Loader = {
       'OsVersion',
     )
 
+    /*
+      Resolved here rather than left to the relation, because `osName` and
+      `osVersion` are what every list and filter reads — `osVersionRefId` is
+      the join nobody selects.
+    */
+    const osRef = osVersionRefId
+      ? await tx.osVersion.findUnique({
+          where: { id: osVersionRefId },
+          select: { version: true, operatingSystem: { select: { name: true } } },
+        })
+      : null
+    const osFromCatalog = osRef
+      ? {
+          name: osRef.operatingSystem.name,
+          version: versionWithoutFamily(osRef.version, osRef.operatingSystem.name),
+        }
+      : null
+
     const createdAt = timestampOr(row.dvc_add_date)
     const data = {
       type,
@@ -408,7 +454,19 @@ export const testerDeviceLoader: Loader = {
       manufacturer:
         brandNames.get(String(row.dvc_manufacturer)) ?? realText(row.dvc_manufacturer_name),
       model,
-      osName: text(row.dvc_os_details),
+      /*
+        The OS comes from the catalog reference, not from `dvc_os_details`.
+
+        That column is free text and much of it holds the day the device was
+        added rather than an operating system, so reading it straight gave a
+        Dell Inspiron an OS of "11-03-2015" and an iPhone 5s "10-05-2015".
+        `dvc_mob_os_ver_id` resolves for 5,888 of the 5,917 devices and names
+        a real version — "iOS 10.3", "Android 11.0" — so it leads, and the
+        free text is kept only for the rows with no reference, and only when
+        it does not look like a date.
+      */
+      osName: osFromCatalog?.name ?? osDetailsIfNotADate(row.dvc_os_details),
+      osVersion: osFromCatalog?.version ?? null,
       screenSize: text(row.dvc_screen),
       ramGb: text(row.dvc_ram),
       primaryNetworkId,
