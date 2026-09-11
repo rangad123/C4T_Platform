@@ -8,7 +8,7 @@ import {
   BUG_TYPE,
 } from '../mapping/lookups.js'
 import { query } from '../legacy/client.js'
-import { loadLegacyLabels, type LegacyLabels } from '../mapping/legacy-labels.js'
+import { loadLegacyLabels, nameEach, type LegacyLabels } from '../mapping/legacy-labels.js'
 import {
   asText,
   enumValue,
@@ -308,7 +308,14 @@ export const bugLoader: Loader = {
       no legacy source and stay null rather than borrowing a neighbouring
       column that means something else.
     */
-    const browserUsed = labels?.browsers.get(String(text(row.bug_browsers_used))) ?? null
+    /*
+      Both columns can hold several ids — "13,14,512" — because a bug could be
+      filed against more than one device or browser.
+    */
+    const rawDevices = text(row.bug_device_used)
+    const rawBrowsers = text(row.bug_browsers_used)
+    const devicesUsed = rawDevices && labels ? nameEach(rawDevices, labels.devices) : []
+    const browsersUsed = rawBrowsers && labels ? nameEach(rawBrowsers, labels.browsers) : []
 
     const data = {
       // The code the old platform showed for this bug, kept so that searching
@@ -328,15 +335,15 @@ export const bugLoader: Loader = {
       outOf: int(row.sometimeTotal),
       type: bugType,
       videoUrl: video.value,
-      deviceModel: labels?.devices.get(String(text(row.bug_device_used))) ?? null,
+      deviceModel: devicesUsed.length > 0 ? devicesUsed.join(', ') : null,
       /*
         Recovered from the browser, not invented: `user_browsers.os_id` names
         the OS the tester registered that browser on, and `bugs_report` has no
         OS column of its own.
       */
-      osName: browserUsed?.osName ?? null,
+      osName: browsersUsed.find((b) => b.osName)?.osName ?? null,
       osVersion: null,
-      browser: browserUsed?.label ?? null,
+      browser: browsersUsed.length > 0 ? browsersUsed.map((b) => b.label).join(', ') : null,
       appVersion: null,
       networkType: null,
       createdAt,

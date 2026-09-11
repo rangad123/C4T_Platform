@@ -28,6 +28,28 @@ export interface BrowserLabel {
   osName: string | null
 }
 
+/**
+ * True for what the bad migration wrote: one id, or several separated by
+ * commas. A bug could be filed against more than one device or browser, and
+ * 229 rows hold lists like "13,14,512" or "549,560".
+ */
+export function isLegacyIdList(value: string | null): boolean {
+  return value !== null && /^\s*\d+(\s*,\s*\d+)*\s*$/.test(value)
+}
+
+/**
+ * Every id in `value`, named. Unresolvable ids are dropped rather than left
+ * as digits — a number is not a device, which is the whole defect.
+ */
+export function nameEach<T>(value: string, lookup: Map<string, T>): T[] {
+  const found: T[] = []
+  for (const id of value.split(',')) {
+    const hit = lookup.get(id.trim())
+    if (hit !== undefined) found.push(hit)
+  }
+  return found
+}
+
 export interface LegacyLabels {
   /** `devices.dvc_id` → "Samsung SM-N920G". */
   devices: Map<string, string>

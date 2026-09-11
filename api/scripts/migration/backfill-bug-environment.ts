@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 import { closeLegacyPool, query } from './legacy/client.js'
-import { loadLegacyLabels } from './mapping/legacy-labels.js'
+import { isLegacyIdList, loadLegacyLabels, nameEach } from './mapping/legacy-labels.js'
 
 /**
  * Replaces the id a bug shows as its device and browser with their names.
@@ -23,20 +23,17 @@ import { loadLegacyLabels } from './mapping/legacy-labels.js'
  *
  * ── WHAT IT WILL NOT TOUCH
  *
- * Only a value that is still a bare number, which is exactly what the bad
- * migration wrote and nothing a person would type. Anything already reading
- * as a name — edited since, or filed on the new platform — is left alone.
+ * Only a value that is still nothing but ids — "588", or a list like
+ * "13,14,512" where a bug was filed against several devices. That is exactly
+ * what the bad migration wrote and nothing a person would type. Anything
+ * already reading as a name — edited since, or filed on the new platform —
+ * is left alone.
  *
  *   npm run migration:backfill-bug-environment -- --dry-run
  *   npm run migration:backfill-bug-environment
  */
 
 const prisma = new PrismaClient()
-
-/** The shape the bad migration left: digits and nothing else. */
-function isBareId(value: string | null): boolean {
-  return value !== null && /^\d+$/.test(value.trim())
-}
 
 interface LegacyBug {
   bug_id: number | string
@@ -73,22 +70,25 @@ async function main(): Promise<void> {
     const data: { deviceModel?: string | null; browser?: string | null; osName?: string | null } =
       {}
 
-    if (isBareId(bug.deviceModel)) {
-      const label = labels.devices.get(bug.deviceModel!.trim())
-      // An id the catalog cannot name is cleared: a number is not a device,
+    if (isLegacyIdList(bug.deviceModel)) {
+      const names = nameEach(bug.deviceModel!, labels.devices)
+      // Ids the catalog cannot name are dropped: a number is not a device,
       // and leaving it there is the defect being reported.
-      data.deviceModel = label ?? null
-      if (label) deviceFixed += 1
+      data.deviceModel = names.length > 0 ? names.join(', ') : null
+      if (names.length > 0) deviceFixed += 1
       else unresolved += 1
     }
 
-    if (isBareId(bug.browser)) {
-      const found = labels.browsers.get(bug.browser!.trim())
-      data.browser = found?.label ?? null
-      if (found) {
+    if (isLegacyIdList(bug.browser)) {
+      const found = nameEach(bug.browser!, labels.browsers)
+      data.browser = found.length > 0 ? found.map((b) => b.label).join(', ') : null
+      if (found.length > 0) {
         browserFixed += 1
-        if (!bug.osName && found.osName) {
-          data.osName = found.osName
+        // The first browser that knows its OS speaks for the report: a bug
+        // filed across several browsers was still filed on one machine.
+        const os = found.find((b) => b.osName)?.osName
+        if (!bug.osName && os) {
+          data.osName = os
           osFilled += 1
         }
       } else {
