@@ -105,7 +105,10 @@ export default async function DevicesAssetPage({
       header: 'Added by',
       render: (row) =>
         row.testerProfile?.user ? (
-          <Link href={`/app/admin/testers/${row.testerProfile.id}`} style={LINK_STYLE}>
+          <Link
+            href={`/app/admin/testers/${row.testerProfile.id}?section=devices`}
+            style={LINK_STYLE}
+          >
             {personName(row.testerProfile.user)}
           </Link>
         ) : (
