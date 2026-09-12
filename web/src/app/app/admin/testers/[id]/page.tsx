@@ -100,6 +100,7 @@ interface TesterDetail {
     createdAt: string
   }
   devices: TesterDevice[]
+  browsers: TesterBrowser[]
   skills: { skill: { id: string; name: string; slug: string } }[]
   languages: { code: string; proficiency: string }[]
   workHistory: WorkHistoryEntry[]
@@ -197,6 +198,39 @@ const FORM_STYLE = {
   flexDirection: 'column' as const,
   gap: 'var(--space-5)',
 }
+
+/** A browser a tester can test in, and the OS it runs on. */
+interface TesterBrowser {
+  id: string
+  browser: { id: string; name: string } | null
+  browserVersion: { id: string; version: string } | null
+  operatingSystem: { id: string; name: string } | null
+  osVersionRef: {
+    id: string
+    version: string
+    operatingSystem: { id: string; name: string }
+  } | null
+}
+
+const browserColumns: readonly TableColumn<TesterBrowser>[] = [
+  {
+    key: 'browser',
+    header: 'Browser',
+    render: (row) => row.browser?.name ?? '—',
+    renderSecondary: (row) => row.browserVersion?.version ?? undefined,
+  },
+  {
+    key: 'os',
+    header: 'Operating system',
+    /*
+      The OS is recorded twice over: a direct `operatingSystem` link, and the
+      family implied by a specific `osVersionRef`. The version is the more
+      precise of the two, so it leads and the bare family is the fallback.
+    */
+    render: (row) => row.osVersionRef?.operatingSystem.name ?? row.operatingSystem?.name ?? '—',
+    renderSecondary: (row) => row.osVersionRef?.version ?? undefined,
+  },
+]
 
 const deviceColumns: readonly TableColumn<TesterDevice>[] = [
   { key: 'type', header: 'Type', render: (device) => titleCase(device.type) },
@@ -393,7 +427,7 @@ const RATING_NOTICES: Record<string, { tone: 'success' | 'error'; message: strin
 
 const SECTIONS = [
   { value: 'profile', label: 'Profile', icon: 'user-check' },
-  { value: 'devices', label: 'Devices', icon: 'smartphone' },
+  { value: 'devices', label: 'Assets', icon: 'smartphone' },
   { value: 'skills', label: 'Skills and languages', icon: 'briefcase' },
   { value: 'work', label: 'Work history', icon: 'clipboard-check' },
   { value: 'payment', label: 'Payment details', icon: 'credit-card' },
@@ -874,6 +908,31 @@ export default async function TesterDetailPage({
               <Muted>
                 No devices listed. A tester adds their own devices, and cannot be assigned
                 device-specific work until they do.
+              </Muted>
+            )}
+          </Panel>
+
+          {/*
+            Browsers under the same tab as devices, which is why it is labelled
+            "Assets" rather than "Devices". A tester's kit is both halves, and
+            the Browsers list links a tester's name straight here — landing on
+            a page with no browser on it was the whole complaint.
+          */}
+          <Panel
+            title="Browsers"
+            description="What this tester can test in, and the operating system behind it."
+            flush={tester.browsers.length > 0}
+          >
+            {tester.browsers.length > 0 ? (
+              <Table
+                ariaLabel="Browsers"
+                columns={browserColumns}
+                rows={tester.browsers}
+                rowKey={(row) => row.id}
+              />
+            ) : (
+              <Muted>
+                No browsers listed. A tester adds their own, the same way they add a device.
               </Muted>
             )}
           </Panel>

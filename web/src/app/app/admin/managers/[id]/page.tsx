@@ -214,7 +214,26 @@ export default async function ManagerDetailPage({
         />
       </Panel>
 
-      <Panel title="Account details" description="Role, access and sign-in activity.">
+      {/*
+        Deactivating a manager happens on their user record, and this is the
+        route to it.
+
+        A manager IS a user with a SUB_ADMIN role — this page already reads
+        the user endpoint for everything above — so the status control, the
+        reason field, the archive action and the last-admin guard all live
+        there and are not worth a second copy here. Without this link the
+        capability existed but nothing on the Managers section led to it,
+        which read as managers being impossible to deactivate at all.
+      */}
+      <Panel
+        title="Account details"
+        description="Role, access and sign-in activity."
+        actions={
+          <Button href={`/app/admin/users/${manager.id}`} variant="secondary" size="sm">
+            Manage account
+          </Button>
+        }
+      >
         <DescriptionList
           items={[
             { label: 'Role', value: <RoleBadge role={manager.role} /> },

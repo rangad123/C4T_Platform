@@ -68,6 +68,26 @@ const profileSelect = {
     },
   },
   devices: true,
+  /*
+    A tester's browsers, beside their devices.
+
+    `profileSelect` returned devices alone, so the admin tester page could
+    show a phone but never a browser — and the Browsers list links a tester's
+    name straight to that page, which then had nothing browser-shaped on it.
+    The desktop half of a tester's kit was simply unreachable admin-side,
+    though the discoverable-tester select has carried it all along.
+  */
+  browsers: {
+    select: {
+      id: true,
+      browser: { select: { id: true, name: true } },
+      browserVersion: { select: { id: true, version: true } },
+      operatingSystem: { select: { id: true, name: true } },
+      osVersionRef: {
+        select: { id: true, version: true, operatingSystem: { select: { id: true, name: true } } },
+      },
+    },
+  },
   skills: {
     select: {
       skill: {
