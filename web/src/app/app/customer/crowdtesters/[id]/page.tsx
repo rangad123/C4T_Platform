@@ -3,6 +3,7 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { DetailShell } from '@/components/admin/DetailShell'
+import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { Avatar } from '@/components/admin/Avatar'
@@ -37,6 +38,24 @@ const SCORE_LABEL: Record<number, string> = {
 
 const ROOT = { label: 'Customer', href: '/app/customer' }
 const LIST_PATH = '/app/customer/crowdtesters'
+
+/**
+ * The same four sections, and the same names, the admin tester page uses.
+ *
+ * This page was one long column of six panels. That reads fine for a tester
+ * with two devices and one engagement, and stops reading at all for a busy
+ * one — the work history grows without bound, so devices and browsers end up
+ * far below the fold of a page that gave no hint they were there.
+ *
+ * "Assets" rather than "Devices" for the same reason it was renamed
+ * admin-side: the tab holds both halves of what a tester can test on.
+ */
+const SECTIONS = [
+  { value: 'profile', label: 'Profile', icon: 'user-check' },
+  { value: 'assets', label: 'Assets', icon: 'smartphone' },
+  { value: 'skills', label: 'Skills', icon: 'briefcase' },
+  { value: 'work', label: 'Work history', icon: 'clipboard-check' },
+] as const
 
 /** Same shape `discoverTesters` returns, one row instead of a page. */
 interface TesterProfileDetail {
@@ -123,11 +142,12 @@ export default async function CrowdtesterProfilePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ notice?: string; rate?: string }>
+  searchParams: Promise<{ notice?: string; rate?: string; section?: string }>
 }) {
   await requireRole(['CUSTOMER'])
   const { id } = await params
-  const { notice, rate } = await searchParams
+  const { notice, rate, section: rawSection } = await searchParams
+  const section = resolveSection(SECTIONS, rawSection)
 
   let tester: TesterProfileDetail | null = null
   try {
@@ -206,7 +226,7 @@ export default async function CrowdtesterProfilePage({
           </span>
         ) : RATEABLE_STATUSES.has(row.status) ? (
           <Button
-            href={`${LIST_PATH}/${id}?rate=${row.project.id}`}
+            href={`${LIST_PATH}/${id}?section=work&rate=${row.project.id}`}
             variant="ghost"
             size="sm"
             iconLeft="star"
@@ -227,49 +247,52 @@ export default async function CrowdtesterProfilePage({
       eyebrow="Delivery"
       title={tester.displayName}
       subtitle={tester.profession ?? tester.headline ?? undefined}
+      tabs={<SectionTabs basePath={`${LIST_PATH}/${id}`} tabs={SECTIONS} active={section} />}
     >
-      <Panel title="Overview">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--space-4)',
-            marginBottom: 'var(--space-5)',
-          }}
-        >
-          <Avatar name={tester.displayName} fileId={tester.avatarFileId} size="lg" />
-          <div>
-            <div className="c4t-heading-md">{tester.displayName}</div>
-            {tester.headline ? (
-              <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{tester.headline}</p>
-            ) : null}
+      {section === 'profile' ? (
+        <Panel title="Overview">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-4)',
+              marginBottom: 'var(--space-5)',
+            }}
+          >
+            <Avatar name={tester.displayName} fileId={tester.avatarFileId} size="lg" />
+            <div>
+              <div className="c4t-heading-md">{tester.displayName}</div>
+              {tester.headline ? (
+                <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{tester.headline}</p>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <DescriptionList
-          items={[
-            { label: 'Profession', value: tester.profession ?? '—' },
-            { label: 'City', value: tester.city ?? '—' },
-            {
-              label: 'Country',
-              value: tester.countryCode ? (
-                <CountryLabel countryCode={tester.countryCode} size={14} />
-              ) : (
-                '—'
-              ),
-            },
-            {
-              label: 'Rating',
-              value: rating ? `${rating} (${tester.ratingCount})` : 'Not yet rated',
-            },
-            {
-              label: 'Experience',
-              value: tester.experienceYears != null ? `${tester.experienceYears} years` : '—',
-            },
-            { label: 'Bugs accepted', value: String(tester.bugsAcceptedCount) },
-            { label: 'Projects completed', value: String(tester.projectsCompletedCount) },
-          ]}
-        />
-      </Panel>
+          <DescriptionList
+            items={[
+              { label: 'Profession', value: tester.profession ?? '—' },
+              { label: 'City', value: tester.city ?? '—' },
+              {
+                label: 'Country',
+                value: tester.countryCode ? (
+                  <CountryLabel countryCode={tester.countryCode} size={14} />
+                ) : (
+                  '—'
+                ),
+              },
+              {
+                label: 'Rating',
+                value: rating ? `${rating} (${tester.ratingCount})` : 'Not yet rated',
+              },
+              {
+                label: 'Experience',
+                value: tester.experienceYears != null ? `${tester.experienceYears} years` : '—',
+              },
+              { label: 'Bugs accepted', value: String(tester.bugsAcceptedCount) },
+              { label: 'Projects completed', value: String(tester.projectsCompletedCount) },
+            ]}
+          />
+        </Panel>
+      ) : null}
 
       {/*
        * Work history, scoped to this customer's own projects.
@@ -280,10 +303,15 @@ export default async function CrowdtesterProfilePage({
        * the same tester. The question worth answering — "have they worked
        * with US, and how did it go" — needs no one else's data.
        */}
+      {/* Notice belongs to no one tab — a save can be reported from any of them. */}
       <Notice code={notice} notices={NOTICES} />
 
-      {ratingTarget ? (
-        <Modal open closedHref={`${LIST_PATH}/${id}`} title={`Rate ${tester.displayName}`}>
+      {section === 'work' && ratingTarget ? (
+        <Modal
+          open
+          closedHref={`${LIST_PATH}/${id}?section=work`}
+          title={`Rate ${tester.displayName}`}
+        >
           <form
             action={rateTesterAction}
             style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
@@ -320,24 +348,26 @@ export default async function CrowdtesterProfilePage({
         </Modal>
       ) : null}
 
-      <Panel
-        title="Work history"
-        description="What this tester has done on your projects."
-        flush={engagements.length > 0}
-      >
-        {engagements.length === 0 ? (
-          <Muted>This tester has not worked on any of your projects yet.</Muted>
-        ) : (
-          <Table
-            columns={engagementColumns}
-            rows={[...engagements]}
-            rowKey={(row) => `${row.project.id}:${row.build?.id ?? 'none'}`}
-            rowHref={(row) => `/app/customer/projects/${row.project.id}`}
-          />
-        )}
-      </Panel>
+      {section === 'work' ? (
+        <Panel
+          title="Work history"
+          description="What this tester has done on your projects."
+          flush={engagements.length > 0}
+        >
+          {engagements.length === 0 ? (
+            <Muted>This tester has not worked on any of your projects yet.</Muted>
+          ) : (
+            <Table
+              columns={engagementColumns}
+              rows={[...engagements]}
+              rowKey={(row) => `${row.project.id}:${row.build?.id ?? 'none'}`}
+              rowHref={(row) => `/app/customer/projects/${row.project.id}`}
+            />
+          )}
+        </Panel>
+      ) : null}
 
-      {tester.bio ? (
+      {section === 'profile' && tester.bio ? (
         <Panel title="About">
           <p style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
             {tester.bio}
@@ -345,47 +375,53 @@ export default async function CrowdtesterProfilePage({
         </Panel>
       ) : null}
 
-      <Panel title="Skills">
-        {tester.skills.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-            {tester.skills.map((skill) => (
-              <Badge key={skill.id} tone="neutral" uppercase={false}>
-                {skill.name}
-              </Badge>
-            ))}
-          </div>
-        ) : (
-          <Muted>No skills listed.</Muted>
-        )}
-      </Panel>
+      {section === 'skills' ? (
+        <Panel title="Skills">
+          {tester.skills.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              {tester.skills.map((skill) => (
+                <Badge key={skill.id} tone="neutral" uppercase={false}>
+                  {skill.name}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <Muted>No skills listed.</Muted>
+          )}
+        </Panel>
+      ) : null}
 
-      <Panel title="Devices">
-        {tester.platforms.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-            {tester.platforms.map((platform) => (
-              <Badge key={platform} tone="neutral" uppercase={false}>
-                {platform}
-              </Badge>
-            ))}
-          </div>
-        ) : (
-          <Muted>No devices listed.</Muted>
-        )}
-      </Panel>
+      {section === 'assets' ? (
+        <Panel title="Devices">
+          {tester.platforms.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              {tester.platforms.map((platform) => (
+                <Badge key={platform} tone="neutral" uppercase={false}>
+                  {platform}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <Muted>No devices listed.</Muted>
+          )}
+        </Panel>
+      ) : null}
 
-      <Panel title="Browsers">
-        {tester.browsers.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-            {tester.browsers.map((browser) => (
-              <Badge key={browser} tone="neutral" uppercase={false}>
-                {browser}
-              </Badge>
-            ))}
-          </div>
-        ) : (
-          <Muted>No browsers listed.</Muted>
-        )}
-      </Panel>
+      {section === 'assets' ? (
+        <Panel title="Browsers">
+          {tester.browsers.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              {tester.browsers.map((browser) => (
+                <Badge key={browser} tone="neutral" uppercase={false}>
+                  {browser}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <Muted>No browsers listed.</Muted>
+          )}
+        </Panel>
+      ) : null}
     </DetailShell>
   )
 }
