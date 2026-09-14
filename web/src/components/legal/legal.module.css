@@ -1,0 +1,190 @@
+/* The legal document type scale — see LegalText.tsx.
+
+   Everything here is set from tokens. Two raw values only, both of which a
+   token cannot express: the 640px breakpoint (media queries cannot read a
+   custom property, so this restates --bp-mobile the way base.css restates
+   --bp-tablet) and the clause-number gutter, which is measured in `ch` because
+   it has to fit "2.16" in the mono face and no spacing token is in that unit.
+
+   The gutter is a min-width on the NUMBER, not a grid column width. `ch`
+   resolves against the element it is written on, so a column of 4ch on the
+   grid would be four characters of the 28px display face on a part heading and
+   four of the 13px mono face on a clause — the rail would step in and out down
+   the page. On the number itself it is always four mono characters. */
+
+.header {
+  padding-block: var(--space-13) var(--space-9);
+}
+
+/* ─── Contents ───────────────────────────────────────────────────────────── */
+
+.contents {
+  margin-bottom: var(--space-11);
+  padding: var(--space-7);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-panel);
+}
+
+.contentsList {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.contentsList a {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4);
+  font-size: var(--type-body-md-size);
+  line-height: var(--type-body-md-line);
+}
+
+.contentsNumber {
+  min-width: 4ch;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-size: var(--type-mono-sm-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+/* ─── Preamble ───────────────────────────────────────────────────────────── */
+
+/* The first part carries no rule above it (see below), so the text that opens
+   the document has to hold the gap itself or section 1 lands on top of it. */
+.preamble {
+  margin-bottom: var(--space-11);
+}
+
+/* ─── Parts ──────────────────────────────────────────────────────────────── */
+
+/* A top-level part opens a new agreement within the document, so it gets the
+   rule and the air. The first one needs neither — the contents panel above it
+   already closes the preceding block. */
+.part {
+  margin-top: var(--space-12);
+  padding-top: var(--space-10);
+  border-top: 1px solid var(--border-default);
+}
+
+.part:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* Clears the 72px sticky TopNav when a #clause link is followed. */
+.part,
+.part ~ section {
+  scroll-margin-top: var(--space-13);
+}
+
+/* ─── Headings ───────────────────────────────────────────────────────────── */
+
+.heading {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  text-wrap: pretty;
+}
+
+.subheading {
+  margin-top: var(--space-9);
+}
+
+/* The number is a self-link — a clause has to be citable by URL. It stays
+   muted and undecorated until hovered so the heading still reads as a heading
+   rather than as a row of links. */
+.headingNumber {
+  min-width: 4ch;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-size: var(--type-mono-sm-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  /* Drops the mono digits onto the baseline of the display face beside them. */
+  padding-top: 0.35em;
+}
+
+/* ─── Clauses ────────────────────────────────────────────────────────────── */
+
+/* Carries its own bottom rhythm so a clause never collides with the heading
+   of the part that follows it. */
+.clause {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.clauseNumber {
+  min-width: 4ch;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  font-size: var(--type-mono-sm-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding-top: 0.4em;
+}
+
+/* ─── Body ───────────────────────────────────────────────────────────────── */
+
+.paragraph {
+  margin-bottom: var(--space-6);
+  font-size: var(--type-body-lg-size);
+  line-height: var(--type-body-lg-line);
+  color: var(--text-primary);
+}
+
+.paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.orderedList,
+.bulletList {
+  margin: 0 0 var(--space-6);
+  padding-left: 1.4em;
+  font-size: var(--type-body-lg-size);
+  line-height: var(--type-body-lg-line);
+  color: var(--text-primary);
+}
+
+.orderedList {
+  list-style: decimal;
+}
+
+.bulletList {
+  list-style: disc;
+}
+
+.orderedList li,
+.bulletList li {
+  margin-bottom: var(--space-3);
+}
+
+/* ─── Narrow ─────────────────────────────────────────────────────────────── */
+
+/* Restates --bp-mobile: 640px. */
+@media (max-width: 640px) {
+  /* The margin number becomes a line above the text — 4.5ch of gutter is a
+     tenth of the measure on a phone, and the clause would set in a column. */
+  .heading,
+  .clause,
+  .contentsList a {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .headingNumber,
+  .clauseNumber {
+    padding-top: 0;
+  }
+
+  .header {
+    padding-block: var(--space-11) var(--space-8);
+  }
+}

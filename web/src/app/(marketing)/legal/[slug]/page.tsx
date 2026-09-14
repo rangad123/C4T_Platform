@@ -1,10 +1,23 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { LegalText } from '@/components/legal/LegalText'
 import { Scaffold } from '@/components/scaffold'
+import { PRIVACY_POLICY, TERMS_AND_CONDITIONS, type LegalDocument } from '@/content'
 import { fromRoute } from '@/lib/seo/metadata'
 import { getRoute, slugsUnder } from '@/lib/seo/routes'
 
 const PREFIX = '/legal'
+
+/**
+ * The two documents the client has supplied. The other three legal routes
+ * (cookies, dpa, accessibility-statement) are registered and still render the
+ * scaffold — they get their text the same way these did, by being written into
+ * `content/legal.ts` and listed here.
+ */
+const DOCUMENTS: Record<string, LegalDocument> = {
+  terms: TERMS_AND_CONDITIONS,
+  privacy: PRIVACY_POLICY,
+}
 
 /**
  * Fully prerendered at build time from the route registry. `dynamicParams`
@@ -32,5 +45,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const { slug } = await params
   const path = `${PREFIX}/${slug}`
   if (!getRoute(path)) notFound()
-  return <Scaffold path={path} />
+
+  const document = DOCUMENTS[slug]
+  return document ? <LegalText document={document} /> : <Scaffold path={path} />
 }
