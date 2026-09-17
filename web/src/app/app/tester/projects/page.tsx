@@ -1,5 +1,6 @@
 import { requireRole } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
+import { Avatar } from '@/components/admin/Avatar'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
@@ -47,6 +48,8 @@ interface AssignmentRow {
     endDate: string | null
     platformTargets: readonly string[]
     organisation: { id: string; name: string } | null
+    /** The application under test, when one was uploaded. */
+    logo: { id: string } | null
   } | null
 }
 
@@ -87,7 +90,17 @@ export default async function TesterProjectsPage({
     {
       key: 'project',
       header: 'Project',
-      render: (row) => row.project?.title ?? 'Project unavailable',
+      render: (row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Avatar
+            name={row.project?.title ?? '?'}
+            fileId={row.project?.logo?.id ?? null}
+            size="sm"
+            shape="rounded"
+          />
+          <span>{row.project?.title ?? 'Project unavailable'}</span>
+        </span>
+      ),
       // The build is what tells two rows for the same project apart.
       renderSecondary: (row) =>
         [row.project?.reference, row.project?.organisation?.name, row.build.name]

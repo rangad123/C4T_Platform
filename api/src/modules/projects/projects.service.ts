@@ -1440,6 +1440,9 @@ export async function listMyAssignments(
             endDate: true,
             platformTargets: true,
             organisation: { select: { id: true, name: true } },
+            // The application-under-test logo — the tester list renders it
+            // the same way the customer's own project list does.
+            logo: { select: { id: true } },
           },
         },
       },
