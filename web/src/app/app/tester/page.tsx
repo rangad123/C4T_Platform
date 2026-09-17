@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetchOrNull, serverFetchPage } from '@/lib/api/server'
 import { Topbar } from '@/components/admin/Topbar'
+import { Avatar } from '@/components/admin/Avatar'
 import { Card, CardGrid } from '@/components/admin/Card'
 import { ActivityFeed, type ActivityItem } from '@/components/admin/ActivityFeed'
 import { resolveNotificationHref } from '@/lib/notifications/href'
@@ -128,6 +129,8 @@ interface AssignmentRow {
     status: string
     endDate: string | null
     organisation: { id: string; name: string } | null
+    /** The application under test, when one was uploaded. */
+    logo: { id: string } | null
   } | null
 }
 
@@ -539,7 +542,27 @@ export default async function TesterHomePage({
                 <Card
                   key={`${a.project!.id}:${a.build.id}`}
                   href={`/app/tester/projects/${a.project!.id}?buildId=${a.build.id}`}
-                  title={a.project!.title}
+                  /* Logo beside the name, the same as the Projects list and
+                     the customer's own — a dashboard card is the shortest
+                     glance of the three and the one that needs the mark
+                     most. */
+                  title={
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-3)',
+                      }}
+                    >
+                      <Avatar
+                        name={a.project!.title}
+                        fileId={a.project!.logo?.id ?? null}
+                        size="sm"
+                        shape="rounded"
+                      />
+                      <span>{a.project!.title}</span>
+                    </span>
+                  }
                   meta={[a.project!.reference, a.project!.organisation?.name, a.build.name]
                     .filter(Boolean)
                     .join(' · ')}
