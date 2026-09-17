@@ -44,23 +44,34 @@ function leadFailure(error: unknown): string {
   return 'lead-failed'
 }
 
+/**
+ * Every path through this ends in `redirect()` — including the rejected-value
+ * one, which used to `throw` instead. The caller is a form action that does
+ * NOT wrap this in a try/catch (wrapping it was the bug that reported every
+ * successful save as failed, since `redirect` unwinds by throwing), so a throw
+ * from here would now reach the error boundary as a crash screen rather than
+ * the notice strip. Unreachable from the form itself — the select only offers
+ * real statuses — but the contract has to hold for a hand-made POST too.
+ */
 export async function updateLeadStatus(id: string, status: string): Promise<void> {
-  if (!LEAD_STATUS_VALUES.includes(status as LeadStatusValue)) {
-    throw new Error(`Invalid lead status: ${status}`)
-  }
-
   let notice = 'status-saved'
-  try {
-    await actionFetch<LeadResponse>(`leads/${id}`, {
-      method: 'PATCH',
-      body: { status },
-    })
-  } catch (error) {
-    notice = leadFailure(error)
+
+  if (!LEAD_STATUS_VALUES.includes(status as LeadStatusValue)) {
+    notice = 'lead-failed'
+  } else {
+    try {
+      await actionFetch<LeadResponse>(`leads/${id}`, {
+        method: 'PATCH',
+        body: { status },
+      })
+    } catch (error) {
+      notice = leadFailure(error)
+    }
+
+    revalidatePath('/app/admin/leads')
+    revalidatePath(`/app/admin/leads/${id}`)
   }
 
-  revalidatePath('/app/admin/leads')
-  revalidatePath(`/app/admin/leads/${id}`)
   redirect(`/app/admin/leads/${id}?notice=${notice}`)
 }
 

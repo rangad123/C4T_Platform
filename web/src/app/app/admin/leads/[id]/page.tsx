@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import { Topbar } from '@/components/admin/Topbar'
 import { LeadStatusBadge, type LeadStatusValue } from '@/components/admin/LeadStatusBadge'
 import { Field } from '@/components/ds/forms/Field'
@@ -82,33 +82,23 @@ const NOTICES: Record<string, NoticeCopy> = {
   'lead-missing': { tone: 'error', message: 'This lead no longer exists.' },
   'lead-failed': { tone: 'error', message: 'That change could not be saved. Try again.' },
   'notes-saved': { tone: 'success', message: 'Notes updated.' },
-  forbidden: { tone: 'error', message: 'You are not able to change that right now.' },
-  invalid: { tone: 'error', message: 'That status was not recognised.' },
-  failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
 }
 
-function leadFailureNotice(error: unknown): string {
-  const status =
-    error instanceof Error && 'status' in error ? (error as { status?: number }).status : undefined
-  if (status === 403) return 'forbidden'
-  if (status === 400 || status === 422) return 'invalid'
-  return 'failed'
-}
-
+/**
+ * Thin FormData adapters — `updateLeadStatus`/`updateLeadNotes` already own
+ * the full try/catch-and-redirect flow, ending in a `redirect()` on every
+ * path. `redirect()` works by throwing, so a `try { await updateLeadStatus() }
+ * catch { redirect(...) }` here caught that throw on the SUCCESS path too and
+ * reported every save — including this one, marking a lead Spam — as failed,
+ * even though it had already gone through. Do not wrap these calls; let them
+ * redirect on their own.
+ */
 async function saveStatus(formData: FormData): Promise<void> {
   'use server'
   const id = formString(formData, 'id')
   const status = formString(formData, 'status')
   if (!id) return
-
-  let notice = 'status-saved'
-  try {
-    await updateLeadStatus(id, status)
-  } catch (error) {
-    notice = leadFailureNotice(error)
-  }
-
-  redirect(`/app/admin/leads/${id}?notice=${notice}`)
+  await updateLeadStatus(id, status)
 }
 
 async function saveNotes(formData: FormData): Promise<void> {
@@ -116,15 +106,7 @@ async function saveNotes(formData: FormData): Promise<void> {
   const id = formString(formData, 'id')
   const notes = formString(formData, 'notes')
   if (!id) return
-
-  let notice = 'notes-saved'
-  try {
-    await updateLeadNotes(id, notes)
-  } catch (error) {
-    notice = leadFailureNotice(error)
-  }
-
-  redirect(`/app/admin/leads/${id}?notice=${notice}`)
+  await updateLeadNotes(id, notes)
 }
 
 export default async function LeadDetailPage({
