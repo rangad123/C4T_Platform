@@ -40,7 +40,7 @@ export default async function BlogIndexPage({
   const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1)
   const hasFilters = Boolean(params.category ?? params.search)
 
-  const [{ data: posts, meta }, categories] = await Promise.all([
+  const [{ data: posts, meta }, allCategories] = await Promise.all([
     publicFetchPage<BlogPostSummary>('blog/posts', {
       query: { category: params.category, search: params.search, page, limit: PAGE_SIZE },
       next: { tags: ['blog-posts'] },
@@ -49,6 +49,13 @@ export default async function BlogIndexPage({
       next: { tags: ['blog-categories'] },
     }),
   ])
+  /*
+    Only categories with at least one published post become a pill here. The
+    filter itself was never broken — of 21 categories, 19 have zero posts, so
+    picking almost any pill correctly showed "no posts" and read as the filter
+    failing. A pill that always empties the grid is worse than no pill.
+  */
+  const categories = (allCategories ?? []).filter((category) => category.postCount > 0)
 
   // The public list is ordered featured-first — on an unfiltered first page,
   // a featured post (if any) is the opening item. Pulled out for its own
@@ -92,7 +99,7 @@ export default async function BlogIndexPage({
             <Tag active={!params.category} href={pageHref({ search: params.search })}>
               All
             </Tag>
-            {(categories ?? []).map((category) => (
+            {categories.map((category) => (
               <Tag
                 key={category.slug}
                 active={params.category === category.slug}
