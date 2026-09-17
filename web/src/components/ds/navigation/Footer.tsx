@@ -7,8 +7,9 @@ import Link from 'next/link'
 import { Logo } from '../core/Logo'
 import { Button } from '../core/Button'
 import { Input } from '../forms/Input'
+import { Icon } from '../core/Icon'
 import { SOCIAL_ICONS } from '@/components/SocialIcons'
-import { SOCIAL_PROFILES } from '@/content/nav'
+import { FOOTER_CONTACT, SOCIAL_PROFILES } from '@/content/nav'
 import type { FooterColumn } from '@/content/nav'
 
 export interface FooterProps {
@@ -64,7 +65,11 @@ export function Footer({ columns, newsletter = true, style, className }: FooterP
           }}
         >
           <div>
-            <Logo size={32} tone="inverse" href="/" />
+            {/* "/#main", not "/" — see the matching note on TopNav's own
+                logo: a Link to the page you're already on is a no-op, which
+                is exactly why this one, reached by scrolling to the bottom
+                of the home page, didn't return to the top. */}
+            <Logo size={32} tone="inverse" href="/#main" />
             <p
               style={{
                 marginTop: 'var(--space-5)',
@@ -164,6 +169,57 @@ export function Footer({ columns, newsletter = true, style, className }: FooterP
                 </Button>
               </form>
             ) : null}
+
+            {/*
+              The footer's "Contact block", content.md verbatim — name,
+              address, email, phone. It sat in the handoff, unrendered, the
+              whole time the footer had everything around it.
+            */}
+            <div
+              style={{
+                marginTop: 'var(--space-7)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-2)',
+                fontSize: 'var(--type-body-sm-size)',
+                color: 'var(--text-inverse-muted)',
+              }}
+            >
+              <span style={{ color: 'var(--text-inverse)', fontWeight: 'var(--fw-semibold)' }}>
+                {FOOTER_CONTACT.name}
+              </span>
+              {FOOTER_CONTACT.addressLines.map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+              <a
+                href={`mailto:${FOOTER_CONTACT.email}`}
+                className="c4t-inverse-link"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  color: 'inherit',
+                  textDecoration: 'none',
+                }}
+              >
+                <Icon name="mail" size={14} />
+                {FOOTER_CONTACT.email}
+              </a>
+              <a
+                href={`tel:${FOOTER_CONTACT.phone.replace(/\s+/g, '')}`}
+                className="c4t-inverse-link"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  color: 'inherit',
+                  textDecoration: 'none',
+                }}
+              >
+                <Icon name="phone" size={14} />
+                {FOOTER_CONTACT.phone}
+              </a>
+            </div>
           </div>
 
           <div

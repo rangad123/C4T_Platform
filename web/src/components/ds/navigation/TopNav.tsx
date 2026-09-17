@@ -126,7 +126,14 @@ export function TopNav({
             than it did on the bare mark. 50px brings it to ~116px, close to
             the old footprint, and still leaves 11px of clearance top and
             bottom inside the 72px bar. */}
-        <Logo variant="horizontal" size={50} href="/" />
+        {/*
+          "/#main", not "/" — Link performs no navigation at all when the
+          target already matches the current URL, so clicking Home while
+          already on the home page (scrolled anywhere) was a silent no-op.
+          The hash makes every click a real navigation, and #main's own
+          scroll-margin-top (base.css) keeps it clear of this sticky bar.
+        */}
+        <Logo variant="horizontal" size={50} href="/#main" />
 
         <nav
           aria-label="Primary"

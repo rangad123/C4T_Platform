@@ -385,3 +385,19 @@ export const SOCIAL_PROFILES = [
     icon: 'instagram',
   },
 ] as const satisfies readonly { label: string; url: string; icon: SocialIconName }[]
+
+/**
+ * The footer's "Contact block" — content.md, verbatim, immediately after the
+ * newsletter block it defines. Never rendered: the footer has a logo,
+ * tagline, social row and newsletter form, and stops there.
+ *
+ * `addressLines` is two lines in the source ("556, 14th Main, Sector 3, HSR
+ * Layout" / "Bengaluru, Karnataka 560102, India") — kept as two rather than
+ * joined, the way a postal address is actually read.
+ */
+export const FOOTER_CONTACT = {
+  name: 'Crowd4Test',
+  addressLines: ['556, 14th Main, Sector 3, HSR Layout', 'Bengaluru, Karnataka 560102, India'],
+  email: 'admin@crowd4test.com',
+  phone: '+91 96323 53367',
+} as const
