@@ -312,6 +312,7 @@ export default async function CustomerBugDetailPage({
       label: 'Project reference',
       value: <span style={{ fontFamily: 'var(--font-mono)' }}>{bug.project.reference}</span>,
     },
+    { label: 'Reported by', value: personName(bug.reportedBy) },
     { label: 'Reported', value: formatDate(bug.createdAt) },
     { label: 'Triaged', value: formatDate(bug.triagedAt) },
     { label: 'Resolved', value: formatDate(bug.resolvedAt) },
