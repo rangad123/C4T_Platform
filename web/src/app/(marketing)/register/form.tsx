@@ -266,9 +266,29 @@ function RoleCard({
   note: string
 }) {
   return (
-    <Link
+    /*
+      ⚠ A PLAIN `<a>`, DELIBERATELY — do not "fix" this back to `<Link>`.
+
+      Picking a role changes only the QUERY STRING (`?role=customer`) on the
+      same path. When this chooser is rendered inside the intercepted auth
+      dialog (`@auth/(.)register`), a client-side navigation that changes only
+      the query does NOT re-render the parallel slot: the router fetches the
+      new RSC payload and returns 200, and the dialog carries on showing these
+      two cards. Reported as "you have to click the same option twice"; in
+      fact no number of clicks worked, because every one of them was a
+      query-only navigation into a slot that would not re-render.
+
+      A real document navigation always lands on a correctly rendered page,
+      in the dialog and on the standalone page alike. The cost is one page
+      load on a step each person takes once, which is the right trade for a
+      step that otherwise dead-ends.
+
+      The footer's "Become a tester" link is unaffected: it carries `role`
+      in the FIRST navigation, so the dialog renders the form directly and
+      never passes through this chooser.
+    */
+    <a
       href={href}
-      replace
       className="c4t-card-hover"
       style={{
         display: 'flex',
@@ -328,7 +348,7 @@ function RoleCard({
           {body}
         </span>
       </span>
-    </Link>
+    </a>
   )
 }
 
