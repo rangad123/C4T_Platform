@@ -46,6 +46,7 @@ export async function registerAction(formData: FormData): Promise<void> {
   const firstName = formTrimmed(formData, 'firstName')
   const lastName = formTrimmed(formData, 'lastName')
   const password = formString(formData, 'password')
+  const confirmPassword = formString(formData, 'confirmPassword')
   const organisationName = formTrimmed(formData, 'organisationName')
   const acceptedTerms = formString(formData, 'acceptedTerms') === 'on'
   const next = formTrimmed(formData, 'next')
@@ -74,6 +75,12 @@ export async function registerAction(formData: FormData): Promise<void> {
   // Mirrors the API's rule so the user is told before a round trip.
   if (password.length < 12) {
     backToForm({ ...echo, error: 'password_short' })
+  }
+  // There is no second field on the API side to check this against — it
+  // exists only to catch a typo before it becomes an account nobody can sign
+  // into, so the comparison happens here and neither value crosses to the API.
+  if (password !== confirmPassword) {
+    backToForm({ ...echo, error: 'password_mismatch' })
   }
   if (role === 'CUSTOMER' && !organisationName) {
     backToForm({ ...echo, error: 'organisation_required' })

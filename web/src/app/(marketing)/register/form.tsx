@@ -49,6 +49,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing: 'Fill in your name, email and a password to continue.',
   terms: 'You need to accept the Terms of Use to create an account.',
   password_short: 'Use a password of at least 12 characters.',
+  password_mismatch: 'Those two passwords don’t match.',
   organisation_required: 'Enter your company name.',
   email_taken: 'An account with this email already exists. Sign in instead.',
   network: 'Could not reach the sign-up service. Check your connection and retry.',
@@ -441,6 +442,25 @@ function SignUpForm({
             />
           </Field>
         </div>
+
+        {/*
+          Its own row, not paired with Password in the grid above — a third
+          field would leave that two-column row uneven. Never re-populated on
+          a failed submission, the same as Password itself: neither value is
+          echoed back into the DOM.
+        */}
+        <Field label="Confirm password" htmlFor="confirmPassword" required>
+          <Input
+            id="confirmPassword"
+            name="confirmPassword"
+            type="password"
+            autoComplete="new-password"
+            required
+            minLength={12}
+            iconLeft="lock"
+            showPasswordToggle
+          />
+        </Field>
 
         {role === 'customer' ? (
           <Field label="Company" htmlFor="organisationName" required>
