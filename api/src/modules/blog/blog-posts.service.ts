@@ -444,7 +444,12 @@ export async function deletePost(id: string): Promise<void> {
 // ─── Public ────────────────────────────────────────────────────────────────
 
 export async function listPostsPublic(query: PublicListPostsQuery) {
-  void settleDuePosts()
+  // `.catch`, not bare `void` — a rejection here (a blip reaching the
+  // database, most likely) was an UNHANDLED rejection, which crashes the
+  // whole process rather than just this best-effort maintenance step. Found
+  // live: a transient DB hiccup took the entire API down mid-request, not
+  // just this one read.
+  void settleDuePosts().catch((err: unknown) => logger.error({ err }, 'settleDuePosts failed'))
 
   const where: Prisma.BlogPostWhereInput = {
     ...publicVisibleWhere(),
@@ -485,7 +490,8 @@ export async function listPostsPublic(query: PublicListPostsQuery) {
 export async function getPostPublic(
   slug: string,
 ): Promise<{ post: ReturnType<typeof shapePublicDetail>; redirectTo?: string }> {
-  void settleDuePosts()
+  // See the matching note on `listPostsPublic` — `.catch`, not bare `void`.
+  void settleDuePosts().catch((err: unknown) => logger.error({ err }, 'settleDuePosts failed'))
 
   const direct = await prisma.blogPost.findFirst({
     where: { slug, ...publicVisibleWhere() },
