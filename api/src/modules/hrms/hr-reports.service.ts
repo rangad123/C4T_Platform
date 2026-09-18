@@ -1,7 +1,8 @@
-import type { Prisma } from '@prisma/client'
+import { HrEmployeeStatus, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { renderHtmlToPdf } from '../../lib/hrms/hr-pdf.js'
 import { financialYearMonths } from '../../lib/hrms/financial-year.js'
+import { getMonthSummary } from './hr-timesheet.service.js'
 import type { GenerateReportQuery } from './hr-reports.schema.js'
 
 function toNumber(value: Prisma.Decimal): number {
@@ -115,6 +116,52 @@ async function generateTdsReport(query: GenerateReportQuery): Promise<string> {
   return reportShell('TDS report', `${query.financialYear} — ${periodLabel(query)}`, body)
 }
 
+async function generateTimesheetReport(query: GenerateReportQuery): Promise<string> {
+  const months = resolveMonths(query)
+  const employees = await prisma.hrEmployee.findMany({
+    where: { status: HrEmployeeStatus.ACTIVE, timesheetRequired: true },
+    select: { id: true, employeeCode: true, firstName: true, lastName: true },
+    orderBy: { employeeCode: 'asc' },
+  })
+
+  if (employees.length === 0) {
+    return reportShell(
+      'Timesheet report',
+      `${query.financialYear} — ${periodLabel(query)}`,
+      '<p class="empty">No employees require timesheet tracking.</p>',
+    )
+  }
+
+  const rows = await Promise.all(
+    employees.map(async (employee) => {
+      const summaries = await Promise.all(
+        months.map((month) => getMonthSummary(employee.id, query.financialYear, month)),
+      )
+      return {
+        employee,
+        workingDays: summaries.reduce((sum, s) => sum + s.workingDays, 0),
+        paidDays: summaries.reduce((sum, s) => sum + s.paidDays, 0),
+        loggedHours: summaries.reduce((sum, s) => sum + s.loggedHours, 0),
+      }
+    }),
+  )
+
+  const body = `
+    <table>
+      <thead><tr><th>Employee code</th><th>Name</th><th class="amount">Working days</th><th class="amount">Paid days</th><th class="amount">Logged hours</th></tr></thead>
+      <tbody>
+        ${rows
+          .map(
+            (row) =>
+              `<tr><td>${escapeHtml(row.employee.employeeCode)}</td><td>${escapeHtml(`${row.employee.firstName} ${row.employee.lastName}`)}</td><td class="amount">${row.workingDays}</td><td class="amount">${row.paidDays}</td><td class="amount">${row.loggedHours}</td></tr>`,
+          )
+          .join('')}
+      </tbody>
+    </table>`
+
+  return reportShell('Timesheet report', `${query.financialYear} — ${periodLabel(query)}`, body)
+}
+
 function unavailableReport(title: string, query: GenerateReportQuery, reason: string): string {
   return reportShell(
     title,
@@ -128,11 +175,7 @@ export async function generateReport(query: GenerateReportQuery): Promise<Buffer
   if (query.reportType === 'TDS') {
     html = await generateTdsReport(query)
   } else if (query.reportType === 'TIMESHEET') {
-    html = unavailableReport(
-      'Timesheet report',
-      query,
-      'Timesheet tracking is not yet available in this system.',
-    )
+    html = await generateTimesheetReport(query)
   } else {
     html = unavailableReport(
       'Professional tax report',
