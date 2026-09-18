@@ -2559,9 +2559,15 @@ enum HrFileScope {
 /// the former also sees their reports' timesheets/leaves) — it has nothing to
 /// do with the platform's own Role enum two thousand lines above.
 model HrEmployee {
-  id           String @id @default(cuid())
-  /// Assigned once on creation, never editable — "EMP-0001".
-  employeeCode String @unique @map("employee_code")
+  id           String  @id @default(cuid())
+  /// Assigned once on creation, never editable — "EMP-0001". Rows imported from
+  /// the old CodeIgniter HRMS keep their original code instead (e.g. "2016010001"),
+  /// which is why nothing enforces the EMP- shape.
+  employeeCode String  @unique @map("employee_code")
+  /// `users.user_id` in the old HRMS MySQL database. Set only by
+  /// scripts/hrms/migrate-legacy.ts, so the import can be re-run without
+  /// duplicating rows and every imported record stays traceable to its source.
+  legacyId     String? @unique @map("legacy_id")
 
   firstName    String @map("first_name")
   lastName     String @map("last_name")
@@ -2747,6 +2753,8 @@ model HrSalaryStructure {
 /// CTC history — "Old Salaries" on the Salary Details page.
 model HrOldSalary {
   id         String   @id @default(cuid())
+  /// `salary.salary_id` in the old HRMS — see HrEmployee.legacyId.
+  legacyId   String?  @unique @map("legacy_id")
   employeeId String   @map("employee_id")
   ctc        Decimal  @db.Decimal(12, 2)
   fromDate   DateTime @map("from_date") @db.Date
@@ -2762,6 +2770,8 @@ model HrOldSalary {
 
 model HrMonthlyIncentive {
   id              String  @id @default(cuid())
+  /// `incentives.incentive_id` in the old HRMS — see HrEmployee.legacyId.
+  legacyId        String? @unique @map("legacy_id")
   employeeId      String  @map("employee_id")
   financialYear   String  @map("financial_year")
   /// 1-12, calendar month — see lib/hrms/financial-year.ts for FY<->month math.
@@ -2801,6 +2811,9 @@ model HrTaxSlab {
 
 model HrInvestmentDeclaration {
   id             String    @id @default(cuid())
+  /// "<investments.investment_id>:<section code>" in the old HRMS, because one
+  /// wide legacy row unpivots into up to nine rows here — see HrEmployee.legacyId.
+  legacyId       String?   @unique @map("legacy_id")
   employeeId     String    @map("employee_id")
   financialYear  String    @map("financial_year")
   sectionId      String    @map("section_id")
@@ -2896,6 +2909,9 @@ model HrLeaveBalance {
 
 model HrLeaveRequest {
   id          String               @id @default(cuid())
+  /// "ts:<timesheet.timesheet_id>" in the old HRMS, where leave was recorded as
+  /// a timesheet row rather than a request — see HrEmployee.legacyId.
+  legacyId    String?              @unique @map("legacy_id")
   employeeId  String               @map("employee_id")
   leaveTypeId String               @map("leave_type_id")
   startDate   DateTime             @map("start_date") @db.Date

@@ -23,6 +23,10 @@ const DESIGNATIONS = [
   'Finance Executive',
   'Business Analyst',
   'Director',
+  // Held by real staff in the old HRMS, so migrate-legacy.ts can map by name.
+  'Customer Success Executive',
+  'Quality Analyst',
+  'Admin',
 ]
 
 const LEAVE_TYPES: { name: string; defaultAnnualDays: number }[] = [
@@ -40,6 +44,10 @@ const INCENTIVE_TYPES = [
   'Project completion bonus',
   'Festival bonus',
   'Retention bonus',
+  // Paid in the old HRMS with no equivalent here — 145 and 104 rows respectively,
+  // so they cannot be folded into one of the above without losing the distinction.
+  'Extra hours incentive',
+  'Project incentive',
 ]
 
 // Chapter VIA + the other sections the spec's Investments module asks for —
