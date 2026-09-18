@@ -5,8 +5,12 @@ import { recentFinancialYears } from '@/lib/hrms/financial-year'
 export interface HrFinancialYearPickerProps {
   /** The page path this navigates within — the employee detail path. */
   action: string
-  /** Carried through unchanged so switching years doesn't drop the open tab. */
-  section: string
+  /**
+   * Carried through unchanged so switching years doesn't drop the open tab.
+   * Omitted on the employee's own pages, which are one page per topic rather
+   * than tabs over a single record.
+   */
+  section?: string
   financialYear: string
 }
 
@@ -29,7 +33,7 @@ export function HrFinancialYearPicker({
       action={action}
       style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}
     >
-      <input type="hidden" name="section" value={section} />
+      {section ? <input type="hidden" name="section" value={section} /> : null}
       <label
         htmlFor="hr-fy-picker"
         style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-secondary)' }}

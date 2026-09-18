@@ -14,6 +14,7 @@ import { hrLeavesRouter } from './hr-leaves.routes.js'
 import { hrEmployeeLeavesRouter } from './hr-employee-leaves.routes.js'
 import { hrTimesheetRouter } from './hr-timesheet.routes.js'
 import { hrEmployeeTimesheetRouter } from './hr-employee-timesheet.routes.js'
+import { hrSelfRouter } from './hr-self.routes.js'
 
 /**
  * Every HRMS route lives under this one prefix, `/v1/hrms/*` — a single
@@ -32,6 +33,8 @@ export const hrmsRouter = Router()
 
 hrmsRouter.use('/auth', hrAuthRouter)
 hrmsRouter.use('/catalog', hrCatalogRouter)
+// Everything under /me acts on the caller and never takes an employee id.
+hrmsRouter.use('/me', hrSelfRouter)
 hrmsRouter.use('/employees', hrEmployeesRouter)
 hrmsRouter.use('/employees', hrSalaryRouter)
 hrmsRouter.use('/employees', hrEmployeeTaxRouter)
