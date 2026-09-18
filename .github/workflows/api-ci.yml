@@ -76,6 +76,9 @@ jobs:
           # Throwaway — never used to encrypt anything real. Just needs to be
           # valid base64 decoding to exactly 32 bytes, which env.ts requires.
           PAYMENT_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          # Same reasoning, for HRMS's separate encryption/JWT env vars.
+          HRMS_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          HRMS_JWT_SECRET: ci-throwaway-hrms-jwt-secret-not-used-anywhere-real
 
   test:
     name: Tests
