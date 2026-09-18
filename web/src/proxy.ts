@@ -65,6 +65,20 @@ const HR_ACCESS_COOKIE = 'hrms_access'
 const HR_REFRESH_COOKIE = 'hrms_refresh'
 
 /**
+ * Framework-served files that exist only at the true app root — `app/icon.png`,
+ * `app/robots.ts`, `app/sitemap.ts`, `app/opengraph-image.tsx` — nothing under
+ * `app/hrms/*` shadows them. Left unexempted, the rewrite below would turn
+ * `/icon.png` into `/hrms/icon.png` and 404 a plain favicon request.
+ */
+const HRMS_ROOT_ASSET_PATHS = new Set([
+  '/favicon.ico',
+  '/icon.png',
+  '/opengraph-image',
+  '/robots.txt',
+  '/sitemap.xml',
+])
+
+/**
  * The HRMS counterpart to `refreshIfExpired` below — renews an expired
  * `hrms_access` cookie before the rewritten request renders. Without this,
  * every HR session died after 15 idle minutes (the access cookie's
@@ -104,6 +118,7 @@ async function hrmsRewrite(request: NextRequest): Promise<NextResponse | null> {
   const host = request.headers.get('host')?.split(':')[0] ?? ''
 
   if (host === HRMS_HOSTNAME) {
+    if (HRMS_ROOT_ASSET_PATHS.has(pathname)) return null // served from the true app root
     if (pathname.startsWith('/hrms')) return null // already there — a direct link, a refresh
 
     let refreshed: ReturnType<typeof authCookieOptions>[] = []
