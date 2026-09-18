@@ -803,17 +803,40 @@ async function importOldSalaries(
       counter.skipped += 1
       continue
     }
-    // Derived from the month/year parts, never from salary_fy — that column is
-    // NULL on 29 of 71 rows while the parts are always populated.
-    const fromDate = dateFromParts(row.salary_start_month, row.salary_start_year)
-    const toDate = dateFromParts(row.salary_end_month, row.salary_end_year)
+    // Prefer the month/year parts, which are exact. They are 0 on 42 of 71
+    // rows — the older entries, where the old app recorded only the financial
+    // year — so fall back to that year's April→March span rather than dropping
+    // more than half the CTC history.
+    let fromDate = dateFromParts(row.salary_start_month, row.salary_start_year)
+    let toDate = dateFromParts(row.salary_end_month, row.salary_end_year)
+
+    if (!fromDate || !toDate) {
+      const fy = financialYear(row.salary_fy)
+      if (fy) {
+        const startYear = Number(fy.slice(0, 4))
+        fromDate = new Date(Date.UTC(startYear, 3, 1)) // 1 April
+        toDate = new Date(Date.UTC(startYear + 1, 2, 31)) // 31 March
+        reporter.problem({
+          legacyTable: 'salary',
+          legacyId,
+          targetModel: 'HrOldSalary',
+          code: 'DATE_RANGE_FROM_FINANCIAL_YEAR',
+          field: null,
+          value: fy,
+          message:
+            'Start/end month and year were both 0; the range is the financial year, 1 April to 31 March.',
+          action: 'DEFAULTED',
+        })
+      }
+    }
+
     if (!fromDate || !toDate) {
       reporter.skip(
         'salary',
         legacyId,
         'HrOldSalary',
         'NO_DATE_RANGE',
-        'Start or end month/year missing or out of range.',
+        'No usable month/year parts and no financial year to fall back to.',
       )
       counter.skipped += 1
       continue
@@ -1030,6 +1053,27 @@ async function importTaxDeductions(
     ).map((r) => [`${r.employeeId}:${r.financialYear}:${r.month}`, r.id]),
   )
 
+  /**
+   * The old app allowed several TDS entries in one month — one employee has
+   * three for a single month — but the target holds ONE row per employee per
+   * month, because `amount` means that month's total deduction. So the legacy
+   * rows are summed per month first. Writing them one at a time would make the
+   * last row silently overwrite the others and understate the year's tax.
+   *
+   * Pre-aggregating also keeps the import idempotent: a re-run writes the same
+   * total rather than adding to what is already there.
+   */
+  const totals = new Map<string, number>()
+  for (const row of rows) {
+    const employeeId = byLegacy.get(String(row.user_id))
+    const fy = financialYear(row.tax_fy)
+    const month = monthNumber(row.tax_month)
+    if (!employeeId || !fy || !month) continue
+    const key = `${employeeId}:${fy}:${month}`
+    totals.set(key, (totals.get(key) ?? 0) + decimal(row.tax))
+  }
+  const written = new Set<string>()
+
   for (const row of rows) {
     counter.read += 1
     const legacyId = String(row.tax_id)
@@ -1057,16 +1101,33 @@ async function importTaxDeductions(
     }
 
     const key = `${employeeId}:${fy}:${month}`
+    const amount = totals.get(key) ?? decimal(row.tax)
+
+    // Only the first legacy row for a month writes; the rest are already
+    // included in that month's total and are recorded as merged, not dropped.
+    if (written.has(key)) {
+      counter.updated += 1
+      reporter.problem({
+        legacyTable: 'taxes',
+        legacyId,
+        targetModel: 'HrMonthlyTaxDeduction',
+        code: 'MERGED_INTO_MONTH_TOTAL',
+        field: null,
+        value: String(decimal(row.tax)),
+        message: `Another deduction already covers ${fy} month ${month}; this amount is summed into that month's total.`,
+        action: 'REVIEW_REQUIRED',
+      })
+      continue
+    }
+    written.add(key)
+
     const existingId = existing.get(key)
     if (existingId) {
-      await tx.hrMonthlyTaxDeduction.update({
-        where: { id: existingId },
-        data: { amount: decimal(row.tax) },
-      })
+      await tx.hrMonthlyTaxDeduction.update({ where: { id: existingId }, data: { amount } })
       counter.updated += 1
     } else {
       const created = await tx.hrMonthlyTaxDeduction.create({
-        data: { employeeId, financialYear: fy, month, amount: decimal(row.tax) },
+        data: { employeeId, financialYear: fy, month, amount },
         select: { id: true },
       })
       existing.set(key, created.id)
@@ -1377,8 +1438,21 @@ async function importPayslips(
     const key = `${employeeId}:${fy}:${month}`
     const existingId = existing.get(key)
     if (existingId) {
+      // A payslip is a document, not a total, so a second one for the same
+      // month supersedes rather than adds to the first — but say so, because
+      // the superseded figures are not carried anywhere.
       await tx.hrPayslip.update({ where: { id: existingId }, data })
       counter.updated += 1
+      reporter.problem({
+        legacyTable: 'payslip',
+        legacyId,
+        targetModel: 'HrPayslip',
+        code: 'DUPLICATE_FOR_MONTH',
+        field: null,
+        value: `${fy} month ${month}`,
+        message: 'Another payslip already covers this month; the later one replaces it.',
+        action: 'REVIEW_REQUIRED',
+      })
     } else {
       const created = await tx.hrPayslip.create({
         data: { ...data, employeeId, financialYear: fy, month },
