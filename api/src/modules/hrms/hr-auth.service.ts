@@ -8,7 +8,8 @@ import {
   HR_SESSION_ABSOLUTE_TTL_MS,
   HR_SESSION_IDLE_TTL_MS,
 } from '../../lib/hrms/hr-tokens.js'
-import { hashToken } from '../../lib/tokens.js'
+import { hashToken, generateOpaqueToken, PASSWORD_RESET_TTL_MS } from '../../lib/tokens.js'
+import { sendMail, hrPasswordResetEmail } from '../../lib/mailer.js'
 import {
   UnauthorizedError,
   ForbiddenError,
@@ -21,8 +22,12 @@ import { logger } from '../../lib/logger.js'
  * HRMS's own login/session service — structurally mirrors
  * modules/auth/auth.service.ts (uniform failure timing, lockout, rotation
  * with reuse detection) but reads/writes HrEmployee and HrSession only.
- * There is deliberately no Google sign-in and no legacy password path here:
- * this is a brand-new system with no existing accounts to migrate.
+ *
+ * There is deliberately no Google sign-in, and no legacy password path: the
+ * accounts imported from the old HR system had unsalted MD5 digests, which
+ * scripts/hrms/migrate-legacy.ts deliberately did not carry across. Those
+ * employees hold a generated password they never chose, which is exactly why
+ * the reset flow below exists.
  */
 
 const MAX_FAILED_LOGINS = 8
@@ -35,7 +40,13 @@ export interface HrSessionTokens {
   refreshExpiresAt: Date
 }
 
-export type HrRevokeReason = 'logout' | 'logout_all' | 'token_reuse' | 'password_changed' | 'admin'
+export type HrRevokeReason =
+  | 'logout'
+  | 'logout_all'
+  | 'token_reuse'
+  | 'password_changed'
+  | 'password_reset'
+  | 'admin'
 
 export interface PublicHrEmployee {
   id: string
@@ -308,6 +319,74 @@ export async function changePassword(
       data: { revokedAt: new Date(), revokedReason: 'password_changed' },
     }),
   ])
+}
+
+// ─── Password reset ──────────────────────────────────────────────────────────
+
+/**
+ * Always reports success to the caller, whether or not the address matched —
+ * otherwise this endpoint answers "does this person work here?" to anyone who
+ * asks. The returned id is for the controller's audit entry only.
+ */
+export async function forgotPassword(email: string): Promise<{ employeeId: string | null }> {
+  const employee = await prisma.hrEmployee.findUnique({
+    where: { email },
+    select: { id: true, email: true, deletedAt: true, status: true },
+  })
+  // A resigned or terminated employee does not get a route back in.
+  if (!employee || employee.deletedAt || employee.status !== HrEmployeeStatus.ACTIVE) {
+    return { employeeId: null }
+  }
+
+  // Only the newest link should work.
+  await prisma.hrPasswordResetToken.updateMany({
+    where: { employeeId: employee.id, usedAt: null },
+    data: { usedAt: new Date() },
+  })
+
+  const { raw, hash } = generateOpaqueToken()
+  await prisma.hrPasswordResetToken.create({
+    data: {
+      employeeId: employee.id,
+      tokenHash: hash,
+      expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+    },
+  })
+
+  await sendMail(hrPasswordResetEmail(employee.email, raw))
+  return { employeeId: employee.id }
+}
+
+export async function resetPassword(rawToken: string, newPassword: string): Promise<string> {
+  const stored = await prisma.hrPasswordResetToken.findUnique({
+    where: { tokenHash: hashToken(rawToken) },
+    select: { id: true, employeeId: true, expiresAt: true, usedAt: true },
+  })
+
+  if (!stored || stored.usedAt) {
+    throw new BadRequestError('This reset link is invalid or already used')
+  }
+  if (stored.expiresAt < new Date()) throw new BadRequestError('This reset link has expired')
+  if (newPassword.length < 12) {
+    throw new BadRequestError('Password must be at least 12 characters')
+  }
+
+  const passwordHash = await hashPassword(newPassword)
+
+  await prisma.$transaction([
+    prisma.hrPasswordResetToken.update({ where: { id: stored.id }, data: { usedAt: new Date() } }),
+    // Clearing the lockout matters here: someone who forgot their password has
+    // usually just failed eight logins trying to remember it.
+    prisma.hrEmployee.update({
+      where: { id: stored.employeeId },
+      data: { passwordHash, failedLoginCount: 0, lockedUntil: null },
+    }),
+    prisma.hrSession.updateMany({
+      where: { employeeId: stored.employeeId, revokedAt: null },
+      data: { revokedAt: new Date(), revokedReason: 'password_reset' satisfies HrRevokeReason },
+    }),
+  ])
+  return stored.employeeId
 }
 
 export { loadPublicEmployee }

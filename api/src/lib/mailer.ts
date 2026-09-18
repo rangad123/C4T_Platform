@@ -182,6 +182,25 @@ export function passwordResetEmail(to: string, token: string): MailMessage {
 }
 
 /**
+ * The HRMS counterpart. A separate template rather than a parameter on the one
+ * above, because it points at a different host and addresses staff rather than
+ * customers — the two systems share no accounts.
+ */
+export function hrPasswordResetEmail(to: string, token: string): MailMessage {
+  const url = `${env.HRMS_PUBLIC_URL}/reset-password?token=${encodeURIComponent(token)}`
+  const { html, text } = renderEmail(
+    {
+      heading: 'Set a new HRMS password',
+      paragraphs: ['Use the button below to choose a new password for your Crowd4Test HRMS login.'],
+      action: { label: 'Set a new password', url },
+      note: 'The link expires in 60 minutes. If you did not request a reset, you can ignore this email — your password will not change.',
+    },
+    {},
+  )
+  return { to, subject: 'Reset your Crowd4Test HRMS password', text, html }
+}
+
+/**
  * §42 — an invitation to join an organisation's team.
  *
  * Sent directly rather than through a notification because the recipient is an

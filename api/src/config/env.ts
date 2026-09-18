@@ -26,6 +26,13 @@ const schema = z.object({
 
   API_PUBLIC_URL: z.string().url(),
   WEB_PUBLIC_URL: z.string().url(),
+  /**
+   * Where HRMS is reached from a browser, used to build password-reset links.
+   * Production is its own hostname (https://hrms.crowd4test.com); locally the
+   * same tree is served under a path, so the default carries the /hrms prefix
+   * and both forms append /reset-password identically.
+   */
+  HRMS_PUBLIC_URL: z.string().url().default('http://localhost:3000/hrms'),
   CORS_ORIGINS: z
     .string()
     .default('')

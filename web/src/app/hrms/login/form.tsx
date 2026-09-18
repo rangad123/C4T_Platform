@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
@@ -6,9 +7,8 @@ import { hrLoginAction } from '@/lib/hrms/hr-actions'
 
 /**
  * The HRMS sign-in form. Structural copy of `(marketing)/login/form.tsx`
- * minus Google sign-in and the register/forgot-password links — HRMS has
- * neither: employees are provisioned by an admin, not self-registered, and
- * there is no self-serve password reset yet.
+ * minus Google sign-in and the register link — employees are provisioned by
+ * an admin here, never self-registered.
  */
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -28,7 +28,7 @@ function errorMessage(code: string | undefined): string | null {
 export default async function HrLoginForm({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string; email?: string }>
+  searchParams: Promise<{ next?: string; error?: string; email?: string; notice?: string }>
 }) {
   const params = await searchParams
   const message = errorMessage(params.error)
@@ -48,6 +48,27 @@ export default async function HrLoginForm({
       >
         Crowd4Test staff only.
       </p>
+
+      {params.notice === 'password_reset' ? (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 'var(--space-3)',
+            padding: 'var(--space-4) var(--space-5)',
+            marginBottom: 'var(--space-6)',
+            background: 'var(--status-success-bg)',
+            color: 'var(--status-success-fg)',
+            borderRadius: 'var(--radius-input)',
+            fontSize: 'var(--type-body-sm-size)',
+            lineHeight: 1.45,
+          }}
+        >
+          <Icon name="check-circle-2" size={18} style={{ flex: 'none', marginTop: 2 }} />
+          <span>Your password has been set. Sign in with it below.</span>
+        </div>
+      ) : null}
 
       {message ? (
         <div
@@ -111,6 +132,16 @@ export default async function HrLoginForm({
           Sign in
         </SubmitButton>
       </form>
+
+      <p
+        style={{
+          margin: 'var(--space-6) 0 0',
+          fontSize: 'var(--type-body-sm-size)',
+          textAlign: 'center',
+        }}
+      >
+        <Link href="/forgot-password">Forgot your password?</Link>
+      </p>
     </div>
   )
 }

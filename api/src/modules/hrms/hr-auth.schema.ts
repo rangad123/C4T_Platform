@@ -20,4 +20,13 @@ export const hrChangePasswordSchema = z.object({
   newPassword: password,
 })
 
+export const hrForgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Enter a valid email address').max(255),
+})
+
+export const hrResetPasswordSchema = z.object({
+  token: z.string().min(1, 'Reset token is required'),
+  password,
+})
+
 export type HrLoginInput = z.infer<typeof hrLoginSchema>

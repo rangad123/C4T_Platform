@@ -15,3 +15,7 @@ prisma/migrations/**/shadow.db
 # deploy refuses to reset over anything uncommitted, untracked included. Left
 # untracked and ignored: the reports name real users and real payment rows.
 migration-report/
+# Same, for the HRMS import. This one additionally writes
+# temporary-passwords.csv, which is plaintext credentials by design and is
+# meant to be distributed and then deleted — never committed.
+migration-report-hrms/

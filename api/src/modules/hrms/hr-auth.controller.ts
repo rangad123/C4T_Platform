@@ -110,3 +110,34 @@ export async function me(req: Request, res: Response): Promise<void> {
   const employee = await hrAuthService.loadPublicEmployee(req.hrEmployee.id)
   res.json({ data: employee })
 }
+
+/**
+ * Answers 204 whether or not the address belongs to anyone. Reporting "no such
+ * employee" would turn this into a staff-directory oracle for an unauthenticated
+ * caller.
+ */
+export async function forgotPassword(req: Request, res: Response): Promise<void> {
+  const { employeeId } = await hrAuthService.forgotPassword(req.body.email)
+  await recordHrAudit({
+    req,
+    action: 'hr.auth.password_reset_requested',
+    entityType: 'HrEmployee',
+    entityId: employeeId ?? undefined,
+    after: { matched: employeeId !== null },
+  })
+  res.status(204).end()
+}
+
+export async function resetPassword(req: Request, res: Response): Promise<void> {
+  const employeeId = await hrAuthService.resetPassword(req.body.token, req.body.password)
+  await recordHrAudit({
+    req,
+    action: 'hr.auth.password_reset',
+    entityType: 'HrEmployee',
+    entityId: employeeId,
+  })
+  // Every session was revoked, so the caller signs in again with the new
+  // password rather than being handed one here.
+  clearHrAuthCookies(res)
+  res.status(204).end()
+}
