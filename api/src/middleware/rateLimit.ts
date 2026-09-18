@@ -94,6 +94,34 @@ export const uploadLimiter = rateLimit({
 })
 
 /**
+ * HRMS's own auth limiters — separate instances (separate token buckets)
+ * from authIpLimiter/authLimiter above, deliberately. HRMS is a fully
+ * separate identity domain; sharing a bucket would mean a flood against
+ * platform login could lock out a legitimate HR login from the same office
+ * network, and vice versa.
+ */
+export const hrAuthIpLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.AUTH_RATE_LIMIT_MAX,
+  keyGenerator: (req) => clientAddress(req),
+  ...shared,
+})
+
+export const hrAuthLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.AUTH_RATE_LIMIT_MAX,
+  keyGenerator: (req) => {
+    const body: unknown = req.body
+    const email =
+      typeof body === 'object' && body !== null && 'email' in body && typeof body.email === 'string'
+        ? body.email.toLowerCase()
+        : ''
+    return `${clientAddress(req)}:${email}`
+  },
+  ...shared,
+})
+
+/**
  * The bank-details reveal endpoint requires the caller's own password, so it
  * is exactly the kind of thing a stolen session token would try to brute-
  * force. Keyed on the caller's user id (the route sits behind `authenticate`,

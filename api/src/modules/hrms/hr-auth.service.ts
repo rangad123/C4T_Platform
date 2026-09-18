@@ -1,0 +1,313 @@
+import { HrEmployeeStatus } from '@prisma/client'
+import type { HrRole } from '@prisma/client'
+import { prisma } from '../../lib/prisma.js'
+import { hashPassword, verifyPassword, needsRehash } from '../../lib/password.js'
+import {
+  signHrAccessToken,
+  generateHrRefreshToken,
+  HR_SESSION_ABSOLUTE_TTL_MS,
+  HR_SESSION_IDLE_TTL_MS,
+} from '../../lib/hrms/hr-tokens.js'
+import { hashToken } from '../../lib/tokens.js'
+import {
+  UnauthorizedError,
+  ForbiddenError,
+  BadRequestError,
+  NotFoundError,
+} from '../../lib/errors.js'
+import { logger } from '../../lib/logger.js'
+
+/**
+ * HRMS's own login/session service — structurally mirrors
+ * modules/auth/auth.service.ts (uniform failure timing, lockout, rotation
+ * with reuse detection) but reads/writes HrEmployee and HrSession only.
+ * There is deliberately no Google sign-in and no legacy password path here:
+ * this is a brand-new system with no existing accounts to migrate.
+ */
+
+const MAX_FAILED_LOGINS = 8
+const LOCKOUT_MS = 15 * 60 * 1000
+
+export interface HrSessionTokens {
+  accessToken: string
+  refreshToken: string
+  sessionId: string
+  refreshExpiresAt: Date
+}
+
+export type HrRevokeReason = 'logout' | 'logout_all' | 'token_reuse' | 'password_changed' | 'admin'
+
+export interface PublicHrEmployee {
+  id: string
+  employeeCode: string
+  firstName: string
+  lastName: string
+  email: string
+  role: HrRole
+  status: HrEmployeeStatus
+  profilePictureFileId: string | null
+}
+
+async function loadPublicEmployee(employeeId: string): Promise<PublicHrEmployee> {
+  const employee = await prisma.hrEmployee.findUnique({
+    where: { id: employeeId },
+    select: {
+      id: true,
+      employeeCode: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      role: true,
+      status: true,
+      profilePictureFileId: true,
+    },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+  return employee
+}
+
+async function openSession(
+  employee: PublicHrEmployee,
+  context: { userAgent?: string; ipAddress?: string },
+): Promise<HrSessionTokens> {
+  const { raw, hash } = generateHrRefreshToken()
+  const now = Date.now()
+  const absoluteExpiresAt = new Date(now + HR_SESSION_ABSOLUTE_TTL_MS)
+  const idleExpiresAt = new Date(now + HR_SESSION_IDLE_TTL_MS)
+
+  const session = await prisma.hrSession.create({
+    data: {
+      employeeId: employee.id,
+      refreshTokenHash: hash,
+      absoluteExpiresAt,
+      idleExpiresAt,
+      userAgent: context.userAgent?.slice(0, 512) ?? null,
+      ipAddress: context.ipAddress ?? null,
+    },
+    select: { id: true },
+  })
+
+  const accessToken = signHrAccessToken({
+    employeeId: employee.id,
+    sessionId: session.id,
+    role: employee.role,
+  })
+
+  return {
+    accessToken,
+    refreshToken: raw,
+    sessionId: session.id,
+    refreshExpiresAt: absoluteExpiresAt < idleExpiresAt ? absoluteExpiresAt : idleExpiresAt,
+  }
+}
+
+function assertUsableStatus(status: HrEmployeeStatus): void {
+  if (status === HrEmployeeStatus.RESIGNED || status === HrEmployeeStatus.TERMINATED) {
+    throw new ForbiddenError('This account no longer has access to HRMS')
+  }
+}
+
+export async function login(
+  input: { email: string; password: string },
+  context: { userAgent?: string; ipAddress?: string },
+): Promise<{ employee: PublicHrEmployee; tokens: HrSessionTokens }> {
+  const record = await prisma.hrEmployee.findUnique({
+    where: { email: input.email },
+    select: {
+      id: true,
+      passwordHash: true,
+      status: true,
+      deletedAt: true,
+      failedLoginCount: true,
+      lockedUntil: true,
+    },
+  })
+
+  // Uniform failure message and a real hash comparison on the miss path, so
+  // response timing does not reveal whether the account exists — same
+  // technique as the platform's own login.
+  if (!record || record.deletedAt) {
+    await verifyPassword(
+      '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$0000000000000000000000000000000000000000000',
+      input.password,
+    )
+    throw new UnauthorizedError('Incorrect email or password')
+  }
+
+  if (record.lockedUntil && record.lockedUntil > new Date()) {
+    throw new ForbiddenError('Too many failed attempts. Try again in a few minutes.')
+  }
+
+  const valid = await verifyPassword(record.passwordHash, input.password)
+  if (!valid) {
+    const nextCount = record.failedLoginCount + 1
+    await prisma.hrEmployee.update({
+      where: { id: record.id },
+      data: {
+        failedLoginCount: nextCount,
+        lockedUntil: nextCount >= MAX_FAILED_LOGINS ? new Date(Date.now() + LOCKOUT_MS) : null,
+      },
+    })
+    throw new UnauthorizedError('Incorrect email or password')
+  }
+
+  assertUsableStatus(record.status)
+
+  const rehash = needsRehash(record.passwordHash) ? await hashPassword(input.password) : undefined
+
+  await prisma.hrEmployee.update({
+    where: { id: record.id },
+    data: {
+      failedLoginCount: 0,
+      lockedUntil: null,
+      ...(rehash ? { passwordHash: rehash } : {}),
+    },
+  })
+
+  const employee = await loadPublicEmployee(record.id)
+  const tokens = await openSession(employee, context)
+  return { employee, tokens }
+}
+
+async function revokeSessionById(sessionId: string, reason: HrRevokeReason): Promise<void> {
+  await prisma.hrSession.update({
+    where: { id: sessionId },
+    data: { revokedAt: new Date(), revokedReason: reason },
+  })
+}
+
+/**
+ * Rotates the refresh token in place and mints a fresh access token. Reuse
+ * detection: presenting an already-superseded hash means the token was
+ * captured and replayed, so the session is destroyed rather than rotated —
+ * identical logic to the platform's own `refresh`.
+ */
+export async function refresh(
+  rawToken: string,
+  context: { userAgent?: string; ipAddress?: string },
+): Promise<{ employee: PublicHrEmployee; tokens: HrSessionTokens }> {
+  const tokenHash = hashToken(rawToken)
+
+  const session = await prisma.hrSession.findFirst({
+    where: { OR: [{ refreshTokenHash: tokenHash }, { previousTokenHash: tokenHash }] },
+    select: {
+      id: true,
+      employeeId: true,
+      refreshTokenHash: true,
+      previousTokenHash: true,
+      rotationCount: true,
+      revokedAt: true,
+      absoluteExpiresAt: true,
+      idleExpiresAt: true,
+      employee: { select: { status: true, deletedAt: true } },
+    },
+  })
+
+  if (!session) throw new UnauthorizedError('Invalid refresh token')
+
+  if (session.previousTokenHash === tokenHash) {
+    await revokeSessionById(session.id, 'token_reuse')
+    logger.warn(
+      {
+        sessionId: session.id,
+        employeeId: session.employeeId,
+        rotationCount: session.rotationCount,
+      },
+      'HRMS refresh token reuse detected — session destroyed',
+    )
+    throw new UnauthorizedError(
+      'This session was ended for security reasons. Please sign in again.',
+    )
+  }
+
+  if (session.revokedAt) throw new UnauthorizedError('Session has been signed out')
+
+  const now = new Date()
+  if (session.absoluteExpiresAt <= now) throw new UnauthorizedError('Session expired')
+  if (session.idleExpiresAt <= now)
+    throw new UnauthorizedError('Session timed out through inactivity')
+
+  if (!session.employee || session.employee.deletedAt) {
+    throw new UnauthorizedError('Account no longer exists')
+  }
+  assertUsableStatus(session.employee.status)
+
+  const employee = await loadPublicEmployee(session.employeeId)
+  const { raw, hash } = generateHrRefreshToken()
+
+  const nextIdle = new Date(now.getTime() + HR_SESSION_IDLE_TTL_MS)
+  const idleExpiresAt = nextIdle < session.absoluteExpiresAt ? nextIdle : session.absoluteExpiresAt
+
+  await prisma.hrSession.update({
+    where: { id: session.id },
+    data: {
+      refreshTokenHash: hash,
+      previousTokenHash: session.refreshTokenHash,
+      rotationCount: { increment: 1 },
+      lastUsedAt: now,
+      idleExpiresAt,
+      userAgent: context.userAgent?.slice(0, 512) ?? undefined,
+      ipAddress: context.ipAddress ?? undefined,
+    },
+  })
+
+  const accessToken = signHrAccessToken({
+    employeeId: employee.id,
+    sessionId: session.id,
+    role: employee.role,
+  })
+
+  return {
+    employee,
+    tokens: {
+      accessToken,
+      refreshToken: raw,
+      sessionId: session.id,
+      refreshExpiresAt: idleExpiresAt,
+    },
+  }
+}
+
+export async function logout(rawToken: string | undefined): Promise<void> {
+  if (!rawToken) return
+  const tokenHash = hashToken(rawToken)
+  await prisma.hrSession.updateMany({
+    where: { refreshTokenHash: tokenHash, revokedAt: null },
+    data: { revokedAt: new Date(), revokedReason: 'logout' },
+  })
+}
+
+export async function changePassword(
+  employeeId: string,
+  currentPassword: string,
+  newPassword: string,
+  keepSessionId?: string,
+): Promise<void> {
+  const employee = await prisma.hrEmployee.findUnique({
+    where: { id: employeeId },
+    select: { passwordHash: true },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+
+  const valid = await verifyPassword(employee.passwordHash, currentPassword)
+  if (!valid) throw new UnauthorizedError('Current password is incorrect')
+  if (newPassword.length < 12) {
+    throw new BadRequestError('Password must be at least 12 characters')
+  }
+
+  const passwordHash = await hashPassword(newPassword)
+
+  await prisma.$transaction([
+    prisma.hrEmployee.update({ where: { id: employeeId }, data: { passwordHash } }),
+    prisma.hrSession.updateMany({
+      where: {
+        employeeId,
+        revokedAt: null,
+        ...(keepSessionId ? { id: { not: keepSessionId } } : {}),
+      },
+      data: { revokedAt: new Date(), revokedReason: 'password_changed' },
+    }),
+  ])
+}
+
+export { loadPublicEmployee }

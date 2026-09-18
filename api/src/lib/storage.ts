@@ -181,6 +181,33 @@ export async function createDownloadUrl(storageKey: string, filename?: string): 
   return getSignedUrl(client(), command, { expiresIn: env.UPLOAD_URL_TTL_SECONDS })
 }
 
+/**
+ * Direct server-side write — for bytes this process generated itself
+ * (a rendered PDF, say), where there is no browser client to hand a
+ * presigned URL to. Every other object in this store arrives via
+ * `createUploadUrl`'s presigned PUT; this is the one path that bypasses it,
+ * used only by callers that produce the bytes server-side in the first
+ * place.
+ */
+export async function putObject(
+  storageKey: string,
+  data: Buffer,
+  contentType: string,
+): Promise<void> {
+  if (env.STORAGE_DRIVER === 'local') {
+    await writeLocalObject(storageKey, data)
+    return
+  }
+  await client().send(
+    new PutObjectCommand({
+      Bucket: env.S3_BUCKET!,
+      Key: storageKey,
+      Body: data,
+      ContentType: contentType,
+    }),
+  )
+}
+
 export async function deleteObject(storageKey: string): Promise<void> {
   if (env.STORAGE_DRIVER === 'local') {
     const full = path.resolve(env.LOCAL_STORAGE_DIR, storageKey)

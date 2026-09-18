@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { env } from '@/lib/env'
+import { env, isProduction } from '@/lib/env'
 import { spendRefreshToken } from '@/lib/auth/refresh-core'
+import { spendHrRefreshToken } from '@/lib/hrms/hr-refresh-core'
 import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
 import { authHeaders } from '@/lib/auth/request-context'
 
@@ -41,6 +42,92 @@ const REFRESH_COOKIE = 'c4t_refresh'
 
 /** Signed-in users have no business on these. */
 const GUEST_ONLY = ['/login', '/register', '/forgot-password']
+
+/**
+ * HRMS lives at hrms.crowd4test.com, but as far as the filesystem router is
+ * concerned it is just another route tree, `app/hrms/*`, in this SAME
+ * Next.js app (see the schema's HRMS section for why: one running process,
+ * one deploy pipeline, the whole design system reused directly — but a
+ * fully separate identity domain from everything `/app/*` below does).
+ *
+ * On that hostname, every path is rewritten to live under `/hrms` — the
+ * visible URL never shows the prefix, so a visitor at hrms.crowd4test.com/
+ * sees exactly `app/hrms/page.tsx`, not a redirect to `/hrms`. On every OTHER
+ * hostname, `/hrms/*` 404s outright: the platform's own visitors must never
+ * be able to reach the HR portal at a guessable URL under crowd4test.com.
+ *
+ * Local development gets neither behaviour — `/hrms/*` is reached directly,
+ * unprefixed, with no host check, since there is no real hrms.crowd4test.com
+ * to browse to on a laptop.
+ */
+const HRMS_HOSTNAME = 'hrms.crowd4test.com'
+const HR_ACCESS_COOKIE = 'hrms_access'
+const HR_REFRESH_COOKIE = 'hrms_refresh'
+
+/**
+ * The HRMS counterpart to `refreshIfExpired` below — renews an expired
+ * `hrms_access` cookie before the rewritten request renders. Without this,
+ * every HR session died after 15 idle minutes (the access cookie's
+ * `Max-Age`) even though its refresh token is good for up to 30 days: this
+ * tree's own `hrmsRewrite` returns before the platform's `refreshIfExpired`
+ * ever runs, and no Server Component render can set cookies to do it later.
+ * See that function's own doc comment for the full reasoning — everything
+ * there applies here, scoped to the HR cookie pair.
+ */
+async function hrRefreshIfExpired(
+  request: NextRequest,
+): Promise<ReturnType<typeof authCookieOptions>[]> {
+  const refreshToken = request.cookies.get(HR_REFRESH_COOKIE)?.value
+  if (!refreshToken) return []
+
+  const cookieHeader = request.headers.get('cookie') ?? ''
+  const setCookies = await spendHrRefreshToken(
+    refreshToken,
+    cookieHeader,
+    authHeaders(request.headers),
+  )
+  if (!setCookies || setCookies.length === 0) return []
+
+  const applied: ReturnType<typeof authCookieOptions>[] = []
+  for (const raw of setCookies) {
+    const parsed = parseSetCookie(raw)
+    if (!parsed) continue
+    const options = authCookieOptions(parsed, isProduction)
+    applied.push(options)
+    request.cookies.set(options.name, options.value)
+  }
+  return applied
+}
+
+async function hrmsRewrite(request: NextRequest): Promise<NextResponse | null> {
+  const { pathname } = request.nextUrl
+  const host = request.headers.get('host')?.split(':')[0] ?? ''
+
+  if (host === HRMS_HOSTNAME) {
+    if (pathname.startsWith('/hrms')) return null // already there — a direct link, a refresh
+
+    let refreshed: ReturnType<typeof authCookieOptions>[] = []
+    if (!request.cookies.has(HR_ACCESS_COOKIE) && request.cookies.has(HR_REFRESH_COOKIE)) {
+      refreshed = await hrRefreshIfExpired(request)
+    }
+
+    const url = request.nextUrl.clone()
+    url.pathname = `/hrms${pathname}`
+
+    const requestHeaders = new Headers(request.headers)
+    if (refreshed.length > 0) requestHeaders.set('cookie', request.cookies.toString())
+
+    const response = NextResponse.rewrite(url, { request: { headers: requestHeaders } })
+    for (const options of refreshed) response.cookies.set(options)
+    return response
+  }
+
+  if (isProduction && pathname.startsWith('/hrms')) {
+    return new NextResponse(null, { status: 404 })
+  }
+
+  return null
+}
 
 /**
  * Renews an expired access token so a navigation doesn't sign the user out.
@@ -91,6 +178,12 @@ async function refreshIfExpired(
 }
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
+  // Checked first, and returns immediately either way: HRMS has its own
+  // auth, its own cookies, its own everything below this line does not
+  // apply to. See hrmsRewrite's own comment for the full reasoning.
+  const hrms = await hrmsRewrite(request)
+  if (hrms) return hrms
+
   const { pathname, search } = request.nextUrl
 
   /**

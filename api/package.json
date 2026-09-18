@@ -2,7 +2,7 @@
   "name": "@crowd4test/api",
   "version": "0.1.0",
   "private": true,
-  "description": "Crowd4Test Platform \u2014 Express.js REST API (Milestone 2: Backend Core & Admin Panel)",
+  "description": "Crowd4Test Platform — Express.js REST API (Milestone 2: Backend Core & Admin Panel)",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
@@ -70,6 +70,7 @@
     "mysql2": "^3.24.3",
     "pino": "^9.5.0",
     "pino-http": "^10.3.0",
+    "puppeteer": "^25.11.0",
     "sanitize-html": "^2.17.7",
     "zod": "^3.24.1"
   },
@@ -93,5 +94,8 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.66.0",
     "vitest": "^2.1.8"
+  },
+  "allowScripts": {
+    "puppeteer@25.11.0": true
   }
 }

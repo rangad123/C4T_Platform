@@ -21,6 +21,7 @@ import { paymentAccountsRouter } from '../modules/payment-accounts/payment-accou
 import { testingRouter } from '../modules/testing/testing.routes.js'
 import { reportsRouter } from '../modules/reports/reports.routes.js'
 import { blogRouter } from '../modules/blog/blog.routes.js'
+import { hrmsRouter } from '../modules/hrms/hrms.routes.js'
 
 /**
  * API v1. Every route is mounted under /v1 so a future breaking change can ship
@@ -52,6 +53,13 @@ v1Router.use('/uploads', uploadsRouter)
 v1Router.use('/stats', statsRouter)
 v1Router.use('/blog', blogRouter)
 v1Router.use('/reports', reportsRouter)
+/**
+ * The whole HRMS product — a deliberately separate identity domain (see the
+ * schema's HRMS section and hr-auth.middleware.ts). Mounted here, well
+ * before `testingRouter` below, so it is never accidentally swept under that
+ * router's blanket `authenticate` — see the warning on that line.
+ */
+v1Router.use('/hrms', hrmsRouter)
 /**
  * ⚠ `/leads` is the only router here whose POST is UNAUTHENTICATED — the
  * marketing site's contact form has no session to present. It applies its own

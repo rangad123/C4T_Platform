@@ -101,6 +101,15 @@ const schema = z.object({
   REFRESH_COOKIE_PATH: z.string().startsWith('/').default('/v1/auth'),
 
   /**
+   * Same purpose as REFRESH_COOKIE_PATH, for HRMS's own separate refresh
+   * cookie (hrms_refresh) — see the note there. Default matches this API's
+   * own direct route; set to /api/v1/hrms/auth once nginx proxies
+   * hrms.crowd4test.com through /api/v1/ the same way it does for the
+   * platform's own domain.
+   */
+  HRMS_REFRESH_COOKIE_PATH: z.string().startsWith('/').default('/v1/hrms/auth'),
+
+  /**
    * Google OAuth. All three must be set together or Google sign-in stays off —
    * `/v1/auth/google` returns 503 rather than redirecting to a broken consent
    * screen. Credentials come from a Web application OAuth client in the Google
@@ -145,6 +154,39 @@ const schema = z.object({
         return false
       }
     }, 'PAYMENT_ENCRYPTION_KEY must be base64 and decode to exactly 32 bytes'),
+
+  /**
+   * AES-256-GCM key for HrEmployee.secureFinancialDetails (PAN, bank account
+   * number, account holder name). Same format and generation command as
+   * PAYMENT_ENCRYPTION_KEY, deliberately a DIFFERENT key — HRMS is a fully
+   * separate identity domain from the testing platform, so its encrypted
+   * data must not be recoverable with the platform's key. See
+   * lib/hrms/hr-encryption.ts.
+   */
+  HRMS_ENCRYPTION_KEY: z
+    .string()
+    .min(1, 'HRMS_ENCRYPTION_KEY is required (see .env.example for how to generate one)')
+    .refine((v) => {
+      try {
+        return Buffer.from(v, 'base64').length === 32
+      } catch {
+        return false
+      }
+    }, 'HRMS_ENCRYPTION_KEY must be base64 and decode to exactly 32 bytes'),
+
+  /**
+   * HS256 secret for HRMS access/session tokens — NOT the platform's RS256
+   * keypair. The platform uses RS256 so the Next.js frontend can hold only
+   * the public key (see lib/keys.ts); HRMS tokens are never verified in
+   * Next.js at all (proxy.ts does a cookie-presence check only, exactly like
+   * the platform's own), so there is no "frontend could forge a token" risk
+   * to design around, and a single shared secret is proportionate for an
+   * internal-only tool. Generate with:
+   *   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+   */
+  HRMS_JWT_SECRET: z
+    .string()
+    .min(32, 'HRMS_JWT_SECRET is required and should be a long random string (see .env.example)'),
 
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   LOCAL_STORAGE_DIR: z.string().default('./.uploads'),

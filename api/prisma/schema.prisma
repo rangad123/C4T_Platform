@@ -1417,8 +1417,8 @@ model ManagerAssignment {
 /// §2.3 — Testers log bugs with description, severity, steps to reproduce and
 /// supporting attachments. §2.4 — Customers view bugs against their projects.
 model Bug {
-  id       String  @id @default(cuid())
-  legacyId String? @unique @map("legacy_id")
+  id              String  @id @default(cuid())
+  legacyId        String? @unique @map("legacy_id")
   /// The reference the OLD platform showed for this bug — "CR_CONF001",
   /// "DE_SAVA028". Deliberately not unique: the legacy column holds 13,993
   /// distinct values across 21,768 bugs, so it cannot carry a unique index and
@@ -1428,8 +1428,8 @@ model Bug {
   legacyReference String? @map("legacy_reference")
   reference       String  @unique // e.g. "BUG-2026-00417"
   projectId       String  @map("project_id")
-  buildId      String  @map("build_id")
-  reportedById String  @map("reported_by_id")
+  buildId         String  @map("build_id")
+  reportedById    String  @map("reported_by_id")
 
   title            String
   description      String
@@ -2505,4 +2505,493 @@ model MigrationError {
   @@index([runId, legacyTable])
   @@index([code])
   @@map("migration_errors")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HRMS — Crowd4Test's own internal staff system, served at hrms.crowd4test.com
+//
+// DELIBERATELY DISCONNECTED FROM EVERYTHING ABOVE THIS LINE. An HR employee
+// is not a platform User — no shared row, no shared Role value, no shared
+// session cookie, no foreign key back to User/Organisation/Project anywhere
+// below. This is a second product on the same box and the same Postgres
+// instance, not a feature of the testing platform. Every model here is
+// prefixed `Hr` so that reads as structural, not just a naming habit.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum HrRole {
+  ADMIN
+  ACCOUNT_MANAGER
+  EMPLOYEE
+}
+
+enum HrEmployeeStatus {
+  ACTIVE
+  RESIGNED
+  TERMINATED
+}
+
+enum HrGender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum HrTaxRegime {
+  OLD
+  NEW
+}
+
+enum HrLeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum HrFileScope {
+  PROFILE_PICTURE
+  TEMPLATE
+  PAYSLIP
+}
+
+/// One row per member of staff. `role` gates the sidebar (ADMIN sees the
+/// Admin Portal; ACCOUNT_MANAGER and EMPLOYEE both see the Employee Portal,
+/// the former also sees their reports' timesheets/leaves) — it has nothing to
+/// do with the platform's own Role enum two thousand lines above.
+model HrEmployee {
+  id           String @id @default(cuid())
+  /// Assigned once on creation, never editable — "EMP-0001".
+  employeeCode String @unique @map("employee_code")
+
+  firstName    String @map("first_name")
+  lastName     String @map("last_name")
+  email        String @unique
+  /// argon2id via lib/password.ts — the same hashing function the platform
+  /// uses, imported directly. Sharing the ALGORITHM is not sharing identity;
+  /// there is no row here a platform login could ever touch.
+  passwordHash String @map("password_hash")
+
+  dateOfBirth          DateTime? @map("date_of_birth") @db.Date
+  gender               HrGender?
+  phone                String?
+  address              String?
+  profilePictureFileId String?   @unique @map("profile_picture_file_id")
+
+  designationId     String?          @map("designation_id")
+  role              HrRole           @default(EMPLOYEE)
+  /// Free text on purpose — "Full-time" / "Contract" / "Intern" is a much
+  /// shorter and more volatile list than Designation; a catalog table would
+  /// be one enum-shaped table for three values that almost never change.
+  accountType       String?          @map("account_type")
+  /// The employee's own manager — another HrEmployee, not a separate table.
+  /// The "Account Manager" field on Add Employee IS this relation.
+  reportsToId       String?          @map("reports_to_id")
+  joiningDate       DateTime         @map("joining_date") @db.Date
+  relievingDate     DateTime?        @map("relieving_date") @db.Date
+  timesheetRequired Boolean          @default(true) @map("timesheet_required")
+  status            HrEmployeeStatus @default(ACTIVE)
+
+  /// Per-account lockout, same defense-in-depth as the platform's own User —
+  /// the IP-keyed rate limiter (hrAuthIpLimiter) stops one host hammering
+  /// many accounts; this stops many hosts hammering ONE account, which a
+  /// botnet defeats the rate limiter for. On financial/PII data, worth both.
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
+
+  /// PAN, bank account number, account holder name — AES-256-GCM via
+  /// lib/hrms/hr-encryption.ts, same envelope shape as PaymentAccount's
+  /// secureDetails, own key (HRMS_ENCRYPTION_KEY). JSON of
+  /// { panNumber, accountNumber, accountName, ifscCode }.
+  secureFinancialDetails Bytes?      @map("secure_financial_details")
+  /// Not sensitive alone, same reasoning PaymentAccount already documents.
+  bankName               String?     @map("bank_name")
+  branchName             String?     @map("branch_name")
+  taxRegime              HrTaxRegime @default(NEW) @map("tax_regime")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  designation    HrDesignation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  reportsTo      HrEmployee?    @relation("HrEmployeeManager", fields: [reportsToId], references: [id], onDelete: SetNull)
+  reports        HrEmployee[]   @relation("HrEmployeeManager")
+  profilePicture HrFile?        @relation("HrEmployeeProfilePicture", fields: [profilePictureFileId], references: [id], onDelete: SetNull)
+
+  sessions               HrSession[]
+  salaryStructures       HrSalaryStructure[]
+  oldSalaries            HrOldSalary[]
+  monthlyIncentives      HrMonthlyIncentive[]
+  investmentDeclarations HrInvestmentDeclaration[]
+  monthlyTaxDeductions   HrMonthlyTaxDeduction[]
+  payslips               HrPayslip[]
+  timesheetEntries       HrTimesheetEntry[]
+  leaveBalances          HrLeaveBalance[]
+  leaveRequestsMade      HrLeaveRequest[]          @relation("HrLeaveRequester")
+  leaveRequestsDecided   HrLeaveRequest[]          @relation("HrLeaveDecider")
+  uploadedTemplates      HrTemplate[]
+  uploadedFiles          HrFile[]                  @relation("HrFileUploader")
+  verifiedDeclarations   HrInvestmentDeclaration[] @relation("HrDeclarationVerifier")
+  auditLogs              HrAuditLog[]
+
+  @@index([status])
+  @@index([reportsToId])
+  @@map("hr_employees")
+}
+
+/// Rotation + reuse-detection, the same shape as the platform's own Session
+/// model — structurally mirrored, not shared: this points at HrEmployee, the
+/// platform's points at User, and the two are never joined.
+model HrSession {
+  id         String @id @default(cuid())
+  employeeId String @map("employee_id")
+
+  refreshTokenHash  String  @unique @map("refresh_token_hash")
+  previousTokenHash String? @unique @map("previous_token_hash")
+  rotationCount     Int     @default(0) @map("rotation_count")
+
+  userAgent String? @map("user_agent")
+  ipAddress String? @map("ip_address")
+
+  createdAt         DateTime  @default(now()) @map("created_at")
+  lastUsedAt        DateTime  @default(now()) @map("last_used_at")
+  absoluteExpiresAt DateTime  @map("absolute_expires_at")
+  idleExpiresAt     DateTime  @map("idle_expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+  revokedReason     String?   @map("revoked_reason")
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("hr_sessions")
+}
+
+/// Admin-curated, isActive soft-retire — the same shape as the platform's
+/// own Catalog rows, but a dedicated table: an HR request carries no platform
+/// session, so it can never reach `GET /v1/catalog` to read the platform's.
+model HrDesignation {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  isActive Boolean @default(true) @map("is_active")
+
+  employees HrEmployee[]
+
+  @@map("hr_designations")
+}
+
+model HrLeaveType {
+  id                String  @id @default(cuid())
+  name              String  @unique
+  isActive          Boolean @default(true) @map("is_active")
+  /// Days credited per financial year when a balance row is first opened.
+  defaultAnnualDays Int     @default(0) @map("default_annual_days")
+
+  balances HrLeaveBalance[]
+  requests HrLeaveRequest[]
+
+  @@map("hr_leave_types")
+}
+
+model HrIncentiveType {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  isActive Boolean @default(true) @map("is_active")
+
+  monthlyIncentives HrMonthlyIncentive[]
+
+  @@map("hr_incentive_types")
+}
+
+/// Chapter VIA section catalog — 80C, 80CCD, 80D, 80EE, 80EEA, 80EEB, 80E,
+/// 24, 10(13A) and whatever else finance adds, without a code change.
+model HrInvestmentSection {
+  id       String  @id @default(cuid())
+  /// "80C", "24", "10(13A)" — the section code as everyone actually says it.
+  code     String  @unique
+  name     String
+  isActive Boolean @default(true) @map("is_active")
+
+  declarations HrInvestmentDeclaration[]
+
+  @@map("hr_investment_sections")
+}
+
+/// One row per employee per financial year. Fixed and variable TOTALS are
+/// never accepted from a client — see hr-salary.service.ts — they are
+/// recomputed from the components on every write and stored purely so a list
+/// query is not five sums deep.
+model HrSalaryStructure {
+  id            String @id @default(cuid())
+  employeeId    String @map("employee_id")
+  /// "2026-2027".
+  financialYear String @map("financial_year")
+
+  basic            Decimal @default(0) @db.Decimal(12, 2)
+  hra              Decimal @default(0) @db.Decimal(12, 2)
+  specialAllowance Decimal @default(0) @map("special_allowance") @db.Decimal(12, 2)
+  totalFixedAnnual Decimal @default(0) @map("total_fixed_annual") @db.Decimal(12, 2)
+
+  performanceIncentive Decimal @default(0) @map("performance_incentive") @db.Decimal(12, 2)
+  projectIncentive     Decimal @default(0) @map("project_incentive") @db.Decimal(12, 2)
+  extraHoursIncentive  Decimal @default(0) @map("extra_hours_incentive") @db.Decimal(12, 2)
+  totalVariableAnnual  Decimal @default(0) @map("total_variable_annual") @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, financialYear])
+  @@map("hr_salary_structures")
+}
+
+/// CTC history — "Old Salaries" on the Salary Details page.
+model HrOldSalary {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  ctc        Decimal  @db.Decimal(12, 2)
+  fromDate   DateTime @map("from_date") @db.Date
+  toDate     DateTime @map("to_date") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("hr_old_salaries")
+}
+
+model HrMonthlyIncentive {
+  id              String  @id @default(cuid())
+  employeeId      String  @map("employee_id")
+  financialYear   String  @map("financial_year")
+  /// 1-12, calendar month — see lib/hrms/financial-year.ts for FY<->month math.
+  month           Int
+  incentiveTypeId String  @map("incentive_type_id")
+  amount          Decimal @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employee      HrEmployee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  incentiveType HrIncentiveType @relation(fields: [incentiveTypeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, financialYear])
+  @@map("hr_monthly_incentives")
+}
+
+/// Admin-editable, versioned by financial year and regime — the tax
+/// computation reads this, it never hardcodes a slab boundary or a rate.
+/// `slabs` is JSON: [{ "upTo": 300000, "rate": 0 }, { "upTo": 600000, "rate": 5 }, …],
+/// the last entry's `upTo` is null for "and above".
+model HrTaxSlab {
+  id                 String      @id @default(cuid())
+  financialYear      String      @map("financial_year")
+  regime             HrTaxRegime
+  slabs              Json
+  standardDeduction  Decimal     @default(0) @map("standard_deduction") @db.Decimal(12, 2)
+  cessRatePercent    Decimal     @default(4) @map("cess_rate_percent") @db.Decimal(5, 2)
+  rebate87ALimit     Decimal     @default(0) @map("rebate_87a_limit") @db.Decimal(12, 2)
+  rebate87AMaxAmount Decimal     @default(0) @map("rebate_87a_max_amount") @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([financialYear, regime])
+  @@map("hr_tax_slabs")
+}
+
+model HrInvestmentDeclaration {
+  id             String    @id @default(cuid())
+  employeeId     String    @map("employee_id")
+  financialYear  String    @map("financial_year")
+  sectionId      String    @map("section_id")
+  description    String?
+  declaredAmount Decimal   @default(0) @map("declared_amount") @db.Decimal(12, 2)
+  verifiedAmount Decimal?  @map("verified_amount") @db.Decimal(12, 2)
+  verifiedById   String?   @map("verified_by_id")
+  verifiedAt     DateTime? @map("verified_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  employee   HrEmployee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  section    HrInvestmentSection @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  verifiedBy HrEmployee?         @relation("HrDeclarationVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, financialYear])
+  @@map("hr_investment_declarations")
+}
+
+model HrMonthlyTaxDeduction {
+  id            String  @id @default(cuid())
+  employeeId    String  @map("employee_id")
+  financialYear String  @map("financial_year")
+  month         Int
+  amount        Decimal @default(0) @db.Decimal(12, 2)
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, financialYear, month])
+  @@map("hr_monthly_tax_deductions")
+}
+
+/// One row per employee per FY+month once generated. `snapshot` freezes the
+/// full computation (salary + tax lines) as JSON at generation time, so
+/// editing salary/tax data afterward never silently rewrites a payslip
+/// someone already downloaded.
+model HrPayslip {
+  id            String   @id @default(cuid())
+  employeeId    String   @map("employee_id")
+  financialYear String   @map("financial_year")
+  month         Int
+  snapshot      Json
+  fileId        String?  @unique @map("file_id")
+  generatedById String   @map("generated_by_id")
+  generatedAt   DateTime @default(now()) @map("generated_at")
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  file     HrFile?    @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, financialYear, month])
+  @@map("hr_payslips")
+}
+
+/// Working/paid days are DERIVED (hr-timesheet.service.ts, from HrHoliday +
+/// approved HrLeaveRequest + the calendar) — never a field here a client can
+/// set directly, which is what produced "NaN" in the legacy system.
+model HrTimesheetEntry {
+  id            String   @id @default(cuid())
+  employeeId    String   @map("employee_id")
+  financialYear String   @map("financial_year")
+  month         Int
+  date          DateTime @db.Date
+  description   String?
+  hours         Decimal  @default(0) @db.Decimal(4, 2)
+  extraHours    Decimal  @default(0) @map("extra_hours") @db.Decimal(4, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([employeeId, financialYear, month])
+  @@map("hr_timesheet_entries")
+}
+
+model HrLeaveBalance {
+  id            String  @id @default(cuid())
+  employeeId    String  @map("employee_id")
+  leaveTypeId   String  @map("leave_type_id")
+  financialYear String  @map("financial_year")
+  allocated     Decimal @default(0) @db.Decimal(5, 1)
+  /// Not a stored running total — computed from approved HrLeaveRequest rows
+  /// at read time (hr-leaves.service.ts) so it can never drift from reality.
+
+  employee  HrEmployee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType HrLeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, leaveTypeId, financialYear])
+  @@map("hr_leave_balances")
+}
+
+model HrLeaveRequest {
+  id          String               @id @default(cuid())
+  employeeId  String               @map("employee_id")
+  leaveTypeId String               @map("leave_type_id")
+  startDate   DateTime             @map("start_date") @db.Date
+  endDate     DateTime             @map("end_date") @db.Date
+  /// Computed from the date range minus HrHoliday rows at creation time —
+  /// never typed in directly.
+  days        Decimal              @db.Decimal(4, 1)
+  reason      String?
+  status      HrLeaveRequestStatus @default(PENDING)
+  decidedById String?              @map("decided_by_id")
+  decidedAt   DateTime?            @map("decided_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  employee  HrEmployee  @relation("HrLeaveRequester", fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType HrLeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  decidedBy HrEmployee? @relation("HrLeaveDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, status])
+  @@map("hr_leave_requests")
+}
+
+/// Duplicate-safe at the database level, not just in application code.
+model HrHoliday {
+  id   String   @id @default(cuid())
+  year Int
+  date DateTime @db.Date
+  name String
+
+  @@unique([year, date])
+  @@map("hr_holidays")
+}
+
+model HrTemplate {
+  id           String  @id @default(cuid())
+  name         String
+  description  String?
+  fileId       String  @unique @map("file_id")
+  uploadedById String  @map("uploaded_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  file       HrFile     @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  uploadedBy HrEmployee @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@map("hr_templates")
+}
+
+/// Self-contained upload record — structurally modelled on the platform's
+/// FileObject (presigned S3, scope-gated) but its OWN table: FileObject's
+/// authorization reads a platform User session, which an HR request never
+/// has. storage.ts's presign helpers are reused directly; this model and its
+/// own authorization are not.
+model HrFile {
+  id           String      @id @default(cuid())
+  scope        HrFileScope
+  storageKey   String      @unique @map("storage_key")
+  driver       String      @default("s3")
+  originalName String      @map("original_name")
+  mimeType     String      @map("mime_type")
+  sizeBytes    Int         @map("size_bytes")
+  uploadedById String      @map("uploaded_by_id")
+  isComplete   Boolean     @default(false) @map("is_complete")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  uploadedBy HrEmployee @relation("HrFileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  profilePictureOf HrEmployee? @relation("HrEmployeeProfilePicture")
+  template         HrTemplate?
+  payslip          HrPayslip?
+
+  @@index([scope])
+  @@map("hr_files")
+}
+
+/// Mirrors the platform's own AuditLog, keyed on HrEmployee instead of User.
+/// Not reused directly — recordAudit() reads req.user, which an HR request
+/// never has, and this is exactly the trail that matters most on a system
+/// holding salary and PAN data.
+model HrAuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?  @map("actor_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  before     Json?
+  after      Json?
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  actor HrEmployee? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("hr_audit_logs")
 }
