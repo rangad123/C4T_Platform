@@ -1,6 +1,6 @@
 'use server'
 
-import { redirect, RedirectType } from 'next/navigation'
+import { hrExternalRedirect } from './hr-external-redirect'
 import { env } from '@/lib/env'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { currentAuthHeaders } from '@/lib/auth/request-context'
@@ -12,11 +12,19 @@ import { currentAuthHeaders } from '@/lib/auth/request-context'
  *
  * Neither action reports whether an address matched an employee — the API
  * answers 204 either way, and so does this.
+ *
+ * Every redirect here targets `/forgot-password`, `/reset-password` or
+ * `/login` — all three exist as separate, real pages on the main marketing
+ * site too, so every one of them goes through `hrExternalRedirect` rather
+ * than Next's plain relative redirect. See that helper's own comment for why:
+ * a relative redirect from a Server Action is resolved by the CLIENT router,
+ * which has no idea `hrms.crowd4test.com` rewrites these paths, and lands on
+ * the marketing site's own page of the same name instead.
  */
 
 export async function hrForgotPasswordAction(formData: FormData): Promise<void> {
   const email = formTrimmed(formData, 'email')
-  if (!email) redirect('/forgot-password?error=missing', RedirectType.replace)
+  if (!email) hrExternalRedirect('/forgot-password?error=missing')
 
   try {
     const response = await fetch(new URL('/v1/hrms/auth/forgot-password', env.API_ORIGIN), {
@@ -29,13 +37,13 @@ export async function hrForgotPasswordAction(formData: FormData): Promise<void> 
     // inbox" when the request was rate-limited leaves someone waiting for mail
     // that was never sent.
     if (response.status === 429) {
-      redirect('/forgot-password?error=rate_limited', RedirectType.replace)
+      hrExternalRedirect('/forgot-password?error=rate_limited')
     }
   } catch {
-    redirect('/forgot-password?error=network', RedirectType.replace)
+    hrExternalRedirect('/forgot-password?error=network')
   }
 
-  redirect('/forgot-password?sent=1', RedirectType.replace)
+  hrExternalRedirect('/forgot-password?sent=1')
 }
 
 export async function hrResetPasswordAction(formData: FormData): Promise<void> {
@@ -48,9 +56,9 @@ export async function hrResetPasswordAction(formData: FormData): Promise<void> {
   const back = (error: string) =>
     `/reset-password?token=${encodeURIComponent(token)}&error=${error}${invite}`
 
-  if (!token) redirect('/reset-password?error=missing_token', RedirectType.replace)
-  if (!password) redirect(back('missing'), RedirectType.replace)
-  if (password !== confirmPassword) redirect(back('mismatch'), RedirectType.replace)
+  if (!token) hrExternalRedirect('/reset-password?error=missing_token')
+  if (!password) hrExternalRedirect(back('missing'))
+  if (password !== confirmPassword) hrExternalRedirect(back('mismatch'))
 
   let response: Response
   try {
@@ -61,14 +69,14 @@ export async function hrResetPasswordAction(formData: FormData): Promise<void> {
       cache: 'no-store',
     })
   } catch {
-    redirect(back('network'), RedirectType.replace)
+    hrExternalRedirect(back('network'))
   }
 
   if (!response.ok) {
     // 400 covers an expired, already-used or unknown link — all of which mean
     // "ask for a new one", so they share a message.
-    redirect(back(response.status === 429 ? 'rate_limited' : 'invalid'), RedirectType.replace)
+    hrExternalRedirect(back(response.status === 429 ? 'rate_limited' : 'invalid'))
   }
 
-  redirect('/login?notice=password_reset', RedirectType.replace)
+  hrExternalRedirect('/login?notice=password_reset')
 }

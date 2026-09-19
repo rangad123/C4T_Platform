@@ -1,6 +1,6 @@
 import 'server-only'
 import { cache } from 'react'
-import { redirect } from 'next/navigation'
+import { hrExternalRedirect } from './hr-external-redirect'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { HR_ROLE_HOME, type HrRole, type PublicHrEmployee } from './hr-types'
@@ -42,8 +42,15 @@ export async function requireHrEmployee(returnTo?: string): Promise<PublicHrEmpl
   if (!read.ok) throw read.error
 
   if (!read.employee) {
-    const target = returnTo ? `/login?next=${encodeURIComponent(returnTo)}` : '/login'
-    redirect(target)
+    /*
+      These run while a page renders, so Next answers them with a real HTTP
+      redirect and the browser's follow-up request passes through the host
+      rewrite correctly — unlike the Server Action redirects this helper was
+      written for. Routed through it anyway so that every HRMS redirect to a
+      browser-facing path is built the same way, and so this resolves locally
+      too, where there is no hrms hostname to rewrite from.
+    */
+    hrExternalRedirect(returnTo ? `/login?next=${encodeURIComponent(returnTo)}` : '/login')
   }
   return read.employee
 }
@@ -52,7 +59,7 @@ export async function requireHrEmployee(returnTo?: string): Promise<PublicHrEmpl
 export async function requireHrRole(roles: HrRole[], returnTo?: string): Promise<PublicHrEmployee> {
   const employee = await requireHrEmployee(returnTo)
   if (!roles.includes(employee.role)) {
-    redirect(HR_ROLE_HOME[employee.role])
+    hrExternalRedirect(HR_ROLE_HOME[employee.role])
   }
   return employee
 }

@@ -1,7 +1,7 @@
 'use server'
 
 import { cookies } from 'next/headers'
-import { redirect, RedirectType } from 'next/navigation'
+import { hrExternalRedirect } from './hr-external-redirect'
 import { env } from '@/lib/env'
 import { safeNext } from '@/lib/safe-redirect'
 import { formString, formTrimmed } from '@/lib/form-data'
@@ -27,8 +27,14 @@ import { HR_ROLE_HOME, type PublicHrEmployee } from './hr-types'
  * which apply here.
  */
 
+/**
+ * `/login` exists at HRMS's own address AND, separately, as the marketing
+ * site's own top-level page — see `hrExternalRedirect`'s own comment for why
+ * that collision means every redirect back to it must force a real browser
+ * navigation rather than let the client router resolve it.
+ */
 function hrAuthRedirect(href: string): never {
-  redirect(href, RedirectType.replace)
+  hrExternalRedirect(href)
 }
 
 export async function hrLoginAction(formData: FormData): Promise<void> {
@@ -83,8 +89,16 @@ export async function hrLoginAction(formData: FormData): Promise<void> {
   // any type error, since both shapes satisfy an under-specified cast.
   const body = (await response.json()) as { data?: { employee?: PublicHrEmployee } }
   const role = body?.data?.employee?.role
-  const home = role ? HR_ROLE_HOME[role] : '/login'
-  redirect(safeNext(next) ?? home)
+  const target = safeNext(next) ?? (role ? HR_ROLE_HOME[role] : null)
+  /*
+    A full browser navigation rather than a client-side one, and not only for
+    consistency with the failure paths above: the session cookies were just
+    set on this response, and a fresh document is the one thing guaranteed to
+    pick them up without carrying any pre-sign-in router state across the
+    boundary. `/login` is the fallback when a response that otherwise looked
+    successful carried no role.
+  */
+  hrExternalRedirect(target ?? '/login')
 }
 
 export async function hrLogoutAction(): Promise<void> {
@@ -109,7 +123,7 @@ export async function hrLogoutAction(): Promise<void> {
 
   cookieStore.delete('hrms_access')
   cookieStore.delete('hrms_refresh')
-  redirect('/login')
+  hrExternalRedirect('/login')
 }
 
 /**
