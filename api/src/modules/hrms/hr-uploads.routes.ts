@@ -91,21 +91,39 @@ hrUploadsRouter.post(
  * reasoning as the platform's AVATAR: a profile picture renders unscoped in
  * the Employees list, so gating it per-viewer breaks that list for no
  * confidentiality gain, and a Template is an internal document, not personal
- * data. PAYSLIP is the one scope that IS personal: only an ADMIN or the
- * payslip's own employee may fetch it.
+ * data.
+ *
+ * PAYSLIP and EMPLOYEE_DOCUMENT are personal: only an ADMIN or the person the
+ * file belongs to may fetch one. Stated as an allow-list of open scopes rather
+ * than "everything except PAYSLIP", which is how it read before — that shape
+ * meant a scope added later was readable by every colleague until somebody
+ * remembered to come back here, and the first scope added after it was a CV.
  */
+const OPEN_SCOPES: readonly HrFileScope[] = [HrFileScope.PROFILE_PICTURE, HrFileScope.TEMPLATE]
+
 async function assertCanDownload(
   employee: Express.AuthenticatedHrEmployee,
   file: { id: string; scope: HrFileScope },
 ): Promise<void> {
-  if (file.scope !== HrFileScope.PAYSLIP) return
+  if (OPEN_SCOPES.includes(file.scope)) return
   if (employee.role === HrRole.ADMIN) return
 
-  const payslip = await prisma.hrPayslip.findFirst({
-    where: { fileId: file.id },
-    select: { employeeId: true },
-  })
-  if (payslip?.employeeId === employee.id) return
+  const ownerId =
+    file.scope === HrFileScope.PAYSLIP
+      ? (
+          await prisma.hrPayslip.findFirst({
+            where: { fileId: file.id },
+            select: { employeeId: true },
+          })
+        )?.employeeId
+      : (
+          await prisma.hrEmployeeDocument.findFirst({
+            where: { fileId: file.id },
+            select: { employeeId: true },
+          })
+        )?.employeeId
+
+  if (ownerId === employee.id) return
 
   throw new ForbiddenError('You do not have access to this file')
 }

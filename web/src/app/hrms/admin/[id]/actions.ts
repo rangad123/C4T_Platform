@@ -331,3 +331,50 @@ export async function revealFinancialDetailsAction(
     return { ok: false, message: 'Could not reveal these details. Try again.' }
   }
 }
+
+// ─── Documents ───────────────────────────────────────────────────────────────
+
+function documentsPath(id: string, message?: string): string {
+  const base = `${BASE}/${id}?section=documents`
+  return message ? `${base}&docError=${encodeURIComponent(message)}` : base
+}
+
+/**
+ * Attaches an already-uploaded file to the employee as a document.
+ *
+ * `kind` is bound by the page rather than carried in the FormData because
+ * `SingleFileUpload` decides what that FormData contains — it sends the one
+ * `fileId` it got back and nothing else. Binding is how the caller adds
+ * context without every upload site having to fork the component.
+ *
+ * The 400 the API returns at the ten-document cap is a real answer, not a
+ * fault, so it is carried back to the page as text instead of thrown.
+ */
+export async function addEmployeeDocument(
+  id: string,
+  kind: string,
+  formData: FormData,
+): Promise<void> {
+  await requireHrRole(['ADMIN'])
+  const fileId = formData.get('fileId')
+  if (typeof fileId !== 'string' || !fileId) return
+  try {
+    await hrActionFetch(`hrms/employees/${id}/documents`, {
+      method: 'POST',
+      body: { kind, fileId },
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      redirect(documentsPath(id, error.message))
+    }
+    throw error
+  }
+  revalidateHrms(`${BASE}/${id}`)
+}
+
+export async function removeEmployeeDocument(id: string, documentId: string): Promise<void> {
+  await requireHrRole(['ADMIN'])
+  await hrActionFetch(`hrms/employees/${id}/documents/${documentId}`, { method: 'DELETE' })
+  revalidateHrms(`${BASE}/${id}`)
+  redirect(documentsPath(id))
+}

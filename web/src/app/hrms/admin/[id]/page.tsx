@@ -29,6 +29,7 @@ import { InvestmentsTab } from './InvestmentsTab'
 import { PayslipTab } from './PayslipTab'
 import { LeavesTab } from './LeavesTab'
 import { TimesheetTab } from './TimesheetTab'
+import { DocumentsTab } from './DocumentsTab'
 import {
   updatePersonalDetails,
   updateEmploymentDetails,
@@ -47,6 +48,7 @@ const SECTIONS = [
   { value: 'payslip', label: 'Payslip', icon: 'credit-card' },
   { value: 'timesheet', label: 'Timesheet', icon: 'clock' },
   { value: 'leaves', label: 'Leaves', icon: 'plane' },
+  { value: 'documents', label: 'Documents', icon: 'file-text' },
 ] as const
 
 const GENDERS = [
@@ -145,6 +147,8 @@ export default async function HrAdminEmployeeDetailPage({
     fy?: string
     verify?: string
     month?: string
+    docKind?: string
+    docError?: string
   }>
 }) {
   await requireHrRole(['ADMIN'])
@@ -365,6 +369,13 @@ export default async function HrAdminEmployeeDetailPage({
         />
       ) : section === 'leaves' ? (
         <LeavesTab employeeId={employee.id} detailPath={detailPath} financialYear={financialYear} />
+      ) : section === 'documents' ? (
+        <DocumentsTab
+          employeeId={employee.id}
+          detailPath={detailPath}
+          kind={sp.docKind}
+          error={sp.docError}
+        />
       ) : (
         <EmptyState
           icon={SECTIONS.find((s) => s.value === section)?.icon}

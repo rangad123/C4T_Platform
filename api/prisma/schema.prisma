@@ -2552,6 +2552,7 @@ enum HrFileScope {
   PROFILE_PICTURE
   TEMPLATE
   PAYSLIP
+  EMPLOYEE_DOCUMENT
 }
 
 /// One row per member of staff. `role` gates the sidebar (ADMIN sees the
@@ -2636,6 +2637,8 @@ model HrEmployee {
   leaveRequestsMade      HrLeaveRequest[]          @relation("HrLeaveRequester")
   leaveRequestsDecided   HrLeaveRequest[]          @relation("HrLeaveDecider")
   uploadedTemplates      HrTemplate[]
+  documents              HrEmployeeDocument[]      @relation("HrEmployeeDocuments")
+  uploadedDocuments      HrEmployeeDocument[]      @relation("HrDocumentUploader")
   uploadedFiles          HrFile[]                  @relation("HrFileUploader")
   verifiedDeclarations   HrInvestmentDeclaration[] @relation("HrDeclarationVerifier")
   auditLogs              HrAuditLog[]
@@ -2990,6 +2993,30 @@ model HrHoliday {
   @@map("hr_holidays")
 }
 
+/// A document held against one employee — a CV, an offer letter, an increment
+/// letter. The old HR system had a single "Upload CV" field on the employee
+/// record; this is the same idea with room for the rest of a personnel file.
+///
+/// `kind` is free text rather than an enum on purpose: the list of things HR
+/// files against a person is open-ended and differs per company, and a new
+/// kind should not need a migration. The screen offers the common ones.
+model HrEmployeeDocument {
+  id           String @id @default(cuid())
+  employeeId   String @map("employee_id")
+  kind         String
+  fileId       String @unique @map("file_id")
+  uploadedById String @map("uploaded_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employee   HrEmployee @relation("HrEmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
+  file       HrFile     @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  uploadedBy HrEmployee @relation("HrDocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+  @@map("hr_employee_documents")
+}
+
 model HrTemplate {
   id           String  @id @default(cuid())
   name         String
@@ -3024,9 +3051,10 @@ model HrFile {
 
   uploadedBy HrEmployee @relation("HrFileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
 
-  profilePictureOf HrEmployee? @relation("HrEmployeeProfilePicture")
+  profilePictureOf HrEmployee?         @relation("HrEmployeeProfilePicture")
   template         HrTemplate?
   payslip          HrPayslip?
+  employeeDocument HrEmployeeDocument?
 
   @@index([scope])
   @@map("hr_files")

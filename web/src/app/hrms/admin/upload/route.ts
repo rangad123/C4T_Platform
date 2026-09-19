@@ -18,11 +18,18 @@ export const runtime = 'nodejs'
  * presign endpoint directly.
  */
 
-const SCOPES = { 'profile-picture': 'PROFILE_PICTURE', template: 'TEMPLATE' } as const
+const SCOPES = {
+  'profile-picture': 'PROFILE_PICTURE',
+  template: 'TEMPLATE',
+  document: 'EMPLOYEE_DOCUMENT',
+} as const
 
 const MAX_BYTES: Record<keyof typeof SCOPES, number> = {
   'profile-picture': 5_242_880, // 5MB — a profile picture, not a document.
   template: 52_428_800, // 50MB — matches the platform's own UPLOAD_MAX_BYTES default.
+  // A CV or offer letter, not a video. Ten of these per employee is the cap,
+  // so the ceiling is per-file rather than per-person.
+  document: 20_971_520, // 20MB
 }
 
 const ALLOWED: Record<keyof typeof SCOPES, readonly string[]> = {
@@ -34,11 +41,19 @@ const ALLOWED: Record<keyof typeof SCOPES, readonly string[]> = {
     'application/vnd.ms-powerpoint',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   ],
+  document: [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'image/png',
+    'image/jpeg',
+  ],
 }
 
 const MIME_ERROR: Record<keyof typeof SCOPES, string> = {
   'profile-picture': 'Use a PNG, JPEG or WebP image.',
   template: 'Use a PDF, Word or PowerPoint file.',
+  document: 'Use a PDF, Word document or an image.',
 }
 
 export async function POST(request: Request): Promise<Response> {
