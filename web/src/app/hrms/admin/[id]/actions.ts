@@ -1,7 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
+import { revalidateHrms } from '@/lib/hrms/revalidate'
 import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
 import { ApiError } from '@/lib/api/types'
@@ -35,7 +35,7 @@ export async function updatePersonalDetails(id: string, formData: FormData): Pro
     phone: formTrimmed(formData, 'phone') || undefined,
     address: formTrimmed(formData, 'address') || undefined,
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(detailPath(id))
 }
 
@@ -49,7 +49,7 @@ export async function updateEmploymentDetails(id: string, formData: FormData): P
     joiningDate: formString(formData, 'joiningDate') || undefined,
     timesheetRequired: formData.get('timesheetRequired') != null,
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(detailPath(id))
 }
 
@@ -71,7 +71,7 @@ export async function updateFinancialDetails(id: string, formData: FormData): Pr
     bankName: formTrimmed(formData, 'bankName') || undefined,
     branchName: formTrimmed(formData, 'branchName') || undefined,
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(detailPath(id))
 }
 
@@ -84,8 +84,8 @@ export async function changeEmployeeStatus(id: string, formData: FormData): Prom
       relievingDate: formString(formData, 'relievingDate') || undefined,
     },
   })
-  revalidatePath(`${BASE}/${id}`)
-  revalidatePath(BASE)
+  revalidateHrms(`${BASE}/${id}`)
+  revalidateHrms(BASE)
   redirect(detailPath(id))
 }
 
@@ -97,8 +97,8 @@ export async function attachProfilePicture(id: string, formData: FormData): Prom
     method: 'PATCH',
     body: { profilePictureFileId: fileId },
   })
-  revalidatePath(`${BASE}/${id}`)
-  revalidatePath(BASE)
+  revalidateHrms(`${BASE}/${id}`)
+  revalidateHrms(BASE)
 }
 
 // ─── Salary details ──────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ export async function updateSalaryStructure(id: string, formData: FormData): Pro
       specialAllowance: formString(formData, 'specialAllowance') || '0',
     },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'salary', financialYear))
 }
 
@@ -149,7 +149,7 @@ export async function addOldSalary(id: string, formData: FormData): Promise<void
       toDate: formString(formData, 'toDate'),
     },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'salary', formString(formData, 'financialYear')))
 }
 
@@ -160,7 +160,7 @@ export async function deleteOldSalary(
 ): Promise<void> {
   await requireHrRole(['ADMIN'])
   await hrActionFetch(`hrms/employees/${id}/old-salaries/${oldSalaryId}`, { method: 'DELETE' })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'salary', financialYear))
 }
 
@@ -177,7 +177,7 @@ export async function addMonthlyIncentive(id: string, formData: FormData): Promi
       amount: formString(formData, 'amount') || '0',
     },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'salary', financialYear))
 }
 
@@ -190,7 +190,7 @@ export async function deleteMonthlyIncentive(
   await hrActionFetch(`hrms/employees/${id}/monthly-incentives/${incentiveId}`, {
     method: 'DELETE',
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'salary', financialYear))
 }
 
@@ -206,7 +206,7 @@ export async function decideLeaveRequest(id: string, formData: FormData): Promis
     path: `hrms/employees/${id}/leaves/requests/${requestId}/decide`,
     body: { status: formString(formData, 'status') },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'leaves', financialYear))
 }
 
@@ -220,7 +220,7 @@ export async function generatePayslip(id: string, formData: FormData): Promise<v
     path: `hrms/employees/${id}/payslips`,
     body: { financialYear, month: formString(formData, 'month') },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'payslip', financialYear))
 }
 
@@ -239,7 +239,7 @@ export async function addInvestmentDeclaration(id: string, formData: FormData): 
       declaredAmount: formString(formData, 'declaredAmount') || '0',
     },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'investments', financialYear))
 }
 
@@ -252,7 +252,7 @@ export async function verifyInvestmentDeclaration(id: string, formData: FormData
     path: `hrms/employees/${id}/investment-declarations/${declarationId}/verify`,
     body: { verifiedAmount: formString(formData, 'verifiedAmount') || '0' },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'investments', financialYear))
 }
 
@@ -265,7 +265,7 @@ export async function deleteInvestmentDeclaration(
   await hrActionFetch(`hrms/employees/${id}/investment-declarations/${declarationId}`, {
     method: 'DELETE',
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'investments', financialYear))
 }
 
@@ -281,7 +281,7 @@ export async function addMonthlyDeduction(id: string, formData: FormData): Promi
       amount: formString(formData, 'amount') || '0',
     },
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'investments', financialYear))
 }
 
@@ -294,7 +294,7 @@ export async function deleteMonthlyDeduction(
   await hrActionFetch(`hrms/employees/${id}/monthly-tax-deductions/${deductionId}`, {
     method: 'DELETE',
   })
-  revalidatePath(`${BASE}/${id}`)
+  revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'investments', financialYear))
 }
 

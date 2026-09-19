@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
+import { revalidateHrms } from '@/lib/hrms/revalidate'
 import { ApiError } from '@/lib/api/types'
 import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
@@ -95,7 +95,7 @@ async function createEmployee(formData: FormData): Promise<void> {
     throw error
   }
 
-  revalidatePath(BASE)
+  revalidateHrms(BASE)
   redirect(`${BASE}/${id}`)
 }
 

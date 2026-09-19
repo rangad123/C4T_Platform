@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidateHrms } from '@/lib/hrms/revalidate'
 import { redirect } from 'next/navigation'
 import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
@@ -21,7 +21,7 @@ function kindOf(formData: FormData): Kind {
 }
 
 function back(kind: Kind, notice: string): never {
-  revalidatePath(BASE)
+  revalidateHrms(BASE)
   redirect(`${BASE}?kind=${kind}&notice=${notice}`)
 }
 
@@ -29,7 +29,7 @@ function fail(kind: Kind, error: unknown): never {
   // A duplicate name is the one failure worth naming — it is what an admin
   // will actually hit, and "already exists" tells them what to do next.
   const code = error instanceof ApiError && error.status === 409 ? 'duplicate' : 'failed'
-  revalidatePath(BASE)
+  revalidateHrms(BASE)
   redirect(`${BASE}?kind=${kind}&error=${code}`)
 }
 

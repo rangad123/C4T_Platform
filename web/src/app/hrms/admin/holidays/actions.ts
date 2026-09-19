@@ -1,7 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
+import { revalidateHrms } from '@/lib/hrms/revalidate'
 import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
 import { ApiError } from '@/lib/api/types'
@@ -24,15 +24,15 @@ export async function addHoliday(formData: FormData): Promise<void> {
     }
     throw error
   }
-  revalidatePath(BASE)
-  revalidatePath('/employee/holidays')
+  revalidateHrms(BASE)
+  revalidateHrms('/employee/holidays')
   redirect(`${BASE}?year=${year}`)
 }
 
 export async function deleteHoliday(id: string, formData: FormData): Promise<void> {
   await requireHrRole(['ADMIN'])
   await hrActionFetch(`hrms/holidays/${id}`, { method: 'DELETE' })
-  revalidatePath(BASE)
-  revalidatePath('/employee/holidays')
+  revalidateHrms(BASE)
+  revalidateHrms('/employee/holidays')
   redirect(`${BASE}?year=${formString(formData, 'year')}`)
 }

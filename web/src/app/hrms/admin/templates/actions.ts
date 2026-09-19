@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidateHrms } from '@/lib/hrms/revalidate'
 import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
 
@@ -18,11 +18,11 @@ export async function createTemplate(formData: FormData): Promise<void> {
   if (typeof fileId !== 'string' || !fileId) return
 
   await hrActionFetch('hrms/templates', { method: 'POST', body: { fileId } })
-  revalidatePath(BASE)
+  revalidateHrms(BASE)
 }
 
 export async function deleteTemplate(id: string): Promise<void> {
   await requireHrRole(['ADMIN'])
   await hrActionFetch(`hrms/templates/${id}`, { method: 'DELETE' })
-  revalidatePath(BASE)
+  revalidateHrms(BASE)
 }
