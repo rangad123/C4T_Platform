@@ -7,7 +7,7 @@ import { Logo } from '@/components/ds/core/Logo'
 import { Icon } from '@/components/ds/core/Icon'
 import type { IconName } from '@/components/ds/core/icon-registry'
 import type { HrRole } from '@/lib/hrms/hr-types'
-import { Avatar } from '@/components/admin/Avatar'
+import { HrAvatar } from './HrAvatar'
 import styles from '@/components/admin/Sidebar.module.css'
 
 /**
@@ -246,7 +246,7 @@ export function HrSidebar({
         title={collapsed ? `${userName} — ${HR_ROLE_LABEL[role]}` : undefined}
       >
         <span className={styles.userAvatar}>
-          <Avatar name={userName} fileId={avatarFileId} size="md" />
+          <HrAvatar name={userName} fileId={avatarFileId} size="md" />
         </span>
         <div className={styles.userMeta}>
           <span className={styles.userName}>{userName}</span>

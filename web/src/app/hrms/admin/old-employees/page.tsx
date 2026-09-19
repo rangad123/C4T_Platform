@@ -4,7 +4,7 @@ import { searchTerm, hasFilter } from '@/lib/admin/format'
 import { HrAdminListPage } from '@/components/hrms/HrAdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Avatar } from '@/components/admin/Avatar'
+import { HrAvatar } from '@/components/hrms/HrAvatar'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 export const metadata: Metadata = { title: 'Old employees' }
@@ -48,7 +48,7 @@ export default async function HrAdminOldEmployeesPage({
       header: 'Name',
       render: (row) => (
         <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <Avatar
+          <HrAvatar
             name={`${row.firstName} ${row.lastName}`}
             fileId={row.profilePictureFileId}
             size="sm"

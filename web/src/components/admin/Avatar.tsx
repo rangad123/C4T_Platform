@@ -25,6 +25,14 @@ export interface AvatarProps {
    * circle, which is why that is the default.
    */
   shape?: 'circle' | 'rounded'
+  /**
+   * Where the file-serving route lives. Defaults to the platform's.
+   *
+   * HRMS is the same app under a different hostname, where `proxy.ts` rewrites
+   * every path under `/hrms` — so `/app/files/...` becomes `/hrms/app/files/...`
+   * and 404s. HRMS passes `/files`, which resolves to its own route.
+   */
+  fileBasePath?: string
 }
 
 const SIZE_PX: Record<AvatarSize, number> = {
@@ -55,7 +63,15 @@ const SIZE_PX: Record<AvatarSize, number> = {
  * Dimensions are explicit and the box is a fixed square, so there is no layout
  * shift for the optimizer to have prevented.
  */
-export function Avatar({ name, fileId, size = 'md', style, tint, shape = 'circle' }: AvatarProps) {
+export function Avatar({
+  name,
+  fileId,
+  size = 'md',
+  style,
+  tint,
+  shape = 'circle',
+  fileBasePath = '/app/files',
+}: AvatarProps) {
   const px = SIZE_PX[size]
   const initials = pickInitials(name)
   // The per-user tint is only ever meant to separate two people who share
@@ -93,7 +109,7 @@ export function Avatar({ name, fileId, size = 'md', style, tint, shape = 'circle
       {fileId ? (
         // eslint-disable-next-line @next/next/no-img-element -- see the note above
         <img
-          src={`/app/files/${fileId}`}
+          src={`${fileBasePath}/${fileId}`}
           alt={name}
           width={px}
           height={px}

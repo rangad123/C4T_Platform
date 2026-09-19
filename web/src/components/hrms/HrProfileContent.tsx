@@ -3,7 +3,7 @@ import { changeHrPassword } from '@/lib/hrms/hr-profile-actions'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Avatar } from '@/components/admin/Avatar'
+import { HrAvatar } from './HrAvatar'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
@@ -47,7 +47,7 @@ export function HrProfileContent({
             marginBottom: 'var(--space-6)',
           }}
         >
-          <Avatar name={displayName} fileId={employee.profilePictureFileId} size="lg" />
+          <HrAvatar name={displayName} fileId={employee.profilePictureFileId} size="lg" />
         </div>
         <DescriptionList
           items={[

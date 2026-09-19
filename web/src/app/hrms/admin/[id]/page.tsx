@@ -12,7 +12,7 @@ import { Modal } from '@/components/admin/Modal'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Avatar } from '@/components/admin/Avatar'
+import { HrAvatar } from '@/components/hrms/HrAvatar'
 import { Button } from '@/components/ds/core/Button'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Field } from '@/components/ds/forms/Field'
@@ -243,7 +243,7 @@ export default async function HrAdminEmployeeDetailPage({
                 marginBottom: 'var(--space-6)',
               }}
             >
-              <Avatar name={displayName} fileId={employee.profilePictureFileId} size="lg" />
+              <HrAvatar name={displayName} fileId={employee.profilePictureFileId} size="lg" />
               <SingleFileUpload
                 endpoint="/admin/upload"
                 scope="profile-picture"

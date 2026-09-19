@@ -5,7 +5,7 @@ import { HrPageShell } from '@/components/hrms/HrPageShell'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Avatar } from '@/components/admin/Avatar'
+import { HrAvatar } from '@/components/hrms/HrAvatar'
 
 export const metadata: Metadata = { title: 'Basic details' }
 
@@ -66,7 +66,7 @@ export default async function HrEmployeeBasicDetailsPage() {
             marginBottom: 'var(--space-6)',
           }}
         >
-          <Avatar name={displayName} fileId={session.profilePictureFileId} size="lg" />
+          <HrAvatar name={displayName} fileId={session.profilePictureFileId} size="lg" />
         </div>
         <DescriptionList
           items={[
