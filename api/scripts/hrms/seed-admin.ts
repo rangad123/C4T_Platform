@@ -25,8 +25,14 @@ async function main(): Promise<void> {
     return
   }
 
+  // Same shape the service issues: yyyymm of the joining date plus a running
+  // number. Seeding EMP-0001 here and then issuing 2026090001 for the first
+  // real hire would reintroduce exactly the mixed formats this replaced.
+  const joining = new Date()
+  const year = joining.getUTCFullYear()
+  const month = String(joining.getUTCMonth() + 1).padStart(2, '0')
   const count = await prisma.hrEmployee.count()
-  const employeeCode = `EMP-${String(count + 1).padStart(4, '0')}`
+  const employeeCode = `${year}${month}${String(count + 1).padStart(4, '0')}`
 
   const employee = await prisma.hrEmployee.create({
     data: {

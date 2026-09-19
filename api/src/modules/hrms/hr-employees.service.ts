@@ -131,9 +131,46 @@ export async function getEmployee(id: string) {
   return toDetail(employee)
 }
 
-async function nextEmployeeCode(): Promise<string> {
-  const count = await prisma.hrEmployee.count()
-  return `EMP-${String(count + 1).padStart(4, '0')}`
+/**
+ * The running number inside an existing employee code.
+ *
+ * Codes carried over from the old HR system use two shapes, because whoever
+ * maintained them changed their mind partway through: `yyyymm` + a 4-digit
+ * sequence (2021040016) for the first 18, then `yyyymmdd` + a 3-digit one
+ * (20220401021) for the 23 after that. Both carry the SAME running number —
+ * it continues across months rather than restarting — so both are read here,
+ * otherwise the sequence would jump backwards the first time someone is hired
+ * after a code of the newer shape.
+ */
+function sequenceIn(code: string): number | null {
+  if (!/^\d{10,11}$/.test(code)) return null
+  const rest = code.slice(6)
+  // 4 digits: the sequence itself. 5 digits: a day, then the sequence.
+  const digits = rest.length === 4 ? rest : rest.slice(2)
+  const value = Number(digits)
+  return Number.isFinite(value) ? value : null
+}
+
+/**
+ * `yyyymm` of the joining date, then the next number in one running sequence —
+ * the format the old HR system used and the one the business asked to keep.
+ *
+ * Deliberately NOT derived from `count()`: soft-deleted rows still count, and a
+ * count says nothing about the highest number actually issued, so two people
+ * hired either side of a deletion could collide. This reads the real maximum.
+ * Codes that predate the scheme (a handful are 8 characters) simply do not
+ * parse and are ignored rather than dragging the sequence down.
+ */
+async function nextEmployeeCode(joiningDate: Date): Promise<string> {
+  const existing = await prisma.hrEmployee.findMany({ select: { employeeCode: true } })
+  const highest = existing.reduce((max, row) => {
+    const seq = sequenceIn(row.employeeCode)
+    return seq !== null && seq > max ? seq : max
+  }, 0)
+
+  const year = joiningDate.getUTCFullYear()
+  const month = String(joiningDate.getUTCMonth() + 1).padStart(2, '0')
+  return `${year}${month}${String(highest + 1).padStart(4, '0')}`
 }
 
 function financialEnvelope(
@@ -165,7 +202,7 @@ export async function createEmployee(input: CreateEmployeeInput) {
   // schema's own note that a count-based scheme accepts this trade-off for a
   // single admin adding one employee at a time.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const employeeCode = await nextEmployeeCode()
+    const employeeCode = await nextEmployeeCode(input.joiningDate)
     try {
       const created = await prisma.hrEmployee.create({
         data: {
