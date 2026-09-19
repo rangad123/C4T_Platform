@@ -576,7 +576,24 @@ export default async function ProjectDetailPage({
    * `summary` carries the same text the removed instructions did, because
    * the wizard fills both from one field. The project's own columns are
    * untouched and "Edit the brief" still sets them.
+   *
+   * ── EXCEPT WHEN THE TWO GENUINELY DIFFER
+   *
+   * That de-duplication assumes one input filled both, which is true of every
+   * project the wizard created and false of every project the migration
+   * created. There, the project's instructions come from the old system's
+   * scope / out-of-scope columns and the build's come from its test-data
+   * column — different fields, different text. Dropping the project's copy
+   * hid the scope of every project carried over by that migration: stored,
+   * editable through "Edit the brief", and rendered nowhere, which is what
+   * "none of the project details are populated" turned out to mean.
+   *
+   * So it is shown when it says something the build does not.
    */
+  const projectInstructions = project.instructions?.trim()
+  const buildInstructions = buildDetail?.instructions?.trim()
+  const showProjectInstructions = !!projectInstructions && projectInstructions !== buildInstructions
+
   const overview: DescriptionItem[] = [
     { label: 'Reference', value: <Mono>{project.reference}</Mono> },
     {
@@ -617,6 +634,15 @@ export default async function ProjectDetailPage({
       wide: true,
       value: project.summary ? <Prose>{project.summary}</Prose> : '',
     },
+    ...(showProjectInstructions
+      ? [
+          {
+            label: 'Scope',
+            wide: true,
+            value: <Prose>{projectInstructions}</Prose>,
+          },
+        ]
+      : []),
   ]
 
   /** Mirrors `assertMayRate` on the API: an invitation never taken up is not work. */
