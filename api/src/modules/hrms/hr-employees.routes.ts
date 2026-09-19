@@ -4,6 +4,7 @@ import { validate, validatedQuery } from '../../middleware/validate.js'
 import { hrAuthenticate, requireHrRole, HR_ADMIN_ROLES } from './hr-auth.middleware.js'
 import { recordHrAudit } from '../../lib/hrms/hr-audit.js'
 import * as service from './hr-employees.service.js'
+import { inviteEmployee } from './hr-auth.service.js'
 import {
   listEmployeesQuery,
   createEmployeeSchema,
@@ -40,15 +41,47 @@ hrEmployeesRouter.get('/:id', validate({ params: employeeIdParam }), async (req,
 })
 
 hrEmployeesRouter.post('/', validate({ body: createEmployeeSchema }), async (req, res) => {
+  const invite = !req.body.password
   const employee = await service.createEmployee(req.body)
   await recordHrAudit({
     req,
     action: 'hr.employee.created',
     entityType: 'HrEmployee',
     entityId: employee.id,
-    after: { email: employee.email, role: employee.role },
+    after: { email: employee.email, role: employee.role, invited: invite },
   })
-  res.status(201).json({ data: employee })
+
+  /**
+   * Sent after the audit entry, not before: if the mail step were to fail
+   * hard the record of who created this account would still exist. It cannot
+   * fail hard — `sendMail` logs and returns — which is the right trade here,
+   * since an employee created but not emailed is fixed with Resend invitation,
+   * whereas a failed create would lose the whole form.
+   */
+  if (invite) {
+    await inviteEmployee(employee.id, req.hrEmployee!.id)
+    await recordHrAudit({
+      req,
+      action: 'hr.employee.invited',
+      entityType: 'HrEmployee',
+      entityId: employee.id,
+      after: { email: employee.email },
+    })
+  }
+
+  res.status(201).json({ data: { ...employee, invited: invite } })
+})
+
+hrEmployeesRouter.post('/:id/invite', validate({ params: employeeIdParam }), async (req, res) => {
+  const { email } = await inviteEmployee(param(req, 'id'), req.hrEmployee!.id)
+  await recordHrAudit({
+    req,
+    action: 'hr.employee.invited',
+    entityType: 'HrEmployee',
+    entityId: param(req, 'id'),
+    after: { email },
+  })
+  res.json({ data: { email } })
 })
 
 hrEmployeesRouter.patch(

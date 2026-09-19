@@ -8,8 +8,13 @@ import {
   HR_SESSION_ABSOLUTE_TTL_MS,
   HR_SESSION_IDLE_TTL_MS,
 } from '../../lib/hrms/hr-tokens.js'
-import { hashToken, generateOpaqueToken, PASSWORD_RESET_TTL_MS } from '../../lib/tokens.js'
-import { sendMail, hrPasswordResetEmail } from '../../lib/mailer.js'
+import {
+  hashToken,
+  generateOpaqueToken,
+  PASSWORD_RESET_TTL_MS,
+  HR_INVITATION_TTL_MS,
+} from '../../lib/tokens.js'
+import { sendMail, hrPasswordResetEmail, hrInvitationEmail } from '../../lib/mailer.js'
 import {
   UnauthorizedError,
   ForbiddenError,
@@ -355,6 +360,62 @@ export async function forgotPassword(email: string): Promise<{ employeeId: strin
 
   await sendMail(hrPasswordResetEmail(employee.email, raw))
   return { employeeId: employee.id }
+}
+
+/**
+ * Sends a new member of staff the link that lets them choose their first
+ * password. Also the "resend" path — an invitation that expired, or went to a
+ * typo'd address that has since been corrected.
+ *
+ * Unlike `forgotPassword`, this is ADMIN-only and says plainly when it will
+ * not send. That endpoint hides whether an address belongs to a member of
+ * staff because anyone can call it; here the caller is HR, already looking at
+ * the record, and a silent no-op would just leave them wondering why nothing
+ * arrived.
+ */
+export async function inviteEmployee(
+  employeeId: string,
+  invitedById: string,
+): Promise<{ email: string }> {
+  const [employee, invitedBy] = await Promise.all([
+    prisma.hrEmployee.findFirst({
+      where: { id: employeeId, deletedAt: null },
+      select: { id: true, email: true, status: true },
+    }),
+    // Looked up here rather than carried on the request: `hrAuthenticate`
+    // attaches only an id and a role, and widening that would mean a name
+    // lookup on every HRMS request to serve the handful that print one.
+    prisma.hrEmployee.findUnique({
+      where: { id: invitedById },
+      select: { firstName: true, lastName: true },
+    }),
+  ])
+  if (!employee) throw new NotFoundError('Employee')
+  if (employee.status !== HrEmployeeStatus.ACTIVE) {
+    throw new BadRequestError('Only an active employee can be invited to sign in')
+  }
+
+  // Only the newest link should work — the same rule as a reset, and the
+  // reason an expired invitation is re-sent rather than accumulated.
+  await prisma.hrPasswordResetToken.updateMany({
+    where: { employeeId: employee.id, usedAt: null },
+    data: { usedAt: new Date() },
+  })
+
+  const { raw, hash } = generateOpaqueToken()
+  await prisma.hrPasswordResetToken.create({
+    data: {
+      employeeId: employee.id,
+      tokenHash: hash,
+      expiresAt: new Date(Date.now() + HR_INVITATION_TTL_MS),
+    },
+  })
+
+  const invitedByName = invitedBy
+    ? `${invitedBy.firstName} ${invitedBy.lastName}`.trim()
+    : 'Your HR administrator'
+  await sendMail(hrInvitationEmail(employee.email, raw, invitedByName))
+  return { email: employee.email }
 }
 
 export async function resetPassword(rawToken: string, newPassword: string): Promise<string> {

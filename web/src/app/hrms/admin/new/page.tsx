@@ -57,7 +57,7 @@ async function createEmployee(formData: FormData): Promise<void> {
   const email = formTrimmed(formData, 'email')
   const password = formString(formData, 'password')
   const joiningDate = formString(formData, 'joiningDate')
-  if (!firstName || !lastName || !email || !password || !joiningDate) {
+  if (!firstName || !lastName || !email || !joiningDate) {
     redirect(`${BASE}/new?error=missing`)
   }
 
@@ -65,7 +65,10 @@ async function createEmployee(formData: FormData): Promise<void> {
     firstName,
     lastName,
     email,
-    password,
+    // Omitted entirely rather than sent empty: the API reads "no password" as
+    // "send them an invitation", and an empty string would fail validation
+    // instead.
+    ...(password ? { password } : {}),
     joiningDate,
     role: formString(formData, 'role') || undefined,
     designationId: formString(formData, 'designationId') || undefined,
@@ -86,9 +89,14 @@ async function createEmployee(formData: FormData): Promise<void> {
   }
 
   let id: string
+  let invited = false
   try {
-    const created = await hrActionFetch<{ id: string }>('hrms/employees', { method: 'POST', body })
+    const created = await hrActionFetch<{ id: string; invited: boolean }>('hrms/employees', {
+      method: 'POST',
+      body,
+    })
     id = created.id
+    invited = created.invited
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) redirect(`${BASE}/new?error=email_taken`)
     if (error instanceof ApiError && error.status === 422) redirect(`${BASE}/new?error=rejected`)
@@ -96,7 +104,7 @@ async function createEmployee(formData: FormData): Promise<void> {
   }
 
   revalidateHrms(BASE)
-  redirect(`${BASE}/${id}`)
+  redirect(`${BASE}/${id}${invited ? '?notice=invited' : ''}`)
 }
 
 export default async function HrAdminNewEmployeePage({
@@ -163,17 +171,16 @@ export default async function HrAdminNewEmployeePage({
               <Input id="email" name="email" type="email" required maxLength={255} />
             </Field>
             <Field
-              label="Temporary password"
+              label="Password"
               htmlFor="password"
-              required
-              hint="At least 12 characters."
+              hint="Leave blank and we email them a link to choose their own. Otherwise at least 12 characters, and you pass it on yourself."
             >
               <Input
                 id="password"
                 name="password"
                 type="password"
-                required
                 minLength={12}
+                autoComplete="new-password"
                 showPasswordToggle
               />
             </Field>

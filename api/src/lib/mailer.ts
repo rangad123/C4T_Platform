@@ -201,6 +201,31 @@ export function hrPasswordResetEmail(to: string, token: string): MailMessage {
 }
 
 /**
+ * An invitation for a new member of staff to set their first HRMS password.
+ *
+ * Deliberately the same token and the same page as a reset — the recipient is
+ * choosing a password either way, and a second near-identical flow is a second
+ * place for the token rules to drift. Only the copy differs, which is what
+ * `invite=1` on the link selects.
+ */
+export function hrInvitationEmail(to: string, token: string, invitedByName: string): MailMessage {
+  const url = `${env.HRMS_PUBLIC_URL}/reset-password?token=${encodeURIComponent(token)}&invite=1`
+  const { html, text } = renderEmail(
+    {
+      heading: 'Your Crowd4Test HRMS account is ready',
+      paragraphs: [
+        `${invitedByName} has set up an HRMS account for you. Choose a password to sign in for the first time.`,
+        'HRMS is where you will find your payslips, tax details, leave and timesheet.',
+      ],
+      action: { label: 'Choose my password', url },
+      note: 'The link expires in 7 days. If it has, ask your HR administrator to send a new one.',
+    },
+    {},
+  )
+  return { to, subject: 'Set up your Crowd4Test HRMS account', text, html }
+}
+
+/**
  * §42 — an invitation to join an organisation's team.
  *
  * Sent directly rather than through a notification because the recipient is an

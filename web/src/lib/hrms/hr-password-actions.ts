@@ -42,8 +42,11 @@ export async function hrResetPasswordAction(formData: FormData): Promise<void> {
   const token = formString(formData, 'token')
   const password = formString(formData, 'password')
   const confirmPassword = formString(formData, 'confirmPassword')
+  // Carried through every bounce, or a mistyped confirmation would drop an
+  // invitee back onto a page telling them to reset a password they never had.
+  const invite = formString(formData, 'invite') === '1' ? '&invite=1' : ''
   const back = (error: string) =>
-    `/reset-password?token=${encodeURIComponent(token)}&error=${error}`
+    `/reset-password?token=${encodeURIComponent(token)}&error=${error}${invite}`
 
   if (!token) redirect('/reset-password?error=missing_token', RedirectType.replace)
   if (!password) redirect(back('missing'), RedirectType.replace)

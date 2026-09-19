@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { type Prisma, HrEmployeeStatus, HrRole } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { searchTerms } from '../../lib/search.js'
@@ -196,7 +197,14 @@ export async function createEmployee(input: CreateEmployeeInput) {
   })
   if (existing) throw new ConflictError('An employee with this email already exists')
 
-  const passwordHash = await hashPassword(input.password)
+  /**
+   * No password means the employee is being invited to choose one. Store a
+   * hash of random bytes rather than a placeholder: the row's NOT NULL is
+   * satisfied, every sign-in attempt fails until the invitation is used, and
+   * there is no sentinel value that a later change could accidentally treat
+   * as "no password set" and wave through.
+   */
+  const passwordHash = await hashPassword(input.password ?? randomBytes(32).toString('hex'))
 
   // employeeCode is retried once on a unique-constraint race — see the
   // schema's own note that a count-based scheme accepts this trade-off for a

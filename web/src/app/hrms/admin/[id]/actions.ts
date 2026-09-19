@@ -101,6 +101,28 @@ export async function attachProfilePicture(id: string, formData: FormData): Prom
   revalidateHrms(BASE)
 }
 
+/**
+ * Emails the employee a link to choose their own password — the first one, or
+ * a replacement for an invitation that lapsed before they opened it.
+ *
+ * Safe to run more than once: each send invalidates the previous link, so a
+ * second click does not leave two working invitations in an inbox.
+ */
+export async function sendEmployeeInvitation(id: string): Promise<void> {
+  await requireHrRole(['ADMIN'])
+  try {
+    await hrActionFetch(`hrms/employees/${id}/invite`, { method: 'POST' })
+  } catch (error) {
+    // The API refuses to invite anyone who has left. That is an answer worth
+    // reading, not a crash.
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      redirect(`${detailPath(id)}?notice=invite_refused&reason=${encodeURIComponent(error.message)}`)
+    }
+    throw error
+  }
+  redirect(`${detailPath(id)}?notice=invited`)
+}
+
 // ─── Salary details ──────────────────────────────────────────────────────────
 
 function sectionPath(id: string, section: string, financialYear: string): string {

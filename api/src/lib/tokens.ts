@@ -102,3 +102,14 @@ export const SESSION_IDLE_TTL_MS = parseDuration(env.SESSION_IDLE_TTL)
 
 export const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000 // 1 hour
 export const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+/**
+ * An HRMS invitation reuses the reset-token table, but not its hour.
+ *
+ * A reset is short-lived because the person asking is sitting at the screen.
+ * An invitation lands in the inbox of someone who has not started yet, may be
+ * on notice elsewhere, and is not waiting for it — an hour would mean most
+ * invitations expiring before they are opened, and an admin re-sending them
+ * one by one.
+ */
+export const HR_INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days

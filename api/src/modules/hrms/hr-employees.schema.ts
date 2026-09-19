@@ -66,7 +66,14 @@ const employeeFields = {
 export const createEmployeeSchema = z.object({
   ...employeeFields,
   email: z.string().trim().toLowerCase().email().max(255),
-  password: z.string().min(12).max(200),
+  /**
+   * Optional: leave it out and the new employee is emailed an invitation to
+   * choose their own. That is the better default — a password an admin types
+   * has to be passed on by hand, which in practice means a chat message that
+   * stays readable forever. It stays available because the admin may be
+   * standing next to the new starter, or the address may not work yet.
+   */
+  password: z.string().min(12).max(200).optional(),
 })
 
 /**

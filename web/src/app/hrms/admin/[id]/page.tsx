@@ -10,6 +10,7 @@ import { HrPageShell } from '@/components/hrms/HrPageShell'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { Modal } from '@/components/admin/Modal'
 import { Panel } from '@/components/admin/Panel'
+import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { HrAvatar } from '@/components/hrms/HrAvatar'
@@ -36,6 +37,7 @@ import {
   updateFinancialDetails,
   changeEmployeeStatus,
   attachProfilePicture,
+  sendEmployeeInvitation,
 } from './actions'
 
 const BASE = '/admin'
@@ -50,6 +52,15 @@ const SECTIONS = [
   { value: 'leaves', label: 'Leaves', icon: 'plane' },
   { value: 'documents', label: 'Documents', icon: 'file-text' },
 ] as const
+
+const NOTICES: Record<string, NoticeCopy> = {
+  invited: {
+    tone: 'success',
+    message:
+      'Invitation sent. The link lets them choose their own password and expires in 7 days — send another if it lapses.',
+  },
+  invite_refused: { tone: 'warning', message: 'Invitation not sent.' },
+}
 
 const GENDERS = [
   { value: 'MALE', label: 'Male' },
@@ -144,6 +155,8 @@ export default async function HrAdminEmployeeDetailPage({
     section?: string
     edit?: string
     error?: string
+    notice?: string
+    reason?: string
     fy?: string
     verify?: string
     month?: string
@@ -203,6 +216,15 @@ export default async function HrAdminEmployeeDetailPage({
       badges={<StatusBadge status={employee.status} />}
       tabs={<SectionTabs basePath={detailPath} tabs={visibleSections} active={section} />}
     >
+      <Notice
+        code={sp.notice}
+        notices={
+          sp.notice === 'invite_refused' && sp.reason
+            ? { ...NOTICES, invite_refused: { tone: 'warning', message: sp.reason } }
+            : NOTICES
+        }
+      />
+
       {sp.error === 'rejected' ? (
         <div
           role="alert"
@@ -220,7 +242,7 @@ export default async function HrAdminEmployeeDetailPage({
 
       {section === 'basic' ? (
         <>
-          <div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
             <Button
               href={`${detailPath}?edit=status`}
               variant="secondary"
@@ -229,6 +251,21 @@ export default async function HrAdminEmployeeDetailPage({
             >
               Change status
             </Button>
+            {/* Offered for anyone still here, not only the newly added: the
+                same link is what rescues a lapsed invitation or an address
+                that was wrong the first time. */}
+            {employee.status === 'ACTIVE' ? (
+              <form action={sendEmployeeInvitation.bind(null, id)}>
+                <SubmitButton
+                  variant="secondary"
+                  size="sm"
+                  iconLeft="mail"
+                  pendingLabel="Sending…"
+                >
+                  Send sign-in invitation
+                </SubmitButton>
+              </form>
+            ) : null}
           </div>
 
           <Panel
