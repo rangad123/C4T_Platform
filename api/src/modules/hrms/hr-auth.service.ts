@@ -41,12 +41,7 @@ export interface HrSessionTokens {
 }
 
 export type HrRevokeReason =
-  | 'logout'
-  | 'logout_all'
-  | 'token_reuse'
-  | 'password_changed'
-  | 'password_reset'
-  | 'admin'
+  'logout' | 'logout_all' | 'token_reuse' | 'password_changed' | 'password_reset' | 'admin'
 
 export interface PublicHrEmployee {
   id: string
@@ -57,6 +52,7 @@ export interface PublicHrEmployee {
   role: HrRole
   status: HrEmployeeStatus
   profilePictureFileId: string | null
+  timesheetRequired: boolean
 }
 
 async function loadPublicEmployee(employeeId: string): Promise<PublicHrEmployee> {
@@ -71,6 +67,10 @@ async function loadPublicEmployee(employeeId: string): Promise<PublicHrEmployee>
       role: true,
       status: true,
       profilePictureFileId: true,
+      // Drives whether the Timesheet section is offered at all — a UI decision
+      // the portals need on every render, so it rides with the session rather
+      // than costing a second fetch per page.
+      timesheetRequired: true,
     },
   })
   if (!employee) throw new NotFoundError('Employee')

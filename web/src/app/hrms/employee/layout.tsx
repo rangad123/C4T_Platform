@@ -8,16 +8,25 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-const SECTIONS: readonly HrSidebarSection[] = [
-  { links: [{ href: '/employee', label: 'Basic details', icon: 'user-check' }] },
-  { links: [{ href: '/employee/salary', label: 'Salary details', icon: 'banknote' }] },
-  { links: [{ href: '/employee/tax', label: 'Tax calculation', icon: 'line-chart' }] },
-  { links: [{ href: '/employee/investments', label: 'Investments', icon: 'landmark' }] },
-  { links: [{ href: '/employee/payslip', label: 'Payslip', icon: 'credit-card' }] },
-  { links: [{ href: '/employee/timesheet', label: 'Timesheet', icon: 'clock' }] },
-  { links: [{ href: '/employee/leaves', label: 'Leaves', icon: 'plane' }] },
-  { links: [{ href: '/employee/holidays', label: 'Holidays list', icon: 'calendar' }] },
-]
+/**
+ * `timesheetRequired` decides whether Timesheet appears at all. The flag was
+ * being stored and shown on the employee's record but drove nothing, so staff
+ * who are not expected to fill one in were still offered the section.
+ */
+function sectionsFor(timesheetRequired: boolean): readonly HrSidebarSection[] {
+  return [
+    { links: [{ href: '/employee', label: 'Basic details', icon: 'user-check' }] },
+    { links: [{ href: '/employee/salary', label: 'Salary details', icon: 'banknote' }] },
+    { links: [{ href: '/employee/tax', label: 'Tax calculation', icon: 'line-chart' }] },
+    { links: [{ href: '/employee/investments', label: 'Investments', icon: 'landmark' }] },
+    { links: [{ href: '/employee/payslip', label: 'Payslip', icon: 'credit-card' }] },
+    ...(timesheetRequired
+      ? [{ links: [{ href: '/employee/timesheet', label: 'Timesheet', icon: 'clock' as const }] }]
+      : []),
+    { links: [{ href: '/employee/leaves', label: 'Leaves', icon: 'plane' }] },
+    { links: [{ href: '/employee/holidays', label: 'Holidays list', icon: 'calendar' }] },
+  ]
+}
 
 /**
  * The Employee Portal — `/employee/*`. Open to every role (ADMIN and
@@ -37,7 +46,7 @@ export default async function HrEmployeeLayout({ children }: { children: React.R
           userName={displayName}
           avatarFileId={employee.profilePictureFileId}
           role={employee.role}
-          sections={SECTIONS}
+          sections={sectionsFor(employee.timesheetRequired)}
           homeHref="/employee"
           portalLabel="Employee"
         />

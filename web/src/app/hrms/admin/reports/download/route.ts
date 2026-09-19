@@ -31,10 +31,20 @@ export async function GET(request: Request): Promise<Response> {
   })
 
   if (!upstream.ok) {
+    // This route is reached by a real navigation, so returning JSON here left
+    // the admin staring at a raw error body on a blank page with no way back.
+    // Send them to the form instead, with something readable on it.
     const body = await upstream.text().catch(() => '')
-    return NextResponse.json(
-      { error: 'Could not generate that report.', detail: body.slice(0, 500) },
-      { status: upstream.status },
+    let message = 'Could not generate that report.'
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: string } | string }
+      const detail = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message
+      if (detail) message = detail
+    } catch {
+      // Not JSON — keep the generic message rather than showing raw HTML.
+    }
+    return NextResponse.redirect(
+      new URL(`/admin/reports?error=${encodeURIComponent(message)}`, request.url),
     )
   }
 

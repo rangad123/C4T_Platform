@@ -27,12 +27,21 @@ export function currentFinancialYear(): string {
   return financialYearOf(new Date())
 }
 
-/** The current FY plus `count - 1` prior ones, newest first. */
-export function recentFinancialYears(count = 5): string[] {
+/**
+ * Financial years to offer in a picker, newest first.
+ *
+ * `ahead` matters: this counted only backwards from the current year, so every
+ * dropdown in HRMS stopped at the year in progress. Salary structures, tax
+ * slabs and declarations are all routinely set up BEFORE the year they apply
+ * to, and on 1 April the newly-current year would not have been selectable at
+ * all until someone shipped a fix.
+ */
+export function recentFinancialYears(back = 5, ahead = 5): string[] {
   const [currentStart] = currentFinancialYear().split('-').map(Number)
-  return Array.from({ length: count }, (_, i) => {
-    const start = (currentStart ?? 0) - i
-    return `${start}-${start + 1}`
+  const start = currentStart ?? 0
+  return Array.from({ length: back + ahead }, (_, i) => {
+    const year = start + ahead - i
+    return `${year}-${year + 1}`
   })
 }
 

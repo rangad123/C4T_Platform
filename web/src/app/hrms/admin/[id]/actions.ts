@@ -27,6 +27,7 @@ async function patchEmployee(id: string, body: Record<string, unknown>): Promise
 export async function updatePersonalDetails(id: string, formData: FormData): Promise<void> {
   await requireHrRole(['ADMIN'])
   await patchEmployee(id, {
+    email: formTrimmed(formData, 'email'),
     firstName: formTrimmed(formData, 'firstName'),
     lastName: formTrimmed(formData, 'lastName'),
     dateOfBirth: formString(formData, 'dateOfBirth') || undefined,

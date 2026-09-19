@@ -216,9 +216,19 @@ export async function createEmployee(input: CreateEmployeeInput) {
 export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
   const existing = await prisma.hrEmployee.findFirst({
     where: { id, deletedAt: null },
-    select: { id: true, secureFinancialDetails: true },
+    select: { id: true, secureFinancialDetails: true, email: true },
   })
   if (!existing) throw new NotFoundError('Employee')
+
+  // Email is the sign-in identity and unique, so a clash has to be reported
+  // rather than left to surface as a raw constraint violation.
+  if (input.email !== undefined && input.email !== existing.email) {
+    const clash = await prisma.hrEmployee.findUnique({
+      where: { email: input.email },
+      select: { id: true },
+    })
+    if (clash) throw new ConflictError('An employee with this email already exists')
+  }
 
   const touchesFinancial =
     input.panNumber !== undefined ||
@@ -240,6 +250,7 @@ export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
   }
 
   const data: Prisma.HrEmployeeUncheckedUpdateInput = {
+    ...(input.email !== undefined ? { email: input.email } : {}),
     ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
     ...(input.lastName !== undefined ? { lastName: input.lastName } : {}),
     ...(input.dateOfBirth !== undefined ? { dateOfBirth: input.dateOfBirth } : {}),

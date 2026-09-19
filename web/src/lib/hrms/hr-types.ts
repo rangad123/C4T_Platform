@@ -20,6 +20,8 @@ export interface PublicHrEmployee {
   role: HrRole
   status: HrEmployeeStatus
   profilePictureFileId: string | null
+  /** Whether this employee is expected to fill in a timesheet at all. */
+  timesheetRequired: boolean
 }
 
 /** Which portal each role lands on after sign-in. */

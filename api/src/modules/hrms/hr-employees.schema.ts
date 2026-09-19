@@ -80,6 +80,12 @@ export const updateEmployeeSchema = z
   .object({
     ...employeeFields,
     profilePictureFileId: z.string().cuid().nullable().optional(),
+    /**
+     * Editable, unlike the password. An employee signs in with this, so a typo
+     * at creation time locked the account permanently: they could not sign in
+     * and no admin screen could correct it. The service re-checks uniqueness.
+     */
+    email: z.string().trim().toLowerCase().email().max(255),
   })
   .partial()
 

@@ -158,6 +158,11 @@ export default async function HrAdminEmployeeDetailPage({
       : new Date().getMonth() + 1
 
   const employee = await loadEmployee(id)
+  // Timesheet is only offered for employees expected to keep one — the same
+  // rule the employee's own portal applies to its sidebar.
+  const visibleSections = employee.timesheetRequired
+    ? SECTIONS
+    : SECTIONS.filter((s) => s.value !== 'timesheet')
 
   const [designations, managers] = await Promise.all([
     loadDesignationOptions(),
@@ -192,7 +197,7 @@ export default async function HrAdminEmployeeDetailPage({
       title={displayName}
       subtitle={`${employee.employeeCode} · ${employee.email}`}
       badges={<StatusBadge status={employee.status} />}
-      tabs={<SectionTabs basePath={detailPath} tabs={SECTIONS} active={section} />}
+      tabs={<SectionTabs basePath={detailPath} tabs={visibleSections} active={section} />}
     >
       {sp.error === 'rejected' ? (
         <div
@@ -381,6 +386,21 @@ export default async function HrAdminEmployeeDetailPage({
               required
               maxLength={80}
               defaultValue={employee.firstName}
+            />
+          </Field>
+          <Field
+            label="Email"
+            htmlFor="email"
+            required
+            hint="This is what the employee signs in with."
+          >
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              required
+              maxLength={255}
+              defaultValue={employee.email}
             />
           </Field>
           <Field label="Last name" htmlFor="lastName" required>

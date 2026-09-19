@@ -6,9 +6,8 @@ import {
 } from '@/lib/hrms/financial-year'
 import { HrPageShell } from '@/components/hrms/HrPageShell'
 import { Panel } from '@/components/admin/Panel'
-import { Field } from '@/components/ds/forms/Field'
-import { Select } from '@/components/ds/forms/Select'
-import { Button } from '@/components/ds/core/Button'
+import { Icon } from '@/components/ds/core/Icon'
+import { ReportForm } from './ReportForm'
 
 export const metadata: Metadata = { title: 'Reports' }
 
@@ -29,7 +28,12 @@ const QUARTERS = [
   { value: '4', label: 'Q4 — Jan, Feb, Mar' },
 ]
 
-export default function HrAdminReportsPage() {
+export default async function HrAdminReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>
+}) {
+  const { error } = await searchParams
   const financialYear = currentFinancialYear()
   const yearOptions = recentFinancialYears(6).map((fy) => ({ value: fy, label: fy }))
   const monthOptions = financialYearMonths(financialYear).map((m) => ({
@@ -46,41 +50,35 @@ export default function HrAdminReportsPage() {
       subtitle="Timesheet, TDS and PT reports for a financial year, period and type."
     >
       <Panel title="Generate a report">
-        <form
-          method="get"
-          action="/admin/reports/download"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: 'var(--space-5)',
-            alignItems: 'end',
-          }}
-        >
-          <Field label="Financial year" htmlFor="financialYear" required>
-            <Select
-              id="financialYear"
-              name="financialYear"
-              required
-              defaultValue={financialYear}
-              options={yearOptions}
-            />
-          </Field>
-          <Field label="Report type" htmlFor="reportType" required>
-            <Select id="reportType" name="reportType" required options={REPORT_TYPES} />
-          </Field>
-          <Field label="Report period" htmlFor="period" required>
-            <Select id="period" name="period" required options={PERIODS} />
-          </Field>
-          <Field label="Month" htmlFor="month" hint="Used for a monthly report.">
-            <Select id="month" name="month" options={monthOptions} />
-          </Field>
-          <Field label="Quarter" htmlFor="quarter" hint="Used for a quarterly report.">
-            <Select id="quarter" name="quarter" options={QUARTERS} placeholder="Select quarter" />
-          </Field>
-          <Button type="submit" variant="primary" iconLeft="download">
-            Generate report
-          </Button>
-        </form>
+        {error ? (
+          <div
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 'var(--space-3)',
+              padding: 'var(--space-4) var(--space-5)',
+              marginBottom: 'var(--space-5)',
+              background: 'var(--status-error-bg)',
+              color: 'var(--status-error-fg)',
+              borderRadius: 'var(--radius-input)',
+              fontSize: 'var(--type-body-sm-size)',
+              lineHeight: 1.45,
+            }}
+          >
+            <Icon name="alert-triangle" size={18} style={{ flex: 'none', marginTop: 2 }} />
+            <span>{error}</span>
+          </div>
+        ) : null}
+
+        <ReportForm
+          financialYear={financialYear}
+          yearOptions={yearOptions}
+          monthOptions={monthOptions}
+          reportTypes={REPORT_TYPES}
+          periods={PERIODS}
+          quarters={QUARTERS}
+        />
       </Panel>
     </HrPageShell>
   )
