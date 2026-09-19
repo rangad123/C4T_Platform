@@ -1,6 +1,6 @@
 import { HrFileScope, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
-import { NotFoundError } from '../../lib/errors.js'
+import { NotFoundError, BadRequestError } from '../../lib/errors.js'
 import { putObject, buildStorageKey, createDownloadUrl, deleteObject } from '../../lib/storage.js'
 import { renderHtmlToPdf } from '../../lib/hrms/hr-pdf.js'
 import {
@@ -56,6 +56,31 @@ async function assembleSnapshot(
   const plain = employee.secureFinancialDetails
     ? decryptHrFinancialDetails(Buffer.from(employee.secureFinancialDetails), employeeId)
     : {}
+
+  /**
+   * Refuse rather than render a payslip of zeros.
+   *
+   * A salary structure can exist with only a CTC and no breakdown — 19 of the
+   * 45 carried over from the old system are exactly that, because the figures
+   * there were derived from an employee's last payslip and those employees had
+   * none. Generating anyway produced a clean, official-looking document
+   * stating the person earned nothing, which is worse than an error: an error
+   * gets fixed, a wrong payslip gets filed.
+   *
+   * The components are not guessable. A conventional basic/HRA split would be
+   * an invented number on a payroll document, so this asks for the real one.
+   */
+  if (
+    !salaryStructure ||
+    toNumber(salaryStructure.basic) +
+      toNumber(salaryStructure.hra) +
+      toNumber(salaryStructure.specialAllowance) ===
+      0
+  ) {
+    throw new BadRequestError(
+      `No salary breakdown is recorded for ${financialYear}. Set basic, HRA and special allowance on the Salary details tab before generating a payslip.`,
+    )
+  }
 
   const basicMonthly = salaryStructure ? toNumber(salaryStructure.basic) / 12 : 0
   const hraMonthly = salaryStructure ? toNumber(salaryStructure.hra) / 12 : 0

@@ -146,15 +146,37 @@ export async function updateSalaryStructure(id: string, formData: FormData): Pro
   redirect(sectionPath(id, 'salary', financialYear))
 }
 
+/**
+ * Shared write path for the salary, investment and payslip tabs.
+ *
+ * A 422 is a field-level rejection and gets the generic "check the values"
+ * banner — the form is right there. Any other 4xx is the API declining for a
+ * stated reason ("no salary breakdown is recorded for 2021-2022"), and that
+ * sentence is the whole answer, so it is carried back and shown. Without
+ * this it escaped as an unhandled error and the admin got a crash screen
+ * instead of the one line telling them what to do.
+ *
+ * `back` lets a caller return to the tab the action was fired from; without
+ * it the reader lands on Basic details and has to find their way back.
+ */
 async function patchSalary(
   id: string,
-  request: { method: 'PUT' | 'POST' | 'DELETE'; path: string; body?: Record<string, unknown> },
+  request: {
+    method: 'PUT' | 'POST' | 'DELETE'
+    path: string
+    body?: Record<string, unknown>
+    back?: string
+  },
 ): Promise<void> {
   try {
     await hrActionFetch(request.path, { method: request.method, body: request.body })
   } catch (error) {
-    if (error instanceof ApiError && error.status === 422) {
-      redirect(`${detailPath(id)}?error=rejected`)
+    if (!(error instanceof ApiError)) throw error
+    if (error.status === 422) redirect(`${detailPath(id)}?error=rejected`)
+    if (error.status >= 400 && error.status < 500) {
+      const back = request.back ?? detailPath(id)
+      const joiner = back.includes('?') ? '&' : '?'
+      redirect(`${back}${joiner}notice=refused&reason=${encodeURIComponent(error.message)}`)
     }
     throw error
   }
@@ -241,6 +263,7 @@ export async function generatePayslip(id: string, formData: FormData): Promise<v
     method: 'POST',
     path: `hrms/employees/${id}/payslips`,
     body: { financialYear, month: formString(formData, 'month') },
+    back: sectionPath(id, 'payslip', financialYear),
   })
   revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'payslip', financialYear))

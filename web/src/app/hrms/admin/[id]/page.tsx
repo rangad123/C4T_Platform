@@ -60,6 +60,7 @@ const NOTICES: Record<string, NoticeCopy> = {
       'Invitation sent. The link lets them choose their own password and expires in 7 days — send another if it lapses.',
   },
   invite_refused: { tone: 'warning', message: 'Invitation not sent.' },
+  refused: { tone: 'warning', message: 'That could not be done.' },
 }
 
 const GENDERS = [
@@ -216,11 +217,14 @@ export default async function HrAdminEmployeeDetailPage({
       badges={<StatusBadge status={employee.status} />}
       tabs={<SectionTabs basePath={detailPath} tabs={visibleSections} active={section} />}
     >
+      {/* A `reason` carries the API's own sentence, which says more than any
+          code-to-copy mapping here could. When one is present it replaces the
+          generic text for whichever code came with it. */}
       <Notice
         code={sp.notice}
         notices={
-          sp.notice === 'invite_refused' && sp.reason
-            ? { ...NOTICES, invite_refused: { tone: 'warning', message: sp.reason } }
+          sp.notice && sp.reason
+            ? { ...NOTICES, [sp.notice]: { tone: 'warning', message: sp.reason } }
             : NOTICES
         }
       />
