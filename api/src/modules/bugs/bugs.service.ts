@@ -9,6 +9,7 @@ import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, ForbiddenError, BadRequestError, ConflictError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import { bugScope } from '../../lib/access/scopes.js'
+import { searchTerms } from '../../lib/search.js'
 import { isAdminSide } from '../../middleware/authorize.js'
 import { bugRelations, projectRelations, type RelationSet } from '../../lib/access/relations.js'
 import {
@@ -142,13 +143,34 @@ export async function listBugs(user: Express.AuthenticatedUser, query: ListBugsQ
           },
         }
       : {}),
-    ...(query.search
+    /**
+     * Every word must match somewhere — the title, reference or description,
+     * or the reporter's NAME.
+     *
+     * The name is searchable because it is already shown: a customer sees who
+     * reported each bug and wanted to find one tester's reports. The reporter's
+     * EMAIL is deliberately not in this list. `maskReporter` hides it from
+     * anyone who is not admin-side, and a search that matched it would undo
+     * that — typing a guessed address and seeing whether any bug came back is a
+     * lookup, however the results are then displayed.
+     *
+     * Splitting into words rather than matching the whole string means a full
+     * name ("devi madduri") finds a bug whose reporter's first and last name
+     * live in separate columns. Anything the old whole-string match found, this
+     * still finds: a phrase present in one column has every one of its words
+     * present in that column.
+     */
+    ...(searchTerms(query.search).length > 0
       ? {
-          OR: [
-            { title: { contains: query.search, mode: 'insensitive' } },
-            { reference: { contains: query.search, mode: 'insensitive' } },
-            { description: { contains: query.search, mode: 'insensitive' } },
-          ],
+          AND: searchTerms(query.search).map((term) => ({
+            OR: [
+              { title: { contains: term, mode: 'insensitive' as const } },
+              { reference: { contains: term, mode: 'insensitive' as const } },
+              { description: { contains: term, mode: 'insensitive' as const } },
+              { reportedBy: { firstName: { contains: term, mode: 'insensitive' as const } } },
+              { reportedBy: { lastName: { contains: term, mode: 'insensitive' as const } } },
+            ],
+          })),
         }
       : {}),
   }
