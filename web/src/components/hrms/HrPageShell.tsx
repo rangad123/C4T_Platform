@@ -43,6 +43,18 @@ export function HrPageShell({
         id="main"
         style={{
           padding: 'var(--space-9)',
+          /**
+           * A scroll runway under the last panel.
+           *
+           * Several HRMS pages end in a form — add a holiday, add a salary row
+           * — and those pages were barely taller than the viewport, leaving
+           * ~30px beneath the final control. A native date picker or select
+           * list wants a few hundred, so it ended up jammed against the bottom
+           * edge with almost nothing to scroll into. This does not control
+           * where the browser draws those popups (nothing in CSS does), but it
+           * gives them somewhere to go and the reader somewhere to scroll.
+           */
+          paddingBottom: 'var(--space-12)',
           display: 'flex',
           flexDirection: 'column',
           gap: 'var(--space-7)',
