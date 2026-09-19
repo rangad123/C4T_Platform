@@ -118,9 +118,6 @@ export async function updateSalaryStructure(id: string, formData: FormData): Pro
       basic: formString(formData, 'basic') || '0',
       hra: formString(formData, 'hra') || '0',
       specialAllowance: formString(formData, 'specialAllowance') || '0',
-      performanceIncentive: formString(formData, 'performanceIncentive') || '0',
-      projectIncentive: formString(formData, 'projectIncentive') || '0',
-      extraHoursIncentive: formString(formData, 'extraHoursIncentive') || '0',
     },
   })
   revalidatePath(`${BASE}/${id}`)

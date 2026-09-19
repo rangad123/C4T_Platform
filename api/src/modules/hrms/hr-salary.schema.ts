@@ -21,14 +21,17 @@ export const financialYearQuery = z.object({ financialYear: financialYearField }
  * from the client. That is the direct fix for the brief's "calculate totals
  * automatically instead of allowing inconsistent totals."
  */
+/**
+ * Fixed pay only. The three variable figures are NOT accepted: they are summed
+ * from the incentives recorded for the year (see variableAnnualFor in the
+ * service), so taking them from the caller would let a typed number disagree
+ * with what was actually paid.
+ */
 export const upsertSalaryStructureSchema = z.object({
   financialYear: financialYearField,
   basic: z.coerce.number().min(0).max(99_999_999),
   hra: z.coerce.number().min(0).max(99_999_999),
   specialAllowance: z.coerce.number().min(0).max(99_999_999),
-  performanceIncentive: z.coerce.number().min(0).max(99_999_999),
-  projectIncentive: z.coerce.number().min(0).max(99_999_999),
-  extraHoursIncentive: z.coerce.number().min(0).max(99_999_999),
 })
 
 export const createOldSalarySchema = z

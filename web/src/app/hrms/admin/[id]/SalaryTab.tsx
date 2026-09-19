@@ -145,17 +145,29 @@ export async function SalaryTab({
                 { label: 'Total fixed annual', value: money(structure.totalFixedAnnual) },
               ]}
             />
-            <DescriptionList
-              items={[
-                { label: 'Performance incentive', value: money(structure.performanceIncentive) },
-                { label: 'Project incentive', value: money(structure.projectIncentive) },
-                { label: 'Extra hours incentive', value: money(structure.extraHoursIncentive) },
-                {
-                  label: 'Total variable annual (estimate)',
-                  value: money(structure.totalVariableAnnual),
-                },
-              ]}
-            />
+            <div>
+              <p
+                style={{
+                  margin: '0 0 var(--space-3)',
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                Variable pay is the total of the incentives recorded below, not a figure typed here
+                — adding or removing one updates these straight away.
+              </p>
+              <DescriptionList
+                items={[
+                  { label: 'Performance incentive', value: money(structure.performanceIncentive) },
+                  { label: 'Project incentive', value: money(structure.projectIncentive) },
+                  { label: 'Extra hours incentive', value: money(structure.extraHoursIncentive) },
+                  {
+                    label: 'Total variable annual',
+                    value: money(structure.totalVariableAnnual),
+                  },
+                ]}
+              />
+            </div>
           </div>
         ) : (
           <EmptyState
@@ -295,36 +307,6 @@ export async function SalaryTab({
               step="0.01"
               required
               defaultValue={structure?.specialAllowance ?? 0}
-            />
-          </Field>
-          <Field label="Performance incentive (estimate)" htmlFor="performanceIncentive">
-            <Input
-              id="performanceIncentive"
-              name="performanceIncentive"
-              type="number"
-              min={0}
-              step="0.01"
-              defaultValue={structure?.performanceIncentive ?? 0}
-            />
-          </Field>
-          <Field label="Project incentive (estimate)" htmlFor="projectIncentive">
-            <Input
-              id="projectIncentive"
-              name="projectIncentive"
-              type="number"
-              min={0}
-              step="0.01"
-              defaultValue={structure?.projectIncentive ?? 0}
-            />
-          </Field>
-          <Field label="Extra hours incentive (estimate)" htmlFor="extraHoursIncentive">
-            <Input
-              id="extraHoursIncentive"
-              name="extraHoursIncentive"
-              type="number"
-              min={0}
-              step="0.01"
-              defaultValue={structure?.extraHoursIncentive ?? 0}
             />
           </Field>
           <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">
