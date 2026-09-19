@@ -99,23 +99,13 @@ export default async function HrAdminHolidaysPage({
       ) : null}
 
       <Panel title={`Holidays in ${year}`}>
-        {holidays && holidays.length > 0 ? (
-          <Table ariaLabel="Holidays" columns={columns} rows={holidays} rowKey={(row) => row.id} />
-        ) : (
-          <EmptyState
-            icon="calendar"
-            title="No holidays added for this year"
-            description="Add a holiday below."
-          />
-        )}
-
         <TrackedForm
           action={addHoliday}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
             gap: 'var(--space-4)',
-            marginTop: 'var(--space-6)',
+            marginBottom: 'var(--space-6)',
             alignItems: 'end',
           }}
         >
@@ -135,6 +125,15 @@ export default async function HrAdminHolidaysPage({
             Add holiday
           </SubmitButton>
         </TrackedForm>
+        {holidays && holidays.length > 0 ? (
+          <Table ariaLabel="Holidays" columns={columns} rows={holidays} rowKey={(row) => row.id} />
+        ) : (
+          <EmptyState
+            icon="calendar"
+            title="No holidays added for this year"
+            description="Use the form above to add the first one."
+          />
+        )}
       </Panel>
     </HrPageShell>
   )

@@ -179,23 +179,13 @@ export async function SalaryTab({
       </Panel>
 
       <Panel title="Old salaries" description="CTC history.">
-        {oldSalaries && oldSalaries.length > 0 ? (
-          <Table
-            ariaLabel="Old salaries"
-            columns={oldSalaryColumns}
-            rows={oldSalaries}
-            rowKey={(row) => row.id}
-          />
-        ) : (
-          <EmptyState icon="banknote" title="No old salary records" />
-        )}
         <TrackedForm
           action={addOldSalary.bind(null, employeeId)}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: 'var(--space-4)',
-            marginTop: 'var(--space-6)',
+            marginBottom: 'var(--space-6)',
             alignItems: 'end',
           }}
         >
@@ -213,26 +203,26 @@ export async function SalaryTab({
             Add old salary
           </SubmitButton>
         </TrackedForm>
-      </Panel>
-
-      <Panel title="Monthly incentives" description={`Actual incentives paid in ${financialYear}.`}>
-        {incentives && incentives.length > 0 ? (
+        {oldSalaries && oldSalaries.length > 0 ? (
           <Table
-            ariaLabel="Monthly incentives"
-            columns={incentiveColumns}
-            rows={incentives}
+            ariaLabel="Old salaries"
+            columns={oldSalaryColumns}
+            rows={oldSalaries}
             rowKey={(row) => row.id}
           />
         ) : (
-          <EmptyState icon="banknote" title="No monthly incentives logged yet" />
+          <EmptyState icon="banknote" title="No old salary records" />
         )}
+      </Panel>
+
+      <Panel title="Monthly incentives" description={`Actual incentives paid in ${financialYear}.`}>
         <TrackedForm
           action={addMonthlyIncentive.bind(null, employeeId)}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: 'var(--space-4)',
-            marginTop: 'var(--space-6)',
+            marginBottom: 'var(--space-6)',
             alignItems: 'end',
           }}
         >
@@ -264,6 +254,16 @@ export async function SalaryTab({
             Add incentive
           </SubmitButton>
         </TrackedForm>
+        {incentives && incentives.length > 0 ? (
+          <Table
+            ariaLabel="Monthly incentives"
+            columns={incentiveColumns}
+            rows={incentives}
+            rowKey={(row) => row.id}
+          />
+        ) : (
+          <EmptyState icon="banknote" title="No monthly incentives logged yet" />
+        )}
       </Panel>
 
       <Modal

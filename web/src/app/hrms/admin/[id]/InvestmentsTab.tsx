@@ -133,23 +133,13 @@ export async function InvestmentsTab({
         title="Investment declarations"
         description={`Section-wise declarations for ${financialYear}. Verified amounts (once set) drive the tax calculation.`}
       >
-        {declarations && declarations.length > 0 ? (
-          <Table
-            ariaLabel="Investment declarations"
-            columns={declarationColumns}
-            rows={declarations}
-            rowKey={(row) => row.id}
-          />
-        ) : (
-          <EmptyState icon="landmark" title="No investment declarations yet" />
-        )}
         <TrackedForm
           action={addInvestmentDeclaration.bind(null, employeeId)}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: 'var(--space-4)',
-            marginTop: 'var(--space-6)',
+            marginBottom: 'var(--space-6)',
             alignItems: 'end',
           }}
         >
@@ -180,29 +170,29 @@ export async function InvestmentsTab({
             Add declaration
           </SubmitButton>
         </TrackedForm>
+        {declarations && declarations.length > 0 ? (
+          <Table
+            ariaLabel="Investment declarations"
+            columns={declarationColumns}
+            rows={declarations}
+            rowKey={(row) => row.id}
+          />
+        ) : (
+          <EmptyState icon="landmark" title="No investment declarations yet" />
+        )}
       </Panel>
 
       <Panel
         title="Monthly tax deductions"
         description={`TDS already deducted for ${financialYear}.`}
       >
-        {deductions && deductions.length > 0 ? (
-          <Table
-            ariaLabel="Monthly tax deductions"
-            columns={deductionColumns}
-            rows={deductions}
-            rowKey={(row) => row.id}
-          />
-        ) : (
-          <EmptyState icon="landmark" title="No TDS entries yet" />
-        )}
         <TrackedForm
           action={addMonthlyDeduction.bind(null, employeeId)}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: 'var(--space-4)',
-            marginTop: 'var(--space-6)',
+            marginBottom: 'var(--space-6)',
             alignItems: 'end',
           }}
         >
@@ -225,6 +215,16 @@ export async function InvestmentsTab({
             Save TDS
           </SubmitButton>
         </TrackedForm>
+        {deductions && deductions.length > 0 ? (
+          <Table
+            ariaLabel="Monthly tax deductions"
+            columns={deductionColumns}
+            rows={deductions}
+            rowKey={(row) => row.id}
+          />
+        ) : (
+          <EmptyState icon="landmark" title="No TDS entries yet" />
+        )}
       </Panel>
 
       <Modal

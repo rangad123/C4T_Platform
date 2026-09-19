@@ -115,24 +115,13 @@ export default async function HrEmployeeTimesheetPage({
       </Panel>
 
       <Panel title="Entries">
-        {entries && entries.length > 0 ? (
-          <Table
-            ariaLabel="Timesheet entries"
-            columns={columns}
-            rows={entries}
-            rowKey={(row) => row.id}
-          />
-        ) : (
-          <EmptyState icon="clock" title="No timesheet entries yet" />
-        )}
-
         <TrackedForm
           action={saveTimesheetEntry}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: 'var(--space-4)',
-            marginTop: 'var(--space-6)',
+            marginBottom: 'var(--space-6)',
             alignItems: 'end',
           }}
         >
@@ -171,6 +160,16 @@ export default async function HrEmployeeTimesheetPage({
             Save entry
           </SubmitButton>
         </TrackedForm>
+        {entries && entries.length > 0 ? (
+          <Table
+            ariaLabel="Timesheet entries"
+            columns={columns}
+            rows={entries}
+            rowKey={(row) => row.id}
+          />
+        ) : (
+          <EmptyState icon="clock" title="No timesheet entries yet" />
+        )}
       </Panel>
     </HrPageShell>
   )

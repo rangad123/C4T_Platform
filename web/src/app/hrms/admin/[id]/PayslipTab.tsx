@@ -71,24 +71,13 @@ export async function PayslipTab({
       <HrFinancialYearPicker action={detailPath} section="payslip" financialYear={financialYear} />
 
       <Panel title="Payslips" description={`Generated payslips for ${financialYear}.`}>
-        {forThisYear.length > 0 ? (
-          <Table
-            ariaLabel="Payslips"
-            columns={columns}
-            rows={forThisYear}
-            rowKey={(row) => row.id}
-          />
-        ) : (
-          <EmptyState icon="credit-card" title="No payslips generated for this year" />
-        )}
-
         <TrackedForm
           action={generatePayslip.bind(null, employeeId)}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: 'var(--space-4)',
-            marginTop: 'var(--space-6)',
+            marginBottom: 'var(--space-6)',
             alignItems: 'end',
           }}
         >
@@ -108,6 +97,16 @@ export async function PayslipTab({
             Generate payslip
           </SubmitButton>
         </TrackedForm>
+        {forThisYear.length > 0 ? (
+          <Table
+            ariaLabel="Payslips"
+            columns={columns}
+            rows={forThisYear}
+            rowKey={(row) => row.id}
+          />
+        ) : (
+          <EmptyState icon="credit-card" title="No payslips generated for this year" />
+        )}
       </Panel>
     </>
   )
