@@ -12,6 +12,13 @@
  */
 import { PrismaClient, HrTaxRegime } from '@prisma/client'
 
+/**
+ * Flat monthly professional tax. 200 is what the old HR system deducted on
+ * every payslip it ever issued, regardless of salary — see the note on
+ * HrProfessionalTaxRate. Editable per year rather than compiled in.
+ */
+const PROFESSIONAL_TAX_MONTHLY = 200
+
 const prisma = new PrismaClient()
 
 async function main(): Promise<void> {
@@ -61,7 +68,16 @@ async function main(): Promise<void> {
     },
   })
 
-  console.log(`seeded tax slabs (NEW + OLD regime) for ${financialYear}`)
+  await prisma.hrProfessionalTaxRate.upsert({
+    where: { financialYear },
+    update: {},
+    create: { financialYear, monthlyAmount: PROFESSIONAL_TAX_MONTHLY },
+  })
+
+  console.log(
+    `seeded tax slabs (NEW + OLD regime) and professional tax ` +
+      `(${PROFESSIONAL_TAX_MONTHLY}/month) for ${financialYear}`,
+  )
 }
 
 main()

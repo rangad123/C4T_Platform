@@ -2810,6 +2810,28 @@ model HrMonthlyIncentive {
   @@map("hr_monthly_incentives")
 }
 
+/// Professional tax: a flat monthly deduction, not a slab calculation.
+///
+/// Every payslip in the old HR system deducted exactly 200 a month, on gross
+/// pay from 16,000 to 183,333 — so there is no salary band and no state table
+/// to model here, only an amount that changes occasionally. It lives in a row
+/// rather than a constant for the same reason HrTaxSlab does: a statutory
+/// figure should not need a deploy to change.
+///
+/// `state` is recorded for the payslip's benefit, since professional tax is
+/// levied by a state, but nothing keys off it — one employer, one registration.
+model HrProfessionalTaxRate {
+  id            String  @id @default(cuid())
+  financialYear String  @unique @map("financial_year")
+  monthlyAmount Decimal @default(0) @map("monthly_amount") @db.Decimal(12, 2)
+  state         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("hr_professional_tax_rates")
+}
+
 /// Admin-editable, versioned by financial year and regime — the tax
 /// computation reads this, it never hardcodes a slab boundary or a rate.
 /// `slabs` is JSON: [{ "upTo": 300000, "rate": 0 }, { "upTo": 600000, "rate": 5 }, …],

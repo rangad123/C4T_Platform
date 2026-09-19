@@ -1201,6 +1201,7 @@ async function importInvestments(
     }
 
     let wrote = 0
+    let anyCreated = false
     for (const { suffix, code } of INVESTMENT_SECTIONS) {
       const declared = decimal(row[`declaration_${suffix}`])
       const actual = decimal(row[`actual_${suffix}`])
@@ -1221,6 +1222,7 @@ async function importInvestments(
         await tx.hrInvestmentDeclaration.update({ where: { id: existingId }, data })
       } else {
         toCreate.push(data)
+        anyCreated = true
       }
       wrote += 1
     }
@@ -1234,8 +1236,13 @@ async function importInvestments(
         'Every section on this row is zero; nothing to declare.',
       )
       counter.skipped += 1
-    } else {
+    } else if (anyCreated) {
       counter.inserted += 1
+    } else {
+      // One legacy row fans out into several declarations, so the counters
+      // track the legacy row: re-running an already-imported row is an update,
+      // not another insert.
+      counter.updated += 1
     }
   }
 

@@ -33,6 +33,9 @@ export interface PayslipSnapshot {
   }
   deductions: {
     tdsMonthly: number
+    /** Flat monthly professional tax. Absent on payslips imported from the
+     *  old HR system before this was modelled. */
+    professionalTaxMonthly?: number
     totalDeductions: number
   }
   netPay: number
@@ -117,6 +120,11 @@ export function renderPayslipHtml(snapshot: PayslipSnapshot): string {
           <thead><tr><th colspan="2">Deductions</th></tr></thead>
           <tbody>
             <tr><td>TDS</td><td class="amount">${money(deductions.tdsMonthly)}</td></tr>
+            ${
+              deductions.professionalTaxMonthly
+                ? `<tr><td>Professional tax</td><td class="amount">${money(deductions.professionalTaxMonthly)}</td></tr>`
+                : ''
+            }
             <tr class="total-row"><td>Total deductions</td><td class="amount">${money(deductions.totalDeductions)}</td></tr>
           </tbody>
         </table>

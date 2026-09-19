@@ -34,7 +34,7 @@ async function assembleSnapshot(
   })
   if (!employee) throw new NotFoundError('Employee')
 
-  const [salaryStructure, incentives, deduction] = await Promise.all([
+  const [salaryStructure, incentives, deduction, professionalTax] = await Promise.all([
     prisma.hrSalaryStructure.findUnique({
       where: { employeeId_financialYear: { employeeId, financialYear } },
       select: { basic: true, hra: true, specialAllowance: true },
@@ -46,6 +46,10 @@ async function assembleSnapshot(
     prisma.hrMonthlyTaxDeduction.findUnique({
       where: { employeeId_financialYear_month: { employeeId, financialYear, month } },
       select: { amount: true },
+    }),
+    prisma.hrProfessionalTaxRate.findUnique({
+      where: { financialYear },
+      select: { monthlyAmount: true },
     }),
   ])
 
@@ -66,6 +70,8 @@ async function assembleSnapshot(
   const grossMonthly = basicMonthly + hraMonthly + specialAllowanceMonthly + incentiveTotal
 
   const tdsMonthly = deduction ? toNumber(deduction.amount) : 0
+  const professionalTaxMonthly = professionalTax ? toNumber(professionalTax.monthlyAmount) : 0
+  const totalDeductions = tdsMonthly + professionalTaxMonthly
   const monthLabel =
     financialYearMonths(financialYear).find((m) => m.month === month)?.label ?? `Month ${month}`
 
@@ -92,9 +98,10 @@ async function assembleSnapshot(
     },
     deductions: {
       tdsMonthly,
-      totalDeductions: tdsMonthly,
+      professionalTaxMonthly,
+      totalDeductions,
     },
-    netPay: grossMonthly - tdsMonthly,
+    netPay: grossMonthly - totalDeductions,
     generatedAt: new Date().toISOString(),
   }
 }

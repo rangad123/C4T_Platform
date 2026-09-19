@@ -162,6 +162,79 @@ async function generateTimesheetReport(query: GenerateReportQuery): Promise<stri
   return reportShell('Timesheet report', `${query.financialYear} — ${periodLabel(query)}`, body)
 }
 
+async function generateProfessionalTaxReport(query: GenerateReportQuery): Promise<string> {
+  const months = resolveMonths(query)
+  const rate = await prisma.hrProfessionalTaxRate.findUnique({
+    where: { financialYear: query.financialYear },
+    select: { monthlyAmount: true, state: true },
+  })
+
+  if (!rate) {
+    return unavailableReport(
+      'Professional tax report',
+      query,
+      `No professional tax rate is configured for ${query.financialYear}.`,
+    )
+  }
+
+  const monthlyAmount = toNumber(rate.monthlyAmount)
+
+  // Payslips are what was actually deducted, so the report counts those rather
+  // than multiplying headcount by months — an employee who joined or left
+  // mid-year has fewer.
+  const payslips = await prisma.hrPayslip.findMany({
+    where: { financialYear: query.financialYear, month: { in: months } },
+    select: { employeeId: true },
+  })
+  if (payslips.length === 0) {
+    return unavailableReport(
+      'Professional tax report',
+      query,
+      'No payslips were issued in this period, so no professional tax was deducted.',
+    )
+  }
+
+  const monthsByEmployee = new Map<string, number>()
+  for (const p of payslips) {
+    monthsByEmployee.set(p.employeeId, (monthsByEmployee.get(p.employeeId) ?? 0) + 1)
+  }
+
+  const employees = await prisma.hrEmployee.findMany({
+    where: { id: { in: [...monthsByEmployee.keys()] } },
+    select: { id: true, employeeCode: true, firstName: true, lastName: true },
+    orderBy: { employeeCode: 'asc' },
+  })
+
+  let total = 0
+  const lines = employees.map((employee) => {
+    const monthCount = monthsByEmployee.get(employee.id) ?? 0
+    const amount = monthCount * monthlyAmount
+    total += amount
+    return { employee, monthCount, amount }
+  })
+
+  const body = `
+    <table>
+      <thead><tr><th>Employee code</th><th>Name</th><th class="amount">Months</th><th class="amount">Professional tax</th></tr></thead>
+      <tbody>
+        ${lines
+          .map(
+            (line) =>
+              `<tr><td>${escapeHtml(line.employee.employeeCode)}</td><td>${escapeHtml(`${line.employee.firstName} ${line.employee.lastName}`)}</td><td class="amount">${line.monthCount}</td><td class="amount">${money(line.amount)}</td></tr>`,
+          )
+          .join('')}
+        <tr class="total-row"><td colspan="3">Total</td><td class="amount">${money(total)}</td></tr>
+      </tbody>
+    </table>
+    <p class="subtitle">${money(monthlyAmount)} per month${rate.state ? ` — ${escapeHtml(rate.state)}` : ''}.</p>`
+
+  return reportShell(
+    'Professional tax report',
+    `${query.financialYear} — ${periodLabel(query)}`,
+    body,
+  )
+}
+
 function unavailableReport(title: string, query: GenerateReportQuery, reason: string): string {
   return reportShell(
     title,
@@ -177,11 +250,7 @@ export async function generateReport(query: GenerateReportQuery): Promise<Buffer
   } else if (query.reportType === 'TIMESHEET') {
     html = await generateTimesheetReport(query)
   } else {
-    html = unavailableReport(
-      'Professional tax report',
-      query,
-      'Professional tax is not yet tracked in this system.',
-    )
+    html = await generateProfessionalTaxReport(query)
   }
   return renderHtmlToPdf(html)
 }
