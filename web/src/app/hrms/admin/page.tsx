@@ -105,9 +105,7 @@ export default async function HrAdminEmployeesPage({
       rowHref={(row) => `${BASE}/${row.id}`}
       hrefFor={hrefFor}
       view={view}
-      cards={
-        'items' in result ? <HrEmployeeCards rows={result.items} basePath={BASE} /> : null
-      }
+      cards={'items' in result ? <HrEmployeeCards rows={result.items} basePath={BASE} /> : null}
       filtered={hasFilter([role, search])}
       emptyIcon="users"
       emptyTitle="No employees yet"

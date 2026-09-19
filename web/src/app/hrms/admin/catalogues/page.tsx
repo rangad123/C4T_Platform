@@ -52,7 +52,7 @@ export default async function HrAdminCataloguesPage({
   searchParams: Promise<{ kind?: string; notice?: string; error?: string }>
 }) {
   const params = await searchParams
-  const kind: Kind = (KINDS.find((k) => k.value === params.kind)?.value ?? 'designations')
+  const kind: Kind = KINDS.find((k) => k.value === params.kind)?.value ?? 'designations'
   const label = KINDS.find((k) => k.value === kind)!.label
 
   const entries = (await serverFetchOrNull<Entry[]>(`hrms/catalog/admin/${kind}`)) ?? []

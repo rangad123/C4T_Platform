@@ -122,11 +122,9 @@ hrCatalogRouter.get(
     const kind = param(req, 'kind') as CatalogKind
     // `as never` only to satisfy the union of four delegate types: the shapes
     // differ by one optional column each, and every one of them has these.
-    const rows = await (delegateFor(kind).findMany)(
-      {
-        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      },
-    )
+    const rows = await delegateFor(kind).findMany({
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    })
     res.json({ data: rows })
   },
 )

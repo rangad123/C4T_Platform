@@ -103,7 +103,13 @@ export default async function HrAdminOldEmployeesPage({
             action={BASE}
             search={{ value: search, placeholder: 'Search name, email or employee code' }}
             selects={[
-              { name: 'status', label: 'Status', options: STATUSES, value: status, allLabel: 'All' },
+              {
+                name: 'status',
+                label: 'Status',
+                options: STATUSES,
+                value: status,
+                allLabel: 'All',
+              },
             ]}
           />
           <HrViewToggle active={view} returnTo={hrefFor(page)} />

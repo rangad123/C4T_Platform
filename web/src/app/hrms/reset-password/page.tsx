@@ -104,7 +104,11 @@ export default async function HrResetPasswordPage({
           />
         </Field>
 
-        <Field label={invite ? 'Confirm password' : 'Confirm new password'} htmlFor="confirmPassword" required>
+        <Field
+          label={invite ? 'Confirm password' : 'Confirm new password'}
+          htmlFor="confirmPassword"
+          required
+        >
           <Input
             id="confirmPassword"
             name="confirmPassword"

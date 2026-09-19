@@ -43,7 +43,12 @@ export function HrEmployeeCards({
             href={`${basePath}/${row.id}`}
             title={
               <span
-                style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0 }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-3)',
+                  minWidth: 0,
+                }}
               >
                 <HrAvatar name={name} fileId={row.profilePictureFileId} size="md" />
                 <span style={{ minWidth: 0 }}>

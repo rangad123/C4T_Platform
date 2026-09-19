@@ -116,7 +116,9 @@ export async function sendEmployeeInvitation(id: string): Promise<void> {
     // The API refuses to invite anyone who has left. That is an answer worth
     // reading, not a crash.
     if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
-      redirect(`${detailPath(id)}?notice=invite_refused&reason=${encodeURIComponent(error.message)}`)
+      redirect(
+        `${detailPath(id)}?notice=invite_refused&reason=${encodeURIComponent(error.message)}`,
+      )
     }
     throw error
   }

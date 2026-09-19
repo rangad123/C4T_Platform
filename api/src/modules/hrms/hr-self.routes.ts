@@ -46,10 +46,14 @@ hrSelfRouter.get('/salary/old', async (req, res) => {
   res.json({ data: await salaryService.listOldSalaries(req.hrEmployee!.id) })
 })
 
-hrSelfRouter.get('/salary/incentives', validate({ query: financialYearQuery }), async (req, res) => {
-  const { financialYear } = validatedQuery<{ financialYear: string }>(res)
-  res.json({ data: await salaryService.listMonthlyIncentives(req.hrEmployee!.id, financialYear) })
-})
+hrSelfRouter.get(
+  '/salary/incentives',
+  validate({ query: financialYearQuery }),
+  async (req, res) => {
+    const { financialYear } = validatedQuery<{ financialYear: string }>(res)
+    res.json({ data: await salaryService.listMonthlyIncentives(req.hrEmployee!.id, financialYear) })
+  },
+)
 
 hrSelfRouter.get('/tax', validate({ query: financialYearQuery }), async (req, res) => {
   const { financialYear } = validatedQuery<{ financialYear: string }>(res)

@@ -260,12 +260,7 @@ export default async function HrAdminEmployeeDetailPage({
                 that was wrong the first time. */}
             {employee.status === 'ACTIVE' ? (
               <form action={sendEmployeeInvitation.bind(null, id)}>
-                <SubmitButton
-                  variant="secondary"
-                  size="sm"
-                  iconLeft="mail"
-                  pendingLabel="Sending…"
-                >
+                <SubmitButton variant="secondary" size="sm" iconLeft="mail" pendingLabel="Sending…">
                   Send sign-in invitation
                 </SubmitButton>
               </form>
