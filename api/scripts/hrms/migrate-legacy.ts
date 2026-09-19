@@ -9,12 +9,18 @@
  * That framework is proven but hardcoded to a different source and target: its
  * REGISTRY is a fixed array of the platform's 66 tables, ALL_LOADERS is six
  * hardcoded imports, legacyPool() is a module singleton, and run.ts calls
- * platform-specific fixups unconditionally. Its batching/keyset/replay
- * machinery exists to survive 200k rows; this source is ~3,900 rows across 13
- * tables, which fits in memory many times over — so the whole import runs in
- * ONE transaction and gives all-or-nothing semantics that batching gave up.
- * Its genuinely reusable parts (the value coercions, the reconciliation
- * reporter, the read-only connection settings) are imported directly below.
+ * platform-specific fixups unconditionally. Its keyset/replay machinery exists
+ * to survive 200k rows; this source is ~3,900 rows across 13 tables, which
+ * fits in memory many times over — so the whole import runs in ONE transaction
+ * and gives all-or-nothing semantics that per-batch commits gave up. Its
+ * genuinely reusable parts (the value coercions, the reconciliation reporter,
+ * the read-only connection settings) are imported directly below.
+ *
+ * Within that transaction, new rows are still written with createMany rather
+ * than one statement each. A write per row is ~3,800 sequential round trips,
+ * which failed three separate ways against a remote database — the transaction
+ * timing out, then the server closing the connection underneath it. Reads that
+ * decide insert-vs-update are likewise one query per table, not one per row.
  *
  * ── The rule this follows
  *
@@ -741,6 +747,7 @@ async function importHolidays(
   reporter: Reporter,
 ): Promise<void> {
   const counter = reporter.counter('holidaylist', 'HrHoliday')
+  const toCreate: Prisma.HrHolidayCreateManyInput[] = []
   const existing = new Map(
     (await tx.hrHoliday.findMany({ select: { id: true, year: true, date: true } })).map((h) => [
       `${h.year}:${h.date.toISOString().slice(0, 10)}`,
@@ -766,14 +773,12 @@ async function importHolidays(
       await tx.hrHoliday.update({ where: { id: existingId }, data: { name } })
       counter.updated += 1
     } else {
-      const created = await tx.hrHoliday.create({
-        data: { year, date, name },
-        select: { id: true },
-      })
-      existing.set(key, created.id)
+      toCreate.push({ year, date, name })
       counter.inserted += 1
     }
   }
+
+  if (toCreate.length > 0) await tx.hrHoliday.createMany({ data: toCreate })
 }
 
 // ── salary → HrOldSalary ─────────────────────────────────────────────────────
@@ -785,6 +790,7 @@ async function importOldSalaries(
   byLegacy: Map<string, string>,
 ): Promise<void> {
   const counter = reporter.counter('salary', 'HrOldSalary')
+  const toCreate: Prisma.HrOldSalaryCreateManyInput[] = []
   const existing = new Map(
     (
       await tx.hrOldSalary.findMany({
@@ -848,10 +854,12 @@ async function importOldSalaries(
       await tx.hrOldSalary.update({ where: { id: existingId }, data })
       counter.updated += 1
     } else {
-      await tx.hrOldSalary.create({ data })
+      toCreate.push(data)
       counter.inserted += 1
     }
   }
+
+  if (toCreate.length > 0) await tx.hrOldSalary.createMany({ data: toCreate })
 }
 
 // ── active_salary + payslip components → HrSalaryStructure ───────────────────
@@ -863,6 +871,7 @@ async function importSalaryStructures(
   byLegacy: Map<string, string>,
 ): Promise<void> {
   const counter = reporter.counter('active_salary', 'HrSalaryStructure')
+  const toCreate = new Map<string, Prisma.HrSalaryStructureCreateManyInput>()
   const rows = legacy.activeSalary
   const existing = new Map(
     (
@@ -958,14 +967,30 @@ async function importSalaryStructures(
         message: `Another active_salary row already covers ${fy} for this employee; the later row wins.`,
         action: 'REVIEW_REQUIRED',
       })
-    } else {
-      const created = await tx.hrSalaryStructure.create({
-        data: { ...data, employeeId, financialYear: fy },
-        select: { id: true },
+    } else if (toCreate.has(key)) {
+      // A second legacy row for the same year, not yet written. Replace the
+      // pending record rather than colliding on the unique constraint, and
+      // count it the same way the already-in-database case above does.
+      toCreate.set(key, { ...data, employeeId, financialYear: fy })
+      counter.updated += 1
+      reporter.problem({
+        legacyTable: 'active_salary',
+        legacyId,
+        targetModel: 'HrSalaryStructure',
+        code: 'DUPLICATE_FOR_FINANCIAL_YEAR',
+        field: null,
+        value: fy,
+        message: `Another active_salary row already covers ${fy} for this employee; the later row wins.`,
+        action: 'REVIEW_REQUIRED',
       })
-      existing.set(key, created.id)
+    } else {
+      toCreate.set(key, { ...data, employeeId, financialYear: fy })
       counter.inserted += 1
     }
+  }
+
+  if (toCreate.size > 0) {
+    await tx.hrSalaryStructure.createMany({ data: [...toCreate.values()] })
   }
 }
 
@@ -979,6 +1004,7 @@ async function importIncentives(
   incentiveTypeByName: Map<string, string>,
 ): Promise<void> {
   const counter = reporter.counter('incentives', 'HrMonthlyIncentive')
+  const toCreate: Prisma.HrMonthlyIncentiveCreateManyInput[] = []
   const existing = new Map(
     (
       await tx.hrMonthlyIncentive.findMany({
@@ -1030,10 +1056,12 @@ async function importIncentives(
       await tx.hrMonthlyIncentive.update({ where: { id: existingId }, data })
       counter.updated += 1
     } else {
-      await tx.hrMonthlyIncentive.create({ data })
+      toCreate.push(data)
       counter.inserted += 1
     }
   }
+
+  if (toCreate.length > 0) await tx.hrMonthlyIncentive.createMany({ data: toCreate })
 }
 
 // ── taxes → HrMonthlyTaxDeduction ────────────────────────────────────────────
@@ -1045,6 +1073,7 @@ async function importTaxDeductions(
   byLegacy: Map<string, string>,
 ): Promise<void> {
   const counter = reporter.counter('taxes', 'HrMonthlyTaxDeduction')
+  const toCreate: Prisma.HrMonthlyTaxDeductionCreateManyInput[] = []
   const existing = new Map(
     (
       await tx.hrMonthlyTaxDeduction.findMany({
@@ -1126,14 +1155,12 @@ async function importTaxDeductions(
       await tx.hrMonthlyTaxDeduction.update({ where: { id: existingId }, data: { amount } })
       counter.updated += 1
     } else {
-      const created = await tx.hrMonthlyTaxDeduction.create({
-        data: { employeeId, financialYear: fy, month, amount },
-        select: { id: true },
-      })
-      existing.set(key, created.id)
+      toCreate.push({ employeeId, financialYear: fy, month, amount })
       counter.inserted += 1
     }
   }
+
+  if (toCreate.length > 0) await tx.hrMonthlyTaxDeduction.createMany({ data: toCreate })
 }
 
 // ── investments (wide) → HrInvestmentDeclaration (tall) ──────────────────────
@@ -1146,6 +1173,7 @@ async function importInvestments(
   sectionByCode: Map<string, string>,
 ): Promise<void> {
   const counter = reporter.counter('investments', 'HrInvestmentDeclaration')
+  const toCreate: Prisma.HrInvestmentDeclarationCreateManyInput[] = []
   const existing = new Map(
     (
       await tx.hrInvestmentDeclaration.findMany({
@@ -1192,7 +1220,7 @@ async function importInvestments(
       if (existingId) {
         await tx.hrInvestmentDeclaration.update({ where: { id: existingId }, data })
       } else {
-        await tx.hrInvestmentDeclaration.create({ data })
+        toCreate.push(data)
       }
       wrote += 1
     }
@@ -1210,6 +1238,8 @@ async function importInvestments(
       counter.inserted += 1
     }
   }
+
+  if (toCreate.length > 0) await tx.hrInvestmentDeclaration.createMany({ data: toCreate })
 }
 
 // ── timesheet → HrTimesheetEntry + HrLeaveRequest ────────────────────────────
@@ -1223,6 +1253,16 @@ async function importTimesheet(
 ): Promise<void> {
   const entryCounter = reporter.counter('timesheet', 'HrTimesheetEntry')
   const leaveCounter = reporter.counter('timesheet', 'HrLeaveRequest')
+  /**
+   * New rows are collected and inserted with createMany at the end instead of
+   * one at a time. This is the largest table by far, and a write per row meant
+   * ~2,800 sequential round trips inside the transaction — which is what made
+   * the import fail three different ways against a remote database (the
+   * transaction timing out, then the server closing the connection). Batched,
+   * it is a couple of statements.
+   */
+  const newEntries = new Map<string, Prisma.HrTimesheetEntryCreateManyInput>()
+  const newLeave = new Map<string, Prisma.HrLeaveRequestCreateManyInput>()
   const existingEntries = new Map(
     (
       await tx.hrTimesheetEntry.findMany({ select: { id: true, employeeId: true, date: true } })
@@ -1296,7 +1336,7 @@ async function importTimesheet(
         await tx.hrLeaveRequest.update({ where: { id: existingLeaveId }, data })
         counter.updated += 1
       } else {
-        await tx.hrLeaveRequest.create({ data })
+        newLeave.set(leaveLegacyId, data)
         counter.inserted += 1
       }
       continue
@@ -1322,13 +1362,21 @@ async function importTimesheet(
       await tx.hrTimesheetEntry.update({ where: { id: existingEntryId }, data })
       counter.updated += 1
     } else {
-      const created = await tx.hrTimesheetEntry.create({
-        data: { ...data, employeeId, date },
-        select: { id: true },
-      })
-      existingEntries.set(entryKey, created.id)
-      counter.inserted += 1
+      // Keyed rather than pushed, so a second legacy row for the same day
+      // replaces the first instead of breaking the unique constraint — the
+      // same "later row wins" rule the per-row path used. The source has no
+      // such duplicates today; this keeps the counts balancing if it grows any.
+      if (newEntries.has(entryKey)) counter.updated += 1
+      else counter.inserted += 1
+      newEntries.set(entryKey, { ...data, employeeId, date })
     }
+  }
+
+  if (newEntries.size > 0) {
+    await tx.hrTimesheetEntry.createMany({ data: [...newEntries.values()] })
+  }
+  if (newLeave.size > 0) {
+    await tx.hrLeaveRequest.createMany({ data: [...newLeave.values()] })
   }
 }
 
@@ -1341,6 +1389,7 @@ async function importPayslips(
   byLegacy: Map<string, string>,
 ): Promise<void> {
   const counter = reporter.counter('payslip', 'HrPayslip')
+  const toCreate = new Map<string, Prisma.HrPayslipCreateManyInput>()
   const existing = new Map(
     (
       await tx.hrPayslip.findMany({
@@ -1454,14 +1503,29 @@ async function importPayslips(
         action: 'REVIEW_REQUIRED',
       })
     } else {
-      const created = await tx.hrPayslip.create({
-        data: { ...data, employeeId, financialYear: fy, month },
-        select: { id: true },
-      })
-      existing.set(key, created.id)
-      counter.inserted += 1
+      // A second legacy payslip for the same month, not yet written: replace
+      // the pending record and report it, exactly as the already-in-database
+      // branch above does, rather than pushing a duplicate into the batch.
+      if (toCreate.has(key)) {
+        counter.updated += 1
+        reporter.problem({
+          legacyTable: 'payslip',
+          legacyId,
+          targetModel: 'HrPayslip',
+          code: 'DUPLICATE_FOR_MONTH',
+          field: null,
+          value: `${fy} month ${month}`,
+          message: 'Another payslip already covers this month; the later one replaces it.',
+          action: 'REVIEW_REQUIRED',
+        })
+      } else {
+        counter.inserted += 1
+      }
+      toCreate.set(key, { ...data, employeeId, financialYear: fy, month })
     }
   }
+
+  if (toCreate.size > 0) await tx.hrPayslip.createMany({ data: [...toCreate.values()] })
 }
 
 runMigration()
