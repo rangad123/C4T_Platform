@@ -31,7 +31,7 @@ export default async function HrForgotPasswordPage({
       footer={{ href: '/login', label: 'Back to sign in' }}
     >
       {params.sent ? (
-        <HrAuthNotice tone="success" icon="mail-check">
+        <HrAuthNotice tone="success" icon="check-circle-2">
           If that address belongs to an active employee, a reset link is on its way. The link
           expires in 60 minutes.
         </HrAuthNotice>
