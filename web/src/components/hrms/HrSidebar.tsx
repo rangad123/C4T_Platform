@@ -81,6 +81,31 @@ function setCollapsedPreference(next: boolean): void {
   window.dispatchEvent(new Event(CHANGE_EVENT))
 }
 
+/**
+ * The path as the sidebar's own hrefs spell it.
+ *
+ * HRMS is served from its own hostname, and `hrmsRewrite` in `proxy.ts`
+ * rewrites every request on it to `/hrms` + the path. Nav hrefs are written
+ * without that prefix, because that is what the address bar shows — but
+ * `usePathname()` does not agree with itself across the boundary: rendering
+ * on the server it reports the rewritten route (`/hrms/admin`), and in the
+ * browser it reports the address (`/admin`).
+ *
+ * Nothing matched server-side, so the sidebar shipped with no section
+ * highlighted; the client then wanted to add the class and React refused,
+ * since a hydration mismatch on an attribute is reported and left alone. The
+ * result was navigation that never showed you where you were.
+ *
+ * Stripping the prefix makes both sides agree on the address-bar form, which
+ * is the one the hrefs are written in. Under plain `localhost/hrms/...` in
+ * development both sides say `/hrms/admin` and this still resolves to the
+ * same `/admin`.
+ */
+function hrPathname(pathname: string): string {
+  if (pathname === '/hrms') return '/'
+  return pathname.startsWith('/hrms/') ? pathname.slice('/hrms'.length) : pathname
+}
+
 export function HrSidebar({
   userName,
   avatarFileId = null,
@@ -91,7 +116,7 @@ export function HrSidebar({
 }: HrSidebarProps) {
   const profileTarget = `${homeHref}/profile`
   const collapsed = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
-  const pathname = usePathname()
+  const pathname = hrPathname(usePathname())
   const searchParams = useSearchParams()
 
   const qualifyingKeys = new Map<string, Set<string>>()
