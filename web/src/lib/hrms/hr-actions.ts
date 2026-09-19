@@ -135,7 +135,14 @@ export async function hrLogoutAction(): Promise<void> {
 
   cookieStore.delete('hrms_access')
   cookieStore.delete('hrms_refresh')
-  hrExternalRedirect('/login')
+  /*
+    Deliberately does NOT redirect. `/login` is one of the three paths that
+    also exist at the marketing site's top level, and a redirect from a Server
+    Action is resolved by Next's client router, which picks that one — so
+    signing out landed on the marketing homepage. `HrSignOutButton` sends the
+    browser to `/login` itself once this returns, which is a real navigation
+    through the server and therefore through the hostname rewrite.
+  */
 }
 
 /**

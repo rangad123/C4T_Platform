@@ -2,39 +2,36 @@ import { redirect } from 'next/navigation'
 import { env } from '@/lib/env'
 
 /**
- * A redirect to one of the three bare paths HRMS shares a name with on the
- * main marketing site: `/login`, `/forgot-password`, `/reset-password`.
+ * Builds an absolute URL for an HRMS redirect and hands it to `redirect()`.
  *
- * ── WHY THIS EXISTS
+ * ── WHAT THIS DOES AND DOES NOT SOLVE
  *
- * `hrmsRewrite` in `proxy.ts` is server-side middleware: on a fresh request
- * it correctly rewrites `hrms.crowd4test.com/login` to the `app/hrms/login`
- * page, invisibly. A plain `redirect('/login?error=...')` from a Server
- * Action does not go through that the same way. Next's client router
- * performs the follow-up navigation itself, and the router has no idea a
- * host-based rewrite exists — it resolves `/login` against its own
- * filesystem route table, where a literal `/login` page ALSO exists, at the
- * marketing site's top level. That page wins. The address bar still reads
- * `hrms.crowd4test.com/login`, but the marketing homepage renders behind its
- * own login modal — the exact "HRMS sign-in redirects to the main site"
- * report this project already fixed once for the bare hostname's root path.
- * This is the same failure, one level deeper: it needed a real page at every
- * shared name, not just at `/`.
+ * It does NOT force a full browser navigation. That was the first attempt at
+ * fixing HRMS sign-in landing on the marketing site, and it was wrong: Next
+ * normalises a same-origin absolute URL straight back into a client-side
+ * transition, so the client router still resolved the path against the
+ * filesystem and still found the marketing site's own `/login`. Verified
+ * against the deployed site, not assumed.
  *
- * The fix is to never let the CLIENT resolve these three redirects at all.
- * `redirect()` given an absolute URL makes Next.js perform a real browser
- * navigation (`window.location`) instead of a soft client-side transition,
- * which sends the browser back through the server — and the server's rewrite
- * has never been wrong. Every redirect to these three paths from HRMS code
- * must go through this helper, not a bare `redirect('/login...')`.
+ * The three paths that collide — `/login`, `/forgot-password`,
+ * `/reset-password` — are therefore not solved here at all. Their actions
+ * return their result to the form instead of redirecting, and the one real
+ * navigation left (to sign-in after a password is set, and after sign-out)
+ * is a `window.location` call from the client, which is a genuine request and
+ * so passes back through `proxy.ts`'s hostname rewrite.
  *
- * ── DEV
+ * ── WHAT IT IS STILL FOR
  *
- * There is no real separate hrms.crowd4test.com in development, so the
- * cleanest correct target is `/hrms<path>` on the same origin — the literal
- * file route, sidestepping the need for host detection entirely. This also
- * fixes the address bar showing the platform's login page in dev, which was
- * a known, previously-accepted limitation.
+ * Redirects to HRMS-only addresses — `/admin`, `/employee` — which collide
+ * with nothing and resolve correctly whichever way they are made. Two things
+ * make routing them through here worthwhile:
+ *
+ *   • `requireHrEmployee` and `requireHrRole` redirect while a page renders,
+ *     so Next answers with a real HTTP redirect and the browser's follow-up
+ *     request passes through the rewrite properly.
+ *   • Locally there is no hrms hostname and so no rewrite, which is why every
+ *     bare-path redirect used to 404 in development. Targeting `/hrms<path>`
+ *     there hits the real route directly.
  */
 export function hrExternalRedirect(path: string, type: 'push' | 'replace' = 'replace'): never {
   const production = env.NEXT_PUBLIC_ENVIRONMENT === 'production'

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Icon } from '@/components/ds/core/Icon'
-import { hrLogoutAction } from '@/lib/hrms/hr-actions'
+import { HrSignOutButton } from './HrSignOutButton'
 import styles from '@/components/admin/Topbar.module.css'
 
 export interface HrCrumb {
@@ -49,12 +49,7 @@ export function HrTopbar({ crumbs, root }: HrTopbarProps) {
       </nav>
 
       <div className={styles.actions}>
-        <form action={hrLogoutAction} className={styles.logoutForm}>
-          <button type="submit" className={styles.logoutButton}>
-            <Icon name="log-out" size={16} />
-            Sign out
-          </button>
-        </form>
+        <HrSignOutButton className={styles.logoutButton} />
       </div>
     </header>
   )
