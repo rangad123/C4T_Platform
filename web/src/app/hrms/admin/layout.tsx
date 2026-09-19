@@ -25,6 +25,7 @@ const SECTIONS: readonly HrSidebarSection[] = [
   { links: [{ href: '/admin/templates', label: 'Templates', icon: 'file-text' }] },
   { links: [{ href: '/admin/payslip', label: 'Payslip', icon: 'credit-card' }] },
   { links: [{ href: '/admin/holidays', label: 'Holidays list', icon: 'calendar' }] },
+  { links: [{ href: '/admin/catalogues', label: 'Catalogues', icon: 'list' }] },
 ]
 
 /**
