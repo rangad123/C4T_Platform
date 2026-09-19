@@ -391,13 +391,18 @@ export const SOCIAL_PROFILES = [
  * newsletter block it defines. Never rendered: the footer has a logo,
  * tagline, social row and newsletter form, and stops there.
  *
- * `addressLines` is two lines in the source ("556, 14th Main, Sector 3, HSR
- * Layout" / "Bengaluru, Karnataka 560102, India") — kept as two rather than
- * joined, the way a postal address is actually read.
+ * `addressLines` is kept as two lines rather than joined, the way a postal
+ * address is actually read. The address itself was corrected on 2026-09-19
+ * from the one in the design handoff ("556, 14th Main, Sector 3, HSR Layout"),
+ * which was wrong — supplied verbatim by the client on the defects sheet.
+ * lib/seo/structured-data.ts carries the same address and must match.
  */
 export const FOOTER_CONTACT = {
   name: 'Crowd4Test',
-  addressLines: ['556, 14th Main, Sector 3, HSR Layout', 'Bengaluru, Karnataka 560102, India'],
+  addressLines: [
+    'No. 1692/B, 3rd Floor (302), 27th Main Road',
+    'Sector 2, HSR Layout, Bengaluru, Karnataka 560102',
+  ],
   email: 'admin@crowd4test.com',
   phone: '+91 96323 53367',
 } as const

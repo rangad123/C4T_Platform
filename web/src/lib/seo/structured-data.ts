@@ -24,7 +24,7 @@ export function organizationJsonLd() {
     foundingDate: '2015',
     address: {
       '@type': 'PostalAddress',
-      streetAddress: '556, 14th Main, Sector 3, HSR Layout',
+      streetAddress: 'No. 1692/B, 3rd Floor (302), 27th Main Road, Sector 2, HSR Layout',
       addressLocality: 'Bengaluru',
       addressRegion: 'Karnataka',
       postalCode: '560102',

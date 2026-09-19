@@ -72,7 +72,13 @@ export async function saveContentAction(formData: FormData): Promise<void> {
   const body = {
     title: formTrimmed(formData, 'title') || undefined,
     slug: formTrimmed(formData, 'slug') || undefined,
-    excerpt: formTrimmed(formData, 'excerpt') || undefined,
+    /**
+     * Sent as-is, including empty. `|| undefined` here meant clearing an
+     * excerpt silently did nothing: the field was dropped from the PATCH, so
+     * the old text stayed. The API accepts an empty string and treats it as
+     * cleared (it is deliberately not nullable — see its schema).
+     */
+    excerpt: formTrimmed(formData, 'excerpt'),
     content: formTrimmed(formData, 'content'),
     categoryId: formTrimmed(formData, 'categoryId') || null,
     authorDisplayName: formTrimmed(formData, 'authorDisplayName') || null,
