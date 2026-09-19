@@ -5,6 +5,9 @@ import { HrAdminListPage } from '@/components/hrms/HrAdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { HrAvatar } from '@/components/hrms/HrAvatar'
+import { HrEmployeeCards } from '@/components/hrms/HrEmployeeCards'
+import { HrViewToggle } from '@/components/hrms/HrViewToggle'
+import { resolveListView } from '@/lib/hrms/list-view'
 import { Button } from '@/components/ds/core/Button'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
@@ -20,6 +23,7 @@ interface EmployeeRow {
   email: string
   role: 'ADMIN' | 'ACCOUNT_MANAGER' | 'EMPLOYEE'
   status: 'ACTIVE' | 'RESIGNED' | 'TERMINATED'
+  phone: string | null
   profilePictureFileId: string | null
   designation: { id: string; name: string } | null
 }
@@ -41,12 +45,20 @@ export default async function HrAdminEmployeesPage({
     search?: string
     sort?: string
     order?: 'asc' | 'desc'
+    view?: string
   }>
 }) {
   const params = await searchParams
   const page = parsePage(params.page)
   const role = ROLES.includes(params.role ?? '') ? params.role : undefined
   const search = searchTerm(params.search)
+  const view = await resolveListView(params.view)
+
+  const listQuery = { role, search, sort: params.sort, order: params.order, view: params.view }
+  const hrefFor = pageHrefBuilder(BASE, listQuery)
+  // Where the view toggle sends you back to: this same list, filters, sort and
+  // page intact, so switching how it is drawn never also moves you.
+  const returnTo = hrefFor(page)
 
   const result = await loadList<EmployeeRow>('hrms/employees', {
     page,
@@ -91,7 +103,11 @@ export default async function HrAdminEmployeesPage({
       columns={columns}
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
-      hrefFor={pageHrefBuilder(BASE, { role, search, sort: params.sort, order: params.order })}
+      hrefFor={hrefFor}
+      view={view}
+      cards={
+        'items' in result ? <HrEmployeeCards rows={result.items} basePath={BASE} /> : null
+      }
       filtered={hasFilter([role, search])}
       emptyIcon="users"
       emptyTitle="No employees yet"
@@ -120,9 +136,19 @@ export default async function HrAdminEmployeesPage({
               order: params.order,
             }}
           />
-          <Button href={`${BASE}/new`} variant="primary" iconLeft="plus">
-            Add employee
-          </Button>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-4)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <HrViewToggle active={view} returnTo={returnTo} />
+            <Button href={`${BASE}/new`} variant="primary" iconLeft="plus">
+              Add employee
+            </Button>
+          </div>
         </div>
       }
     />

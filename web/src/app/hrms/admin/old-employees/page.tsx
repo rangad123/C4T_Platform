@@ -5,6 +5,9 @@ import { HrAdminListPage } from '@/components/hrms/HrAdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { HrAvatar } from '@/components/hrms/HrAvatar'
+import { HrEmployeeCards } from '@/components/hrms/HrEmployeeCards'
+import { HrViewToggle } from '@/components/hrms/HrViewToggle'
+import { resolveListView } from '@/lib/hrms/list-view'
 import type { TableColumn } from '@/components/ds/admin/Table'
 
 export const metadata: Metadata = { title: 'Old employees' }
@@ -19,6 +22,7 @@ interface EmployeeRow {
   email: string
   role: 'ADMIN' | 'ACCOUNT_MANAGER' | 'EMPLOYEE'
   status: 'ACTIVE' | 'RESIGNED' | 'TERMINATED'
+  phone: string | null
   profilePictureFileId: string | null
   designation: { id: string; name: string } | null
 }
@@ -29,12 +33,16 @@ const STATUSES = ['RESIGNED', 'TERMINATED']
 export default async function HrAdminOldEmployeesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; status?: string; search?: string }>
+  searchParams: Promise<{ page?: string; status?: string; search?: string; view?: string }>
 }) {
   const params = await searchParams
   const page = parsePage(params.page)
   const status = STATUSES.includes(params.status ?? '') ? params.status : undefined
   const search = searchTerm(params.search)
+  // Shares the Employees list's remembered preference: these are the same
+  // people, and a colleague who left should not be drawn differently.
+  const view = await resolveListView(params.view)
+  const hrefFor = pageHrefBuilder(BASE, { status, search, view: params.view })
 
   const result = await loadList<EmployeeRow>('hrms/employees', {
     page,
@@ -74,19 +82,32 @@ export default async function HrAdminOldEmployeesPage({
       columns={columns}
       rowKey={(row) => row.id}
       rowHref={(row) => `/admin/${row.id}`}
-      hrefFor={pageHrefBuilder(BASE, { status, search })}
+      hrefFor={hrefFor}
+      view={view}
+      cards={'items' in result ? <HrEmployeeCards rows={result.items} basePath="/admin" /> : null}
       filtered={hasFilter([status, search])}
       emptyIcon="user-check"
       emptyTitle="No former employees"
       emptyDescription="Employees who resign or are terminated appear here."
       toolbar={
-        <ListFilters
-          action={BASE}
-          search={{ value: search, placeholder: 'Search name, email or employee code' }}
-          selects={[
-            { name: 'status', label: 'Status', options: STATUSES, value: status, allLabel: 'All' },
-          ]}
-        />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+            gap: 'var(--space-4)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <ListFilters
+            action={BASE}
+            search={{ value: search, placeholder: 'Search name, email or employee code' }}
+            selects={[
+              { name: 'status', label: 'Status', options: STATUSES, value: status, allLabel: 'All' },
+            ]}
+          />
+          <HrViewToggle active={view} returnTo={hrefFor(page)} />
+        </div>
       }
     />
   )

@@ -23,6 +23,19 @@ export interface HrAdminListPageProps<Row> {
   toolbar?: ReactNode
   summary?: ReactNode
 
+  /**
+   * An alternative rendering of the same `result.items`, shown instead of the
+   * table when `view` is `cards`.
+   *
+   * Passed in rather than derived here: a card is a layout decision about one
+   * kind of record — which field is the title, which the meta line — and the
+   * `columns` array does not carry enough to guess it. The shell keeps owning
+   * everything around the list: the header, the empty and error states, and
+   * the pagination, all of which are the same either way.
+   */
+  cards?: ReactNode
+  view?: 'table' | 'cards'
+
   emptyTitle: string
   emptyDescription: string
   emptyIcon?: IconName
@@ -51,6 +64,8 @@ export function HrAdminListPage<Row>({
   tabs,
   toolbar,
   summary,
+  cards,
+  view = 'table',
   emptyTitle,
   emptyDescription,
   emptyIcon = 'inbox',
@@ -110,13 +125,17 @@ export function HrAdminListPage<Row>({
         ) : (
           <>
             {summary}
-            <Table
-              ariaLabel={title}
-              columns={columns}
-              rows={result.items}
-              rowKey={rowKey}
-              rowHref={rowHref}
-            />
+            {view === 'cards' && cards ? (
+              cards
+            ) : (
+              <Table
+                ariaLabel={title}
+                columns={columns}
+                rows={result.items}
+                rowKey={rowKey}
+                rowHref={rowHref}
+              />
+            )}
             <Pagination
               page={result.meta.page}
               totalPages={Math.max(1, result.meta.totalPages)}
