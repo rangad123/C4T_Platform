@@ -28,25 +28,41 @@ import { HR_ROLE_HOME, type PublicHrEmployee } from './hr-types'
  */
 
 /**
- * `/login` exists at HRMS's own address AND, separately, as the marketing
- * site's own top-level page — see `hrExternalRedirect`'s own comment for why
- * that collision means every redirect back to it must force a real browser
- * navigation rather than let the client router resolve it.
+ * What the sign-in form renders after a failed attempt.
+ *
+ * A FAILED sign-in does not redirect anywhere — it returns, and the form
+ * shows the message in place. That is not just tidier than bouncing through
+ * `/login?error=...`, it is the only thing that actually works here.
+ *
+ * HRMS is one Next app behind a host-based rewrite: `proxy.ts` turns
+ * `hrms.crowd4test.com/login` into `app/hrms/login` on the server. Every real
+ * request goes through that correctly. What it cannot reach is Next's client
+ * router, which resolves a redirect target against the filesystem and knows
+ * nothing about the rewrite — and a second, real `/login` page exists at the
+ * marketing site's top level. That one won, so a wrong password silently
+ * replaced the sign-in screen with the marketing homepage and its own login
+ * dialog: right address bar, wrong page, no error shown. An absolute URL does
+ * not help; Next normalises a same-origin one back to a client transition.
+ *
+ * Not navigating at all sidesteps the whole problem, and stops putting the
+ * address someone just typed into their URL bar and browser history.
  */
-function hrAuthRedirect(href: string): never {
-  hrExternalRedirect(href)
+export interface HrLoginState {
+  /** A code from ERROR_MESSAGES in the form, or undefined before first submit. */
+  error?: string
+  /** Echoed back so a failed attempt does not clear what was typed. */
+  email?: string
 }
 
-export async function hrLoginAction(formData: FormData): Promise<void> {
+export async function hrLoginAction(
+  _previous: HrLoginState,
+  formData: FormData,
+): Promise<HrLoginState> {
   const email = formTrimmed(formData, 'email')
   const password = formString(formData, 'password')
   const next = formString(formData, 'next')
 
-  if (!email || !password) {
-    hrAuthRedirect(
-      `/login?error=missing${next ? `&next=${encodeURIComponent(next)}` : ''}&email=${encodeURIComponent(email)}`,
-    )
-  }
+  if (!email || !password) return { error: 'missing', email }
 
   let response: Response
   try {
@@ -57,9 +73,7 @@ export async function hrLoginAction(formData: FormData): Promise<void> {
       cache: 'no-store',
     })
   } catch {
-    hrAuthRedirect(
-      `/login?error=network${next ? `&next=${encodeURIComponent(next)}` : ''}&email=${encodeURIComponent(email)}`,
-    )
+    return { error: 'network', email }
   }
 
   if (!response.ok) {
@@ -75,9 +89,7 @@ export async function hrLoginAction(formData: FormData): Promise<void> {
     } catch {
       // Body wasn't JSON — keep the generic code.
     }
-    hrAuthRedirect(
-      `/login?error=${encodeURIComponent(code)}${next ? `&next=${encodeURIComponent(next)}` : ''}&email=${encodeURIComponent(email)}`,
-    )
+    return { error: code, email }
   }
 
   await bridgeApiCookies(response)
@@ -91,12 +103,12 @@ export async function hrLoginAction(formData: FormData): Promise<void> {
   const role = body?.data?.employee?.role
   const target = safeNext(next) ?? (role ? HR_ROLE_HOME[role] : null)
   /*
-    A full browser navigation rather than a client-side one, and not only for
-    consistency with the failure paths above: the session cookies were just
-    set on this response, and a fresh document is the one thing guaranteed to
-    pick them up without carrying any pre-sign-in router state across the
-    boundary. `/login` is the fallback when a response that otherwise looked
-    successful carried no role.
+    Success DOES navigate — there is somewhere to go. `/admin` and `/employee`
+    are HRMS-only addresses, so unlike `/login` they collide with nothing at
+    the marketing site's top level and resolve correctly either way. Going
+    through the helper regardless, because the session cookies were just set
+    on this response and a fresh document is what reliably picks them up
+    rather than carrying pre-sign-in router state across the boundary.
   */
   hrExternalRedirect(target ?? '/login')
 }

@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 export default async function HrLoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string; email?: string }>
+  searchParams: Promise<{ next?: string; notice?: string }>
 }) {
   const params = await searchParams
 
@@ -50,7 +50,7 @@ export default async function HrLoginPage({
           boxShadow: 'var(--shadow-md)',
         }}
       >
-        <HrLoginForm searchParams={Promise.resolve(params)} />
+        <HrLoginForm next={params.next} notice={params.notice} />
       </div>
     </div>
   )

@@ -1,14 +1,23 @@
+'use client'
+
+import { useActionState } from 'react'
 import Link from 'next/link'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Icon } from '@/components/ds/core/Icon'
-import { hrLoginAction } from '@/lib/hrms/hr-actions'
+import { hrLoginAction, type HrLoginState } from '@/lib/hrms/hr-actions'
 
 /**
- * The HRMS sign-in form. Structural copy of `(marketing)/login/form.tsx`
- * minus Google sign-in and the register link — employees are provisioned by
- * an admin here, never self-registered.
+ * The HRMS sign-in form.
+ *
+ * A client component holding the action's returned state, rather than a
+ * Server Component reading `?error=` out of the URL. A failed sign-in used to
+ * redirect back to `/login?error=...`, and on this hostname that redirect
+ * landed on the MARKETING site's own `/login` page instead of this one — see
+ * `hrLoginAction`'s comment for the full reason. Keeping the failure in
+ * component state means no navigation happens at all, so there is nothing to
+ * resolve wrongly, and the address someone typed stays out of their URL bar.
  */
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -25,14 +34,9 @@ function errorMessage(code: string | undefined): string | null {
   return ERROR_MESSAGES[code] ?? 'Sign-in failed. Please try again.'
 }
 
-export default async function HrLoginForm({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string; error?: string; email?: string; notice?: string }>
-}) {
-  const params = await searchParams
-  const message = errorMessage(params.error)
-  const preservedEmail = params.email ?? ''
+export default function HrLoginForm({ next, notice }: { next?: string; notice?: string }) {
+  const [state, formAction] = useActionState<HrLoginState, FormData>(hrLoginAction, {})
+  const message = errorMessage(state.error)
 
   return (
     <div>
@@ -49,7 +53,7 @@ export default async function HrLoginForm({
         Crowd4Test staff only.
       </p>
 
-      {params.notice === 'password_reset' ? (
+      {notice === 'password_reset' ? (
         <div
           role="status"
           style={{
@@ -92,10 +96,10 @@ export default async function HrLoginForm({
       ) : null}
 
       <form
-        action={hrLoginAction}
+        action={formAction}
         style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
       >
-        <input type="hidden" name="next" value={params.next ?? ''} />
+        <input type="hidden" name="next" value={next ?? ''} />
 
         <Field label="Email" htmlFor="email" required>
           <Input
@@ -104,7 +108,7 @@ export default async function HrLoginForm({
             type="email"
             autoComplete="email"
             required
-            defaultValue={preservedEmail}
+            defaultValue={state.email ?? ''}
             placeholder="you@crowd4test.com"
             iconLeft="mail"
           />
