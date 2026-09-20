@@ -38,7 +38,15 @@ export function DescriptionList({ items }: { items: readonly DescriptionItem[] }
             ...(item.wide ? { gridColumn: '1 / -1' } : {}),
           }}
         >
-          <dt className="c4t-eyebrow" style={{ color: 'var(--text-muted)', margin: 0 }}>
+          {/*
+            `--text-secondary`, not `--text-muted`. These are small, uppercase
+            monospace labels, so the 4.5:1 text threshold applies, and muted ink
+            only just meets it on the page floor (4.50:1) and misses it on the
+            sunken surface many panels sit on (4.10:1). A field label that is
+            hard to read is the one job it has. The value keeps the primary
+            ink, so label and value still read as two different things.
+          */}
+          <dt className="c4t-eyebrow" style={{ color: 'var(--text-secondary)', margin: 0 }}>
             {item.label}
           </dt>
           <dd
