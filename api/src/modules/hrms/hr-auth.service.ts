@@ -440,11 +440,13 @@ export interface InviteEmployeesResult {
 export async function inviteEmployees(
   employeeIds: readonly string[],
   invitedById: string,
+  // Injectable so the loop's rules can be tested without sending mail.
+  send: (employeeId: string, invitedById: string) => Promise<{ email: string }> = inviteEmployee,
 ): Promise<InviteEmployeesResult> {
   const result: InviteEmployeesResult = { sent: [], failed: [] }
   for (const id of new Set(employeeIds)) {
     try {
-      const { email } = await inviteEmployee(id, invitedById)
+      const { email } = await send(id, invitedById)
       result.sent.push({ id, email })
     } catch (error) {
       if (!(error instanceof AppError) || error.statusCode >= 500) throw error
