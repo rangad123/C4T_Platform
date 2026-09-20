@@ -2761,11 +2761,25 @@ function ProgressBar({ percent }: { percent: number }) {
 }
 function MaterialTarget({ material }: { material: ProjectMaterial }) {
   if (material.file) {
+    /*{ A link, not a caption. This used to print the file's name, type and
+       size as plain text and nothing else, so a document could be attached
+       and listed but never opened — the tester's page beside it always
+       linked. `DownloadLink` says "no longer available" itself when the bytes
+       are gone, so only a file that is really there gets a size line. }*/
     return (
-      <Caption>
-        {material.file.originalName} · {material.file.mimeType} ·{' '}
-        {material.file.isComplete ? formatBytes(material.file.sizeBytes) : 'no longer available'}
-      </Caption>
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+        <DownloadLink
+          fileId={material.file.id}
+          name={material.file.originalName}
+          basePath="/app/customer/download"
+          available={material.file.isComplete}
+        />
+        {material.file.isComplete ? (
+          <Caption>
+            {material.file.mimeType} · {formatBytes(material.file.sizeBytes)}
+          </Caption>
+        ) : null}
+      </span>
     )
   }
   if (material.url) {

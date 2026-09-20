@@ -2148,7 +2148,7 @@ export default async function ProjectDetailPage({
           {capabilities.canManageMaterials ? (
             <Panel
               title="Attach a material"
-              description="Give it a title and either a link or the id of a file already uploaded."
+              description="Give it a title and either a link or a document to upload."
             >
               <form action={addMaterial} style={stackStyle}>
                 <input type="hidden" name="id" value={project.id} />
@@ -2172,12 +2172,26 @@ export default async function ProjectDetailPage({
                       placeholder="https://builds.example.com/4.2.1.apk"
                     />
                   </Field>
+                  {/*
+                    An upload control, not a text box for a file id. This used to
+                    ask for "the id of a file already uploaded" — a value nobody
+                    holds, since nothing on the page gave you one — so a document
+                    could not be attached at all. The control posts the same
+                    `fileId` the action already reads, so nothing else changed.
+                    Builds are still shared by link; they are too large for this.
+                  */}
                   <Field
-                    label="Uploaded file id"
+                    label="Document"
                     htmlFor="material-file"
-                    hint="Use instead of a link when the file came through the uploads endpoint."
+                    hint="Optional. Upload a file instead of a link — PDF, Word, Excel, text or CSV."
                   >
-                    <Input id="material-file" name="fileId" placeholder="cl…" />
+                    <InlineFileUpload
+                      name="fileId"
+                      endpoint="/app/admin/upload"
+                      scope="test-document"
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                      label="Upload a document"
+                    />
                   </Field>
                 </div>
                 <Field
@@ -3069,11 +3083,25 @@ function ProgressBar({ percent }: { percent: number }) {
 /** A material points at either an uploaded file or an external link, never both. */
 function MaterialTarget({ material }: { material: ProjectMaterial }) {
   if (material.file) {
+    /*{ A link, not a caption. This used to print the file's name, type and
+       size as plain text and nothing else, so a document could be attached
+       and listed but never opened — the tester's page beside it always
+       linked. `DownloadLink` says "no longer available" itself when the bytes
+       are gone, so only a file that is really there gets a size line. }*/
     return (
-      <Caption>
-        {material.file.originalName} · {material.file.mimeType} ·{' '}
-        {material.file.isComplete ? formatBytes(material.file.sizeBytes) : 'no longer available'}
-      </Caption>
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+        <DownloadLink
+          fileId={material.file.id}
+          name={material.file.originalName}
+          basePath="/app/admin/download"
+          available={material.file.isComplete}
+        />
+        {material.file.isComplete ? (
+          <Caption>
+            {material.file.mimeType} · {formatBytes(material.file.sizeBytes)}
+          </Caption>
+        ) : null}
+      </span>
     )
   }
   if (material.url) {
