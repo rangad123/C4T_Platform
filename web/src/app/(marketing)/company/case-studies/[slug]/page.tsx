@@ -18,7 +18,13 @@ import { DRAFT_METADATA, INCLUDE_DRAFTS } from '@/lib/content-visibility'
 import { env } from '@/lib/env'
 import { SITE_NAME } from '@/lib/seo/metadata'
 import { breadcrumbJsonLd } from '@/lib/seo/structured-data'
-import { CASE_STUDY_SECTIONS, CLOSING_CTA, getCaseStudy, visibleCaseStudies } from '@/content'
+import {
+  CASE_STUDY_SECTIONS,
+  CLOSING_CTA,
+  assertPublishedCaseStudiesAreReal,
+  getCaseStudy,
+  visibleCaseStudies,
+} from '@/content'
 
 const PREFIX = '/company/case-studies'
 
@@ -37,6 +43,9 @@ const PREFIX = '/company/case-studies'
 export const dynamicParams = false
 
 export function generateStaticParams() {
+  // Fails the build if a study was flipped to published with "00%" still in it.
+  // Lived on the index page until that started listing blog posts instead.
+  assertPublishedCaseStudiesAreReal()
   return visibleCaseStudies(INCLUDE_DRAFTS).map((study) => ({ slug: study.slug }))
 }
 

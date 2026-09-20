@@ -1,19 +1,13 @@
 import type { Metadata } from 'next'
-import { CaseStudyCard, CtaBanner, Section, StatBlock } from '@/components/ds'
+import { CtaBanner, Section, StatBlock } from '@/components/ds'
 import { DeepBand } from '@/components/sections/blocks'
-import { Carousel } from '@/components/sections/Carousel'
+import { CaseStudyStrip } from '@/components/sections/BlogStrips'
 import s from '@/components/sections/sections.module.css'
 import { JsonLd } from '@/components/seo/JsonLd'
 import { buildMetadata } from '@/lib/seo/metadata'
 import { breadcrumbFor } from '@/lib/seo/structured-data'
-import { INCLUDE_DRAFTS } from '@/lib/content-visibility'
-import {
-  CASE_STUDIES_INDEX,
-  CLOSING_CTA,
-  RESULTS,
-  assertPublishedCaseStudiesAreReal,
-  visibleCaseStudies,
-} from '@/content'
+import { loadBlogCollection } from '@/lib/blog/collections'
+import { CASE_STUDIES_INDEX, CLOSING_CTA, RESULTS } from '@/content'
 
 const PATH = '/company/case-studies'
 
@@ -27,16 +21,13 @@ export const metadata: Metadata = buildMetadata(PATH)
  * a case study is a story you step through rather than scan, and the band because
  * it is the page's summary claim.
  *
- * ⚠ EMPTY IN PRODUCTION TODAY. Every entry in `content/case-studies.ts` is a
- * draft holding the handoff's placeholder values. content.md §12.3 requires every
- * metric to trace to delivery data and every named client to have given written
- * approval, so nothing here can be published without that paperwork.
+ * The studies are blog posts filed as case studies, newest first — the same
+ * source as the homepage and About strips. The typed placeholders in
+ * `content/case-studies.ts` no longer feed this page: they were drafts holding
+ * "00%" and "Case study one", which is why it used to be empty in production.
  */
-export default function CaseStudiesIndexPage() {
-  // Fails the build if a study was flipped to published with "00%" still in it.
-  assertPublishedCaseStudiesAreReal()
-
-  const studies = visibleCaseStudies(INCLUDE_DRAFTS)
+export default async function CaseStudiesIndexPage() {
+  const studies = await loadBlogCollection('case-studies', 12)
 
   return (
     <>
@@ -67,21 +58,7 @@ export default function CaseStudiesIndexPage() {
 
       <Section>
         {studies.length ? (
-          <Carousel
-            variant="deck"
-            label="Case studies"
-            itemNoun="case study"
-            slides={studies.map((study) => (
-              <CaseStudyCard
-                key={study.slug}
-                client={study.client}
-                industry={study.industry}
-                headline={study.headline}
-                results={study.results}
-                href={`${PATH}/${study.slug}`}
-              />
-            ))}
-          />
+          <CaseStudyStrip posts={studies} />
         ) : (
           <p className="c4t-body-lg" style={{ margin: 0, color: 'var(--text-secondary)' }}>
             {CASE_STUDIES_INDEX.emptyState}

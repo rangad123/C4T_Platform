@@ -1,4 +1,4 @@
-import type { IconName, ResourceType } from '@/components/ds'
+import type { IconName } from '@/components/ds'
 import { STATS } from './stats'
 
 /**
@@ -583,47 +583,11 @@ export const TESTIMONIAL = {
 } as const
 
 /**
- * The homepage "Proof" carousel reads the real collection in
- * `content/case-studies.ts` — it used to hold a second, duplicate copy of the
- * three placeholder studies plus its own `CaseStudy` type, which then collided
- * with the collection's when both were re-exported from the barrel.
- *
- * The cards on the homepage and the About page link to the case-study INDEX, not
- * to individual studies: every entry is a draft, so a per-study link would 404 in
- * production. See CASE_STUDY_ENTRIES for the ⚠ on the placeholder values.
+ * The homepage "Proof" and "Resources" strips are not content modules any more:
+ * they show the latest blog posts, split into case studies and everything else.
+ * See `lib/blog/collections.ts`. The typed placeholder studies in
+ * `content/case-studies.ts` remain only for the draft-gated detail template.
  */
-
-/* ─── Resources ────────────────────────────────────────────────────────────── */
-
-export interface Resource {
-  /** Drives the plate icon on ResourceCard, so it is the card's union. */
-  type: ResourceType
-  title: string
-  description: string
-}
-
-export const RESOURCES: readonly Resource[] = [
-  {
-    type: 'Guide',
-    title: 'The Ultimate Guide to Testing AI Applications',
-    description: 'A practical framework for validating LLMs, agents and RAG systems.',
-  },
-  {
-    type: 'Report',
-    title: 'The State of AI Quality 2026',
-    description: `What ${STATS.surveyedTeams} engineering teams told us about testing AI in production.`,
-  },
-  {
-    type: 'Article',
-    title: 'GenAI Testing Checklist',
-    description: '45 checks to run before you ship an AI feature.',
-  },
-  {
-    type: 'Article',
-    title: 'Crowd Testing vs. In-House QA: The Real Cost',
-    description: 'An honest cost model, including the parts vendors leave out.',
-  },
-]
 
 /* ─── Closing band ─────────────────────────────────────────────────────────── */
 

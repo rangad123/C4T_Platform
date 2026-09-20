@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import {
   Button,
-  CaseStudyCard,
   CtaBanner,
   FeatureCard,
   Hero,
@@ -11,12 +10,12 @@ import {
   StatBlock,
 } from '@/components/ds'
 import { DeepBand } from '@/components/sections/blocks'
-import { Carousel } from '@/components/sections/Carousel'
+import { CaseStudyStrip } from '@/components/sections/BlogStrips'
 import s from '@/components/sections/sections.module.css'
+import { loadBlogCollection } from '@/lib/blog/collections'
 import { buildMetadata } from '@/lib/seo/metadata'
 import {
   ABOUT_PAGE,
-  CASE_STUDY_ENTRIES,
   CLOSING_CTA,
   COMPANY_CTAS,
   COMPANY_SECTIONS,
@@ -36,10 +35,12 @@ export const metadata: Metadata = buildMetadata(PATH)
  * site with a genuine essay, which is why it gets its own column rather than the
  * 720px header width used everywhere else.
  *
- * ⚠ The case-study carousel is the same placeholder set as the homepage —
- * "Case study one", "00%". See CASE_STUDY_ENTRIES in content/case-studies.ts.
+ * The case-study carousel is the same strip as the homepage's: the blog posts
+ * filed as case studies, left out when there are none.
  */
-export default function AboutPage() {
+export default async function AboutPage() {
+  const caseStudies = await loadBlogCollection('case-studies', 6)
+
   return (
     <>
       <Hero
@@ -121,36 +122,24 @@ export default function AboutPage() {
       </Section>
 
       {/* ─── Proof ───────────────────────────────────────────────────────── */}
-      <Section tone="sunken">
-        <SectionHeader
-          eyebrow={COMPANY_SECTIONS.aboutProof.eyebrow}
-          title={COMPANY_SECTIONS.aboutProof.title}
-          actions={
-            <Button
-              variant="secondary"
-              iconRight="arrow-right"
-              href={COMPANY_SECTIONS.aboutProof.action.href}
-            >
-              {COMPANY_SECTIONS.aboutProof.action.label}
-            </Button>
-          }
-        />
-        <Carousel
-          variant="deck"
-          label="Case studies"
-          itemNoun="case study"
-          slides={CASE_STUDY_ENTRIES.map((study) => (
-            <CaseStudyCard
-              key={study.slug}
-              client={study.client}
-              industry={study.industry}
-              headline={study.headline}
-              results={study.results}
-              href="/company/case-studies"
-            />
-          ))}
-        />
-      </Section>
+      {caseStudies.length > 0 ? (
+        <Section tone="sunken">
+          <SectionHeader
+            eyebrow={COMPANY_SECTIONS.aboutProof.eyebrow}
+            title={COMPANY_SECTIONS.aboutProof.title}
+            actions={
+              <Button
+                variant="secondary"
+                iconRight="arrow-right"
+                href={COMPANY_SECTIONS.aboutProof.action.href}
+              >
+                {COMPANY_SECTIONS.aboutProof.action.label}
+              </Button>
+            }
+          />
+          <CaseStudyStrip posts={caseStudies} />
+        </Section>
+      ) : null}
 
       <DeepBand>
         <CtaBanner tone="inverse" style={{ background: 'transparent' }} {...CLOSING_CTA} />

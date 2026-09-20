@@ -2,12 +2,10 @@ import type { Metadata } from 'next'
 import {
   Button,
   CapabilitySection,
-  CaseStudyCard,
   CtaBanner,
   FeatureCard,
   Icon,
   LogoWall,
-  ResourceCard,
   Section,
   SectionHeader,
   ServiceCard,
@@ -16,13 +14,13 @@ import {
   Tag,
   Testimonial,
 } from '@/components/ds'
-import { Carousel } from '@/components/sections/Carousel'
+import { CaseStudyStrip, ResourceStrip } from '@/components/sections/BlogStrips'
+import { loadHomeBlogStrips } from '@/lib/blog/collections'
 import { HomeHero } from '@/components/sections/HomeHero'
 import s from '@/components/sections/sections.module.css'
 import { buildMetadata } from '@/lib/seo/metadata'
 import {
   AI_SERVICES,
-  CASE_STUDY_ENTRIES,
   CLIENTS,
   CLOSING_CTA,
   HOME_CARDS,
@@ -33,7 +31,6 @@ import {
   PLATFORM_MODULES,
   PROBLEMS,
   QA_SERVICES,
-  RESOURCES,
   RESULTS,
   STEPS,
   TESTIMONIAL,
@@ -60,14 +57,20 @@ export const metadata: Metadata = buildMetadata(PATH)
  * separated from the next by a light one; two darks in a row would read as one
  * long section.
  *
- * WHAT IS NOT REAL YET. The testimonial and the three case studies are the
- * handoff's visible placeholders — "Testimonial quote goes here…", "Case study
- * one", "00%". They render because they read unmistakably as placeholders and
- * because the sections need to exist to be reviewed; they must be replaced
- * before launch. See the ⚠ notes in content/home.ts. The same goes for every
- * photograph and the certification line under the hero.
+ * WHAT IS NOT REAL YET. The testimonial is the handoff's visible placeholder —
+ * "Testimonial quote goes here…" — and must be replaced before launch. See the
+ * ⚠ notes in content/home.ts. The same goes for every photograph and the
+ * certification line under the hero.
+ *
+ * THE PROOF AND RESOURCES STRIPS ARE THE BLOG. Case studies are the posts filed
+ * as one, and the resources are every other post, both newest first. The API
+ * keeps the two lists disjoint, so a post appears in one strip or the other,
+ * never both. Each strip is left out when it has nothing to show, rather than
+ * falling back to invented entries.
  */
-export default function HomePage() {
+export default async function HomePage() {
+  const { caseStudies, articles } = await loadHomeBlogStrips({ caseStudies: 6, articles: 8 })
+
   return (
     <>
       <HomeHero />
@@ -410,31 +413,19 @@ export default function HomePage() {
       </Section>
 
       {/* ─── Proof ───────────────────────────────────────────────────────── */}
-      <Section tone="sunken">
-        <SectionHeader
-          {...HOME_SECTIONS.proof}
-          actions={
-            <Button variant="secondary" iconRight="arrow-right" href="/company/case-studies">
-              {HOME_SECTIONS.proof.action.label}
-            </Button>
-          }
-        />
-        <Carousel
-          variant="deck"
-          label="Case studies"
-          itemNoun="case study"
-          slides={CASE_STUDY_ENTRIES.map((study) => (
-            <CaseStudyCard
-              key={study.slug}
-              client={study.client}
-              industry={study.industry}
-              headline={study.headline}
-              results={study.results}
-              href="/company/case-studies"
-            />
-          ))}
-        />
-      </Section>
+      {caseStudies.length > 0 ? (
+        <Section tone="sunken">
+          <SectionHeader
+            {...HOME_SECTIONS.proof}
+            actions={
+              <Button variant="secondary" iconRight="arrow-right" href="/company/case-studies">
+                {HOME_SECTIONS.proof.action.label}
+              </Button>
+            }
+          />
+          <CaseStudyStrip posts={caseStudies} />
+        </Section>
+      ) : null}
 
       {/* ─── Twin cards ──────────────────────────────────────────────────── */}
       <Section tone="inverse" className={s.deep}>
@@ -505,30 +496,19 @@ export default function HomePage() {
       </Section>
 
       {/* ─── Resources ───────────────────────────────────────────────────── */}
-      <Section tone="sunken">
-        <SectionHeader
-          {...HOME_SECTIONS.resources}
-          actions={
-            <Button variant="secondary" iconRight="arrow-right" href="/company/blog">
-              {HOME_SECTIONS.resources.action.label}
-            </Button>
-          }
-        />
-        <Carousel
-          variant="coverflow"
-          label="Resources"
-          itemNoun="resource"
-          slides={RESOURCES.map((resource) => (
-            <ResourceCard
-              key={resource.title}
-              type={resource.type}
-              title={resource.title}
-              description={resource.description}
-              href="/company/blog"
-            />
-          ))}
-        />
-      </Section>
+      {articles.length > 0 ? (
+        <Section tone="sunken">
+          <SectionHeader
+            {...HOME_SECTIONS.resources}
+            actions={
+              <Button variant="secondary" iconRight="arrow-right" href="/company/blog">
+                {HOME_SECTIONS.resources.action.label}
+              </Button>
+            }
+          />
+          <ResourceStrip posts={articles} />
+        </Section>
+      ) : null}
 
       {/* ─── Close ───────────────────────────────────────────────────────── */}
       <div className={s.deep} style={{ position: 'relative' }}>

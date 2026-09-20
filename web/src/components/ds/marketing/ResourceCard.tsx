@@ -39,8 +39,25 @@ export interface ResourceCardProps {
    * keep the existing `type`-as-label behavior unchanged.
    */
   category?: string
+  /**
+   * Caps the title at three lines and the description at two.
+   *
+   * For a carousel, whose track has a fixed height: a card that grows past it
+   * is clipped top and bottom. A blog grid sizes itself to its content, so it
+   * leaves this off and shows the full text.
+   */
+  clamp?: boolean
   style?: CSSProperties
   className?: string
+}
+
+function clampLines(lines: number): CSSProperties {
+  return {
+    display: '-webkit-box',
+    WebkitLineClamp: lines,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  }
 }
 
 /**
@@ -66,6 +83,7 @@ export function ResourceCard({
   href,
   image,
   category,
+  clamp,
   style,
   className,
 }: ResourceCardProps) {
@@ -176,6 +194,7 @@ export function ResourceCard({
             lineHeight: 'var(--type-heading-sm-line)',
             letterSpacing: 'var(--type-heading-sm-tracking)',
             textWrap: 'pretty',
+            ...(clamp ? clampLines(3) : {}),
           }}
         >
           {title}
@@ -188,6 +207,7 @@ export function ResourceCard({
               fontSize: 'var(--type-body-sm-size)',
               lineHeight: 'var(--type-body-sm-line)',
               color: 'var(--text-secondary)',
+              ...(clamp ? clampLines(2) : {}),
             }}
           >
             {description}

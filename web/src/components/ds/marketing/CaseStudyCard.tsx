@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import { Icon } from '../core/Icon'
 import { Media } from './Media'
+import { SiteImage } from './SiteImage'
 
 export interface CaseStudyResult {
   value: string
@@ -8,15 +9,37 @@ export interface CaseStudyResult {
 }
 
 export interface CaseStudyCardProps {
-  client: string
+  /**
+   * The client, or an anonymised descriptor. Optional: a case study published
+   * as a blog post has a headline and a photograph but no separate client
+   * field, and inventing one to fill the slot would be wrong.
+   */
+  client?: string
   industry: string
   headline: string
+  /** A sentence or two under the headline, for a study with no metrics to show. */
+  description?: string
+  /**
+   * A real photograph in place of the placeholder plate. Additive, like
+   * `ResourceCard`'s: every call site that omits it renders as before.
+   */
+  image?: { src: string; alt: string }
   results?: readonly CaseStudyResult[]
   /** Two-column hero treatment for the lead study on a hub page. */
   featured?: boolean
   href: string
   style?: CSSProperties
   className?: string
+}
+
+/** Caps text at a number of lines, for a card that lives in a fixed-height carousel track. */
+function clampLines(lines: number): CSSProperties {
+  return {
+    display: '-webkit-box',
+    WebkitLineClamp: lines,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  }
 }
 
 /**
@@ -38,6 +61,8 @@ export function CaseStudyCard({
   client,
   industry,
   headline,
+  description,
+  image,
   results = [],
   featured,
   href,
@@ -140,13 +165,14 @@ export function CaseStudyCard({
               color: 'var(--text-brand)',
             }}
           >
-            Read the {client} story <Icon name="arrow-right" size={15} />
+            {client ? `Read the ${client} story` : 'Read the case study'}{' '}
+            <Icon name="arrow-right" size={15} />
           </span>
         </div>
 
         <Media
           ratio="auto"
-          label={client}
+          label={client ?? industry}
           icon="building-2"
           tone="sunken"
           radius="0"
@@ -178,14 +204,26 @@ export function CaseStudyCard({
         ...style,
       }}
     >
-      <Media
-        ratio="16 / 9"
-        label={client}
-        icon="building-2"
-        tone="sunken"
-        radius="0"
-        style={{ borderWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}
-      />
+      {image ? (
+        <SiteImage
+          src={image.src}
+          alt={image.alt}
+          fill
+          ratio="16 / 9"
+          sizes="(max-width: 900px) 100vw, 540px"
+          radius="0"
+          style={{ borderBottom: '1px solid var(--border-subtle)' }}
+        />
+      ) : (
+        <Media
+          ratio="16 / 9"
+          label={client ?? industry}
+          icon="building-2"
+          tone="sunken"
+          radius="0"
+          style={{ borderWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}
+        />
+      )}
 
       <div
         style={{
@@ -215,10 +253,25 @@ export function CaseStudyCard({
             lineHeight: 'var(--type-heading-sm-line)',
             letterSpacing: 'var(--type-heading-sm-tracking)',
             textWrap: 'pretty',
+            ...clampLines(3),
           }}
         >
           {headline}
         </h3>
+
+        {description ? (
+          <p
+            style={{
+              marginTop: 12,
+              fontSize: 'var(--type-body-sm-size)',
+              lineHeight: 'var(--type-body-sm-line)',
+              color: 'var(--text-secondary)',
+              ...clampLines(2),
+            }}
+          >
+            {description}
+          </p>
+        ) : null}
 
         {results.length ? (
           <div

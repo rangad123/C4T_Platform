@@ -191,6 +191,42 @@ function publicVisibleWhere(): Prisma.BlogPostWhereInput {
 }
 
 /**
+ * What makes a post a case study.
+ *
+ * Two markers count, because editors reach for both: the "Case Study" category
+ * the migrated posts were filed under, and a tag of the same name. Either is
+ * enough. Slugs rather than names, so "Case Study", "case study" and "Case
+ * studies" all match.
+ */
+const CASE_STUDY_CATEGORY_SLUG = 'case-study'
+const CASE_STUDY_TAG_SLUGS = ['case-study', 'case-studies']
+
+/**
+ * The public blog's two sections, as complementary filters.
+ *
+ * `articles` is written out positively rather than as `NOT` of the case-study
+ * filter. A post with no category has a NULL `category_id`, and in SQL
+ * `NOT (NULL IN (...))` is NULL, not true — so negating the case-study filter
+ * would silently drop every uncategorised post from the articles as well.
+ */
+function collectionWhere(collection: 'case-studies' | 'articles'): Prisma.BlogPostWhereInput {
+  if (collection === 'case-studies') {
+    return {
+      OR: [
+        { category: { slug: CASE_STUDY_CATEGORY_SLUG } },
+        { tags: { some: { tag: { slug: { in: CASE_STUDY_TAG_SLUGS } } } } },
+      ],
+    }
+  }
+  return {
+    AND: [
+      { OR: [{ categoryId: null }, { category: { slug: { not: CASE_STUDY_CATEGORY_SLUG } } }] },
+      { tags: { none: { tag: { slug: { in: CASE_STUDY_TAG_SLUGS } } } } },
+    ],
+  }
+}
+
+/**
  * No cron exists anywhere in this codebase (confirmed — nothing like
  * node-cron/bullmq/agenda is installed). Scheduled publishing is settled
  * lazily instead, the same "stamp on next touch" idiom already used for
@@ -443,6 +479,42 @@ export async function deletePost(id: string): Promise<void> {
 
 // ─── Public ────────────────────────────────────────────────────────────────
 
+/**
+ * The filter behind every public blog listing.
+ *
+ * Exported so its shape can be tested without a database: the rule that matters
+ * is structural — every `OR` sits inside its own `AND` entry — and a regression
+ * there is silent (a search starts returning drafts) rather than a crash.
+ */
+export function buildPublicPostsWhere(query: PublicListPostsQuery): Prisma.BlogPostWhereInput {
+  /*
+    Each rule that needs an OR goes in its own `AND` entry. They used to be
+    spread into one object, so the search's `OR` REPLACED the visibility `OR`
+    (published, or scheduled and due) — and any search then matched drafts and
+    archived posts as well as live ones.
+  */
+  const and: Prisma.BlogPostWhereInput[] = [publicVisibleWhere()]
+  if (query.search) {
+    and.push({
+      OR: [
+        { title: { contains: query.search, mode: 'insensitive' } },
+        { excerpt: { contains: query.search, mode: 'insensitive' } },
+        { content: { contains: query.search, mode: 'insensitive' } },
+        { category: { name: { contains: query.search, mode: 'insensitive' } } },
+        { tags: { some: { tag: { name: { contains: query.search, mode: 'insensitive' } } } } },
+      ],
+    })
+  }
+  if (query.collection) and.push(collectionWhere(query.collection))
+
+  return {
+    AND: and,
+    ...(query.category ? { category: { slug: query.category } } : {}),
+    ...(query.tag ? { tags: { some: { tag: { slug: query.tag } } } } : {}),
+    ...(query.excludeId ? { id: { not: query.excludeId } } : {}),
+  }
+}
+
 export async function listPostsPublic(query: PublicListPostsQuery) {
   // `.catch`, not bare `void` — a rejection here (a blip reaching the
   // database, most likely) was an UNHANDLED rejection, which crashes the
@@ -451,23 +523,7 @@ export async function listPostsPublic(query: PublicListPostsQuery) {
   // just this one read.
   void settleDuePosts().catch((err: unknown) => logger.error({ err }, 'settleDuePosts failed'))
 
-  const where: Prisma.BlogPostWhereInput = {
-    ...publicVisibleWhere(),
-    ...(query.category ? { category: { slug: query.category } } : {}),
-    ...(query.tag ? { tags: { some: { tag: { slug: query.tag } } } } : {}),
-    ...(query.excludeId ? { id: { not: query.excludeId } } : {}),
-    ...(query.search
-      ? {
-          OR: [
-            { title: { contains: query.search, mode: 'insensitive' } },
-            { excerpt: { contains: query.search, mode: 'insensitive' } },
-            { content: { contains: query.search, mode: 'insensitive' } },
-            { category: { name: { contains: query.search, mode: 'insensitive' } } },
-            { tags: { some: { tag: { name: { contains: query.search, mode: 'insensitive' } } } } },
-          ],
-        }
-      : {}),
-  }
+  const where = buildPublicPostsWhere(query)
 
   const [items, total] = await Promise.all([
     prisma.blogPost.findMany({

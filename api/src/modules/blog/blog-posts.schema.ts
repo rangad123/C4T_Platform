@@ -28,6 +28,13 @@ export const publicListPostsQuery = z.object({
   /** Excludes one post id from the results — used for "related articles". */
   excludeId: z.string().cuid().optional(),
   /**
+   * Splits the blog into its two public sections. `case-studies` is the posts
+   * filed under the Case Study category or tagged "case study"; `articles` is
+   * every other post. Together they cover the whole blog and never overlap, so
+   * a page showing one list of each cannot repeat a post.
+   */
+  collection: z.enum(['case-studies', 'articles']).optional(),
+  /**
    * Looks a post up by a slug it USED to have rather than its current one —
    * the detail page's fallback path after a slug change. Mutually exclusive
    * with the filters above in practice, but not worth a discriminated union
