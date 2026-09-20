@@ -214,11 +214,11 @@ export function hrInvitationEmail(to: string, token: string, invitedByName: stri
     {
       heading: 'Your Crowd4Test HRMS account is ready',
       paragraphs: [
-        `${invitedByName} has set up an HRMS account for you. Choose a password to sign in for the first time.`,
+        `${invitedByName} has set up an HRMS account for you. Choose a password to sign in, then fill in your personal and bank details.`,
         'HRMS is where you will find your payslips, tax details, leave and timesheet.',
       ],
       action: { label: 'Choose my password', url },
-      note: 'The link expires in 7 days. If it has, ask your HR administrator to send a new one.',
+      note: 'The link expires in 7 days. If it has, choose "Forgot password" on the sign-in page and we will send you a new one.',
     },
     {},
   )

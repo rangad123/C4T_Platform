@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { type Prisma, HrEmployeeStatus, HrRole } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
+import { todayInIndia } from '../../lib/hrms/hr-calendar.js'
 import { searchTerms } from '../../lib/search.js'
 import { hashPassword, verifyPassword } from '../../lib/password.js'
 import {
@@ -20,9 +21,10 @@ import {
 import {
   EMPLOYEE_SORT_FIELDS,
   type ListEmployeesQuery,
-  type ListInvitationsQuery,
   type CreateEmployeeInput,
   type UpdateEmployeeInput,
+  type UpdateOwnDetailsInput,
+  OWN_FINANCIAL_KEYS,
 } from './hr-employees.schema.js'
 
 const listSelect = {
@@ -116,78 +118,6 @@ export async function listEmployees(query: ListEmployeesQuery) {
   return { items, meta: buildMeta(query, total) }
 }
 
-/**
- * Active staff for the Invitations page, with whether each has ever signed in.
- *
- * "Signed in" means a session row exists. That is the honest test: an account
- * an admin created with a typed password, or one migrated from the old system,
- * has a password but has never been used, and is exactly who an invitation is
- * for. `notSignedIn` counts everyone in that state whatever the search, so the
- * tab's number does not move while someone is filtering.
- *
- * `lastLinkSentAt` is the newest password link of any kind — an invitation or
- * a reset. They share a table, so the two cannot be told apart, and the
- * column is worded to say only what is true: a link went out.
- */
-export async function listInvitations(query: ListInvitationsQuery) {
-  const terms = searchTerms(query.search)
-  const active = { deletedAt: null, status: HrEmployeeStatus.ACTIVE } as const
-  const where: Prisma.HrEmployeeWhereInput = {
-    ...active,
-    ...(query.filter === 'not-signed-in' ? { sessions: { none: {} } } : {}),
-    ...(terms.length > 0
-      ? {
-          AND: terms.map((term) => ({
-            OR: [
-              { email: { contains: term, mode: 'insensitive' as const } },
-              { firstName: { contains: term, mode: 'insensitive' as const } },
-              { lastName: { contains: term, mode: 'insensitive' as const } },
-              { employeeCode: { contains: term, mode: 'insensitive' as const } },
-            ],
-          })),
-        }
-      : {}),
-  }
-
-  const [rows, total, notSignedIn] = await Promise.all([
-    prisma.hrEmployee.findMany({
-      where,
-      select: {
-        id: true,
-        employeeCode: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        designation: { select: { name: true } },
-        _count: { select: { sessions: true } },
-        passwordResetTokens: {
-          select: { createdAt: true },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-      },
-      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
-      ...toSkipTake(query),
-    }),
-    prisma.hrEmployee.count({ where }),
-    prisma.hrEmployee.count({ where: { ...active, sessions: { none: {} } } }),
-  ])
-
-  return {
-    items: rows.map((row) => ({
-      id: row.id,
-      employeeCode: row.employeeCode,
-      firstName: row.firstName,
-      lastName: row.lastName,
-      email: row.email,
-      designation: row.designation,
-      signedIn: row._count.sessions > 0,
-      lastLinkSentAt: row.passwordResetTokens[0]?.createdAt ?? null,
-    })),
-    meta: { ...buildMeta(query, total), notSignedIn },
-  }
-}
-
 /** Active ADMIN/ACCOUNT_MANAGER employees, for the "Account Manager" picker. */
 export async function listManagers() {
   return prisma.hrEmployee.findMany({
@@ -254,7 +184,7 @@ async function nextEmployeeCode(joiningDate: Date): Promise<string> {
 
 function financialEnvelope(
   employeeId: string,
-  input: Pick<CreateEmployeeInput, 'panNumber' | 'accountNumber' | 'accountName' | 'ifscCode'>,
+  input: Pick<UpdateEmployeeInput, 'panNumber' | 'accountNumber' | 'accountName' | 'ifscCode'>,
 ): Buffer | null {
   if (!input.panNumber && !input.accountNumber && !input.accountName && !input.ifscCode) return null
   return encryptHrFinancialDetails(
@@ -268,6 +198,19 @@ function financialEnvelope(
   )
 }
 
+/**
+ * Adds someone from the four details HR types (name, email, role).
+ *
+ * The new starter cannot sign in yet: their password is a hash of random bytes
+ * that nobody knows, so every attempt fails until they use the invitation the
+ * caller sends next. A random hash rather than a placeholder because the
+ * column is NOT NULL and there is then no sentinel value a later change could
+ * mistake for "no password set" and wave through.
+ *
+ * The joining date starts as today, in India. It is a NOT NULL column and the
+ * employee code is built from it, and adding someone is, in practice, the day
+ * they join; HR corrects it from Edit employment if it is not.
+ */
 export async function createEmployee(input: CreateEmployeeInput) {
   const existing = await prisma.hrEmployee.findUnique({
     where: { email: input.email },
@@ -275,20 +218,14 @@ export async function createEmployee(input: CreateEmployeeInput) {
   })
   if (existing) throw new ConflictError('An employee with this email already exists')
 
-  /**
-   * No password means the employee is being invited to choose one. Store a
-   * hash of random bytes rather than a placeholder: the row's NOT NULL is
-   * satisfied, every sign-in attempt fails until the invitation is used, and
-   * there is no sentinel value that a later change could accidentally treat
-   * as "no password set" and wave through.
-   */
-  const passwordHash = await hashPassword(input.password ?? randomBytes(32).toString('hex'))
+  const passwordHash = await hashPassword(randomBytes(32).toString('hex'))
+  const joiningDate = todayInIndia()
 
   // employeeCode is retried once on a unique-constraint race — see the
   // schema's own note that a count-based scheme accepts this trade-off for a
   // single admin adding one employee at a time.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const employeeCode = await nextEmployeeCode(input.joiningDate)
+    const employeeCode = await nextEmployeeCode(joiningDate)
     try {
       const created = await prisma.hrEmployee.create({
         data: {
@@ -297,31 +234,11 @@ export async function createEmployee(input: CreateEmployeeInput) {
           lastName: input.lastName,
           email: input.email,
           passwordHash,
-          dateOfBirth: input.dateOfBirth ?? null,
-          gender: input.gender ?? null,
-          phone: input.phone ?? null,
-          address: input.address ?? null,
-          designationId: input.designationId ?? null,
           role: input.role,
-          accountType: input.accountType ?? null,
-          reportsToId: input.reportsToId ?? null,
-          joiningDate: input.joiningDate,
-          timesheetRequired: input.timesheetRequired,
-          taxRegime: input.taxRegime,
-          bankName: input.bankName ?? null,
-          branchName: input.branchName ?? null,
+          joiningDate,
         },
         select: { id: true },
       })
-
-      const envelope = financialEnvelope(created.id, input)
-      if (envelope) {
-        await prisma.hrEmployee.update({
-          where: { id: created.id },
-          data: { secureFinancialDetails: new Uint8Array(envelope) },
-        })
-      }
-
       return await getEmployee(created.id)
     } catch (error) {
       const isUniqueCodeClash =
@@ -417,6 +334,31 @@ export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
   await prisma.hrEmployee.update({ where: { id }, data })
 
   return getEmployee(id)
+}
+
+/**
+ * An employee filling in their own details after accepting their invitation.
+ *
+ * Goes through `updateEmployee`, so the partial merge of encrypted financial
+ * fields behaves exactly as it does for HR. The schema has already limited the
+ * fields to personal and bank/PAN details; the one rule enforced here is the
+ * password step-up for the bank/PAN group, because changing where someone is
+ * paid is the change a stolen session would try first.
+ */
+export async function updateOwnDetails(employeeId: string, input: UpdateOwnDetailsInput) {
+  const { currentPassword, ...fields } = input
+
+  if (OWN_FINANCIAL_KEYS.some((key) => fields[key] !== undefined)) {
+    const me = await prisma.hrEmployee.findFirst({
+      where: { id: employeeId, deletedAt: null },
+      select: { passwordHash: true },
+    })
+    if (!me || !currentPassword || !(await verifyPassword(me.passwordHash, currentPassword))) {
+      throw new UnauthorizedError('Incorrect password')
+    }
+  }
+
+  return updateEmployee(employeeId, fields)
 }
 
 export async function changeEmployeeStatus(

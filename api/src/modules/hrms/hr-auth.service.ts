@@ -16,7 +16,6 @@ import {
 } from '../../lib/tokens.js'
 import { sendMail, hrPasswordResetEmail, hrInvitationEmail } from '../../lib/mailer.js'
 import {
-  AppError,
   UnauthorizedError,
   ForbiddenError,
   BadRequestError,
@@ -417,43 +416,6 @@ export async function inviteEmployee(
     : 'Your HR administrator'
   await sendMail(hrInvitationEmail(employee.email, raw, invitedByName))
   return { email: employee.email }
-}
-
-export interface InviteEmployeesResult {
-  sent: { id: string; email: string }[]
-  /** Someone the API declined to invite, with why — never a whole-request failure. */
-  failed: { id: string; reason: string }[]
-}
-
-/**
- * Invites several people, one at a time.
- *
- * One person's refusal (they have since left, or were deleted) is recorded and
- * the rest still go out: an admin who ticked twenty names should not get
- * nineteen unsent invitations because of one stale row. Anything that is not
- * a stated refusal — the database is down, say — is not swallowed.
- *
- * Sequential on purpose. Each send is a mail round trip, the batch is bounded,
- * and running them in parallel would only find the mail provider's rate limit
- * sooner.
- */
-export async function inviteEmployees(
-  employeeIds: readonly string[],
-  invitedById: string,
-  // Injectable so the loop's rules can be tested without sending mail.
-  send: (employeeId: string, invitedById: string) => Promise<{ email: string }> = inviteEmployee,
-): Promise<InviteEmployeesResult> {
-  const result: InviteEmployeesResult = { sent: [], failed: [] }
-  for (const id of new Set(employeeIds)) {
-    try {
-      const { email } = await send(id, invitedById)
-      result.sent.push({ id, email })
-    } catch (error) {
-      if (!(error instanceof AppError) || error.statusCode >= 500) throw error
-      result.failed.push({ id, reason: error.message })
-    }
-  }
-  return result
 }
 
 export async function resetPassword(rawToken: string, newPassword: string): Promise<string> {

@@ -52,3 +52,16 @@ export function overlapDaysInMonth(
   if (rangeStart > rangeEnd) return 0
   return countWorkingDays(rangeStart, rangeEnd, holidayDates)
 }
+
+/**
+ * Today's calendar date in India, as UTC midnight — the way every date-only
+ * column here is stored.
+ *
+ * India, not the server's own zone: the server runs in UTC, so between 00:00
+ * and 05:30 IST "today" there is still yesterday, and someone added at 2 a.m.
+ * would be given the previous day as their joining date.
+ */
+export function todayInIndia(now: Date = new Date()): Date {
+  const iso = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+  return new Date(`${iso}T00:00:00.000Z`)
+}

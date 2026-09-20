@@ -4,18 +4,15 @@ import { validate, validatedQuery } from '../../middleware/validate.js'
 import { hrAuthenticate, requireHrRole, HR_ADMIN_ROLES } from './hr-auth.middleware.js'
 import { recordHrAudit } from '../../lib/hrms/hr-audit.js'
 import * as service from './hr-employees.service.js'
-import { inviteEmployee, inviteEmployees } from './hr-auth.service.js'
+import { inviteEmployee } from './hr-auth.service.js'
 import {
   listEmployeesQuery,
-  listInvitationsQuery,
-  inviteEmployeesSchema,
   createEmployeeSchema,
   updateEmployeeSchema,
   changeEmployeeStatusSchema,
   revealFinancialDetailsSchema,
   employeeIdParam,
   type ListEmployeesQuery,
-  type ListInvitationsQuery,
 } from './hr-employees.schema.js'
 
 /**
@@ -33,36 +30,6 @@ hrEmployeesRouter.get('/managers', async (_req, res) => {
   res.json({ data: await service.listManagers() })
 })
 
-// Who can be invited, and who has never signed in. Declared before `/:id` so
-// "invitations" is never parsed as an employee id.
-hrEmployeesRouter.get(
-  '/invitations',
-  validate({ query: listInvitationsQuery }),
-  async (_req, res) => {
-    const query = validatedQuery<ListInvitationsQuery>(res)
-    const { items, meta } = await service.listInvitations(query)
-    res.json({ data: items, meta })
-  },
-)
-
-hrEmployeesRouter.post(
-  '/invitations',
-  validate({ body: inviteEmployeesSchema }),
-  async (req, res) => {
-    const result = await inviteEmployees(req.body.employeeIds, req.hrEmployee!.id)
-    for (const { id, email } of result.sent) {
-      await recordHrAudit({
-        req,
-        action: 'hr.employee.invited',
-        entityType: 'HrEmployee',
-        entityId: id,
-        after: { email },
-      })
-    }
-    res.json({ data: result })
-  },
-)
-
 hrEmployeesRouter.get('/', validate({ query: listEmployeesQuery }), async (_req, res) => {
   const query = validatedQuery<ListEmployeesQuery>(res)
   const { items, meta } = await service.listEmployees(query)
@@ -73,36 +40,38 @@ hrEmployeesRouter.get('/:id', validate({ params: employeeIdParam }), async (req,
   res.json({ data: await service.getEmployee(param(req, 'id')) })
 })
 
+/**
+ * Adding an employee IS inviting them. There is no separate "send invitation"
+ * step: the person is created from the four details HR types and emailed a link
+ * to choose their own password, after which they fill in the rest themselves.
+ *
+ * The invitation is sent after the audit entry for the creation, not before: if
+ * the mail step were to fail hard the record of who created this account would
+ * still exist. It cannot fail hard — `sendMail` logs and returns — which is the
+ * right trade, since an employee created but not emailed can ask for a fresh
+ * link from "Forgot password" on the sign-in page, whereas a failed create
+ * would lose the whole form.
+ */
 hrEmployeesRouter.post('/', validate({ body: createEmployeeSchema }), async (req, res) => {
-  const invite = !req.body.password
   const employee = await service.createEmployee(req.body)
   await recordHrAudit({
     req,
     action: 'hr.employee.created',
     entityType: 'HrEmployee',
     entityId: employee.id,
-    after: { email: employee.email, role: employee.role, invited: invite },
+    after: { email: employee.email, role: employee.role },
   })
 
-  /**
-   * Sent after the audit entry, not before: if the mail step were to fail
-   * hard the record of who created this account would still exist. It cannot
-   * fail hard — `sendMail` logs and returns — which is the right trade here,
-   * since an employee created but not emailed is fixed with Resend invitation,
-   * whereas a failed create would lose the whole form.
-   */
-  if (invite) {
-    await inviteEmployee(employee.id, req.hrEmployee!.id)
-    await recordHrAudit({
-      req,
-      action: 'hr.employee.invited',
-      entityType: 'HrEmployee',
-      entityId: employee.id,
-      after: { email: employee.email },
-    })
-  }
+  await inviteEmployee(employee.id, req.hrEmployee!.id)
+  await recordHrAudit({
+    req,
+    action: 'hr.employee.invited',
+    entityType: 'HrEmployee',
+    entityId: employee.id,
+    after: { email: employee.email },
+  })
 
-  res.status(201).json({ data: { ...employee, invited: invite } })
+  res.status(201).json({ data: employee })
 })
 
 hrEmployeesRouter.patch(

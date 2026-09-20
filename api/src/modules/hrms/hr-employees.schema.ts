@@ -63,17 +63,21 @@ const employeeFields = {
   branchName: z.string().trim().max(120).optional(),
 }
 
+/**
+ * What HR types to add someone: who they are and what they may do.
+ *
+ * Everything else is deliberately absent. The new starter is emailed a link to
+ * choose their own password and then fills in their own personal and bank
+ * details (see `updateOwnDetailsSchema`); HR sets the employment side
+ * (designation, reporting line, joining date, and so on) from the record.
+ * Collecting it all up front meant HR typing details they often do not have,
+ * and typing a password to pass on by hand.
+ */
 export const createEmployeeSchema = z.object({
-  ...employeeFields,
+  firstName: employeeFields.firstName,
+  lastName: employeeFields.lastName,
   email: z.string().trim().toLowerCase().email().max(255),
-  /**
-   * Optional: leave it out and the new employee is emailed an invitation to
-   * choose their own. That is the better default — a password an admin types
-   * has to be passed on by hand, which in practice means a chat message that
-   * stays readable forever. It stays available because the admin may be
-   * standing next to the new starter, or the address may not work yet.
-   */
-  password: z.string().min(12).max(200).optional(),
+  role: employeeFields.role,
 })
 
 /**
@@ -118,24 +122,46 @@ export const revealFinancialDetailsSchema = z.object({
 
 export const employeeIdParam = z.object({ id: z.string().cuid() })
 
+/** Bank and tax details: changing them moves someone's pay, so they need a password. */
+export const OWN_FINANCIAL_KEYS = [
+  'panNumber',
+  'accountNumber',
+  'accountName',
+  'ifscCode',
+  'bankName',
+  'branchName',
+] as const
+
 /**
- * `not-signed-in` is the default because it is the question the page exists
- * to answer: who has been added but never got in. `all` is for re-sending to
- * someone whose link lapsed or who lost the email after signing in once.
+ * What an employee may fill in about themselves after accepting their
+ * invitation: personal details, and PAN and bank details.
+ *
+ * Not name, email, role or anything about their employment — those are HR's.
+ * Any bank or PAN field also needs `currentPassword`, the same step-up the
+ * reveal route asks HR for: a stolen session should not be able to redirect a
+ * salary without knowing the password.
  */
-export const listInvitationsQuery = paginationQuery.extend({
-  filter: z.enum(['not-signed-in', 'all']).default('not-signed-in'),
-  search: z.string().trim().max(120).optional(),
-})
-
-/** One request sends mail one by one, so the batch is bounded. */
-export const MAX_INVITATIONS_PER_REQUEST = 50
-
-export const inviteEmployeesSchema = z.object({
-  employeeIds: z.array(z.string().cuid()).min(1).max(MAX_INVITATIONS_PER_REQUEST),
-})
+export const updateOwnDetailsSchema = z
+  .object({
+    dateOfBirth: employeeFields.dateOfBirth,
+    gender: employeeFields.gender,
+    phone: employeeFields.phone,
+    address: employeeFields.address,
+    panNumber: employeeFields.panNumber,
+    accountNumber: employeeFields.accountNumber,
+    accountName: employeeFields.accountName,
+    ifscCode: employeeFields.ifscCode,
+    bankName: employeeFields.bankName,
+    branchName: employeeFields.branchName,
+    currentPassword: z.string().min(1).max(200).optional(),
+  })
+  .refine(
+    (value) =>
+      !OWN_FINANCIAL_KEYS.some((key) => value[key] !== undefined) || Boolean(value.currentPassword),
+    { path: ['currentPassword'], message: 'Enter your password to save bank or PAN details' },
+  )
 
 export type ListEmployeesQuery = z.infer<typeof listEmployeesQuery>
-export type ListInvitationsQuery = z.infer<typeof listInvitationsQuery>
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>
+export type UpdateOwnDetailsInput = z.infer<typeof updateOwnDetailsSchema>

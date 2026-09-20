@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { validate, validatedQuery } from '../../middleware/validate.js'
 import { hrAuthenticate } from './hr-auth.middleware.js'
+import { recordHrAudit } from '../../lib/hrms/hr-audit.js'
+import { updateOwnDetailsSchema } from './hr-employees.schema.js'
 import * as employeesService from './hr-employees.service.js'
 import * as salaryService from './hr-salary.service.js'
 import * as taxService from './hr-tax.service.js'
@@ -35,6 +37,26 @@ hrSelfRouter.use(hrAuthenticate)
  */
 hrSelfRouter.get('/profile', async (req, res) => {
   res.json({ data: await employeesService.getEmployee(req.hrEmployee!.id) })
+})
+
+/**
+ * The employee filling in their own details — the step after accepting an
+ * invitation. Personal details, and PAN and bank details; the last group needs
+ * the current password. Nothing about employment: that stays with HR.
+ *
+ * The audit entry names the fields changed and never their values.
+ */
+hrSelfRouter.patch('/profile', validate({ body: updateOwnDetailsSchema }), async (req, res) => {
+  const id = req.hrEmployee!.id
+  const employee = await employeesService.updateOwnDetails(id, req.body)
+  await recordHrAudit({
+    req,
+    action: 'hr.employee.self_updated',
+    entityType: 'HrEmployee',
+    entityId: id,
+    after: { fields: Object.keys(req.body).filter((key) => key !== 'currentPassword') },
+  })
+  res.json({ data: employee })
 })
 
 hrSelfRouter.get('/salary', validate({ query: financialYearQuery }), async (req, res) => {

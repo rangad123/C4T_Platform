@@ -19,12 +19,7 @@ export const metadata: Metadata = {
 }
 
 const SECTIONS: readonly HrSidebarSection[] = [
-  {
-    links: [
-      { href: '/admin', label: 'Employees', icon: 'users' },
-      { href: '/admin/invitations', label: 'Invitations', icon: 'mail' },
-    ],
-  },
+  { links: [{ href: '/admin', label: 'Employees', icon: 'users' }] },
   { links: [{ href: '/admin/old-employees', label: 'Old employees', icon: 'user-check' }] },
   { links: [{ href: '/admin/leaves', label: 'Leaves', icon: 'plane' }] },
   { links: [{ href: '/admin/reports', label: 'Reports', icon: 'line-chart' }] },

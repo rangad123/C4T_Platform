@@ -9,6 +9,68 @@ import { formString, formTrimmed } from '@/lib/form-data'
 
 const ANY_EMPLOYEE = ['ADMIN', 'ACCOUNT_MANAGER', 'EMPLOYEE'] as const
 
+const BASIC_DETAILS = '/employee'
+
+/**
+ * The employee filling in their own personal details — the step after they
+ * accept their invitation. Blank fields are left out of the body rather than
+ * sent empty, so saving a half-filled form never wipes what is already there.
+ */
+export async function updateMyPersonalDetails(formData: FormData): Promise<void> {
+  await requireHrRole([...ANY_EMPLOYEE])
+  try {
+    await hrActionFetch('hrms/me/profile', {
+      method: 'PATCH',
+      body: {
+        dateOfBirth: formString(formData, 'dateOfBirth') || undefined,
+        gender: formString(formData, 'gender') || undefined,
+        phone: formTrimmed(formData, 'phone') || undefined,
+        address: formTrimmed(formData, 'address') || undefined,
+      },
+    })
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 400 || error.status === 422)) {
+      redirect(`${BASIC_DETAILS}?edit=personal&error=rejected`)
+    }
+    throw error
+  }
+  revalidateHrms(BASIC_DETAILS)
+  redirect(`${BASIC_DETAILS}?notice=saved`)
+}
+
+/**
+ * PAN and bank details. The employee's own password goes with them: changing
+ * where pay is sent is the change a stolen session would try first, so it must
+ * not be possible without knowing it. A wrong password comes back as a 401.
+ */
+export async function updateMyFinancialDetails(formData: FormData): Promise<void> {
+  await requireHrRole([...ANY_EMPLOYEE])
+  try {
+    await hrActionFetch('hrms/me/profile', {
+      method: 'PATCH',
+      body: {
+        currentPassword: formString(formData, 'currentPassword'),
+        panNumber: formTrimmed(formData, 'panNumber') || undefined,
+        bankName: formTrimmed(formData, 'bankName') || undefined,
+        branchName: formTrimmed(formData, 'branchName') || undefined,
+        accountName: formTrimmed(formData, 'accountName') || undefined,
+        accountNumber: formTrimmed(formData, 'accountNumber') || undefined,
+        ifscCode: formTrimmed(formData, 'ifscCode') || undefined,
+      },
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      redirect(`${BASIC_DETAILS}?edit=financial&error=incorrect`)
+    }
+    if (error instanceof ApiError && (error.status === 400 || error.status === 422)) {
+      redirect(`${BASIC_DETAILS}?edit=financial&error=rejected`)
+    }
+    throw error
+  }
+  revalidateHrms(BASIC_DETAILS)
+  redirect(`${BASIC_DETAILS}?notice=saved`)
+}
+
 function leavesPath(financialYear: string): string {
   return `/employee/leaves?fy=${financialYear}`
 }
