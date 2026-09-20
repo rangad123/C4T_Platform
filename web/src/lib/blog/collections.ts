@@ -11,6 +11,14 @@ import type { BlogPostSummary } from './types'
 export type BlogCollection = 'case-studies' | 'articles'
 
 /**
+ * The category the migrated case studies are filed under. The API decides what
+ * counts as a case study (this category, or a case-study tag); this is only so
+ * the blog's category pills can leave the category out, since its posts are not
+ * listed there.
+ */
+export const CASE_STUDY_CATEGORY_SLUG = 'case-study'
+
+/**
  * The latest published posts of one collection, newest first.
  *
  * Read on the server and cached: the five-minute window is the ceiling on how

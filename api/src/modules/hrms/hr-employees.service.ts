@@ -260,6 +260,10 @@ export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
   })
   if (!existing) throw new NotFoundError('Employee')
 
+  if (input.role !== undefined && input.role !== HrRole.ADMIN) {
+    await assertNotLastAdministrator(id, 'changing their role')
+  }
+
   // Email is the sign-in identity and unique, so a clash has to be reported
   // rather than left to surface as a raw constraint violation.
   if (input.email !== undefined && input.email !== existing.email) {
@@ -361,6 +365,39 @@ export async function updateOwnDetails(employeeId: string, input: UpdateOwnDetai
   return updateEmployee(employeeId, fields)
 }
 
+/**
+ * There must always be at least one active HR administrator.
+ *
+ * An admin who resigns themselves, or is moved to a different role, while they
+ * are the only one, locks everybody out of the Admin Portal, and nothing inside
+ * the app can undo it: it needs someone with database access. It has happened
+ * twice, from the Change status control on the admin's own record.
+ *
+ * Only guards the case that causes it. Anyone who is not an active administrator
+ * is unaffected, and so is an administrator when another one exists.
+ */
+export async function assertNotLastAdministrator(employeeId: string, doingWhat: string) {
+  const target = await prisma.hrEmployee.findFirst({
+    where: { id: employeeId, deletedAt: null },
+    select: { role: true, status: true },
+  })
+  if (target?.role !== HrRole.ADMIN || target.status !== HrEmployeeStatus.ACTIVE) return
+
+  const others = await prisma.hrEmployee.count({
+    where: {
+      id: { not: employeeId },
+      role: HrRole.ADMIN,
+      status: HrEmployeeStatus.ACTIVE,
+      deletedAt: null,
+    },
+  })
+  if (others === 0) {
+    throw new BadRequestError(
+      `This is the only active HR administrator. Make someone else an administrator before ${doingWhat}.`,
+    )
+  }
+}
+
 export async function changeEmployeeStatus(
   id: string,
   status: HrEmployeeStatus,
@@ -373,6 +410,7 @@ export async function changeEmployeeStatus(
   if (!existing) throw new NotFoundError('Employee')
 
   const isOffboarding = status !== HrEmployeeStatus.ACTIVE
+  if (isOffboarding) await assertNotLastAdministrator(id, 'changing their status')
 
   await prisma.$transaction([
     prisma.hrEmployee.update({

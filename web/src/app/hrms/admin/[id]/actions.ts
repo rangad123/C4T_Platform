@@ -85,13 +85,23 @@ export async function updateFinancialDetails(id: string, formData: FormData): Pr
 
 export async function changeEmployeeStatus(id: string, formData: FormData): Promise<void> {
   await requireHrRole(['ADMIN'])
-  await hrActionFetch(`hrms/employees/${id}/status`, {
-    method: 'POST',
-    body: {
-      status: formString(formData, 'status'),
-      relievingDate: formString(formData, 'relievingDate') || undefined,
-    },
-  })
+  try {
+    await hrActionFetch(`hrms/employees/${id}/status`, {
+      method: 'POST',
+      body: {
+        status: formString(formData, 'status'),
+        relievingDate: formString(formData, 'relievingDate') || undefined,
+      },
+    })
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error
+    // Refused for a stated reason, most often "this is the only active HR
+    // administrator". That sentence is the whole answer, not a crash.
+    if (error.status >= 400 && error.status < 500) {
+      redirect(`${detailPath(id)}?notice=refused&reason=${encodeURIComponent(error.message)}`)
+    }
+    throw error
+  }
   revalidateHrms(`${BASE}/${id}`)
   revalidateHrms(BASE)
   redirect(detailPath(id))

@@ -6,6 +6,7 @@ import { BlogSearchBox } from '@/components/ds/marketing/BlogSearchBox'
 import { buildMetadata } from '@/lib/seo/metadata'
 import { breadcrumbFor } from '@/lib/seo/structured-data'
 import { publicFetchOrNull, publicFetchPage } from '@/lib/api/public'
+import { CASE_STUDY_CATEGORY_SLUG } from '@/lib/blog/collections'
 import type { BlogCategorySummary, BlogPostSummary } from '@/lib/blog/types'
 import { BLOG_INDEX, CLOSING_CTA } from '@/content'
 
@@ -40,9 +41,21 @@ export default async function BlogIndexPage({
   const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1)
   const hasFilters = Boolean(params.category ?? params.search)
 
+  /*
+    Case studies have their own page and their own strips, so the browse list
+    leaves them out: a post shows up in one section of the site, not two.
+    A search is the exception. Someone typing a name is looking for that post
+    wherever it lives, and hiding it from them would read as "not found".
+  */
   const [{ data: posts, meta }, allCategories] = await Promise.all([
     publicFetchPage<BlogPostSummary>('blog/posts', {
-      query: { category: params.category, search: params.search, page, limit: PAGE_SIZE },
+      query: {
+        category: params.category,
+        search: params.search,
+        collection: params.search ? undefined : 'articles',
+        page,
+        limit: PAGE_SIZE,
+      },
       next: { tags: ['blog-posts'] },
     }),
     publicFetchOrNull<BlogCategorySummary[]>('blog/categories', {
@@ -55,7 +68,9 @@ export default async function BlogIndexPage({
     picking almost any pill correctly showed "no posts" and read as the filter
     failing. A pill that always empties the grid is worse than no pill.
   */
-  const categories = (allCategories ?? []).filter((category) => category.postCount > 0)
+  const categories = (allCategories ?? []).filter(
+    (category) => category.postCount > 0 && category.slug !== CASE_STUDY_CATEGORY_SLUG,
+  )
 
   // The public list is ordered featured-first — on an unfiltered first page,
   // a featured post (if any) is the opening item. Pulled out for its own
