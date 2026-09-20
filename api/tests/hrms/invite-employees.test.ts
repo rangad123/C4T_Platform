@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { inviteEmployees } from '../../src/modules/hrms/hr-auth.service.js'
 import { BadRequestError, InternalError, NotFoundError } from '../../src/lib/errors.js'
 
-const okSender = () => vi.fn(async (id: string) => ({ email: `${id}@example.test` }))
+const okSender = () => vi.fn((id: string) => Promise.resolve({ email: `${id}@example.test` }))
 
 describe('inviteEmployees', () => {
   it('sends to everyone and reports each address', async () => {
@@ -24,31 +24,28 @@ describe('inviteEmployees', () => {
   })
 
   it('records a stated refusal against that person and still sends the rest', async () => {
-    const send = vi.fn(async (id: string) => {
-      if (id === 'left')
-        throw new BadRequestError('Only an active employee can be invited to sign in')
-      if (id === 'gone') throw new NotFoundError('Employee')
-      return { email: `${id}@example.test` }
+    const send = vi.fn((id: string) => {
+      if (id === 'left') {
+        return Promise.reject(new BadRequestError('Only an active employee can be invited'))
+      }
+      if (id === 'gone') return Promise.reject(new NotFoundError('Employee'))
+      return Promise.resolve({ email: `${id}@example.test` })
     })
 
     const result = await inviteEmployees(['a', 'left', 'gone', 'b'], 'admin', send)
 
     expect(result.sent.map((s) => s.id)).toEqual(['a', 'b'])
     expect(result.failed.map((f) => f.id)).toEqual(['left', 'gone'])
-    expect(result.failed[0]?.reason).toBe('Only an active employee can be invited to sign in')
+    expect(result.failed[0]?.reason).toBe('Only an active employee can be invited')
   })
 
   it('does not swallow a server fault', async () => {
-    const send = vi.fn(async () => {
-      throw new InternalError('database is down')
-    })
+    const send = vi.fn(() => Promise.reject(new InternalError('database is down')))
     await expect(inviteEmployees(['a'], 'admin', send)).rejects.toThrow('database is down')
   })
 
   it('does not swallow an unexpected error', async () => {
-    const send = vi.fn(async () => {
-      throw new TypeError('boom')
-    })
+    const send = vi.fn(() => Promise.reject(new TypeError('boom')))
     await expect(inviteEmployees(['a'], 'admin', send)).rejects.toThrow('boom')
   })
 })
