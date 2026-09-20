@@ -6,7 +6,7 @@ import { hrUploadsRouter } from './hr-uploads.routes.js'
 import { hrSalaryRouter } from './hr-salary.routes.js'
 import { hrTaxRouter, hrEmployeeTaxRouter } from './hr-tax.routes.js'
 import { hrInvestmentsRouter } from './hr-investments.routes.js'
-import { hrPayslipRouter } from './hr-payslip.routes.js'
+import { hrPayslipRouter, hrPayslipRunRouter } from './hr-payslip.routes.js'
 import { hrTemplatesRouter } from './hr-templates.routes.js'
 import { hrReportsRouter } from './hr-reports.routes.js'
 import { hrHolidaysRouter } from './hr-holidays.routes.js'
@@ -44,6 +44,7 @@ hrmsRouter.use('/employees', hrPayslipRouter)
 hrmsRouter.use('/employees', hrEmployeeLeavesRouter)
 hrmsRouter.use('/employees', hrEmployeeTimesheetRouter)
 hrmsRouter.use('/employees', hrDocumentsRouter)
+hrmsRouter.use('/payslips', hrPayslipRunRouter)
 hrmsRouter.use('/tax-slabs', hrTaxRouter)
 hrmsRouter.use('/templates', hrTemplatesRouter)
 hrmsRouter.use('/reports', hrReportsRouter)

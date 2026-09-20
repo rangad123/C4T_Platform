@@ -3,7 +3,12 @@ import { type Prisma, HrEmployeeStatus, HrRole } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { searchTerms } from '../../lib/search.js'
 import { hashPassword, verifyPassword } from '../../lib/password.js'
-import { NotFoundError, ConflictError, UnauthorizedError } from '../../lib/errors.js'
+import {
+  NotFoundError,
+  ConflictError,
+  UnauthorizedError,
+  BadRequestError,
+} from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import {
   encryptHrFinancialDetails,
@@ -15,6 +20,7 @@ import {
 import {
   EMPLOYEE_SORT_FIELDS,
   type ListEmployeesQuery,
+  type ListInvitationsQuery,
   type CreateEmployeeInput,
   type UpdateEmployeeInput,
 } from './hr-employees.schema.js'
@@ -108,6 +114,78 @@ export async function listEmployees(query: ListEmployeesQuery) {
   ])
 
   return { items, meta: buildMeta(query, total) }
+}
+
+/**
+ * Active staff for the Invitations page, with whether each has ever signed in.
+ *
+ * "Signed in" means a session row exists. That is the honest test: an account
+ * an admin created with a typed password, or one migrated from the old system,
+ * has a password but has never been used, and is exactly who an invitation is
+ * for. `notSignedIn` counts everyone in that state whatever the search, so the
+ * tab's number does not move while someone is filtering.
+ *
+ * `lastLinkSentAt` is the newest password link of any kind — an invitation or
+ * a reset. They share a table, so the two cannot be told apart, and the
+ * column is worded to say only what is true: a link went out.
+ */
+export async function listInvitations(query: ListInvitationsQuery) {
+  const terms = searchTerms(query.search)
+  const active = { deletedAt: null, status: HrEmployeeStatus.ACTIVE } as const
+  const where: Prisma.HrEmployeeWhereInput = {
+    ...active,
+    ...(query.filter === 'not-signed-in' ? { sessions: { none: {} } } : {}),
+    ...(terms.length > 0
+      ? {
+          AND: terms.map((term) => ({
+            OR: [
+              { email: { contains: term, mode: 'insensitive' as const } },
+              { firstName: { contains: term, mode: 'insensitive' as const } },
+              { lastName: { contains: term, mode: 'insensitive' as const } },
+              { employeeCode: { contains: term, mode: 'insensitive' as const } },
+            ],
+          })),
+        }
+      : {}),
+  }
+
+  const [rows, total, notSignedIn] = await Promise.all([
+    prisma.hrEmployee.findMany({
+      where,
+      select: {
+        id: true,
+        employeeCode: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        designation: { select: { name: true } },
+        _count: { select: { sessions: true } },
+        passwordResetTokens: {
+          select: { createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+      ...toSkipTake(query),
+    }),
+    prisma.hrEmployee.count({ where }),
+    prisma.hrEmployee.count({ where: { ...active, sessions: { none: {} } } }),
+  ])
+
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      employeeCode: row.employeeCode,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      email: row.email,
+      designation: row.designation,
+      signedIn: row._count.sessions > 0,
+      lastLinkSentAt: row.passwordResetTokens[0]?.createdAt ?? null,
+    })),
+    meta: { ...buildMeta(query, total), notSignedIn },
+  }
 }
 
 /** Active ADMIN/ACCOUNT_MANAGER employees, for the "Account Manager" picker. */
@@ -261,7 +339,7 @@ export async function createEmployee(input: CreateEmployeeInput) {
 export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
   const existing = await prisma.hrEmployee.findFirst({
     where: { id, deletedAt: null },
-    select: { id: true, secureFinancialDetails: true, email: true },
+    select: { id: true, secureFinancialDetails: true, email: true, joiningDate: true },
   })
   if (!existing) throw new NotFoundError('Employee')
 
@@ -273,6 +351,16 @@ export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
       select: { id: true },
     })
     if (clash) throw new ConflictError('An employee with this email already exists')
+  }
+
+  // Checked against whichever joining date will be in force after this save,
+  // so moving both dates in one edit is judged on the pair rather than on a
+  // stale stored value.
+  if (input.relievingDate) {
+    const joining = input.joiningDate ?? existing.joiningDate
+    if (input.relievingDate < joining) {
+      throw new BadRequestError('The relieving date cannot be before the joining date')
+    }
   }
 
   const touchesFinancial =
@@ -307,6 +395,7 @@ export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
     ...(input.accountType !== undefined ? { accountType: input.accountType } : {}),
     ...(input.reportsToId !== undefined ? { reportsToId: input.reportsToId } : {}),
     ...(input.joiningDate !== undefined ? { joiningDate: input.joiningDate } : {}),
+    ...(input.relievingDate !== undefined ? { relievingDate: input.relievingDate } : {}),
     ...(input.timesheetRequired !== undefined
       ? { timesheetRequired: input.timesheetRequired }
       : {}),

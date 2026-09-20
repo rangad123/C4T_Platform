@@ -53,3 +53,17 @@ hrPayslipRouter.post(
     res.status(201).json({ data: payslip })
   },
 )
+
+/**
+ * Cross-employee payslip endpoints, under `/payslips` rather than
+ * `/employees/...`: a one-segment path there would be read as an employee id by
+ * the employees router, which is mounted first.
+ */
+export const hrPayslipRunRouter = Router()
+
+hrPayslipRunRouter.use(hrAuthenticate, requireHrRole(...HR_ADMIN_ROLES))
+
+hrPayslipRunRouter.get('/run', validate({ query: payslipQuery }), async (_req, res) => {
+  const { financialYear, month } = validatedQuery<GeneratePayslipInput>(res)
+  res.json({ data: await service.previewPayslipRun(financialYear, month) })
+})

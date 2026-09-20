@@ -5,6 +5,8 @@ export interface HrTaxCalculation {
   financialYear: string
   regime: 'OLD' | 'NEW'
   hasSalaryStructure: boolean
+  /** Months of the year they were on the payroll; under 12 for a joiner or leaver. */
+  monthsEmployed?: number
   grossSalary: number
   standardDeduction: number
   incomeFromSalary: number
@@ -36,6 +38,20 @@ export function HrTaxBreakdown({
       {!calculation.hasSalaryStructure ? (
         <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
           No salary structure is on file for {financialYear} — this calculation assumes zero pay.
+        </p>
+      ) : null}
+      {calculation.hasSalaryStructure &&
+      calculation.monthsEmployed !== undefined &&
+      calculation.monthsEmployed < 12 ? (
+        <p
+          style={{
+            margin: 0,
+            color: 'var(--text-secondary)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
+          On the payroll for {calculation.monthsEmployed} of 12 months in {financialYear}, so the
+          annual salary is counted for those months only.
         </p>
       ) : null}
       <DescriptionList

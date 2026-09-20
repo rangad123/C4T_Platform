@@ -1,10 +1,12 @@
 import { Router } from 'express'
 import { param } from '../../lib/http.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
-import { hrAuthenticate } from './hr-auth.middleware.js'
+import { hrAuthenticate, requireHrRole, HR_ADMIN_ROLES } from './hr-auth.middleware.js'
 import { recordHrAudit } from '../../lib/hrms/hr-audit.js'
 import * as service from './hr-leaves.service.js'
 import {
+  listAllLeaveRequestsQuery,
+  type ListAllLeaveRequestsQuery,
   financialYearQuery,
   createLeaveRequestSchema,
   leaveRequestIdParam,
@@ -22,6 +24,23 @@ import {
 export const hrLeavesRouter = Router()
 
 hrLeavesRouter.use(hrAuthenticate)
+
+/**
+ * The one admin-only route in this otherwise self-service router: every
+ * employee's requests, for the Leaves screen. Declared before anything with a
+ * path parameter so it is never read as an id, and gated on its own because
+ * `hrAuthenticate` above only proves someone is signed in.
+ */
+hrLeavesRouter.get(
+  '/all',
+  requireHrRole(...HR_ADMIN_ROLES),
+  validate({ query: listAllLeaveRequestsQuery }),
+  async (_req, res) => {
+    const query = validatedQuery<ListAllLeaveRequestsQuery>(res)
+    const { items, meta } = await service.listAllRequests(query)
+    res.json({ data: items, meta })
+  },
+)
 
 hrLeavesRouter.get('/balances', validate({ query: financialYearQuery }), async (req, res) => {
   const { financialYear } = validatedQuery<FinancialYearQuery>(res)

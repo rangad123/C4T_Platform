@@ -1,4 +1,4 @@
-import { HrFileScope, type Prisma } from '@prisma/client'
+import { HrEmployeeStatus, HrFileScope, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, BadRequestError } from '../../lib/errors.js'
 import { putObject, buildStorageKey, createDownloadUrl, deleteObject } from '../../lib/storage.js'
@@ -9,7 +9,10 @@ import {
   maskAccountNumber,
 } from '../../lib/hrms/hr-encryption.js'
 import { financialYearMonths } from '../../lib/hrms/financial-year.js'
+import { employedMonths } from '../../lib/hrms/hr-tds-schedule.js'
+import { payslipRunState } from '../../lib/hrms/hr-payslip-run.js'
 import { renderPayslipHtml, type PayslipSnapshot } from './hr-payslip-template.js'
+import { calculateMonthlyTds } from './hr-tax.service.js'
 
 function toNumber(value: Prisma.Decimal): number {
   return value.toNumber()
@@ -34,7 +37,7 @@ async function assembleSnapshot(
   })
   if (!employee) throw new NotFoundError('Employee')
 
-  const [salaryStructure, incentives, deduction, professionalTax] = await Promise.all([
+  const [salaryStructure, incentives, professionalTax] = await Promise.all([
     prisma.hrSalaryStructure.findUnique({
       where: { employeeId_financialYear: { employeeId, financialYear } },
       select: { basic: true, hra: true, specialAllowance: true },
@@ -42,10 +45,6 @@ async function assembleSnapshot(
     prisma.hrMonthlyIncentive.findMany({
       where: { employeeId, financialYear, month },
       select: { amount: true, incentiveType: { select: { name: true } } },
-    }),
-    prisma.hrMonthlyTaxDeduction.findUnique({
-      where: { employeeId_financialYear_month: { employeeId, financialYear, month } },
-      select: { amount: true },
     }),
     prisma.hrProfessionalTaxRate.findUnique({
       where: { financialYear },
@@ -81,6 +80,25 @@ async function assembleSnapshot(
       `No salary breakdown is recorded for ${financialYear}. Set basic, HRA and special allowance on the Salary details tab before generating a payslip.`,
     )
   }
+
+  /**
+   * This month's TDS, worked out if nobody has recorded one.
+   *
+   * After the breakdown guard above on purpose: a payslip that is about to be
+   * refused must not leave tax rows behind for someone with no salary. And
+   * before the read below, so the figure printed is the one now in the TDS
+   * table — the payslip and the table cannot disagree, because the payslip is
+   * reading the table.
+   *
+   * Lenient: a year with no tax configuration must not stop a payslip. It just
+   * has no calculated TDS, and shows whatever is recorded, which is what it did
+   * before this existed.
+   */
+  await calculateMonthlyTds(employeeId, financialYear, month, { lenient: true })
+  const deduction = await prisma.hrMonthlyTaxDeduction.findUnique({
+    where: { employeeId_financialYear_month: { employeeId, financialYear, month } },
+    select: { amount: true },
+  })
 
   const basicMonthly = salaryStructure ? toNumber(salaryStructure.basic) / 12 : 0
   const hraMonthly = salaryStructure ? toNumber(salaryStructure.hra) / 12 : 0
@@ -158,6 +176,52 @@ async function resolveDownloadUrl(fileId: string): Promise<string | null> {
   })
   if (!file) return null
   return createDownloadUrl(file.storageKey, 'payslip.pdf')
+}
+
+export async function previewPayslipRun(financialYear: string, month: number) {
+  const rows = await prisma.hrEmployee.findMany({
+    where: { deletedAt: null, status: HrEmployeeStatus.ACTIVE },
+    select: {
+      id: true,
+      employeeCode: true,
+      firstName: true,
+      lastName: true,
+      joiningDate: true,
+      relievingDate: true,
+      salaryStructures: {
+        where: { financialYear },
+        select: { basic: true, hra: true, specialAllowance: true },
+      },
+      payslips: { where: { financialYear, month }, select: { generatedAt: true } },
+    },
+    orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+  })
+
+  return rows.map((row) => {
+    const structure = row.salaryStructures[0]
+    const hasBreakdown =
+      structure !== undefined &&
+      toNumber(structure.basic) + toNumber(structure.hra) + toNumber(structure.specialAllowance) > 0
+    const employed = employedMonths(financialYear, {
+      joiningDate: row.joiningDate,
+      relievingDate: row.relievingDate,
+    }).includes(month)
+
+    const state = payslipRunState({
+      hasPayslip: row.payslips.length > 0,
+      employed,
+      hasBreakdown,
+    })
+
+    return {
+      id: row.id,
+      employeeCode: row.employeeCode,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      state,
+      generatedAt: row.payslips[0]?.generatedAt ?? null,
+    }
+  })
 }
 
 export async function listPayslips(employeeId: string) {

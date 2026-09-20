@@ -93,6 +93,15 @@ export const updateEmployeeSchema = z
      * and no admin screen could correct it. The service re-checks uniqueness.
      */
     email: z.string().trim().toLowerCase().email().max(255),
+    /**
+     * The last working day, set or corrected independently of a status change.
+     *
+     * Until this existed the only way to record one was to move someone to
+     * Resigned or Terminated, so a notice period could not be captured on a
+     * person who was still working, and a mistyped date could not be fixed
+     * without flipping their status back and forth. `null` clears it.
+     */
+    relievingDate: z.coerce.date().nullable().optional(),
   })
   .partial()
 
@@ -109,6 +118,24 @@ export const revealFinancialDetailsSchema = z.object({
 
 export const employeeIdParam = z.object({ id: z.string().cuid() })
 
+/**
+ * `not-signed-in` is the default because it is the question the page exists
+ * to answer: who has been added but never got in. `all` is for re-sending to
+ * someone whose link lapsed or who lost the email after signing in once.
+ */
+export const listInvitationsQuery = paginationQuery.extend({
+  filter: z.enum(['not-signed-in', 'all']).default('not-signed-in'),
+  search: z.string().trim().max(120).optional(),
+})
+
+/** One request sends mail one by one, so the batch is bounded. */
+export const MAX_INVITATIONS_PER_REQUEST = 50
+
+export const inviteEmployeesSchema = z.object({
+  employeeIds: z.array(z.string().cuid()).min(1).max(MAX_INVITATIONS_PER_REQUEST),
+})
+
 export type ListEmployeesQuery = z.infer<typeof listEmployeesQuery>
+export type ListInvitationsQuery = z.infer<typeof listInvitationsQuery>
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>

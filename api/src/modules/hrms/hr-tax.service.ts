@@ -2,6 +2,11 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError } from '../../lib/errors.js'
 import { computeTax, type TaxSlabBand } from '../../lib/hrms/hr-tax-engine.js'
+import {
+  buildTdsSchedule,
+  employedMonths,
+  type TdsScheduleEntry,
+} from '../../lib/hrms/hr-tds-schedule.js'
 import { sumMonthlyIncentives } from './hr-salary.service.js'
 import type { UpsertTaxSlabInput } from './hr-tax.schema.js'
 
@@ -82,7 +87,7 @@ export async function deleteTaxSlab(id: string): Promise<void> {
 export async function computeEmployeeTax(employeeId: string, financialYear: string) {
   const employee = await prisma.hrEmployee.findFirst({
     where: { id: employeeId, deletedAt: null },
-    select: { id: true, taxRegime: true },
+    select: { id: true, taxRegime: true, joiningDate: true, relievingDate: true },
   })
   if (!employee) throw new NotFoundError('Employee')
 
@@ -112,7 +117,22 @@ export async function computeEmployeeTax(employeeId: string, financialYear: stri
     )
   }
 
-  const totalFixedAnnual = salaryStructure ? toNumber(salaryStructure.totalFixedAnnual) : 0
+  /**
+   * Fixed pay is the ANNUAL figure, so for someone who was on the payroll for
+   * only part of the year it has to be cut down to the months they were.
+   *
+   * Without this, a person who joined in August was taxed as though they had
+   * earned twelve months of salary, and the figure that fed their monthly TDS
+   * was a third too high. Someone employed all year is unaffected: twelve of
+   * twelve months is the whole amount.
+   */
+  const monthsEmployed = employedMonths(financialYear, {
+    joiningDate: employee.joiningDate,
+    relievingDate: employee.relievingDate,
+  }).length
+  const totalFixedAnnual = salaryStructure
+    ? toNumber(salaryStructure.totalFixedAnnual) * (monthsEmployed / 12)
+    : 0
   // Actual incentives paid this FY are the real figure; the salary
   // structure's own variable total is only an estimate set at structure time
   // and is used as a fallback before any month has been logged.
@@ -142,6 +162,92 @@ export async function computeEmployeeTax(employeeId: string, financialYear: stri
     financialYear,
     regime: employee.taxRegime,
     hasSalaryStructure: Boolean(salaryStructure),
+    monthsEmployed,
     ...result,
   }
+}
+
+export interface CalculateTdsResult {
+  /** The months that were filled in, with the amount for each. */
+  created: TdsScheduleEntry[]
+  /** Why nothing was calculated, when that is the case. */
+  skipped: string | null
+}
+
+/**
+ * Fills in the monthly TDS for every month up to `throughMonth` that has no
+ * figure yet.
+ *
+ * ── NEVER OVERWRITES
+ *
+ * A month that already has an amount keeps it — one an admin typed, or one
+ * carried over from the old system — and simply counts as already deducted.
+ * There is no flag on the row saying who set it, so the only safe rule is
+ * that anything present is authoritative. To recalculate a month, delete its
+ * entry and run this again.
+ *
+ * ── LENIENT vs STRICT
+ *
+ * `lenient` is for payslip generation, which must not fail because tax could
+ * not be worked out: a year with no slab configuration, or someone with no
+ * salary structure, simply gets no calculated TDS and the payslip goes ahead
+ * on whatever is recorded. Called from the admin's own Calculate button it is
+ * strict, so a missing slab configuration is reported rather than skipped
+ * silently and the admin is told why nothing happened.
+ */
+export async function calculateMonthlyTds(
+  employeeId: string,
+  financialYear: string,
+  throughMonth: number,
+  { lenient = false }: { lenient?: boolean } = {},
+): Promise<CalculateTdsResult> {
+  const employee = await prisma.hrEmployee.findFirst({
+    where: { id: employeeId, deletedAt: null },
+    select: { joiningDate: true, relievingDate: true },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+
+  let annualLiability: number
+  try {
+    const tax = await computeEmployeeTax(employeeId, financialYear)
+    if (!tax.hasSalaryStructure) {
+      return { created: [], skipped: `No salary structure is recorded for ${financialYear}.` }
+    }
+    annualLiability = tax.totalTaxLiability
+  } catch (error) {
+    if (lenient && error instanceof NotFoundError) {
+      return { created: [], skipped: error.message }
+    }
+    throw error
+  }
+
+  const rows = await prisma.hrMonthlyTaxDeduction.findMany({
+    where: { employeeId, financialYear },
+    select: { month: true, amount: true },
+  })
+  const recorded = new Map(rows.map((row) => [row.month, toNumber(row.amount)]))
+
+  const created = buildTdsSchedule({
+    financialYear,
+    window: { joiningDate: employee.joiningDate, relievingDate: employee.relievingDate },
+    annualLiability,
+    recorded,
+    throughMonth,
+  })
+
+  if (created.length > 0) {
+    await prisma.hrMonthlyTaxDeduction.createMany({
+      data: created.map((entry) => ({
+        employeeId,
+        financialYear,
+        month: entry.month,
+        amount: entry.amount,
+      })),
+      // Two runs at once (a bulk payslip run and an admin clicking Calculate)
+      // would otherwise fail on the unique key for the same month.
+      skipDuplicates: true,
+    })
+  }
+
+  return { created, skipped: null }
 }

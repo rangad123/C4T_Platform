@@ -4,7 +4,9 @@ import { BadRequestError, ForbiddenError, NotFoundError } from '../../lib/errors
 import { countWorkingDays } from '../../lib/hrms/hr-calendar.js'
 import { listHolidayDatesForYears } from './hr-holidays.service.js'
 import { financialYearOf } from '../../lib/hrms/financial-year.js'
-import type { CreateLeaveRequestInput } from './hr-leaves.schema.js'
+import { searchTerms } from '../../lib/search.js'
+import { buildMeta, toSkipTake } from '../../lib/pagination.js'
+import type { CreateLeaveRequestInput, ListAllLeaveRequestsQuery } from './hr-leaves.schema.js'
 
 function toNumber(value: Prisma.Decimal): number {
   return value.toNumber()
@@ -25,6 +27,63 @@ const requestSelect = {
 
 function toPublicRequest(row: Prisma.HrLeaveRequestGetPayload<{ select: typeof requestSelect }>) {
   return { ...row, days: toNumber(row.days) }
+}
+
+const adminRequestSelect = {
+  ...requestSelect,
+  employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+} satisfies Prisma.HrLeaveRequestSelect
+
+/**
+ * Every employee's requests — the admin's Leaves screen.
+ *
+ * Former staff are left in on purpose. Someone who resigned last month can
+ * still have a request from before they went that was never decided, and
+ * hiding it would leave an approval nobody could find.
+ *
+ * Newest first. The screen opens on the Pending filter, so "what needs
+ * deciding" is what the default view already is; the total of undecided
+ * requests comes back in `meta.pending` whatever the filter, so the count
+ * stays honest when someone is looking at Approved or All.
+ */
+export async function listAllRequests(query: ListAllLeaveRequestsQuery) {
+  const terms = searchTerms(query.search)
+  const where: Prisma.HrLeaveRequestWhereInput = {
+    employee: { deletedAt: null },
+    ...(query.status ? { status: query.status } : {}),
+    ...(terms.length > 0
+      ? {
+          AND: terms.map((term) => ({
+            employee: {
+              OR: [
+                { firstName: { contains: term, mode: 'insensitive' as const } },
+                { lastName: { contains: term, mode: 'insensitive' as const } },
+                { employeeCode: { contains: term, mode: 'insensitive' as const } },
+                { email: { contains: term, mode: 'insensitive' as const } },
+              ],
+            },
+          })),
+        }
+      : {}),
+  }
+
+  const [items, total, pending] = await Promise.all([
+    prisma.hrLeaveRequest.findMany({
+      where,
+      select: adminRequestSelect,
+      orderBy: { createdAt: 'desc' },
+      ...toSkipTake(query),
+    }),
+    prisma.hrLeaveRequest.count({ where }),
+    prisma.hrLeaveRequest.count({
+      where: { status: HrLeaveRequestStatus.PENDING, employee: { deletedAt: null } },
+    }),
+  ])
+
+  return {
+    items: items.map((row) => ({ ...row, days: toNumber(row.days) })),
+    meta: { ...buildMeta(query, total), pending },
+  }
 }
 
 export async function getBalances(employeeId: string, financialYear: string) {

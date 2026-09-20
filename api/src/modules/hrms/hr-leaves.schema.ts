@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { HrLeaveRequestStatus } from '@prisma/client'
 import { isValidFinancialYear } from '../../lib/hrms/financial-year.js'
+import { paginationQuery } from '../../lib/pagination.js'
 
 const financialYearField = z
   .string()
@@ -28,9 +29,21 @@ export const createLeaveRequestSchema = z
     path: ['endDate'],
   })
 
+/**
+ * Every employee's leave requests, for the admin's own Leaves screen.
+ *
+ * `status` is optional so "All" is expressible; the screen defaults to PENDING
+ * because approving is what an admin comes here to do.
+ */
+export const listAllLeaveRequestsQuery = paginationQuery.extend({
+  status: z.nativeEnum(HrLeaveRequestStatus).optional(),
+  search: z.string().trim().max(120).optional(),
+})
+
 export const decideLeaveRequestSchema = z.object({
   status: z.enum([HrLeaveRequestStatus.APPROVED, HrLeaveRequestStatus.REJECTED]),
 })
 
+export type ListAllLeaveRequestsQuery = z.infer<typeof listAllLeaveRequestsQuery>
 export type CreateLeaveRequestInput = z.infer<typeof createLeaveRequestSchema>
 export type FinancialYearQuery = z.infer<typeof financialYearQuery>

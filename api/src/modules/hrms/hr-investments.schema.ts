@@ -37,6 +37,12 @@ export const createMonthlyDeductionSchema = z.object({
   amount: z.coerce.number().min(0).max(9_999_999),
 })
 
+export const calculateTdsSchema = z.object({
+  financialYear: financialYearField,
+  /** Fill in every month with no entry up to and including this one. */
+  month: z.coerce.number().int().min(1).max(12),
+})
+
 export type CreateDeclarationInput = z.infer<typeof createDeclarationSchema>
 export type UpdateDeclarationInput = z.infer<typeof updateDeclarationSchema>
 export type CreateMonthlyDeductionInput = z.infer<typeof createMonthlyDeductionSchema>

@@ -17,8 +17,14 @@ async function patchEmployee(id: string, body: Record<string, unknown>): Promise
   try {
     await hrActionFetch(`hrms/employees/${id}`, { method: 'PATCH', body })
   } catch (error) {
-    if (error instanceof ApiError && error.status === 422) {
-      redirect(`${detailPath(id)}?error=rejected`)
+    if (!(error instanceof ApiError)) throw error
+    if (error.status === 422) redirect(`${detailPath(id)}?error=rejected`)
+    // Any other 4xx is the API declining for a stated reason — "the relieving
+    // date cannot be before the joining date", "an employee with this email
+    // already exists" — and that sentence is the whole answer. It used to
+    // escape as an unhandled error and replace the page with a crash screen.
+    if (error.status >= 400 && error.status < 500) {
+      redirect(`${detailPath(id)}?notice=refused&reason=${encodeURIComponent(error.message)}`)
     }
     throw error
   }
@@ -47,6 +53,8 @@ export async function updateEmploymentDetails(id: string, formData: FormData): P
     accountType: formString(formData, 'accountType') || undefined,
     reportsToId: formString(formData, 'reportsToId') || undefined,
     joiningDate: formString(formData, 'joiningDate') || undefined,
+    // `null`, not `undefined`, when blank: an empty field means "clear it".
+    relievingDate: formString(formData, 'relievingDate') || null,
     timesheetRequired: formData.get('timesheetRequired') != null,
   })
   revalidateHrms(`${BASE}/${id}`)
@@ -101,30 +109,6 @@ export async function attachProfilePicture(id: string, formData: FormData): Prom
   revalidateHrms(BASE)
 }
 
-/**
- * Emails the employee a link to choose their own password — the first one, or
- * a replacement for an invitation that lapsed before they opened it.
- *
- * Safe to run more than once: each send invalidates the previous link, so a
- * second click does not leave two working invitations in an inbox.
- */
-export async function sendEmployeeInvitation(id: string): Promise<void> {
-  await requireHrRole(['ADMIN'])
-  try {
-    await hrActionFetch(`hrms/employees/${id}/invite`, { method: 'POST' })
-  } catch (error) {
-    // The API refuses to invite anyone who has left. That is an answer worth
-    // reading, not a crash.
-    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
-      redirect(
-        `${detailPath(id)}?notice=invite_refused&reason=${encodeURIComponent(error.message)}`,
-      )
-    }
-    throw error
-  }
-  redirect(`${detailPath(id)}?notice=invited`)
-}
-
 // ─── Salary details ──────────────────────────────────────────────────────────
 
 function sectionPath(id: string, section: string, financialYear: string): string {
@@ -161,7 +145,7 @@ export async function updateSalaryStructure(id: string, formData: FormData): Pro
  * `back` lets a caller return to the tab the action was fired from; without
  * it the reader lands on Basic details and has to find their way back.
  */
-async function patchSalary(
+async function patchSalary<T = void>(
   id: string,
   request: {
     method: 'PUT' | 'POST' | 'DELETE'
@@ -169,9 +153,9 @@ async function patchSalary(
     body?: Record<string, unknown>
     back?: string
   },
-): Promise<void> {
+): Promise<T> {
   try {
-    await hrActionFetch(request.path, { method: request.method, body: request.body })
+    return await hrActionFetch<T>(request.path, { method: request.method, body: request.body })
   } catch (error) {
     if (!(error instanceof ApiError)) throw error
     if (error.status === 422) redirect(`${detailPath(id)}?error=rejected`)
@@ -330,6 +314,30 @@ export async function addMonthlyDeduction(id: string, formData: FormData): Promi
   })
   revalidateHrms(`${BASE}/${id}`)
   redirect(sectionPath(id, 'investments', financialYear))
+}
+
+/**
+ * Fills in TDS for every month up to the one chosen that has no entry yet.
+ *
+ * The API never changes a month that already has a figure, so pressing this
+ * twice — or after typing one month by hand — is safe. To recalculate a
+ * month, remove its entry first.
+ */
+export async function calculateMonthlyDeductions(id: string, formData: FormData): Promise<void> {
+  await requireHrRole(['ADMIN'])
+  const financialYear = formString(formData, 'financialYear')
+  const back = sectionPath(id, 'investments', financialYear)
+  const result = await patchSalary<{ created: unknown[]; skipped: string | null }>(id, {
+    method: 'POST',
+    path: `hrms/employees/${id}/monthly-tax-deductions/calculate`,
+    body: { financialYear, month: formString(formData, 'month') },
+    back,
+  })
+  revalidateHrms(`${BASE}/${id}`)
+  if (result.skipped) {
+    redirect(`${back}&notice=refused&reason=${encodeURIComponent(result.skipped)}`)
+  }
+  redirect(`${back}&notice=${result.created.length > 0 ? 'tds_calculated' : 'tds_nothing'}`)
 }
 
 export async function deleteMonthlyDeduction(

@@ -4,6 +4,7 @@ import { validate, validatedQuery } from '../../middleware/validate.js'
 import { hrAuthenticate, requireHrRole, HR_ADMIN_ROLES } from './hr-auth.middleware.js'
 import { recordHrAudit } from '../../lib/hrms/hr-audit.js'
 import * as service from './hr-investments.service.js'
+import { calculateMonthlyTds } from './hr-tax.service.js'
 import {
   employeeIdParam,
   employeeSubResourceParam,
@@ -12,6 +13,7 @@ import {
   updateDeclarationSchema,
   verifyDeclarationSchema,
   createMonthlyDeductionSchema,
+  calculateTdsSchema,
 } from './hr-investments.schema.js'
 
 /**
@@ -119,6 +121,27 @@ hrInvestmentsRouter.post(
       entityId: upserted.id,
     })
     res.status(201).json({ data: upserted })
+  },
+)
+
+/**
+ * Declared before the `/:subId` route below so "calculate" is never read as an
+ * id. POST, because it writes.
+ */
+hrInvestmentsRouter.post(
+  '/:id/monthly-tax-deductions/calculate',
+  validate({ params: employeeIdParam, body: calculateTdsSchema }),
+  async (req, res) => {
+    const { financialYear, month } = req.body as { financialYear: string; month: number }
+    const result = await calculateMonthlyTds(param(req, 'id'), financialYear, month)
+    await recordHrAudit({
+      req,
+      action: 'hr.monthly_tax_deduction.calculated',
+      entityType: 'HrMonthlyTaxDeduction',
+      entityId: param(req, 'id'),
+      after: { financialYear, throughMonth: month, created: result.created },
+    })
+    res.json({ data: result })
   },
 )
 

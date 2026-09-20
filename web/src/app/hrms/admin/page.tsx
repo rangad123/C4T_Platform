@@ -143,6 +143,9 @@ export default async function HrAdminEmployeesPage({
             }}
           >
             <HrViewToggle active={view} returnTo={returnTo} />
+            <Button href={`${BASE}/invitations`} variant="secondary" iconLeft="mail">
+              Send invitations
+            </Button>
             <Button href={`${BASE}/new`} variant="primary" iconLeft="plus">
               Add employee
             </Button>

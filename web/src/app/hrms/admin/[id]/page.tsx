@@ -37,7 +37,6 @@ import {
   updateFinancialDetails,
   changeEmployeeStatus,
   attachProfilePicture,
-  sendEmployeeInvitation,
 } from './actions'
 
 const BASE = '/admin'
@@ -54,12 +53,15 @@ const SECTIONS = [
 ] as const
 
 const NOTICES: Record<string, NoticeCopy> = {
-  invited: {
+  tds_calculated: {
     tone: 'success',
     message:
-      'Invitation sent. The link lets them choose their own password and expires in 7 days — send another if it lapses.',
+      'TDS calculated for the months that had no entry. Entries that were already there were not changed.',
   },
-  invite_refused: { tone: 'warning', message: 'Invitation not sent.' },
+  tds_nothing: {
+    tone: 'info',
+    message: 'Nothing to calculate. Every month up to the one you picked already has an entry.',
+  },
   refused: { tone: 'warning', message: 'That could not be done.' },
 }
 
@@ -255,16 +257,6 @@ export default async function HrAdminEmployeeDetailPage({
             >
               Change status
             </Button>
-            {/* Offered for anyone still here, not only the newly added: the
-                same link is what rescues a lapsed invitation or an address
-                that was wrong the first time. */}
-            {employee.status === 'ACTIVE' ? (
-              <form action={sendEmployeeInvitation.bind(null, id)}>
-                <SubmitButton variant="secondary" size="sm" iconLeft="mail" pendingLabel="Sending…">
-                  Send sign-in invitation
-                </SubmitButton>
-              </form>
-            ) : null}
           </div>
 
           <Panel
@@ -296,6 +288,7 @@ export default async function HrAdminEmployeeDetailPage({
               items={[
                 { label: 'First name', value: employee.firstName },
                 { label: 'Last name', value: employee.lastName },
+                { label: 'Email', value: employee.email },
                 {
                   label: 'Date of birth',
                   value: employee.dateOfBirth
@@ -536,6 +529,18 @@ export default async function HrAdminEmployeeDetailPage({
               type="date"
               required
               defaultValue={toDateInputValue(employee.joiningDate)}
+            />
+          </Field>
+          <Field
+            label="Relieving date"
+            htmlFor="employmentRelievingDate"
+            hint="The last working day. Set it when someone has given notice; clear it if they are staying."
+          >
+            <Input
+              id="employmentRelievingDate"
+              name="relievingDate"
+              type="date"
+              defaultValue={toDateInputValue(employee.relievingDate)}
             />
           </Field>
           <Checkbox

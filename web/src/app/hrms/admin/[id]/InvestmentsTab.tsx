@@ -18,6 +18,7 @@ import {
   verifyInvestmentDeclaration,
   deleteInvestmentDeclaration,
   addMonthlyDeduction,
+  calculateMonthlyDeductions,
   deleteMonthlyDeduction,
 } from './actions'
 
@@ -34,6 +35,23 @@ interface DeductionRow {
   id: string
   month: number
   amount: number
+}
+
+/**
+ * The month the Calculate control opens on: this month while the year is in
+ * progress, otherwise the year's last month (a finished year) or first (one
+ * that has not started). Someone running it mid-year almost always means
+ * "up to now", and defaulting to March would project a whole year's TDS.
+ */
+function defaultCalculateMonth(financialYear: string): string {
+  const months = financialYearMonths(financialYear)
+  const now = new Date()
+  const current = months.find(
+    (m) => m.calendarYear === now.getFullYear() && m.month === now.getMonth() + 1,
+  )
+  if (current) return String(current.month)
+  const first = months[0]
+  return String(first && new Date(first.calendarYear, first.month - 1, 1) > now ? first.month : 3)
 }
 
 function money(value: number): string {
@@ -184,8 +202,47 @@ export async function InvestmentsTab({
 
       <Panel
         title="Monthly tax deductions"
-        description={`TDS already deducted for ${financialYear}.`}
+        description={`TDS deducted for ${financialYear}. Calculate fills it in from the salary and declarations; you can also enter a month by hand.`}
       >
+        <TrackedForm
+          action={calculateMonthlyDeductions.bind(null, employeeId)}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: 'var(--space-4)',
+            marginBottom: 'var(--space-3)',
+            alignItems: 'end',
+          }}
+        >
+          <input type="hidden" name="financialYear" value={financialYear} />
+          <Field label="Calculate up to" htmlFor="calculateMonth" required>
+            <Select
+              id="calculateMonth"
+              name="month"
+              required
+              defaultValue={defaultCalculateMonth(financialYear)}
+              options={financialYearMonths(financialYear).map((m) => ({
+                value: String(m.month),
+                label: m.label,
+              }))}
+            />
+          </Field>
+          <SubmitButton variant="primary" pendingLabel="Calculating…">
+            Calculate TDS
+          </SubmitButton>
+        </TrackedForm>
+        <p
+          style={{
+            margin: '0 0 var(--space-6)',
+            color: 'var(--text-secondary)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
+          Fills every month up to the one you pick that has no entry. Each month is what is still
+          owed for the year, spread over the months left. A month that already has an entry is never
+          changed; remove it first to recalculate it. Generating a payslip does this for its own
+          month.
+        </p>
         <TrackedForm
           action={addMonthlyDeduction.bind(null, employeeId)}
           style={{
