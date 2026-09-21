@@ -1,7 +1,8 @@
 import { type Prisma, HrLeaveRequestStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { BadRequestError, ForbiddenError, NotFoundError } from '../../lib/errors.js'
-import { countWorkingDays } from '../../lib/hrms/hr-calendar.js'
+import { countWorkingDays, todayInIndia } from '../../lib/hrms/hr-calendar.js'
+import { accruesMonthly, creditsEarned, daysEarned } from '../../lib/hrms/hr-leave-accrual.js'
 import { listHolidayDatesForYears } from './hr-holidays.service.js'
 import { financialYearOf } from '../../lib/hrms/financial-year.js'
 import { searchTerms } from '../../lib/search.js'
@@ -86,12 +87,31 @@ export async function listAllRequests(query: ListAllLeaveRequestsQuery) {
   }
 }
 
+/**
+ * What an employee has earned, used and has left of each leave type for a year.
+ *
+ * Leave is EARNED, not handed out: a type's yearly days are credited in twelve
+ * monthly instalments (see `hr-leave-accrual.ts`), so `allocated` is what has
+ * been earned so far, and `annualDays` is the full-year figure it builds toward.
+ * The field keeps its old name because the screens that read it already use it.
+ *
+ * A balance row an administrator has set for the year is a fixed allocation and
+ * wins outright: it is how HR grants something outside the monthly rule, and
+ * it does not accrue.
+ */
 export async function getBalances(employeeId: string, financialYear: string) {
   const leaveTypes = await prisma.hrLeaveType.findMany({
     where: { isActive: true },
     select: { id: true, name: true, defaultAnnualDays: true },
     orderBy: { name: 'asc' },
   })
+
+  const employee = await prisma.hrEmployee.findFirst({
+    where: { id: employeeId, deletedAt: null },
+    select: { joiningDate: true, relievingDate: true },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+  const credits = creditsEarned(financialYear, todayInIndia(), employee)
 
   const [balanceRows, approvedRows] = await Promise.all([
     prisma.hrLeaveBalance.findMany({
@@ -116,13 +136,18 @@ export async function getBalances(employeeId: string, financialYear: string) {
   }
 
   return leaveTypes.map((type) => {
-    const allocated = allocatedByType.get(type.id) ?? type.defaultAnnualDays
+    const fixed = allocatedByType.get(type.id)
+    const accrues = fixed === undefined && accruesMonthly(type.name)
+    const allocated =
+      fixed ?? (accrues ? daysEarned(type.defaultAnnualDays, credits) : type.defaultAnnualDays)
     const used = usedByType.get(type.id) ?? 0
     return {
       leaveType: { id: type.id, name: type.name },
       allocated,
+      annualDays: fixed ?? type.defaultAnnualDays,
+      accruesMonthly: accrues,
       used,
-      remaining: allocated - used,
+      remaining: Math.round((allocated - used) * 100) / 100,
     }
   })
 }

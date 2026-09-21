@@ -161,6 +161,15 @@ export const updateOwnDetailsSchema = z
     { path: ['currentPassword'], message: 'Enter your password to save bank or PAN details' },
   )
 
+/**
+ * HR sets a temporary password for someone: either one they type, or, left
+ * blank, a strong one generated for them. Twelve characters is the same floor
+ * every other password in HRMS has.
+ */
+export const setTemporaryPasswordSchema = z.object({
+  password: z.string().min(12).max(200).optional(),
+})
+
 export type ListEmployeesQuery = z.infer<typeof listEmployeesQuery>
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>

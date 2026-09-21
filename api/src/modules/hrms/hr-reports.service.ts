@@ -2,6 +2,12 @@ import { HrEmployeeStatus, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { renderHtmlToPdf } from '../../lib/hrms/hr-pdf.js'
 import { financialYearMonths } from '../../lib/hrms/financial-year.js'
+import { logoImg } from '../../lib/hrms/hr-logo.js'
+import {
+  DEFAULT_PROFESSIONAL_TAX_MONTHLY,
+  PROFESSIONAL_TAX_THRESHOLD_MONTHLY,
+  professionalTaxDeducted,
+} from '../../lib/hrms/hr-professional-tax.js'
 import { getMonthSummary } from './hr-timesheet.service.js'
 import type { GenerateReportQuery } from './hr-reports.schema.js'
 
@@ -49,6 +55,8 @@ function reportShell(title: string, subtitle: string, body: string): string {
   * { box-sizing: border-box; }
   body { font-family: Arial, Helvetica, sans-serif; color: #241e18; margin: 0; padding: 16px; font-size: 12px; }
   h1 { font-size: 18px; margin: 0 0 4px; }
+  .brand { margin: 0 0 12px; }
+  .brand img { display: block; }
   .subtitle { color: #625950; margin: 0 0 20px; }
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; border-bottom: 1px solid #c9c3bc; padding: 6px 8px; color: #625950; }
@@ -59,7 +67,8 @@ function reportShell(title: string, subtitle: string, body: string): string {
 </style>
 </head>
 <body>
-  <h1>Crowd4Test — ${escapeHtml(title)}</h1>
+  <div class="brand">${logoImg(150)}</div>
+  <h1>${escapeHtml(title)}</h1>
   <p class="subtitle">${escapeHtml(subtitle)}</p>
   ${body}
 </body>
@@ -168,23 +177,15 @@ async function generateProfessionalTaxReport(query: GenerateReportQuery): Promis
     where: { financialYear: query.financialYear },
     select: { monthlyAmount: true, state: true },
   })
+  const monthlyAmount = rate ? toNumber(rate.monthlyAmount) : DEFAULT_PROFESSIONAL_TAX_MONTHLY
 
-  if (!rate) {
-    return unavailableReport(
-      'Professional tax report',
-      query,
-      `No professional tax rate is configured for ${query.financialYear}.`,
-    )
-  }
-
-  const monthlyAmount = toNumber(rate.monthlyAmount)
-
-  // Payslips are what was actually deducted, so the report counts those rather
-  // than multiplying headcount by months — an employee who joined or left
-  // mid-year has fewer.
+  // Read off the payslips, because they are what was actually deducted. Only
+  // people above the threshold pay it, and not necessarily in every month
+  // (someone joins, leaves, or has a lighter month), so a headcount times a
+  // rate would be wrong in both directions.
   const payslips = await prisma.hrPayslip.findMany({
     where: { financialYear: query.financialYear, month: { in: months } },
-    select: { employeeId: true },
+    select: { employeeId: true, snapshot: true },
   })
   if (payslips.length === 0) {
     return unavailableReport(
@@ -194,23 +195,34 @@ async function generateProfessionalTaxReport(query: GenerateReportQuery): Promis
     )
   }
 
-  const monthsByEmployee = new Map<string, number>()
-  for (const p of payslips) {
-    monthsByEmployee.set(p.employeeId, (monthsByEmployee.get(p.employeeId) ?? 0) + 1)
+  const byEmployee = new Map<string, { months: number; amount: number }>()
+  for (const payslip of payslips) {
+    const deducted = professionalTaxDeducted(payslip.snapshot)
+    if (deducted <= 0) continue
+    const entry = byEmployee.get(payslip.employeeId) ?? { months: 0, amount: 0 }
+    entry.months += 1
+    entry.amount += deducted
+    byEmployee.set(payslip.employeeId, entry)
+  }
+  if (byEmployee.size === 0) {
+    return unavailableReport(
+      'Professional tax report',
+      query,
+      `No professional tax was deducted in this period. It applies to a monthly gross above ${money(PROFESSIONAL_TAX_THRESHOLD_MONTHLY)}.`,
+    )
   }
 
   const employees = await prisma.hrEmployee.findMany({
-    where: { id: { in: [...monthsByEmployee.keys()] } },
+    where: { id: { in: [...byEmployee.keys()] } },
     select: { id: true, employeeCode: true, firstName: true, lastName: true },
     orderBy: { employeeCode: 'asc' },
   })
 
   let total = 0
   const lines = employees.map((employee) => {
-    const monthCount = monthsByEmployee.get(employee.id) ?? 0
-    const amount = monthCount * monthlyAmount
-    total += amount
-    return { employee, monthCount, amount }
+    const entry = byEmployee.get(employee.id) ?? { months: 0, amount: 0 }
+    total += entry.amount
+    return { employee, monthCount: entry.months, amount: entry.amount }
   })
 
   const body = `
@@ -226,7 +238,7 @@ async function generateProfessionalTaxReport(query: GenerateReportQuery): Promis
         <tr class="total-row"><td colspan="3">Total</td><td class="amount">${money(total)}</td></tr>
       </tbody>
     </table>
-    <p class="subtitle">${money(monthlyAmount)} per month${rate.state ? ` — ${escapeHtml(rate.state)}` : ''}.</p>`
+    <p class="subtitle">${money(monthlyAmount)} per month on a monthly gross above ${money(PROFESSIONAL_TAX_THRESHOLD_MONTHLY)}${rate?.state ? ` — ${escapeHtml(rate.state)}` : ''}.</p>`
 
   return reportShell(
     'Professional tax report',

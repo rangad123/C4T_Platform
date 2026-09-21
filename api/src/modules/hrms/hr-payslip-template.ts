@@ -5,6 +5,8 @@
  * changed) without wading through the data-assembly logic around it.
  */
 
+import { logoImg } from '../../lib/hrms/hr-logo.js'
+
 export interface PayslipIncentiveLine {
   type: string
   amount: number
@@ -70,6 +72,8 @@ export function renderPayslipHtml(snapshot: PayslipSnapshot): string {
   body { font-family: Arial, Helvetica, sans-serif; color: #241e18; margin: 0; padding: 0; font-size: 12px; }
   .sheet { padding: 8px; }
   h1 { font-size: 18px; margin: 0 0 4px; }
+  .brand { margin: 0 0 10px; }
+  .brand img { display: block; }
   .subtitle { color: #625950; margin: 0 0 20px; }
   .meta { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
   .meta td { padding: 3px 0; }
@@ -90,7 +94,7 @@ export function renderPayslipHtml(snapshot: PayslipSnapshot): string {
 </head>
 <body>
   <div class="sheet">
-    <h1>Crowd4Test</h1>
+    <div class="brand">${logoImg(150)}</div>
     <p class="subtitle">Payslip for ${escapeHtml(snapshot.monthLabel)}</p>
 
     <table class="meta">

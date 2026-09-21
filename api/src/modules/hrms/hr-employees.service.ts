@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { type Prisma, HrEmployeeStatus, HrRole } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { todayInIndia } from '../../lib/hrms/hr-calendar.js'
+import { generateTemporaryPassword } from '../../lib/hrms/hr-temporary-password.js'
 import { searchTerms } from '../../lib/search.js'
 import { hashPassword, verifyPassword } from '../../lib/password.js'
 import {
@@ -396,6 +397,60 @@ export async function assertNotLastAdministrator(employeeId: string, doingWhat: 
       `This is the only active HR administrator. Make someone else an administrator before ${doingWhat}.`,
     )
   }
+}
+
+/**
+ * HR gives someone a temporary password, for when they cannot use the invitation
+ * link or the Forgot password page: a lapsed link, an address that does not
+ * work, a person who is standing next to HR.
+ *
+ * The plaintext is returned ONCE, to be passed on, and stored nowhere: what is
+ * saved is its hash, like any other password. Everything that could still get
+ * someone in with the old one is closed at the same time: their sessions are
+ * revoked, and any reset or invitation link that has not been used is cancelled,
+ * so a link sent earlier cannot quietly replace the password HR just chose.
+ *
+ * Only for an active employee (nobody else can sign in) and never for oneself,
+ * where Change password on the profile is the right tool and setting your own
+ * temporary password would only sign you out.
+ */
+export async function setTemporaryPassword(
+  employeeId: string,
+  actorId: string,
+  requested?: string,
+): Promise<{ password: string }> {
+  if (employeeId === actorId) {
+    throw new BadRequestError('Use Change password on your profile to change your own password')
+  }
+  const employee = await prisma.hrEmployee.findFirst({
+    where: { id: employeeId, deletedAt: null },
+    select: { id: true, status: true },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+  if (employee.status !== HrEmployeeStatus.ACTIVE) {
+    throw new BadRequestError('Only an active employee can sign in, so no password is needed')
+  }
+
+  const password = requested ?? generateTemporaryPassword()
+  const passwordHash = await hashPassword(password)
+  const now = new Date()
+
+  await prisma.$transaction([
+    prisma.hrEmployee.update({
+      where: { id: employeeId },
+      data: { passwordHash, failedLoginCount: 0, lockedUntil: null },
+    }),
+    prisma.hrSession.updateMany({
+      where: { employeeId, revokedAt: null },
+      data: { revokedAt: now, revokedReason: 'admin' },
+    }),
+    prisma.hrPasswordResetToken.updateMany({
+      where: { employeeId, usedAt: null },
+      data: { usedAt: now },
+    }),
+  ])
+
+  return { password }
 }
 
 export async function changeEmployeeStatus(

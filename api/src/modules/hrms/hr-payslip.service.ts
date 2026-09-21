@@ -11,6 +11,7 @@ import {
 import { financialYearMonths } from '../../lib/hrms/financial-year.js'
 import { employedMonths } from '../../lib/hrms/hr-tds-schedule.js'
 import { payslipRunState } from '../../lib/hrms/hr-payslip-run.js'
+import { professionalTaxFor } from '../../lib/hrms/hr-professional-tax.js'
 import { renderPayslipHtml, type PayslipSnapshot } from './hr-payslip-template.js'
 import { calculateMonthlyTds } from './hr-tax.service.js'
 
@@ -113,7 +114,10 @@ async function assembleSnapshot(
   const grossMonthly = basicMonthly + hraMonthly + specialAllowanceMonthly + incentiveTotal
 
   const tdsMonthly = deduction ? toNumber(deduction.amount) : 0
-  const professionalTaxMonthly = professionalTax ? toNumber(professionalTax.monthlyAmount) : 0
+  const professionalTaxMonthly = professionalTaxFor({
+    grossMonthly,
+    configuredMonthly: professionalTax ? toNumber(professionalTax.monthlyAmount) : null,
+  })
   const totalDeductions = tdsMonthly + professionalTaxMonthly
   const monthLabel =
     financialYearMonths(financialYear).find((m) => m.month === month)?.label ?? `Month ${month}`

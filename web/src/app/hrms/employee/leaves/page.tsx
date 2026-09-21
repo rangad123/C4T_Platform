@@ -22,6 +22,8 @@ export const metadata: Metadata = { title: 'Leaves' }
 interface BalanceRow {
   leaveType: { id: string; name: string }
   allocated: number
+  annualDays: number
+  accruesMonthly: boolean
   used: number
   remaining: number
 }
@@ -53,7 +55,8 @@ export default async function HrEmployeeLeavesPage({
 
   const balanceColumns: readonly TableColumn<BalanceRow>[] = [
     { key: 'type', header: 'Leave type', render: (row) => row.leaveType.name },
-    { key: 'allocated', header: 'Allocated', render: (row) => row.allocated },
+    { key: 'allocated', header: 'Earned so far', render: (row) => row.allocated },
+    { key: 'annual', header: 'For the year', render: (row) => row.annualDays },
     { key: 'used', header: 'Used', render: (row) => row.used },
     { key: 'remaining', header: 'Remaining', render: (row) => row.remaining },
   ]
@@ -114,7 +117,10 @@ export default async function HrEmployeeLeavesPage({
         </div>
       ) : null}
 
-      <Panel title="Balance" description={`For ${financialYear}.`}>
+      <Panel
+        title="Balance"
+        description={`For ${financialYear}. Casual and privilege leave are earned a month at a time, on the 1st, so the balance grows through the year.`}
+      >
         {balances && balances.length > 0 ? (
           <Table
             ariaLabel="Leave balance"

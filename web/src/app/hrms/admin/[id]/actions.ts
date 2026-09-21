@@ -6,6 +6,7 @@ import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed, formString } from '@/lib/form-data'
+import type { TemporaryPasswordState } from './temporary-password-state'
 
 const BASE = '/admin'
 
@@ -81,6 +82,40 @@ export async function updateFinancialDetails(id: string, formData: FormData): Pr
   })
   revalidateHrms(`${BASE}/${id}`)
   redirect(detailPath(id))
+}
+
+/**
+ * Sets a temporary password and hands it back to the form that asked, which
+ * shows it once. It is returned, not redirected with: a redirect would put it in
+ * a URL, and a URL ends up in browser history and server logs.
+ *
+ * A refusal ("only an active employee can sign in") comes back as a message on
+ * the form rather than an error page.
+ */
+export async function setTemporaryPassword(
+  _previous: TemporaryPasswordState,
+  formData: FormData,
+): Promise<TemporaryPasswordState> {
+  await requireHrRole(['ADMIN'])
+  const id = formString(formData, 'employeeId')
+  const typed = formString(formData, 'password')
+
+  try {
+    const result = await hrActionFetch<{ password: string }>(
+      `hrms/employees/${id}/temporary-password`,
+      { method: 'POST', body: typed ? { password: typed } : {} },
+    )
+    return { status: 'done', password: result.password }
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error
+    if (error.status === 422) {
+      return { status: 'error', message: 'A password needs at least 12 characters.' }
+    }
+    if (error.status >= 400 && error.status < 500) {
+      return { status: 'error', message: error.message }
+    }
+    throw error
+  }
 }
 
 export async function changeEmployeeStatus(id: string, formData: FormData): Promise<void> {

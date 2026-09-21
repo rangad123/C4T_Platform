@@ -27,6 +27,7 @@ import { HrRevealFinancialDetails } from '@/components/hrms/HrRevealFinancialDet
 import { SalaryTab } from './SalaryTab'
 import { TaxTab } from './TaxTab'
 import { InvestmentsTab } from './InvestmentsTab'
+import { TemporaryPasswordPanel } from './TemporaryPasswordPanel'
 import { PayslipTab } from './PayslipTab'
 import { LeavesTab } from './LeavesTab'
 import { TimesheetTab } from './TimesheetTab'
@@ -167,7 +168,7 @@ export default async function HrAdminEmployeeDetailPage({
     docError?: string
   }>
 }) {
-  await requireHrRole(['ADMIN'])
+  const viewer = await requireHrRole(['ADMIN'])
   const { id } = await params
   const sp = await searchParams
   const section = resolveSection(SECTIONS, sp.section)
@@ -258,6 +259,12 @@ export default async function HrAdminEmployeeDetailPage({
               Change status
             </Button>
           </div>
+
+          {/* Only for someone who can actually sign in, and never for yourself,
+              where Change password on your profile is the right tool. */}
+          {employee.status === 'ACTIVE' && employee.id !== viewer.id ? (
+            <TemporaryPasswordPanel employeeId={employee.id} />
+          ) : null}
 
           <Panel
             title="Personal information"

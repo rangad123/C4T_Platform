@@ -8,6 +8,7 @@ import { inviteEmployee } from './hr-auth.service.js'
 import {
   listEmployeesQuery,
   createEmployeeSchema,
+  setTemporaryPasswordSchema,
   updateEmployeeSchema,
   changeEmployeeStatusSchema,
   revealFinancialDetailsSchema,
@@ -73,6 +74,32 @@ hrEmployeesRouter.post('/', validate({ body: createEmployeeSchema }), async (req
 
   res.status(201).json({ data: employee })
 })
+
+/**
+ * Sets a temporary password and returns it once. Never cached and never logged:
+ * the audit entry records that it happened, not what it was.
+ */
+hrEmployeesRouter.post(
+  '/:id/temporary-password',
+  validate({ params: employeeIdParam, body: setTemporaryPasswordSchema }),
+  async (req, res) => {
+    const id = param(req, 'id')
+    const { password } = await service.setTemporaryPassword(
+      id,
+      req.hrEmployee!.id,
+      req.body.password,
+    )
+    await recordHrAudit({
+      req,
+      action: 'hr.employee.temporary_password_set',
+      entityType: 'HrEmployee',
+      entityId: id,
+      after: { chosenByAdmin: req.body.password !== undefined },
+    })
+    res.setHeader('Cache-Control', 'no-store')
+    res.json({ data: { password } })
+  },
+)
 
 hrEmployeesRouter.patch(
   '/:id',
