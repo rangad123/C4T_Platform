@@ -3208,11 +3208,17 @@ model CrmLead {
   createdById  String      @map("created_by_id")
   createdBy    HrEmployee  @relation("CrmLeadCreator", fields: [createdById], references: [id], onDelete: Restrict)
 
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
   /// Soft delete/archive — matches Bug/Project/Organisation/BlogPost. "Delete
   /// or Archive Leads" in the spec is this one flag, not two features.
-  deletedAt DateTime? @map("deleted_at")
+  deletedAt      DateTime? @map("deleted_at")
+  /// Denormalized copy of `MAX(activity.createdAt)` for this lead, kept in
+  /// step by the service every time a `CrmLeadActivity` row is written
+  /// (including the automatic CREATED/STATUS_CHANGED/ASSIGNED entries) —
+  /// lets the "last activity" date-range filter be a plain indexed column
+  /// instead of a correlated subquery on every page of the leads list.
+  lastActivityAt DateTime? @map("last_activity_at")
 
   contacts CrmContact[]
   activity CrmLeadActivity[]
@@ -3221,6 +3227,7 @@ model CrmLead {
   @@index([assignedToId])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([lastActivityAt])
   @@map("crm_leads")
 }
 

@@ -11,13 +11,29 @@ import { z } from 'zod'
 const name = z.string().trim().min(1, 'A name is required').max(80)
 
 export const catalogKindParam = z.object({
-  kind: z.enum(['designations', 'leave-types', 'incentive-types', 'investment-sections']),
+  kind: z.enum([
+    'designations',
+    'leave-types',
+    'incentive-types',
+    'investment-sections',
+    'crm-industries',
+    'crm-lead-sources',
+  ]),
 })
 
 export const catalogIdParam = catalogKindParam.extend({ id: z.string().cuid() })
 
+/** The subset of `catalogKindParam` reachable from `/crm/catalog` — see hr-catalog.routes.ts. */
+export const crmCatalogKindParam = z.object({
+  kind: z.enum(['crm-industries', 'crm-lead-sources']),
+})
+
+export const crmCatalogIdParam = crmCatalogKindParam.extend({ id: z.string().cuid() })
+
 export const createDesignationSchema = z.object({ name })
 export const createIncentiveTypeSchema = z.object({ name })
+export const createCrmIndustrySchema = z.object({ name })
+export const createCrmLeadSourceSchema = z.object({ name })
 
 export const createLeaveTypeSchema = z.object({
   name,

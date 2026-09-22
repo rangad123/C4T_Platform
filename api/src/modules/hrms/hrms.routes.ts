@@ -16,6 +16,7 @@ import { hrTimesheetRouter } from './hr-timesheet.routes.js'
 import { hrEmployeeTimesheetRouter } from './hr-employee-timesheet.routes.js'
 import { hrSelfRouter } from './hr-self.routes.js'
 import { hrDocumentsRouter } from './hr-documents.routes.js'
+import { hrCrmLeadsRouter } from './hr-crm-leads.routes.js'
 
 /**
  * Every HRMS route lives under this one prefix, `/v1/hrms/*` — a single
@@ -52,3 +53,4 @@ hrmsRouter.use('/holidays', hrHolidaysRouter)
 hrmsRouter.use('/leaves', hrLeavesRouter)
 hrmsRouter.use('/timesheet', hrTimesheetRouter)
 hrmsRouter.use('/uploads', hrUploadsRouter)
+hrmsRouter.use('/crm/leads', hrCrmLeadsRouter)
