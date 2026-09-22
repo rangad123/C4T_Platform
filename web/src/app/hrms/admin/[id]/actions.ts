@@ -285,21 +285,6 @@ export async function decideLeaveRequest(id: string, formData: FormData): Promis
   redirect(sectionPath(id, 'leaves', financialYear))
 }
 
-// ─── Payslip ─────────────────────────────────────────────────────────────────
-
-export async function generatePayslip(id: string, formData: FormData): Promise<void> {
-  await requireHrRole(['ADMIN'])
-  const financialYear = formString(formData, 'financialYear')
-  await patchSalary(id, {
-    method: 'POST',
-    path: `hrms/employees/${id}/payslips`,
-    body: { financialYear, month: formString(formData, 'month') },
-    back: sectionPath(id, 'payslip', financialYear),
-  })
-  revalidateHrms(`${BASE}/${id}`)
-  redirect(sectionPath(id, 'payslip', financialYear))
-}
-
 // ─── Investments ─────────────────────────────────────────────────────────────
 
 export async function addInvestmentDeclaration(id: string, formData: FormData): Promise<void> {

@@ -147,6 +147,12 @@ export const updateOwnDetailsSchema = z
     gender: employeeFields.gender,
     phone: employeeFields.phone,
     address: employeeFields.address,
+    /**
+     * No password needed, unlike the bank/PAN group below: a photo is not a
+     * secret an account takeover would want, and requiring one here would
+     * just be friction on the one detail every new starter fills in first.
+     */
+    profilePictureFileId: z.string().cuid().nullable().optional(),
     panNumber: employeeFields.panNumber,
     accountNumber: employeeFields.accountNumber,
     accountName: employeeFields.accountName,

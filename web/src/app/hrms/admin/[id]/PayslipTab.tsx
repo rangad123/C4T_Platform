@@ -5,11 +5,6 @@ import { Panel } from '@/components/admin/Panel'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
 import { Button } from '@/components/ds/core/Button'
-import { Field } from '@/components/ds/forms/Field'
-import { Select } from '@/components/ds/forms/Select'
-import { TrackedForm } from '@/components/ds/forms/TrackedForm'
-import { SubmitButton } from '@/components/ds/core/SubmitButton'
-import { generatePayslip } from './actions'
 
 interface PayslipRow {
   id: string
@@ -19,6 +14,13 @@ interface PayslipRow {
   downloadUrl: string | null
 }
 
+/**
+ * Read-only. Payslips are generated in one run for every active employee, on
+ * the Payslip page under Employees — not per person here. That page's rows
+ * link back to this tab, which is where the result is downloaded from and,
+ * for someone the run could not handle (no salary breakdown, say), where the
+ * fix belongs.
+ */
 export async function PayslipTab({
   employeeId,
   detailPath,
@@ -70,33 +72,15 @@ export async function PayslipTab({
     <>
       <HrFinancialYearPicker action={detailPath} section="payslip" financialYear={financialYear} />
 
-      <Panel title="Payslips" description={`Generated payslips for ${financialYear}.`}>
-        <TrackedForm
-          action={generatePayslip.bind(null, employeeId)}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-            gap: 'var(--space-4)',
-            marginBottom: 'var(--space-6)',
-            alignItems: 'end',
-          }}
-        >
-          <input type="hidden" name="financialYear" value={financialYear} />
-          <Field label="Month" htmlFor="payslipMonth" required>
-            <Select
-              id="payslipMonth"
-              name="month"
-              required
-              options={financialYearMonths(financialYear).map((m) => ({
-                value: String(m.month),
-                label: m.label,
-              }))}
-            />
-          </Field>
-          <SubmitButton variant="primary" pendingLabel="Generating…">
-            Generate payslip
-          </SubmitButton>
-        </TrackedForm>
+      <Panel
+        title="Payslips"
+        description={`Generated payslips for ${financialYear}. Payslips are generated for everyone at once from the Payslip page under Employees.`}
+        actions={
+          <Button href="/admin/payslip" variant="secondary" size="sm" iconLeft="credit-card">
+            Go to payslip run
+          </Button>
+        }
+      >
         {forThisYear.length > 0 ? (
           <Table
             ariaLabel="Payslips"
@@ -105,7 +89,11 @@ export async function PayslipTab({
             rowKey={(row) => row.id}
           />
         ) : (
-          <EmptyState icon="credit-card" title="No payslips generated for this year" />
+          <EmptyState
+            icon="credit-card"
+            title="No payslips generated for this year"
+            description="Run the payslip generator from the Payslip page under Employees."
+          />
         )}
       </Panel>
     </>

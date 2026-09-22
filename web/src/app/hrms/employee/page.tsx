@@ -8,13 +8,18 @@ import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Modal } from '@/components/admin/Modal'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { HrAvatar } from '@/components/hrms/HrAvatar'
+import { SingleFileUpload } from '@/components/admin/SingleFileUpload'
 import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
-import { updateMyFinancialDetails, updateMyPersonalDetails } from './actions'
+import {
+  updateMyFinancialDetails,
+  updateMyPersonalDetails,
+  updateMyProfilePicture,
+} from './actions'
 
 export const metadata: Metadata = { title: 'Basic details' }
 
@@ -26,6 +31,7 @@ interface HrSelfDetail {
   firstName: string
   lastName: string
   email: string
+  profilePictureFileId: string | null
   phone: string | null
   address: string | null
   dateOfBirth: string | null
@@ -170,7 +176,22 @@ export default async function HrEmployeeBasicDetailsPage({
             marginBottom: 'var(--space-6)',
           }}
         >
-          <HrAvatar name={displayName} fileId={session.profilePictureFileId} size="lg" />
+          <HrAvatar
+            name={displayName}
+            fileId={detail?.profilePictureFileId ?? session.profilePictureFileId}
+            size="lg"
+          />
+          <SingleFileUpload
+            endpoint="/admin/upload"
+            scope="profile-picture"
+            accept="image/png,image/jpeg,image/webp"
+            label={
+              (detail?.profilePictureFileId ?? session.profilePictureFileId)
+                ? 'Replace photo'
+                : 'Upload photo'
+            }
+            onUploaded={updateMyProfilePicture}
+          />
         </div>
         <DescriptionList
           items={[

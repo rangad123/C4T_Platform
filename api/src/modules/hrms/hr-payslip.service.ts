@@ -34,9 +34,30 @@ async function assembleSnapshot(
       designation: { select: { name: true } },
       bankName: true,
       secureFinancialDetails: true,
+      joiningDate: true,
+      relievingDate: true,
     },
   })
   if (!employee) throw new NotFoundError('Employee')
+
+  /**
+   * Refuse a month the person was not on the payroll for — before they
+   * joined, or after they left.
+   *
+   * Found live: an admin generated an April payslip for someone who joined in
+   * September, and it rendered a full month's pay because nothing checked the
+   * date. The bulk payslip run already skips these months (`payslipRunState`
+   * marks them `not-employed`), but this single-employee path had no such
+   * check, so it was still reachable — from this route directly, and from
+   * whatever calls it next.
+   */
+  if (!employedMonths(financialYear, employee).includes(month)) {
+    const monthLabel =
+      financialYearMonths(financialYear).find((m) => m.month === month)?.label ?? `Month ${month}`
+    throw new BadRequestError(
+      `${employee.firstName} ${employee.lastName} was not on the payroll in ${monthLabel}.`,
+    )
+  }
 
   const [salaryStructure, incentives, professionalTax] = await Promise.all([
     prisma.hrSalaryStructure.findUnique({

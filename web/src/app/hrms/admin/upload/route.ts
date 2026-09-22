@@ -7,10 +7,19 @@ export const runtime = 'nodejs'
 
 /**
  * `/admin/upload` (visible without the `/hrms` prefix — see proxy.ts) — an HR
- * admin uploads one file. Structural copy of `app/app/admin/upload/route.ts`:
+ * employee uploads one file. Structural copy of `app/app/admin/upload/route.ts`:
  * same presign → PUT → complete dance against `lib/storage.ts`, gated by
  * `getHrEmployee()` instead of the platform's `getUser()`, targeting
  * `/v1/hrms/uploads/*` instead of `/v1/uploads/*`.
+ *
+ * Despite living under `admin/`, `profile-picture` is open to any signed-in
+ * employee — it is how someone sets their own photo from the Employee
+ * Portal, not only how HR sets one from a record. `template` and `document`
+ * stay ADMIN-only: a template is a company document, and a document upload
+ * on this route is HR attaching a file to someone else's record. Who a
+ * profile picture ends up ON is decided by the PATCH that follows this
+ * upload, not by this route — an employee's own PATCH only ever touches
+ * their own record.
  *
  * A Route Handler, not a Server Action, for the same reason as the platform
  * route: a Server Action body caps well below a useful file size, and the
@@ -58,7 +67,7 @@ const MIME_ERROR: Record<keyof typeof SCOPES, string> = {
 
 export async function POST(request: Request): Promise<Response> {
   const employee = await getHrEmployee()
-  if (employee?.role !== 'ADMIN') {
+  if (!employee) {
     return NextResponse.json({ error: 'Not permitted' }, { status: 403 })
   }
 
@@ -69,6 +78,9 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!(scopeKey in SCOPES)) {
     return NextResponse.json({ error: 'Unknown upload type.' }, { status: 400 })
+  }
+  if (scopeKey !== 'profile-picture' && employee.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'Not permitted' }, { status: 403 })
   }
   if (!(file instanceof File) || file.size === 0) {
     return NextResponse.json({ error: 'No file supplied' }, { status: 400 })

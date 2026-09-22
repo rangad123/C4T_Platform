@@ -39,6 +39,22 @@ export async function updateMyPersonalDetails(formData: FormData): Promise<void>
 }
 
 /**
+ * The employee setting their own photo. `SingleFileUpload` already stored the
+ * bytes and returned a file id — this just attaches it, no password needed
+ * (see the schema's own note on why not).
+ */
+export async function updateMyProfilePicture(formData: FormData): Promise<void> {
+  await requireHrRole([...ANY_EMPLOYEE])
+  const fileId = formData.get('fileId')
+  if (typeof fileId !== 'string' || !fileId) return
+  await hrActionFetch('hrms/me/profile', {
+    method: 'PATCH',
+    body: { profilePictureFileId: fileId },
+  })
+  revalidateHrms(BASIC_DETAILS)
+}
+
+/**
  * PAN and bank details. The employee's own password goes with them: changing
  * where pay is sent is the change a stolen session would try first, so it must
  * not be possible without knowing it. A wrong password comes back as a 401.
