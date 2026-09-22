@@ -8,6 +8,9 @@
 
 export type HrRole = 'ADMIN' | 'ACCOUNT_MANAGER' | 'EMPLOYEE'
 
+/** CRM's own tier — an independent access axis from `HrRole`. */
+export type CrmRole = 'ADMIN' | 'MANAGER' | 'EMPLOYEE'
+
 export type HrEmployeeStatus = 'ACTIVE' | 'RESIGNED' | 'TERMINATED'
 
 /** Shape returned by GET /v1/hrms/auth/me (and by the login/refresh routes). */
@@ -22,6 +25,10 @@ export interface PublicHrEmployee {
   profilePictureFileId: string | null
   /** Whether this employee is expected to fill in a timesheet at all. */
   timesheetRequired: boolean
+  /** Whether the CRM module is switched on for this employee. */
+  crmEnabled: boolean
+  /** The employee's tier within CRM, once `crmEnabled` is true. */
+  crmRole: CrmRole | null
 }
 
 /** Which portal each role lands on after sign-in. */

@@ -9,22 +9,35 @@ export const metadata: Metadata = {
 }
 
 /**
- * `timesheetRequired` decides whether Timesheet appears at all. The flag was
- * being stored and shown on the employee's record but drove nothing, so staff
- * who are not expected to fill one in were still offered the section.
+ * `timesheetRequired` and `crmEnabled` decide whether their sections appear at
+ * all. Both flags were already being stored on the employee's record; CRM
+ * follows exactly the same "module toggle → sidebar section" pattern
+ * Timesheet established, rather than a new mechanism.
+ *
+ * The CRM link leaves this portal entirely — `/crm` is its own portal shell
+ * with its own sidebar (its tier is a separate axis from `HrRole`, so it
+ * cannot just be another page under `/employee`). Hiding it here is a
+ * convenience, not the security boundary: `/crm`'s own layout re-checks
+ * access independently, and so does every CRM API route.
  */
-function sectionsFor(timesheetRequired: boolean): readonly HrSidebarSection[] {
+function sectionsFor(flags: {
+  timesheetRequired: boolean
+  crmEnabled: boolean
+}): readonly HrSidebarSection[] {
   return [
     { links: [{ href: '/employee', label: 'Basic details', icon: 'user-check' }] },
     { links: [{ href: '/employee/salary', label: 'Salary details', icon: 'banknote' }] },
     { links: [{ href: '/employee/tax', label: 'Tax calculation', icon: 'line-chart' }] },
     { links: [{ href: '/employee/investments', label: 'Investments', icon: 'landmark' }] },
     { links: [{ href: '/employee/payslip', label: 'Payslip', icon: 'credit-card' }] },
-    ...(timesheetRequired
+    ...(flags.timesheetRequired
       ? [{ links: [{ href: '/employee/timesheet', label: 'Timesheet', icon: 'clock' as const }] }]
       : []),
     { links: [{ href: '/employee/leaves', label: 'Leaves', icon: 'plane' }] },
     { links: [{ href: '/employee/holidays', label: 'Holidays list', icon: 'calendar' }] },
+    ...(flags.crmEnabled
+      ? [{ links: [{ href: '/crm', label: 'CRM', icon: 'handshake' as const }] }]
+      : []),
   ]
 }
 
@@ -46,7 +59,10 @@ export default async function HrEmployeeLayout({ children }: { children: React.R
           userName={displayName}
           avatarFileId={employee.profilePictureFileId}
           role={employee.role}
-          sections={sectionsFor(employee.timesheetRequired)}
+          sections={sectionsFor({
+            timesheetRequired: employee.timesheetRequired,
+            crmEnabled: employee.crmEnabled,
+          })}
           homeHref="/employee"
           portalLabel="Employee"
         />

@@ -63,3 +63,22 @@ export async function requireHrRole(roles: HrRole[], returnTo?: string): Promise
   }
   return employee
 }
+
+/**
+ * Gate for the CRM portal. Any signed-in employee may reach `/crm` at the
+ * `HrRole` layer — `crmEnabled` is the real gate, and it is per-employee, not
+ * per-`HrRole` (an ADMIN can have CRM off; an ordinary EMPLOYEE can have it
+ * on). Sends someone whose module is off back to their normal portal home,
+ * the same "gate then redirect" shape `requireHrRole` uses above.
+ *
+ * This is a convenience for the frontend, same as every other HRMS route
+ * guard — the real enforcement is the API's own `requireCrmAccess`
+ * middleware, which every CRM route runs independently.
+ */
+export async function requireCrmAccess(returnTo?: string): Promise<PublicHrEmployee> {
+  const employee = await requireHrEmployee(returnTo)
+  if (!employee.crmEnabled || !employee.crmRole) {
+    hrExternalRedirect(HR_ROLE_HOME[employee.role])
+  }
+  return employee
+}

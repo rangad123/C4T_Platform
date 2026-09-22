@@ -1,5 +1,5 @@
 import { HrEmployeeStatus } from '@prisma/client'
-import type { HrRole } from '@prisma/client'
+import type { HrRole, CrmRole } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { hashPassword, verifyPassword, needsRehash } from '../../lib/password.js'
 import {
@@ -58,6 +58,15 @@ export interface PublicHrEmployee {
   status: HrEmployeeStatus
   profilePictureFileId: string | null
   timesheetRequired: boolean
+  /** Whether the CRM module is switched on for this employee — drives the
+   *  "CRM" sidebar link on both portals, same idea as `timesheetRequired`. */
+  crmEnabled: boolean
+  /** The employee's tier WITHIN CRM, once `crmEnabled` is true. Safe to carry
+   *  on the session object like everything else here: this whole record is
+   *  re-read from the database on every navigation (see `readHrSession` on
+   *  the web side), never cached in the access token, so there is nothing
+   *  stale about it. */
+  crmRole: CrmRole | null
 }
 
 async function loadPublicEmployee(employeeId: string): Promise<PublicHrEmployee> {
@@ -76,6 +85,8 @@ async function loadPublicEmployee(employeeId: string): Promise<PublicHrEmployee>
       // the portals need on every render, so it rides with the session rather
       // than costing a second fetch per page.
       timesheetRequired: true,
+      crmEnabled: true,
+      crmRole: true,
     },
   })
   if (!employee) throw new NotFoundError('Employee')

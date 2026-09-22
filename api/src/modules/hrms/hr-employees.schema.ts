@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { HrRole, HrGender, HrEmployeeStatus, HrTaxRegime } from '@prisma/client'
+import { HrRole, HrGender, HrEmployeeStatus, HrTaxRegime, CrmRole } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 import { phoneField } from '../../lib/phone.js'
 
@@ -53,6 +53,15 @@ const employeeFields = {
   reportsToId: z.string().cuid().optional(),
   joiningDate: z.coerce.date(),
   timesheetRequired: z.boolean().default(true),
+  /** The module switch — same idea as `timesheetRequired`, above. */
+  crmEnabled: z.boolean().default(false),
+  /**
+   * Only meaningful while `crmEnabled` is true, but accepted independently of
+   * it: an admin may set the tier first and flip the switch a moment later,
+   * or leave it configured while briefly switching CRM off. `null` clears it
+   * (matches `relievingDate`'s own convention on this same schema).
+   */
+  crmRole: z.nativeEnum(CrmRole).nullable().optional(),
 
   taxRegime: z.nativeEnum(HrTaxRegime).default(HrTaxRegime.NEW),
   panNumber: panField.optional(),

@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-const SECTIONS: readonly HrSidebarSection[] = [
+const BASE_SECTIONS: readonly HrSidebarSection[] = [
   { links: [{ href: '/admin', label: 'Employees', icon: 'users' }] },
   { links: [{ href: '/admin/old-employees', label: 'Old employees', icon: 'user-check' }] },
   { links: [{ href: '/admin/leaves', label: 'Leaves', icon: 'plane' }] },
@@ -28,6 +28,24 @@ const SECTIONS: readonly HrSidebarSection[] = [
   { links: [{ href: '/admin/holidays', label: 'Holidays list', icon: 'calendar' }] },
   { links: [{ href: '/admin/catalogues', label: 'Catalogues', icon: 'list' }] },
 ]
+
+/**
+ * Every other admin section is open to any `ADMIN` — that role gate is
+ * already the whole layout's own `requireHrRole(['ADMIN'])`, below. CRM is
+ * the first admin-side section that ALSO depends on a per-employee flag
+ * (`crmEnabled`), because CRM tier is a second, independent access axis: an
+ * `ADMIN` can have CRM switched off entirely. Same "conditionally splice a
+ * section" pattern `HrEmployeeLayout` already uses for Timesheet, introduced
+ * here for the first time since nothing on the admin side needed it before.
+ */
+function sectionsFor(crmEnabled: boolean): readonly HrSidebarSection[] {
+  return [
+    ...BASE_SECTIONS,
+    ...(crmEnabled
+      ? [{ links: [{ href: '/crm', label: 'CRM', icon: 'handshake' as const }] }]
+      : []),
+  ]
+}
 
 /**
  * The HR Admin Portal — `/admin/*` (visible on hrms.crowd4test.com; the
@@ -45,7 +63,7 @@ export default async function HrAdminLayout({ children }: { children: React.Reac
           userName={displayName}
           avatarFileId={employee.profilePictureFileId}
           role={employee.role}
-          sections={SECTIONS}
+          sections={sectionsFor(employee.crmEnabled)}
           homeHref="/admin"
           portalLabel="Admin"
         />

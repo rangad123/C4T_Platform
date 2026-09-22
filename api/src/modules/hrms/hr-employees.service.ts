@@ -50,6 +50,8 @@ const detailSelect = {
   accountType: true,
   relievingDate: true,
   timesheetRequired: true,
+  crmEnabled: true,
+  crmRole: true,
   taxRegime: true,
   bankName: true,
   branchName: true,
@@ -321,6 +323,8 @@ export async function updateEmployee(id: string, input: UpdateEmployeeInput) {
     ...(input.timesheetRequired !== undefined
       ? { timesheetRequired: input.timesheetRequired }
       : {}),
+    ...(input.crmEnabled !== undefined ? { crmEnabled: input.crmEnabled } : {}),
+    ...(input.crmRole !== undefined ? { crmRole: input.crmRole } : {}),
     ...(input.taxRegime !== undefined ? { taxRegime: input.taxRegime } : {}),
     ...(input.bankName !== undefined ? { bankName: input.bankName } : {}),
     ...(input.branchName !== undefined ? { branchName: input.branchName } : {}),

@@ -1,4 +1,5 @@
 import type { Role, HrRole } from '@prisma/client'
+import type { CrmRole } from '../lib/hrms/hr-crm-capabilities.js'
 
 declare global {
   namespace Express {
@@ -30,6 +31,15 @@ declare global {
       hrEmployee?: AuthenticatedHrEmployee
       /** Id of the `hr_sessions` row backing this request. Set alongside `hrEmployee`. */
       hrSessionId?: string
+      /**
+       * Present only after `requireCrmAccess` has run. A separate property,
+       * not folded into `hrEmployee`, so it stays obvious which routes have
+       * actually checked CRM access — `crmEnabled`/`crmRole` are not on the
+       * JWT (unlike `role`), because they must take effect immediately on an
+       * admin's toggle rather than waiting for the access token to expire, so
+       * this is always a fresh read.
+       */
+      crmAccess?: { role: CrmRole }
       /** Correlation id, set by the requestId middleware and echoed to clients. */
       requestId: string
     }

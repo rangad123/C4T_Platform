@@ -2596,6 +2596,18 @@ model HrEmployee {
   joiningDate       DateTime         @map("joining_date") @db.Date
   relievingDate     DateTime?        @map("relieving_date") @db.Date
   timesheetRequired Boolean          @default(true) @map("timesheet_required")
+  /// The CRM module, ON/OFF — same idea as `timesheetRequired` above: an
+  /// admin-set flag that hides the whole module (nav, routes, API) rather
+  /// than a row in some generic permission-grant table, because that generic
+  /// table does not exist anywhere in HRMS. See `CrmRole` for what an
+  /// employee may DO inside CRM once this is on; the two are independent —
+  /// this can be true with `crmRole` still unset only transiently, between
+  /// turning access on and picking a tier.
+  crmEnabled        Boolean          @default(false) @map("crm_enabled")
+  /// Only meaningful while `crmEnabled` is true. Nullable rather than
+  /// defaulted to EMPLOYEE so "never configured" is visibly different from
+  /// "deliberately set to the least-privileged tier" in an audit trail.
+  crmRole           CrmRole?         @map("crm_role")
   status            HrEmployeeStatus @default(ACTIVE)
 
   /// Per-account lockout, same defense-in-depth as the platform's own User —
@@ -2642,6 +2654,10 @@ model HrEmployee {
   uploadedFiles          HrFile[]                  @relation("HrFileUploader")
   verifiedDeclarations   HrInvestmentDeclaration[] @relation("HrDeclarationVerifier")
   auditLogs              HrAuditLog[]
+
+  crmLeadsAssigned CrmLead[]         @relation("CrmLeadAssignee")
+  crmLeadsCreated  CrmLead[]         @relation("CrmLeadCreator")
+  crmActivity      CrmLeadActivity[]
 
   @@index([status])
   @@index([reportsToId])
@@ -3082,4 +3098,176 @@ model HrAuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("hr_audit_logs")
+}
+
+// ─── CRM ─────────────────────────────────────────────────────────────────
+//
+// A native HRMS module, not a separate application: it references HrEmployee
+// directly (assignment, authorship, activity) and uses the same HrAuditLog.
+// There is deliberately no CrmUser/CrmEmployee/CrmAuth here.
+//
+// `CrmRole` is a second, independent access axis from `HrRole` — an ordinary
+// HrRole.EMPLOYEE can be a CrmRole.ADMIN for the sales team, and an HrRole.ADMIN
+// can have CRM switched off entirely (`HrEmployee.crmEnabled`, above). Do not
+// conflate the two when reading this section.
+
+/// An employee's tier WITHIN CRM, once `HrEmployee.crmEnabled` is true. The
+/// capability matrix for what each tier may do lives in
+/// `api/src/lib/hrms/hr-crm-capabilities.ts` as a pure, tested function —
+/// not encoded here, so it can change without a migration.
+enum CrmRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+/// The go-forward sales-pipeline vocabulary the client specified. Not the
+/// legacy CRM's real historical values (a messier mix of an early ticket-like
+/// New/In progress/Completed/Cancelled and a later New/Hot/Warm/Cold/
+/// Prospect/Client/Lost/Unqualified/Shutdown) — that system's ~550 leads are
+/// deliberately NOT migrated by this change; this is a fresh module.
+enum CrmLeadStatus {
+  NEW
+  UNQUALIFIED
+  QUALIFIED
+  PROSPECT
+  WARM
+  HOT
+  COLD
+  CLIENT
+  LEAD_LOST
+  SHUTDOWN
+}
+
+/// What kind of thing one CrmLeadActivity row is. A single timeline table
+/// (notes and system events together, ordered by createdAt) rather than a
+/// notes table plus a separate history table — matches the legacy system's
+/// own "notes" table, which already stitched a status snapshot onto a note.
+enum CrmActivityKind {
+  NOTE
+  STATUS_CHANGED
+  ASSIGNED
+  CREATED
+}
+
+/// A sales lead's industry. Catalog data, same shape as `HrDesignation` — an
+/// admin manages it from the existing `/admin/catalogues?kind=crm-industries`
+/// page (one more `kind` on the existing generic dispatcher), not a new page.
+model CrmIndustry {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  isActive Boolean @default(true) @map("is_active")
+
+  leads CrmLead[]
+
+  @@map("crm_industries")
+}
+
+/// Where a lead came from (referral, outbound, website form, event, ...).
+/// Same catalog shape and admin page as CrmIndustry.
+model CrmLeadSource {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  isActive Boolean @default(true) @map("is_active")
+
+  leads CrmLead[]
+
+  @@map("crm_lead_sources")
+}
+
+/// A sales lead / prospective customer. `countryCode` is the platform's own
+/// ISO alpha-2 convention (`lib/geo/source.ts`, matches User.countryCode) —
+/// the legacy system's own 240-row country table is not imported.
+model CrmLead {
+  id String @id @default(cuid())
+
+  companyName String  @map("company_name")
+  companySize String? @map("company_size")
+  website     String?
+
+  industryId   String?        @map("industry_id")
+  industry     CrmIndustry?   @relation(fields: [industryId], references: [id], onDelete: SetNull)
+  leadSourceId String?        @map("lead_source_id")
+  leadSource   CrmLeadSource? @relation(fields: [leadSourceId], references: [id], onDelete: SetNull)
+  countryCode  String?        @map("country_code")
+  location     String?
+
+  status CrmLeadStatus @default(NEW)
+
+  /// India-specific fields the client's own spec names explicitly (GSTIN,
+  /// registered org name/address) — present once a lead becomes a real,
+  /// invoiceable entity, not required at creation.
+  registeredOrgName String? @map("registered_org_name")
+  registeredAddress String? @map("registered_address") @db.Text
+  gstin             String?
+
+  /// Null = unassigned — a real, filterable state ("Unassigned Leads" on the
+  /// dashboard), not the same as "assigned to nobody in particular".
+  assignedToId String?     @map("assigned_to_id")
+  assignedTo   HrEmployee? @relation("CrmLeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdById  String      @map("created_by_id")
+  createdBy    HrEmployee  @relation("CrmLeadCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  /// Soft delete/archive — matches Bug/Project/Organisation/BlogPost. "Delete
+  /// or Archive Leads" in the spec is this one flag, not two features.
+  deletedAt DateTime? @map("deleted_at")
+
+  contacts CrmContact[]
+  activity CrmLeadActivity[]
+
+  @@index([status])
+  @@index([assignedToId])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@map("crm_leads")
+}
+
+/// A person at the lead's company. Properly one-to-many, unlike the legacy
+/// system's two embedded contact-column-pairs on the lead row itself plus a
+/// third, separately-keyed `contacts` table for anyone beyond those two.
+model CrmContact {
+  id     String  @id @default(cuid())
+  leadId String  @map("lead_id")
+  lead   CrmLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  name        String
+  designation String?
+  phone       String?
+  email       String?
+  profileUrl  String? @map("profile_url")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([leadId])
+  @@map("crm_contacts")
+}
+
+/// One timeline per lead: free-text notes and system events (status changes,
+/// (re)assignment, creation) together, ordered by createdAt — the "Activity
+/// timeline" the spec asks for, as one queryable feed rather than a UNION of
+/// a notes table and a history table.
+model CrmLeadActivity {
+  id     String  @id @default(cuid())
+  leadId String  @map("lead_id")
+  lead   CrmLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  employeeId String     @map("employee_id")
+  employee   HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  kind CrmActivityKind
+  /// The note text. Null for a pure system event (STATUS_CHANGED/ASSIGNED/
+  /// CREATED), whose facts live in `meta` instead.
+  body String?         @db.Text
+  /// e.g. `{"from":"NEW","to":"HOT"}` for STATUS_CHANGED, `{"from":null,
+  /// "to":"emp_123"}` for ASSIGNED. Shaped per `kind`, not a fixed schema —
+  /// this is a timeline entry's own detail, never queried into directly.
+  meta Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([leadId, createdAt])
+  @@map("crm_lead_activity")
 }

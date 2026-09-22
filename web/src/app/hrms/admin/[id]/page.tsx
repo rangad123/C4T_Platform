@@ -81,6 +81,16 @@ const ACCOUNT_TYPES = [
   { value: 'Contract', label: 'Contract' },
   { value: 'Intern', label: 'Intern' },
 ]
+const CRM_ROLES = [
+  { value: 'EMPLOYEE', label: 'Employee' },
+  { value: 'MANAGER', label: 'Manager' },
+  { value: 'ADMIN', label: 'Administrator' },
+]
+const CRM_ROLE_LABELS: Record<string, string> = {
+  ADMIN: 'Administrator',
+  MANAGER: 'Manager',
+  EMPLOYEE: 'Employee',
+}
 const TAX_REGIMES = [
   { value: 'NEW', label: 'New regime' },
   { value: 'OLD', label: 'Old regime' },
@@ -115,6 +125,8 @@ interface EmployeeDetail {
   accountType: string | null
   relievingDate: string | null
   timesheetRequired: boolean
+  crmEnabled: boolean
+  crmRole: 'ADMIN' | 'MANAGER' | 'EMPLOYEE' | null
   taxRegime: 'NEW' | 'OLD'
   bankName: string | null
   branchName: string | null
@@ -340,6 +352,12 @@ export default async function HrAdminEmployeeDetailPage({
                     : null,
                 },
                 { label: 'Timesheet required', value: employee.timesheetRequired ? 'Yes' : 'No' },
+                {
+                  label: 'CRM access',
+                  value: employee.crmEnabled
+                    ? `Yes — ${CRM_ROLE_LABELS[employee.crmRole ?? 'EMPLOYEE']}`
+                    : 'No',
+                },
               ]}
             />
           </Panel>
@@ -550,12 +568,46 @@ export default async function HrAdminEmployeeDetailPage({
               defaultValue={toDateInputValue(employee.relievingDate)}
             />
           </Field>
-          <Checkbox
-            id="timesheetRequired"
-            name="timesheetRequired"
-            label="Timesheet required"
-            defaultChecked={employee.timesheetRequired}
-          />
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-4)',
+              padding: 'var(--space-5)',
+              background: 'var(--surface-sunken)',
+              borderRadius: 'var(--radius-card)',
+            }}
+          >
+            <span
+              style={{
+                fontSize: 'var(--type-label-size)',
+                fontWeight: 'var(--fw-medium)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              Module access
+            </span>
+            <Checkbox
+              id="timesheetRequired"
+              name="timesheetRequired"
+              label="Timesheet required"
+              defaultChecked={employee.timesheetRequired}
+            />
+            <Checkbox
+              id="crmEnabled"
+              name="crmEnabled"
+              label="CRM access"
+              defaultChecked={employee.crmEnabled}
+            />
+            <Field label="CRM role" htmlFor="crmRole" hint="Only used while CRM access is on.">
+              <Select
+                id="crmRole"
+                name="crmRole"
+                options={CRM_ROLES}
+                defaultValue={employee.crmRole ?? 'EMPLOYEE'}
+              />
+            </Field>
+          </div>
           <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">
             Save
           </SubmitButton>

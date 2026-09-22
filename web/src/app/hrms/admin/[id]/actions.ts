@@ -57,6 +57,8 @@ export async function updateEmploymentDetails(id: string, formData: FormData): P
     // `null`, not `undefined`, when blank: an empty field means "clear it".
     relievingDate: formString(formData, 'relievingDate') || null,
     timesheetRequired: formData.get('timesheetRequired') != null,
+    crmEnabled: formData.get('crmEnabled') != null,
+    crmRole: formString(formData, 'crmRole') || undefined,
   })
   revalidateHrms(`${BASE}/${id}`)
   redirect(detailPath(id))
