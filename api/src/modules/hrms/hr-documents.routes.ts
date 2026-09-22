@@ -12,11 +12,16 @@ import * as service from './hr-documents.service.js'
  * Documents held against an employee. Mounted under `/employees`, alongside
  * the other per-employee routers.
  *
- * Writes are ADMIN-only — a personnel file is HR's to curate, not the
- * employee's. Listing is open to an admin OR the employee themselves, which
- * is why that handler checks for the pairing rather than sitting behind
- * `requireHrRole`; the employee's own portal lists these through the same
- * route.
+ * Writes on THIS router are ADMIN-only — any kind, any employee. Listing is
+ * open to an admin OR the employee themselves, which is why that handler
+ * checks for the pairing rather than sitting behind `requireHrRole`.
+ *
+ * An employee's own portal does not call this router for its reads OR its one
+ * write: `hr-self.routes.ts` has its own `/me/documents` pair, `GET` mirroring
+ * `listDocuments` here and `POST` attaching a fixed low-risk kind to their own
+ * record only. Kept separate rather than relaxing this router's role gate,
+ * the same reason every other self endpoint lives on that router instead of
+ * this one — see its own file header.
  *
  * There is deliberately no download endpoint here. The bytes come from
  * `/v1/hrms/uploads/:id/download-url`, which resolves a file's scope back to

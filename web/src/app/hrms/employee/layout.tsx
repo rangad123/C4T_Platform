@@ -31,6 +31,7 @@ function sectionsFor(flags: {
     { links: [{ href: '/employee/tax', label: 'Tax calculation', icon: 'line-chart' }] },
     { links: [{ href: '/employee/investments', label: 'Investments', icon: 'landmark' }] },
     { links: [{ href: '/employee/payslip', label: 'Payslip', icon: 'credit-card' }] },
+    { links: [{ href: '/employee/documents', label: 'Documents', icon: 'file-text' }] },
     ...(flags.timesheetRequired
       ? [{ links: [{ href: '/employee/timesheet', label: 'Timesheet', icon: 'clock' as const }] }]
       : []),

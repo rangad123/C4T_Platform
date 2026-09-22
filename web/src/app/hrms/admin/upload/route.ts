@@ -12,14 +12,17 @@ export const runtime = 'nodejs'
  * `getHrEmployee()` instead of the platform's `getUser()`, targeting
  * `/v1/hrms/uploads/*` instead of `/v1/uploads/*`.
  *
- * Despite living under `admin/`, `profile-picture` is open to any signed-in
- * employee — it is how someone sets their own photo from the Employee
- * Portal, not only how HR sets one from a record. `template` and `document`
- * stay ADMIN-only: a template is a company document, and a document upload
- * on this route is HR attaching a file to someone else's record. Who a
- * profile picture ends up ON is decided by the PATCH that follows this
- * upload, not by this route — an employee's own PATCH only ever touches
- * their own record.
+ * Despite living under `admin/`, `profile-picture` and `document` are open to
+ * any signed-in employee — profile-picture is how someone sets their own
+ * photo from the Employee Portal, not only how HR sets one from a record, and
+ * document is how an employee attaches their own CV or identity proof, not
+ * only how HR attaches a file to someone else's record. `template` stays
+ * ADMIN-only: a template is a company document with no self-service side.
+ * Who a profile picture ends up ON, and which employee a document is attached
+ * to and under what label, are decided by whichever action follows this
+ * upload (a PATCH, or `hr-self.routes.ts`'s narrow `/me/documents`), not by
+ * this route — an employee's own follow-up action only ever touches their own
+ * record and a fixed, low-risk set of document kinds.
  *
  * A Route Handler, not a Server Action, for the same reason as the platform
  * route: a Server Action body caps well below a useful file size, and the
@@ -79,7 +82,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!(scopeKey in SCOPES)) {
     return NextResponse.json({ error: 'Unknown upload type.' }, { status: 400 })
   }
-  if (scopeKey !== 'profile-picture' && employee.role !== 'ADMIN') {
+  if (scopeKey === 'template' && employee.role !== 'ADMIN') {
     return NextResponse.json({ error: 'Not permitted' }, { status: 403 })
   }
   if (!(file instanceof File) || file.size === 0) {

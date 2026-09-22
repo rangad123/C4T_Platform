@@ -5,6 +5,14 @@ import { BadRequestError, NotFoundError } from '../../lib/errors.js'
 /**
  * Documents held against one employee — CV, offer letter, increment letter.
  *
+ * `attachDocument` is called from two routers: the admin one (`hr-documents
+ * .routes.ts`, any kind, any employee) and the self one (`hr-self.routes.ts`,
+ * a fixed low-risk kind, the caller's own record only) — this function has no
+ * opinion on which; the kind restriction and the "whose record" question are
+ * each router's own job. `deleteDocument` is only ever reached from the admin
+ * router — there is deliberately no self equivalent, so a document, once
+ * added, is HR's to retire, not the employee's.
+ *
  * Capped per employee rather than unlimited: the request was "up to 10 max",
  * and a cap also keeps a personnel file from quietly becoming a dumping
  * ground. The check is here rather than in the schema because it is a count of
