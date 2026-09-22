@@ -55,6 +55,11 @@ hrCrmLeadsRouter.get(
   },
 )
 
+/** Declared before `/:id` so "stats" is never parsed as a lead id. */
+hrCrmLeadsRouter.get('/stats', requireCrmCapability('view_dashboard'), async (req, res) => {
+  res.json({ data: await service.getDashboardStats(actorFrom(req)) })
+})
+
 hrCrmLeadsRouter.post(
   '/',
   requireCrmCapability('create_leads'),

@@ -77,6 +77,101 @@ export async function listAssignableEmployees() {
   })
 }
 
+/** Statuses that mean a lead is no longer being actively worked. */
+const CLOSED_STATUSES: readonly CrmLeadStatus[] = [
+  CrmLeadStatus.CLIENT,
+  CrmLeadStatus.LEAD_LOST,
+  CrmLeadStatus.SHUTDOWN,
+]
+
+const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+
+export interface CrmDashboardStats {
+  scope: 'own' | 'all'
+  own?: { total: number; new: number; hot: number; stale: number }
+  all?: {
+    total: number
+    unassigned: number
+    byStatus: { status: CrmLeadStatus; count: number }[]
+    byEmployee: { employeeId: string; name: string; count: number }[]
+    conversionRate: number
+  }
+}
+
+/**
+ * The numbers behind `/crm`'s dashboard — same idea as `listLeads`, scoped
+ * the same way (`ownershipWhere`), so an EMPLOYEE's counts are already
+ * "my leads" and never need a second, separate check. Which of `own`/`all`
+ * comes back is decided by scope alone, never by `actor.role`'s name — a
+ * MANAGER and an ADMIN share the `all` scope for `view_leads` in the
+ * capability matrix, so they get the identical numbers here; the dashboard
+ * PAGE decides which widgets to show from that one shape.
+ */
+export async function getDashboardStats(actor: CrmActor): Promise<CrmDashboardStats> {
+  const scope = crmCapabilityScope(actor.role, 'view_dashboard')
+  const base: Prisma.CrmLeadWhereInput = {
+    deletedAt: null,
+    ...ownershipWhere(actor, 'view_dashboard'),
+  }
+
+  if (scope === 'own') {
+    const [total, newCount, hot, stale] = await Promise.all([
+      prisma.crmLead.count({ where: base }),
+      prisma.crmLead.count({ where: { ...base, status: CrmLeadStatus.NEW } }),
+      prisma.crmLead.count({ where: { ...base, status: CrmLeadStatus.HOT } }),
+      prisma.crmLead.count({
+        where: {
+          ...base,
+          status: { notIn: [...CLOSED_STATUSES] },
+          OR: [
+            { lastActivityAt: null },
+            { lastActivityAt: { lt: new Date(Date.now() - STALE_AFTER_MS) } },
+          ],
+        },
+      }),
+    ])
+    return { scope: 'own', own: { total, new: newCount, hot, stale } }
+  }
+
+  const [total, unassigned, statusGroups, employeeGroups, closedClient] = await Promise.all([
+    prisma.crmLead.count({ where: base }),
+    prisma.crmLead.count({ where: { ...base, assignedToId: null } }),
+    prisma.crmLead.groupBy({ by: ['status'], where: base, _count: { _all: true } }),
+    prisma.crmLead.groupBy({
+      by: ['assignedToId'],
+      where: { ...base, assignedToId: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.crmLead.count({ where: { ...base, status: CrmLeadStatus.CLIENT } }),
+  ])
+
+  const employeeIds = employeeGroups
+    .map((g) => g.assignedToId)
+    .filter((id): id is string => id !== null)
+  const employees = await prisma.hrEmployee.findMany({
+    where: { id: { in: employeeIds } },
+    select: { id: true, firstName: true, lastName: true },
+  })
+  const nameById = new Map(employees.map((e) => [e.id, `${e.firstName} ${e.lastName}`]))
+
+  return {
+    scope: 'all',
+    all: {
+      total,
+      unassigned,
+      byStatus: statusGroups.map((g) => ({ status: g.status, count: g._count._all })),
+      byEmployee: employeeGroups
+        .map((g) => ({
+          employeeId: g.assignedToId!,
+          name: nameById.get(g.assignedToId!) ?? 'Unknown',
+          count: g._count._all,
+        }))
+        .sort((a, b) => b.count - a.count),
+      conversionRate: total > 0 ? closedClient / total : 0,
+    },
+  }
+}
+
 export async function listLeads(actor: CrmActor, query: ListLeadsQuery) {
   const where: Prisma.CrmLeadWhereInput = {
     deletedAt: null,

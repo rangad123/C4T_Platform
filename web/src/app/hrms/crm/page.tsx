@@ -1,8 +1,11 @@
 import type { Metadata } from 'next'
+import { serverFetchOrNull } from '@/lib/api/server'
 import { requireCrmAccess } from '@/lib/hrms/hr-session'
 import { hasCrmCapability, canAddEmployeeFromCrm } from '@/lib/hrms/hr-crm-capabilities'
 import { HrPageShell } from '@/components/hrms/HrPageShell'
 import { Panel } from '@/components/admin/Panel'
+import { KpiCard } from '@/components/admin/KpiCard'
+import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Button } from '@/components/ds/core/Button'
 
 export const metadata: Metadata = { title: 'Dashboard' }
@@ -13,18 +16,30 @@ const CRM_ROLE_LABEL: Record<'ADMIN' | 'MANAGER' | 'EMPLOYEE', string> = {
   EMPLOYEE: 'CRM employee',
 }
 
+interface CrmDashboardStats {
+  scope: 'own' | 'all'
+  own?: { total: number; new: number; hot: number; stale: number }
+  all?: {
+    total: number
+    unassigned: number
+    byStatus: { status: string; count: number }[]
+    byEmployee: { employeeId: string; name: string; count: number }[]
+    conversionRate: number
+  }
+}
+
 /**
- * The CRM landing page. A genuine placeholder — the role-tiered widget
- * dashboard the spec describes (My Leads / Team Leads / org-wide totals) is
- * Phase 3 — but a real one, not a stub: it already reads the signed-in
- * employee's actual `crmRole` and builds its Quick Links the same
- * capability-aware way the eventual dashboard will, so nothing here gets
- * thrown away once the widgets are built, and the nav → guard → landing
- * chain is fully clickable today.
+ * The CRM dashboard — built from `/crm/leads/stats`, which returns `own` or
+ * `all` scoped numbers based on the visitor's `view_dashboard` capability
+ * scope, never from `crmRole`'s name directly (a MANAGER and an ADMIN share
+ * the `all` scope, so they see identical data here; only the page's own
+ * widget selection below leans on role for presentation, never for access).
  */
 export default async function HrCrmDashboardPage() {
   const employee = await requireCrmAccess()
   const crmRole = employee.crmRole!
+
+  const stats = await serverFetchOrNull<CrmDashboardStats>('hrms/crm/leads/stats')
 
   return (
     <HrPageShell
@@ -52,17 +67,127 @@ export default async function HrCrmDashboardPage() {
         </div>
       </Panel>
 
-      <Panel title="Dashboard widgets" description="Coming in a later phase of this build.">
-        <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-          This page will show{' '}
-          {crmRole === 'EMPLOYEE'
-            ? 'your assigned leads, new and hot leads, and upcoming follow-ups'
-            : crmRole === 'MANAGER'
-              ? "your team's leads and workload by employee"
-              : 'organisation-wide totals, conversion, and unassigned leads'}
-          .
-        </p>
-      </Panel>
+      {stats?.scope === 'own' && stats.own ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 'var(--space-4)',
+          }}
+        >
+          <KpiCard icon="handshake" label="My leads" value={stats.own.total} href="/crm/leads" />
+          <KpiCard icon="sparkles" label="New" value={stats.own.new} href="/crm/leads?status=NEW" />
+          <KpiCard icon="zap" label="Hot" value={stats.own.hot} href="/crm/leads?status=HOT" />
+          <KpiCard icon="clock" label="Needs follow-up" value={stats.own.stale} href="/crm/leads" />
+        </div>
+      ) : stats?.scope === 'all' && stats.all ? (
+        <>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 'var(--space-4)',
+            }}
+          >
+            <KpiCard
+              icon="handshake"
+              label="Team leads"
+              value={stats.all.total}
+              href="/crm/leads"
+            />
+            <KpiCard
+              icon="user-check"
+              label="Unassigned"
+              value={stats.all.unassigned}
+              href="/crm/leads?assignedToId=unassigned"
+            />
+            <KpiCard
+              icon="badge-check"
+              label="Clients"
+              value={stats.all.byStatus.find((s) => s.status === 'CLIENT')?.count ?? 0}
+              href="/crm/leads?status=CLIENT"
+            />
+            <KpiCard
+              icon="trending-up"
+              label="Conversion"
+              value={`${(stats.all.conversionRate * 100).toFixed(1)}%`}
+              href="/crm/leads"
+            />
+          </div>
+
+          <Panel title="By status">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+              {stats.all.byStatus.map((row) => (
+                <a
+                  key={row.status}
+                  href={`/crm/leads?status=${row.status}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-2)',
+                    padding: 'var(--space-2) var(--space-3)',
+                    borderRadius: 'var(--radius-card)',
+                    border: '1px solid var(--border-default)',
+                    textDecoration: 'none',
+                  }}
+                >
+                  <StatusBadge status={row.status} />
+                  <span
+                    style={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {row.count}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </Panel>
+
+          {stats.all.byEmployee.length > 0 ? (
+            <Panel title="Workload by employee">
+              <ul
+                style={{
+                  listStyle: 'none',
+                  margin: 0,
+                  padding: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-3)',
+                }}
+              >
+                {stats.all.byEmployee.map((row) => (
+                  <li key={row.employeeId}>
+                    <a
+                      href={`/crm/leads?assignedToId=${row.employeeId}`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        color: 'var(--text-primary)',
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <span>{row.name}</span>
+                      <span
+                        style={{
+                          fontVariantNumeric: 'tabular-nums',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        {row.count}
+                      </span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          ) : null}
+        </>
+      ) : (
+        <Panel title="Dashboard">
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+            Could not load your CRM numbers.
+          </p>
+        </Panel>
+      )}
     </HrPageShell>
   )
 }

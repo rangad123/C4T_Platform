@@ -25,6 +25,7 @@ function sectionsFor(flags: {
   crmEnabled: boolean
 }): readonly HrSidebarSection[] {
   return [
+    { links: [{ href: '/employee/dashboard', label: 'Dashboard', icon: 'layout-dashboard' }] },
     { links: [{ href: '/employee', label: 'Basic details', icon: 'user-check' }] },
     { links: [{ href: '/employee/salary', label: 'Salary details', icon: 'banknote' }] },
     { links: [{ href: '/employee/tax', label: 'Tax calculation', icon: 'line-chart' }] },
