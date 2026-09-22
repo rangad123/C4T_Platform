@@ -52,6 +52,16 @@ const TONES: Record<string, Tone> = {
   SCHEDULED: 'info',
   PUBLISHED: 'success',
 
+  // CRM lead funnel — NEW and QUALIFIED already covered above.
+  UNQUALIFIED: 'neutral',
+  PROSPECT: 'accent',
+  WARM: 'warning',
+  HOT: 'brand',
+  COLD: 'neutral',
+  CLIENT: 'success',
+  LEAD_LOST: 'error',
+  SHUTDOWN: 'error',
+
   // Terminal-bad
   REJECTED: 'error',
   FAILED: 'error',

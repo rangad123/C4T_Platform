@@ -22,43 +22,54 @@ export type CrmCapability =
   | 'manage_catalog'
   | 'add_employee'
 
-const MATRIX: Record<CrmRole, ReadonlySet<CrmCapability>> = {
-  ADMIN: new Set<CrmCapability>([
-    'view_dashboard',
-    'view_leads',
-    'create_leads',
-    'edit_leads',
-    'delete_leads',
-    'assign_leads',
-    'change_status',
-    'manage_contacts',
-    'add_activity',
-    'manage_catalog',
-    'add_employee',
-  ]),
-  MANAGER: new Set<CrmCapability>([
-    'view_dashboard',
-    'view_leads',
-    'create_leads',
-    'edit_leads',
-    'assign_leads',
-    'change_status',
-    'manage_contacts',
-    'add_activity',
-  ]),
-  EMPLOYEE: new Set<CrmCapability>([
-    'view_dashboard',
-    'view_leads',
-    'create_leads',
-    'edit_leads',
-    'change_status',
-    'manage_contacts',
-    'add_activity',
-  ]),
+/** `'own'` capabilities are additionally scoped to leads the employee is assigned to. */
+export type CrmCapabilityScope = 'all' | 'own'
+
+const MATRIX: Record<CrmRole, Partial<Record<CrmCapability, CrmCapabilityScope>>> = {
+  ADMIN: {
+    view_dashboard: 'all',
+    view_leads: 'all',
+    create_leads: 'all',
+    edit_leads: 'all',
+    delete_leads: 'all',
+    assign_leads: 'all',
+    change_status: 'all',
+    manage_contacts: 'all',
+    add_activity: 'all',
+    manage_catalog: 'all',
+    add_employee: 'all',
+  },
+  MANAGER: {
+    view_dashboard: 'all',
+    view_leads: 'all',
+    create_leads: 'all',
+    edit_leads: 'all',
+    assign_leads: 'all',
+    change_status: 'all',
+    manage_contacts: 'all',
+    add_activity: 'all',
+  },
+  EMPLOYEE: {
+    view_dashboard: 'own',
+    view_leads: 'own',
+    create_leads: 'own',
+    edit_leads: 'own',
+    change_status: 'own',
+    manage_contacts: 'own',
+    add_activity: 'own',
+  },
 }
 
 export function hasCrmCapability(role: CrmRole, capability: CrmCapability): boolean {
-  return MATRIX[role].has(capability)
+  return MATRIX[role][capability] !== undefined
+}
+
+/** Same as the API's — used here only to decide what to SHOW (an assignee filter/picker), never to enforce anything. */
+export function crmCapabilityScope(
+  role: CrmRole,
+  capability: CrmCapability,
+): CrmCapabilityScope | null {
+  return MATRIX[role][capability] ?? null
 }
 
 /** See the API's identically-named function for the full reasoning. */

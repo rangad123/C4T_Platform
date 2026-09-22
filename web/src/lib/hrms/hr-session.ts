@@ -4,6 +4,7 @@ import { hrExternalRedirect } from './hr-external-redirect'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { HR_ROLE_HOME, type HrRole, type PublicHrEmployee } from './hr-types'
+import { hasCrmCapability, type CrmCapability } from './hr-crm-capabilities'
 
 /**
  * The HRMS authorization boundary — mirrors `lib/auth/session.ts` exactly,
@@ -79,6 +80,25 @@ export async function requireCrmAccess(returnTo?: string): Promise<PublicHrEmplo
   const employee = await requireHrEmployee(returnTo)
   if (!employee.crmEnabled || !employee.crmRole) {
     hrExternalRedirect(HR_ROLE_HOME[employee.role])
+  }
+  return employee
+}
+
+/**
+ * Gate for one CRM section (Catalog, Add Employee) that needs a specific
+ * capability, not just the module being on — an EMPLOYEE-tier visitor who
+ * finds the URL for `/crm/catalog` by hand is sent back to `/crm`, the same
+ * "gate then redirect" shape as every other guard here. Convenience only —
+ * the API's own `requireCrmCapability` middleware is what actually enforces
+ * this on every request.
+ */
+export async function requireCrmCapability(
+  capability: CrmCapability,
+  returnTo?: string,
+): Promise<PublicHrEmployee> {
+  const employee = await requireCrmAccess(returnTo)
+  if (!hasCrmCapability(employee.crmRole!, capability)) {
+    hrExternalRedirect('/crm')
   }
   return employee
 }

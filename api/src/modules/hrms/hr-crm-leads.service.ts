@@ -68,6 +68,15 @@ async function touchLastActivity(leadId: string, at: Date, tx: Prisma.Transactio
   await tx.crmLead.update({ where: { id: leadId }, data: { lastActivityAt: at } })
 }
 
+/** Active, CRM-enabled employees — the pool a lead can be assigned to. */
+export async function listAssignableEmployees() {
+  return prisma.hrEmployee.findMany({
+    where: { deletedAt: null, status: 'ACTIVE', crmEnabled: true },
+    select: { id: true, firstName: true, lastName: true, employeeCode: true },
+    orderBy: { firstName: 'asc' },
+  })
+}
+
 export async function listLeads(actor: CrmActor, query: ListLeadsQuery) {
   const where: Prisma.CrmLeadWhereInput = {
     deletedAt: null,

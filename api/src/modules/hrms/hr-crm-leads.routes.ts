@@ -46,6 +46,15 @@ hrCrmLeadsRouter.get(
   },
 )
 
+/** Declared before `/:id` so "assignable-employees" is never parsed as a lead id. */
+hrCrmLeadsRouter.get(
+  '/assignable-employees',
+  requireCrmCapability('assign_leads'),
+  async (_req, res) => {
+    res.json({ data: await service.listAssignableEmployees() })
+  },
+)
+
 hrCrmLeadsRouter.post(
   '/',
   requireCrmCapability('create_leads'),

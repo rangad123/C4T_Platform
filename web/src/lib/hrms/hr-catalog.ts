@@ -41,6 +41,18 @@ interface LeaveTypeRow {
   name: string
 }
 
+interface CrmCatalogRow {
+  id: string
+  name: string
+}
+
+interface AssignableEmployeeRow {
+  id: string
+  firstName: string
+  lastName: string
+  employeeCode: string
+}
+
 export async function loadDesignationOptions(): Promise<readonly HrOption[]> {
   const rows = await serverFetchOrNull<DesignationRow[]>('hrms/catalog/designations')
   return (rows ?? []).map((row) => ({ value: row.id, label: row.name }))
@@ -67,6 +79,27 @@ export async function loadInvestmentSectionOptions(): Promise<readonly HrOption[
 export async function loadLeaveTypeOptions(): Promise<readonly HrOption[]> {
   const rows = await serverFetchOrNull<LeaveTypeRow[]>('hrms/catalog/leave-types')
   return (rows ?? []).map((row) => ({ value: row.id, label: row.name }))
+}
+
+export async function loadCrmIndustryOptions(): Promise<readonly HrOption[]> {
+  const rows = await serverFetchOrNull<CrmCatalogRow[]>('hrms/catalog/crm-industries')
+  return (rows ?? []).map((row) => ({ value: row.id, label: row.name }))
+}
+
+export async function loadCrmLeadSourceOptions(): Promise<readonly HrOption[]> {
+  const rows = await serverFetchOrNull<CrmCatalogRow[]>('hrms/catalog/crm-lead-sources')
+  return (rows ?? []).map((row) => ({ value: row.id, label: row.name }))
+}
+
+/** Active, CRM-enabled employees — who a lead can be assigned to. Requires `assign_leads`. */
+export async function loadCrmAssignableEmployeeOptions(): Promise<readonly HrOption[]> {
+  const rows = await serverFetchOrNull<AssignableEmployeeRow[]>(
+    'hrms/crm/leads/assignable-employees',
+  )
+  return (rows ?? []).map((row) => ({
+    value: row.id,
+    label: `${row.firstName} ${row.lastName} (${row.employeeCode})`,
+  }))
 }
 
 /**
