@@ -1,0 +1,58 @@
+/* The sign-in page's background: the sunken surface plus the Crowd4Test
+ * wordmark repeated faintly behind the card, so the page reads as branded
+ * rather than empty. Real text, not a tiled image — it stays crisp at any
+ * resolution and reads as the actual brand name rather than an abstract
+ * mark. Same idiom as the marketing site's `.deep`/`.airy` bands in
+ * `components/sections/sections.module.css`: a decorative layer, kept out of
+ * the tab order and never touching the card's own contrast, since the card
+ * sits on its own opaque surface above it.
+ */
+.page {
+  position: relative;
+  overflow: hidden;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--surface-sunken);
+}
+
+/* Oversized and rotated so the grid's edges never show inside the viewport,
+ * however wide the window gets. `ink-300` on the `ink-100` floor is already
+ * the app's own quiet, low-contrast pairing — muted text uses the same
+ * combination — so the pattern reads as a watermark without extra opacity
+ * blending, which is what made an earlier version of this render too dark. */
+.watermark {
+  position: absolute;
+  inset: -30%;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-9) var(--space-8);
+  transform: rotate(-12deg);
+  pointer-events: none;
+}
+
+.watermarkWord {
+  font-family: var(--font-display);
+  font-weight: var(--fw-semibold);
+  font-size: var(--type-heading-md-size);
+  color: var(--ink-300);
+  white-space: nowrap;
+}
+
+.watermarkAccent {
+  color: var(--accent-faint);
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 400px;
+  padding: var(--space-8);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-md);
+}
