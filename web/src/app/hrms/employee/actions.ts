@@ -129,15 +129,22 @@ export async function saveTimesheetEntry(formData: FormData): Promise<void> {
   await requireHrRole([...ANY_EMPLOYEE])
   const financialYear = formString(formData, 'financialYear')
   const month = formString(formData, 'month')
-  await hrActionFetch('hrms/timesheet/entries', {
-    method: 'PUT',
-    body: {
-      date: formString(formData, 'date'),
-      description: formTrimmed(formData, 'description') || undefined,
-      hours: formString(formData, 'hours') || '0',
-      extraHours: formString(formData, 'extraHours') || '0',
-    },
-  })
+  try {
+    await hrActionFetch('hrms/timesheet/entries', {
+      method: 'PUT',
+      body: {
+        date: formString(formData, 'date'),
+        description: formTrimmed(formData, 'description') || undefined,
+        hours: formString(formData, 'hours') || '0',
+        extraHours: formString(formData, 'extraHours') || '0',
+      },
+    })
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 400 || error.status === 422)) {
+      redirect(`${timesheetPath(financialYear, month)}&error=${encodeURIComponent(error.message)}`)
+    }
+    throw error
+  }
   revalidateHrms('/employee/timesheet')
   redirect(timesheetPath(financialYear, month))
 }

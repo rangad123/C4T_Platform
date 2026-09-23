@@ -17,6 +17,7 @@ import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
+import { Icon } from '@/components/ds/core/Icon'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { saveTimesheetEntry, deleteTimesheetEntry } from '../actions'
 
@@ -41,7 +42,7 @@ interface Summary {
 export default async function HrEmployeeTimesheetPage({
   searchParams,
 }: {
-  searchParams: Promise<{ fy?: string; month?: string }>
+  searchParams: Promise<{ fy?: string; month?: string; error?: string }>
 }) {
   const params = await searchParams
   const financialYear =
@@ -98,6 +99,25 @@ export default async function HrEmployeeTimesheetPage({
         />
         <LiveFormStatus />
       </LiveGetForm>
+
+      {params.error ? (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 'var(--space-3)',
+            padding: 'var(--space-4) var(--space-5)',
+            background: 'var(--status-error-bg)',
+            color: 'var(--status-error-fg)',
+            borderRadius: 'var(--radius-input)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
+          <Icon name="alert-triangle" size={18} style={{ flex: 'none', marginTop: 2 }} />
+          <span>{decodeURIComponent(params.error)}</span>
+        </div>
+      ) : null}
 
       <Panel title="Summary">
         {summary ? (

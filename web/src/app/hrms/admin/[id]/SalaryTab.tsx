@@ -276,7 +276,12 @@ export async function SalaryTab({
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
         >
           <input type="hidden" name="financialYear" value={financialYear} />
-          <Field label="Basic" htmlFor="basic" required>
+          <Field
+            label="Basic (annual)"
+            hint="The figure for the whole year — the payslip divides this by 12."
+            htmlFor="basic"
+            required
+          >
             <Input
               id="basic"
               name="basic"
@@ -287,7 +292,12 @@ export async function SalaryTab({
               defaultValue={structure?.basic ?? 0}
             />
           </Field>
-          <Field label="HRA" htmlFor="hra" required>
+          <Field
+            label="HRA (annual)"
+            hint="The figure for the whole year — the payslip divides this by 12."
+            htmlFor="hra"
+            required
+          >
             <Input
               id="hra"
               name="hra"
@@ -298,7 +308,12 @@ export async function SalaryTab({
               defaultValue={structure?.hra ?? 0}
             />
           </Field>
-          <Field label="Special allowance" htmlFor="specialAllowance" required>
+          <Field
+            label="Special allowance (annual)"
+            hint="The figure for the whole year — the payslip divides this by 12."
+            htmlFor="specialAllowance"
+            required
+          >
             <Input
               id="specialAllowance"
               name="specialAllowance"
