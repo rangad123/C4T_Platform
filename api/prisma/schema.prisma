@@ -3181,6 +3181,11 @@ model CrmLeadSource {
 model CrmLead {
   id String @id @default(cuid())
 
+  /// `leads.id` from the legacy CRM MySQL database, set only by
+  /// scripts/hrms/migrate-legacy-crm.ts — lets that import be re-run without
+  /// duplicating rows, same convention as HrEmployee.legacyId.
+  legacyId String? @unique @map("legacy_id")
+
   companyName String  @map("company_name")
   companySize String? @map("company_size")
   website     String?
@@ -3239,6 +3244,12 @@ model CrmContact {
   leadId String  @map("lead_id")
   lead   CrmLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
+  /// e.g. "lead:31:1" for the first embedded contact on legacy lead 31,
+  /// "contact:4" for a row from the legacy `contacts` table — set only by
+  /// scripts/hrms/migrate-legacy-crm.ts, for the same re-run safety as
+  /// CrmLead.legacyId.
+  legacyId String? @unique @map("legacy_id")
+
   name        String
   designation String?
   phone       String?
@@ -3260,6 +3271,12 @@ model CrmLeadActivity {
   id     String  @id @default(cuid())
   leadId String  @map("lead_id")
   lead   CrmLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// e.g. "created:31" for the synthetic CREATED event on legacy lead 31,
+  /// "note:170" for a row from the legacy `notes` table — set only by
+  /// scripts/hrms/migrate-legacy-crm.ts, for the same re-run safety as
+  /// CrmLead.legacyId.
+  legacyId String? @unique @map("legacy_id")
 
   employeeId String     @map("employee_id")
   employee   HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
