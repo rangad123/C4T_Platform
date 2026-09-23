@@ -19,3 +19,5 @@ migration-report/
 # temporary-passwords.csv, which is plaintext credentials by design and is
 # meant to be distributed and then deleted — never committed.
 migration-report-hrms/
+# Same, for the CRM import — names real leads, contacts and their emails/phones.
+migration-report-crm/
