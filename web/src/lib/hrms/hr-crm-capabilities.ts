@@ -20,7 +20,6 @@ export type CrmCapability =
   | 'manage_contacts'
   | 'add_activity'
   | 'manage_catalog'
-  | 'add_employee'
 
 /** `'own'` capabilities are additionally scoped to leads the employee is assigned to. */
 export type CrmCapabilityScope = 'all' | 'own'
@@ -37,7 +36,6 @@ const MATRIX: Record<CrmRole, Partial<Record<CrmCapability, CrmCapabilityScope>>
     manage_contacts: 'all',
     add_activity: 'all',
     manage_catalog: 'all',
-    add_employee: 'all',
   },
   MANAGER: {
     view_dashboard: 'all',
@@ -70,12 +68,4 @@ export function crmCapabilityScope(
   capability: CrmCapability,
 ): CrmCapabilityScope | null {
   return MATRIX[role][capability] ?? null
-}
-
-/** See the API's identically-named function for the full reasoning. */
-export function canAddEmployeeFromCrm(
-  crmRole: CrmRole,
-  hrRole: 'ADMIN' | 'ACCOUNT_MANAGER' | 'EMPLOYEE',
-): boolean {
-  return hasCrmCapability(crmRole, 'add_employee') && hrRole === 'ADMIN'
 }

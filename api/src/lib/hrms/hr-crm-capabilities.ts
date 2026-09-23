@@ -5,7 +5,7 @@
  *
  * There is no generic permission-grant table anywhere in HRMS to extend (only
  * `HrRole`, a 3-value enum, plus a few plain booleans like
- * `timesheetRequired`). Building one just for CRM's 11 checkboxes would be
+ * `timesheetRequired`). Building one just for CRM's 10 checkboxes would be
  * its own new system, which is exactly what was asked not to build. A small
  * capability matrix keyed by `CrmRole` is the minimum real extension:
  * everything a tier can do is derived from one place, so a rule can never
@@ -29,13 +29,12 @@ export type CrmCapability =
   | 'manage_contacts'
   | 'add_activity'
   | 'manage_catalog'
-  | 'add_employee'
 
 /**
  * Whether a capability applies to every lead or only ones the employee is
  * assigned to. Absent from this map (`delete_leads`, `assign_leads`,
- * `manage_catalog`, `add_employee`) means the capability has no per-row
- * ownership concept — a tier either has it org-wide or not at all.
+ * `manage_catalog`) means the capability has no per-row ownership concept —
+ * a tier either has it org-wide or not at all.
  */
 export type CrmCapabilityScope = 'all' | 'own'
 
@@ -51,7 +50,6 @@ const MATRIX: Record<CrmRole, Partial<Record<CrmCapability, CrmCapabilityScope>>
     manage_contacts: 'all',
     add_activity: 'all',
     manage_catalog: 'all',
-    add_employee: 'all',
   },
   MANAGER: {
     view_dashboard: 'all',
@@ -90,20 +88,4 @@ export function crmCapabilityScope(
   capability: CrmCapability,
 ): CrmCapabilityScope | null {
   return MATRIX[role][capability] ?? null
-}
-
-/**
- * "Add Employee" additionally needs `HrRole.ADMIN` — it deep-links to the
- * existing HR employee-creation flow (`/admin`, gated server-side by
- * `requireHrRole(['ADMIN'])` regardless of CRM role), so showing it to a CRM
- * Administrator who is an ordinary HR employee would be a dead link. Kept as
- * its own function rather than folded into the matrix, since it is the one
- * capability that depends on the OTHER access axis (`HrRole`), not just
- * `CrmRole`.
- */
-export function canAddEmployeeFromCrm(
-  crmRole: CrmRole,
-  hrRole: 'ADMIN' | 'ACCOUNT_MANAGER' | 'EMPLOYEE',
-): boolean {
-  return hasCrmCapability(crmRole, 'add_employee') && hrRole === 'ADMIN'
 }

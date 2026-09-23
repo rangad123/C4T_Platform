@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { requireCrmAccess } from '@/lib/hrms/hr-session'
-import { hasCrmCapability, canAddEmployeeFromCrm } from '@/lib/hrms/hr-crm-capabilities'
+import { hasCrmCapability } from '@/lib/hrms/hr-crm-capabilities'
 import { HrSidebar, type HrSidebarSection } from '@/components/hrms/HrSidebar'
 import { AppShell } from '@/components/admin/AppShell'
 
@@ -10,17 +10,18 @@ export const metadata: Metadata = {
 }
 
 /**
- * CRM's own four sections, each gated by the capability that owns it —
+ * CRM's own three sections, each gated by the capability that owns it —
  * exactly the spec's "A user without the relevant permission must not see or
  * access the section." Dashboard and All Leads need nothing beyond CRM
  * access itself (every tier has `view_dashboard`/`view_leads`, just scoped
- * differently — see `hr-crm-capabilities.ts`); Catalog and Add Employee are
- * real gates.
+ * differently — see `hr-crm-capabilities.ts`); Catalog is a real gate.
+ *
+ * There is deliberately no "Add Employee" section: granting CRM access is
+ * already how someone gets into CRM at all (the Module access toggle on
+ * their employee record), so a second, CRM-side entry point into employee
+ * creation was a redundant door to the same room.
  */
-function sectionsFor(
-  crmRole: 'ADMIN' | 'MANAGER' | 'EMPLOYEE',
-  hrRole: 'ADMIN' | 'ACCOUNT_MANAGER' | 'EMPLOYEE',
-): readonly HrSidebarSection[] {
+function sectionsFor(crmRole: 'ADMIN' | 'MANAGER' | 'EMPLOYEE'): readonly HrSidebarSection[] {
   return [
     {
       links: [
@@ -28,9 +29,6 @@ function sectionsFor(
         { href: '/crm/leads', label: 'All Leads', icon: 'handshake' },
         ...(hasCrmCapability(crmRole, 'manage_catalog')
           ? [{ href: '/crm/catalog', label: 'Catalog', icon: 'list' as const }]
-          : []),
-        ...(canAddEmployeeFromCrm(crmRole, hrRole)
-          ? [{ href: '/crm/employees/new', label: 'Add Employee', icon: 'user-check' as const }]
           : []),
       ],
     },
@@ -61,7 +59,7 @@ export default async function HrCrmLayout({ children }: { children: React.ReactN
           userName={displayName}
           avatarFileId={employee.profilePictureFileId}
           role={employee.role}
-          sections={sectionsFor(crmRole, employee.role)}
+          sections={sectionsFor(crmRole)}
           homeHref="/crm"
           portalLabel="CRM"
         />

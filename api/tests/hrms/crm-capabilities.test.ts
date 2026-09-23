@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  canAddEmployeeFromCrm,
   crmCapabilityScope,
   hasCrmCapability,
   type CrmCapability,
@@ -17,7 +16,6 @@ const ALL_CAPABILITIES: readonly CrmCapability[] = [
   'manage_contacts',
   'add_activity',
   'manage_catalog',
-  'add_employee',
 ]
 
 describe('hasCrmCapability', () => {
@@ -27,8 +25,8 @@ describe('hasCrmCapability', () => {
     }
   })
 
-  it('gives the manager everything except delete, catalog and adding an employee', () => {
-    const denied: CrmCapability[] = ['delete_leads', 'manage_catalog', 'add_employee']
+  it('gives the manager everything except delete and catalog', () => {
+    const denied: CrmCapability[] = ['delete_leads', 'manage_catalog']
     for (const capability of ALL_CAPABILITIES) {
       expect(hasCrmCapability('MANAGER', capability), capability).toBe(!denied.includes(capability))
     }
@@ -51,13 +49,8 @@ describe('hasCrmCapability', () => {
     }
   })
 
-  it('never lets the employee tier delete, assign, manage the catalog or add an employee', () => {
-    for (const capability of [
-      'delete_leads',
-      'assign_leads',
-      'manage_catalog',
-      'add_employee',
-    ] as const) {
+  it('never lets the employee tier delete, assign or manage the catalog', () => {
+    for (const capability of ['delete_leads', 'assign_leads', 'manage_catalog'] as const) {
       expect(hasCrmCapability('EMPLOYEE', capability)).toBe(false)
     }
   })
@@ -80,27 +73,11 @@ describe('crmCapabilityScope', () => {
   })
 
   it('has no ownership concept for capabilities that are org-wide-or-nothing', () => {
-    // assign_leads/manage_catalog/add_employee never appear as 'own' for any tier.
+    // assign_leads/manage_catalog never appear as 'own' for any tier.
     for (const role of ['ADMIN', 'MANAGER', 'EMPLOYEE'] as const) {
-      for (const capability of ['assign_leads', 'manage_catalog', 'add_employee'] as const) {
+      for (const capability of ['assign_leads', 'manage_catalog'] as const) {
         expect(crmCapabilityScope(role, capability)).not.toBe('own')
       }
     }
-  })
-})
-
-describe('canAddEmployeeFromCrm', () => {
-  it('needs both a CRM administrator and an HR administrator', () => {
-    expect(canAddEmployeeFromCrm('ADMIN', 'ADMIN')).toBe(true)
-  })
-
-  it('refuses a CRM administrator who is not an HR administrator, to avoid a dead link', () => {
-    expect(canAddEmployeeFromCrm('ADMIN', 'EMPLOYEE')).toBe(false)
-    expect(canAddEmployeeFromCrm('ADMIN', 'ACCOUNT_MANAGER')).toBe(false)
-  })
-
-  it('refuses anyone who is not a CRM administrator, even if they are an HR administrator', () => {
-    expect(canAddEmployeeFromCrm('MANAGER', 'ADMIN')).toBe(false)
-    expect(canAddEmployeeFromCrm('EMPLOYEE', 'ADMIN')).toBe(false)
   })
 })

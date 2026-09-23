@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { serverFetchOrNull } from '@/lib/api/server'
 import { requireCrmAccess } from '@/lib/hrms/hr-session'
-import { hasCrmCapability, canAddEmployeeFromCrm } from '@/lib/hrms/hr-crm-capabilities'
+import { hasCrmCapability } from '@/lib/hrms/hr-crm-capabilities'
 import { HrPageShell } from '@/components/hrms/HrPageShell'
 import { Panel } from '@/components/admin/Panel'
 import { KpiCard } from '@/components/admin/KpiCard'
@@ -57,11 +57,6 @@ export default async function HrCrmDashboardPage() {
           {hasCrmCapability(crmRole, 'manage_catalog') ? (
             <Button href="/crm/catalog" variant="secondary" iconLeft="list">
               Catalog
-            </Button>
-          ) : null}
-          {canAddEmployeeFromCrm(crmRole, employee.role) ? (
-            <Button href="/crm/employees/new" variant="secondary" iconLeft="user-check">
-              Add employee
             </Button>
           ) : null}
         </div>
