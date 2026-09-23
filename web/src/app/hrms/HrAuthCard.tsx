@@ -1,5 +1,9 @@
 import Link from 'next/link'
 import { Icon } from '@/components/ds/core/Icon'
+import styles from './HrAuthCard.module.css'
+
+/** Enough tiles to cover any window size once the grid is rotated and overscanned. */
+const WATERMARK_TILES = 48
 
 /**
  * The centred card the unauthenticated HRMS screens sit in. Extracted when
@@ -18,27 +22,16 @@ export function HrAuthCard({
   children: React.ReactNode
 }) {
   return (
-    <div
-      style={{
-        minHeight: '100dvh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'var(--space-6)',
-        background: 'var(--surface-sunken)',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 400,
-          padding: 'var(--space-8)',
-          background: 'var(--surface-raised)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--radius-panel)',
-          boxShadow: 'var(--shadow-md)',
-        }}
-      >
+    <div className={styles.page}>
+      {/* Decorative — see the identical note on `login/page.tsx`'s watermark. */}
+      <div className={styles.watermark} aria-hidden="true">
+        {Array.from({ length: WATERMARK_TILES }, (_, i) => (
+          <span key={i} className={styles.watermarkWord}>
+            Crowd<span className={styles.watermarkAccent}>4</span>Test
+          </span>
+        ))}
+      </div>
+      <div className={styles.card}>
         <h1 className="c4t-heading-lg" style={{ marginBottom: 'var(--space-3)' }}>
           {title}
         </h1>

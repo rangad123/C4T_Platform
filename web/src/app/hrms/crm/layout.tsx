@@ -3,6 +3,7 @@ import { requireCrmAccess } from '@/lib/hrms/hr-session'
 import { hasCrmCapability } from '@/lib/hrms/hr-crm-capabilities'
 import { HrSidebar, type HrSidebarSection } from '@/components/hrms/HrSidebar'
 import { AppShell } from '@/components/admin/AppShell'
+import { HR_ROLE_HOME } from '@/lib/hrms/hr-types'
 
 /** No `title` here — see the identical note in `app/hrms/admin/layout.tsx`. */
 export const metadata: Metadata = {
@@ -20,8 +21,18 @@ export const metadata: Metadata = {
  * already how someone gets into CRM at all (the Module access toggle on
  * their employee record), so a second, CRM-side entry point into employee
  * creation was a redundant door to the same room.
+ *
+ * The trailing "Switch to HRMS" link is the way back out: CRM is its own
+ * portal shell (see the layout doc comment below), so unlike Admin/Employee
+ * — which each gained a one-line "CRM" link the moment their sidebar's
+ * `sectionsFor` grew a conditional — nothing pointed the other direction.
+ * `hrRoot` is `/admin` for an HR Administrator and `/employee` for everyone
+ * else, matching each portal's own `requireHrRole` gate.
  */
-function sectionsFor(crmRole: 'ADMIN' | 'MANAGER' | 'EMPLOYEE'): readonly HrSidebarSection[] {
+function sectionsFor(
+  crmRole: 'ADMIN' | 'MANAGER' | 'EMPLOYEE',
+  hrRoot: string,
+): readonly HrSidebarSection[] {
   return [
     {
       links: [
@@ -30,6 +41,7 @@ function sectionsFor(crmRole: 'ADMIN' | 'MANAGER' | 'EMPLOYEE'): readonly HrSide
         ...(hasCrmCapability(crmRole, 'manage_catalog')
           ? [{ href: '/crm/catalog', label: 'Catalog', icon: 'list' as const }]
           : []),
+        { href: hrRoot, label: 'Switch to HRMS', icon: 'repeat' },
       ],
     },
   ]
@@ -51,6 +63,7 @@ export default async function HrCrmLayout({ children }: { children: React.ReactN
   const displayName = `${employee.firstName} ${employee.lastName}`.trim() || employee.email
   // requireCrmAccess already refused anyone without a role, so this is safe.
   const crmRole = employee.crmRole!
+  const hrRoot = HR_ROLE_HOME[employee.role]
 
   return (
     <AppShell
@@ -59,9 +72,10 @@ export default async function HrCrmLayout({ children }: { children: React.ReactN
           userName={displayName}
           avatarFileId={employee.profilePictureFileId}
           role={employee.role}
-          sections={sectionsFor(crmRole)}
+          sections={sectionsFor(crmRole, hrRoot)}
           homeHref="/crm"
           portalLabel="CRM"
+          profileHref={`${hrRoot}/profile`}
         />
       }
     >

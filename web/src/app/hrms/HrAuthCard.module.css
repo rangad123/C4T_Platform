@@ -1,0 +1,51 @@
+/* The same branded background as the sign-in screen (see
+ * `login/login.module.css`'s longer note) — forgot-password and
+ * reset-password share this card and were missing it, reading as a bare,
+ * unbranded page next to `/login`. Mirrored rather than imported from
+ * `login.module.css` so this component (and this stylesheet) doesn't take on
+ * a dependency on the sign-in page's own file.
+ */
+.page {
+  position: relative;
+  overflow: hidden;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--surface-sunken);
+}
+
+.watermark {
+  position: absolute;
+  inset: -30%;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-9) var(--space-8);
+  transform: rotate(-12deg);
+  pointer-events: none;
+}
+
+.watermarkWord {
+  font-family: var(--font-display);
+  font-weight: var(--fw-semibold);
+  font-size: var(--type-heading-md-size);
+  color: var(--ink-300);
+  white-space: nowrap;
+}
+
+.watermarkAccent {
+  color: var(--accent-faint);
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 400px;
+  padding: var(--space-8);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-md);
+}

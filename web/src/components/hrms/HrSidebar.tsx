@@ -40,6 +40,13 @@ export interface HrSidebarProps {
   sections: readonly HrSidebarSection[]
   homeHref: string
   portalLabel: string
+  /**
+   * Where the bottom-left profile card links to. Defaults to `${homeHref}/profile`,
+   * which is right for Admin and Employee — each owns a `/profile` page — but wrong
+   * for CRM, which does not: CRM tier is a separate axis from `HrRole`, so "your
+   * profile" there means the Admin or Employee profile page, not a fourth one.
+   */
+  profileHref?: string
 }
 
 const HR_ROLE_LABEL: Record<HrRole, string> = {
@@ -113,8 +120,9 @@ export function HrSidebar({
   sections,
   homeHref,
   portalLabel,
+  profileHref,
 }: HrSidebarProps) {
-  const profileTarget = `${homeHref}/profile`
+  const profileTarget = profileHref ?? `${homeHref}/profile`
   const collapsed = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
   const pathname = hrPathname(usePathname())
   const searchParams = useSearchParams()
