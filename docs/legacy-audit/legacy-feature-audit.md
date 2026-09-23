@@ -33,7 +33,7 @@ Where a fix is described here, treat the corresponding finding further down as h
    bypass; avatars/logos stay open (they render unscoped across the admin UI, so gating them
    would break lists for no confidentiality gain); anything unattached (e.g. `TESTER_DOCUMENT`)
    falls back to uploader-only. Verified end-to-end with a real uploaded file: uploader → 200,
-   unrelated tester → 403, admin → 200. `docs/SCHEMA-RECONCILIATION.md`'s note on this gap is
+   unrelated tester → 403, admin → 200. `SCHEMA-RECONCILIATION.md`'s note on this gap is
    updated to point here.
 2. **Maximum tester limit** — `Project.maxTesters` (nullable int, additive schema change),
    enforced in `assignTesters()` (`api/src/modules/projects/projects.service.ts`): counts
@@ -449,9 +449,9 @@ Where a fix is described here, treat the corresponding finding further down as h
     `api/old sql/crowd4testDB.sql`, the actual legacy MariaDB dump, rather than only the demo
     checklist. **66 legacy tables / 600 columns** inventoried against the current 36 models /
     477 fields: **16 MAPPED, 11 PARTIAL, 39 MISSING**. Three new documents:
-    `docs/legacy-schema-inventory.md` (every table, every column, with types/nullability/
-    defaults/legacy comments), `docs/schema-parity-audit.md` (table-level verdicts), and
-    `docs/legacy-feature-schema-mapping.md` (capability-level — whether the feature those
+    `legacy-schema-inventory.md` (every table, every column, with types/nullability/
+    defaults/legacy comments), `schema-parity-audit.md` (table-level verdicts), and
+    `legacy-feature-schema-mapping.md` (capability-level — whether the feature those
     columns supported is actually usable, plus a prioritised gap list).
     **The schema proved capabilities the demo never showed.** `test_case` → `assign_testCase`
     → `test_report` (with `trep_defect_id` → `bugs_report`) → `test_review` shows a bug was

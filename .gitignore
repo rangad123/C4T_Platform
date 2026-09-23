@@ -75,17 +75,17 @@ desktop.ini
 .playwright-mcp/
 .claude/scheduled_tasks.lock
 
-Crowd4Test_Service_Agreement (1).docx
+Crowd4Test_Service_Agreement.docx
 
 .vscode/
 
-CLAUDE.md
-
-content.md
-home-viewport.png
-
-backend.md
+web/CLAUDE.md
 
 login.md
 
 checklist.md
+
+# Screen recordings dropped at the repo root during manual QA/bug reports.
+*.mp4
+*.mov
+*.webm
