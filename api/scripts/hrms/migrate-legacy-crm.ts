@@ -57,7 +57,7 @@ import mysql from 'mysql2/promise'
 import { PrismaClient, CrmLeadStatus, CrmActivityKind, type Prisma } from '@prisma/client'
 import { ISO_COUNTRY_CODES } from '../../src/lib/iso-countries.js'
 import { Reporter } from '../migration/report/reporter.js'
-import { text, url, email as emailOf } from '../migration/transform/values.js'
+import { text, url, email as emailOf, timestamp } from '../migration/transform/values.js'
 
 // ── Source connection ────────────────────────────────────────────────────────
 
@@ -516,6 +516,9 @@ async function importLeads(
       // falling to the system owner the way createdById does below.
       assignedToId,
       createdById: assignedToId ?? systemOwnerId,
+      // The real historical date, not the migration's own clock — leads.date
+      // is nullable in the legacy schema, hence the fallback.
+      createdAt: timestamp(row.date) ?? new Date(),
       legacyId,
     }
 
@@ -739,7 +742,11 @@ async function importNotes(
       kind: CrmActivityKind.NOTE,
       body,
       meta: Object.keys(meta).length > 0 ? (meta as Prisma.InputJsonValue) : undefined,
-      createdAt: new Date(String(row.AddedON)),
+      // AddedON is nullable in the legacy schema; a raw `new Date(String(...))`
+      // on a null row produces an Invalid Date, which Prisma rejects with an
+      // error naming neither the row nor the column — caught by a dry run
+      // before this ever wrote anything.
+      createdAt: timestamp(row.AddedON) ?? new Date(),
       legacyId: activityLegacyId,
     })
     counter.inserted += 1
