@@ -20,6 +20,7 @@ export const metadata: Metadata = { title: 'Catalog' }
 const KINDS = [
   { value: 'crm-industries', label: 'Industries' },
   { value: 'crm-lead-sources', label: 'Lead sources' },
+  { value: 'crm-communication-statuses', label: 'Communication statuses' },
 ] as const
 
 type Kind = (typeof KINDS)[number]['value']
@@ -99,7 +100,7 @@ export default async function HrCrmCataloguePage({
       root={{ label: 'CRM', href: '/crm' }}
       eyebrow="CRM"
       title="Catalog"
-      subtitle="The industries and lead sources every lead form picks from."
+      subtitle="The industries, lead sources and communication statuses every lead form picks from."
     >
       <LiveGetForm
         action="/crm/catalog"

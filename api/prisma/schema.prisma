@@ -3175,6 +3175,19 @@ model CrmLeadSource {
   @@map("crm_lead_sources")
 }
 
+/// How a communication attempt on a lead went (DNP1, DNP2, DNP3, ... — did
+/// not pick, by attempt number — or whatever an admin defines). Tags a
+/// CrmLeadActivity note rather than gating anything, so it lives in that
+/// row's `meta`, not as its own FK column. Same catalog shape and admin page
+/// (the CRM one, not the platform one) as CrmIndustry/CrmLeadSource.
+model CrmCommunicationStatus {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  isActive Boolean @default(true) @map("is_active")
+
+  @@map("crm_communication_statuses")
+}
+
 /// A sales lead / prospective customer. `countryCode` is the platform's own
 /// ISO alpha-2 convention (`lib/geo/source.ts`, matches User.countryCode) —
 /// the legacy system's own 240-row country table is not imported.

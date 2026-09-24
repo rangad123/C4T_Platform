@@ -157,7 +157,12 @@ hrCrmLeadsRouter.post(
   validate({ params: leadIdParam, body: addLeadActivitySchema }),
   async (req, res) => {
     const id = param(req, 'id')
-    const activity = await service.addLeadNote(actorFrom(req), id, req.body.body)
+    const activity = await service.addLeadNote(
+      actorFrom(req),
+      id,
+      req.body.body,
+      req.body.communicationStatusId,
+    )
     await recordHrAudit({
       req,
       action: 'hr.crm_activity.added',

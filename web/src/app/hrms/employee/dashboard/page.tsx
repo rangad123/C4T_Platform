@@ -26,42 +26,82 @@ export default async function HrEmployeeDashboardPage() {
       title="Dashboard"
       subtitle="Your modules, at a glance."
     >
-      <Panel title="Your modules">
-        {!employee.timesheetRequired && !employee.crmEnabled ? (
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-            Nothing extra is switched on for your account yet — your basic details, leaves and
-            payslip are in the sidebar.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      {/*
+        The spec asked for a centred image here. No approved image asset
+        exists anywhere in HRMS today (every existing "image" in this portal
+        is a CSS watermark, not a real picture) — per this repo's own rule
+        against inventing content, this is left as a gap rather than a stock
+        photo. Give us a real image (a remote URL, or a file to host) and its
+        alt text, and this slot is a one-line addition.
+      */}
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 2fr) minmax(220px, 1fr)',
+          gap: 'var(--space-5)',
+          alignItems: 'start',
+        }}
+      >
+        <Panel title="Your modules">
+          {!employee.timesheetRequired && !employee.crmEnabled ? (
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              Nothing extra is switched on for your account yet — your basic details, leaves and
+              payslip are in the sidebar.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              {employee.timesheetRequired ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                    You&rsquo;re expected to fill in a timesheet.
+                  </p>
+                  <Button
+                    href="/employee/timesheet"
+                    variant="secondary"
+                    iconLeft="clock"
+                    style={{ alignSelf: 'flex-start' }}
+                  >
+                    Open timesheet
+                  </Button>
+                </div>
+              ) : null}
+              {employee.crmEnabled ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                    CRM is on for your account. Open it to see your leads.
+                  </p>
+                  <Button href="/crm" iconLeft="handshake" style={{ alignSelf: 'flex-start' }}>
+                    Open CRM
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Quick links" description="Jump straight to what you use most.">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <Button href="/employee/payslip" variant="secondary" iconLeft="credit-card" fullWidth>
+              Payslip
+            </Button>
+            <Button href="/employee/leaves" variant="secondary" iconLeft="plane" fullWidth>
+              Leaves
+            </Button>
             {employee.timesheetRequired ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-                  You&rsquo;re expected to fill in a timesheet.
-                </p>
-                <Button
-                  href="/employee/timesheet"
-                  variant="secondary"
-                  iconLeft="clock"
-                  style={{ alignSelf: 'flex-start' }}
-                >
-                  Open timesheet
-                </Button>
-              </div>
+              <Button href="/employee/timesheet" variant="secondary" iconLeft="clock" fullWidth>
+                Timesheet
+              </Button>
             ) : null}
-            {employee.crmEnabled ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-                  CRM is on for your account. Open it to see your leads.
-                </p>
-                <Button href="/crm" iconLeft="handshake" style={{ alignSelf: 'flex-start' }}>
-                  Open CRM
-                </Button>
-              </div>
-            ) : null}
+            <Button href="/employee/documents" variant="secondary" iconLeft="file-text" fullWidth>
+              Documents
+            </Button>
+            <Button href="/employee/tax" variant="secondary" iconLeft="line-chart" fullWidth>
+              Tax calculation
+            </Button>
           </div>
-        )}
-      </Panel>
+        </Panel>
+      </div>
     </HrPageShell>
   )
 }

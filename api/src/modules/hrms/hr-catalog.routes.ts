@@ -19,6 +19,7 @@ import {
   createInvestmentSectionSchema,
   createCrmIndustrySchema,
   createCrmLeadSourceSchema,
+  createCrmCommunicationStatusSchema,
   updateCatalogEntrySchema,
   type CatalogKind,
   type UpdateCatalogEntryInput,
@@ -93,6 +94,15 @@ hrCatalogRouter.get('/crm-lead-sources', async (_req, res) => {
   res.json({ data: rows })
 })
 
+hrCatalogRouter.get('/crm-communication-statuses', async (_req, res) => {
+  const rows = await prisma.crmCommunicationStatus.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true },
+    orderBy: { name: 'asc' },
+  })
+  res.json({ data: rows })
+})
+
 // ── Admin management ─────────────────────────────────────────────────────────
 //
 // The reads above stay exactly as they were: active rows only, for the
@@ -131,6 +141,8 @@ function delegateFor(kind: CatalogKind): CatalogDelegate {
       return prisma.crmIndustry
     case 'crm-lead-sources':
       return prisma.crmLeadSource
+    case 'crm-communication-statuses':
+      return prisma.crmCommunicationStatus
   }
 }
 
@@ -141,6 +153,7 @@ const CREATE_SCHEMAS: Record<CatalogKind, ZodTypeAny> = {
   'investment-sections': createInvestmentSectionSchema,
   'crm-industries': createCrmIndustrySchema,
   'crm-lead-sources': createCrmLeadSourceSchema,
+  'crm-communication-statuses': createCrmCommunicationStatusSchema,
 }
 
 /**

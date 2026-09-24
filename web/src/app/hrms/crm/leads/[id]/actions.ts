@@ -102,7 +102,13 @@ export async function addLeadNote(id: string, formData: FormData): Promise<void>
   await requireCrmAccess()
   await leadAction(
     `hrms/crm/leads/${id}/activity`,
-    { method: 'POST', body: { body: formTrimmed(formData, 'body') } },
+    {
+      method: 'POST',
+      body: {
+        body: formTrimmed(formData, 'body'),
+        communicationStatusId: formString(formData, 'communicationStatusId') || undefined,
+      },
+    },
     id,
     'activity',
   )

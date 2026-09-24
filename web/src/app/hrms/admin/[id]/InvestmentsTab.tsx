@@ -1,6 +1,6 @@
 import { serverFetchOrNull } from '@/lib/api/server'
 import { loadInvestmentSectionOptions } from '@/lib/hrms/hr-catalog'
-import { financialYearMonths } from '@/lib/hrms/financial-year'
+import { financialYearMonths, currentMonthInFinancialYear } from '@/lib/hrms/financial-year'
 import { HrFinancialYearPicker } from '@/components/hrms/HrFinancialYearPicker'
 import { Panel } from '@/components/admin/Panel'
 import { Modal } from '@/components/admin/Modal'
@@ -35,23 +35,6 @@ interface DeductionRow {
   id: string
   month: number
   amount: number
-}
-
-/**
- * The month the Calculate control opens on: this month while the year is in
- * progress, otherwise the year's last month (a finished year) or first (one
- * that has not started). Someone running it mid-year almost always means
- * "up to now", and defaulting to March would project a whole year's TDS.
- */
-function defaultCalculateMonth(financialYear: string): string {
-  const months = financialYearMonths(financialYear)
-  const now = new Date()
-  const current = months.find(
-    (m) => m.calendarYear === now.getFullYear() && m.month === now.getMonth() + 1,
-  )
-  if (current) return String(current.month)
-  const first = months[0]
-  return String(first && new Date(first.calendarYear, first.month - 1, 1) > now ? first.month : 3)
 }
 
 function money(value: number): string {
@@ -220,7 +203,7 @@ export async function InvestmentsTab({
               id="calculateMonth"
               name="month"
               required
-              defaultValue={defaultCalculateMonth(financialYear)}
+              defaultValue={String(currentMonthInFinancialYear(financialYear))}
               options={financialYearMonths(financialYear).map((m) => ({
                 value: String(m.month),
                 label: m.label,

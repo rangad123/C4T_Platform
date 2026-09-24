@@ -18,6 +18,7 @@ export const catalogKindParam = z.object({
     'investment-sections',
     'crm-industries',
     'crm-lead-sources',
+    'crm-communication-statuses',
   ]),
 })
 
@@ -25,7 +26,7 @@ export const catalogIdParam = catalogKindParam.extend({ id: z.string().cuid() })
 
 /** The subset of `catalogKindParam` reachable from `/crm/catalog` — see hr-catalog.routes.ts. */
 export const crmCatalogKindParam = z.object({
-  kind: z.enum(['crm-industries', 'crm-lead-sources']),
+  kind: z.enum(['crm-industries', 'crm-lead-sources', 'crm-communication-statuses']),
 })
 
 export const crmCatalogIdParam = crmCatalogKindParam.extend({ id: z.string().cuid() })
@@ -34,6 +35,7 @@ export const createDesignationSchema = z.object({ name })
 export const createIncentiveTypeSchema = z.object({ name })
 export const createCrmIndustrySchema = z.object({ name })
 export const createCrmLeadSourceSchema = z.object({ name })
+export const createCrmCommunicationStatusSchema = z.object({ name })
 
 export const createLeaveTypeSchema = z.object({
   name,

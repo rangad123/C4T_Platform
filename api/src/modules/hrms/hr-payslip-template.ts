@@ -19,6 +19,7 @@ export interface PayslipSnapshot {
     lastName: string
     designation: string | null
     email: string
+    joiningDate: string
     panMasked: string | null
     bankName: string | null
     accountNumberMasked: string | null
@@ -54,6 +55,14 @@ function escapeHtml(value: string): string {
 
 function money(value: number): string {
   return `Rs. ${Math.round(value).toLocaleString('en-IN')}`
+}
+
+function formatDate(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
 function row(label: string, value: string): string {
@@ -101,6 +110,7 @@ export function renderPayslipHtml(snapshot: PayslipSnapshot): string {
       ${row('Employee name', `${employee.firstName} ${employee.lastName}`)}
       ${row('Employee code', employee.employeeCode)}
       ${row('Designation', employee.designation ?? '—')}
+      ${row('Date of joining', formatDate(employee.joiningDate))}
       ${row('Financial year', snapshot.financialYear)}
       ${employee.panMasked ? row('PAN', employee.panMasked) : ''}
       ${employee.bankName ? row('Bank', `${employee.bankName}${employee.accountNumberMasked ? ` (${employee.accountNumberMasked})` : ''}`) : ''}

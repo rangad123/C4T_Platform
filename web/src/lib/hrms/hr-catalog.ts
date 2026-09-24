@@ -91,6 +91,11 @@ export async function loadCrmLeadSourceOptions(): Promise<readonly HrOption[]> {
   return (rows ?? []).map((row) => ({ value: row.id, label: row.name }))
 }
 
+export async function loadCrmCommunicationStatusOptions(): Promise<readonly HrOption[]> {
+  const rows = await serverFetchOrNull<CrmCatalogRow[]>('hrms/catalog/crm-communication-statuses')
+  return (rows ?? []).map((row) => ({ value: row.id, label: row.name }))
+}
+
 /** Active, CRM-enabled employees — who a lead can be assigned to. Requires `assign_leads`. */
 export async function loadCrmAssignableEmployeeOptions(): Promise<readonly HrOption[]> {
   const rows = await serverFetchOrNull<AssignableEmployeeRow[]>(

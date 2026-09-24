@@ -4,6 +4,7 @@ import {
   currentFinancialYear,
   isValidFinancialYear,
   financialYearMonths,
+  currentMonthInFinancialYear,
   recentFinancialYears,
 } from '@/lib/hrms/financial-year'
 import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
@@ -50,7 +51,7 @@ export default async function HrEmployeeTimesheetPage({
   const months = financialYearMonths(financialYear)
   const month = months.some((m) => String(m.month) === params.month)
     ? Number(params.month)
-    : months[0]!.month
+    : currentMonthInFinancialYear(financialYear)
 
   const [entries, summary] = await Promise.all([
     serverFetchOrNull<EntryRow[]>('hrms/timesheet/entries', { query: { financialYear, month } }),

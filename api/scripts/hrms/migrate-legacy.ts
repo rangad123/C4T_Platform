@@ -1413,6 +1413,7 @@ async function importPayslips(
       firstName: true,
       lastName: true,
       email: true,
+      joiningDate: true,
       designation: { select: { name: true } },
     },
   })
@@ -1458,6 +1459,7 @@ async function importPayslips(
         lastName: employee.lastName,
         designation: employee.designation?.name ?? null,
         email: employee.email,
+        joiningDate: employee.joiningDate.toISOString(),
         panMasked: maskPanValue(text(row.pan_no)),
         bankName: text(row.bank_name),
         accountNumberMasked: maskAccountValue(text(row.account_no)),

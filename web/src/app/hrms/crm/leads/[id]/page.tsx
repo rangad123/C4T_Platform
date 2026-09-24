@@ -8,6 +8,7 @@ import {
   loadCrmIndustryOptions,
   loadCrmLeadSourceOptions,
   loadCrmAssignableEmployeeOptions,
+  loadCrmCommunicationStatusOptions,
 } from '@/lib/hrms/hr-catalog'
 import { titleCase, formatDate, formatDateTime } from '@/lib/admin/format'
 import { HrPageShell } from '@/components/hrms/HrPageShell'
@@ -17,6 +18,7 @@ import { Panel } from '@/components/admin/Panel'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Badge } from '@/components/ds/core/Badge'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Icon } from '@/components/ds/core/Icon'
 import { Button } from '@/components/ds/core/Button'
@@ -85,7 +87,12 @@ interface Activity {
   id: string
   kind: 'NOTE' | 'STATUS_CHANGED' | 'ASSIGNED' | 'CREATED'
   body: string | null
-  meta: { from?: string | null; to?: string | null } | null
+  meta: {
+    from?: string | null
+    to?: string | null
+    communicationStatusId?: string
+    communicationStatusName?: string
+  } | null
   createdAt: string
   employee: EmployeeSummary
 }
@@ -175,11 +182,13 @@ export default async function HrCrmLeadDetailPage({
   const canAddActivity = hasCrmCapability(crmRole, 'add_activity')
   const canSeeAllLeads = crmCapabilityScope(crmRole, 'view_leads') === 'all'
 
-  const [industryOptions, leadSourceOptions, assignableEmployees] = await Promise.all([
-    canEdit ? loadCrmIndustryOptions() : Promise.resolve([]),
-    canEdit ? loadCrmLeadSourceOptions() : Promise.resolve([]),
-    canAssign ? loadCrmAssignableEmployeeOptions() : Promise.resolve([]),
-  ])
+  const [industryOptions, leadSourceOptions, assignableEmployees, communicationStatusOptions] =
+    await Promise.all([
+      canEdit ? loadCrmIndustryOptions() : Promise.resolve([]),
+      canEdit ? loadCrmLeadSourceOptions() : Promise.resolve([]),
+      canAssign ? loadCrmAssignableEmployeeOptions() : Promise.resolve([]),
+      canAddActivity ? loadCrmCommunicationStatusOptions() : Promise.resolve([]),
+    ])
 
   const detailPath = `${BASE}/${id}`
   const sectionQuery = section === SECTIONS[0].value ? '' : `?section=${section}`
@@ -635,6 +644,14 @@ export default async function HrCrmLeadDetailPage({
               <Field label="Add a note" htmlFor="noteBody">
                 <Textarea id="noteBody" name="body" rows={3} maxLength={4000} required />
               </Field>
+              <Field label="Communication status" htmlFor="communicationStatusId">
+                <Select
+                  id="communicationStatusId"
+                  name="communicationStatusId"
+                  placeholder="No status"
+                  options={communicationStatusOptions}
+                />
+              </Field>
               <SubmitButton
                 variant="primary"
                 iconLeft="plus"
@@ -687,6 +704,11 @@ export default async function HrCrmLeadDetailPage({
                     <span style={{ fontSize: 'var(--type-body-sm-size)' }}>
                       {activityDescription(activity)}
                     </span>
+                    {activity.meta?.communicationStatusName ? (
+                      <Badge tone="neutral" uppercase={false} style={{ alignSelf: 'flex-start' }}>
+                        {activity.meta.communicationStatusName}
+                      </Badge>
+                    ) : null}
                     {activity.body ? <p style={{ margin: 0 }}>{activity.body}</p> : null}
                     <span
                       style={{ fontSize: 'var(--type-caption-size)', color: 'var(--text-muted)' }}

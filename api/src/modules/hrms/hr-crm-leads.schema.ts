@@ -53,6 +53,8 @@ export const assignLeadSchema = z.object({ assignedToId: z.string().cuid().nulla
 
 export const addLeadActivitySchema = z.object({
   body: z.string().trim().min(1, 'Write a note before saving').max(4000),
+  /** Tags this note with how the communication attempt went (DNP1, DNP2, ...) — optional. */
+  communicationStatusId: z.string().cuid().optional(),
 })
 
 export const leadIdParam = z.object({ id: z.string().cuid() })

@@ -61,3 +61,21 @@ export function financialYearMonths(financialYear: string): FinancialYearMonth[]
     return { month, calendarYear, label: `${label} ${calendarYear}` }
   })
 }
+
+/**
+ * Which month of `financialYear` today falls in — the FY's first month if
+ * today is before it starts (a future year not yet begun), its last month if
+ * today is after it ends (a finished year), never a hardcoded April. A page
+ * defaulting its month picker to "now" means this, not `financialYearMonths`'s
+ * own first entry — that's always April regardless of what day it is.
+ */
+export function currentMonthInFinancialYear(financialYear: string): number {
+  const months = financialYearMonths(financialYear)
+  const now = new Date()
+  const current = months.find(
+    (m) => m.calendarYear === now.getFullYear() && m.month === now.getMonth() + 1,
+  )
+  if (current) return current.month
+  const first = months[0]
+  return first && new Date(first.calendarYear, first.month - 1, 1) > now ? first.month : 3
+}

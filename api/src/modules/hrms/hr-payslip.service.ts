@@ -150,6 +150,7 @@ async function assembleSnapshot(
       lastName: employee.lastName,
       designation: employee.designation?.name ?? null,
       email: employee.email,
+      joiningDate: employee.joiningDate.toISOString(),
       panMasked: maskPan(plain.panNumber),
       bankName: employee.bankName,
       accountNumberMasked: maskAccountNumber(plain.accountNumber),

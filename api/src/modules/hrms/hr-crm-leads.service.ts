@@ -366,17 +366,42 @@ export async function archiveLead(id: string) {
   await prisma.crmLead.update({ where: { id }, data: { deletedAt: new Date() } })
 }
 
-export async function addLeadNote(actor: CrmActor, id: string, body: string) {
+export async function addLeadNote(
+  actor: CrmActor,
+  id: string,
+  body: string,
+  communicationStatusId?: string,
+) {
   const existing = await prisma.crmLead.findFirst({
     where: { id, deletedAt: null, ...ownershipWhere(actor, 'add_activity') },
     select: { id: true },
   })
   if (!existing) throw new NotFoundError('Lead')
 
+  // Carried in `meta` rather than a column on the note itself — this tags a
+  // NOTE, it does not become a new kind of timeline event (see the model's
+  // own doc comment on `meta` being shaped per `kind`).
+  let meta: { communicationStatusId: string; communicationStatusName: string } | undefined
+  if (communicationStatusId) {
+    const status = await prisma.crmCommunicationStatus.findUnique({
+      where: { id: communicationStatusId },
+      select: { name: true },
+    })
+    if (!status) throw new NotFoundError('Communication status')
+    meta = { communicationStatusId, communicationStatusName: status.name }
+  }
+
   const now = new Date()
   return prisma.$transaction(async (tx) => {
     const activity = await tx.crmLeadActivity.create({
-      data: { leadId: id, employeeId: actor.id, kind: CrmActivityKind.NOTE, body, createdAt: now },
+      data: {
+        leadId: id,
+        employeeId: actor.id,
+        kind: CrmActivityKind.NOTE,
+        body,
+        meta,
+        createdAt: now,
+      },
       include: { employee: employeeSummary },
     })
     await touchLastActivity(id, now, tx)
