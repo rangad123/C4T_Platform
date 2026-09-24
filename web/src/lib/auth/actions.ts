@@ -286,3 +286,50 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
 
   authRedirect('/login?notice=password_reset')
 }
+
+/**
+ * Server Action: confirm the emailed "verify my email" link.
+ *
+ * Deliberately NOT run automatically on the page's GET load: corporate mail
+ * scanners and Outlook Safe Links fetch a message's links before a person
+ * ever opens them, and this token is single-use — an automatic verify on
+ * page load would let a scanner burn it, leaving the real reader stuck on
+ * "invalid or already used" for a link they never clicked. The page shows a
+ * button; this action only runs on that explicit POST. Same shape as
+ * `resetPasswordAction` above.
+ */
+export async function verifyEmailAction(formData: FormData): Promise<void> {
+  const token = formTrimmed(formData, 'token')
+
+  if (!token) {
+    authRedirect('/verify-email?error=missing')
+  }
+
+  let response: Response
+  try {
+    response = await fetch(new URL('/v1/auth/verify-email', env.API_ORIGIN), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await currentAuthHeaders()) },
+      body: JSON.stringify({ token }),
+      cache: 'no-store',
+    })
+  } catch {
+    authRedirect(`/verify-email?token=${encodeURIComponent(token)}&error=network`)
+  }
+
+  if (!response.ok) {
+    // The API returns a stable code for an invalid/expired/already-used
+    // token (see verifyEmailSchema / verifyEmail in the API's auth module).
+    let code = 'failed'
+    try {
+      const body = (await response.json()) as { error?: { code?: string } }
+      const apiCode = body?.error?.code?.toLowerCase()
+      if (apiCode === 'bad_request') code = 'expired'
+    } catch {
+      // Body wasn't JSON — keep the generic code.
+    }
+    authRedirect(`/verify-email?token=${encodeURIComponent(token)}&error=${code}`)
+  }
+
+  authRedirect('/login?notice=email_verified')
+}

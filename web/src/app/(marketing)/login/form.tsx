@@ -77,7 +77,7 @@ export default async function LoginForm({
         Sign in
       </h1>
 
-      {params.notice === 'password_reset' ? (
+      {params.notice === 'password_reset' || params.notice === 'email_verified' ? (
         <div
           role="status"
           style={{
@@ -94,7 +94,11 @@ export default async function LoginForm({
           }}
         >
           <Icon name="check-circle-2" size={18} style={{ flex: 'none', marginTop: 2 }} />
-          <span>Your password has been updated. Sign in with your new password.</span>
+          <span>
+            {params.notice === 'email_verified'
+              ? 'Your email is verified. Sign in to continue.'
+              : 'Your password has been updated. Sign in with your new password.'}
+          </span>
         </div>
       ) : null}
 
