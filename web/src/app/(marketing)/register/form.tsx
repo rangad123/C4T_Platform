@@ -526,6 +526,14 @@ function SignUpForm({
           aria-label="I accept the Terms of Use and Privacy Policy"
         />
 
+        {/* Bot trap — same pattern as the marketing contact form. Hidden from
+            sight AND from assistive technology, and excluded from tab order,
+            so a real person can neither see nor reach it. */}
+        <div aria-hidden="true" className="c4t-visually-hidden">
+          <label htmlFor="hp">Leave this field empty</label>
+          <input id="hp" name="honeypot" type="text" tabIndex={-1} autoComplete="off" />
+        </div>
+
         <SubmitButton
           variant="primary"
           size="lg"

@@ -50,6 +50,15 @@ export async function registerAction(formData: FormData): Promise<void> {
   const organisationName = formTrimmed(formData, 'organisationName')
   const acceptedTerms = formString(formData, 'acceptedTerms') === 'on'
   const next = formTrimmed(formData, 'next')
+  const honeypot = formTrimmed(formData, 'honeypot')
+
+  // A hidden field no human fills in — see its input in form.tsx. Bots that
+  // complete every field trip it, and get the same redirect a real sign-up
+  // would, without ever reaching the API or creating anything: telling them
+  // apart from a genuine failure would only teach the bot to leave it blank.
+  if (honeypot) {
+    redirect(safeNext(next) ?? '/', RedirectType.replace)
+  }
 
   // Re-echoed on every failure path so a rejected form comes back filled in —
   // `next` included, so someone signing up from an invitation link who typos
