@@ -8,6 +8,7 @@ import {
 } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { verifyTesterOnEmailConfirmed } from '../testers/testers.service.js'
+import { verifyOrganisationOnEmailConfirmed } from '../organisations/organisations.service.js'
 import { hashPassword, verifyPassword, needsRehash } from '../../lib/password.js'
 import { isLegacyAlgo, verifyLegacyPassword } from '../../lib/legacy-password.js'
 import type { GoogleIdentity } from '../../lib/oauth/google.js'
@@ -591,10 +592,11 @@ export async function verifyEmail(rawToken: string): Promise<PublicUser> {
     }),
   ])
 
-  // A no-op for anyone who isn't a tester, or whose profile is already past
-  // APPLIED — see that function's own doc comment for why this is separate
-  // from the transaction above rather than folded into it.
+  // No-ops for anyone the respective function does not apply to — see each
+  // one's own doc comment for why they are separate from the transaction
+  // above rather than folded into it.
   await verifyTesterOnEmailConfirmed(stored.userId)
+  await verifyOrganisationOnEmailConfirmed(stored.userId)
 
   return loadPublicUser(stored.userId)
 }

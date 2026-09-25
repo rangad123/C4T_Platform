@@ -6,6 +6,7 @@ import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import { isAdminSide } from '../../middleware/authorize.js'
 import { organisationScope } from '../../lib/access/scopes.js'
 import { ORG_SORT_FIELDS, type ListOrganisationsQuery } from './organisations.schema.js'
+import { createNotification } from '../notifications/notifications.service.js'
 
 /**
  * `kumar.shubham@corp.com` → `ku•••@corp.com`.
@@ -235,6 +236,46 @@ export async function updateOrganisation(
       ...(becomingActive && !existing.onboardedAt ? { onboardedAt: new Date() } : {}),
     },
     select: orgSelect,
+  })
+}
+
+/**
+ * Mirrors `verifyTesterOnEmailConfirmed` for the other self-registration path
+ * (§2.4): a CUSTOMER's organisation is created PENDING, same as a tester's
+ * application, and email confirmation is the one thing every registrant does
+ * — so it is what promotes the org out of PENDING too, rather than leaving it
+ * to wait on an admin who has no reason to know it exists yet.
+ *
+ * Scoped to the OWNER specifically. A regular member confirming their own
+ * email says nothing about whether the organisation itself is legitimate —
+ * only the person who registered it is the one this action is about.
+ *
+ * No-op for a user who owns no organisation, or whose organisation has moved
+ * past PENDING already (an admin's own decision, including having frozen or
+ * archived it, must never be quietly re-opened by a stale click through an
+ * old verification email).
+ */
+export async function verifyOrganisationOnEmailConfirmed(userId: string): Promise<void> {
+  const membership = await prisma.organisationMember.findFirst({
+    where: { userId, orgRole: OrgMemberRole.OWNER },
+    select: { organisation: { select: { id: true, status: true, onboardedAt: true } } },
+  })
+  const org = membership?.organisation
+  if (org?.status !== OrganisationStatus.PENDING) return
+
+  await prisma.organisation.update({
+    where: { id: org.id },
+    data: {
+      status: OrganisationStatus.ACTIVE,
+      ...(org.onboardedAt ? {} : { onboardedAt: new Date() }),
+    },
+  })
+
+  await createNotification({
+    userId,
+    type: 'SYSTEM',
+    title: 'Your organisation is now active',
+    link: '/app/customer/organisation',
   })
 }
 
