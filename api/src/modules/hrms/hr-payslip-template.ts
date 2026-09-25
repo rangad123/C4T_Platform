@@ -33,6 +33,10 @@ export interface PayslipSnapshot {
     specialAllowanceMonthly: number
     incentives: PayslipIncentiveLine[]
     grossMonthly: number
+    /** Both absent on payslips imported from the old HR system, which never
+     *  prorated a partial month — treated as "full month" by the template. */
+    workingDaysPaid?: number
+    workingDaysInMonth?: number
   }
   deductions: {
     tdsMonthly: number
@@ -69,6 +73,20 @@ function row(label: string, value: string): string {
   return `<tr><td class="label">${escapeHtml(label)}</td><td class="value">${escapeHtml(value)}</td></tr>`
 }
 
+/** Only shown for a genuinely partial month — a full one (or a snapshot from
+ *  before proration existed) prints no note at all. */
+function prorationNote(earnings: PayslipSnapshot['earnings']): string {
+  const { workingDaysPaid, workingDaysInMonth } = earnings
+  if (
+    workingDaysPaid === undefined ||
+    workingDaysInMonth === undefined ||
+    workingDaysPaid >= workingDaysInMonth
+  ) {
+    return ''
+  }
+  return `<p class="proration-note">Prorated: paid for ${workingDaysPaid} of ${workingDaysInMonth} working days this month.</p>`
+}
+
 export function renderPayslipHtml(snapshot: PayslipSnapshot): string {
   const { employee, earnings, deductions } = snapshot
 
@@ -99,12 +117,14 @@ export function renderPayslipHtml(snapshot: PayslipSnapshot): string {
   .net-pay .label { font-size: 14px; font-weight: 700; }
   .net-pay .amount { font-size: 20px; font-weight: 700; }
   .footer { margin-top: 24px; color: #9a928b; font-size: 10px; }
+  .proration-note { margin: -12px 0 20px; padding: 8px 12px; background: #faf3e0; color: #7a5c1e; border-radius: 4px; font-size: 11px; }
 </style>
 </head>
 <body>
   <div class="sheet">
     <div class="brand">${logoImg(150)}</div>
     <p class="subtitle">Payslip for ${escapeHtml(snapshot.monthLabel)}</p>
+    ${prorationNote(earnings)}
 
     <table class="meta">
       ${row('Employee name', `${employee.firstName} ${employee.lastName}`)}

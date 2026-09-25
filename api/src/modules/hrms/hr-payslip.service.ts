@@ -8,10 +8,12 @@ import {
   maskPan,
   maskAccountNumber,
 } from '../../lib/hrms/hr-encryption.js'
-import { financialYearMonths } from '../../lib/hrms/financial-year.js'
+import { financialYearMonths, calendarYearForMonth } from '../../lib/hrms/financial-year.js'
 import { employedMonths } from '../../lib/hrms/hr-tds-schedule.js'
 import { payslipRunState } from '../../lib/hrms/hr-payslip-run.js'
 import { professionalTaxFor } from '../../lib/hrms/hr-professional-tax.js'
+import { countWorkingDays, todayInIndia } from '../../lib/hrms/hr-calendar.js'
+import { listHolidayDatesForYears } from './hr-holidays.service.js'
 import { renderPayslipHtml, type PayslipSnapshot } from './hr-payslip-template.js'
 import { calculateMonthlyTds } from './hr-tax.service.js'
 
@@ -122,10 +124,44 @@ async function assembleSnapshot(
     select: { amount: true },
   })
 
-  const basicMonthly = salaryStructure ? toNumber(salaryStructure.basic) / 12 : 0
-  const hraMonthly = salaryStructure ? toNumber(salaryStructure.hra) / 12 : 0
+  /**
+   * How much of this month has actually happened, in working days —
+   * generating September's payslip on the 12th must not pay for the 13th
+   * through the 30th, which have not happened yet. Capped by joining date at
+   * the start and by relieving date at the end the same way, so this one
+   * ratio covers "generated mid-month" and "joined or left mid-month"
+   * without two separate code paths.
+   *
+   * Deliberately does not touch `employedMonths`/the TDS schedule above:
+   * those decide whether this month gets a payslip AT ALL (a whole-month
+   * question), which is unrelated to how much of it is paid for once it
+   * does — TDS already recomputes what is owed from what has actually been
+   * deducted so far, so a smaller prorated month here is absorbed by the
+   * months after it, the same way a raise or a late declaration is.
+   */
+  const year = calendarYearForMonth(financialYear, month)
+  const monthStart = new Date(Date.UTC(year, month - 1, 1))
+  const monthEnd = new Date(Date.UTC(year, month, 0))
+  const holidayDates = await listHolidayDatesForYears([year])
+
+  const today = todayInIndia()
+  const paidThrough = monthEnd < today ? monthEnd : today
+  const paidFrom = employee.joiningDate > monthStart ? employee.joiningDate : monthStart
+  const cappedPaidThrough =
+    employee.relievingDate && employee.relievingDate < paidThrough
+      ? employee.relievingDate
+      : paidThrough
+
+  const workingDaysInMonth = countWorkingDays(monthStart, monthEnd, holidayDates)
+  const workingDaysPaid =
+    paidFrom <= cappedPaidThrough ? countWorkingDays(paidFrom, cappedPaidThrough, holidayDates) : 0
+  const prorationRatio =
+    workingDaysInMonth > 0 ? Math.min(1, workingDaysPaid / workingDaysInMonth) : 1
+
+  const basicMonthly = salaryStructure ? (toNumber(salaryStructure.basic) / 12) * prorationRatio : 0
+  const hraMonthly = salaryStructure ? (toNumber(salaryStructure.hra) / 12) * prorationRatio : 0
   const specialAllowanceMonthly = salaryStructure
-    ? toNumber(salaryStructure.specialAllowance) / 12
+    ? (toNumber(salaryStructure.specialAllowance) / 12) * prorationRatio
     : 0
   const incentiveLines = incentives.map((row) => ({
     type: row.incentiveType.name,
@@ -164,6 +200,8 @@ async function assembleSnapshot(
       specialAllowanceMonthly,
       incentives: incentiveLines,
       grossMonthly,
+      workingDaysPaid,
+      workingDaysInMonth,
     },
     deductions: {
       tdsMonthly,
