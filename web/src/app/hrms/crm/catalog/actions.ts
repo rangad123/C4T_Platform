@@ -10,7 +10,7 @@ import { ApiError } from '@/lib/api/types'
 const BASE = '/crm/catalog'
 
 /** Mirrors the API's own union for this route — see hr-catalog.schema.ts's `crmCatalogKindParam`. */
-const KINDS = ['crm-industries', 'crm-lead-sources'] as const
+const KINDS = ['crm-industries', 'crm-lead-sources', 'crm-communication-statuses'] as const
 type Kind = (typeof KINDS)[number]
 
 function kindOf(formData: FormData): Kind {
