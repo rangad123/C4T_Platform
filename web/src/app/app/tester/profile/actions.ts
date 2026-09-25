@@ -7,6 +7,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed, formStringArray } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 import {
   DEVICE_TYPES,
   LANGUAGE_PROFICIENCIES,
@@ -72,7 +73,7 @@ export async function updateBasicInfoAction(formData: FormData): Promise<void> {
 
   const firstName = formTrimmed(formData, 'firstName')
   const lastName = formTrimmed(formData, 'lastName')
-  const phone = formTrimmed(formData, 'phone')
+  const phone = combinePhoneFromForm(formData)
   const experienceYears = formTrimmed(formData, 'experienceYears')
   const countryCode = formTrimmed(formData, 'countryCode')
 

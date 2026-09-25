@@ -6,6 +6,7 @@ import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed, formString } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 import type { TemporaryPasswordState } from './temporary-password-state'
 
 const BASE = '/admin'
@@ -39,7 +40,7 @@ export async function updatePersonalDetails(id: string, formData: FormData): Pro
     lastName: formTrimmed(formData, 'lastName'),
     dateOfBirth: formString(formData, 'dateOfBirth') || undefined,
     gender: formString(formData, 'gender') || undefined,
-    phone: formTrimmed(formData, 'phone') || undefined,
+    phone: combinePhoneFromForm(formData) || undefined,
     address: formTrimmed(formData, 'address') || undefined,
   })
   revalidateHrms(`${BASE}/${id}`)

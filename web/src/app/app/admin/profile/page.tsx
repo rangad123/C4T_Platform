@@ -13,7 +13,7 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
-import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
+import { PhoneNumberField } from '@/components/ds/forms/PhoneNumberField'
 import { Select } from '@/components/ds/forms/Select'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
@@ -516,9 +516,7 @@ export default async function AdminProfilePage({
                   />
                 </Field>
 
-                <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
-                  <PhoneInput id="phone" name="phone" defaultValue={profile.phone ?? ''} />
-                </Field>
+                <PhoneNumberField id="phone" defaultValue={profile.phone} />
 
                 <Field label="Country" htmlFor="countryCode">
                   <CountrySelect id="countryCode" defaultValue={profile.countryCode} />

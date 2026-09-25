@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 
 /**
  * Server Actions for the admin's own account — `/app/admin/profile`.
@@ -75,7 +76,7 @@ async function clearBridgedCookies(): Promise<void> {
 export async function saveProfile(formData: FormData): Promise<void> {
   const firstName = formTrimmed(formData, 'firstName')
   const lastName = formTrimmed(formData, 'lastName')
-  const phone = formTrimmed(formData, 'phone')
+  const phone = combinePhoneFromForm(formData)
   const countryCode = formTrimmed(formData, 'countryCode').toUpperCase()
   const timezone = formTrimmed(formData, 'timezone')
 

@@ -6,6 +6,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 import { ROLES, USER_STATUSES } from '@/lib/domain/enums'
 
 /**
@@ -91,7 +92,7 @@ export async function updateUserIdentity(formData: FormData): Promise<void> {
       body: {
         ...(firstName ? { firstName } : {}),
         lastName: formTrimmed(formData, 'lastName'),
-        phone: formTrimmed(formData, 'phone'),
+        phone: combinePhoneFromForm(formData),
         timezone: formTrimmed(formData, 'timezone'),
         ...(countryCode.length === 2 ? { countryCode } : {}),
       },

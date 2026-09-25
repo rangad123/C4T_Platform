@@ -6,6 +6,7 @@ import { requireCrmAccess } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed, formString } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 
 const BASE = '/crm/leads'
 
@@ -125,7 +126,7 @@ export async function addLeadContact(id: string, formData: FormData): Promise<vo
       body: {
         name: formTrimmed(formData, 'name'),
         designation: formTrimmed(formData, 'designation') || undefined,
-        phone: formTrimmed(formData, 'phone') || undefined,
+        phone: combinePhoneFromForm(formData) || undefined,
         email: formTrimmed(formData, 'email') || undefined,
         profileUrl: formTrimmed(formData, 'profileUrl') || undefined,
       },
@@ -150,7 +151,7 @@ export async function updateLeadContact(
       body: {
         name: formTrimmed(formData, 'name'),
         designation: formTrimmed(formData, 'designation') || undefined,
-        phone: formTrimmed(formData, 'phone') || undefined,
+        phone: combinePhoneFromForm(formData) || undefined,
         email: formTrimmed(formData, 'email') || undefined,
         profileUrl: formTrimmed(formData, 'profileUrl') || undefined,
       },

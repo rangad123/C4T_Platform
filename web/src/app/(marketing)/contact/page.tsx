@@ -4,6 +4,7 @@ import { NumberedRows } from '@/components/sections/blocks'
 import s from '@/components/sections/sections.module.css'
 import { buildMetadata } from '@/lib/seo/metadata'
 import { CONTACT_FORM, CONTACT_PAGE } from '@/content'
+import { dialCodeOptions } from '@/lib/geo/source'
 import { submitLead } from './actions'
 
 const PATH = '/contact'
@@ -86,6 +87,7 @@ export default function ContactPage() {
           submitLabel={CONTACT_FORM.submitLabel}
           teamSizes={CONTACT_FORM.teamSizes}
           success={CONTACT_FORM.success}
+          dialCodeOptions={dialCodeOptions()}
         />
       </div>
     </Section>

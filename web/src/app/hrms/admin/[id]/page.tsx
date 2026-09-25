@@ -18,6 +18,7 @@ import { Button } from '@/components/ds/core/Button'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneNumberField } from '@/components/ds/forms/PhoneNumberField'
 import { Select } from '@/components/ds/forms/Select'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
@@ -494,9 +495,7 @@ export default async function HrAdminEmployeeDetailPage({
               defaultValue={employee.gender ?? ''}
             />
           </Field>
-          <Field label="Phone" htmlFor="phone">
-            <Input id="phone" name="phone" type="tel" defaultValue={employee.phone ?? ''} />
-          </Field>
+          <PhoneNumberField id="phone" defaultValue={employee.phone} />
           <Field label="Address" htmlFor="address">
             <Input
               id="address"

@@ -13,6 +13,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { getUser } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 
 interface LeadResponse {
   id: string
@@ -44,7 +45,7 @@ export async function createLeadAction(formData: FormData): Promise<void> {
     firstName: formTrimmed(formData, 'firstName'),
     lastName: formTrimmed(formData, 'lastName'),
     email: formTrimmed(formData, 'email'),
-    phone: formTrimmed(formData, 'phone') || undefined,
+    phone: combinePhoneFromForm(formData) || undefined,
     company: formTrimmed(formData, 'company'),
     teamSize: formTrimmed(formData, 'teamSize') || undefined,
     message: formTrimmed(formData, 'message') || undefined,

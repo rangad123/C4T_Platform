@@ -6,6 +6,7 @@ import { requireHrRole } from '@/lib/hrms/hr-session'
 import { hrActionFetch } from '@/lib/hrms/hr-action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 
 const ANY_EMPLOYEE = ['ADMIN', 'ACCOUNT_MANAGER', 'EMPLOYEE'] as const
 
@@ -24,7 +25,7 @@ export async function updateMyPersonalDetails(formData: FormData): Promise<void>
       body: {
         dateOfBirth: formString(formData, 'dateOfBirth') || undefined,
         gender: formString(formData, 'gender') || undefined,
-        phone: formTrimmed(formData, 'phone') || undefined,
+        phone: combinePhoneFromForm(formData) || undefined,
         address: formTrimmed(formData, 'address') || undefined,
       },
     })

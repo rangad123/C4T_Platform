@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 import { ORGANISATION_STATUSES, ORG_MEMBER_ROLES, isOneOf } from '@/lib/domain/enums'
 
 /**
@@ -37,11 +38,14 @@ const ORG_STATUSES: readonly string[] = ORGANISATION_STATUSES
  * `.email()` and `.length(2)`, both of which reject `''`, and neither field is
  * nullable. The API therefore offers no way to clear them, so a blank input
  * leaves whatever is on file — the field hints say so.
+ *
+ * `contactPhone` is also absent from this list — `PhoneNumberField` submits it
+ * as two fields (`contactPhoneDialCode`/`contactPhoneNumber`), so it is read
+ * with `combinePhoneFromForm` below instead of the generic loop.
  */
 const CLEARABLE_PROFILE_FIELDS = [
   'website',
   'industry',
-  'contactPhone',
   'addressLine1',
   'addressLine2',
   'city',
@@ -86,6 +90,7 @@ function profileBody(formData: FormData): Record<string, string> {
   for (const field of CLEARABLE_PROFILE_FIELDS) {
     body[field] = formTrimmed(formData, field)
   }
+  body.contactPhone = combinePhoneFromForm(formData, 'contactPhone')
 
   const contactEmail = formTrimmed(formData, 'contactEmail')
   if (contactEmail) body.contactEmail = contactEmail

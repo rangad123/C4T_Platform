@@ -14,7 +14,7 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
-import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
+import { PhoneNumberField } from '@/components/ds/forms/PhoneNumberField'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { serverFetch, serverFetchPage } from '@/lib/api/server'
@@ -547,14 +547,12 @@ export default async function OrganisationDetailPage({
                 />
               </Field>
 
-              <Field label="Contact phone" htmlFor="contactPhone" hint={PHONE_HINT}>
-                <PhoneInput
-                  id="contactPhone"
-                  name="contactPhone"
-                  defaultValue={organisation.contactPhone ?? ''}
-                  autoComplete="off"
-                />
-              </Field>
+              <PhoneNumberField
+                id="contactPhone"
+                name="contactPhone"
+                label="Contact phone"
+                defaultValue={organisation.contactPhone}
+              />
 
               <Field label="Address line 1" htmlFor="addressLine1" style={{ gridColumn: '1 / -1' }}>
                 <Input

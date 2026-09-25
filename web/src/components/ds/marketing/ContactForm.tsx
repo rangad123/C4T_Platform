@@ -5,7 +5,8 @@ import { SubmitButton } from '../core/SubmitButton'
 import { Icon } from '../core/Icon'
 import { Field } from '../forms/Field'
 import { Input } from '../forms/Input'
-import { PhoneInput } from '../forms/PhoneInput'
+import { PhoneNumberControls } from '../forms/PhoneNumberControls'
+import type { SelectOption } from '../forms/Select'
 import { Select } from '../forms/Select'
 import { Textarea } from '../forms/Textarea'
 import type { LeadState } from '@/app/(marketing)/contact/actions'
@@ -19,6 +20,13 @@ export interface ContactFormProps {
   footnote?: string
   teamSizes: readonly string[]
   success: { title: string; body: string }
+  /**
+   * The dial-code picker's options — computed with `dialCodeOptions()`
+   * (`lib/geo/source.ts`, `server-only`) in this form's Server Component
+   * parent and passed down as plain data, since this component itself
+   * cannot import a `server-only` module.
+   */
+  dialCodeOptions: readonly SelectOption[]
 }
 
 /**
@@ -56,6 +64,7 @@ export function ContactForm({
   footnote,
   teamSizes,
   success,
+  dialCodeOptions,
 }: ContactFormProps) {
   const [state, formAction] = useActionState<LeadState, FormData>(action, { status: 'idle' })
   const successRef = useRef<HTMLDivElement>(null)
@@ -221,22 +230,15 @@ export function ContactForm({
           arranged by call, so the number is what the next step actually
           needs.
         */}
-        {/*
-          No visible hint. The constraint is unchanged: `PhoneInput` keeps the
-          pattern, and `phoneField` on the API is the half that actually
-          matters. PHONE_HINT is still attached as the input's `title`, which
-          the browser shows alongside its own message when the pattern
-          rejects — so the format is explained at the moment someone gets it
-          wrong, rather than spending three lines of the first screen on a
-          rule most people satisfy without being told.
-
-          Deliberately only here. The admin and portal forms still show the
-          hint inline; this is the one form where a visitor is being asked to
-          convert and the button had fallen below the fold.
-        */}
-        <Field label="Contact number" required htmlFor="ph" error={err.phone}>
-          <PhoneInput id="ph" name="phone" required invalid={Boolean(err.phone)} />
-        </Field>
+        <PhoneNumberControls
+          id="ph"
+          label="Contact number"
+          dialCode=""
+          number=""
+          dialCodeOptions={dialCodeOptions}
+          required
+          error={err.phone}
+        />
       </div>
 
       <div

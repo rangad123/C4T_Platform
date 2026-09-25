@@ -5,7 +5,7 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
-import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
+import { PhoneNumberField } from '@/components/ds/forms/PhoneNumberField'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
@@ -100,9 +100,7 @@ export default async function NewLeadPage({
                 placeholder="name@company.com"
               />
             </Field>
-            <Field label="Contact number" htmlFor="phone" hint={PHONE_HINT}>
-              <PhoneInput id="phone" name="phone" autoComplete="off" />
-            </Field>
+            <PhoneNumberField id="phone" label="Contact number" />
           </div>
 
           <div style={fieldGrid}>

@@ -13,6 +13,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { getUser } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 
 interface OrganisationResponse {
   id: string
@@ -42,7 +43,7 @@ export async function createOrganisationAction(formData: FormData): Promise<void
     status: formTrimmed(formData, 'status') || 'PENDING',
     industry: formTrimmed(formData, 'industry') || undefined,
     contactEmail: formTrimmed(formData, 'contactEmail') || undefined,
-    contactPhone: formTrimmed(formData, 'contactPhone') || undefined,
+    contactPhone: combinePhoneFromForm(formData, 'contactPhone') || undefined,
     website: formTrimmed(formData, 'website') || undefined,
     addressLine1: formTrimmed(formData, 'addressLine1') || undefined,
     addressLine2: formTrimmed(formData, 'addressLine2') || undefined,

@@ -90,9 +90,9 @@ export function labelFor(control: FormControl): string {
  * Why this control is invalid, as one sentence.
  *
  * Ordered by how specific the answer is. `patternMismatch` defers to the
- * control's `title`, which is exactly what that attribute is for and what
- * `PhoneInput` already sets — so the phone rule is stated once and read here
- * rather than restated. The last line falls back to the browser's own wording,
+ * control's `title`, which is exactly what that attribute is for — a rule
+ * stated once on the input and read here rather than restated. The last
+ * line falls back to the browser's own wording,
  * which is still better than inventing a message for a constraint this list
  * has not met yet.
  */

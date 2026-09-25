@@ -46,11 +46,14 @@ export function Select({
         {...rest}
       >
         {placeholder ? <option value="">{placeholder}</option> : null}
-        {options.map((option) => {
+        {options.map((option, index) => {
           const value = typeof option === 'string' ? option : option.value
           const label = typeof option === 'string' ? option : option.label
+          // Index in the key, not just `value` — a dial-code picker lists more
+          // than one country under the same value (`+1` for the US, Canada, …),
+          // and duplicate keys make React drop or duplicate the extra rows.
           return (
-            <option key={value} value={value}>
+            <option key={`${value}-${index}`} value={value}>
               {label}
             </option>
           )

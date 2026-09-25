@@ -8,13 +8,14 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
-import { PhoneInput, PHONE_HINT } from '@/components/ds/forms/PhoneInput'
+import { PhoneNumberField } from '@/components/ds/forms/PhoneNumberField'
 import { Select } from '@/components/ds/forms/Select'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
 import { formString, formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 import { titleCase } from '@/lib/admin/format'
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 import { ROLES } from '@/lib/domain/enums'
@@ -114,7 +115,7 @@ async function createAccount(formData: FormData): Promise<void> {
   const password = formString(formData, 'password')
   const firstName = formTrimmed(formData, 'firstName')
   const lastName = formTrimmed(formData, 'lastName')
-  const phone = formTrimmed(formData, 'phone')
+  const phone = combinePhoneFromForm(formData)
   const countryCode = formTrimmed(formData, 'countryCode').toUpperCase()
 
   const permissionCodes = [
@@ -304,9 +305,7 @@ export default async function NewUserPage({
             <Field label="Last name" htmlFor="lastName">
               <Input id="lastName" name="lastName" maxLength={80} autoComplete="off" />
             </Field>
-            <Field label="Phone" htmlFor="phone" hint={PHONE_HINT}>
-              <PhoneInput id="phone" name="phone" autoComplete="off" />
-            </Field>
+            <PhoneNumberField id="phone" />
             <Field label="Country" htmlFor="countryCode">
               <CountrySelect id="countryCode" />
             </Field>

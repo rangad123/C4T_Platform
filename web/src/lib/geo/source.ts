@@ -59,6 +59,37 @@ export function countryLabel(code: string | null | undefined): string {
 }
 
 /**
+ * Dialing codes for the phone country-code picker — `{ value: digits only
+ * (e.g. "91"), label: "India (+91)" }`.
+ *
+ * The label leads with the country NAME, not the code, so the browser's
+ * built-in type-ahead (typing "i" jumps to the first option starting with
+ * that letter) actually searches by country — leading with "+91" would put
+ * "+" at the front of every label and make type-ahead useless. This is what
+ * makes a plain native `<select>` a genuine answer to "searchable list of
+ * countries" rather than a compromise.
+ *
+ * `phonecode` is inconsistent in the underlying package: usually plain
+ * digits ("91"), but a leading `+` and a sub-region suffix show up too
+ * ("+358-18" for the Åland Islands, "+1-684" for American Samoa) — stripped
+ * down to digits only before the "+" is re-added for display. A handful of
+ * codes (`+1`, `+7`, `+61`, ...) are shared by more than one country; each
+ * still gets its own row with its own name, sharing that `value`, which is
+ * the normal shape for this kind of picker.
+ */
+let dialCodeCache: readonly Option[] | null = null
+
+export function dialCodeOptions(): readonly Option[] {
+  if (dialCodeCache) return dialCodeCache
+  dialCodeCache = Country.getAllCountries()
+    .map((c) => ({ name: c.name, digits: c.phonecode.replace(/[^0-9]/g, '') }))
+    .filter((c) => c.digits.length > 0)
+    .map((c) => ({ value: c.digits, label: `${c.name} (+${c.digits})` }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  return dialCodeCache
+}
+
+/**
  * States of one country, as `{ value: isoCode, label: name }`.
  *
  * The code is the value because the city lookup needs it. Callers that store

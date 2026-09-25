@@ -13,6 +13,7 @@ import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneNumberField } from '@/components/ds/forms/PhoneNumberField'
 import { Select } from '@/components/ds/forms/Select'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import {
@@ -250,9 +251,7 @@ export default async function HrEmployeeBasicDetailsPage({
       <Modal open={params.edit === 'personal'} closedHref={BASE} title="Your personal details">
         <TrackedForm action={updateMyPersonalDetails} style={FORM_STYLE}>
           <FormError code={params.edit === 'personal' ? params.error : undefined} />
-          <Field label="Phone" htmlFor="myPhone">
-            <Input id="myPhone" name="phone" type="tel" defaultValue={detail?.phone ?? ''} />
-          </Field>
+          <PhoneNumberField id="myPhone" defaultValue={detail?.phone} />
           <Field label="Date of birth" htmlFor="myDateOfBirth">
             <Input
               id="myDateOfBirth"

@@ -24,6 +24,7 @@ import { Icon } from '@/components/ds/core/Icon'
 import { Button } from '@/components/ds/core/Button'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
+import { PhoneNumberField } from '@/components/ds/forms/PhoneNumberField'
 import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
@@ -557,9 +558,7 @@ export default async function HrCrmLeadDetailPage({
               <Field label="Designation" htmlFor="contactDesignation">
                 <Input id="contactDesignation" name="designation" maxLength={120} />
               </Field>
-              <Field label="Phone" htmlFor="contactPhone">
-                <Input id="contactPhone" name="phone" type="tel" maxLength={24} />
-              </Field>
+              <PhoneNumberField id="contactPhone" />
               <Field label="Email" htmlFor="contactEmail">
                 <Input id="contactEmail" name="email" type="email" maxLength={255} />
               </Field>
@@ -595,15 +594,7 @@ export default async function HrCrmLeadDetailPage({
                     defaultValue={editingContact.designation ?? ''}
                   />
                 </Field>
-                <Field label="Phone" htmlFor="editContactPhone">
-                  <Input
-                    id="editContactPhone"
-                    name="phone"
-                    type="tel"
-                    maxLength={24}
-                    defaultValue={editingContact.phone ?? ''}
-                  />
-                </Field>
+                <PhoneNumberField id="editContactPhone" defaultValue={editingContact.phone} />
                 <Field label="Email" htmlFor="editContactEmail">
                   <Input
                     id="editContactEmail"

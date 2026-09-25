@@ -3,6 +3,7 @@
 import { headers } from 'next/headers'
 import { z } from 'zod'
 import { env } from '@/lib/env'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 
 /**
  * The demo-request server action.
@@ -83,7 +84,13 @@ export interface LeadState {
 }
 
 export async function submitLead(_prev: LeadState, formData: FormData): Promise<LeadState> {
-  const parsed = LeadSchema.safeParse(Object.fromEntries(formData))
+  // `phone` arrives as two form fields (`phoneDialCode` + `phoneNumber`) —
+  // see `PhoneNumberControls` — combined into the one string `LeadSchema`
+  // (and the API's `phoneField` beyond it) has always validated.
+  const parsed = LeadSchema.safeParse({
+    ...Object.fromEntries(formData),
+    phone: combinePhoneFromForm(formData),
+  })
 
   if (!parsed.success) {
     const errors: Record<string, string> = {}

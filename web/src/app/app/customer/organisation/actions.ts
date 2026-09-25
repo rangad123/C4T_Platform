@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { formTrimmed } from '@/lib/form-data'
+import { combinePhoneFromForm } from '@/lib/phone/combine'
 import { ORG_MEMBER_ROLES, isOneOf } from '@/lib/domain/enums'
 
 /**
@@ -23,7 +24,6 @@ const DETAIL_PATH = '/app/customer/organisation'
 const CLEARABLE_PROFILE_FIELDS = [
   'website',
   'industry',
-  'contactPhone',
   'addressLine1',
   'addressLine2',
   'city',
@@ -52,6 +52,7 @@ function profileBody(formData: FormData): Record<string, string> {
   for (const field of CLEARABLE_PROFILE_FIELDS) {
     body[field] = formTrimmed(formData, field)
   }
+  body.contactPhone = combinePhoneFromForm(formData, 'contactPhone')
 
   const contactEmail = formTrimmed(formData, 'contactEmail')
   if (contactEmail) body.contactEmail = contactEmail
