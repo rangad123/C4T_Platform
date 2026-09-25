@@ -68,9 +68,10 @@ interface TesterRow {
  * `/app/admin/testers` — the tester pool, including applications awaiting
  * review.
  *
- * The default sort puts newest first, which means an unreviewed APPLIED profile
- * surfaces at the top without needing a filter — the common reason to open this
- * page is "who is waiting on me".
+ * Defaults to VERIFIED. Bot signups pile up as unreviewed APPLIED profiles
+ * that never go anywhere, so a status-less view of "everyone" was mostly
+ * that noise rather than the real pool. Pick "All statuses" (or "Applied")
+ * from the dropdown to see what is waiting on review.
  *
  * `bugsAccepted / bugsReported` is shown as a pair rather than an acceptance
  * percentage: a tester with 1-of-1 accepted is not more reliable than one with
@@ -92,9 +93,16 @@ export default async function TestersPage({
   await requirePermission('tester.read')
 
   const params = await searchParams
-  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
-    ? params.status
-    : undefined
+  // Absent entirely (first load) defaults to VERIFIED. Present but empty
+  // means the reader explicitly chose "All statuses" from the dropdown —
+  // that must stay distinguishable from "no choice made yet", or the filter
+  // could never be turned off.
+  const status =
+    params.status === undefined
+      ? 'VERIFIED'
+      : STATUSES.includes(params.status as (typeof STATUSES)[number])
+        ? params.status
+        : undefined
   // The API validates this as exactly two letters, so anything else is dropped
   // here rather than sent on to earn a 422.
   const raw = params.countryCode?.trim().toUpperCase()

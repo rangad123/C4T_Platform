@@ -40,6 +40,11 @@ interface OrganisationRow {
 /**
  * `/app/admin/organisations` — every customer organisation on the platform.
  *
+ * Defaults to ACTIVE, the same idea as the Testers page defaulting to
+ * VERIFIED: a plain "everyone" view was mostly PENDING applications rather
+ * than the working customer base. Pick "All statuses" (or "Pending") from
+ * the dropdown to see what is waiting on approval.
+ *
  * The API scopes this list by caller rather than by permission: an admin sees
  * all organisations, a customer sees only theirs. The route is still gated to
  * ADMIN/SUB_ADMIN by the layout, so reaching this page at all means the wider
@@ -60,9 +65,15 @@ export default async function OrganisationsPage({
   await requirePermission('organisation.read')
 
   const params = await searchParams
-  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
-    ? params.status
-    : undefined
+  // Absent entirely (first load) defaults to ACTIVE. Present but empty means
+  // the reader explicitly chose "All statuses" — see the same distinction on
+  // the Testers page.
+  const status =
+    params.status === undefined
+      ? 'ACTIVE'
+      : STATUSES.includes(params.status as (typeof STATUSES)[number])
+        ? params.status
+        : undefined
   const search = searchTerm(params.search)
   const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
     ? params.sort
