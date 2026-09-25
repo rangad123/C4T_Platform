@@ -672,6 +672,39 @@ export async function changeTesterStatus(
   return updated
 }
 
+/**
+ * Confirming their email address is what makes a tester VERIFIED — called
+ * from `authService.verifyEmail()`, not from an admin route, so there is no
+ * human `actorId` to record: `verifiedById` stays null, distinguishing
+ * "verified by confirming their email" from `changeTesterStatus`'s admin
+ * review.
+ *
+ * Deliberately narrow: only ever moves a profile OUT of APPLIED. A tester an
+ * admin has already put UNDER_REVIEW, REJECTED or SUSPENDED stays exactly
+ * there — re-confirming an email (or a token used twice) must never undo a
+ * real decision someone already made. No-op, not an error, for a user who
+ * is not a tester at all, or whose profile is already past APPLIED.
+ */
+export async function verifyTesterOnEmailConfirmed(userId: string): Promise<void> {
+  const profile = await prisma.testerProfile.findUnique({
+    where: { userId },
+    select: { id: true, status: true },
+  })
+  if (profile?.status !== TesterStatus.APPLIED) return
+
+  await prisma.testerProfile.update({
+    where: { id: profile.id },
+    data: { status: TesterStatus.VERIFIED, verifiedAt: new Date(), verifiedById: null },
+  })
+
+  await createNotification({
+    userId,
+    type: 'TESTER_STATUS_CHANGED',
+    title: 'Your tester status is now verified',
+    link: '/app/tester/profile',
+  })
+}
+
 // ─── Devices ─────────────────────────────────────────────────────────────────
 
 /**
