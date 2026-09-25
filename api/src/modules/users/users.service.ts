@@ -5,6 +5,7 @@ import { hashPassword } from '../../lib/password.js'
 import { NotFoundError, BadRequestError, ConflictError, ForbiddenError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import { PERMISSION_CATALOGUE, DEFAULT_SUBADMIN_PERMISSIONS } from '../../config/permissions.js'
+import { sendVerificationEmail } from '../auth/auth.service.js'
 import { USER_SORT_FIELDS, type ListUsersQuery } from './users.schema.js'
 
 const userSelect = {
@@ -208,6 +209,25 @@ export async function changeStatus(id: string, status: UserStatus) {
     }
     return updated
   })
+}
+
+/**
+ * An administrator sending a fresh verification link on a user's behalf —
+ * the same mail `resendVerification` (auth.service.ts) sends, but that one is
+ * a public, unauthenticated endpoint that must stay silent about whether an
+ * email exists at all. Here the caller already knows: they are looking at
+ * this exact account, so a clear 409 for "already verified" is useful
+ * feedback rather than an enumeration leak.
+ */
+export async function resendVerificationEmail(id: string): Promise<void> {
+  const user = await prisma.user.findFirst({
+    where: { id, deletedAt: null },
+    select: { id: true, email: true, emailVerifiedAt: true },
+  })
+  if (!user) throw new NotFoundError('User')
+  if (user.emailVerifiedAt) throw new ConflictError('This account has already verified its email')
+
+  await sendVerificationEmail(user.id, user.email)
 }
 
 /** Soft delete. The row stays for audit and referential integrity. */

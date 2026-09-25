@@ -48,6 +48,7 @@ import {
   setNdaDocumentAction,
   setAvatarAction,
   requestPayoutFromProfileAction,
+  resendVerificationEmail,
   deleteAccountAction,
 } from './actions'
 import { loadTermOptions, withStored } from '@/lib/catalog/target-options'
@@ -132,6 +133,7 @@ interface ProfileDetail {
     lastName: string | null
     phone: string | null
     avatarFileId: string | null
+    emailVerifiedAt: string | null
   }
   devices: readonly TesterDevice[]
   skills: readonly { skill: { id: string; name: string } }[]
@@ -305,6 +307,11 @@ const NOTICES: Record<string, NoticeCopy> = {
   'avatar-saved': { tone: 'success', message: 'Your profile picture has been updated.' },
   'nda-accepted': { tone: 'success', message: 'Thanks — your NDA acceptance is recorded.' },
   'nda-document-saved': { tone: 'success', message: 'Your signed NDA has been attached.' },
+  'verification-sent': {
+    tone: 'success',
+    message: 'If that address needs verifying, a new email is on its way.',
+  },
+  'verification-failed': { tone: 'error', message: 'Could not send that. Try again in a moment.' },
   'name-required': { tone: 'error', message: 'Enter your first name — it cannot be blank.' },
   'phone-required': {
     tone: 'error',
@@ -630,6 +637,20 @@ export default async function TesterProfilePage({
       tabs={<SectionTabs basePath="/app/tester/profile" tabs={SECTIONS} active={section} />}
     >
       <Notice code={resolvedParams.notice} notices={NOTICES} />
+
+      {!profile.user.emailVerifiedAt ? (
+        <Panel
+          title="Verify your email"
+          description="Projects can't reach you and your application can't be reviewed until this is done."
+        >
+          <form action={resendVerificationEmail}>
+            <input type="hidden" name="email" value={profile.user.email} />
+            <SubmitButton variant="primary" iconLeft="mail" pendingLabel="Sending…">
+              Resend verification email
+            </SubmitButton>
+          </form>
+        </Panel>
+      ) : null}
 
       {!profile.ndaAcceptedAt ? (
         <Panel

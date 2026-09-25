@@ -157,6 +157,24 @@ export async function changePassword(formData: FormData): Promise<void> {
 }
 
 /**
+ * Posts to the same public `auth/resend-verification` the sign-up and
+ * sign-in screens use — it is a silent no-op for an already-verified address,
+ * so there is nothing to distinguish here; the page always reports success.
+ */
+export async function resendVerificationEmail(formData: FormData): Promise<void> {
+  const email = formTrimmed(formData, 'email')
+  if (!email) back('verification_failed', 'error')
+
+  try {
+    await actionFetch('auth/resend-verification', { method: 'POST', body: { email } })
+  } catch {
+    back('verification_failed', 'error')
+  }
+
+  back('verification_sent', 'ok')
+}
+
+/**
  * Ends one session.
  *
  * Whether the target is the caller's own device is read from the API rather

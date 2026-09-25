@@ -21,7 +21,13 @@ import { serverFetch } from '@/lib/api/server'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
 import { orDash, personName } from '@/lib/admin/format'
 import { EmailNotificationsPanel } from '@/components/settings/EmailNotificationsPanel'
-import { saveProfile, changePassword, revokeSession, signOutEverywhere } from './actions'
+import {
+  saveProfile,
+  changePassword,
+  resendVerificationEmail,
+  revokeSession,
+  signOutEverywhere,
+} from './actions'
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 import { timezoneOptions, withCurrent } from '@/lib/geo/source'
 
@@ -80,6 +86,14 @@ const NOTICES: Record<string, Notice> = {
   email_prefs_failed: {
     tone: 'error',
     text: 'That preference could not be saved. Try again in a moment.',
+  },
+  verification_sent: {
+    tone: 'success',
+    text: 'If that address needs verifying, a new email is on its way.',
+  },
+  verification_failed: {
+    tone: 'error',
+    text: 'Could not send that. Try again in a moment.',
   },
 
   name_required: { tone: 'error', text: 'Enter a first name — it cannot be blank.' },
@@ -317,21 +331,31 @@ export default async function CustomerProfilePage({
       tabs={<SectionTabs basePath={PROFILE_PATH} tabs={SECTIONS} active={section} />}
       aside={
         <Panel title="Account" description="Set by the platform, not editable from this page.">
-          <DescriptionList
-            items={[
-              { label: 'Email', value: profile.email, wide: true },
-              { label: 'Role', value: <RoleBadge role={profile.role} /> },
-              { label: 'Status', value: <StatusBadge status={profile.status} /> },
-              {
-                label: 'Email verified',
-                value: profile.emailVerifiedAt
-                  ? formatDateTime(profile.emailVerifiedAt)
-                  : 'Not verified',
-                wide: true,
-              },
-              { label: 'Last sign-in', value: formatDateTime(profile.lastLoginAt), wide: true },
-            ]}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+            <DescriptionList
+              items={[
+                { label: 'Email', value: profile.email, wide: true },
+                { label: 'Role', value: <RoleBadge role={profile.role} /> },
+                { label: 'Status', value: <StatusBadge status={profile.status} /> },
+                {
+                  label: 'Email verified',
+                  value: profile.emailVerifiedAt
+                    ? formatDateTime(profile.emailVerifiedAt)
+                    : 'Not verified',
+                  wide: true,
+                },
+                { label: 'Last sign-in', value: formatDateTime(profile.lastLoginAt), wide: true },
+              ]}
+            />
+            {!profile.emailVerifiedAt ? (
+              <form action={resendVerificationEmail}>
+                <input type="hidden" name="email" value={profile.email} />
+                <SubmitButton variant="secondary" size="sm" iconLeft="mail" pendingLabel="Sending…">
+                  Resend verification email
+                </SubmitButton>
+              </form>
+            ) : null}
+          </div>
         </Panel>
       }
     >

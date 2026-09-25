@@ -29,6 +29,7 @@ import {
   archiveUserAccount,
   changeUserRole,
   changeUserStatus,
+  resendVerificationEmail,
   setSubAdminPermissions,
   updateUserIdentity,
 } from './actions'
@@ -79,6 +80,8 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'error',
     message: 'This is the last active administrator — the account must keep this status.',
   },
+  'verification-resent': { tone: 'success', message: 'A new verification email has been sent.' },
+  'already-verified': { tone: 'success', message: 'This account has already verified its email.' },
   failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
 }
 
@@ -435,26 +438,41 @@ export default async function UserDetailPage({
           ) : null}
 
           <Panel title="Account">
-            <DescriptionList
-              items={[
-                { label: 'Email', value: user.email },
-                {
-                  label: 'Email verified',
-                  value: user.emailVerifiedAt ? formatDate(user.emailVerifiedAt) : 'Not verified',
-                },
-                {
-                  label: 'Last sign-in',
-                  value: user.lastLoginAt ? formatDate(user.lastLoginAt) : 'Never',
-                },
-                { label: 'Created', value: formatDate(user.createdAt) },
-                { label: 'Last updated', value: formatDate(user.updatedAt) },
-                { label: 'Timezone', value: user.timezone ?? '' },
-                {
-                  label: 'Account id',
-                  value: <span style={{ fontFamily: 'var(--font-mono)' }}>{user.id}</span>,
-                },
-              ]}
-            />
+            <div style={formStyle}>
+              <DescriptionList
+                items={[
+                  { label: 'Email', value: user.email },
+                  {
+                    label: 'Email verified',
+                    value: user.emailVerifiedAt ? formatDate(user.emailVerifiedAt) : 'Not verified',
+                  },
+                  {
+                    label: 'Last sign-in',
+                    value: user.lastLoginAt ? formatDate(user.lastLoginAt) : 'Never',
+                  },
+                  { label: 'Created', value: formatDate(user.createdAt) },
+                  { label: 'Last updated', value: formatDate(user.updatedAt) },
+                  { label: 'Timezone', value: user.timezone ?? '' },
+                  {
+                    label: 'Account id',
+                    value: <span style={{ fontFamily: 'var(--font-mono)' }}>{user.id}</span>,
+                  },
+                ]}
+              />
+              {canWrite && user.emailVerifiedAt === null ? (
+                <form action={resendVerificationEmail}>
+                  <input type="hidden" name="id" value={user.id} />
+                  <SubmitButton
+                    variant="secondary"
+                    size="sm"
+                    iconLeft="mail"
+                    pendingLabel="Sending…"
+                  >
+                    Resend verification email
+                  </SubmitButton>
+                </form>
+              ) : null}
+            </div>
           </Panel>
 
           <Panel title="Contribution">

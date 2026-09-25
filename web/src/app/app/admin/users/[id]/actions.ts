@@ -206,6 +206,27 @@ export async function setSubAdminPermissions(formData: FormData): Promise<void> 
 }
 
 /**
+ * POST users/:id/resend-verification. A 409 here means the account verified
+ * its email between page load and this click — worth its own notice rather
+ * than the generic "conflict" wording, since it is good news, not a failure.
+ */
+export async function resendVerificationEmail(formData: FormData): Promise<void> {
+  await requirePermission('user.write')
+
+  const id = formTrimmed(formData, 'id')
+  if (!id) return
+
+  let notice = 'verification-resent'
+  try {
+    await actionFetch<unknown>(`users/${id}/resend-verification`, { method: 'POST' })
+  } catch (error) {
+    notice = failureNotice(error, { 409: 'already-verified' })
+  }
+
+  redirect(`${LIST_PATH}/${id}?notice=${notice}`)
+}
+
+/**
  * DELETE users/:id, which is a soft delete: the row keeps its history, the
  * status becomes DEACTIVATED, every session is revoked and the email address is
  * released for reuse. The button is labelled for that, not for "delete".

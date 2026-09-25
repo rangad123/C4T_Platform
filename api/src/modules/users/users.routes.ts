@@ -166,6 +166,22 @@ usersRouter.delete(
   },
 )
 
+usersRouter.post(
+  '/:id/resend-verification',
+  requirePermission(PERMISSIONS.USER_WRITE),
+  validate({ params: userIdParam }),
+  async (req, res) => {
+    await service.resendVerificationEmail(param(req, 'id'))
+    await recordAudit({
+      req,
+      action: 'user.verification_resent',
+      entityType: 'User',
+      entityId: param(req, 'id'),
+    })
+    res.status(204).end()
+  },
+)
+
 // ─── Sub-Admin permission grants (§2.2 "Sub-Admin Permissions") ──────────────
 
 usersRouter.get(

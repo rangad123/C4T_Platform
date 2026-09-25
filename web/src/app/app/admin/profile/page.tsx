@@ -21,7 +21,13 @@ import { serverFetch } from '@/lib/api/server'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
 import { orDash, personName } from '@/lib/admin/format'
 import { EmailNotificationsPanel } from '@/components/settings/EmailNotificationsPanel'
-import { saveProfile, changePassword, revokeSession, signOutEverywhere } from './actions'
+import {
+  saveProfile,
+  changePassword,
+  resendVerificationEmail,
+  revokeSession,
+  signOutEverywhere,
+} from './actions'
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 import { timezoneOptions, withCurrent } from '@/lib/geo/source'
 
@@ -99,6 +105,14 @@ const NOTICES: Record<string, Notice> = {
   email_prefs_failed: {
     tone: 'error',
     text: 'That preference could not be saved. Try again in a moment.',
+  },
+  verification_sent: {
+    tone: 'success',
+    text: 'If that address needs verifying, a new email is on its way.',
+  },
+  verification_failed: {
+    tone: 'error',
+    text: 'Could not send that. Try again in a moment.',
   },
 
   // Profile failures
@@ -395,6 +409,14 @@ export default async function AdminProfilePage({
               },
             ]}
           />
+          {!profile.emailVerifiedAt ? (
+            <form action={resendVerificationEmail} style={{ marginTop: 'var(--space-5)' }}>
+              <input type="hidden" name="email" value={profile.email} />
+              <SubmitButton variant="secondary" size="sm" iconLeft="mail" pendingLabel="Sending…">
+                Resend verification email
+              </SubmitButton>
+            </form>
+          ) : null}
           <p
             style={{
               margin: 'var(--space-5) 0 0',

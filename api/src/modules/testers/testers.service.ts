@@ -63,6 +63,7 @@ const profileSelect = {
       phone: true,
       timezone: true,
       role: true,
+      emailVerifiedAt: true,
       lastLoginAt: true,
       createdAt: true,
     },

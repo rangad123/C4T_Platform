@@ -518,6 +518,30 @@ export async function removeWorkHistoryAction(formData: FormData): Promise<void>
   redirect(`${WORK_HISTORY_PATH}&notice=${notice}`, 'replace')
 }
 
+/**
+ * Posts to the same public `auth/resend-verification` the sign-up and
+ * sign-in screens use — it is a silent no-op for an already-verified
+ * address, so there is nothing to distinguish here; the page always reports
+ * success.
+ */
+export async function resendVerificationEmail(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+  const email = formTrimmed(formData, 'email')
+
+  let notice = 'verification-sent'
+  if (!email) {
+    notice = 'verification-failed'
+  } else {
+    try {
+      await actionFetch('auth/resend-verification', { method: 'POST', body: { email } })
+    } catch {
+      notice = 'verification-failed'
+    }
+  }
+
+  redirect(`${PROFILE_PATH}?notice=${notice}`, 'replace')
+}
+
 export async function acceptNdaAction(_formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
   let notice = 'nda-accepted'
