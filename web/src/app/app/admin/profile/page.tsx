@@ -604,7 +604,7 @@ export default async function AdminProfilePage({
               <Field
                 label="New password"
                 htmlFor="newPassword"
-                hint="At least 12 characters. Length is what the API checks, so a long phrase beats a short scramble."
+                hint="At least 12 characters, mixing upper, lower, a number and a symbol."
                 required
               >
                 <Input
@@ -616,6 +616,7 @@ export default async function AdminProfilePage({
                   autoComplete="new-password"
                   required
                   showPasswordToggle
+                  showStrength
                 />
               </Field>
 

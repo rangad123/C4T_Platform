@@ -57,7 +57,7 @@ export function HrResetPasswordForm({ token, invite }: { token: string; invite: 
           label={invite ? 'Password' : 'New password'}
           htmlFor="password"
           required
-          hint="At least 12 characters."
+          hint="At least 12 characters, mixing upper, lower, a number and a symbol."
         >
           <Input
             id="password"
@@ -68,6 +68,7 @@ export function HrResetPasswordForm({ token, invite }: { token: string; invite: 
             minLength={12}
             iconLeft="lock"
             showPasswordToggle
+            showStrength
           />
         </Field>
 

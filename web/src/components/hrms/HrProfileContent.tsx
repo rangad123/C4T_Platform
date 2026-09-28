@@ -114,7 +114,12 @@ export function HrProfileContent({
               showPasswordToggle
             />
           </Field>
-          <Field label="New password" htmlFor="newPassword" required hint="At least 12 characters.">
+          <Field
+            label="New password"
+            htmlFor="newPassword"
+            required
+            hint="At least 12 characters, mixing upper, lower, a number and a symbol."
+          >
             <Input
               id="newPassword"
               name="newPassword"
@@ -122,6 +127,7 @@ export function HrProfileContent({
               required
               minLength={12}
               showPasswordToggle
+              showStrength
             />
           </Field>
           <Field label="Confirm new password" htmlFor="confirmPassword" required>

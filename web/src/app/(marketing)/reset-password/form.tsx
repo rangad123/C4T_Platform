@@ -46,7 +46,7 @@ export default async function ResetPasswordForm({
           marginBottom: 'var(--space-6)',
         }}
       >
-        At least 12 characters. A long phrase beats a short scramble.
+        At least 12 characters, mixing upper, lower, a number and a symbol.
       </p>
 
       {error && ERROR_MESSAGES[error] ? (
@@ -87,6 +87,7 @@ export default async function ResetPasswordForm({
               maxLength={200}
               required
               showPasswordToggle
+              showStrength
             />
           </Field>
 

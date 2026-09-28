@@ -253,7 +253,7 @@ export default async function NewUserPage({
               label="Password"
               htmlFor="password"
               required
-              hint={`At least ${MIN_PASSWORD_LENGTH} characters. The account holder should change it after signing in.`}
+              hint={`At least ${MIN_PASSWORD_LENGTH} characters, mixing upper, lower, a number and a symbol. The account holder should change it after signing in.`}
             >
               <Input
                 id="password"
@@ -263,6 +263,8 @@ export default async function NewUserPage({
                 maxLength={200}
                 required
                 autoComplete="new-password"
+                showPasswordToggle
+                showStrength
               />
             </Field>
             <Field

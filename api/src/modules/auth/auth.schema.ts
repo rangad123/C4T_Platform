@@ -1,22 +1,10 @@
 import { z } from 'zod'
 import { phoneField } from '../../lib/phone.js'
+import { passwordField as password } from '../../lib/password-policy.js'
 import { Role } from '@prisma/client'
 import { ISO_COUNTRY_CODES } from '../../lib/iso-countries.js'
 
 const email = z.string().trim().toLowerCase().email('Enter a valid email address').max(255)
-
-/**
- * Minimum 12 characters. Length beats composition rules for real-world
- * resistance, so we require length and check nothing else beyond a blocklist.
- */
-const password = z
-  .string()
-  .min(12, 'Password must be at least 12 characters')
-  .max(200, 'Password must be at most 200 characters')
-  .refine(
-    (v) => !['password', '123456789012', 'qwertyuiop12'].includes(v.toLowerCase()),
-    'That password is too common',
-  )
 
 export const registerSchema = z
   .object({

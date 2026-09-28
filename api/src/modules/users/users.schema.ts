@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { Role, UserStatus } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 import { phoneField } from '../../lib/phone.js'
+import { passwordField } from '../../lib/password-policy.js'
 
 export const USER_SORT_FIELDS = ['createdAt', 'email', 'role', 'status', 'lastLoginAt'] as const
 
@@ -15,7 +16,7 @@ export const listUsersQuery = paginationQuery.extend({
 /** Admin-created accounts, including Sub-Admins (§2.2). */
 export const createUserSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(255),
-  password: z.string().min(12).max(200),
+  password: passwordField,
   role: z.nativeEnum(Role),
   firstName: z.string().trim().min(1).max(80),
   lastName: z.string().trim().max(80).optional(),

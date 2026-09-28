@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { HrRole, HrGender, HrEmployeeStatus, HrTaxRegime, CrmRole } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 import { phoneField } from '../../lib/phone.js'
+import { passwordField } from '../../lib/password-policy.js'
 
 /** `[A-Z]{5}[0-9]{4}[A-Z]` — the fixed Indian PAN format, e.g. "ABCDE1234F". */
 const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/
@@ -182,7 +183,7 @@ export const updateOwnDetailsSchema = z
  * every other password in HRMS has.
  */
 export const setTemporaryPasswordSchema = z.object({
-  password: z.string().min(12).max(200).optional(),
+  password: passwordField.optional(),
 })
 
 export type ListEmployeesQuery = z.infer<typeof listEmployeesQuery>

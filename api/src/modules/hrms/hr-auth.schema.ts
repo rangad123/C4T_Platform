@@ -1,10 +1,5 @@
 import { z } from 'zod'
-
-/** Same length-over-composition rule as the platform's own password schema. */
-const password = z
-  .string()
-  .min(12, 'Password must be at least 12 characters')
-  .max(200, 'Password must be at most 200 characters')
+import { passwordField as password } from '../../lib/password-policy.js'
 
 export const hrLoginSchema = z.object({
   email: z.string().trim().toLowerCase().email('Enter a valid email address').max(255),

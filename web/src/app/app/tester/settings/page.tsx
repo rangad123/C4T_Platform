@@ -296,7 +296,7 @@ export default async function TesterSettingsPage({
               <Field
                 label="New password"
                 htmlFor="newPassword"
-                hint="At least 12 characters. Length is what actually matters, so a long phrase beats a short scramble."
+                hint="At least 12 characters, mixing upper, lower, a number and a symbol."
                 required
               >
                 <Input
@@ -308,6 +308,7 @@ export default async function TesterSettingsPage({
                   autoComplete="new-password"
                   required
                   showPasswordToggle
+                  showStrength
                 />
               </Field>
               <Field label="Confirm new password" htmlFor="confirmPassword" required>

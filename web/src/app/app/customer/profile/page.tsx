@@ -524,7 +524,7 @@ export default async function CustomerProfilePage({
               <Field
                 label="New password"
                 htmlFor="newPassword"
-                hint="At least 12 characters."
+                hint="At least 12 characters, mixing upper, lower, a number and a symbol."
                 required
               >
                 <Input
@@ -536,6 +536,7 @@ export default async function CustomerProfilePage({
                   autoComplete="new-password"
                   required
                   showPasswordToggle
+                  showStrength
                 />
               </Field>
               <Field label="Confirm new password" htmlFor="confirmPassword" required>

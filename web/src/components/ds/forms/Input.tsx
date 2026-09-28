@@ -18,6 +18,13 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   showPasswordToggle?: boolean
   /** Accessible label for the toggle button. Defaults to "Show password". */
   passwordToggleLabel?: string
+  /**
+   * Render a live strength bar + requirements checklist beneath a NEW
+   * password field (never a "current password" or "confirm password" one —
+   * see `PasswordStrengthMeter`'s own comment for why the checks mirror the
+   * API's rule exactly). Also delegates to `PasswordToggleInput`.
+   */
+  showStrength?: boolean
 }
 
 /**
@@ -44,10 +51,11 @@ export const controlBase: CSSProperties = {
  * in the `.c4t-input` rules in tokens/interactions.css — never restyle them
  * here, and never suppress the focus ring.
  *
- * Server Component by default. The password show/hide toggle is the only
- * interactive path, and it delegates to `PasswordToggleInput` (a client
- * component) rather than pulling `useState` into this file — every other
- * `<Input>` in the app renders with zero client JS.
+ * Server Component by default. The password show/hide toggle and the
+ * strength meter are the only interactive paths, and both delegate to
+ * `PasswordToggleInput` (a client component) rather than pulling `useState`
+ * into this file — every other `<Input>` in the app renders with zero
+ * client JS.
  */
 export function Input({
   iconLeft,
@@ -57,11 +65,12 @@ export function Input({
   className,
   showPasswordToggle = false,
   passwordToggleLabel,
+  showStrength = false,
   type,
   ...rest
 }: InputProps) {
   const isPassword = type === 'password'
-  const canToggle = isPassword && showPasswordToggle
+  const canToggle = isPassword && (showPasswordToggle || showStrength)
 
   if (canToggle) {
     return (
@@ -72,6 +81,7 @@ export function Input({
         style={style}
         className={className}
         passwordToggleLabel={passwordToggleLabel}
+        showStrength={showStrength}
         {...rest}
       />
     )
