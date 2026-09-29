@@ -16,6 +16,7 @@ import {
 } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 import { TESTER_STATUSES } from '@/lib/domain/enums'
+import { countryOptions } from '@/lib/geo/source'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/testers'
@@ -251,14 +252,12 @@ export default async function TestersPage({
                     value: status,
                     allLabel: 'All statuses',
                   },
-                ]}
-                texts={[
                   {
                     name: 'countryCode',
                     label: 'Country',
+                    options: countryOptions(),
                     value: countryCode,
-                    placeholder: 'ISO 2-letter',
-                    maxLength: 2,
+                    allLabel: 'All countries',
                   },
                 ]}
                 sort={{
