@@ -1,4 +1,5 @@
 import { AssignmentStatus, type Prisma, Role } from '@prisma/client'
+import { PERMISSIONS } from '../../config/permissions.js'
 
 /**
  * List scoping — the same relationships as `relations.ts`, expressed as Prisma
@@ -26,6 +27,22 @@ function isPlatform(user: Express.AuthenticatedUser): boolean {
   return user.role === Role.ADMIN || user.role === Role.SUB_ADMIN
 }
 
+/**
+ * A Sub-Admin holding `project.scope_to_assigned` — see the matching check in
+ * `policy.ts`, kept as a separate one-line copy rather than a shared import so
+ * the two modules stay independent, per their own header comments.
+ */
+function isScopedSubAdmin(user: Express.AuthenticatedUser): boolean {
+  return (
+    user.role === Role.SUB_ADMIN && user.permissions.includes(PERMISSIONS.PROJECT_SCOPE_TO_ASSIGNED)
+  )
+}
+
+/** A project this manager is assigned to, via `ManagerAssignment`. */
+function assignedProjectsRelation(user: Express.AuthenticatedUser) {
+  return { managers: { some: { managerId: user.id } } }
+}
+
 // ─── Projects ────────────────────────────────────────────────────────────────
 
 /**
@@ -36,6 +53,7 @@ function isPlatform(user: Express.AuthenticatedUser): boolean {
  *   USER              — nothing
  */
 export function projectScope(user: Express.AuthenticatedUser): Prisma.ProjectWhereInput {
+  if (isScopedSubAdmin(user)) return assignedProjectsRelation(user)
   if (isPlatform(user)) return {}
 
   if (user.role === Role.CUSTOMER) {
@@ -64,6 +82,7 @@ export function projectScope(user: Express.AuthenticatedUser): Prisma.ProjectWhe
  * title-and-status-only endpoint rather than widening this.
  */
 export function bugScope(user: Express.AuthenticatedUser): Prisma.BugWhereInput {
+  if (isScopedSubAdmin(user)) return { project: assignedProjectsRelation(user) }
   if (isPlatform(user)) return {}
 
   if (user.role === Role.CUSTOMER) {
@@ -107,6 +126,7 @@ export function organisationScope(user: Express.AuthenticatedUser): Prisma.Organ
 // ─── Threads ─────────────────────────────────────────────────────────────────
 
 export function threadScope(user: Express.AuthenticatedUser): Prisma.ThreadWhereInput {
+  if (isScopedSubAdmin(user)) return { project: assignedProjectsRelation(user) }
   if (isPlatform(user)) return {}
   return { participants: { some: { userId: user.id } } }
 }
@@ -130,6 +150,7 @@ export function transactionScope(user: Express.AuthenticatedUser): Prisma.Transa
 
 /** Hidden ratings are visible to the admin side only. */
 export function ratingScope(user: Express.AuthenticatedUser): Prisma.RatingWhereInput {
+  if (isScopedSubAdmin(user)) return { project: assignedProjectsRelation(user) }
   if (isPlatform(user)) return {}
   return { isVisible: true }
 }

@@ -1,7 +1,18 @@
-import { BugStatus } from '@prisma/client'
+import { BugStatus, Role } from '@prisma/client'
 import { PERMISSIONS, type PermissionCode } from '../../config/permissions.js'
 import { ForbiddenError } from '../errors.js'
 import type { Relation, RelationSet } from './relations.js'
+
+/**
+ * A Sub-Admin holding `project.scope_to_assigned` — see the matching check in
+ * `scopes.ts`, kept as a separate one-line copy rather than a shared import so
+ * the two modules stay independent, per their own header comments.
+ */
+function isScopedSubAdmin(user: Express.AuthenticatedUser): boolean {
+  return (
+    user.role === Role.SUB_ADMIN && user.permissions.includes(PERMISSIONS.PROJECT_SCOPE_TO_ASSIGNED)
+  )
+}
 
 /**
  * The policy table — the normative half of access control.
@@ -296,8 +307,16 @@ export function can(
   }
 
   if (relations.has('platform:subadmin') && rule.relations.includes('platform:subadmin')) {
-    if (!rule.permission) return true
-    if (user.permissions.includes(rule.permission)) return true
+    // A scoped Sub-Admin does not get the platform-wide pass for anything a
+    // project's own manager could also do — they must hold that real
+    // relation instead, exactly like anyone else. `project:manager` is
+    // already computed correctly from ManagerAssignment in relations.ts, so
+    // this falls through to it below rather than granting outright.
+    const scopedOut = isScopedSubAdmin(user) && rule.relations.includes('project:manager')
+    if (!scopedOut) {
+      if (!rule.permission) return true
+      if (user.permissions.includes(rule.permission)) return true
+    }
     // Fall through: a sub-admin might still qualify through a non-platform
     // relation, e.g. they are personally a manager on this project.
   }

@@ -38,6 +38,8 @@ export const PERMISSIONS = {
   PROJECT_WRITE: 'project.write',
   PROJECT_ASSIGN: 'project.assign',
   PROJECT_DELETE: 'project.delete',
+  /** Restricts a Sub-Admin to projects (and their bugs/ratings/conversations) they are assigned to manage. */
+  PROJECT_SCOPE_TO_ASSIGNED: 'project.scope_to_assigned',
 
   // Organisations — §2.2 Organisation Management
   ORGANISATION_READ: 'organisation.read',
@@ -123,6 +125,13 @@ export const PERMISSION_CATALOGUE: PermissionDefinition[] = [
     group: PERMISSION_GROUPS.PROJECTS,
     label: 'Delete projects',
     description: 'Archive or delete a project and its data',
+  },
+  {
+    code: PERMISSIONS.PROJECT_SCOPE_TO_ASSIGNED,
+    group: PERMISSION_GROUPS.PROJECTS,
+    label: 'Scope to assigned projects only',
+    description:
+      'Restrict this Sub-Admin to the projects they are assigned to manage (Managers → Assign a project), instead of every project — also narrows the bugs, ratings and conversations they can see to those same projects.',
   },
 
   {
