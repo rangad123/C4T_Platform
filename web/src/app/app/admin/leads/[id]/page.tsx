@@ -284,6 +284,14 @@ export default async function LeadDetailPage({
                 gap: 'var(--space-5)',
               }}
             >
+              <DetailRow
+                label="Email"
+                value={
+                  <a href={`mailto:${lead.email}`} style={{ color: 'var(--text-primary)' }}>
+                    {lead.email}
+                  </a>
+                }
+              />
               <DetailRow label="Company" value={lead.company} />
               {lead.phone ? (
                 <DetailRow
