@@ -89,3 +89,5 @@ checklist.md
 *.mp4
 *.mov
 *.webm
+
+.claude/settings.local.json
