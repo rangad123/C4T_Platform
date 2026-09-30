@@ -63,7 +63,13 @@ const postAdminSelect = {
     // gallery looks right in development and scrambles in production.
     orderBy: { position: 'asc' },
   },
-  tags: { select: { tag: { select: { id: true, name: true, slug: true } } } },
+  // Same "no default order" trap as galleryImages above — without this, a
+  // freshly added tag can render anywhere in the chip row, not at the end,
+  // which reads as "my tag change didn't take".
+  tags: {
+    select: { tag: { select: { id: true, name: true, slug: true } } },
+    orderBy: { tag: { name: 'asc' } },
+  },
 } satisfies Prisma.BlogPostSelect
 
 type AdminPostRow = Prisma.BlogPostGetPayload<{ select: typeof postAdminSelect }>
@@ -128,7 +134,10 @@ const postPublicDetailSelect = {
     select: { caption: true, position: true, file: { select: { storageKey: true } } },
     orderBy: { position: 'asc' },
   },
-  tags: { select: { tag: { select: { name: true, slug: true } } } },
+  tags: {
+    select: { tag: { select: { name: true, slug: true } } },
+    orderBy: { tag: { name: 'asc' } },
+  },
 } satisfies Prisma.BlogPostSelect
 
 type PublicPostDetailRow = Prisma.BlogPostGetPayload<{ select: typeof postPublicDetailSelect }>

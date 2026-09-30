@@ -153,6 +153,7 @@ export default async function BlogPostDetailPage({
   const seededContent = bodyIsEmpty ? (blogTemplateHtml(sp.template) ?? post.content) : post.content
 
   const canWrite = hasPermission(user, 'blog.write')
+  const canManageTags = hasPermission(user, 'blog.manage_tags')
   const canPublish = hasPermission(user, 'blog.publish')
   const canDelete = hasPermission(user, 'blog.delete')
 
@@ -386,6 +387,7 @@ export default async function BlogPostDetailPage({
                   allTags={allTags ?? []}
                   defaultSelected={post.tags}
                   findOrCreateTag={findOrCreateTagAction}
+                  canCreateTags={canManageTags}
                 />
               </Field>
 

@@ -21,6 +21,18 @@ export interface TagComboboxProps {
    * managed entirely from here, there is no separate tag admin page.
    */
   findOrCreateTag: (name: string) => Promise<TagOption>
+  /**
+   * Whether the signed-in user holds `blog.manage_tags` — a permission
+   * separate from `blog.write`. Without it, `findOrCreateTag` 403s on a
+   * brand-new name. Previously this component tried the create anyway and
+   * only showed a small, easy-to-miss inline error, so the tag silently
+   * never made it into the post while the rest of the save succeeded —
+   * reported as "excerpt saves fine, tags don't". Gating the "Create"
+   * option itself on this prop means the failure never happens: a name
+   * that doesn't already exist gets an explanatory note instead of a
+   * button that quietly doesn't work.
+   */
+  canCreateTags: boolean
 }
 
 /**
@@ -30,7 +42,13 @@ export interface TagComboboxProps {
  * unnecessary complexity" note in the spec), and a "Create" option when the
  * typed name matches nothing.
  */
-export function TagCombobox({ name, allTags, defaultSelected, findOrCreateTag }: TagComboboxProps) {
+export function TagCombobox({
+  name,
+  allTags,
+  defaultSelected,
+  findOrCreateTag,
+  canCreateTags,
+}: TagComboboxProps) {
   const [selected, setSelected] = useState<TagOption[]>(() => [...defaultSelected])
   const [query, setQuery] = useState('')
   const [pending, startTransition] = useTransition()
@@ -161,7 +179,7 @@ export function TagCombobox({ name, allTags, defaultSelected, findOrCreateTag }:
                 {tag.name}
               </button>
             ))}
-            {!exactMatch ? (
+            {!exactMatch && canCreateTags ? (
               <button
                 type="button"
                 onClick={createTag}
@@ -184,6 +202,18 @@ export function TagCombobox({ name, allTags, defaultSelected, findOrCreateTag }:
                 <Icon name="plus" size={14} />
                 Create &quot;{trimmedQuery}&quot;
               </button>
+            ) : null}
+            {!exactMatch && !canCreateTags ? (
+              <span
+                style={{
+                  padding: 'var(--space-2) var(--space-3)',
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                No matching tag. Creating a new tag needs the &quot;Manage blog tags&quot;
+                permission — ask an admin.
+              </span>
             ) : null}
             {matches.length === 0 && exactMatch ? (
               <span
