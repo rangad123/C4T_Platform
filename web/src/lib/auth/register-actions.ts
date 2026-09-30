@@ -52,6 +52,12 @@ export async function registerAction(formData: FormData): Promise<void> {
   const next = formTrimmed(formData, 'next')
   const honeypot = formTrimmed(formData, 'honeypot')
 
+  // Someone completing a team invitation joins the inviting organisation once
+  // they accept it — they must not also be forced to create a new one of
+  // their own just to get through this form. See the matching check in
+  // form.tsx, which hides the Company field under the same condition.
+  const joiningViaInvitation = next.startsWith('/invitations/')
+
   // A hidden field no human fills in — see its input in form.tsx. Bots that
   // complete every field trip it, and get the same redirect a real sign-up
   // would, without ever reaching the API or creating anything: telling them
@@ -91,7 +97,7 @@ export async function registerAction(formData: FormData): Promise<void> {
   if (password !== confirmPassword) {
     backToForm({ ...echo, error: 'password_mismatch' })
   }
-  if (role === 'CUSTOMER' && !organisationName) {
+  if (role === 'CUSTOMER' && !organisationName && !joiningViaInvitation) {
     backToForm({ ...echo, error: 'organisation_required' })
   }
 
@@ -106,7 +112,8 @@ export async function registerAction(formData: FormData): Promise<void> {
         firstName,
         ...(lastName ? { lastName } : {}),
         intendedRole: role,
-        ...(role === 'CUSTOMER' ? { organisationName } : {}),
+        ...(role === 'CUSTOMER' && organisationName ? { organisationName } : {}),
+        ...(joiningViaInvitation ? { joiningViaInvitation: true } : {}),
         acceptedTerms: true,
       }),
       cache: 'no-store',

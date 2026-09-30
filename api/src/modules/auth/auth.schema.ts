@@ -41,14 +41,25 @@ export const registerSchema = z
     }),
     /** Required when intendedRole is CUSTOMER — creates the organisation. */
     organisationName: z.string().trim().min(2).max(160).optional(),
+    /**
+     * Set when this signup is completing a team invitation (§42) rather than
+     * starting fresh. A customer in this case joins the inviting organisation
+     * once they accept the invitation — they must not also get a brand-new
+     * one of their own, so `organisationName` is not required here.
+     */
+    joiningViaInvitation: z.boolean().optional(),
     acceptedTerms: z.literal(true, {
       errorMap: () => ({ message: 'You must accept the Terms of Use to register' }),
     }),
   })
-  .refine((data) => data.intendedRole !== Role.CUSTOMER || !!data.organisationName, {
-    message: 'Organisation name is required for a customer account',
-    path: ['organisationName'],
-  })
+  .refine(
+    (data) =>
+      data.intendedRole !== Role.CUSTOMER || !!data.organisationName || data.joiningViaInvitation,
+    {
+      message: 'Organisation name is required for a customer account',
+      path: ['organisationName'],
+    },
+  )
 
 export const loginSchema = z.object({
   email,

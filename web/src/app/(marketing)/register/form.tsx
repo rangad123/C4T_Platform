@@ -370,6 +370,12 @@ function SignUpForm({
   }
 }) {
   const copy = ROLE_COPY[role]
+  // A person completing a team invitation joins the inviting organisation
+  // once they accept it (§42) — asking them to name a company here would
+  // create a second, unwanted organisation of their own. See the matching
+  // check in register-actions.ts, which is the one that actually enforces
+  // this; this only decides what the form shows.
+  const isInvitedSignup = params.next?.startsWith('/invitations/') ?? false
 
   return (
     <>
@@ -430,7 +436,10 @@ function SignUpForm({
             dialog is wide enough for both and it keeps the form to four rows
             instead of six. */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
-          <Field label="Work email" htmlFor="email" required>
+          {/* A tester signs up with whatever email they use day to day, not
+              necessarily a work one — "Work email" and its placeholder only
+              fit the customer side, which is signing up as an organisation. */}
+          <Field label={role === 'customer' ? 'Work email' : 'Email'} htmlFor="email" required>
             <Input
               id="email"
               name="email"
@@ -438,7 +447,7 @@ function SignUpForm({
               autoComplete="email"
               required
               defaultValue={params.email ?? ''}
-              placeholder="you@company.com"
+              placeholder={role === 'customer' ? 'you@company.com' : 'you@example.com'}
               iconLeft="mail"
             />
           </Field>
@@ -482,7 +491,29 @@ function SignUpForm({
           />
         </Field>
 
-        {role === 'customer' ? (
+        {role === 'customer' && isInvitedSignup ? (
+          <div
+            role="status"
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 'var(--space-3)',
+              padding: 'var(--space-4) var(--space-5)',
+              background: 'var(--status-info-bg)',
+              color: 'var(--status-info-fg)',
+              borderRadius: 'var(--radius-input)',
+              fontSize: 'var(--type-body-sm-size)',
+              lineHeight: 1.45,
+            }}
+          >
+            <Icon name="users" size={18} style={{ flex: 'none', marginTop: 2 }} />
+            <span>
+              You are joining an existing team from an invitation, so no company name is needed.
+            </span>
+          </div>
+        ) : null}
+
+        {role === 'customer' && !isInvitedSignup ? (
           <Field label="Company" htmlFor="organisationName" required>
             <Input
               id="organisationName"
