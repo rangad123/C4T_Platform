@@ -12,7 +12,7 @@ import { Field } from '@/components/ds/forms/Field'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { serverFetch } from '@/lib/api/server'
 import { requireRole } from '@/lib/auth/session'
-import { personName, titleCase } from '@/lib/admin/format'
+import { formatDateTime, personName, titleCase } from '@/lib/admin/format'
 import { ApiError } from '@/lib/api/types'
 import { closeThread, postThreadMessage } from './actions'
 
@@ -49,20 +49,6 @@ interface ThreadDetail {
   participants: readonly { lastReadAt: string | null; user: Person }[]
   _count: { messages: number }
   messages: readonly ThreadMessage[]
-}
-
-/** Day and time. A conversation is unreadable without the clock. */
-function formatWhen(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 /** Attachment sizes, from the API's `sizeBytes` integer. */
@@ -178,7 +164,7 @@ export default async function ThreadDetailPage({
       title={title}
       subtitle={
         <>
-          Started by {personName(thread.createdBy)} on {formatWhen(thread.createdAt)} ·{' '}
+          Started by {personName(thread.createdBy)} on {formatDateTime(thread.createdAt)} ·{' '}
           {messageCount} {messageCount === 1 ? 'message' : 'messages'}
         </>
       }
@@ -212,8 +198,8 @@ export default async function ThreadDetailPage({
                   wide: true,
                 },
                 { label: 'Started by', value: personName(thread.createdBy) },
-                { label: 'Started', value: formatWhen(thread.createdAt) },
-                { label: 'Last activity', value: formatWhen(thread.lastMessageAt) },
+                { label: 'Started', value: formatDateTime(thread.createdAt) },
+                { label: 'Last activity', value: formatDateTime(thread.lastMessageAt) },
                 { label: 'Messages', value: messageCount },
                 { label: 'State', value: thread.isClosed ? 'Closed' : 'Open' },
               ]}
@@ -267,7 +253,7 @@ export default async function ThreadDetailPage({
                       }}
                     >
                       {participant.lastReadAt
-                        ? `Last read ${formatWhen(participant.lastReadAt)}`
+                        ? `Last read ${formatDateTime(participant.lastReadAt)}`
                         : 'Not read yet'}
                     </span>
                   </li>
@@ -370,7 +356,7 @@ export default async function ThreadDetailPage({
                         fontSize: 'var(--type-body-sm-size)',
                       }}
                     >
-                      {formatWhen(message.createdAt)}
+                      {formatDateTime(message.createdAt)}
                       {message.editedAt ? ' · edited' : ''}
                     </span>
                   </header>

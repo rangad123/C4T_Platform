@@ -10,7 +10,7 @@ import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { serverFetch } from '@/lib/api/server'
 import { requirePermission } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
-import { personName } from '@/lib/admin/format'
+import { formatDateTime, personName } from '@/lib/admin/format'
 import { deleteDraftAction } from '../../broadcast-actions'
 
 /**
@@ -102,8 +102,8 @@ export default async function MessageDetailPage({ params }: { params: Promise<{ 
       title={title}
       subtitle={
         isDraft
-          ? `Draft · last edited ${formatWhen(message.updatedAt)}`
-          : `Sent ${formatWhen(message.sentAt)} by ${personName(message.sender)}`
+          ? `Draft · last edited ${formatDateTime(message.updatedAt)}`
+          : `Sent ${formatDateTime(message.sentAt)} by ${personName(message.sender)}`
       }
       badges={<StatusBadge status={message.status} />}
       aside={
@@ -176,7 +176,7 @@ export default async function MessageDetailPage({ params }: { params: Promise<{ 
                   value: isDraft ? '—' : `${message.readCount} of ${message.recipients.length}`,
                 },
                 { label: 'Template', value: message.template?.name ?? '—' },
-                { label: 'Created', value: formatWhen(message.createdAt) },
+                { label: 'Created', value: formatDateTime(message.createdAt) },
               ]}
             />
           </div>
@@ -303,7 +303,7 @@ function ReadState({ draft, recipient }: { draft: boolean; recipient: Recipient 
           Opened
         </Badge>
         <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}>
-          {formatWhen(recipient.readAt)}
+          {formatDateTime(recipient.readAt)}
         </span>
       </span>
     )
@@ -325,17 +325,4 @@ function StatusBadge({ status }: { status: 'DRAFT' | 'SENT' }) {
       Draft
     </Badge>
   )
-}
-
-function formatWhen(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }

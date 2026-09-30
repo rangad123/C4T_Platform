@@ -3,7 +3,7 @@ import { ListFilters } from '@/components/admin/ListFilters'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { searchTerm } from '@/lib/admin/format'
+import { formatDateTime, searchTerm } from '@/lib/admin/format'
 import { requirePermission } from '@/lib/auth/session'
 import type { TableColumn } from '@/components/ds/admin/Table'
 import { CommunicationTabs } from './tabs'
@@ -122,7 +122,7 @@ export default async function CommunicationPage({
       key: 'when',
       header: tab === 'SENT' ? 'Sent' : 'Last edited',
       align: 'right',
-      render: (row) => formatWhen(row.status === 'SENT' ? row.sentAt : row.updatedAt),
+      render: (row) => formatDateTime(row.status === 'SENT' ? row.sentAt : row.updatedAt),
     },
   ]
 
@@ -244,21 +244,4 @@ function ReadSummary({ rows }: { rows: readonly BroadcastRow[] }) {
 function firstLine(body: string): string {
   const line = body.split('\n').find((l) => l.trim().length > 0) ?? ''
   return line.length > 120 ? `${line.slice(0, 119)}…` : line
-}
-
-/**
- * Day and time, not just the day — two messages that both say "14 Aug 2026"
- * tell you nothing about which went out first.
- */
-function formatWhen(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }

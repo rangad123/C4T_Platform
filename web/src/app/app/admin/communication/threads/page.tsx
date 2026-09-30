@@ -3,7 +3,7 @@ import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { Badge } from '@/components/ds/core/Badge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
-import { personName, titleCase } from '@/lib/admin/format'
+import { formatDateTime, personName, titleCase } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 import { CommunicationTabs } from '../tabs'
 
@@ -27,27 +27,6 @@ interface ThreadRow {
   createdBy: { id: string; firstName: string | null; lastName: string | null; role: string } | null
   participants: readonly ThreadParticipant[]
   _count: { messages: number }
-}
-
-/**
- * Day and time, not just the day.
- *
- * `formatDate` in `@/lib/admin/format` drops the clock, which is right for a
- * start date and wrong for "last activity" — two threads that both say
- * "14 Aug 2026" tell you nothing about which one is moving. Local to this page
- * rather than added to the shared module, which is not mine to extend.
- */
-function formatWhen(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 /** A thread's subject is optional in the schema, so every row needs a fallback. */
@@ -155,7 +134,7 @@ export default async function CommunicationThreadsPage({
       key: 'activity',
       header: 'Last activity',
       align: 'right',
-      render: (row) => formatWhen(row.lastMessageAt ?? row.createdAt),
+      render: (row) => formatDateTime(row.lastMessageAt ?? row.createdAt),
     },
   ]
 

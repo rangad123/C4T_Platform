@@ -37,12 +37,25 @@ export function titleCase(value: string): string {
     )
 }
 
+/*
+ * These render inside Server Components — on the Node.js process, not the
+ * admin's browser. Without an explicit `timeZone`, `Intl`/`toLocaleString`
+ * falls back to the SERVER's own zone (UTC in production), not India's, so
+ * every date and time here was off by a fixed 5:30. See `todayInIndia` in
+ * `api/src/lib/hrms/hr-calendar.ts` for the same fix applied server-side.
+ */
+
 /** `2026-08-14T12:09:18.713Z` → `14 Aug 2026`. */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  })
 }
 
 /** Same date format as `formatDate`, with hours and minutes appended. */
@@ -56,6 +69,7 @@ export function formatDateTime(iso: string | null | undefined): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   })
 }
 
@@ -168,23 +182,28 @@ export function formatInboxTime(value: string | null | undefined): string {
   if (Number.isNaN(then.getTime())) return ''
 
   const now = new Date()
+  // Calendar-day comparison, in India — not the server's own UTC calendar day.
+  // Two instants a few minutes apart, either side of 00:00 IST, must not be
+  // read as "yesterday" just because the server's own clock has already
+  // rolled over to the next UTC day.
+  const IST = 'Asia/Kolkata' as const
   const sameDay =
-    then.getFullYear() === now.getFullYear() &&
-    then.getMonth() === now.getMonth() &&
-    then.getDate() === now.getDate()
+    then.toLocaleDateString('en-CA', { timeZone: IST }) ===
+    now.toLocaleDateString('en-CA', { timeZone: IST })
 
   if (sameDay) {
-    return then.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    return then.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: IST })
   }
 
   const daysAgo = (now.getTime() - then.getTime()) / 86_400_000
   if (daysAgo >= 0 && daysAgo < 7) {
-    return then.toLocaleDateString('en-GB', { weekday: 'short' })
+    return then.toLocaleDateString('en-GB', { weekday: 'short', timeZone: IST })
   }
 
   return then.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'short',
+    timeZone: IST,
     ...(then.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
   })
 }

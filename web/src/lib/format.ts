@@ -7,10 +7,18 @@
  * helper so we never round-trip through `Number`.
  */
 
+/*
+ * These formatters run inside Server Components — on the Node.js process,
+ * not the reader's browser. Without an explicit `timeZone`, `Intl` falls
+ * back to the SERVER's own zone (UTC in production), not India's, so every
+ * date and time rendered here was off by a fixed 5:30. See `todayInIndia` in
+ * `api/src/lib/hrms/hr-calendar.ts` for the same fix applied server-side.
+ */
 const date = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
   month: 'short',
   year: 'numeric',
+  timeZone: 'Asia/Kolkata',
 })
 
 const dateTime = new Intl.DateTimeFormat('en-GB', {
@@ -19,6 +27,7 @@ const dateTime = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
   hour: '2-digit',
   minute: '2-digit',
+  timeZone: 'Asia/Kolkata',
 })
 
 export const format = {
