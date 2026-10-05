@@ -47,7 +47,6 @@ const profileSelect = {
   linkedinUrl: true,
   profession: true,
   verifiedAt: true,
-  rejectionReason: true,
   ndaAcceptedAt: true,
   ndaFileId: true,
   ndaFile: { select: { id: true, originalName: true, mimeType: true, sizeBytes: true } },
@@ -641,7 +640,6 @@ export async function changeTesterStatus(
         status,
         verifiedAt: status === TesterStatus.VERIFIED ? new Date() : null,
         verifiedById: status === TesterStatus.VERIFIED ? actorId : null,
-        rejectionReason: status === TesterStatus.REJECTED ? (reason ?? null) : null,
       },
       select: profileSelect,
     })
@@ -681,10 +679,10 @@ export async function changeTesterStatus(
  * review.
  *
  * Deliberately narrow: only ever moves a profile OUT of APPLIED. A tester an
- * admin has already put UNDER_REVIEW, REJECTED or SUSPENDED stays exactly
- * there — re-confirming an email (or a token used twice) must never undo a
- * real decision someone already made. No-op, not an error, for a user who
- * is not a tester at all, or whose profile is already past APPLIED.
+ * admin has already SUSPENDED stays exactly there — re-confirming an email
+ * (or a token used twice) must never undo a real decision someone already
+ * made. No-op, not an error, for a user who is not a tester at all, or whose
+ * profile is already past APPLIED.
  */
 export async function verifyTesterOnEmailConfirmed(userId: string): Promise<void> {
   const profile = await prisma.testerProfile.findUnique({

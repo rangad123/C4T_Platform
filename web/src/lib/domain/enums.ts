@@ -79,13 +79,7 @@ export const BUG_REPRODUCIBILITY_OPTIONS = options(BUG_REPRODUCIBILITIES)
 
 export const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
 export const USER_STATUSES = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED'] as const
-export const TESTER_STATUSES = [
-  'APPLIED',
-  'UNDER_REVIEW',
-  'VERIFIED',
-  'REJECTED',
-  'SUSPENDED',
-] as const
+export const TESTER_STATUSES = ['APPLIED', 'VERIFIED', 'SUSPENDED'] as const
 export const ORGANISATION_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const
 export const ORG_MEMBER_ROLES = ['OWNER', 'MEMBER'] as const
 

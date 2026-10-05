@@ -81,9 +81,7 @@ enum OrgMemberRole {
 /// Tester onboarding pipeline, §2.2 "Crowd Tester Management".
 enum TesterStatus {
   APPLIED
-  UNDER_REVIEW
   VERIFIED
-  REJECTED
   SUSPENDED
 }
 
@@ -688,10 +686,9 @@ model TesterProfile {
   bugsAcceptedCount      Int      @default(0) @map("bugs_accepted_count")
   projectsCompletedCount Int      @default(0) @map("projects_completed_count")
 
-  verifiedAt      DateTime? @map("verified_at")
-  verifiedById    String?   @map("verified_by_id")
-  rejectionReason String?   @map("rejection_reason")
-  ndaAcceptedAt   DateTime? @map("nda_accepted_at")
+  verifiedAt    DateTime? @map("verified_at")
+  verifiedById  String?   @map("verified_by_id")
+  ndaAcceptedAt DateTime? @map("nda_accepted_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

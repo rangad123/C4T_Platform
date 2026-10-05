@@ -108,16 +108,11 @@ export const ndaDocumentSchema = z.object({
   fileId: z.string().cuid(),
 })
 
-/** §2.2 — Admin verifies, rejects or suspends a tester. */
-export const changeTesterStatusSchema = z
-  .object({
-    status: z.nativeEnum(TesterStatus),
-    reason: z.string().trim().max(1000).optional(),
-  })
-  .refine((d) => d.status !== TesterStatus.REJECTED || !!d.reason, {
-    message: 'A reason is required when rejecting a tester',
-    path: ['reason'],
-  })
+/** §2.2 — Admin verifies or suspends a tester. */
+export const changeTesterStatusSchema = z.object({
+  status: z.nativeEnum(TesterStatus),
+  reason: z.string().trim().max(1000).optional(),
+})
 
 export const deviceSchema = z.object({
   type: z.nativeEnum(DeviceType),

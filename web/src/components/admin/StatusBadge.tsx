@@ -38,7 +38,6 @@ const TONES: Record<string, Tone> = {
   PENDING: 'warning',
   PENDING_VERIFICATION: 'warning',
   IN_REVIEW: 'warning',
-  UNDER_REVIEW: 'warning',
   PAUSED: 'warning',
   REOPENED: 'warning',
   IN_PROGRESS: 'info',

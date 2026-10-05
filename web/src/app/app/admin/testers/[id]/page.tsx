@@ -26,7 +26,8 @@ import { Modal } from '@/components/admin/Modal'
 import { loadList, parsePage } from '@/lib/admin/list'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, stars, titleCase } from '@/lib/admin/format'
-import { setTesterStatus, rejectTester, rateTesterAction } from './actions'
+import { TESTER_STATUS_OPTIONS } from '@/lib/domain/enums'
+import { setTesterStatus, rateTesterAction } from './actions'
 
 /**
  * `/app/admin/testers/[id]` — one crowd tester, §2.2 "Onboard, verify, manage,
@@ -44,14 +45,6 @@ import { setTesterStatus, rejectTester, rateTesterAction } from './actions'
 
 const BASE = '/app/admin/testers'
 const RATINGS_PAGE_SIZE = 10
-
-/** The transitions that need no reason. REJECTED has its own form. */
-const WORKFLOW_STATUSES = ['APPLIED', 'UNDER_REVIEW', 'VERIFIED', 'SUSPENDED'] as const
-
-const WORKFLOW_OPTIONS = WORKFLOW_STATUSES.map((status) => ({
-  value: status,
-  label: titleCase(status),
-}))
 
 interface TesterDevice {
   id: string
@@ -83,7 +76,6 @@ interface TesterDetail {
   bugsAcceptedCount: number
   projectsCompletedCount: number
   verifiedAt: string | null
-  rejectionReason: string | null
   ndaAcceptedAt: string | null
   createdAt: string
   user: {
@@ -650,9 +642,6 @@ export default async function TesterDetailPage({
   ]
   const average = toRating(tester.ratingAverage)
   const location = [tester.city, tester.countryCode].filter(Boolean).join(', ')
-  const currentWorkflowStatus = (WORKFLOW_STATUSES as readonly string[]).includes(tester.status)
-    ? tester.status
-    : 'UNDER_REVIEW'
 
   return (
     <DetailShell
@@ -702,17 +691,6 @@ export default async function TesterDetailPage({
             {canVerify ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <StatusBadge status={tester.status} />
-                {tester.rejectionReason ? (
-                  <p
-                    style={{
-                      margin: 0,
-                      color: 'var(--text-secondary)',
-                      fontSize: 'var(--type-body-sm-size)',
-                    }}
-                  >
-                    {tester.rejectionReason}
-                  </p>
-                ) : null}
               </div>
             ) : (
               <div
@@ -746,8 +724,8 @@ export default async function TesterDetailPage({
                     <Select
                       id="status"
                       name="status"
-                      defaultValue={currentWorkflowStatus}
-                      options={WORKFLOW_OPTIONS}
+                      defaultValue={tester.status}
+                      options={TESTER_STATUS_OPTIONS}
                     />
                   </Field>
                   <Field
@@ -767,36 +745,6 @@ export default async function TesterDetailPage({
                     Save status
                   </SubmitButton>
                 </TrackedForm>
-
-                <form
-                  action={rejectTester}
-                  style={{
-                    ...FORM_STYLE,
-                    paddingTop: 'var(--space-6)',
-                    borderTop: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  <input type="hidden" name="id" value={tester.id} />
-                  <Field
-                    label="Reject this application"
-                    htmlFor="reason"
-                    required
-                    hint="The reason is required, and the tester reads it. Say what was missing so they can reapply."
-                  >
-                    <Textarea
-                      id="reason"
-                      name="reason"
-                      rows={4}
-                      required
-                      maxLength={1000}
-                      defaultValue={tester.rejectionReason ?? ''}
-                      placeholder="Which checks did not pass"
-                    />
-                  </Field>
-                  <SubmitButton variant="secondary" fullWidth pendingLabel="Rejecting…">
-                    Reject application
-                  </SubmitButton>
-                </form>
               </div>
             </Modal>
           ) : null}
@@ -857,7 +805,6 @@ export default async function TesterDetailPage({
                   value: tester.verifiedAt ? formatDate(tester.verifiedAt) : null,
                 },
                 { label: 'Bio', value: tester.bio, wide: true },
-                { label: 'Rejection reason', value: tester.rejectionReason, wide: true },
               ]}
             />
           </Panel>

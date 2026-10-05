@@ -174,8 +174,6 @@ function titleCase(value: string): string {
 export const RECIPIENT_STATUSES: readonly { value: string; label: string }[] = [
   { value: 'VERIFIED', label: 'Verified' },
   { value: 'APPLIED', label: 'Applied' },
-  { value: 'UNDER_REVIEW', label: 'Under review' },
-  { value: 'REJECTED', label: 'Rejected' },
   { value: 'SUSPENDED', label: 'Suspended' },
 ]
 
