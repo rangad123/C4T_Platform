@@ -88,9 +88,9 @@ export const ROLE_BY_NAME: Record<string, Role> = {
 /** `usr_active` / `activity_status`, both enum('active','inactive'). */
 export const USER_STATUS: Record<string, UserStatus> = {
   active: UserStatus.ACTIVE,
-  inactive: UserStatus.DEACTIVATED,
+  inactive: UserStatus.ARCHIVED,
   suspended: UserStatus.SUSPENDED,
-  pending: UserStatus.PENDING_VERIFICATION,
+  pending: UserStatus.PENDING,
 }
 
 /**

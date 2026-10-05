@@ -95,8 +95,7 @@ export async function authenticate(
   const user = session.user
   if (!user || user.deletedAt) throw new UnauthorizedError('Account no longer exists')
   if (user.status === UserStatus.SUSPENDED) throw new ForbiddenError('This account is suspended')
-  if (user.status === UserStatus.DEACTIVATED)
-    throw new ForbiddenError('This account is deactivated')
+  if (user.status === UserStatus.ARCHIVED) throw new ForbiddenError('This account is deactivated')
 
   req.user = {
     id: user.id,

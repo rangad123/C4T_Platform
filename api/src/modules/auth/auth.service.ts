@@ -186,7 +186,7 @@ export async function register(
         email: input.email,
         passwordHash,
         role: input.intendedRole,
-        status: UserStatus.PENDING_VERIFICATION,
+        status: UserStatus.PENDING,
         firstName: input.firstName,
         lastName: input.lastName ?? null,
         phone: input.phone ?? null,
@@ -233,7 +233,7 @@ export async function register(
       await tx.testerProfile.create({
         data: {
           userId: user.id,
-          status: TesterStatus.APPLIED,
+          status: TesterStatus.PENDING,
           countryCode: input.countryCode ?? null,
         },
       })
@@ -326,8 +326,7 @@ export async function login(
   }
 
   if (record.status === UserStatus.SUSPENDED) throw new ForbiddenError('This account is suspended')
-  if (record.status === UserStatus.DEACTIVATED)
-    throw new ForbiddenError('This account is deactivated')
+  if (record.status === UserStatus.ARCHIVED) throw new ForbiddenError('This account is deactivated')
 
   /**
    * UPGRADE THE HASH. This is the only moment the plaintext is legitimately in
@@ -417,7 +416,7 @@ export async function refresh(
     throw new UnauthorizedError('Account no longer exists')
   if (session.user.status === UserStatus.SUSPENDED)
     throw new ForbiddenError('This account is suspended')
-  if (session.user.status === UserStatus.DEACTIVATED)
+  if (session.user.status === UserStatus.ARCHIVED)
     throw new ForbiddenError('This account is deactivated')
 
   const user = await loadPublicUser(session.userId)
@@ -583,11 +582,11 @@ export async function verifyEmail(rawToken: string): Promise<PublicUser> {
       where: { id: stored.userId },
       data: { emailVerifiedAt: new Date() },
     }),
-    // Promote out of PENDING_VERIFICATION only. updateMany lets us filter on
+    // Promote out of PENDING only. updateMany lets us filter on
     // status, so verifying an old link can never resurrect a suspended or
     // deactivated account.
     prisma.user.updateMany({
-      where: { id: stored.userId, status: UserStatus.PENDING_VERIFICATION },
+      where: { id: stored.userId, status: UserStatus.PENDING },
       data: { status: UserStatus.ACTIVE },
     }),
   ])
@@ -837,7 +836,7 @@ export async function signInWithGoogle(
           // Google vouching for the address is at least as strong as our own
           // emailed link, so an unverified local account becomes verified and
           // active here rather than being left in limbo.
-          ...(existing.status === UserStatus.PENDING_VERIFICATION
+          ...(existing.status === UserStatus.PENDING
             ? { status: UserStatus.ACTIVE, emailVerifiedAt: new Date() }
             : {}),
         },
@@ -859,7 +858,7 @@ export async function signInWithGoogle(
         role: signUpRole,
         // Google has already proven the address, so there is nothing for our
         // own verification email to add.
-        status: identity.emailVerified ? UserStatus.ACTIVE : UserStatus.PENDING_VERIFICATION,
+        status: identity.emailVerified ? UserStatus.ACTIVE : UserStatus.PENDING,
         emailVerifiedAt: identity.emailVerified ? new Date() : null,
         firstName: identity.firstName ?? null,
         lastName: identity.lastName ?? null,
@@ -882,7 +881,7 @@ export async function signInWithGoogle(
     // gives us no company name, so that is collected during onboarding.
     if (signUpRole === Role.TESTER) {
       await tx.testerProfile.create({
-        data: { userId: created.id, status: TesterStatus.APPLIED },
+        data: { userId: created.id, status: TesterStatus.PENDING },
       })
     }
 
@@ -896,5 +895,5 @@ export async function signInWithGoogle(
 /** Shared status gate for the Google paths. */
 function assertUsableStatus(status: UserStatus): void {
   if (status === UserStatus.SUSPENDED) throw new ForbiddenError('This account is suspended')
-  if (status === UserStatus.DEACTIVATED) throw new ForbiddenError('This account is deactivated')
+  if (status === UserStatus.ARCHIVED) throw new ForbiddenError('This account is deactivated')
 }

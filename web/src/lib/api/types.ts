@@ -49,7 +49,7 @@ export interface ValidationDetail {
 
 export type Role = 'USER' | 'CUSTOMER' | 'TESTER' | 'ADMIN' | 'SUB_ADMIN'
 
-export type UserStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED'
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED'
 
 /** Shape returned by GET /v1/auth/me. */
 export interface SessionUser {

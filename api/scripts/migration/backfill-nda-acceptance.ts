@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 
   const assignable = await prisma.testerProfile.count({
     where: {
-      status: 'VERIFIED',
+      status: 'ACTIVE',
       ndaAcceptedAt: { not: null },
       user: { status: 'ACTIVE', role: 'TESTER' },
     },

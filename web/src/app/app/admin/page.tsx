@@ -160,7 +160,7 @@ export default async function AdminDashboardPage({
   }
 
   const activeProjects = stats.projects.byStatus.IN_PROGRESS ?? 0
-  const verifiedTesters = stats.testers.byStatus.VERIFIED ?? 0
+  const verifiedTesters = stats.testers.byStatus.ACTIVE ?? 0
   const newLeads = stats.leads?.NEW ?? 0
   const narrative = buildNarrative(stats, newLeads)
 
@@ -229,7 +229,7 @@ export default async function AdminDashboardPage({
             icon="user-check"
             label="Verified testers"
             value={verifiedTesters}
-            href="/app/admin/testers?status=VERIFIED"
+            href="/app/admin/testers?status=ACTIVE"
           />
           <KpiCard
             icon="clock"

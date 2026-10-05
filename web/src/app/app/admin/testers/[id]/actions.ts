@@ -6,7 +6,6 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { requirePermission } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 import { ApiError } from '@/lib/api/types'
-import { TESTER_STATUSES } from '@/lib/domain/enums'
 
 /**
  * Server Action for the tester verification workflow (§2.2 "Onboard, verify,
@@ -20,12 +19,18 @@ import { TESTER_STATUSES } from '@/lib/domain/enums'
  * is a POST endpoint reachable without going through the page, so the gate has to
  * be here too. The API enforces `tester.verify` independently — this only avoids
  * a pointless round trip and sends the wrong role home.
+ *
+ * Deliberately narrower than the full `TESTER_STATUSES` vocabulary — ARCHIVED
+ * is refused here even if posted by hand, so it cannot be set on a tester
+ * directly. It only ever follows from the underlying account being archived
+ * (see `syncTesterArchivedState` in users.service.ts).
  */
+const EDITABLE_TESTER_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED'] as const
 
-type TesterStatusValue = (typeof TESTER_STATUSES)[number]
+type TesterStatusValue = (typeof EDITABLE_TESTER_STATUSES)[number]
 
 function isTesterStatus(value: string): value is TesterStatusValue {
-  return (TESTER_STATUSES as readonly string[]).includes(value)
+  return (EDITABLE_TESTER_STATUSES as readonly string[]).includes(value)
 }
 
 /**

@@ -26,8 +26,20 @@ import { Modal } from '@/components/admin/Modal'
 import { loadList, parsePage } from '@/lib/admin/list'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, stars, titleCase } from '@/lib/admin/format'
-import { TESTER_STATUS_OPTIONS } from '@/lib/domain/enums'
 import { setTesterStatus, rateTesterAction } from './actions'
+
+/**
+ * Deliberately narrower than the full `TESTER_STATUSES` vocabulary — ARCHIVED
+ * is excluded here because it's never something an admin sets on a tester
+ * directly; it only ever follows from the underlying account being archived
+ * (see `syncTesterArchivedState` in users.service.ts). Offering it in this
+ * dropdown would suggest an admin action that doesn't actually exist.
+ */
+const EDITABLE_TESTER_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED'] as const
+const EDITABLE_TESTER_STATUS_OPTIONS = EDITABLE_TESTER_STATUSES.map((status) => ({
+  value: status,
+  label: titleCase(status),
+}))
 
 /**
  * `/app/admin/testers/[id]` — one crowd tester, §2.2 "Onboard, verify, manage,
@@ -725,7 +737,7 @@ export default async function TesterDetailPage({
                       id="status"
                       name="status"
                       defaultValue={tester.status}
-                      options={TESTER_STATUS_OPTIONS}
+                      options={EDITABLE_TESTER_STATUS_OPTIONS}
                     />
                   </Field>
                   <Field

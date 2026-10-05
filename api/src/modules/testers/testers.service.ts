@@ -116,7 +116,13 @@ const profileSelect = {
  */
 export function testerFilterWhere(query: TesterFilterQuery): Prisma.TesterProfileWhereInput {
   return {
-    user: { deletedAt: null },
+    // Archived testers (and testers whose underlying account was deleted
+    // outright — deleteUser() sets both together) are hidden by default,
+    // same as an archived Organisation — but, unlike Organisation (which has
+    // no way back), explicitly asking for ARCHIVED here still finds them.
+    ...(query.status === TesterStatus.ARCHIVED
+      ? {}
+      : { user: { deletedAt: null }, deletedAt: null }),
     ...(query.status ? { status: query.status } : {}),
     ...(query.countryCode ? { countryCode: query.countryCode } : {}),
     ...(query.city ? { city: { contains: query.city, mode: 'insensitive' } } : {}),
@@ -523,6 +529,9 @@ export async function listGlobalBrowsers(query: ListGlobalBrowsersQuery) {
 }
 
 export async function getTesterById(id: string) {
+  // No deletedAt restriction here, deliberately — matches getUser(): an
+  // admin opening a specific tester by id should see it regardless of
+  // archived state.
   const profile = await prisma.testerProfile.findUnique({ where: { id }, select: profileSelect })
   if (!profile) throw new NotFoundError('Tester')
   return profile
@@ -638,8 +647,8 @@ export async function changeTesterStatus(
       where: { id: testerProfileId },
       data: {
         status,
-        verifiedAt: status === TesterStatus.VERIFIED ? new Date() : null,
-        verifiedById: status === TesterStatus.VERIFIED ? actorId : null,
+        verifiedAt: status === TesterStatus.ACTIVE ? new Date() : null,
+        verifiedById: status === TesterStatus.ACTIVE ? actorId : null,
       },
       select: profileSelect,
     })
@@ -672,34 +681,36 @@ export async function changeTesterStatus(
 }
 
 /**
- * Confirming their email address is what makes a tester VERIFIED — called
+ * Confirming their email address is what makes a tester ACTIVE — called
  * from `authService.verifyEmail()`, not from an admin route, so there is no
  * human `actorId` to record: `verifiedById` stays null, distinguishing
  * "verified by confirming their email" from `changeTesterStatus`'s admin
  * review.
  *
- * Deliberately narrow: only ever moves a profile OUT of APPLIED. A tester an
- * admin has already SUSPENDED stays exactly there — re-confirming an email
- * (or a token used twice) must never undo a real decision someone already
- * made. No-op, not an error, for a user who is not a tester at all, or whose
- * profile is already past APPLIED.
+ * Deliberately narrow: only ever moves a profile OUT of PENDING. A tester an
+ * admin has already SUSPENDED (or ARCHIVED, via the underlying account)
+ * stays exactly there — re-confirming an email (or a token used twice) must
+ * never undo a real decision someone already made. No-op, not an error, for
+ * a user who is not a tester at all, or whose profile is already past
+ * PENDING.
  */
 export async function verifyTesterOnEmailConfirmed(userId: string): Promise<void> {
   const profile = await prisma.testerProfile.findUnique({
     where: { userId },
     select: { id: true, status: true },
   })
-  if (profile?.status !== TesterStatus.APPLIED) return
+  if (!profile) return
+  if (profile.status !== TesterStatus.PENDING) return
 
   await prisma.testerProfile.update({
     where: { id: profile.id },
-    data: { status: TesterStatus.VERIFIED, verifiedAt: new Date(), verifiedById: null },
+    data: { status: TesterStatus.ACTIVE, verifiedAt: new Date(), verifiedById: null },
   })
 
   await createNotification({
     userId,
     type: 'TESTER_STATUS_CHANGED',
-    title: 'Your tester status is now verified',
+    title: 'Your tester status is now active',
     link: '/app/tester/profile',
   })
 }
@@ -985,7 +996,7 @@ export async function assertAssignable(testerUserId: string): Promise<void> {
 
   if (!profile) throw new BadRequestError('That user is not a tester')
   if (profile.user.role !== Role.TESTER) throw new BadRequestError('That user is not a tester')
-  if (profile.status !== TesterStatus.VERIFIED) {
+  if (profile.status !== TesterStatus.ACTIVE) {
     throw new BadRequestError('Only verified testers can be assigned to a project')
   }
   if (profile.user.status !== UserStatus.ACTIVE) {
@@ -1113,7 +1124,7 @@ export async function getDiscoverableTester(testerId: string) {
   const tester = await prisma.testerProfile.findFirst({
     where: {
       id: testerId,
-      status: TesterStatus.VERIFIED,
+      status: TesterStatus.ACTIVE,
       user: { deletedAt: null, status: UserStatus.ACTIVE },
     },
     select: DISCOVERABLE_TESTER_SELECT,
@@ -1165,7 +1176,7 @@ export async function getTesterEngagementsForOrganisation(
   const tester = await prisma.testerProfile.findFirst({
     where: {
       id: testerProfileId,
-      status: TesterStatus.VERIFIED,
+      status: TesterStatus.ACTIVE,
       user: { deletedAt: null, status: UserStatus.ACTIVE },
     },
     select: { userId: true },
@@ -1261,7 +1272,7 @@ function discoverableTesterWhere(query: {
      * Only verified testers are discoverable. An applicant or a rejected
      * account is platform-internal state a client has no business browsing.
      */
-    status: TesterStatus.VERIFIED,
+    status: TesterStatus.ACTIVE,
     user: { deletedAt: null, status: UserStatus.ACTIVE },
     ...(query.countryCode ? { countryCode: query.countryCode } : {}),
     ...(query.skills?.length

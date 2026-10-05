@@ -478,7 +478,7 @@ async function main() {
       where: { userId: user.id },
       create: {
         userId: user.id,
-        status: TesterStatus.VERIFIED,
+        status: TesterStatus.ACTIVE,
         headline: index === 0 ? 'Localization Tester' : 'QA Engineer',
         experienceYears: 3 + index,
         countryCode: seed.country,

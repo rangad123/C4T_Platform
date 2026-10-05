@@ -60,10 +60,10 @@ enum Role {
 }
 
 enum UserStatus {
-  PENDING_VERIFICATION
+  PENDING
   ACTIVE
   SUSPENDED
-  DEACTIVATED
+  ARCHIVED
 }
 
 enum OrganisationStatus {
@@ -80,9 +80,10 @@ enum OrgMemberRole {
 
 /// Tester onboarding pipeline, §2.2 "Crowd Tester Management".
 enum TesterStatus {
-  APPLIED
-  VERIFIED
+  PENDING
+  ACTIVE
   SUSPENDED
+  ARCHIVED
 }
 
 enum DeviceType {
@@ -316,7 +317,7 @@ model User {
    */
   passwordAlgo    PasswordAlgo @default(ARGON2ID) @map("password_algo")
   role            Role         @default(USER)
-  status          UserStatus   @default(PENDING_VERIFICATION)
+  status          UserStatus   @default(PENDING)
 
   firstName    String? @map("first_name")
   lastName     String? @map("last_name")
@@ -647,7 +648,7 @@ model TesterProfile {
   id       String       @id @default(cuid())
   legacyId String?      @unique @map("legacy_id")
   userId   String       @unique @map("user_id")
-  status   TesterStatus @default(APPLIED)
+  status   TesterStatus @default(PENDING)
 
   headline        String? // e.g. "Localization Tester"
   bio             String?
@@ -690,8 +691,13 @@ model TesterProfile {
   verifiedById  String?   @map("verified_by_id")
   ndaAcceptedAt DateTime? @map("nda_accepted_at")
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  /// Set alongside status=ARCHIVED when the underlying account is archived
+  /// (see `changeStatus`/`deleteUser` in users.service.ts) — mirrors
+  /// Organisation.deletedAt so the same "hidden by default, reachable via an
+  /// explicit filter" list behavior applies here too.
+  deletedAt DateTime? @map("deleted_at")
 
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   ndaFile     FileObject?         @relation("TesterNda", fields: [ndaFileId], references: [id], onDelete: SetNull)

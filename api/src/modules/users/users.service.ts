@@ -27,7 +27,10 @@ const userSelect = {
 
 export async function listUsers(query: ListUsersQuery) {
   const where: Prisma.UserWhereInput = {
-    deletedAt: null,
+    // Archived accounts are hidden by default, same as an archived
+    // Organisation — but, unlike Organisation (which has no way back),
+    // explicitly asking for ARCHIVED here still finds them.
+    ...(query.status === UserStatus.ARCHIVED ? {} : { deletedAt: null }),
     ...(query.role ? { role: query.role } : {}),
     ...(query.status ? { status: query.status } : {}),
     /**
@@ -66,8 +69,11 @@ export async function listUsers(query: ListUsersQuery) {
 }
 
 export async function getUser(id: string) {
+  // No deletedAt restriction here, deliberately — an admin opening a
+  // specific record by id should see it regardless of archived state, the
+  // same way list visibility doesn't gate a direct, deliberate open.
   const user = await prisma.user.findFirst({
-    where: { id, deletedAt: null },
+    where: { id },
     select: {
       ...userSelect,
       permissions: { select: { permission: { select: { code: true, label: true, group: true } } } },
@@ -111,7 +117,7 @@ export async function createUser(input: {
         lastName: input.lastName ?? null,
         phone: input.phone ?? null,
         countryCode: input.countryCode ?? null,
-        status: input.activateImmediately ? UserStatus.ACTIVE : UserStatus.PENDING_VERIFICATION,
+        status: input.activateImmediately ? UserStatus.ACTIVE : UserStatus.PENDING,
         emailVerifiedAt: input.activateImmediately ? new Date() : null,
       },
       select: userSelect,
@@ -122,7 +128,7 @@ export async function createUser(input: {
       await tx.testerProfile.create({
         data: {
           userId: user.id,
-          status: TesterStatus.APPLIED,
+          status: TesterStatus.PENDING,
           countryCode: input.countryCode ?? null,
         },
       })
@@ -199,7 +205,7 @@ export async function changeRole(actorId: string, id: string, role: Role) {
     if (role === Role.TESTER) {
       await tx.testerProfile.upsert({
         where: { userId: id },
-        create: { userId: id, status: TesterStatus.APPLIED },
+        create: { userId: id, status: TesterStatus.PENDING },
         update: {},
       })
     }
@@ -208,8 +214,11 @@ export async function changeRole(actorId: string, id: string, role: Role) {
 }
 
 export async function changeStatus(id: string, status: UserStatus) {
+  // No deletedAt restriction here, deliberately — an already-archived user
+  // (deletedAt set) must still be reachable through this same action in
+  // order to be reinstated.
   const user = await prisma.user.findFirst({
-    where: { id, deletedAt: null },
+    where: { id },
     select: { id: true, role: true, status: true },
   })
   if (!user) throw new NotFoundError('User')
@@ -219,7 +228,17 @@ export async function changeStatus(id: string, status: UserStatus) {
   }
 
   return prisma.$transaction(async (tx) => {
-    const updated = await tx.user.update({ where: { id }, data: { status }, select: userSelect })
+    const updated = await tx.user.update({
+      where: { id },
+      data: {
+        status,
+        // Hidden from default list views while archived, reinstated
+        // (findable again) otherwise — mirrors Organisation.archiveOrganisation,
+        // but unlike it, reachable again via an explicit status=ARCHIVED filter.
+        deletedAt: status === UserStatus.ARCHIVED ? new Date() : null,
+      },
+      select: userSelect,
+    })
     // Suspending or deactivating ends every live session. With stateful auth
     // this cuts access on the target's very next request.
     if (status !== UserStatus.ACTIVE) {
@@ -228,8 +247,40 @@ export async function changeStatus(id: string, status: UserStatus) {
         data: { revokedAt: new Date(), revokedReason: 'account_suspended' },
       })
     }
+    await syncTesterArchivedState(tx, id, status)
     return updated
   })
+}
+
+/**
+ * Keeps a tester's profile archived in lock-step with their account.
+ * ARCHIVED is never set directly on a TesterProfile (see `changeTesterStatus`
+ * in testers.service.ts) — it only ever follows from the underlying account
+ * being archived here or in `deleteUser`. Reinstating clears the hide-flag
+ * and lands the profile at PENDING: restoring its exact prior status isn't
+ * tracked anywhere, so "needs a fresh look" is the conservative choice.
+ * `updateMany` rather than `update` because most users have no
+ * TesterProfile at all, which should be a no-op, not a "not found" error.
+ */
+async function syncTesterArchivedState(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  status: UserStatus,
+): Promise<void> {
+  if (status === UserStatus.ARCHIVED) {
+    await tx.testerProfile.updateMany({
+      where: { userId },
+      data: { status: TesterStatus.ARCHIVED, deletedAt: new Date() },
+    })
+  } else {
+    // Only a profile that is CURRENTLY archived is reinstated here — an
+    // unrelated status change (e.g. suspending an account) must not touch a
+    // tester profile that was never archived in the first place.
+    await tx.testerProfile.updateMany({
+      where: { userId, status: TesterStatus.ARCHIVED },
+      data: { status: TesterStatus.PENDING, deletedAt: null },
+    })
+  }
 }
 
 /**
@@ -265,16 +316,18 @@ export async function deleteUser(id: string) {
       where: { userId: id, revokedAt: null },
       data: { revokedAt: new Date(), revokedReason: 'account_deleted' },
     })
-    return tx.user.update({
+    const updated = await tx.user.update({
       where: { id },
       data: {
         deletedAt: new Date(),
-        status: UserStatus.DEACTIVATED,
+        status: UserStatus.ARCHIVED,
         // Free the address for reuse while keeping the row traceable.
         email: `deleted+${id}@crowd4test.invalid`,
       },
       select: { id: true, deletedAt: true },
     })
+    await syncTesterArchivedState(tx, id, UserStatus.ARCHIVED)
+    return updated
   })
 }
 

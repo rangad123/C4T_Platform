@@ -180,7 +180,7 @@ export async function seedWorld(): Promise<World> {
     await prisma.testerProfile.create({
       data: {
         userId: tester.id,
-        status: TesterStatus.VERIFIED,
+        status: TesterStatus.ACTIVE,
         verifiedAt: new Date(),
         ndaAcceptedAt: new Date(),
         countryCode: 'IN',

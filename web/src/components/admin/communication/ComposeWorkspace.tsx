@@ -666,7 +666,7 @@ function Footer({ left, right }: { left: React.ReactNode; right: React.ReactNode
 function partialCandidate(user: Candidate['user']): Candidate {
   return {
     id: user.id,
-    status: 'VERIFIED',
+    status: 'ACTIVE',
     headline: null,
     profession: null,
     city: null,

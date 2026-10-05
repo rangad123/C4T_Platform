@@ -56,7 +56,7 @@ export default async function ComposePage({
 
   const [recipients, catalog, templates, draft] = await Promise.all([
     serverFetchPage<Candidate>('testers/message-recipients', {
-      query: { status: 'VERIFIED', limit: 25, page: 1, sort: 'ratingAverage', order: 'desc' },
+      query: { status: 'ACTIVE', limit: 25, page: 1, sort: 'ratingAverage', order: 'desc' },
     }).catch(() => ({ data: [] as Candidate[], meta: { total: 0, page: 1, limit: 25 } })),
     serverFetch<CatalogPayload>('catalog').catch(() => null),
     serverFetch<TemplateRow[]>('communication/templates').catch(() => [] as TemplateRow[]),

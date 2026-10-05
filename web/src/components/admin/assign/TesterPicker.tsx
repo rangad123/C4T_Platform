@@ -57,7 +57,7 @@ export const EMPTY_FILTERS: Filters = {
   search: '',
   countryCode: '',
   city: '',
-  status: 'VERIFIED',
+  status: 'ACTIVE',
   minRating: '',
   osName: '',
   browser: '',

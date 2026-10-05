@@ -34,9 +34,7 @@ const TONES: Record<string, Tone> = {
 
   // In flight
   NEW: 'info',
-  APPLIED: 'info',
   PENDING: 'warning',
-  PENDING_VERIFICATION: 'warning',
   IN_REVIEW: 'warning',
   PAUSED: 'warning',
   REOPENED: 'warning',
@@ -74,7 +72,6 @@ const TONES: Record<string, Tone> = {
   ARCHIVED: 'neutral',
   INACTIVE: 'neutral',
   EXPIRED: 'neutral',
-  DEACTIVATED: 'neutral',
 }
 
 /** The tone a status maps to, for anything that needs the color without the pill (e.g. a chart segment). */

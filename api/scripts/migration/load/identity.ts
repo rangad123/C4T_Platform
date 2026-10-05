@@ -302,7 +302,7 @@ export const userLoader: Loader = {
     const role = resolveRole(row, roleNames)
     problems.push(role.problem)
 
-    const status = enumValue(row.usr_active, USER_STATUS, UserStatus.DEACTIVATED, 'usr_active')
+    const status = enumValue(row.usr_active, USER_STATUS, UserStatus.ARCHIVED, 'usr_active')
     problems.push(status.problem)
 
     const country = resolveUserCountry(row)
@@ -397,8 +397,8 @@ export const userLoader: Loader = {
       const profileData = {
         status:
           bool(row.usr_agreement_verification, false) || status.value === UserStatus.ACTIVE
-            ? TesterStatus.VERIFIED
-            : TesterStatus.APPLIED,
+            ? TesterStatus.ACTIVE
+            : TesterStatus.PENDING,
         bio: null,
         experienceYears: int(row.usr_exp_years),
         city: text(row.usr_city),

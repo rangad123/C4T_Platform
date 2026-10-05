@@ -93,7 +93,7 @@ export default async function AssignTestersPage({
     serverFetchPage<Candidate>('testers/assignment-candidates', {
       query: {
         buildId,
-        status: 'VERIFIED',
+        status: 'ACTIVE',
         limit: 25,
         page: 1,
         sort: 'ratingAverage',

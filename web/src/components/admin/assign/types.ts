@@ -172,8 +172,8 @@ function titleCase(value: string): string {
  * act on is worse than no picker, because it only refuses at the end.
  */
 export const RECIPIENT_STATUSES: readonly { value: string; label: string }[] = [
-  { value: 'VERIFIED', label: 'Verified' },
-  { value: 'APPLIED', label: 'Applied' },
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'PENDING', label: 'Pending' },
   { value: 'SUSPENDED', label: 'Suspended' },
 ]
 
@@ -230,15 +230,15 @@ export function filterChips(
   }
   if (filters.city) chips.push({ key: 'city', label: filters.city, clear: { city: '' } })
   /*
-    Only ever a chip when it is NOT the default. Verified is what every picker
-    opens on, and a permanent "Verified" chip with an x on it would invite
+    Only ever a chip when it is NOT the default. Active is what every picker
+    opens on, and a permanent "Active" chip with an x on it would invite
     clearing the one filter that is doing the most useful work.
   */
-  if (filters.status && filters.status !== 'VERIFIED') {
+  if (filters.status && filters.status !== 'ACTIVE') {
     chips.push({
       key: 'status',
       label: STATUS_LABELS[filters.status] ?? filters.status,
-      clear: { status: 'VERIFIED' },
+      clear: { status: 'ACTIVE' },
     })
   }
   if (filters.osName) chips.push({ key: 'os', label: filters.osName, clear: { osName: '' } })

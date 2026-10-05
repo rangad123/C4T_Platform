@@ -78,8 +78,17 @@ export const BUG_REPRODUCIBILITY_OPTIONS = options(BUG_REPRODUCIBILITIES)
 // ─── People and accounts ─────────────────────────────────────────────────────
 
 export const ROLES = ['USER', 'CUSTOMER', 'TESTER', 'ADMIN', 'SUB_ADMIN'] as const
-export const USER_STATUSES = ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED'] as const
-export const TESTER_STATUSES = ['APPLIED', 'VERIFIED', 'SUSPENDED'] as const
+export const USER_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const
+/**
+ * Full vocabulary — matches OrganisationStatus. Used for the Testers list
+ * filter dropdown (ARCHIVED is reachable there) and `TesterStatus`
+ * validation generally; the status-*change* dropdown on a tester's own
+ * detail page uses a narrower, locally-scoped list that excludes ARCHIVED,
+ * since archiving only ever follows from the underlying account (see
+ * `syncTesterArchivedState` in the API) — never something an admin sets on
+ * a tester directly.
+ */
+export const TESTER_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const
 export const ORGANISATION_STATUSES = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const
 export const ORG_MEMBER_ROLES = ['OWNER', 'MEMBER'] as const
 
