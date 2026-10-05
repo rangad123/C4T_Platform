@@ -94,13 +94,13 @@ export default async function TestersPage({
   await requirePermission('tester.read')
 
   const params = await searchParams
-  // Absent entirely (first load) defaults to VERIFIED. Present but empty
+  // AAll the tester will be shown when Testers page loaded.
   // means the reader explicitly chose "All statuses" from the dropdown —
   // that must stay distinguishable from "no choice made yet", or the filter
   // could never be turned off.
   const status =
     params.status === undefined
-      ? 'VERIFIED'
+      ? undefined
       : STATUSES.includes(params.status as (typeof STATUSES)[number])
         ? params.status
         : undefined
