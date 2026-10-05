@@ -139,15 +139,36 @@ export async function createUser(input: {
   })
 }
 
+/**
+ * `countryCode` is duplicated onto `TesterProfile` (the Testers tab reads its
+ * own copy, not `User.countryCode` — see schema.prisma) because a tester's
+ * profile is meant to stand alone. Editing it only here left the two
+ * silently diverging: an admin correcting a tester's country from the Users
+ * tab never showed up on that same person's Testers page. `updateMany`
+ * rather than `update` because most users have no `TesterProfile` row at
+ * all, which should be a no-op, not a "record not found" error.
+ */
 export async function updateUser(id: string, input: Record<string, unknown>) {
   const user = await prisma.user.findFirst({ where: { id, deletedAt: null }, select: { id: true } })
   if (!user) throw new NotFoundError('User')
 
-  return prisma.user.update({
-    where: { id },
-    data: input,
-    select: userSelect,
-  })
+  const [updated] = await prisma.$transaction([
+    prisma.user.update({
+      where: { id },
+      data: input,
+      select: userSelect,
+    }),
+    ...('countryCode' in input
+      ? [
+          prisma.testerProfile.updateMany({
+            where: { userId: id },
+            data: { countryCode: input.countryCode as string | null },
+          }),
+        ]
+      : []),
+  ])
+
+  return updated
 }
 
 /**
