@@ -7,7 +7,7 @@ export const PHONE_NUMBER_MAX_LENGTH = 24
 
 /**
  * Ceiling on the dial-code picker's width calculation, in characters. Of the
- * 251 codes, all but 5 fit in 6 ("+1234" is 5, the common case is 2-4) — the
+ * 251 codes, all but 5 fit in 8 ("+1234" is 5, the common case is 2-4) — the
  * 5 that don't (Dominican Republic "+18091829", Puerto Rico "+17871939",
  * and the Channel Islands/Isle of Man "+4414xx" numbers, an artifact of how
  * the underlying country data encodes NANP area codes) would otherwise
@@ -15,7 +15,7 @@ export const PHONE_NUMBER_MAX_LENGTH = 24
  * still work — their label just clips in the closed box, same trade-off as
  * a long country name used to be.
  */
-const MAX_CODE_WIDTH_CH = 6
+const MAX_CODE_WIDTH_CH = 8
 
 /**
  * The actual dial-code-select + number-input row `PhoneNumberField` renders.
