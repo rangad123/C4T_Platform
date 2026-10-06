@@ -22,7 +22,9 @@ const PAGE_SIZE = 25
 const BASE = '/app/admin/testers'
 const STATUSES = TESTER_STATUSES
 const SORT_OPTIONS = [
-  { value: 'createdAt', label: 'Applied' },
+  // No entry for "date applied" — the list is already ordered by it when no
+  // sort is chosen (`listTesters()`'s own default), so it would just be a
+  // second way to ask for what "Default" already does.
   { value: 'ratingAverage', label: 'Rating' },
   { value: 'bugsReportedCount', label: 'Bugs reported' },
   { value: 'projectsCompletedCount', label: 'Projects completed' },
@@ -69,10 +71,8 @@ interface TesterRow {
  * `/app/admin/testers` — the tester pool, including applications awaiting
  * review.
  *
- * Defaults to VERIFIED. Bot signups pile up as unreviewed APPLIED profiles
- * that never go anywhere, so a status-less view of "everyone" was mostly
- * that noise rather than the real pool. Pick "All statuses" (or "Applied")
- * from the dropdown to see what is waiting on review.
+ * No default status filter — pick PENDING from the dropdown to see what is
+ * waiting on review.
  *
  * `bugsAccepted / bugsReported` is shown as a pair rather than an acceptance
  * percentage: a tester with 1-of-1 accepted is not more reliable than one with

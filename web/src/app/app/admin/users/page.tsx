@@ -1,6 +1,7 @@
 import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { Avatar } from '@/components/admin/Avatar'
+import { Button } from '@/components/ds/core/Button'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { StatusBadge, RoleBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
@@ -159,6 +160,9 @@ export default async function UsersPage({
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
+          <Button href="/app/admin/users/new" variant="primary" iconLeft="plus">
+            New user
+          </Button>
         </div>
       }
     />

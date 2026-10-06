@@ -203,7 +203,7 @@ export default async function NewUserPage({
             </li>
             <li>
               The tester role also creates the tester profile that the tester pool page reads, at
-              status applied.
+              status pending.
             </li>
             <li>
               The sub-admin role with nothing ticked below grants the default read-only set, which
