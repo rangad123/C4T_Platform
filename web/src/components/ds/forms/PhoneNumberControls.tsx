@@ -6,6 +6,18 @@ import { Input } from './Input'
 export const PHONE_NUMBER_MAX_LENGTH = 24
 
 /**
+ * Ceiling on the dial-code picker's width calculation, in characters. Of the
+ * 251 codes, all but 5 fit in 6 ("+1234" is 5, the common case is 2-4) — the
+ * 5 that don't (Dominican Republic "+18091829", Puerto Rico "+17871939",
+ * and the Channel Islands/Isle of Man "+4414xx" numbers, an artifact of how
+ * the underlying country data encodes NANP area codes) would otherwise
+ * stretch the box for every reader to cover five rare exceptions. Those
+ * still work — their label just clips in the closed box, same trade-off as
+ * a long country name used to be.
+ */
+const MAX_CODE_WIDTH_CH = 6
+
+/**
  * The actual dial-code-select + number-input row `PhoneNumberField` renders.
  *
  * Split into its own file, with no `geo/source.ts` import, so it can also be
@@ -36,6 +48,19 @@ export function PhoneNumberControls({
   hint?: string
   error?: string
 }) {
+  /**
+   * Sized from the options actually passed in, not a guessed constant — the
+   * label is now just the code ("+91", "+1876", ...), so its longest form is
+   * a handful of characters, and asking for exactly that (plus the select's
+   * own fixed chrome: 14px left padding + 40px reserved for the chevron)
+   * leaves everything else in the row for the number input. Whatever is left
+   * over goes to `Input`'s `flex: 1` below.
+   */
+  const codeWidthCh = Math.min(
+    Math.max('Code'.length, ...dialCodeOptions.map((o) => o.label.length)),
+    MAX_CODE_WIDTH_CH,
+  )
+
   return (
     <Field
       label={label}
@@ -53,13 +78,7 @@ export function PhoneNumberControls({
           placeholder="Code"
           required={required}
           invalid={Boolean(error)}
-          // Short on purpose: this sits next to the number input in a row
-          // that is sometimes a narrow grid cell (a 2-column form at tablet
-          // width, or a sidebar panel), and the full country name in the
-          // option label only needs to be readable while the dropdown is
-          // open — the closed box can clip it. 168px left no room at all for
-          // the number in those narrow cells.
-          style={{ flex: '0 0 108px' }}
+          style={{ flex: `0 0 calc(${codeWidthCh}ch + 54px)` }}
         />
         <Input
           id={id}
