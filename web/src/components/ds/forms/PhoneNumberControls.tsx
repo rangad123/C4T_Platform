@@ -6,18 +6,6 @@ import { Input } from './Input'
 export const PHONE_NUMBER_MAX_LENGTH = 24
 
 /**
- * Ceiling on the dial-code picker's width calculation, in characters. Of the
- * 251 codes, all but 5 fit in 8 ("+1234" is 5, the common case is 2-4) — the
- * 5 that don't (Dominican Republic "+18091829", Puerto Rico "+17871939",
- * and the Channel Islands/Isle of Man "+4414xx" numbers, an artifact of how
- * the underlying country data encodes NANP area codes) would otherwise
- * stretch the box for every reader to cover five rare exceptions. Those
- * still work — their label just clips in the closed box, same trade-off as
- * a long country name used to be.
- */
-const MAX_CODE_WIDTH_CH = 8
-
-/**
  * The actual dial-code-select + number-input row `PhoneNumberField` renders.
  *
  * Split into its own file, with no `geo/source.ts` import, so it can also be
@@ -48,28 +36,26 @@ export function PhoneNumberControls({
   hint?: string
   error?: string
 }) {
-  /**
-   * Sized from the options actually passed in, not a guessed constant — the
-   * label is now just the code ("+91", "+1876", ...), so its longest form is
-   * a handful of characters, and asking for exactly that (plus the select's
-   * own fixed chrome: 14px left padding + 40px reserved for the chevron)
-   * leaves everything else in the row for the number input. Whatever is left
-   * over goes to `Input`'s `flex: 1` below.
-   */
-  const codeWidthCh = Math.min(
-    Math.max('Code'.length, ...dialCodeOptions.map((o) => o.label.length)),
-    MAX_CODE_WIDTH_CH,
-  )
-
   return (
-    <Field
-      label={label}
-      htmlFor={id}
-      required={required}
-      error={error}
-      hint={hint ?? 'Pick your country, then enter the number without its dialing code.'}
-    >
+    <Field label={label} htmlFor={id} required={required} error={error} hint={hint}>
       <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+        {/*
+          A fixed 1:3 ratio, not a character-count estimate — the code
+          picker is exactly a third of the number input's width whenever
+          there is room for that, rather than a width guessed from the
+          longest label. `minWidth` is the floor: the row's own 14px left
+          padding + 40px reserved for the chevron already eat 54px before a
+          single character of text fits, so in a narrow two-column cell a
+          literal 1:3 split can shrink the box past the point of showing
+          anything at all — tried at 72px, which fit one character of a
+          multi-digit code before the ellipsis, worse than no code at all.
+          120px is enough room for the common 2-5 digit case in full.
+
+          The option labels are "+91 · India" — full country names, for the
+          OPEN dropdown, which isn't width-constrained the same way the
+          closed box is. `controlStyle` clips the CLOSED box's text with an
+          ellipsis instead of shrinking it further.
+        */}
         <Select
           id={`${id}-code`}
           name={`${name}DialCode`}
@@ -78,7 +64,8 @@ export function PhoneNumberControls({
           placeholder="Code"
           required={required}
           invalid={Boolean(error)}
-          style={{ flex: `0 0 calc(${codeWidthCh}ch + 54px)` }}
+          style={{ flex: '1 1 0%', minWidth: 120 }}
+          controlStyle={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         />
         <Input
           id={id}
@@ -90,7 +77,7 @@ export function PhoneNumberControls({
           required={required}
           invalid={Boolean(error)}
           maxLength={PHONE_NUMBER_MAX_LENGTH}
-          style={{ flex: 1 }}
+          style={{ flex: '3 1 0%' }}
         />
       </div>
     </Field>

@@ -60,15 +60,20 @@ export function countryLabel(code: string | null | undefined): string {
 
 /**
  * Dialing codes for the phone country-code picker — `{ value: digits only
- * (e.g. "91"), label: "+91" }`.
+ * (e.g. "91"), label: "+91 · India" }`.
  *
- * The label is the code alone, not the country name — the picker sits next
- * to the number input in a row with limited width, and the full name only
- * earns its space back if a reader needs it. Still SORTED by country name
- * (computed before the name is dropped), so the list reads in the same
- * browsable order as before — type-ahead-by-country-letter is the one thing
- * this gives up, since the browser's native type-ahead matches the visible
- * label, not the sort key.
+ * The code leads, not the country name — a native `<select>`'s CLOSED box
+ * and its OPEN dropdown both render straight from this one label, but the
+ * closed box is deliberately narrow (it sits next to the number input) and
+ * clips with an ellipsis (see `PhoneNumberControls`). Code-first means what
+ * survives that clip is the useful part; the full dropdown list, which
+ * isn't width-constrained the same way, still reads the whole thing.
+ *
+ * Still SORTED by country name (computed before the label is built), so
+ * the list reads in a browsable order rather than the numeric-ish order
+ * "+1, +1246, +1264, +20, ..." would give — type-ahead-by-country-letter
+ * is still given up, since the browser's native type-ahead matches the
+ * visible label (which now starts with the code), not the sort key.
  *
  * `phonecode` is inconsistent in the underlying package: usually plain
  * digits ("91"), but a leading `+` and a sub-region suffix show up too
@@ -76,8 +81,7 @@ export function countryLabel(code: string | null | undefined): string {
  * down to digits only before the "+" is re-added for display. A handful of
  * codes (`+1`, `+7`, `+61`, ...) are shared by more than one country; each
  * still gets its own row, sharing that `value`, which is the normal shape
- * for this kind of picker — the trade-off is that several rows now show the
- * identical label, distinguishable only by scroll position.
+ * for this kind of picker.
  */
 let dialCodeCache: readonly Option[] | null = null
 
@@ -87,7 +91,7 @@ export function dialCodeOptions(): readonly Option[] {
     .map((c) => ({ name: c.name, digits: c.phonecode.replace(/[^0-9]/g, '') }))
     .filter((c) => c.digits.length > 0)
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((c) => ({ value: c.digits, label: `+${c.digits}` }))
+    .map((c) => ({ value: c.digits, label: `+${c.digits} · ${c.name}` }))
   return dialCodeCache
 }
 

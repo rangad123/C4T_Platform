@@ -12,7 +12,15 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
   invalid?: boolean
   /** Renders as a leading empty-value option, so "nothing chosen" is real. */
   placeholder?: string
+  /** Layout styling for the WRAPPER — the actual flex/grid item in a caller's row. */
   style?: CSSProperties
+  /**
+   * Extra styling layered onto the `<select>` element itself, on top of
+   * `controlBase` — for properties that only make sense on the element that
+   * actually holds the text (e.g. `textOverflow` to clip a long option to an
+   * ellipsis), as opposed to `style`, which sizes the wrapper around it.
+   */
+  controlStyle?: CSSProperties
 }
 
 /**
@@ -28,6 +36,7 @@ export function Select({
   invalid,
   placeholder,
   style,
+  controlStyle,
   className,
   ...rest
 }: SelectProps) {
@@ -49,6 +58,7 @@ export function Select({
           appearance: 'none',
           paddingRight: 40,
           cursor: 'pointer',
+          ...controlStyle,
         }}
         {...rest}
       >
