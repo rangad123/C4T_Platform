@@ -1,5 +1,6 @@
 import { Field } from './Field'
-import { Select, type SelectOption } from './Select'
+import { DialCodeSelect } from './DialCodeSelect'
+import { type SelectOption } from './Select'
 import { Input } from './Input'
 
 /** Matches `PHONE_MAX_LENGTH` in `api/src/lib/phone.ts` (the combined value; the number half alone is always shorter). */
@@ -51,12 +52,12 @@ export function PhoneNumberControls({
           multi-digit code before the ellipsis, worse than no code at all.
           120px is enough room for the common 2-5 digit case in full.
 
-          The option labels are "+91 · India" — full country names, for the
-          OPEN dropdown, which isn't width-constrained the same way the
-          closed box is. `controlStyle` clips the CLOSED box's text with an
-          ellipsis instead of shrinking it further.
+          `DialCodeSelect`, not the shared `Select`: the dropdown shows full
+          "+91 · India" labels, but the closed box shows the code alone —
+          see that component's own doc comment for why a plain native
+          select can't do both at once.
         */}
-        <Select
+        <DialCodeSelect
           id={`${id}-code`}
           name={`${name}DialCode`}
           defaultValue={dialCode}
@@ -65,7 +66,6 @@ export function PhoneNumberControls({
           required={required}
           invalid={Boolean(error)}
           style={{ flex: '1 1 0%', minWidth: 120 }}
-          controlStyle={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         />
         <Input
           id={id}
