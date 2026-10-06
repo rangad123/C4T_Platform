@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
-import { Role } from '@prisma/client'
+import { Role, UserStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { searchTerms } from '../../lib/search.js'
 import { authenticate } from '../../middleware/authenticate.js'
@@ -34,6 +34,7 @@ const MANAGER_SORT_FIELDS = [
 
 const listQuery = paginationQuery.extend({
   search: z.string().trim().max(120).optional(),
+  status: z.nativeEnum(UserStatus).optional(),
 })
 
 /** Everyone eligible to manage a project, with their current load. */
@@ -42,7 +43,11 @@ managersRouter.get('/', validate({ query: listQuery }), async (_req, res) => {
 
   const where = {
     role: { in: [Role.ADMIN, Role.SUB_ADMIN] },
-    deletedAt: null,
+    // Archived managers are hidden by default, same as the Users list —
+    // but, unlike Organisation's archive (which has no way back), explicitly
+    // asking for ARCHIVED here still finds them.
+    ...(query.status === UserStatus.ARCHIVED ? {} : { deletedAt: null }),
+    ...(query.status ? { status: query.status } : {}),
     /** Every term must match some column — see `searchTerms`. */
     ...(searchTerms(query.search).length > 0
       ? {

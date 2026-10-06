@@ -5,9 +5,11 @@ import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { personName, searchTerm, hasFilter } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
+import { USER_STATUSES } from '@/lib/domain/enums'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/managers'
+const STATUSES = USER_STATUSES
 const SORT_OPTIONS = [
   { value: 'createdAt', label: 'Created' },
   { value: 'firstName', label: 'First name' },
@@ -49,11 +51,20 @@ interface ManagerRow {
 export default async function ManagersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; page?: string; sort?: string; order?: string }>
+  searchParams: Promise<{
+    status?: string
+    search?: string
+    page?: string
+    sort?: string
+    order?: string
+  }>
 }) {
   await requirePermission('manager.read')
 
   const params = await searchParams
+  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
+    ? params.status
+    : undefined
   const search = searchTerm(params.search)
   const sort = SORT_FIELDS.includes(params.sort as (typeof SORT_FIELDS)[number])
     ? params.sort
@@ -64,7 +75,7 @@ export default async function ManagersPage({
   const result = await loadList<ManagerRow>('managers', {
     page,
     limit: PAGE_SIZE,
-    query: { search, sort, order },
+    query: { status, search, sort, order },
   })
 
   const columns: readonly TableColumn<ManagerRow>[] = [
@@ -94,8 +105,8 @@ export default async function ManagersPage({
       columns={columns}
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
-      hrefFor={pageHrefBuilder(BASE, { search, sort, order })}
-      filtered={hasFilter([search])}
+      hrefFor={pageHrefBuilder(BASE, { status, search, sort, order })}
+      filtered={hasFilter([status, search])}
       permission="manager.read"
       emptyIcon="shield-check"
       emptyTitle="No managers yet"
@@ -113,6 +124,15 @@ export default async function ManagersPage({
             <ListFilters
               action={BASE}
               search={{ value: search, placeholder: 'Name or email' }}
+              selects={[
+                {
+                  name: 'status',
+                  label: 'Status',
+                  options: STATUSES,
+                  value: status,
+                  allLabel: 'All statuses',
+                },
+              ]}
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
