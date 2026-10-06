@@ -36,6 +36,12 @@ function failureNotice(error: unknown, overrides: Record<number, string> = {}): 
   if (error instanceof ApiError) {
     const override = overrides[error.status]
     if (override) return override
+    // Same 403 as "not an owner" below, but a different reason — showing
+    // that message to someone who IS the owner would be actively wrong, not
+    // just unhelpful.
+    if (error.status === 403 && error.message.includes('Verify your email')) {
+      return 'email-not-verified'
+    }
     if (error.status === 403) return 'forbidden-write'
     if (error.status === 404) return 'missing'
     if (error.status === 400 || error.status === 422) return 'invalid'
@@ -186,14 +192,17 @@ export async function inviteTeamMemberAction(formData: FormData): Promise<void> 
     })
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 0
+    const message = error instanceof ApiError ? error.message : ''
     const code =
       status === 409
         ? 'invite-exists'
-        : status === 403
-          ? 'invite-forbidden'
-          : status === 422
-            ? 'invite-email'
-            : 'invite-failed'
+        : status === 403 && message.includes('Verify your email')
+          ? 'email-not-verified'
+          : status === 403
+            ? 'invite-forbidden'
+            : status === 422
+              ? 'invite-email'
+              : 'invite-failed'
     redirect(`${DETAIL_PATH}?section=members&notice=${code}`)
   }
 

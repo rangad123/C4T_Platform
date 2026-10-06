@@ -4,6 +4,7 @@ import {
   AssignmentStatus,
   OrgMemberRole,
   BugFieldType,
+  Role,
 } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, ForbiddenError, BadRequestError, ConflictError } from '../../lib/errors.js'
@@ -12,6 +13,7 @@ import { isAdminSide } from '../../middleware/authorize.js'
 import { projectScope } from '../../lib/access/scopes.js'
 import { projectRelations } from '../../lib/access/relations.js'
 import { authorize, can } from '../../lib/access/policy.js'
+import { assertEmailVerified } from '../../lib/access/verification.js'
 import {
   assertAssignable,
   refreshTesterAggregates,
@@ -585,6 +587,12 @@ export async function createProject(
   user: Express.AuthenticatedUser,
   input: Record<string, unknown> & { organisationId?: string },
 ) {
+  // Creating a project is the actual commitment to a paid engagement on this
+  // platform — there is no separate "payment" step anywhere to gate instead.
+  // Only the customer path is checked; an Admin/Sub-Admin creating a project
+  // on someone's behalf is unaffected.
+  if (user.role === Role.CUSTOMER) await assertEmailVerified(user.id)
+
   const organisationId = await resolveOrganisationId(user, input.organisationId)
   const { organisationId: _drop, ...data } = input
 

@@ -34,9 +34,19 @@ export async function requestPayoutAction(formData: FormData): Promise<void> {
     })
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 0
+    const message = error instanceof ApiError ? error.message : ''
     // 400 covers every rule above; the page re-reads the real state on the
-    // redirect, so the notice only has to say which rule was hit.
-    redirect(`${DASHBOARD}?notice=${status === 400 ? 'payout-rejected' : 'payout-failed'}`)
+    // redirect, so the notice only has to say which rule was hit. A 403 for
+    // an unverified email gets its own code — "try again in a moment" (the
+    // generic `payout-failed` message) would be actively wrong here, since
+    // retrying can never succeed until the address is verified.
+    const code =
+      status === 400
+        ? 'payout-rejected'
+        : status === 403 && message.includes('Verify your email')
+          ? 'email-not-verified'
+          : 'payout-failed'
+    redirect(`${DASHBOARD}?notice=${code}`)
   }
 
   revalidatePath(DASHBOARD)

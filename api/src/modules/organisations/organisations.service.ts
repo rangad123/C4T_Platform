@@ -5,6 +5,7 @@ import { NotFoundError, ForbiddenError, ConflictError, BadRequestError } from '.
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import { isAdminSide } from '../../middleware/authorize.js'
 import { organisationScope } from '../../lib/access/scopes.js'
+import { assertEmailVerified } from '../../lib/access/verification.js'
 import { ORG_SORT_FIELDS, type ListOrganisationsQuery } from './organisations.schema.js'
 import { createNotification } from '../notifications/notifications.service.js'
 
@@ -219,6 +220,9 @@ export async function updateOrganisation(
 ) {
   // A Customer may edit only their own organisation, and only as OWNER.
   await assertOrgAccess(user, id, { requireOwner: !isAdminSide(user) })
+  // These are the org's billing-relevant fields (contactEmail, taxId,
+  // address, etc.) — admins editing on a customer's behalf are unaffected.
+  if (!isAdminSide(user)) await assertEmailVerified(user.id)
 
   const existing = await prisma.organisation.findFirst({
     where: { id, deletedAt: null },
@@ -462,6 +466,9 @@ export async function inviteMember(
   input: { email: string; orgRole?: OrgMemberRole; message?: string },
 ) {
   await assertOrgAccess(user, organisationId, { requireOwner: !isAdminSide(user) })
+  // Gates the INVITER's own verification, not the invitee's — the invitee
+  // verifies separately when they accept.
+  if (!isAdminSide(user)) await assertEmailVerified(user.id)
 
   const email = input.email.trim().toLowerCase()
 

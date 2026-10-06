@@ -343,6 +343,10 @@ const NOTICES: Record<string, NoticeCopy> = {
   'work-added': { tone: 'success', message: 'Role added.' },
   'work-removed': { tone: 'success', message: 'Role removed.' },
   forbidden: { tone: 'error', message: 'You are not able to change that right now.' },
+  'email-not-verified': {
+    tone: 'error',
+    message: 'Verify your email address before saving payment details or requesting a payout.',
+  },
   invalid: {
     tone: 'error',
     message: 'Something on that form was not valid. Check it and try again.',

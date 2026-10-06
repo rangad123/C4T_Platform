@@ -19,6 +19,7 @@ import { nextReference } from '../../lib/reference.js'
 import { createNotification } from '../notifications/notifications.service.js'
 import { PERMISSIONS } from '../../config/permissions.js'
 import { transactionScope } from '../../lib/access/scopes.js'
+import { assertEmailVerified } from '../../lib/access/verification.js'
 
 /**
  * §2.2 "Transactions" — payment and billing RECORDS for projects, Customers and
@@ -637,7 +638,7 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
   if (req.user!.role !== Role.TESTER)
     throw new BadRequestError('Only a tester has a payout balance')
 
-  const [balance, account, openRequest] = await Promise.all([
+  const [balance, account, openRequest, requester] = await Promise.all([
     payoutBalance(req.user!.id),
     prisma.paymentAccount.findFirst({
       where: { userId: req.user!.id, status: 'ACTIVE' },
@@ -652,9 +653,11 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
       select: { id: true, reference: true, amountMinor: true, status: true, occurredAt: true },
       orderBy: { occurredAt: 'desc' },
     }),
+    prisma.user.findUnique({ where: { id: req.user!.id }, select: { emailVerifiedAt: true } }),
   ])
 
   const meetsMinimum = balance.availableMinor >= PAYOUT_MINIMUM_MINOR
+  const emailVerified = Boolean(requester?.emailVerifiedAt)
 
   res.json({
     data: {
@@ -670,10 +673,11 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
       minimumMinor: PAYOUT_MINIMUM_MINOR.toString(),
       hasPaymentAccount: Boolean(account),
       meetsMinimum,
+      emailVerified,
       openRequest: openRequest
         ? { ...openRequest, amountMinor: openRequest.amountMinor.toString() }
         : null,
-      canRequest: Boolean(account) && meetsMinimum && !openRequest,
+      canRequest: Boolean(account) && meetsMinimum && !openRequest && emailVerified,
     },
   })
 })
@@ -704,6 +708,7 @@ transactionsRouter.post(
     if (req.user!.role !== Role.TESTER) {
       throw new BadRequestError('Only a tester can request a payout')
     }
+    await assertEmailVerified(req.user!.id)
     const input = req.body as z.infer<typeof requestPayoutSchema>
 
     const account = await prisma.paymentAccount.findFirst({

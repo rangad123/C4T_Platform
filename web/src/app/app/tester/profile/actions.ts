@@ -27,6 +27,11 @@ function failureNotice(error: unknown, overrides: Record<number, string> = {}): 
   if (error instanceof ApiError) {
     const override = overrides[error.status]
     if (override) return override
+    // Same 403 as "forbidden" below, but this one has an obvious fix — don't
+    // let it collapse into a message with no next step.
+    if (error.status === 403 && error.message.includes('Verify your email')) {
+      return 'email-not-verified'
+    }
     if (error.status === 403) return 'forbidden'
     if (error.status === 400 || error.status === 422) return 'invalid'
   }

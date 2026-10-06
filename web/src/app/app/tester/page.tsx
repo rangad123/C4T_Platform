@@ -72,6 +72,10 @@ const NOTICES: Record<string, NoticeCopy> = {
     message:
       'That request could not be submitted. Check the balance and payment details shown below, then try again.',
   },
+  'email-not-verified': {
+    tone: 'error',
+    message: 'Verify your email address before requesting a payout.',
+  },
   'payout-failed': {
     tone: 'error',
     message: 'We could not submit that request. Try again in a moment.',

@@ -13,6 +13,7 @@ import { verifyPassword } from '../../lib/password.js'
 import { encryptPaymentDetails, maskPaymentDetails } from '../../lib/payment-encryption.js'
 import { revealPaymentAccount } from './payment-accounts.reveal.js'
 import { recordAudit } from '../../lib/audit.js'
+import { assertEmailVerified } from '../../lib/access/verification.js'
 
 /**
  * §14-20 — tester payout accounts. Recovers legacy `payment_acc_details`.
@@ -95,6 +96,7 @@ paymentAccountsRouter.put(
   async (req, res) => {
     const input = req.body as z.infer<typeof upsertBody>
     const userId = req.user!.id
+    await assertEmailVerified(userId)
 
     const plain = {
       accountName: input.accountName,

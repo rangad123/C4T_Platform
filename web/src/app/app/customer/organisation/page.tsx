@@ -101,6 +101,10 @@ const NOTICES: Record<string, NoticeCopy> = {
     message: 'Those values were not accepted. Check the highlighted fields.',
   },
   'forbidden-write': { tone: 'error', message: 'Only an owner can make that change.' },
+  'email-not-verified': {
+    tone: 'error',
+    message: 'Verify your email address before changing billing details or inviting people.',
+  },
   missing: { tone: 'error', message: 'That record is no longer there. Reload the page.' },
   failed: { tone: 'error', message: 'That did not save. Try again in a moment.' },
   'invite-sent': {
