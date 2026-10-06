@@ -32,7 +32,15 @@ export function Select({
   ...rest
 }: SelectProps) {
   return (
-    <span style={{ position: 'relative', display: 'block' }}>
+    // `style` lands here, not on the `<select>` below: this span is the
+    // actual flex/grid item in a caller's layout (e.g. the dial-code picker
+    // in PhoneNumberControls sizing itself to `flex: '0 0 168px'` in the
+    // phone-number row). Putting it on the select instead was a no-op for
+    // layout purposes — a nested element's `flex`/sizing props don't apply
+    // unless THAT element is the flex item — and let the select's native
+    // width-to-longest-option behaviour win, crowding out the row's other
+    // field.
+    <span style={{ position: 'relative', display: 'block', ...style }}>
       <select
         className={['c4t-input', className].filter(Boolean).join(' ')}
         aria-invalid={invalid ? true : undefined}
@@ -41,7 +49,6 @@ export function Select({
           appearance: 'none',
           paddingRight: 40,
           cursor: 'pointer',
-          ...style,
         }}
         {...rest}
       >

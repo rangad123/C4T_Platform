@@ -53,7 +53,13 @@ export function PhoneNumberControls({
           placeholder="Code"
           required={required}
           invalid={Boolean(error)}
-          style={{ flex: '0 0 168px' }}
+          // Short on purpose: this sits next to the number input in a row
+          // that is sometimes a narrow grid cell (a 2-column form at tablet
+          // width, or a sidebar panel), and the full country name in the
+          // option label only needs to be readable while the dropdown is
+          // open — the closed box can clip it. 168px left no room at all for
+          // the number in those narrow cells.
+          style={{ flex: '0 0 108px' }}
         />
         <Input
           id={id}
