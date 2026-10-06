@@ -117,20 +117,22 @@ export default async function ManagerDetailPage({
    * The two additional reads are best-effort: a missing project list still
    * renders a useful page. Failures are surfaced inline rather than via an
    * overlay so the reader keeps the manager record.
+   *
+   * `assignable-projects` is its own endpoint rather than a second call to
+   * `GET /projects` filtered client-side: that endpoint scopes results to
+   * whatever the CALLER (not this manager) is allowed to browse, which for a
+   * Sub-Admin restricted to their own assigned projects made this picker
+   * wrongly show "no more projects to assign" for a manager who had every
+   * project on the platform still available.
    */
   const [projectsResult, candidatesResult] = await Promise.all([
     serverFetchOrNull<ManagerProjectEnvelope>(`managers/${id}/projects`),
-    serverFetchOrNull<ProjectListEnvelope>('projects', {
-      // 100 is the API's ceiling — see the organisation picker on
-      // projects/new. `serverFetchOrNull` swallows the 422 the same way.
-      query: { limit: 100 },
-    }),
+    serverFetchOrNull<ProjectListEnvelope>(`managers/${id}/assignable-projects`),
   ])
 
   const projects = projectsResult?.data ?? []
   const projectsFailed = projectsResult === null
-  const assignedIds = new Set(projects.map((p) => p.project.id))
-  const candidates = (candidatesResult?.data ?? []).filter((p) => !assignedIds.has(p.id))
+  const candidates = candidatesResult?.data ?? []
 
   const columns: readonly TableColumn<ManagerProject>[] = [
     {

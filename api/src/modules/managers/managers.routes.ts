@@ -110,6 +110,38 @@ managersRouter.get(
   },
 )
 
+/**
+ * Projects this manager could still be assigned to — deliberately every
+ * non-deleted project on the platform, not `projectScope(req.user!)`'s view
+ * of them.
+ *
+ * Those are two different questions. `projectScope` answers "which projects
+ * can the CALLER browse", and for a Sub-Admin holding
+ * `project.scope_to_assigned` that is only the projects *they themselves*
+ * already manage — correct for the main Projects list, where that Sub-Admin
+ * is looking at their own work. Here the caller is deciding which project
+ * SOMEONE ELSE (the manager named in the URL) should pick up next, which is
+ * exactly what `manager.read`/`manager.write` (already required on every
+ * route in this file) exists to gate. Reusing the scoped list silently
+ * capped this picker to the caller's own projects, so a scoped Sub-Admin
+ * with manager.write could see "no more projects to assign" for a manager
+ * who, in fact, had every platform project still available.
+ */
+managersRouter.get(
+  '/:id/assignable-projects',
+  validate({ params: z.object({ id: z.string().cuid() }) }),
+  async (req, res) => {
+    const managerId = param(req, 'id')
+    const projects = await prisma.project.findMany({
+      where: { deletedAt: null, managers: { none: { managerId } } },
+      select: { id: true, reference: true, title: true, status: true },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    })
+    res.json({ data: projects })
+  },
+)
+
 const assignSchema = z.object({
   managerId: z.string().cuid(),
   projectId: z.string().cuid(),
