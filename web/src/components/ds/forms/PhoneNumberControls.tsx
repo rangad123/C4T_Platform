@@ -41,16 +41,13 @@ export function PhoneNumberControls({
     <Field label={label} htmlFor={id} required={required} error={error} hint={hint}>
       <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
         {/*
-          A fixed 1:3 ratio, not a character-count estimate — the code
-          picker is exactly a third of the number input's width whenever
-          there is room for that, rather than a width guessed from the
-          longest label. `minWidth` is the floor: the row's own 14px left
-          padding + 40px reserved for the chevron already eat 54px before a
-          single character of text fits, so in a narrow two-column cell a
-          literal 1:3 split can shrink the box past the point of showing
-          anything at all — tried at 72px, which fit one character of a
-          multi-digit code before the ellipsis, worse than no code at all.
-          120px is enough room for the common 2-5 digit case in full.
+          A straight 1:2 flex ratio — the code picker is exactly half the
+          number input's width. No minimum floor: an earlier version added
+          one (first 72px, then 120px) to keep the code legible in a narrow
+          row, but on this exact form that floor was the one actually
+          winning — the literal ratio came out well under it, so the floor
+          made the "ratio" fiction and the two fields came out nearly equal.
+          The floor is gone; the ratio is now the ratio.
 
           `DialCodeSelect`, not the shared `Select`: the dropdown shows full
           "+91 · India" labels, but the closed box shows the code alone —
@@ -62,10 +59,9 @@ export function PhoneNumberControls({
           name={`${name}DialCode`}
           defaultValue={dialCode}
           options={dialCodeOptions}
-          placeholder="Code"
           required={required}
           invalid={Boolean(error)}
-          style={{ flex: '1 1 0%', minWidth: 120 }}
+          style={{ flex: '1 1 0%' }}
         />
         <Input
           id={id}
@@ -77,7 +73,7 @@ export function PhoneNumberControls({
           required={required}
           invalid={Boolean(error)}
           maxLength={PHONE_NUMBER_MAX_LENGTH}
-          style={{ flex: '3 1 0%' }}
+          style={{ flex: '2 1 0%' }}
         />
       </div>
     </Field>

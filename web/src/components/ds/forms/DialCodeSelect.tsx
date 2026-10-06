@@ -45,7 +45,7 @@ export function DialCodeSelect({
   name,
   defaultValue,
   options,
-  placeholder = 'Code',
+  placeholder = '',
   required = false,
   invalid = false,
   style,
