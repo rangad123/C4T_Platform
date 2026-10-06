@@ -1,0 +1,17 @@
+/**
+ * Shows the Sub-admin permissions panel only while the Role field above it
+ * is set to Sub Admin — CSS-only, via `:has()`, so the page stays a Server
+ * Component (no client state needed just to watch one native `<select>`).
+ *
+ * `#role` has to be wrapped in `:global(...)` — CSS Modules scopes bare ID
+ * selectors the same way it scopes classes, so the un-global form silently
+ * rewrote it to an id nothing in the rendered page actually has, and the
+ * rule never matched.
+ */
+.subAdminPanel {
+  display: none;
+}
+
+form:has(:global(#role) option[value='SUB_ADMIN']:checked) .subAdminPanel {
+  display: block;
+}

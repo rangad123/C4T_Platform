@@ -19,6 +19,7 @@ import { combinePhoneFromForm } from '@/lib/phone/combine'
 import { titleCase } from '@/lib/admin/format'
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 import { ROLES } from '@/lib/domain/enums'
+import styles from './page.module.css'
 
 /**
  * `/app/admin/users/new` — the admin-created account, including the Sub-Admin
@@ -314,72 +315,80 @@ export default async function NewUserPage({
           </div>
         </Panel>
 
-        <Panel
-          title="Sub-admin permissions"
-          description="Applied only when the role above is sub-admin. Leave every box unticked and the API grants its default read-only set instead."
-        >
-          {catalogueError !== null ? (
-            <EmptyState
-              icon={catalogueError === 'forbidden' ? 'lock' : 'alert-triangle'}
-              title={
-                catalogueError === 'forbidden'
-                  ? 'You can still create a sub-admin'
-                  : "Couldn't load the permission catalogue"
-              }
-              description={
-                catalogueError === 'forbidden'
-                  ? 'It will start with the default read-only set. Choosing the grants yourself needs the subadmin.manage permission.'
-                  : 'The users service is unreachable. A sub-admin created now starts with the default read-only set.'
-              }
-            />
-          ) : permissionGroups.length === 0 ? (
-            <p style={noteStyle}>
-              The permission catalogue came back empty, so there is nothing to tick. Seed the
-              permissions table on the API and reload.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-7)' }}>
-              {permissionGroups.map((group) => (
-                <fieldset
-                  key={group.group}
-                  style={{
-                    margin: 0,
-                    padding: 0,
-                    border: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-4)',
-                  }}
-                >
-                  <legend
-                    className="c4t-eyebrow"
-                    style={{ padding: 0, color: 'var(--text-muted)' }}
-                  >
-                    {group.group}
-                  </legend>
-                  <div
+        {/*
+          Hidden by default and shown only while the Role select above is
+          set to Sub Admin — see page.module.css. CSS-only (:has()), so this
+          stays a plain Server Component; a scoped sub-admin or any other
+          role never sees a panel of checkboxes the form ignores for them.
+        */}
+        <div className={styles.subAdminPanel}>
+          <Panel
+            title="Sub-admin permissions"
+            description="Applied only when the role above is sub-admin. Leave every box unticked and the API grants its default read-only set instead."
+          >
+            {catalogueError !== null ? (
+              <EmptyState
+                icon={catalogueError === 'forbidden' ? 'lock' : 'alert-triangle'}
+                title={
+                  catalogueError === 'forbidden'
+                    ? 'You can still create a sub-admin'
+                    : "Couldn't load the permission catalogue"
+                }
+                description={
+                  catalogueError === 'forbidden'
+                    ? 'It will start with the default read-only set. Choosing the grants yourself needs the subadmin.manage permission.'
+                    : 'The users service is unreachable. A sub-admin created now starts with the default read-only set.'
+                }
+              />
+            ) : permissionGroups.length === 0 ? (
+              <p style={noteStyle}>
+                The permission catalogue came back empty, so there is nothing to tick. Seed the
+                permissions table on the API and reload.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-7)' }}>
+                {permissionGroups.map((group) => (
+                  <fieldset
+                    key={group.group}
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                      gap: 'var(--space-4) var(--space-6)',
+                      margin: 0,
+                      padding: 0,
+                      border: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-4)',
                     }}
                   >
-                    {group.items.map((permission) => (
-                      <Checkbox
-                        key={permission.code}
-                        id={`perm-${permission.code}`}
-                        name="permissionCodes"
-                        value={permission.code}
-                        label={permission.label}
-                        description={permission.description}
-                      />
-                    ))}
-                  </div>
-                </fieldset>
-              ))}
-            </div>
-          )}
-        </Panel>
+                    <legend
+                      className="c4t-eyebrow"
+                      style={{ padding: 0, color: 'var(--text-muted)' }}
+                    >
+                      {group.group}
+                    </legend>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                        gap: 'var(--space-4) var(--space-6)',
+                      }}
+                    >
+                      {group.items.map((permission) => (
+                        <Checkbox
+                          key={permission.code}
+                          id={`perm-${permission.code}`}
+                          name="permissionCodes"
+                          value={permission.code}
+                          label={permission.label}
+                          description={permission.description}
+                        />
+                      ))}
+                    </div>
+                  </fieldset>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
 
         <div
           style={{
