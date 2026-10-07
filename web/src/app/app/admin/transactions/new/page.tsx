@@ -477,7 +477,11 @@ export default async function NewTransactionPage({
               />
             </Field>
 
-            <Field label="Currency" htmlFor="currency">
+            <Field
+              label="Currency"
+              htmlFor="currency"
+              hint="Match the tester's actual payout instrument — Indian bank account or Paytm is INR, everything else (a non-Indian bank account or PayPal) is USD. This stays INR by default regardless of who you pick below; it is not derived from their payment details."
+            >
               <Select
                 id="currency"
                 name="currency"

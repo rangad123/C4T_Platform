@@ -450,6 +450,15 @@ interface PaymentAccountDetail {
   paytmNumberLast4: string | null
 }
 
+interface WalletBalance {
+  currency: string
+  availableMinor: string
+  creditedMinor: string
+  releasedMinor: string
+  awaitingReleaseMinor: string
+  requestedMinor: string
+}
+
 interface PaymentHistoryRow {
   id: string
   reference: string
@@ -550,64 +559,75 @@ export default async function TesterDetailPage({
    * section needs together (payment account + history, projects + bugs)
    * instead of one after another cuts the round trips further.
    */
-  const [paymentAccount, paymentHistory, ratings, platformProjects, reportedBugs, engagements] =
-    await Promise.all([
-      section === 'payment'
-        ? serverFetchOrNull<PaymentAccountDetail | null>(
-            `payment-accounts?userId=${tester.user.id}`,
-          )
-        : Promise.resolve(null),
-      // §23 "Account details" — payment HISTORY, not just the payout instrument
-      // above. Reuses the exact Transaction rows the Transactions module already
-      // tracks for this tester as counterparty.
-      section === 'payment' && canReadTransactions
-        ? loadList<PaymentHistoryRow>('transactions', {
-            page: 1,
-            limit: 10,
-            query: {
-              counterpartyId: tester.user.id,
-              type: 'TESTER_EARNING,TESTER_PAYOUT',
-              sort: 'createdAt',
-              order: 'desc',
-            },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      // Ratings are keyed by user id, not profile id.
-      section === 'ratings'
-        ? loadList<RatingRow>('ratings', {
-            page: parsePage(ratingsPage),
-            limit: RATINGS_PAGE_SIZE,
-            query: { subjectUserId: tester.user.id },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      // §23 "Work history" — actual platform activity, alongside the tester's
-      // own self-reported prior experience below. Both use tester.user.id: the
-      // projects/bugs relations key on User.id, not the tester profile's id.
-      section === 'work'
-        ? loadList<PlatformProjectRow>('projects', {
-            page: 1,
-            limit: 25,
-            query: { testerId: tester.user.id, sort: 'createdAt', order: 'desc' },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      section === 'work'
-        ? loadList<ReportedBugRow>('bugs', {
-            page: 1,
-            limit: 10,
-            query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
-          })
-        : Promise.resolve({ error: 'forbidden' as const }),
-      /**
-       * Every project this tester has actually been on, so a rating can name
-       * one. Admin-side callers get the unscoped list — see the route's own
-       * note on why "no organisations" and "all organisations" differ.
-       *
-       * Best-effort: a failure costs the rating control, not the page.
-       */
-      section === 'ratings' && canRate
-        ? serverFetchOrNull<readonly TesterEngagement[]>(`testers/discover/${id}/engagements`)
-        : Promise.resolve(null),
-    ])
+  const [
+    paymentAccount,
+    walletBalance,
+    paymentHistory,
+    ratings,
+    platformProjects,
+    reportedBugs,
+    engagements,
+  ] = await Promise.all([
+    section === 'payment'
+      ? serverFetchOrNull<PaymentAccountDetail | null>(`payment-accounts?userId=${tester.user.id}`)
+      : Promise.resolve(null),
+    // §23 "Account details" — the tester's current wallet balance, not just
+    // the payout instrument above. Same numbers the tester's own dashboard
+    // shows (`GET /transactions/payouts/mine`), admin-targeted.
+    section === 'payment' && canReadTransactions
+      ? serverFetchOrNull<WalletBalance>(`transactions/payouts/${tester.user.id}`)
+      : Promise.resolve(null),
+    // §23 "Account details" — payment HISTORY, not just the payout instrument
+    // above. Reuses the exact Transaction rows the Transactions module already
+    // tracks for this tester as counterparty.
+    section === 'payment' && canReadTransactions
+      ? loadList<PaymentHistoryRow>('transactions', {
+          page: 1,
+          limit: 10,
+          query: {
+            counterpartyId: tester.user.id,
+            type: 'TESTER_EARNING,TESTER_PAYOUT',
+            sort: 'createdAt',
+            order: 'desc',
+          },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    // Ratings are keyed by user id, not profile id.
+    section === 'ratings'
+      ? loadList<RatingRow>('ratings', {
+          page: parsePage(ratingsPage),
+          limit: RATINGS_PAGE_SIZE,
+          query: { subjectUserId: tester.user.id },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    // §23 "Work history" — actual platform activity, alongside the tester's
+    // own self-reported prior experience below. Both use tester.user.id: the
+    // projects/bugs relations key on User.id, not the tester profile's id.
+    section === 'work'
+      ? loadList<PlatformProjectRow>('projects', {
+          page: 1,
+          limit: 25,
+          query: { testerId: tester.user.id, sort: 'createdAt', order: 'desc' },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    section === 'work'
+      ? loadList<ReportedBugRow>('bugs', {
+          page: 1,
+          limit: 10,
+          query: { reportedById: tester.user.id, sort: 'createdAt', order: 'desc' },
+        })
+      : Promise.resolve({ error: 'forbidden' as const }),
+    /**
+     * Every project this tester has actually been on, so a rating can name
+     * one. Admin-side callers get the unscoped list — see the route's own
+     * note on why "no organisations" and "all organisations" differ.
+     *
+     * Best-effort: a failure costs the rating control, not the page.
+     */
+    section === 'ratings' && canRate
+      ? serverFetchOrNull<readonly TesterEngagement[]>(`testers/discover/${id}/engagements`)
+      : Promise.resolve(null),
+  ])
 
   const ratingRows = 'error' in ratings ? [] : ratings.items
 
@@ -1050,6 +1070,41 @@ export default async function TesterDetailPage({
 
       {section === 'payment' ? (
         <>
+          <Panel
+            title="Wallet"
+            description="This tester's current balance — the same numbers their own dashboard shows."
+          >
+            {!canReadTransactions ? (
+              <Muted>
+                Ask an administrator to grant you the transaction.read permission to view wallet
+                balances.
+              </Muted>
+            ) : !walletBalance ? (
+              <Muted>Could not load the wallet balance. Try refreshing.</Muted>
+            ) : (
+              <DescriptionList
+                items={[
+                  {
+                    label: 'Available to withdraw',
+                    value: formatMoney(walletBalance.availableMinor, walletBalance.currency),
+                  },
+                  {
+                    label: 'Awaiting release',
+                    value: formatMoney(walletBalance.awaitingReleaseMinor, walletBalance.currency),
+                  },
+                  {
+                    label: 'Already requested',
+                    value: formatMoney(walletBalance.requestedMinor, walletBalance.currency),
+                  },
+                  {
+                    label: 'Credited total',
+                    value: formatMoney(walletBalance.creditedMinor, walletBalance.currency),
+                  },
+                ]}
+              />
+            )}
+          </Panel>
+
           <Panel
             title="Payment details"
             description="Where this tester's earnings get paid out. Maintained by the tester on their own profile. Sensitive fields are encrypted at rest and shown masked here by default."

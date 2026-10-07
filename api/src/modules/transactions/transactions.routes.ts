@@ -553,6 +553,29 @@ const OPEN_PAYOUT_STATUSES: TransactionStatus[] = [
   TransactionStatus.RELEASED,
 ]
 
+/** INR for an Indian payout instrument, USD for everything else — the same split `categoryFilter` buckets settled transactions by. */
+function currencyForPaymentType(type: PaymentMethod): 'INR' | 'USD' {
+  return INDIAN_METHODS.includes(type) ? 'INR' : 'USD'
+}
+
+/**
+ * The currency a tester is actually paid in, derived from their current
+ * payout instrument. Falls back to INR when no payment account exists yet —
+ * nothing to derive from, and a payout is blocked in that state regardless.
+ *
+ * Every tester-facing balance read used to hardcode `currency: 'INR'`
+ * instead of this, so an international tester (PayPal / a non-Indian bank
+ * account) saw their own earnings and payout totals labelled in INR even
+ * though the underlying amounts were never rupees.
+ */
+async function testerCurrency(testerId: string): Promise<'INR' | 'USD'> {
+  const account = await prisma.paymentAccount.findFirst({
+    where: { userId: testerId, status: 'ACTIVE' },
+    select: { paymentType: true },
+  })
+  return account ? currencyForPaymentType(account.paymentType) : 'INR'
+}
+
 /**
  * The tester's money, at all three stages.
  *
@@ -661,7 +684,7 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
 
   res.json({
     data: {
-      currency: 'INR',
+      currency: account ? currencyForPaymentType(account.paymentType) : 'INR',
       availableMinor: balance.availableMinor.toString(),
       /** Everything credited, released or not — legacy "Credit Fund". */
       creditedMinor: balance.creditedMinor.toString(),
@@ -681,6 +704,48 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
     },
   })
 })
+
+/**
+ * §23 "Account details" — an admin's view of a tester's current wallet
+ * balance. Same shape and the same `payoutBalance()` as the tester's own
+ * `/payouts/mine` above, just admin-targeted: gated by `transaction.read`
+ * rather than "is this your own balance", and keyed by a path param instead
+ * of the session. Declared after the literal `/payouts/mine` route, not
+ * before — Express matches in declaration order, and a `/payouts/:testerId`
+ * route declared first would swallow "mine" as a (invalid) testerId.
+ */
+transactionsRouter.get(
+  '/payouts/:testerId',
+  requirePermission(PERMISSIONS.TRANSACTION_READ),
+  validate({ params: z.object({ testerId: z.string().cuid() }) }),
+  async (req, res) => {
+    const testerId = param(req, 'testerId')
+    const tester = await prisma.user.findFirst({
+      where: { id: testerId, role: Role.TESTER, deletedAt: null },
+      select: { id: true },
+    })
+    if (!tester) throw new NotFoundError('Tester')
+
+    const [balance, account] = await Promise.all([
+      payoutBalance(testerId),
+      prisma.paymentAccount.findFirst({
+        where: { userId: testerId, status: 'ACTIVE' },
+        select: { paymentType: true },
+      }),
+    ])
+
+    res.json({
+      data: {
+        currency: account ? currencyForPaymentType(account.paymentType) : 'INR',
+        availableMinor: balance.availableMinor.toString(),
+        creditedMinor: balance.creditedMinor.toString(),
+        releasedMinor: balance.releasedMinor.toString(),
+        awaitingReleaseMinor: balance.awaitingReleaseMinor.toString(),
+        requestedMinor: balance.requestedMinor.toString(),
+      },
+    })
+  },
+)
 
 const requestPayoutSchema = z.object({
   /**
@@ -748,7 +813,7 @@ transactionsRouter.post(
         type: TransactionType.TESTER_PAYOUT,
         status: TransactionStatus.PENDING,
         amountMinor,
-        currency: 'INR',
+        currency: currencyForPaymentType(account.paymentType),
         counterpartyId: req.user!.id,
         paymentAccountId: account.id,
         paymentMethod: account.paymentType,
@@ -775,7 +840,7 @@ transactionsRouter.post(
 
 /** §2.3 — a tester's own earnings summary. */
 transactionsRouter.get('/summary/mine', async (req, res) => {
-  const [grouped, tds] = await Promise.all([
+  const [grouped, tds, currency] = await Promise.all([
     prisma.transaction.groupBy({
       by: ['type', 'status'],
       where: { counterpartyId: req.user!.id },
@@ -788,6 +853,7 @@ transactionsRouter.get('/summary/mine', async (req, res) => {
       where: { counterpartyId: req.user!.id },
       _sum: { tdsAmountMinor: true },
     }),
+    testerCurrency(req.user!.id),
   ])
 
   const sum = (type: TransactionType, status?: TransactionStatus) =>
@@ -798,7 +864,7 @@ transactionsRouter.get('/summary/mine', async (req, res) => {
 
   res.json({
     data: {
-      currency: 'INR',
+      currency,
       earnedTotalMinor: sum(TransactionType.TESTER_EARNING),
       earnedApprovedMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.APPROVED),
       earnedReleasedMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.RELEASED),
