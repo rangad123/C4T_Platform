@@ -86,9 +86,12 @@ interface TransactionRow {
 /**
  * The transactions endpoint adds a `totalsByType` array to the standard page
  * meta — the sum per type across the *whole* filtered set, not just this page.
+ * Grouped by currency as well as type: the filtered set can hold a mix (the
+ * All and Pending tabs both can), and summing cents and paise together as one
+ * number would not be a real amount in either currency.
  */
 interface TransactionMeta extends PageMeta {
-  totalsByType?: readonly { type: string; amountMinor: string }[]
+  totalsByType?: readonly { type: string; currency: string; amountMinor: string }[]
 }
 
 /**
@@ -174,6 +177,15 @@ export default async function TransactionsPage({
   })
 
   const totals = 'items' in result ? ((result.meta as TransactionMeta).totalsByType ?? []) : []
+  // One tile per type, but a type can carry more than one currency (the All
+  // and Pending tabs aren't currency-filtered) — grouped here so each tile
+  // lists every currency it actually holds instead of merging them.
+  const totalsByType = new Map<string, { currency: string; amountMinor: string }[]>()
+  for (const t of totals) {
+    const amounts = totalsByType.get(t.type) ?? []
+    amounts.push({ currency: t.currency, amountMinor: t.amountMinor })
+    totalsByType.set(t.type, amounts)
+  }
 
   const columns: readonly TableColumn<TransactionRow>[] = [
     {
@@ -380,7 +392,7 @@ export default async function TransactionsPage({
         </div>
       }
       summary={
-        totals.length > 0 ? (
+        totalsByType.size > 0 ? (
           <div
             style={{
               display: 'flex',
@@ -392,23 +404,34 @@ export default async function TransactionsPage({
               background: 'var(--surface-raised)',
             }}
           >
-            {totals.map((total) => (
+            {Array.from(totalsByType.entries()).map(([type, amounts]) => (
               <div
-                key={total.type}
+                key={type}
                 style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}
               >
                 <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-                  {titleCase(total.type)}
+                  {titleCase(type)}
                 </span>
-                <span
-                  style={{
-                    fontVariantNumeric: 'tabular-nums',
-                    fontWeight: 'var(--fw-semibold)',
-                    color: 'var(--text-primary)',
-                  }}
-                >
-                  {formatMoney(total.amountMinor)}
-                </span>
+                {/*
+                  One line per currency actually present, not one merged
+                  number — the All and Pending tabs can hold more than one
+                  (an international tester's $ rows sitting alongside Indian
+                  ₹ rows), and adding their minor units together before
+                  picking a symbol would produce a number that is not a real
+                  amount in any currency.
+                */}
+                {amounts.map(({ currency, amountMinor }) => (
+                  <span
+                    key={currency}
+                    style={{
+                      fontVariantNumeric: 'tabular-nums',
+                      fontWeight: 'var(--fw-semibold)',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    {formatMoney(amountMinor, currency)}
+                  </span>
+                ))}
               </div>
             ))}
           </div>

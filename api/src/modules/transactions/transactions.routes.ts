@@ -293,7 +293,11 @@ transactionsRouter.get('/', validate({ query: listQuery }), async (req, res) => 
       ...toSkipTake(query),
     }),
     prisma.transaction.count({ where }),
-    prisma.transaction.groupBy({ by: ['type'], where, _sum: { amountMinor: true } }),
+    // Grouped by currency as well as type — summing amountMinor across rows
+    // in different currencies (cents and paise are not the same unit) would
+    // produce a number that isn't a real amount in any currency, however
+    // confidently it gets a single symbol slapped on it afterward.
+    prisma.transaction.groupBy({ by: ['type', 'currency'], where, _sum: { amountMinor: true } }),
   ])
 
   res.json({
@@ -302,6 +306,7 @@ transactionsRouter.get('/', validate({ query: listQuery }), async (req, res) => 
       ...buildMeta(query, total),
       totalsByType: totals.map((t) => ({
         type: t.type,
+        currency: t.currency,
         amountMinor: (t._sum.amountMinor ?? 0n).toString(),
       })),
     },
