@@ -179,12 +179,26 @@ export default async function TransactionsPage({
   const totals = 'items' in result ? ((result.meta as TransactionMeta).totalsByType ?? []) : []
   // One tile per type, but a type can carry more than one currency (the All
   // and Pending tabs aren't currency-filtered) — grouped here so each tile
-  // lists every currency it actually holds instead of merging them.
-  const totalsByType = new Map<string, { currency: string; amountMinor: string }[]>()
+  // lists every currency it actually holds instead of merging them. INR is
+  // always labelled Indian and anything else International, the same split
+  // `categoryFilter` on the API side uses to bucket the Indian/International
+  // tabs themselves — not a currency code on its own, which wouldn't say
+  // which pile of money an admin is looking at.
+  const totalsByType = new Map<string, { currency: string; amountMinor: string; label: string }[]>()
   for (const t of totals) {
     const amounts = totalsByType.get(t.type) ?? []
-    amounts.push({ currency: t.currency, amountMinor: t.amountMinor })
+    amounts.push({
+      currency: t.currency,
+      amountMinor: t.amountMinor,
+      label: t.currency === 'INR' ? 'Indian' : 'International',
+    })
     totalsByType.set(t.type, amounts)
+  }
+  // Indian first, then International, everywhere this renders — matching the
+  // tab order above — rather than whatever order the database happened to
+  // group them in.
+  for (const amounts of totalsByType.values()) {
+    amounts.sort((a, b) => (a.currency === 'INR' ? -1 : b.currency === 'INR' ? 1 : 0))
   }
 
   const columns: readonly TableColumn<TransactionRow>[] = [
@@ -418,18 +432,37 @@ export default async function TransactionsPage({
                   (an international tester's $ rows sitting alongside Indian
                   ₹ rows), and adding their minor units together before
                   picking a symbol would produce a number that is not a real
-                  amount in any currency.
+                  amount in any currency. Labelled Indian/International, not
+                  just left to the ₹/$ to say which is which.
                 */}
-                {amounts.map(({ currency, amountMinor }) => (
+                {amounts.map(({ currency, amountMinor, label }) => (
                   <span
                     key={currency}
-                    style={{
-                      fontVariantNumeric: 'tabular-nums',
-                      fontWeight: 'var(--fw-semibold)',
-                      color: 'var(--text-primary)',
-                    }}
+                    style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-2)' }}
                   >
-                    {formatMoney(amountMinor, currency)}
+                    {/* Only shown when this tile actually mixes currencies —
+                        on the Indian/International tabs there is exactly one,
+                        and the tab itself already says which. */}
+                    {amounts.length > 1 ? (
+                      <span
+                        style={{
+                          fontSize: 'var(--type-body-sm-size)',
+                          color: 'var(--text-secondary)',
+                          minWidth: '5.5em',
+                        }}
+                      >
+                        {label}
+                      </span>
+                    ) : null}
+                    <span
+                      style={{
+                        fontVariantNumeric: 'tabular-nums',
+                        fontWeight: 'var(--fw-semibold)',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      {formatMoney(amountMinor, currency)}
+                    </span>
                   </span>
                 ))}
               </div>
