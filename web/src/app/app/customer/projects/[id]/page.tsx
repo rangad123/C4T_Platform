@@ -935,6 +935,22 @@ export default async function CustomerProjectDetailPage({
               builds={project.builds}
               activeBuildId={activeBuildId}
             />
+            {/*
+              Read-only, so available regardless of canUpdate — anyone who can
+              see this project at all can see this build's own report.
+              `prefetch={false}` is load-bearing: without it Next generates
+              the file on hover, same as every other download button in
+              this app.
+            */}
+            <Button
+              href={`${detailPath}/download?buildId=${activeBuildId}`}
+              prefetch={false}
+              variant="secondary"
+              size="sm"
+              iconLeft="download"
+            >
+              Download report
+            </Button>
             {capabilities.canUpdate ? (
               <>
                 <Button
