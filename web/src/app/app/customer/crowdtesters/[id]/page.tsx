@@ -73,7 +73,7 @@ interface TesterProfileDetail {
   projectsCompletedCount: number
   experienceYears: number | null
   skills: readonly { id: string; name: string; slug: string }[]
-  platforms: readonly string[]
+  devices: readonly string[]
   browsers: readonly string[]
 }
 
@@ -393,11 +393,11 @@ export default async function CrowdtesterProfilePage({
 
       {section === 'assets' ? (
         <Panel title="Devices">
-          {tester.platforms.length > 0 ? (
+          {tester.devices.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-              {tester.platforms.map((platform) => (
-                <Badge key={platform} tone="neutral" uppercase={false}>
-                  {platform}
+              {tester.devices.map((device) => (
+                <Badge key={device} tone="neutral" uppercase={false}>
+                  {device}
                 </Badge>
               ))}
             </div>

@@ -1038,7 +1038,10 @@ const DISCOVERABLE_TESTER_SELECT = {
   experienceYears: true,
   user: { select: { id: true, firstName: true, lastName: true, avatarFileId: true } },
   skills: { select: { skill: { select: { id: true, name: true, slug: true } } }, take: 8 },
-  devices: { select: { type: true, osName: true }, take: 6 },
+  devices: {
+    select: { type: true, manufacturer: true, model: true, osName: true, osVersion: true },
+    take: 6,
+  },
   browsers: {
     select: {
       browser: { select: { name: true } },
@@ -1071,8 +1074,23 @@ function shapeDiscoverableTester(t: DiscoverableTesterRow) {
     projectsCompletedCount: t.projectsCompletedCount,
     experienceYears: t.experienceYears,
     skills: t.skills.map((s) => s.skill),
-    /** Coarse device coverage — a type and an OS, never a specific handset. */
-    platforms: [...new Set(t.devices.map((d) => d.osName ?? d.type).filter(Boolean))] as string[],
+    /**
+     * The actual handset ("Samsung Galaxy S25"), not just its OS — the field
+     * used to read `d.osName ?? d.type`, which discarded `manufacturer` and
+     * `model` entirely and left this panel showing nothing but "Android" /
+     * "iOS" tags no matter how specific the tester's own device really was.
+     */
+    devices: [
+      ...new Set(
+        t.devices.map((d) => {
+          const name =
+            [d.manufacturer, d.model].filter(Boolean).join(' ') ||
+            d.type.charAt(0) + d.type.slice(1).toLowerCase().replace(/_/g, ' ')
+          const os = [d.osName, d.osVersion].filter(Boolean).join(' ')
+          return os ? `${name} (${os})` : name
+        }),
+      ),
+    ] as string[],
     /**
      * Browser coverage, as "Chrome 128" — the version is kept because it is
      * the whole point of the field: "can this person test the browser we are

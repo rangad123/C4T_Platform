@@ -43,7 +43,7 @@ interface CrowdTester {
   projectsCompletedCount: number
   experienceYears: number | null
   skills: readonly { id: string; name: string; slug: string }[]
-  platforms: readonly string[]
+  devices: readonly string[]
 }
 
 interface SkillCatalog {
