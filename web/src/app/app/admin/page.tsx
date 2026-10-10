@@ -28,6 +28,9 @@ import { resolveNotificationHref } from '@/lib/notifications/href'
  * permission gap never reads as "no leads exist".
  */
 
+/** One entry per currency actually present — never a single cross-currency sum. */
+type MoneyByCurrency = readonly { currency: string; amountMinor: string }[]
+
 interface StatsResponse {
   projects: { byStatus: Record<string, number>; newLast30Days: number }
   bugs: {
@@ -40,11 +43,39 @@ interface StatsResponse {
   organisations: { byStatus: Record<string, number> }
   users: { byRole: Record<string, number> }
   leads: Record<string, number> | null
-  finance: { currency: string; collectedMinor: string; paidOutMinor: string }
+  finance: { collected: MoneyByCurrency; paidOut: MoneyByCurrency }
   payouts: {
-    currency: string
-    byCategory: { indian: string; international: string; pending: string }
+    byCategory: {
+      indian: MoneyByCurrency
+      international: MoneyByCurrency
+      pending: MoneyByCurrency
+    }
   }
+}
+
+/**
+ * Every currency present, formatted and joined — "₹25,12,560.00 + $1,275.00"
+ * — rather than merging their minor units into one number first. Empty means
+ * a real zero (no matching transactions), shown as a plain ₹0.00 rather than
+ * nothing: a KPI tile reading blank looks broken, not "nothing pending".
+ */
+function joinedAmount(amounts: MoneyByCurrency): string {
+  if (amounts.length === 0) return formatMoney('0', 'INR')
+  return amounts.map(({ currency, amountMinor }) => formatMoney(amountMinor, currency)).join(' + ')
+}
+
+/** Sums every entry across categories, re-grouped by currency — still one line per currency, not one merged number. */
+function totalByCurrency(...groups: MoneyByCurrency[]): MoneyByCurrency {
+  const totals = new Map<string, bigint>()
+  for (const group of groups) {
+    for (const { currency, amountMinor } of group) {
+      totals.set(currency, (totals.get(currency) ?? 0n) + BigInt(amountMinor))
+    }
+  }
+  return Array.from(totals.entries()).map(([currency, amountMinor]) => ({
+    currency,
+    amountMinor: amountMinor.toString(),
+  }))
 }
 
 function segmentsFromCounts(
@@ -76,7 +107,7 @@ function buildNarrative(stats: StatsResponse, newLeads: number): string {
   if (stats.leads && newLeads > 0) {
     notes.push(`${newLeads} new lead${newLeads === 1 ? '' : 's'} waiting for a response`)
   }
-  if (BigInt(stats.payouts.byCategory.pending) > 0n) {
+  if (stats.payouts.byCategory.pending.length > 0) {
     notes.push('tester payouts pending')
   }
   if (notes.length === 0) {
@@ -164,13 +195,15 @@ export default async function AdminDashboardPage({
   const newLeads = stats.leads?.NEW ?? 0
   const narrative = buildNarrative(stats, newLeads)
 
-  // BigInt, not Number: these are minor-unit strings and a float sum risks
-  // precision loss above 2^53 — same care `formatMoney` itself takes.
-  const payoutTotalMinor = (
-    BigInt(stats.payouts.byCategory.indian) +
-    BigInt(stats.payouts.byCategory.international) +
-    BigInt(stats.payouts.byCategory.pending)
-  ).toString()
+  // Re-grouped by currency, not added together as one number — Indian is
+  // minor units of INR, International and Pending can each be a different
+  // currency, and summing across them would not be a real amount in any of
+  // them (same reasoning as `byCurrency` on the API side).
+  const payoutTotal = totalByCurrency(
+    stats.payouts.byCategory.indian,
+    stats.payouts.byCategory.international,
+    stats.payouts.byCategory.pending,
+  )
 
   return (
     <>
@@ -234,7 +267,7 @@ export default async function AdminDashboardPage({
           <KpiCard
             icon="clock"
             label="Pending tester payouts"
-            value={formatMoney(stats.payouts.byCategory.pending, stats.payouts.currency)}
+            value={joinedAmount(stats.payouts.byCategory.pending)}
             href="/app/admin/transactions?section=pending"
           />
           {stats.leads ? (
@@ -288,23 +321,42 @@ export default async function AdminDashboardPage({
             </ChartCard>
           ) : null}
 
+          {/*
+            One segment per (category, currency) pair actually present, not
+            three fixed category segments — Indian is always one currency in
+            practice, but International and Pending are not guaranteed to
+            be, and a segment can only honestly show one currency's amount.
+            The label only gets a currency suffix once a category actually
+            needs the disambiguation (more than one entry); a single-currency
+            category keeps its plain name, same as it always has.
+
+            Comparing slice sizes (`value`) across different currencies is
+            still an approximation — there is no FX rate anywhere in this
+            platform to make ₹1 and $1 commensurable, and building one is
+            well outside what this fix is for. Each slice's own number is
+            exact; only how its size reads next to a different-currency
+            slice is a rough visual cue, not a claim.
+          */}
           <ChartCard>
             <DonutChart
               title="Tester payouts by category"
               href="/app/admin/transactions"
-              centerLabel={formatMoney(payoutTotalMinor, stats.payouts.currency)}
+              centerLabel={joinedAmount(payoutTotal)}
               segments={(
                 [
                   { key: 'indian', label: 'Indian', tone: 'info' },
                   { key: 'international', label: 'International', tone: 'accent' },
                   { key: 'pending', label: 'Pending', tone: 'warning' },
                 ] as const
-              ).map(({ key, label, tone }) => ({
-                label,
-                tone,
-                value: Number(stats.payouts.byCategory[key]),
-                displayValue: formatMoney(stats.payouts.byCategory[key], stats.payouts.currency),
-              }))}
+              ).flatMap(({ key, label, tone }) => {
+                const amounts = stats.payouts.byCategory[key]
+                return amounts.map(({ currency, amountMinor }) => ({
+                  label: amounts.length > 1 ? `${label} (${currency})` : label,
+                  tone,
+                  value: Number(amountMinor),
+                  displayValue: formatMoney(amountMinor, currency),
+                }))
+              })}
             />
           </ChartCard>
         </div>

@@ -28,6 +28,16 @@ statsRouter.use(authenticate)
 /** §21-27 -- dashboard payout breakdown is scoped to tester types only, same as the Transactions module's own tester-payouts-only scope. */
 const TESTER_PAYOUT_TYPES = [TransactionType.TESTER_EARNING, TransactionType.TESTER_PAYOUT]
 
+/**
+ * `groupBy(['currency'], ...)` rows → `[{ currency, amountMinor }]` — one
+ * entry per currency actually present, never a cross-currency sum. Shared by
+ * every money aggregate in this file: summing amountMinor across rows in
+ * different currencies and stamping one symbol on the result would produce a
+ * number that is not a real amount in any currency.
+ */
+const byCurrency = (rows: { currency: string; _sum: { amountMinor: bigint | null } }[]) =>
+  rows.map((r) => ({ currency: r.currency, amountMinor: (r._sum.amountMinor ?? 0n).toString() }))
+
 statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req, res) => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   // A sub-admin can hold STATS_READ (a dashboard-wide grant) without also
@@ -69,11 +79,18 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
     }),
     prisma.bug.count({ where: { deletedAt: null, createdAt: { gte: thirtyDaysAgo } } }),
     prisma.project.count({ where: { deletedAt: null, createdAt: { gte: thirtyDaysAgo } } }),
-    prisma.transaction.aggregate({
+    // Grouped by currency as well as status/category throughout this block —
+    // see the matching note on the Transactions list endpoint. "Pending" in
+    // particular is never filtered to one currency (that is the whole point
+    // of the category), so summing it as one number and stamping INR on the
+    // result silently added rupees and dollars together.
+    prisma.transaction.groupBy({
+      by: ['currency'],
       where: { type: TransactionType.CUSTOMER_PAYMENT, status: TransactionStatus.PAID },
       _sum: { amountMinor: true },
     }),
-    prisma.transaction.aggregate({
+    prisma.transaction.groupBy({
+      by: ['currency'],
       where: { type: TransactionType.TESTER_PAYOUT, status: TransactionStatus.PAID },
       _sum: { amountMinor: true },
     }),
@@ -84,15 +101,18 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
           _count: true,
         })
       : Promise.resolve(null),
-    prisma.transaction.aggregate({
+    prisma.transaction.groupBy({
+      by: ['currency'],
       where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('indian') },
       _sum: { amountMinor: true },
     }),
-    prisma.transaction.aggregate({
+    prisma.transaction.groupBy({
+      by: ['currency'],
       where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('international') },
       _sum: { amountMinor: true },
     }),
-    prisma.transaction.aggregate({
+    prisma.transaction.groupBy({
+      by: ['currency'],
       where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('pending') },
       _sum: { amountMinor: true },
     }),
@@ -131,16 +151,14 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
           )
         : null,
       finance: {
-        currency: 'INR',
-        collectedMinor: (revenue._sum.amountMinor ?? 0n).toString(),
-        paidOutMinor: (payouts._sum.amountMinor ?? 0n).toString(),
+        collected: byCurrency(revenue),
+        paidOut: byCurrency(payouts),
       },
       payouts: {
-        currency: 'INR',
         byCategory: {
-          indian: (payoutsIndian._sum.amountMinor ?? 0n).toString(),
-          international: (payoutsInternational._sum.amountMinor ?? 0n).toString(),
-          pending: (payoutsPending._sum.amountMinor ?? 0n).toString(),
+          indian: byCurrency(payoutsIndian),
+          international: byCurrency(payoutsInternational),
+          pending: byCurrency(payoutsPending),
         },
       },
     },
@@ -214,7 +232,11 @@ statsRouter.get('/tester', async (req, res) => {
         projectsCompletedCount: true,
       },
     }),
-    prisma.transaction.aggregate({
+    // Grouped by currency — see the matching note on /admin above. Usually
+    // one entry (a tester's payout instrument rarely changes currency), but
+    // never assumed to be.
+    prisma.transaction.groupBy({
+      by: ['currency'],
       where: { counterpartyId: userId, type: TransactionType.TESTER_EARNING },
       _sum: { amountMinor: true },
     }),
@@ -225,10 +247,7 @@ statsRouter.get('/tester', async (req, res) => {
       assignments: Object.fromEntries(assignments.map((a) => [a.status, a._count])),
       bugs: Object.fromEntries(bugsByStatus.map((b) => [b.status, b._count])),
       profile,
-      earnings: {
-        currency: 'INR',
-        totalMinor: (earnings._sum.amountMinor ?? 0n).toString(),
-      },
+      earnings: byCurrency(earnings),
     },
   })
 })
