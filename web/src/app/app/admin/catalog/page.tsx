@@ -521,7 +521,7 @@ export default async function CatalogPage({
         </Panel>
       ) : null}
 
-      {activeGroup.key === 'terms' && section === 'professions' ? (
+      {activeGroup.key === 'terms' ? (
         <Panel
           title="Professions"
           description={`${catalog.professions.length} listed. Offered on a tester's profile.`}
@@ -553,7 +553,7 @@ export default async function CatalogPage({
         </Panel>
       ) : null}
 
-      {activeGroup.key === 'terms' && section === 'industries' ? (
+      {activeGroup.key === 'terms' ? (
         <Panel
           title="Industries"
           description={`${catalog.industries.length} listed. Offered on an organisation.`}
