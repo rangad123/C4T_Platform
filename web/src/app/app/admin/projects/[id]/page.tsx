@@ -1017,6 +1017,22 @@ export default async function ProjectDetailPage({
                 </Button>
               </>
             ) : null}
+            {/*
+              Read-only, so gated on project.read rather than canUpdate —
+              reusing the same permission the page itself already required to
+              render at all. `prefetch={false}` is load-bearing: without it
+              Next generates the file on hover, same as the Reports page's
+              own download button.
+            */}
+            <Button
+              href={`${detailPath}/download?buildId=${activeBuildId}`}
+              prefetch={false}
+              variant="secondary"
+              size="sm"
+              iconLeft="download"
+            >
+              Download report
+            </Button>
           </div>
 
           <SectionTabs
