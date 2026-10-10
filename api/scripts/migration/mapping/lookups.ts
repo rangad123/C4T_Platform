@@ -358,21 +358,30 @@ export const TRANSACTION_TYPE: Record<string, TransactionType> = {
   refund: TransactionType.REFUND,
 }
 
+/**
+ * TransactionStatus is now PENDING/PAID only (see the
+ * `simplify_transaction_status` migration). Anything the legacy ledger
+ * recorded as further along than a bare request — approved, released,
+ * completed, even a failed or cancelled one — maps to PAID: there is no
+ * terminal-bad bucket left, and remapping a resolved legacy row to PENDING
+ * would wrongly surface it as a live, open request. Same reasoning the
+ * migration itself uses for existing rows.
+ */
 export const TRANSACTION_STATUS: Record<string, TransactionStatus> = {
   // The only value payment_history carries, on all 6,700 rows. The legacy
   // ledger recorded movements that had already happened.
   new: TransactionStatus.PAID,
   pending: TransactionStatus.PENDING,
   requested: TransactionStatus.PENDING,
-  approved: TransactionStatus.APPROVED,
-  released: TransactionStatus.RELEASED,
+  approved: TransactionStatus.PAID,
+  released: TransactionStatus.PAID,
   paid: TransactionStatus.PAID,
   completed: TransactionStatus.PAID,
   success: TransactionStatus.PAID,
-  failed: TransactionStatus.FAILED,
-  cancelled: TransactionStatus.CANCELLED,
-  canceled: TransactionStatus.CANCELLED,
-  rejected: TransactionStatus.CANCELLED,
+  failed: TransactionStatus.PAID,
+  cancelled: TransactionStatus.PAID,
+  canceled: TransactionStatus.PAID,
+  rejected: TransactionStatus.PAID,
 }
 
 /** `pmt_payment_type` on payment_acc_details, and `pmt_method` on history. */

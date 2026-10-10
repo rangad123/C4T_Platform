@@ -44,7 +44,7 @@ const BASE = '/app/admin/transactions'
 // untouched, this form just never sends those values.
 const TYPES = ['TESTER_EARNING', 'TESTER_PAYOUT', 'ADJUSTMENT'] as const
 
-const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'FAILED', 'CANCELLED'] as const
+const STATUSES = ['PENDING', 'PAID'] as const
 
 /** Mirrors the API's own coherence rule, so the message arrives without a round trip. */
 const COUNTERPARTY_REQUIRED: readonly string[] = ['TESTER_EARNING', 'TESTER_PAYOUT']

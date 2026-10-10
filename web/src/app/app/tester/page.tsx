@@ -21,8 +21,6 @@ const ROOT = { label: 'Tester', href: '/app/tester' }
 interface EarningsSummary {
   currency: string
   earnedTotalMinor: string
-  earnedApprovedMinor: string
-  earnedReleasedMinor: string
   earnedPendingMinor: string
   paidOutMinor: string
   tdsWithheldMinor: string
@@ -32,12 +30,8 @@ interface EarningsSummary {
 interface PayoutState {
   currency: string
   availableMinor: string
-  /** Everything credited — the legacy "Credit Fund". */
+  /** Every earning, credited the moment it's recorded. */
   creditedMinor: string
-  /** The released subset — the legacy "Release Fund". */
-  releasedMinor: string
-  /** Credited but held back, so not withdrawable. */
-  awaitingReleaseMinor: string
   minimumMinor: string
   hasPaymentAccount: boolean
   meetsMinimum: boolean
@@ -617,27 +611,12 @@ export default async function TesterHomePage({
                 <StatTile
                   label="Available to withdraw"
                   value={formatMoney(availableBalanceMinor ?? '0', currency)}
-                  hint="Released funds not yet paid out"
+                  hint="Credited, minus anything already paid out or requested"
                 />
-                {/* The legacy Credit Fund / Release Fund split. Credited is what
-                  the tester has earned and been approved for; awaiting release
-                  is the part an operator still holds back. Showing only one
-                  number here is what used to imply approved money was
-                  withdrawable. */}
                 <StatTile
                   label="Credited"
                   value={formatMoney(payout?.creditedMinor ?? summary.earnedTotalMinor, currency)}
-                  hint="Approved earnings, released or not"
-                />
-                <StatTile
-                  label="Awaiting release"
-                  value={formatMoney(payout?.awaitingReleaseMinor ?? '0', currency)}
-                  hint="Credited, not yet withdrawable"
-                />
-                <StatTile
-                  label="Pending review"
-                  value={formatMoney(summary.earnedPendingMinor, currency)}
-                  hint="Not yet approved"
+                  hint="Every earning recorded, paid out or not"
                 />
                 <StatTile label="Paid out" value={formatMoney(summary.paidOutMinor, currency)} />
                 <StatTile
@@ -689,19 +668,6 @@ export default async function TesterHomePage({
                             ? `You can request a payout once your balance reaches ${formatMoney(payout.minimumMinor, currency)}.`
                             : `${formatMoney(payout.availableMinor, currency)} is ready to be paid to your saved account.`}
                     </span>
-                    {/* Distinguishes "you have earned nothing" from "your money
-                      is credited but an operator has not released it" — two
-                      very different things to a tester chasing a payment. */}
-                    {!payout.openRequest &&
-                    !payout.meetsMinimum &&
-                    payout.awaitingReleaseMinor !== '0' ? (
-                      <span
-                        style={{ fontSize: 'var(--type-body-sm-size)', color: 'var(--text-muted)' }}
-                      >
-                        {formatMoney(payout.awaitingReleaseMinor, currency)} is credited but not yet
-                        released.
-                      </span>
-                    ) : null}
                   </div>
 
                   {payout.openRequest ? null : payout.hasPaymentAccount ? (

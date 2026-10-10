@@ -928,7 +928,7 @@ async function main() {
       {
         reference: `TXN-${new Date().getUTCFullYear()}-00002`,
         type: TransactionType.TESTER_PAYOUT,
-        status: TransactionStatus.APPROVED,
+        status: TransactionStatus.PENDING,
         amountMinor: BigInt(75000), // ₹750.00
         description: 'Tester payout — Hrvoje Nikolic',
       },

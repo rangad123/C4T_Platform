@@ -228,11 +228,7 @@ enum TransactionType {
 /// APPROVED has to stand in for both, which overstates what a tester can take.
 enum TransactionStatus {
   PENDING
-  APPROVED
-  RELEASED
   PAID
-  FAILED
-  CANCELLED
 }
 
 enum NotificationType {

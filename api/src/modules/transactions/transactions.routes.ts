@@ -57,7 +57,19 @@ const txSelect = {
   project: { select: { id: true, reference: true, title: true } },
   /// What the money was for, when it was for a build.
   build: { select: { id: true, name: true } },
-  counterparty: { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
+  counterparty: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      role: true,
+      // The admin counterparty link needs this to reach a tester's own
+      // Payment details tab (`/admin/testers/:id` is keyed by TesterProfile
+      // id, not User id — see `testers.service.ts getTesterById`).
+      testerProfile: { select: { id: true } },
+    },
+  },
   recordedBy: { select: { id: true, firstName: true, lastName: true } },
   // Masked — never `include`, never `secureDetails`. Same select used by
   // `payment-accounts.routes.ts`'s own masked reads; a transaction read must
@@ -124,25 +136,15 @@ const TRANSACTION_SORT_FIELDS = [
  * §21-27 — Indian / International / Pending, as three real backend queries
  * over one table, not three client-side filters over one flat fetch.
  *
- * Pending takes priority over the other two: any transaction still in
- * PENDING or APPROVED is "Pending Payments" regardless of what currency or
- * payment method it will eventually settle in — that is exactly what the
- * brief's "Outstanding Amount" framing for that category is about (money not
- * yet paid out). Only settled rows get bucketed as Indian/International, by
- * `paymentMethod`, falling back to `currency` for rows recorded before a
- * payment method was attached to the ledger (see §Phase-C migration note).
+ * Pending takes priority over the other two: any transaction still PENDING is
+ * "Pending Payments" regardless of what currency or payment method it will
+ * eventually settle in — that is exactly what the brief's "Outstanding
+ * Amount" framing for that category is about (money not yet paid out). Only
+ * PAID rows get bucketed as Indian/International, by `paymentMethod`,
+ * falling back to `currency` for rows recorded before a payment method was
+ * attached to the ledger (see §Phase-C migration note).
  */
-/**
- * RELEASED belongs here with PENDING and APPROVED: the category means "money
- * not yet paid out", and releasing funds authorises a payment without making
- * one. Omitting it would push released-but-unpaid rows into the
- * Indian/International buckets, which are explicitly for settled rows only.
- */
-const PENDING_STATUSES: TransactionStatus[] = [
-  TransactionStatus.PENDING,
-  TransactionStatus.APPROVED,
-  TransactionStatus.RELEASED,
-]
+const PENDING_STATUSES: TransactionStatus[] = [TransactionStatus.PENDING]
 const INDIAN_METHODS: PaymentMethod[] = [PaymentMethod.IND_BANK_ACCOUNT, PaymentMethod.PAYTM]
 const INTERNATIONAL_METHODS: PaymentMethod[] = [
   PaymentMethod.NON_IND_BANK_ACCOUNT,
@@ -521,42 +523,11 @@ transactionsRouter.patch(
 export const PAYOUT_MINIMUM_MINOR = 50_000n
 
 /**
- * An earning that counts as CREDITED — money the tester has been told is
- * theirs. It may or may not be withdrawable yet.
- */
-const CREDITED_EARNING_STATUSES: TransactionStatus[] = [
-  TransactionStatus.APPROVED,
-  TransactionStatus.RELEASED,
-  TransactionStatus.PAID,
-]
-
-/**
- * An earning that has been RELEASED — withdrawable.
- *
- * `PAID` is included because releasing is a precondition of paying: a row that
- * reached PAID was necessarily released, and older rows recorded before this
- * stage existed went straight from APPROVED to PAID. Excluding PAID would make
- * every historical payout look unreleased and drop the balance below what was
- * actually settled.
- */
-const RELEASED_EARNING_STATUSES: TransactionStatus[] = [
-  TransactionStatus.RELEASED,
-  TransactionStatus.PAID,
-]
-
-/**
- * A payout the tester has raised that has not finished.
- *
- * RELEASED counts: the funds were authorised but not paid, so the request is
- * very much still live and a second one would double-claim the same balance.
+ * A payout the tester has raised that has not finished — still PENDING.
  * Shared by the read and the write below so the two cannot disagree about what
  * "already in progress" means.
  */
-const OPEN_PAYOUT_STATUSES: TransactionStatus[] = [
-  TransactionStatus.PENDING,
-  TransactionStatus.APPROVED,
-  TransactionStatus.RELEASED,
-]
+const OPEN_PAYOUT_STATUSES: TransactionStatus[] = [TransactionStatus.PENDING]
 
 /** INR for an Indian payout instrument, USD for everything else — the same split `categoryFilter` buckets settled transactions by. */
 function currencyForPaymentType(type: PaymentMethod): 'INR' | 'USD' {
@@ -582,51 +553,40 @@ async function testerCurrency(testerId: string): Promise<'INR' | 'USD'> {
 }
 
 /**
- * The tester's money, at all three stages.
+ * The tester's money. Two statuses, two meanings:
  *
- *   credited          every APPROVED / RELEASED / PAID earning
- *   released          the RELEASED / PAID subset — withdrawable
- *   awaiting release  credited − released, held back by an operator
- *   available         released − everything already requested
+ *   PENDING on a TESTER_EARNING credits the wallet the moment it exists —
+ *   there is no separate approve/release step any more.
+ *   PAID on a TESTER_PAYOUT debits the wallet — that is the one point money
+ *   actually leaves.
  *
- * A PENDING earning counts as nothing: an admin has not confirmed it, and
- * paying it would be paying for work that might still be rejected.
- *
- * Withdrawal keys off RELEASED, not APPROVED. That is the whole point of the
- * stage — approving an earning says the work was accepted, releasing it says
- * the money can leave. Before the stage existed APPROVED had to mean both,
- * which overstated what a tester could actually take.
- *
- * On the other side every payout that has not been CANCELLED or FAILED counts
- * against the balance, including ones still PENDING — otherwise a tester could
- * submit the same balance twice before the first was settled.
+ *   credited   every TESTER_EARNING, any status
+ *   paid out   the PAID subset of TESTER_PAYOUT — already sent
+ *   requested  the PENDING subset of TESTER_PAYOUT — open, not yet sent, but
+ *              still reserved against the balance so a tester cannot submit
+ *              the same balance twice before the first request is settled
+ *   available  credited − paid out − requested
  */
 async function payoutBalance(testerId: string): Promise<{
-  /** Released, minus everything already requested. What may be withdrawn now. */
+  /** Credited, minus everything already paid out or requested. What may be withdrawn now. */
   availableMinor: bigint
-  /** Every credited earning, released or not. */
+  /** Every TESTER_EARNING, any status. */
   creditedMinor: bigint
-  /** The released subset of the above. */
-  releasedMinor: bigint
-  /** Credited but still held back. */
-  awaitingReleaseMinor: bigint
-  /** Payouts already raised and not cancelled or failed. */
+  /** TESTER_PAYOUT rows already PAID. */
+  paidOutMinor: bigint
+  /** TESTER_PAYOUT rows still PENDING — open requests. */
   requestedMinor: bigint
 }> {
-  const [credited, released, requested] = await Promise.all([
+  const [credited, paidOut, requested] = await Promise.all([
     prisma.transaction.aggregate({
-      where: {
-        counterpartyId: testerId,
-        type: TransactionType.TESTER_EARNING,
-        status: { in: CREDITED_EARNING_STATUSES },
-      },
+      where: { counterpartyId: testerId, type: TransactionType.TESTER_EARNING },
       _sum: { amountMinor: true },
     }),
     prisma.transaction.aggregate({
       where: {
         counterpartyId: testerId,
-        type: TransactionType.TESTER_EARNING,
-        status: { in: RELEASED_EARNING_STATUSES },
+        type: TransactionType.TESTER_PAYOUT,
+        status: TransactionStatus.PAID,
       },
       _sum: { amountMinor: true },
     }),
@@ -634,23 +594,21 @@ async function payoutBalance(testerId: string): Promise<{
       where: {
         counterpartyId: testerId,
         type: TransactionType.TESTER_PAYOUT,
-        status: { notIn: [TransactionStatus.CANCELLED, TransactionStatus.FAILED] },
+        status: TransactionStatus.PENDING,
       },
       _sum: { amountMinor: true },
     }),
   ])
 
   const creditedMinor = credited._sum.amountMinor ?? 0n
-  const releasedMinor = released._sum.amountMinor ?? 0n
+  const paidOutMinor = paidOut._sum.amountMinor ?? 0n
   const requestedMinor = requested._sum.amountMinor ?? 0n
-  const availableMinor = releasedMinor - requestedMinor
-  const awaitingReleaseMinor = creditedMinor - releasedMinor
+  const availableMinor = creditedMinor - paidOutMinor - requestedMinor
 
   return {
     creditedMinor,
-    releasedMinor,
+    paidOutMinor,
     requestedMinor,
-    awaitingReleaseMinor: awaitingReleaseMinor > 0n ? awaitingReleaseMinor : 0n,
     availableMinor: availableMinor > 0n ? availableMinor : 0n,
   }
 }
@@ -691,12 +649,10 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
     data: {
       currency: account ? currencyForPaymentType(account.paymentType) : 'INR',
       availableMinor: balance.availableMinor.toString(),
-      /** Everything credited, released or not — legacy "Credit Fund". */
+      /** Every earning, credited the moment it's recorded — legacy "Credit Fund". */
       creditedMinor: balance.creditedMinor.toString(),
-      /** The released subset — legacy "Release Fund". */
-      releasedMinor: balance.releasedMinor.toString(),
-      /** Credited but not yet released, so not yet withdrawable. */
-      awaitingReleaseMinor: balance.awaitingReleaseMinor.toString(),
+      paidOutMinor: balance.paidOutMinor.toString(),
+      /** Open (PENDING) payout requests — not yet sent, still reserved against the balance. */
       requestedMinor: balance.requestedMinor.toString(),
       minimumMinor: PAYOUT_MINIMUM_MINOR.toString(),
       hasPaymentAccount: Boolean(account),
@@ -744,8 +700,7 @@ transactionsRouter.get(
         currency: account ? currencyForPaymentType(account.paymentType) : 'INR',
         availableMinor: balance.availableMinor.toString(),
         creditedMinor: balance.creditedMinor.toString(),
-        releasedMinor: balance.releasedMinor.toString(),
-        awaitingReleaseMinor: balance.awaitingReleaseMinor.toString(),
+        paidOutMinor: balance.paidOutMinor.toString(),
         requestedMinor: balance.requestedMinor.toString(),
       },
     })
@@ -871,8 +826,6 @@ transactionsRouter.get('/summary/mine', async (req, res) => {
     data: {
       currency,
       earnedTotalMinor: sum(TransactionType.TESTER_EARNING),
-      earnedApprovedMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.APPROVED),
-      earnedReleasedMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.RELEASED),
       earnedPendingMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.PENDING),
       paidOutMinor: sum(TransactionType.TESTER_PAYOUT, TransactionStatus.PAID),
       /**

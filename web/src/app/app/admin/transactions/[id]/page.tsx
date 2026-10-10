@@ -83,6 +83,7 @@ interface TransactionDetail {
     lastName: string | null
     email: string
     role: string
+    testerProfile: { id: string } | null
   } | null
   recordedBy: { id: string; firstName: string | null; lastName: string | null } | null
 }
@@ -213,7 +214,14 @@ export default async function TransactionDetailPage({
             gap: 'var(--space-2)',
           }}
         >
-          <Link href={`/app/admin/users/${tx.counterparty.id}`} style={recordLink}>
+          <Link
+            href={
+              tx.counterparty.role === 'TESTER' && tx.counterparty.testerProfile
+                ? `/app/admin/testers/${tx.counterparty.testerProfile.id}?section=payment`
+                : `/app/admin/users/${tx.counterparty.id}`
+            }
+            style={recordLink}
+          >
             {personName(tx.counterparty)}
           </Link>
           <RoleBadge role={tx.counterparty.role} />

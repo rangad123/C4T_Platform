@@ -144,14 +144,7 @@ export const TRANSACTION_TYPES = [
   'ADJUSTMENT',
   'REFUND',
 ] as const
-export const TRANSACTION_STATUSES = [
-  'PENDING',
-  'APPROVED',
-  'RELEASED',
-  'PAID',
-  'FAILED',
-  'CANCELLED',
-] as const
+export const TRANSACTION_STATUSES = ['PENDING', 'PAID'] as const
 export const PAYMENT_METHODS = [
   'IND_BANK_ACCOUNT',
   'NON_IND_BANK_ACCOUNT',

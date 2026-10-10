@@ -152,8 +152,6 @@ interface PayoutState {
   currency: string
   availableMinor: string
   creditedMinor: string
-  releasedMinor: string
-  awaitingReleaseMinor: string
   minimumMinor: string
   hasPaymentAccount: boolean
   meetsMinimum: boolean
@@ -2043,10 +2041,6 @@ export default async function TesterProfilePage({
                     {
                       label: 'Available to withdraw',
                       value: formatMoney(payoutState.availableMinor, payoutState.currency),
-                    },
-                    {
-                      label: 'Awaiting release',
-                      value: formatMoney(payoutState.awaitingReleaseMinor, payoutState.currency),
                     },
                     {
                       label: 'Credited in total',

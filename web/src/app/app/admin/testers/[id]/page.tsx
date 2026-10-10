@@ -454,8 +454,6 @@ interface WalletBalance {
   currency: string
   availableMinor: string
   creditedMinor: string
-  releasedMinor: string
-  awaitingReleaseMinor: string
   requestedMinor: string
 }
 
@@ -1087,10 +1085,6 @@ export default async function TesterDetailPage({
                   {
                     label: 'Available to withdraw',
                     value: formatMoney(walletBalance.availableMinor, walletBalance.currency),
-                  },
-                  {
-                    label: 'Awaiting release',
-                    value: formatMoney(walletBalance.awaitingReleaseMinor, walletBalance.currency),
                   },
                   {
                     label: 'Already requested',
