@@ -656,7 +656,7 @@ export async function requestPayoutFromProfileAction(): Promise<void> {
 export async function cancelPayoutRequestFromProfileAction(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
 
-  const id = String(formData.get('id') ?? '').trim()
+  const id = formTrimmed(formData, 'id')
   let notice = 'payout-cancelled'
   if (!id) notice = 'payout-rejected'
   else {

@@ -76,7 +76,9 @@ export async function OwedPayments({
   params: { page?: string; search?: string; paymentMethod?: string }
   tabs: ReactNode
 }) {
-  const search = params.search?.trim() || undefined
+  // An empty box is "no filter": the list read, the page links and the
+  // filter form all treat an empty string as absent.
+  const search = params.search?.trim() ?? ''
   const paymentMethod = isOneOf(
     PAYMENT_METHODS,
     params.paymentMethod as (typeof PAYMENT_METHODS)[number],

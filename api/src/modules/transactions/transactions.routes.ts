@@ -328,7 +328,7 @@ transactionsRouter.get(
       }),
     ])
 
-    type Row = {
+    interface Row {
       testerId: string
       currency: string
       owedMinor: bigint
