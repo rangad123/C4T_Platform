@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
-import { serverFetch, serverFetchOrNull, serverFetchPage } from '@/lib/api/server'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { getUser, hasPermission } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
+import { bugReportLines, loadBugReport } from '@/lib/reports/bug-report-csv'
 import { countBlock, csvResponse, row, slug, titleCase } from '@/lib/reports/report-csv'
 import type {
   BuildDetail,
   BuildSummary,
   ProjectAssignmentRow,
-  ProjectBugRow,
   ProjectDetail,
   ProjectMaterial,
 } from '../constants.js'
@@ -33,12 +33,15 @@ export const dynamic = 'force-dynamic'
  * who imports it), and a name is exactly what "which testers, which bugs"
  * needs to mean anything.
  *
- * What it still never contains, on either section: email or phone. Both
- * `ProjectAssignmentRow.tester` and `ProjectBugRow.reportedBy` carry `email`
- * on the wire (an admin session is never masked — see `maskReporter` in
- * `bugs.service.ts`), and it is destructured out below and never written to
- * a line. That is the one thing worth re-checking if this file is ever
- * touched again.
+ * The Bugs half is `lib/reports/bug-report-csv.ts` — every field a bug
+ * carries, plus its comments, status history and attachments — shared with
+ * the customer report so the two cannot drift.
+ *
+ * What it still never contains: email or phone. `ProjectAssignmentRow.tester`
+ * carries `email` on the wire (an admin session is never masked — see
+ * `maskReporter` in `bugs.service.ts`) and `testerRow` below never reads it;
+ * the bug section's types do not declare it at all. That is the one thing
+ * worth re-checking if this file is ever touched again.
  */
 
 interface FeatureRow {
@@ -69,13 +72,13 @@ export async function GET(
     })
     const activeBuildId = project.activeBuildId
 
-    const [build, summary, features, bugs] = await Promise.all([
+    const [build, summary, features, bugReport] = await Promise.all([
       serverFetchOrNull<BuildDetail>(`projects/${projectId}/builds/${activeBuildId}`),
       serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`),
       serverFetchOrNull<readonly FeatureRow[]>(`projects/${projectId}/features`, {
         query: { buildId: activeBuildId },
       }),
-      fetchAllBugs(projectId, activeBuildId),
+      loadBugReport(projectId, activeBuildId),
     ])
 
     const generated = new Date().toISOString()
@@ -177,15 +180,7 @@ export async function GET(
     }
     lines.push('')
 
-    lines.push(
-      `Bugs (${bugs.length})`,
-      row('Reference', 'Title', 'Severity', 'Status', 'Reported by', 'Created'),
-    )
-    if (bugs.length === 0) {
-      lines.push(row('None recorded'))
-    } else {
-      for (const bug of bugs) lines.push(bugRow(bug))
-    }
+    lines.push(...bugReportLines(bugReport))
 
     const filename = `${slug(project.reference)}-${slug(build?.name ?? 'build')}-report.csv`
     return csvResponse(lines, filename)
@@ -196,25 +191,6 @@ export async function GET(
     }
     return NextResponse.json({ error: 'The report could not be built' }, { status: 502 })
   }
-}
-
-/**
- * Every bug on this build, not just one page of 25 — the admin page itself
- * only ever holds whichever page is on screen, so this loops the same
- * `bugs` list endpoint at the API's own page-size ceiling until exhausted.
- */
-async function fetchAllBugs(projectId: string, buildId: string): Promise<ProjectBugRow[]> {
-  const all: ProjectBugRow[] = []
-  let page = 1
-  for (;;) {
-    const { data, meta } = await serverFetchPage<ProjectBugRow>('bugs', {
-      query: { projectId, buildId, page, limit: 100 },
-    })
-    all.push(...data)
-    if (!meta?.hasNext) break
-    page += 1
-  }
-  return all
 }
 
 /** Name only — `tester.email` is on the wire for an admin session and is deliberately left unread here. */
@@ -251,18 +227,6 @@ function materialRow(material: ProjectMaterial): string {
     material.url ?? '—',
     material.file?.originalName ?? '—',
     material.createdAt,
-  )
-}
-
-/** Name only — `reportedBy.email` is on the wire for an admin session and is deliberately left unread here. */
-function bugRow(bug: ProjectBugRow): string {
-  return row(
-    bug.reference,
-    bug.title,
-    titleCase(bug.severity),
-    titleCase(bug.status),
-    bug.reportedBy ? personName(bug.reportedBy.firstName, bug.reportedBy.lastName) : '—',
-    bug.createdAt,
   )
 }
 

@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
-import { serverFetch, serverFetchOrNull, serverFetchPage } from '@/lib/api/server'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { getUser } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
+import { bugReportLines, loadBugReport } from '@/lib/reports/bug-report-csv'
 import { countBlock, csvResponse, row, slug, titleCase } from '@/lib/reports/report-csv'
 import type {
   BuildDetail,
   BuildSummary,
   ProjectAssignmentRow,
-  ProjectBugRow,
   ProjectDetail,
   ProjectMaterial,
 } from '../constants'
@@ -21,21 +21,26 @@ export const dynamic = 'force-dynamic'
  * seven sections, scoped to the caller's own organisation the same way the
  * page itself is (the project read 404s for a project outside it).
  *
- * ── NARROWER THAN THE ADMIN VERSION, ON PURPOSE
+ * ── THE RULE HERE: ONLY WHAT THE CUSTOMER ALREADY SEES ON SCREEN
  *
  * Testers are per-row (name, no email — `ProjectAssignmentRow.tester.email`
  * is typed optional here specifically because the API omits it for a
  * customer caller) and carry no assigned-device/browser columns, because
  * this page's own `ProjectAssignmentRow` never fetches them for a customer.
  *
- * Bugs are per-row too, but WITHOUT a reporter column at all — not even a
- * name. `maskReporter` in `bugs.service.ts` keeps the reporter's name (just
- * not email) on the wire for a customer caller, but the on-screen Bugs tab
- * here has never shown who reported a bug, and this file does not go
- * further than the screen it mirrors. That line is deliberate: a
- * customer-facing CSV carrying tester identity is exactly the failure mode
- * `no-csv-export` history warns about, so when in doubt here the rule is
- * "only what's already on screen," not "whatever the API would allow."
+ * Bugs are `lib/reports/bug-report-csv.ts`, in full: everything the
+ * customer's own bug page shows — the report as filed, reporter NAME,
+ * environment, custom answers, comments, status history, attachments. An
+ * earlier cut left the reporter out because the Bugs LIST table has no such
+ * column; the bug page itself does show it, and `maskReporter` keeps the
+ * name (never the email) on the wire for a customer caller.
+ *
+ * Still never here: email or phone (the bug section's types do not declare
+ * them), signed attachment links, or internal comments (the API filters
+ * those out before this route sees them). A customer-facing CSV carrying
+ * contact details is exactly the failure `report-csv.ts` records, so when in
+ * doubt the rule is "what is already on screen", not "what the API would
+ * allow."
  */
 
 interface FeatureRow {
@@ -63,13 +68,13 @@ export async function GET(
     })
     const activeBuildId = project.activeBuildId
 
-    const [build, summary, features, bugs] = await Promise.all([
+    const [build, summary, features, bugReport] = await Promise.all([
       serverFetchOrNull<BuildDetail>(`projects/${projectId}/builds/${activeBuildId}`),
       serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`),
       serverFetchOrNull<readonly FeatureRow[]>(`projects/${projectId}/features`, {
         query: { buildId: activeBuildId },
       }),
-      fetchAllBugs(projectId, activeBuildId),
+      loadBugReport(projectId, activeBuildId),
     ])
 
     const generated = new Date().toISOString()
@@ -161,12 +166,7 @@ export async function GET(
     }
     lines.push('')
 
-    lines.push(`Bugs (${bugs.length})`, row('Reference', 'Title', 'Severity', 'Status', 'Created'))
-    if (bugs.length === 0) {
-      lines.push(row('None recorded'))
-    } else {
-      for (const bug of bugs) lines.push(bugRow(bug))
-    }
+    lines.push(...bugReportLines(bugReport))
 
     const filename = `${slug(project.reference)}-${slug(build?.name ?? 'build')}-report.csv`
     return csvResponse(lines, filename)
@@ -180,24 +180,6 @@ export async function GET(
     }
     return NextResponse.json({ error: 'The report could not be built' }, { status: 502 })
   }
-}
-
-/**
- * Every bug on this build, not just one page — the page itself only ever
- * holds whichever page is on screen.
- */
-async function fetchAllBugs(projectId: string, buildId: string): Promise<ProjectBugRow[]> {
-  const all: ProjectBugRow[] = []
-  let page = 1
-  for (;;) {
-    const { data, meta } = await serverFetchPage<ProjectBugRow>('bugs', {
-      query: { projectId, buildId, page, limit: 100 },
-    })
-    all.push(...data)
-    if (!meta?.hasNext) break
-    page += 1
-  }
-  return all
 }
 
 /** Name only — the API never sends `tester.email` to a customer caller in the first place. */
@@ -222,17 +204,6 @@ function materialRow(material: ProjectMaterial): string {
     material.url ?? '—',
     material.file?.originalName ?? '—',
     material.createdAt,
-  )
-}
-
-/** No reporter column at all — see the module note on why this stays narrower than the admin report. */
-function bugRow(bug: ProjectBugRow): string {
-  return row(
-    bug.reference,
-    bug.title,
-    titleCase(bug.severity),
-    titleCase(bug.status),
-    bug.createdAt,
   )
 }
 
