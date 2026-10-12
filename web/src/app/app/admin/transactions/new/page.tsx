@@ -44,8 +44,6 @@ const BASE = '/app/admin/transactions'
 // untouched, this form just never sends those values.
 const TYPES = ['TESTER_EARNING', 'TESTER_PAYOUT', 'ADJUSTMENT'] as const
 
-const STATUSES = ['PENDING', 'PAID'] as const
-
 /** Mirrors the API's own coherence rule, so the message arrives without a round trip. */
 const COUNTERPARTY_REQUIRED: readonly string[] = ['TESTER_EARNING', 'TESTER_PAYOUT']
 
@@ -67,18 +65,14 @@ const TYPE_OPTIONS: readonly SelectOption[] = TYPES.map((type) => ({
   value: type,
   label: TYPE_LABELS[type],
 }))
-const STATUS_OPTIONS: readonly SelectOption[] = STATUSES.map((status) => ({
-  value: status,
-  label: titleCase(status),
-}))
-
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
 
 /** The keys the form echoes back through the URL when a submit is rejected. */
 const ECHO_KEYS = [
   'type',
-  'status',
   'amount',
+  'tdsAmount',
+  'payoutRequestId',
   'currency',
   'projectId',
   'buildId',
@@ -147,16 +141,21 @@ async function recordTransaction(formData: FormData): Promise<void> {
   }
 
   const type = echo.type ?? ''
-  const status = echo.status ?? 'PENDING'
   const currency = (echo.currency ?? 'INR').toUpperCase()
   const occurredAt = echo.occurredAt ?? ''
   const amountMinor = toMinorUnits(echo.amount ?? '')
+  const tdsAmountMinor = echo.tdsAmount ? toMinorUnits(echo.tdsAmount) : null
 
   if (!(TYPES as readonly string[]).includes(type)) {
     redirect(backToForm('Choose a transaction type.', echo))
   }
-  if (!(STATUSES as readonly string[]).includes(status)) {
-    redirect(backToForm('Choose a status.', echo))
+  if (echo.tdsAmount && !tdsAmountMinor) {
+    redirect(
+      backToForm(
+        'Enter TDS in major units with at most two decimal places, or leave it blank.',
+        echo,
+      ),
+    )
   }
   if (!(CURRENCIES as readonly string[]).includes(currency)) {
     redirect(backToForm('Choose a currency.', echo))
@@ -185,9 +184,10 @@ async function recordTransaction(formData: FormData): Promise<void> {
       method: 'POST',
       body: {
         type,
-        status,
         amountMinor,
         currency,
+        ...(tdsAmountMinor ? { tdsAmountMinor } : {}),
+        ...(echo.payoutRequestId ? { payoutRequestId: echo.payoutRequestId } : {}),
         ...(echo.projectId ? { projectId: echo.projectId } : {}),
         ...(echo.buildId ? { buildId: echo.buildId } : {}),
         ...(echo.counterpartyId ? { counterpartyId: echo.counterpartyId } : {}),
@@ -387,8 +387,15 @@ export default async function NewTransactionPage({
             >
               <li>The entry gets a reference and appears in the ledger.</li>
               <li>
+                A credit adds to the tester’s wallet at once; a debit is recorded only after the
+                money has been sent, and takes it out.
+              </li>
+              <li>
                 The counterparty, if there is one, is notified that a transaction was recorded.
               </li>
+              {params.payoutRequestId ? (
+                <li>This settles the tester’s open payout request and closes it.</li>
+              ) : null}
               <li>
                 A row is written to the audit log against your account, and the amount, currency and
                 type can no longer be edited.
@@ -428,6 +435,12 @@ export default async function NewTransactionPage({
             </p>
           ) : null}
 
+          {/* Set when this form was opened from a tester's payout request:
+              recording the payout closes that request in the same step. */}
+          {params.payoutRequestId ? (
+            <input type="hidden" name="payoutRequestId" value={params.payoutRequestId} />
+          ) : null}
+
           <div
             style={{
               display: 'grid',
@@ -447,19 +460,6 @@ export default async function NewTransactionPage({
             </Field>
 
             <Field
-              label="Status"
-              htmlFor="status"
-              hint="Paid also stamps the settlement date with today."
-            >
-              <Select
-                id="status"
-                name="status"
-                defaultValue={params.status ?? 'PENDING'}
-                options={STATUS_OPTIONS}
-              />
-            </Field>
-
-            <Field
               label="Amount"
               htmlFor="amount"
               required
@@ -473,6 +473,22 @@ export default async function NewTransactionPage({
                 autoComplete="off"
                 placeholder="1500.00"
                 defaultValue={params.amount ?? ''}
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+              />
+            </Field>
+
+            <Field
+              label="TDS withheld"
+              htmlFor="tdsAmount"
+              hint="Optional, payouts only. What the tester receives is the amount minus this."
+            >
+              <Input
+                id="tdsAmount"
+                name="tdsAmount"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="0.00"
+                defaultValue={params.tdsAmount ?? ''}
                 style={{ fontVariantNumeric: 'tabular-nums' }}
               />
             </Field>
@@ -521,7 +537,7 @@ export default async function NewTransactionPage({
             <Field
               label="Payment method"
               htmlFor="paymentMethod"
-              hint="Drives which of Indian / International / Pending this row appears under once settled."
+              hint="Drives whether this row appears under Indian or International."
             >
               <Select
                 id="paymentMethod"

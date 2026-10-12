@@ -647,6 +647,33 @@ export async function requestPayoutFromProfileAction(): Promise<void> {
 }
 
 /**
+ * Withdraw an open payout request, from the profile's payment section.
+ *
+ * Without this a request nobody wants paid would reserve the balance and block
+ * a fresh one indefinitely. Only the tester's own open request can be cancelled
+ * — the API answers 404 for anyone else's, or for one already paid.
+ */
+export async function cancelPayoutRequestFromProfileAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const id = String(formData.get('id') ?? '').trim()
+  let notice = 'payout-cancelled'
+  if (!id) notice = 'payout-rejected'
+  else {
+    try {
+      await actionFetch(`transactions/payouts/requests/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+      revalidatePath(PROFILE_PATH)
+    } catch (error) {
+      notice = failureNotice(error, { 404: 'payout-cancelled', 400: 'payout-rejected' })
+    }
+  }
+
+  redirect(`${PROFILE_PATH}?section=payment&notice=${notice}`, 'replace')
+}
+
+/**
  * Close the tester's own account.
  *
  * The deletion itself is the same soft delete an admin performs — the row is

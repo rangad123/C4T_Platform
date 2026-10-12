@@ -19,9 +19,10 @@ import { resolveNotificationHref } from '@/lib/notifications/href'
  * already existed and already aggregated projects/bugs/testers/orgs/users —
  * this pass only added a `leads` block (reusing the exact groupBy the old
  * version of this page ran as four separate `GET /leads?limit=1` calls) and
- * a `payouts.byCategory` block (reusing the Indian/International/Pending
- * `categoryFilter` the Transactions module already built). Nothing here is
- * mocked or hardcoded — a zero on this page is a real zero.
+ * a `payouts` block: what has been paid out (Indian / International, via the
+ * `categoryFilter` the Transactions module already built) and what is still
+ * owed to testers. Nothing here is mocked or hardcoded — a zero on this page
+ * is a real zero.
  *
  * `leads` is `null`, not a row of zeros, when the caller lacks `lead.read` —
  * the API omits it deliberately (see the route's own comment) so a
@@ -45,11 +46,10 @@ interface StatsResponse {
   leads: Record<string, number> | null
   finance: { collected: MoneyByCurrency; paidOut: MoneyByCurrency }
   payouts: {
-    byCategory: {
-      indian: MoneyByCurrency
-      international: MoneyByCurrency
-      pending: MoneyByCurrency
-    }
+    /** Payouts already sent — a payout is only ever recorded once the money has gone. */
+    paidOut: { indian: MoneyByCurrency; international: MoneyByCurrency }
+    /** Credits not yet paid out, summed per tester so one overpayment never offsets another's balance. */
+    owed: MoneyByCurrency
   }
 }
 
@@ -107,11 +107,11 @@ function buildNarrative(stats: StatsResponse, newLeads: number): string {
   if (stats.leads && newLeads > 0) {
     notes.push(`${newLeads} new lead${newLeads === 1 ? '' : 's'} waiting for a response`)
   }
-  if (stats.payouts.byCategory.pending.length > 0) {
-    notes.push('tester payouts pending')
+  if (stats.payouts.owed.length > 0) {
+    notes.push('testers waiting to be paid')
   }
   if (notes.length === 0) {
-    return 'Nothing urgent right now — no critical bugs, no leads waiting, and no payouts pending.'
+    return 'Nothing urgent right now — no critical bugs, no leads waiting, and nobody owed a payout.'
   }
   return `Needs attention: ${notes.join(', ')}.`
 }
@@ -195,15 +195,17 @@ export default async function AdminDashboardPage({
   const newLeads = stats.leads?.NEW ?? 0
   const narrative = buildNarrative(stats, newLeads)
 
-  // Re-grouped by currency, not added together as one number — Indian is
-  // minor units of INR, International and Pending can each be a different
-  // currency, and summing across them would not be a real amount in any of
-  // them (same reasoning as `byCurrency` on the API side).
-  const payoutTotal = totalByCurrency(
-    stats.payouts.byCategory.indian,
-    stats.payouts.byCategory.international,
-    stats.payouts.byCategory.pending,
-  )
+  // The three slices of the payments donut. Re-grouped by currency, not added
+  // together as one number — Indian is minor units of INR, International and
+  // Owed can each be a different currency, and summing across them would not be
+  // a real amount in any of them (same reasoning as `byCurrency` on the API
+  // side).
+  const paymentSlices = [
+    { label: 'Indian paid', tone: 'info', amounts: stats.payouts.paidOut.indian },
+    { label: 'International paid', tone: 'accent', amounts: stats.payouts.paidOut.international },
+    { label: 'Still owed', tone: 'warning', amounts: stats.payouts.owed },
+  ] as const
+  const paymentTotal = totalByCurrency(...paymentSlices.map((slice) => slice.amounts))
 
   return (
     <>
@@ -266,8 +268,8 @@ export default async function AdminDashboardPage({
           />
           <KpiCard
             icon="clock"
-            label="Pending tester payouts"
-            value={joinedAmount(stats.payouts.byCategory.pending)}
+            label="Owed to testers"
+            value={joinedAmount(stats.payouts.owed)}
             href="/app/admin/transactions?section=pending"
           />
           {stats.leads ? (
@@ -322,41 +324,32 @@ export default async function AdminDashboardPage({
           ) : null}
 
           {/*
-            One segment per (category, currency) pair actually present, not
-            three fixed category segments — Indian is always one currency in
-            practice, but International and Pending are not guaranteed to
-            be, and a segment can only honestly show one currency's amount.
-            The label only gets a currency suffix once a category actually
-            needs the disambiguation (more than one entry); a single-currency
-            category keeps its plain name, same as it always has.
+            One segment per (slice, currency) pair actually present, not three
+            fixed segments — Indian is always one currency in practice, but
+            International and Still owed are not guaranteed to be, and a
+            segment can only honestly show one currency's amount. The label
+            only gets a currency suffix once a slice actually needs the
+            disambiguation (more than one entry).
 
             Comparing slice sizes (`value`) across different currencies is
             still an approximation — there is no FX rate anywhere in this
-            platform to make ₹1 and $1 commensurable, and building one is
-            well outside what this fix is for. Each slice's own number is
-            exact; only how its size reads next to a different-currency
+            platform to make ₹1 and $1 commensurable. Each slice's own number
+            is exact; only how its size reads next to a different-currency
             slice is a rough visual cue, not a claim.
           */}
           <ChartCard>
             <DonutChart
-              title="Tester payouts by category"
+              title="Tester payments"
               href="/app/admin/transactions"
-              centerLabel={joinedAmount(payoutTotal)}
-              segments={(
-                [
-                  { key: 'indian', label: 'Indian', tone: 'info' },
-                  { key: 'international', label: 'International', tone: 'accent' },
-                  { key: 'pending', label: 'Pending', tone: 'warning' },
-                ] as const
-              ).flatMap(({ key, label, tone }) => {
-                const amounts = stats.payouts.byCategory[key]
-                return amounts.map(({ currency, amountMinor }) => ({
+              centerLabel={joinedAmount(paymentTotal)}
+              segments={paymentSlices.flatMap(({ label, tone, amounts }) =>
+                amounts.map(({ currency, amountMinor }) => ({
                   label: amounts.length > 1 ? `${label} (${currency})` : label,
                   tone,
                   value: Number(amountMinor),
                   displayValue: formatMoney(amountMinor, currency),
-                }))
-              })}
+                })),
+              )}
             />
           </ChartCard>
         </div>

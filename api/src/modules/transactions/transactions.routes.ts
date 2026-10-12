@@ -1,16 +1,10 @@
 import { Router } from 'express'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
-import {
-  TransactionType,
-  TransactionStatus,
-  PaymentMethod,
-  Role,
-  type Prisma,
-} from '@prisma/client'
+import { TransactionType, PaymentMethod, Role, type Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
-import { requirePermission, isAdminSide } from '../../middleware/authorize.js'
+import { requirePermission, isAdminSide, hasPermission } from '../../middleware/authorize.js'
 import { validate, validatedQuery } from '../../middleware/validate.js'
 import { buildMeta, buildOrderBy, paginationQuery, toSkipTake } from '../../lib/pagination.js'
 import { NotFoundError, BadRequestError } from '../../lib/errors.js'
@@ -32,6 +26,11 @@ import { assertEmailVerified } from '../../lib/access/verification.js'
  *
  * Amounts are stored in MINOR UNITS (paise) as BigInt. Never use a float for
  * money. The API accepts and returns minor units; formatting is the frontend's job.
+ *
+ * A row has no status — its TYPE says what it is. TESTER_EARNING is a credit
+ * (owed to the tester, in their wallet as soon as it is recorded) and
+ * TESTER_PAYOUT is a debit (already paid). A tester asking to be paid is a
+ * `PayoutRequest`, which reserves balance but is not a ledger row.
  */
 export const transactionsRouter = Router()
 
@@ -41,13 +40,11 @@ const txSelect = {
   id: true,
   reference: true,
   type: true,
-  status: true,
   amountMinor: true,
   currency: true,
   description: true,
   externalRef: true,
   occurredAt: true,
-  settledAt: true,
   createdAt: true,
   paymentMethod: true,
   tdsAmountMinor: true,
@@ -87,9 +84,8 @@ const txSelect = {
 } satisfies Prisma.TransactionSelect
 
 /**
- * Shapes one transaction for the caller: adds the computed outstanding amount,
- * and removes the counterparty's email address for anyone who is not
- * admin-side.
+ * Shapes one transaction for the caller: removes the counterparty's email
+ * address for anyone who is not admin-side.
  *
  * ── WHY THE EMAIL GOES
  *
@@ -103,17 +99,13 @@ const txSelect = {
  * `user` is a required parameter rather than an option so no call site can
  * quietly return an unmasked row by forgetting it.
  */
-function withOutstanding<
-  T extends {
-    amountMinor: bigint
-    paidAmountMinor: bigint
-    counterparty?: { email: string } | null
-  },
->(user: Express.AuthenticatedUser, tx: T) {
-  const outstandingMinor = (tx.amountMinor - tx.paidAmountMinor).toString()
-  if (isAdminSide(user) || !tx.counterparty) return { ...tx, outstandingMinor }
+function maskCounterparty<T extends { counterparty?: { email: string } | null }>(
+  user: Express.AuthenticatedUser,
+  tx: T,
+) {
+  if (isAdminSide(user) || !tx.counterparty) return tx
   const { email: _omit, ...counterparty } = tx.counterparty
-  return { ...tx, counterparty, outstandingMinor }
+  return { ...tx, counterparty }
 }
 
 /**
@@ -128,44 +120,37 @@ const TRANSACTION_SORT_FIELDS = [
   'createdAt',
   'amountMinor',
   'type',
-  'status',
   'reference',
 ] as const
 
 /**
- * §21-27 — Indian / International / Pending, as three real backend queries
- * over one table, not three client-side filters over one flat fetch.
- *
- * Pending takes priority over the other two: any transaction still PENDING is
- * "Pending Payments" regardless of what currency or payment method it will
- * eventually settle in — that is exactly what the brief's "Outstanding
- * Amount" framing for that category is about (money not yet paid out). Only
- * PAID rows get bucketed as Indian/International, by `paymentMethod`,
+ * §21-27 — Indian / International, as real backend queries over one table, not
+ * client-side filters over one flat fetch. A row is bucketed by `paymentMethod`,
  * falling back to `currency` for rows recorded before a payment method was
  * attached to the ledger (see §Phase-C migration note).
+ *
+ * "Pending payments" is deliberately NOT a category of ledger rows any more:
+ * what is still owed is a per-tester balance (`GET /owed`), because an earning
+ * row never says whether it has since been paid out.
  */
-const PENDING_STATUSES: TransactionStatus[] = [TransactionStatus.PENDING]
 const INDIAN_METHODS: PaymentMethod[] = [PaymentMethod.IND_BANK_ACCOUNT, PaymentMethod.PAYTM]
 const INTERNATIONAL_METHODS: PaymentMethod[] = [
   PaymentMethod.NON_IND_BANK_ACCOUNT,
   PaymentMethod.PAYPAL,
 ]
 
-export const TRANSACTION_CATEGORIES = ['indian', 'international', 'pending'] as const
+export const TRANSACTION_CATEGORIES = ['indian', 'international'] as const
 export type TransactionCategory = (typeof TRANSACTION_CATEGORIES)[number]
 
 /** Exported for reuse by `stats.routes.ts`'s dashboard payout breakdown — one categorisation, not two. */
 export function categoryFilter(category?: TransactionCategory): Prisma.TransactionWhereInput {
-  if (category === 'pending') return { status: { in: PENDING_STATUSES } }
   if (category === 'indian') {
     return {
-      status: { notIn: PENDING_STATUSES },
       OR: [{ paymentMethod: { in: INDIAN_METHODS } }, { paymentMethod: null, currency: 'INR' }],
     }
   }
   if (category === 'international') {
     return {
-      status: { notIn: PENDING_STATUSES },
       OR: [
         { paymentMethod: { in: INTERNATIONAL_METHODS } },
         { paymentMethod: null, NOT: { currency: 'INR' } },
@@ -227,7 +212,6 @@ const listQuery = paginationQuery.extend({
       })
       return parsed.length > 0 ? parsed : undefined
     }),
-  status: z.nativeEnum(TransactionStatus).optional(),
   organisationId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
   /** "Everything paid out on this build" — the query buildId exists for. */
@@ -254,7 +238,6 @@ function transactionWhere(
   const base: Prisma.TransactionWhereInput = {
     ...transactionScope(user),
     ...(query.type ? { type: { in: query.type } } : {}),
-    ...(query.status ? { status: query.status } : {}),
     ...(query.organisationId ? { organisationId: query.organisationId } : {}),
     ...(query.projectId ? { projectId: query.projectId } : {}),
     ...(query.buildId ? { buildId: query.buildId } : {}),
@@ -270,8 +253,8 @@ function transactionWhere(
       : {}),
   }
 
-  // `category` and `financeYear`/`month` both potentially set `status`/
-  // `occurredAt`, which `base` may already set too — composed as separate AND
+  // `category` and `financeYear`/`month` both potentially set keys (`OR`,
+  // `occurredAt`) that `base` may already set too — composed as separate AND
   // branches instead of spread into `base` so neither can silently overwrite
   // the other's key.
   const extra = [
@@ -303,7 +286,7 @@ transactionsRouter.get('/', validate({ query: listQuery }), async (req, res) => 
   ])
 
   res.json({
-    data: items.map((tx) => withOutstanding(req.user!, tx)),
+    data: items.map((tx) => maskCounterparty(req.user!, tx)),
     meta: {
       ...buildMeta(query, total),
       totalsByType: totals.map((t) => ({
@@ -315,6 +298,135 @@ transactionsRouter.get('/', validate({ query: listQuery }), async (req, res) => 
   })
 })
 
+const owedQuery = paginationQuery.extend({
+  /** Matches the tester's name. */
+  search: z.string().trim().max(120).optional(),
+  paymentMethod: z.nativeEnum(PaymentMethod).optional(),
+})
+
+/**
+ * §27 Pending Payments — who is owed what, as one row per tester and currency.
+ *
+ * Owed = every credit recorded for them minus every payout recorded to them.
+ * A tester with an open payout request is listed even if the sums say they are
+ * square, so a request can never sit where nobody can see it. Declared before
+ * `/:id`, or "owed" would be read as a transaction id.
+ */
+transactionsRouter.get(
+  '/owed',
+  requirePermission(PERMISSIONS.TRANSACTION_READ),
+  validate({ query: owedQuery }),
+  async (req, res) => {
+    const query = validatedQuery<z.infer<typeof owedQuery>>(res)
+
+    const [balances, requests] = await Promise.all([
+      testerBalances(),
+      prisma.payoutRequest.findMany({
+        where: { fulfilledAt: null },
+        select: { id: true, testerId: true, amountMinor: true, currency: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ])
+
+    type Row = {
+      testerId: string
+      currency: string
+      owedMinor: bigint
+      openRequest: { id: string; amountMinor: bigint; createdAt: Date } | null
+    }
+    const rows = new Map<string, Row>()
+    const key = (testerId: string, currency: string) => `${testerId}|${currency}`
+    for (const b of balances) {
+      const owedMinor = b.creditedMinor - b.paidOutMinor
+      if (owedMinor > 0n) {
+        rows.set(key(b.testerId, b.currency), {
+          testerId: b.testerId,
+          currency: b.currency,
+          owedMinor,
+          openRequest: null,
+        })
+      }
+    }
+    for (const r of requests) {
+      const existing = rows.get(key(r.testerId, r.currency))
+      const openRequest = { id: r.id, amountMinor: r.amountMinor, createdAt: r.createdAt }
+      if (existing) existing.openRequest ??= openRequest
+      else {
+        rows.set(key(r.testerId, r.currency), {
+          testerId: r.testerId,
+          currency: r.currency,
+          owedMinor: 0n,
+          openRequest,
+        })
+      }
+    }
+
+    const testers = await prisma.user.findMany({
+      where: {
+        id: { in: [...new Set([...rows.values()].map((r) => r.testerId))] },
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        testerProfile: { select: { id: true, countryCode: true } },
+        // Masked columns only — never `secureDetails`.
+        paymentAccount: {
+          select: {
+            paymentType: true,
+            bankName: true,
+            accountNumberLast4: true,
+            paypalEmailMasked: true,
+            paytmNumberLast4: true,
+          },
+        },
+      },
+    })
+    const byId = new Map(testers.map((t) => [t.id, t]))
+    const terms = (query.search ?? '').toLowerCase().split(/\s+/).filter(Boolean)
+
+    const items = [...rows.values()]
+      .flatMap((r) => {
+        const tester = byId.get(r.testerId)
+        if (!tester) return []
+        if (query.paymentMethod && tester.paymentAccount?.paymentType !== query.paymentMethod) {
+          return []
+        }
+        const name = `${tester.firstName ?? ''} ${tester.lastName ?? ''}`.toLowerCase()
+        if (!terms.every((term) => name.includes(term))) return []
+        return [
+          {
+            testerId: tester.id,
+            testerProfileId: tester.testerProfile?.id ?? null,
+            firstName: tester.firstName,
+            lastName: tester.lastName,
+            countryCode: tester.testerProfile?.countryCode ?? null,
+            currency: r.currency,
+            owedMinor: r.owedMinor.toString(),
+            paymentAccount: tester.paymentAccount,
+            openRequest: r.openRequest
+              ? { ...r.openRequest, amountMinor: r.openRequest.amountMinor.toString() }
+              : null,
+          },
+        ]
+      })
+      // A request first, then biggest balance — what needs paying leads.
+      .sort(
+        (a, b) =>
+          Number(Boolean(b.openRequest)) - Number(Boolean(a.openRequest)) ||
+          (BigInt(b.owedMinor) > BigInt(a.owedMinor)
+            ? 1
+            : BigInt(b.owedMinor) < BigInt(a.owedMinor)
+              ? -1
+              : 0),
+      )
+
+    const { skip, take } = toSkipTake(query)
+    res.json({ data: items.slice(skip, skip + take), meta: buildMeta(query, items.length) })
+  },
+)
+
 transactionsRouter.get(
   '/:id',
   validate({ params: z.object({ id: z.string().cuid() }) }),
@@ -324,13 +436,12 @@ transactionsRouter.get(
       select: txSelect,
     })
     if (!tx) throw new NotFoundError('Transaction')
-    res.json({ data: withOutstanding(req.user!, tx) })
+    res.json({ data: maskCounterparty(req.user!, tx) })
   },
 )
 
 const createSchema = z.object({
   type: z.nativeEnum(TransactionType),
-  status: z.nativeEnum(TransactionStatus).default(TransactionStatus.PENDING),
   /** Minor units. 150000 = ₹1,500.00 */
   amountMinor: z.coerce.bigint().positive('Amount must be greater than zero'),
   currency: z.string().trim().length(3).toUpperCase().default('INR'),
@@ -346,8 +457,11 @@ const createSchema = z.object({
   paymentAccountId: z.string().cuid().optional(),
   /** Minor units, like `amountMinor`. */
   tdsAmountMinor: z.coerce.bigint().nonnegative().optional(),
+  /** What actually reached the tester, after TDS. Defaults to amount − TDS for a payout. */
   paidAmountMinor: z.coerce.bigint().nonnegative().optional(),
   buildOrContestRef: z.string().trim().max(160).optional(),
+  /** The open request this payout settles — closes it in the same step. */
+  payoutRequestId: z.string().cuid().optional(),
 })
 
 const CUSTOMER_TYPES: TransactionType[] = [
@@ -365,7 +479,24 @@ transactionsRouter.post(
   requirePermission(PERMISSIONS.TRANSACTION_WRITE),
   validate({ body: createSchema }),
   async (req, res) => {
-    const input = req.body as z.infer<typeof createSchema>
+    const { payoutRequestId, ...input } = req.body as z.infer<typeof createSchema>
+
+    if (input.tdsAmountMinor !== undefined && input.tdsAmountMinor > input.amountMinor) {
+      throw new BadRequestError('TDS cannot be more than the amount')
+    }
+    if (payoutRequestId) {
+      if (input.type !== TransactionType.TESTER_PAYOUT) {
+        throw new BadRequestError('Only a payout can settle a payout request')
+      }
+      const request = await prisma.payoutRequest.findFirst({
+        where: { id: payoutRequestId, fulfilledAt: null },
+        select: { testerId: true },
+      })
+      if (!request) throw new BadRequestError('That payout request is no longer open')
+      if (request.testerId !== input.counterpartyId) {
+        throw new BadRequestError('That payout request belongs to a different tester')
+      }
+    }
 
     // Keep the ledger coherent: a customer-side row needs an organisation, a
     // tester-side row needs a tester counterparty.
@@ -420,21 +551,42 @@ transactionsRouter.post(
       input.projectId ??= build.projectId
     }
 
-    const tx = await prisma.transaction.create({
-      data: {
-        ...input,
-        reference: await nextReference('transaction'),
-        recordedById: req.user!.id,
-        ...(input.status === TransactionStatus.PAID ? { settledAt: new Date() } : {}),
-      },
-      select: txSelect,
+    const reference = await nextReference('transaction')
+    const paidAmountMinor =
+      input.paidAmountMinor ??
+      (input.type === TransactionType.TESTER_PAYOUT
+        ? input.amountMinor - (input.tdsAmountMinor ?? 0n)
+        : undefined)
+
+    // The row and the request it settles land together or not at all — a
+    // payout that is recorded but leaves its request open would keep reserving
+    // balance the tester has already been paid.
+    const tx = await prisma.$transaction(async (db) => {
+      const created = await db.transaction.create({
+        data: { ...input, paidAmountMinor, reference, recordedById: req.user!.id },
+        select: txSelect,
+      })
+      if (payoutRequestId) {
+        const closed = await db.payoutRequest.updateMany({
+          where: { id: payoutRequestId, fulfilledAt: null },
+          data: { fulfilledAt: new Date(), fulfilledByTransactionId: created.id },
+        })
+        if (closed.count !== 1) throw new BadRequestError('That payout request is no longer open')
+      }
+      return created
     })
 
     if (input.counterpartyId) {
+      const title =
+        input.type === TransactionType.TESTER_PAYOUT
+          ? `A payout has been recorded: ${tx.reference}`
+          : input.type === TransactionType.TESTER_EARNING
+            ? `New earning credited: ${tx.reference}`
+            : `New transaction recorded: ${tx.reference}`
       await createNotification({
         userId: input.counterpartyId,
         type: 'TRANSACTION_UPDATED',
-        title: `New transaction recorded: ${tx.reference}`,
+        title,
         link: '/app/transactions',
       })
     }
@@ -444,23 +596,24 @@ transactionsRouter.post(
       action: 'transaction.created',
       entityType: 'Transaction',
       entityId: tx.id,
-      after: { reference: tx.reference, type: tx.type, amountMinor: tx.amountMinor.toString() },
+      after: {
+        reference: tx.reference,
+        type: tx.type,
+        amountMinor: tx.amountMinor.toString(),
+        ...(payoutRequestId ? { payoutRequestId } : {}),
+      },
     })
 
-    res.status(201).json({ data: withOutstanding(req.user!, tx) })
+    res.status(201).json({ data: maskCounterparty(req.user!, tx) })
   },
 )
 
 const updateSchema = z.object({
-  status: z.nativeEnum(TransactionStatus).optional(),
   description: z.string().trim().max(1000).optional(),
   externalRef: z.string().trim().max(120).optional(),
-  settledAt: z.coerce.date().nullable().optional(),
   paymentMethod: z.nativeEnum(PaymentMethod).optional(),
   paymentAccountId: z.string().cuid().optional(),
-  /** Records a (partial or full) payout against this transaction — Pending
-   * Payments' whole reason to exist is tracking this moving toward
-   * `amountMinor`. */
+  /** What actually reached the tester, after TDS. */
   paidAmountMinor: z.coerce.bigint().nonnegative().optional(),
   tdsAmountMinor: z.coerce.bigint().nonnegative().optional(),
   buildOrContestRef: z.string().trim().max(160).optional(),
@@ -475,40 +628,30 @@ transactionsRouter.patch(
 
     const existing = await prisma.transaction.findUnique({
       where: { id: param(req, 'id') },
-      select: { id: true, status: true, counterpartyId: true, reference: true },
+      select: { id: true, amountMinor: true, tdsAmountMinor: true },
     })
     if (!existing) throw new NotFoundError('Transaction')
 
+    const tds = input.tdsAmountMinor ?? existing.tdsAmountMinor
+    if (tds !== null && tds !== undefined && tds > existing.amountMinor) {
+      throw new BadRequestError('TDS cannot be more than the amount')
+    }
+
     const tx = await prisma.transaction.update({
       where: { id: param(req, 'id') },
-      data: {
-        ...input,
-        ...(input.status === TransactionStatus.PAID && !input.settledAt
-          ? { settledAt: new Date() }
-          : {}),
-      },
+      data: input,
       select: txSelect,
     })
-
-    if (input.status && input.status !== existing.status && existing.counterpartyId) {
-      await createNotification({
-        userId: existing.counterpartyId,
-        type: 'TRANSACTION_UPDATED',
-        title: `${existing.reference} is now ${input.status.toLowerCase()}`,
-        link: '/app/transactions',
-      })
-    }
 
     await recordAudit({
       req,
       action: 'transaction.updated',
       entityType: 'Transaction',
       entityId: tx.id,
-      before: { status: existing.status },
       after: input,
     })
 
-    res.json({ data: withOutstanding(req.user!, tx) })
+    res.json({ data: maskCounterparty(req.user!, tx) })
   },
 )
 
@@ -522,12 +665,8 @@ transactionsRouter.patch(
  */
 export const PAYOUT_MINIMUM_MINOR = 50_000n
 
-/**
- * A payout the tester has raised that has not finished — still PENDING.
- * Shared by the read and the write below so the two cannot disagree about what
- * "already in progress" means.
- */
-const OPEN_PAYOUT_STATUSES: TransactionStatus[] = [TransactionStatus.PENDING]
+/** An open request is one nobody has paid yet. Shared by every read and write so they agree. */
+const OPEN_REQUEST = { fulfilledAt: null } as const
 
 /** INR for an Indian payout instrument, USD for everything else — the same split `categoryFilter` buckets settled transactions by. */
 function currencyForPaymentType(type: PaymentMethod): 'INR' | 'USD' {
@@ -553,28 +692,73 @@ async function testerCurrency(testerId: string): Promise<'INR' | 'USD'> {
 }
 
 /**
- * The tester's money. Two statuses, two meanings:
+ * Credits and debits per tester and currency, across the whole ledger.
  *
- *   PENDING on a TESTER_EARNING credits the wallet the moment it exists —
- *   there is no separate approve/release step any more.
- *   PAID on a TESTER_PAYOUT debits the wallet — that is the one point money
- *   actually leaves.
+ * Exported for the dashboard (`stats.routes.ts`) so "still owed" there and on
+ * the Pending payments tab are computed once, the same way — per tester, never
+ * as one global earnings-minus-payouts figure, which would let one tester's
+ * overpayment quietly cancel another's balance.
+ */
+export async function testerBalances(): Promise<
+  { testerId: string; currency: string; creditedMinor: bigint; paidOutMinor: bigint }[]
+> {
+  const grouped = await prisma.transaction.groupBy({
+    by: ['counterpartyId', 'currency', 'type'],
+    where: {
+      type: { in: [TransactionType.TESTER_EARNING, TransactionType.TESTER_PAYOUT] },
+      counterpartyId: { not: null },
+    },
+    _sum: { amountMinor: true },
+  })
+  const balances = new Map<
+    string,
+    { testerId: string; currency: string; creditedMinor: bigint; paidOutMinor: bigint }
+  >()
+  for (const g of grouped) {
+    if (!g.counterpartyId) continue
+    const key = `${g.counterpartyId}|${g.currency}`
+    const row = balances.get(key) ?? {
+      testerId: g.counterpartyId,
+      currency: g.currency,
+      creditedMinor: 0n,
+      paidOutMinor: 0n,
+    }
+    const sum = g._sum.amountMinor ?? 0n
+    if (g.type === TransactionType.TESTER_EARNING) row.creditedMinor += sum
+    else row.paidOutMinor += sum
+    balances.set(key, row)
+  }
+  return [...balances.values()]
+}
+
+/** What each tester is owed, per currency — a tester paid up to or past their credits owes nothing. */
+export async function owedByCurrency(): Promise<{ currency: string; amountMinor: string }[]> {
+  const totals = new Map<string, bigint>()
+  for (const b of await testerBalances()) {
+    const owed = b.creditedMinor - b.paidOutMinor
+    if (owed > 0n) totals.set(b.currency, (totals.get(b.currency) ?? 0n) + owed)
+  }
+  return [...totals].map(([currency, amount]) => ({ currency, amountMinor: amount.toString() }))
+}
+
+/**
+ * The tester's money. A ledger row carries no status — its type says it all:
  *
- *   credited   every TESTER_EARNING, any status
- *   paid out   the PAID subset of TESTER_PAYOUT — already sent
- *   requested  the PENDING subset of TESTER_PAYOUT — open, not yet sent, but
- *              still reserved against the balance so a tester cannot submit
- *              the same balance twice before the first request is settled
+ *   credited   every TESTER_EARNING — in the wallet the moment it is recorded
+ *   paid out   every TESTER_PAYOUT — a debit is only ever recorded once the
+ *              money has been sent
+ *   requested  open payout requests — not sent yet, but reserved so the same
+ *              balance cannot be asked for twice
  *   available  credited − paid out − requested
  */
 async function payoutBalance(testerId: string): Promise<{
   /** Credited, minus everything already paid out or requested. What may be withdrawn now. */
   availableMinor: bigint
-  /** Every TESTER_EARNING, any status. */
+  /** Every TESTER_EARNING. */
   creditedMinor: bigint
-  /** TESTER_PAYOUT rows already PAID. */
+  /** Every TESTER_PAYOUT — already sent. */
   paidOutMinor: bigint
-  /** TESTER_PAYOUT rows still PENDING — open requests. */
+  /** Open payout requests — not yet sent, still reserved against the balance. */
   requestedMinor: bigint
 }> {
   const [credited, paidOut, requested] = await Promise.all([
@@ -583,19 +767,11 @@ async function payoutBalance(testerId: string): Promise<{
       _sum: { amountMinor: true },
     }),
     prisma.transaction.aggregate({
-      where: {
-        counterpartyId: testerId,
-        type: TransactionType.TESTER_PAYOUT,
-        status: TransactionStatus.PAID,
-      },
+      where: { counterpartyId: testerId, type: TransactionType.TESTER_PAYOUT },
       _sum: { amountMinor: true },
     }),
-    prisma.transaction.aggregate({
-      where: {
-        counterpartyId: testerId,
-        type: TransactionType.TESTER_PAYOUT,
-        status: TransactionStatus.PENDING,
-      },
+    prisma.payoutRequest.aggregate({
+      where: { testerId, ...OPEN_REQUEST },
       _sum: { amountMinor: true },
     }),
   ])
@@ -630,14 +806,10 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
       where: { userId: req.user!.id, status: 'ACTIVE' },
       select: { id: true, paymentType: true },
     }),
-    prisma.transaction.findFirst({
-      where: {
-        counterpartyId: req.user!.id,
-        type: TransactionType.TESTER_PAYOUT,
-        status: { in: OPEN_PAYOUT_STATUSES },
-      },
-      select: { id: true, reference: true, amountMinor: true, status: true, occurredAt: true },
-      orderBy: { occurredAt: 'desc' },
+    prisma.payoutRequest.findFirst({
+      where: { testerId: req.user!.id, ...OPEN_REQUEST },
+      select: { id: true, amountMinor: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
     }),
     prisma.user.findUnique({ where: { id: req.user!.id }, select: { emailVerifiedAt: true } }),
   ])
@@ -652,7 +824,7 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
       /** Every earning, credited the moment it's recorded — legacy "Credit Fund". */
       creditedMinor: balance.creditedMinor.toString(),
       paidOutMinor: balance.paidOutMinor.toString(),
-      /** Open (PENDING) payout requests — not yet sent, still reserved against the balance. */
+      /** Open payout requests — not yet sent, still reserved against the balance. */
       requestedMinor: balance.requestedMinor.toString(),
       minimumMinor: PAYOUT_MINIMUM_MINOR.toString(),
       hasPaymentAccount: Boolean(account),
@@ -720,11 +892,12 @@ const requestPayoutSchema = z.object({
 /**
  * §2.3 — a tester asks to be paid.
  *
- * Creates a PENDING `TESTER_PAYOUT` that an admin then approves and settles
- * through the existing PATCH route. Nothing here moves money; see the module
- * note. The tester is the only one who can call this for themselves —
- * `counterpartyId` comes from the session and is never read from the body, so
- * a tester cannot request a payout against someone else's balance.
+ * Creates a `PayoutRequest`, NOT a ledger row: nothing has been paid, so the
+ * wallet's paid-out figure must not move. The request only reserves the amount
+ * until an admin pays it outside the platform and records the payout with this
+ * request's id. The tester is the only one who can call this for themselves —
+ * `testerId` comes from the session and is never read from the body, so a
+ * tester cannot request a payout against someone else's balance.
  */
 transactionsRouter.post(
   '/payouts/request',
@@ -746,13 +919,9 @@ transactionsRouter.post(
 
     // One open request at a time. Without this, two submits seconds apart both
     // pass the balance check and the ledger owes twice what it should.
-    const openRequest = await prisma.transaction.findFirst({
-      where: {
-        counterpartyId: req.user!.id,
-        type: TransactionType.TESTER_PAYOUT,
-        status: { in: OPEN_PAYOUT_STATUSES },
-      },
-      select: { id: true, reference: true },
+    const openRequest = await prisma.payoutRequest.findFirst({
+      where: { testerId: req.user!.id, ...OPEN_REQUEST },
+      select: { id: true },
     })
     if (openRequest) {
       throw new BadRequestError('You already have a payout request in progress')
@@ -768,33 +937,76 @@ transactionsRouter.post(
       throw new BadRequestError('That is below the minimum payout amount')
     }
 
-    const tx = await prisma.transaction.create({
+    const request = await prisma.payoutRequest.create({
       data: {
-        type: TransactionType.TESTER_PAYOUT,
-        status: TransactionStatus.PENDING,
+        testerId: req.user!.id,
         amountMinor,
         currency: currencyForPaymentType(account.paymentType),
-        counterpartyId: req.user!.id,
         paymentAccountId: account.id,
-        paymentMethod: account.paymentType,
-        description: input.note,
-        occurredAt: new Date(),
-        reference: await nextReference('transaction'),
-        // The tester raised it themselves — there is no admin to credit.
-        recordedById: req.user!.id,
+        note: input.note,
       },
-      select: txSelect,
+      select: { id: true, amountMinor: true, currency: true, createdAt: true },
     })
 
     await recordAudit({
       req,
       action: 'transaction.payout_requested',
-      entityType: 'Transaction',
-      entityId: tx.id,
-      after: { reference: tx.reference, amountMinor: tx.amountMinor.toString() },
+      entityType: 'PayoutRequest',
+      entityId: request.id,
+      after: { amountMinor: request.amountMinor.toString(), currency: request.currency },
     })
 
-    res.status(201).json({ data: withOutstanding(req.user!, tx) })
+    res.status(201).json({ data: { ...request, amountMinor: request.amountMinor.toString() } })
+  },
+)
+
+/**
+ * Cancel an open payout request — the tester's own, or any tester's for an
+ * admin who may write transactions.
+ *
+ * Without this a request nobody wants paid would reserve the balance and block
+ * the tester from asking again, with no way out. A request that has already
+ * been paid is closed, not open, so it cannot be cancelled. Anyone else gets a
+ * 404 rather than a 403: the response must not confirm the request exists.
+ */
+transactionsRouter.delete(
+  '/payouts/requests/:id',
+  validate({ params: z.object({ id: z.string().cuid() }) }),
+  async (req, res) => {
+    const request = await prisma.payoutRequest.findFirst({
+      where: { id: param(req, 'id'), ...OPEN_REQUEST },
+      select: { id: true, testerId: true, amountMinor: true, currency: true },
+    })
+    const mayCancel =
+      request &&
+      (request.testerId === req.user!.id || hasPermission(req.user!, PERMISSIONS.TRANSACTION_WRITE))
+    if (!request || !mayCancel) throw new NotFoundError('Payout request')
+
+    // Re-checked in the delete itself: an admin paying it at this very moment
+    // must win, not have their just-recorded payout's request vanish.
+    const removed = await prisma.payoutRequest.deleteMany({
+      where: { id: request.id, ...OPEN_REQUEST },
+    })
+    if (removed.count !== 1) throw new NotFoundError('Payout request')
+
+    await recordAudit({
+      req,
+      action: 'transaction.payout_request_cancelled',
+      entityType: 'PayoutRequest',
+      entityId: request.id,
+      before: { amountMinor: request.amountMinor.toString(), currency: request.currency },
+    })
+
+    if (request.testerId !== req.user!.id) {
+      await createNotification({
+        userId: request.testerId,
+        type: 'TRANSACTION_UPDATED',
+        title: 'Your payout request was cancelled',
+        link: '/app/tester',
+      })
+    }
+
+    res.status(204).end()
   },
 )
 
@@ -802,7 +1014,7 @@ transactionsRouter.post(
 transactionsRouter.get('/summary/mine', async (req, res) => {
   const [grouped, tds, currency] = await Promise.all([
     prisma.transaction.groupBy({
-      by: ['type', 'status'],
+      by: ['type'],
       where: { counterpartyId: req.user!.id },
       _sum: { amountMinor: true },
       _count: true,
@@ -816,9 +1028,9 @@ transactionsRouter.get('/summary/mine', async (req, res) => {
     testerCurrency(req.user!.id),
   ])
 
-  const sum = (type: TransactionType, status?: TransactionStatus) =>
+  const sum = (type: TransactionType) =>
     grouped
-      .filter((g) => g.type === type && (!status || g.status === status))
+      .filter((g) => g.type === type)
       .reduce((acc, g) => acc + (g._sum.amountMinor ?? 0n), 0n)
       .toString()
 
@@ -826,8 +1038,7 @@ transactionsRouter.get('/summary/mine', async (req, res) => {
     data: {
       currency,
       earnedTotalMinor: sum(TransactionType.TESTER_EARNING),
-      earnedPendingMinor: sum(TransactionType.TESTER_EARNING, TransactionStatus.PENDING),
-      paidOutMinor: sum(TransactionType.TESTER_PAYOUT, TransactionStatus.PAID),
+      paidOutMinor: sum(TransactionType.TESTER_PAYOUT),
       /**
        * TDS withheld across every row that recorded it. The column has existed
        * since the payout-accounts pass but nothing surfaced it, so a tester

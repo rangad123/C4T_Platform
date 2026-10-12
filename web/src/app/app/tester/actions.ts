@@ -52,3 +52,33 @@ export async function requestPayoutAction(formData: FormData): Promise<void> {
   revalidatePath(DASHBOARD)
   redirect(`${DASHBOARD}?notice=payout-requested`)
 }
+
+/**
+ * Withdraw an open payout request.
+ *
+ * Without this a request nobody wants paid would reserve the balance and block
+ * a fresh one indefinitely. Only the tester's own open request can be
+ * cancelled — the API answers 404 for anyone else's, or one already paid, and
+ * that is reported as the same "cancelled" outcome because the state the tester
+ * wanted (no open request) is already true.
+ */
+export async function cancelPayoutRequestAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const id = formTrimmed(formData, 'id')
+  let code = 'payout-cancelled'
+  if (!id) code = 'payout-rejected'
+  else {
+    try {
+      await actionFetch(`transactions/payouts/requests/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+    } catch (error) {
+      const status = error instanceof ApiError ? error.status : 0
+      if (status !== 404) code = 'payout-failed'
+    }
+  }
+
+  revalidatePath(DASHBOARD)
+  redirect(`${DASHBOARD}?notice=${code}`)
+}

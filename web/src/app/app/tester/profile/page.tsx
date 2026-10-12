@@ -48,6 +48,7 @@ import {
   setNdaDocumentAction,
   setAvatarAction,
   requestPayoutFromProfileAction,
+  cancelPayoutRequestFromProfileAction,
   resendVerificationEmail,
   deleteAccountAction,
 } from './actions'
@@ -152,16 +153,14 @@ interface PayoutState {
   currency: string
   availableMinor: string
   creditedMinor: string
+  paidOutMinor: string
+  /** Open payout requests — asked for, not yet paid. */
+  requestedMinor: string
   minimumMinor: string
   hasPaymentAccount: boolean
   meetsMinimum: boolean
-  openRequest: {
-    id: string
-    reference: string
-    amountMinor: string
-    status: string
-    occurredAt: string
-  } | null
+  /** A request is not a ledger row: it has no reference and no status, only an amount and a date. */
+  openRequest: { id: string; amountMinor: string; createdAt: string } | null
   canRequest: boolean
 }
 
@@ -170,12 +169,10 @@ interface LedgerRow {
   id: string
   reference: string
   type: string
-  status: string
   amountMinor: string
   currency: string
   description: string | null
   occurredAt: string
-  settledAt: string | null
   paymentMethod: string | null
 }
 
@@ -317,7 +314,11 @@ const NOTICES: Record<string, NoticeCopy> = {
   },
   'payout-requested': {
     tone: 'success',
-    message: 'Your payout request has been submitted. It will show below once it settles.',
+    message: 'Your payout request has been submitted. It will show below once it has been paid.',
+  },
+  'payout-cancelled': {
+    tone: 'success',
+    message: 'Your payout request has been cancelled. The money is available again.',
   },
   'payout-rejected': {
     tone: 'warning',
@@ -443,17 +444,10 @@ export default async function TesterProfilePage({
         `${row.type === 'TESTER_PAYOUT' ? '−' : '+'}${formatMoney(row.amountMinor, row.currency)}`,
     },
     {
-      key: 'status',
-      header: 'Status',
-      render: (row) => <StatusBadge status={row.status} />,
-    },
-    {
       key: 'date',
       header: 'Date',
       align: 'right',
       render: (row) => formatDate(row.occurredAt),
-      renderSecondary: (row) =>
-        row.settledAt ? `Settled ${formatDate(row.settledAt)}` : undefined,
     },
   ]
 
@@ -2046,6 +2040,14 @@ export default async function TesterProfilePage({
                       label: 'Credited in total',
                       value: formatMoney(payoutState.creditedMinor, payoutState.currency),
                     },
+                    {
+                      label: 'Paid out',
+                      value: formatMoney(payoutState.paidOutMinor, payoutState.currency),
+                    },
+                    {
+                      label: 'Requested',
+                      value: formatMoney(payoutState.requestedMinor, payoutState.currency),
+                    },
                   ].map((tile) => (
                     <div
                       key={tile.label}
@@ -2074,13 +2076,28 @@ export default async function TesterProfilePage({
                 </div>
 
                 {payoutState.openRequest ? (
-                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-                    A payout of{' '}
-                    {formatMoney(payoutState.openRequest.amountMinor, payoutState.currency)} is
-                    already in progress ({payoutState.openRequest.reference} ·{' '}
-                    {titleCase(payoutState.openRequest.status)}). You can request again once it
-                    settles.
-                  </p>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 'var(--space-4)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                      You asked to be paid{' '}
+                      {formatMoney(payoutState.openRequest.amountMinor, payoutState.currency)} on{' '}
+                      {formatDate(payoutState.openRequest.createdAt)}. It shows in your history once
+                      it has been paid. You can ask again after that, or cancel the request.
+                    </p>
+                    <form action={cancelPayoutRequestFromProfileAction}>
+                      <input type="hidden" name="id" value={payoutState.openRequest.id} />
+                      <SubmitButton variant="secondary" pendingLabel="Cancelling…">
+                        Cancel request
+                      </SubmitButton>
+                    </form>
+                  </div>
                 ) : !payoutState.hasPaymentAccount ? (
                   <Muted>
                     Add your payment details above before requesting a payout — there is nowhere to

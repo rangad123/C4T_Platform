@@ -935,7 +935,6 @@ interface OrgTransactionRow {
   id: string
   reference: string
   type: string
-  status: string
   amountMinor: string
   currency: string
   createdAt: string
@@ -974,7 +973,6 @@ async function BillingSettings({ organisationId }: { organisationId: string }) {
       render: (row) => row.reference,
       renderSecondary: (row) => titleCase(row.type),
     },
-    { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     {
       key: 'amount',
       header: 'Amount',

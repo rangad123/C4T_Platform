@@ -211,6 +211,11 @@ enum RatingSubjectType {
 /// §2.2 "Transactions" — billing and payment RECORDS.
 /// §5 explicitly excludes payment-gateway integration from scope, so these are
 /// bookkeeping rows entered/managed by Admin, not live gateway transactions.
+///
+/// There is deliberately no status on a transaction: the TYPE says what the row
+/// is. TESTER_EARNING is a credit (money owed to the tester, in their wallet the
+/// moment it is recorded); TESTER_PAYOUT is a debit (money already sent). A
+/// tester ASKING to be paid is a `PayoutRequest`, not a ledger row.
 enum TransactionType {
   CUSTOMER_INVOICE
   CUSTOMER_PAYMENT
@@ -218,17 +223,6 @@ enum TransactionType {
   TESTER_PAYOUT
   ADJUSTMENT
   REFUND
-}
-
-/// Legacy `payment_history.pmt_type` was `credit | debit | release` — a
-/// three-stage model where funds are credited, then RELEASED, then paid.
-/// `RELEASED` is that middle stage: an APPROVED earning is money the tester has
-/// earned but cannot yet withdraw; releasing it makes it withdrawable. Without
-/// this stage the "Credit Fund / Release Fund" split has nothing to key off and
-/// APPROVED has to stand in for both, which overstates what a tester can take.
-enum TransactionStatus {
-  PENDING
-  PAID
 }
 
 enum NotificationType {
@@ -379,6 +373,7 @@ model User {
 
   transactionsAsCounterparty Transaction[]   @relation("TransactionCounterparty")
   transactionsRecorded       Transaction[]   @relation("TransactionRecordedBy")
+  payoutRequests             PayoutRequest[] @relation("PayoutRequestTester")
   paymentAccount             PaymentAccount?
 
   notifications            Notification[]
@@ -1974,8 +1969,9 @@ model PaymentAccount {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  payoutRequests PayoutRequest[]
 
   @@map("payment_accounts")
 }
@@ -1985,11 +1981,10 @@ model PaymentAccount {
 /// §2.2 "Transactions" — payment/billing records for projects, Customers and
 /// Testers. Bookkeeping only: §5 excludes gateway integration from scope.
 model Transaction {
-  id        String            @id @default(cuid())
-  legacyId  String?           @unique @map("legacy_id")
-  reference String            @unique // e.g. "TXN-2026-00318"
+  id        String          @id @default(cuid())
+  legacyId  String?         @unique @map("legacy_id")
+  reference String          @unique // e.g. "TXN-2026-00318"
   type      TransactionType
-  status    TransactionStatus @default(PENDING)
 
   /// Minor units (paise) to avoid float error. 150000 = ₹1,500.00
   amountMinor BigInt @map("amount_minor")
@@ -2010,14 +2005,13 @@ model Transaction {
   recordedById   String  @map("recorded_by_id")
 
   description String?
-  externalRef String?   @map("external_ref") // bank UTR / invoice no.
-  occurredAt  DateTime  @map("occurred_at")
-  settledAt   DateTime? @map("settled_at")
+  externalRef String?  @map("external_ref") // bank UTR / invoice no.
+  occurredAt  DateTime @map("occurred_at")
 
-  /// §21-27 — Indian/International/Pending is DERIVED from these at query
-  /// time (see `transactions.routes.ts` `categoryFilter`), not stored as its
-  /// own field: it would just be a second place `paymentMethod` could drift
-  /// out of sync with `currency`.
+  /// §21-27 — Indian/International is DERIVED from these at query time (see
+  /// `transactions.routes.ts` `categoryFilter`), not stored as its own field:
+  /// it would just be a second place `paymentMethod` could drift out of sync
+  /// with `currency`.
   paymentMethod     PaymentMethod? @map("payment_method")
   /// Always read through `PaymentAccount`'s masked `select` — a `Transaction`
   /// read must never be able to carry the linked account's ciphertext.
@@ -2049,15 +2043,43 @@ model Transaction {
   counterparty   User?           @relation("TransactionCounterparty", fields: [counterpartyId], references: [id], onDelete: SetNull)
   recordedBy     User            @relation("TransactionRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
   paymentAccount PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  /// The open request this payout settled, when it did. See `PayoutRequest`.
+  settledRequest PayoutRequest?
 
   @@index([organisationId])
   @@index([counterpartyId])
-  @@index([type, status])
+  @@index([type])
   @@index([occurredAt])
   @@index([paymentAccountId])
   /// "Everything paid out on this build" is the query this column exists for.
   @@index([buildId])
   @@map("transactions")
+}
+
+/// A tester asking to be paid. NOT a ledger row: nothing has moved yet, so it
+/// must not touch the wallet's credited/paid-out figures. It only RESERVES part
+/// of the balance (so the same money cannot be requested twice) until an admin
+/// pays it outside the platform and records the payout, which closes it.
+///
+/// Open = `fulfilledAt` is null. One open request per tester at a time.
+model PayoutRequest {
+  id                       String    @id @default(cuid())
+  testerId                 String    @map("tester_id")
+  /// Minor units, like `Transaction.amountMinor`.
+  amountMinor              BigInt    @map("amount_minor")
+  currency                 String
+  paymentAccountId         String?   @map("payment_account_id")
+  note                     String?
+  createdAt                DateTime  @default(now()) @map("created_at")
+  fulfilledAt              DateTime? @map("fulfilled_at")
+  fulfilledByTransactionId String?   @unique @map("fulfilled_by_transaction_id")
+
+  tester         User            @relation("PayoutRequestTester", fields: [testerId], references: [id], onDelete: Cascade)
+  paymentAccount PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  transaction    Transaction?    @relation(fields: [fulfilledByTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([testerId, fulfilledAt])
+  @@map("payout_requests")
 }
 
 // ─── Notifications ───────────────────────────────────────────────────────────

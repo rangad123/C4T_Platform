@@ -144,7 +144,6 @@ export const TRANSACTION_TYPES = [
   'ADJUSTMENT',
   'REFUND',
 ] as const
-export const TRANSACTION_STATUSES = ['PENDING', 'PAID'] as const
 export const PAYMENT_METHODS = [
   'IND_BANK_ACCOUNT',
   'NON_IND_BANK_ACCOUNT',
@@ -154,7 +153,6 @@ export const PAYMENT_METHODS = [
 export const PAYMENT_ACCOUNT_COUNTRIES = ['INDIAN', 'NON_INDIAN'] as const
 
 export const TRANSACTION_TYPE_OPTIONS = options(TRANSACTION_TYPES)
-export const TRANSACTION_STATUS_OPTIONS = options(TRANSACTION_STATUSES)
 /**
  * Hand-written labels, not `titleCase`.
  *

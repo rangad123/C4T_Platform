@@ -7,7 +7,6 @@ import {
   OrganisationStatus,
   Role,
   TransactionType,
-  TransactionStatus,
   LeadStatus,
 } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
@@ -15,7 +14,7 @@ import { authenticate } from '../../middleware/authenticate.js'
 import { requirePermission, isAdminSide, hasPermission } from '../../middleware/authorize.js'
 import { PERMISSIONS } from '../../config/permissions.js'
 import { visibilityFilter } from '../projects/projects.service.js'
-import { categoryFilter } from '../transactions/transactions.routes.js'
+import { categoryFilter, owedByCurrency } from '../transactions/transactions.routes.js'
 
 /**
  * §2.2 — the centralised Admin dashboard summary, plus lighter per-role
@@ -24,9 +23,6 @@ import { categoryFilter } from '../transactions/transactions.routes.js'
 export const statsRouter = Router()
 
 statsRouter.use(authenticate)
-
-/** §21-27 -- dashboard payout breakdown is scoped to tester types only, same as the Transactions module's own tester-payouts-only scope. */
-const TESTER_PAYOUT_TYPES = [TransactionType.TESTER_EARNING, TransactionType.TESTER_PAYOUT]
 
 /**
  * `groupBy(['currency'], ...)` rows → `[{ currency, amountMinor }]` — one
@@ -60,9 +56,9 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
     revenue,
     payouts,
     leadsByStatus,
-    payoutsIndian,
-    payoutsInternational,
-    payoutsPending,
+    paidOutIndian,
+    paidOutInternational,
+    owed,
   ] = await Promise.all([
     prisma.project.groupBy({ by: ['status'], where: { deletedAt: null }, _count: true }),
     prisma.bug.groupBy({ by: ['status'], where: { deletedAt: null }, _count: true }),
@@ -79,19 +75,17 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
     }),
     prisma.bug.count({ where: { deletedAt: null, createdAt: { gte: thirtyDaysAgo } } }),
     prisma.project.count({ where: { deletedAt: null, createdAt: { gte: thirtyDaysAgo } } }),
-    // Grouped by currency as well as status/category throughout this block —
-    // see the matching note on the Transactions list endpoint. "Pending" in
-    // particular is never filtered to one currency (that is the whole point
-    // of the category), so summing it as one number and stamping INR on the
-    // result silently added rupees and dollars together.
+    // Grouped by currency throughout this block — see the matching note on the
+    // Transactions list endpoint: summing rupees and dollars as one number and
+    // stamping one symbol on it would not be a real amount in either.
     prisma.transaction.groupBy({
       by: ['currency'],
-      where: { type: TransactionType.CUSTOMER_PAYMENT, status: TransactionStatus.PAID },
+      where: { type: TransactionType.CUSTOMER_PAYMENT },
       _sum: { amountMinor: true },
     }),
     prisma.transaction.groupBy({
       by: ['currency'],
-      where: { type: TransactionType.TESTER_PAYOUT, status: TransactionStatus.PAID },
+      where: { type: TransactionType.TESTER_PAYOUT },
       _sum: { amountMinor: true },
     }),
     canReadLeads
@@ -101,21 +95,19 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
           _count: true,
         })
       : Promise.resolve(null),
+    // Payouts only. These used to sum earnings AND payouts together, so a
+    // credit not yet paid out showed up under "paid".
     prisma.transaction.groupBy({
       by: ['currency'],
-      where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('indian') },
+      where: { type: TransactionType.TESTER_PAYOUT, ...categoryFilter('indian') },
       _sum: { amountMinor: true },
     }),
     prisma.transaction.groupBy({
       by: ['currency'],
-      where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('international') },
+      where: { type: TransactionType.TESTER_PAYOUT, ...categoryFilter('international') },
       _sum: { amountMinor: true },
     }),
-    prisma.transaction.groupBy({
-      by: ['currency'],
-      where: { type: { in: TESTER_PAYOUT_TYPES }, ...categoryFilter('pending') },
-      _sum: { amountMinor: true },
-    }),
+    owedByCurrency(),
   ])
 
   const tally = <T extends string>(
@@ -155,11 +147,12 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
         paidOut: byCurrency(payouts),
       },
       payouts: {
-        byCategory: {
-          indian: byCurrency(payoutsIndian),
-          international: byCurrency(payoutsInternational),
-          pending: byCurrency(payoutsPending),
+        paidOut: {
+          indian: byCurrency(paidOutIndian),
+          international: byCurrency(paidOutInternational),
         },
+        /** Still owed to testers — credits not yet paid out, per tester, per currency. */
+        owed,
       },
     },
   })

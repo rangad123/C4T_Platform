@@ -4,12 +4,11 @@ import { DetailShell } from '@/components/admin/DetailShell'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Panel } from '@/components/admin/Panel'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
-import { RoleBadge, StatusBadge } from '@/components/admin/StatusBadge'
+import { RoleBadge } from '@/components/admin/StatusBadge'
 import { Badge } from '@/components/ds/core/Badge'
 import { Button } from '@/components/ds/core/Button'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
-import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { Field } from '@/components/ds/forms/Field'
 import { Input } from '@/components/ds/forms/Input'
 import { Select } from '@/components/ds/forms/Select'
@@ -18,45 +17,35 @@ import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, titleCase } from '@/lib/admin/format'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
-import { saveTransactionDetails, saveTransactionStatus, savePayoutDetails } from './actions'
-import { PAYMENT_METHOD_OPTIONS, TRANSACTION_STATUSES } from '@/lib/domain/enums'
+import { saveTransactionDetails, savePayoutDetails } from './actions'
+import { PAYMENT_METHOD_OPTIONS } from '@/lib/domain/enums'
 
 /**
  * `/app/admin/transactions/[id]` — one ledger entry.
  *
  * §2.2 "Transactions": a payment or billing RECORD tied to a project, a
  * Customer or a Tester. §5 excludes gateway integration, so this page never
- * moves money — the status control records a decision someone made in a bank
- * or an accounting package, and the copy says so, because an admin who marks a
- * payout "paid" must not walk away believing the tester has been paid.
+ * moves money — a row is the record of something that happened in a bank or an
+ * accounting package, and the copy says so.
+ *
+ * A row has no status: its type says what it is (an earning is a credit, a
+ * payout is a debit that has already been paid).
  *
  * Amount, currency, type and the linked records are read-only: the API's patch
- * schema accepts only status, description, externalRef and settledAt. A wrong
+ * schema accepts only description, externalRef and the payout details. A wrong
  * amount is corrected by recording an ADJUSTMENT against it, not by editing
  * history.
  */
 
 const BASE = '/app/admin/transactions'
 
-/**
- * Mirrors TransactionStatus. Kept here rather than imported from `./actions`
- * because every export of a `'use server'` module must be an async function —
- * exporting this array from there would unregister both actions.
- */
-const STATUS_OPTIONS = TRANSACTION_STATUSES.map((status) => ({
-  value: status,
-  label: titleCase(status),
-}))
-
 interface TransactionDetail {
   id: string
   reference: string
   type: string
-  status: string
   /** Minor units. A BigInt column, serialised as a string — never parse it as a float. */
   amountMinor: string
-  /** `amountMinor - paidAmountMinor`, computed by the API — not stored. */
-  outstandingMinor: string
+  /** What actually reached the tester, after TDS. Meaningful for a payout. */
   paidAmountMinor: string
   tdsAmountMinor: string | null
   paymentMethod: string | null
@@ -65,7 +54,6 @@ interface TransactionDetail {
   description: string | null
   externalRef: string | null
   occurredAt: string
-  settledAt: string | null
   createdAt: string
   organisation: { id: string; name: string } | null
   project: { id: string; reference: string; title: string } | null
@@ -97,23 +85,21 @@ const recordLink = {
 /**
  * What each write on this page can come back with.
  *
- * The three save actions used to post straight through, so an API refusal —
- * a status the ledger will not allow, a row someone else settled first —
- * reached Next's error boundary as a crash screen. They now land here.
+ * The save actions used to post straight through, so an API refusal reached
+ * Next's error boundary as a crash screen. They now land here.
  */
 const NOTICES: Record<string, NoticeCopy> = {
-  'tx-status-saved': { tone: 'success', message: 'The transaction status has been updated.' },
   'tx-details-saved': { tone: 'success', message: 'The details have been saved.' },
   'tx-payout-saved': { tone: 'success', message: 'The payout details have been saved.' },
   'tx-forbidden': { tone: 'error', message: 'This transaction is not yours to change.' },
   'tx-missing': { tone: 'error', message: 'This transaction no longer exists.' },
   'tx-conflict': {
     tone: 'error',
-    message: 'That change is no longer allowed from this status. Reload the page.',
+    message: 'That change is no longer allowed. Reload the page.',
   },
   'tx-invalid': {
     tone: 'error',
-    message: 'Some values were not accepted. Check the amounts and dates.',
+    message: 'Some values were not accepted. Check the amounts — TDS cannot exceed the amount.',
   },
   'tx-failed': { tone: 'error', message: 'That change could not be saved. Try again in a moment.' },
 }
@@ -175,12 +161,12 @@ export default async function TransactionDetailPage({
    *  DescriptionList and the subtitle both want instead. */
   const recordedByName = tx.recordedBy ? personName(tx.recordedBy) : null
 
+  /** What the row does to a tester's wallet — named the way the Credit / Debit buttons are. */
+  const direction =
+    tx.type === 'TESTER_EARNING' ? 'Credit' : tx.type === 'TESTER_PAYOUT' ? 'Debit' : null
+
   const entryItems: readonly DescriptionItem[] = [
     { label: 'Occurred on', value: formatDate(tx.occurredAt) },
-    {
-      label: 'Settled on',
-      value: tx.settledAt ? formatDate(tx.settledAt) : null,
-    },
     { label: 'External reference', value: tx.externalRef },
     { label: 'Recorded on', value: formatDate(tx.createdAt) },
     { label: 'Description', value: tx.description, wide: true },
@@ -269,77 +255,32 @@ export default async function TransactionDetailPage({
       }
       badges={
         <>
-          <StatusBadge status={tx.status} />
+          {direction ? (
+            <Badge tone={direction === 'Credit' ? 'success' : 'info'} uppercase={false}>
+              {direction}
+            </Badge>
+          ) : null}
           <Badge tone="neutral" uppercase={false}>
             {titleCase(tx.type)}
           </Badge>
         </>
       }
       aside={
-        <>
-          <Panel
-            title="Status"
-            description="Records a decision taken elsewhere. Changing it moves no money."
+        <Panel title="This is a record, not a payment">
+          <p
+            style={{
+              margin: 0,
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--type-body-sm-size)',
+              lineHeight: 1.55,
+            }}
           >
-            {canWrite ? (
-              <form
-                action={saveTransactionStatus}
-                style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
-              >
-                <input type="hidden" name="id" value={tx.id} />
-                <Field label="Status" htmlFor="status">
-                  <Select
-                    id="status"
-                    name="status"
-                    defaultValue={tx.status}
-                    options={STATUS_OPTIONS}
-                  />
-                </Field>
-                <Field
-                  label="Settlement date"
-                  htmlFor="settledAt"
-                  hint="Leave empty to keep the stored date. Marking a row paid sets it to now."
-                >
-                  <Input id="settledAt" name="settledAt" type="date" />
-                </Field>
-                <Checkbox
-                  name="clearSettledAt"
-                  label="Clear the settlement date"
-                  description="Takes precedence over the date above. Use it when a settlement is reversed."
-                />
-                <SubmitButton variant="primary" fullWidth pendingLabel="Saving status…">
-                  Save status
-                </SubmitButton>
-              </form>
-            ) : (
-              <p
-                style={{
-                  margin: 0,
-                  color: 'var(--text-secondary)',
-                  fontSize: 'var(--type-body-sm-size)',
-                }}
-              >
-                This entry is {titleCase(tx.status).toLowerCase()}. Ask an administrator for the
-                transaction.write permission to change it.
-              </p>
-            )}
-          </Panel>
-
-          <Panel title="Settlement happens outside the platform">
-            <p
-              style={{
-                margin: 0,
-                color: 'var(--text-secondary)',
-                fontSize: 'var(--type-body-sm-size)',
-                lineHeight: 1.55,
-              }}
-            >
-              Payment gateway integration is out of scope, so this row is bookkeeping. The money
-              still moves through your bank or your accounting package, and the counterparty is
-              notified whenever the status changes here.
-            </p>
-          </Panel>
-        </>
+            Payment gateway integration is out of scope, so this row is bookkeeping. The money moves
+            through your bank or your accounting package. A credit sits in the tester’s wallet until
+            a payout is recorded against it, and a payout is recorded only once the money has been
+            sent.
+          </p>
+        </Panel>
       }
     >
       <Notice code={notice} notices={NOTICES} />
@@ -372,22 +313,16 @@ export default async function TransactionDetailPage({
               borderTop: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-                Paid
-              </span>
-              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
-                {formatMoney(tx.paidAmountMinor, tx.currency)}
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
-                Outstanding
-              </span>
-              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
-                {formatMoney(tx.outstandingMinor, tx.currency)}
-              </span>
-            </div>
+            {tx.type === 'TESTER_PAYOUT' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
+                  Net paid
+                </span>
+                <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)' }}>
+                  {formatMoney(tx.paidAmountMinor, tx.currency)}
+                </span>
+              </div>
+            ) : null}
             {tx.tdsAmountMinor ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span className="c4t-eyebrow" style={{ color: 'var(--text-muted)' }}>
@@ -475,7 +410,7 @@ export default async function TransactionDetailPage({
       {canWrite ? (
         <Panel
           title="Payout details"
-          description="§21-27 — drives which category (Indian / International / Pending) this row appears under, and what a customer or tester's outstanding balance shows."
+          description="§21-27 — drives whether this row appears under Indian or International, and what the tester actually received after TDS."
         >
           <form
             action={savePayoutDetails}
@@ -498,7 +433,7 @@ export default async function TransactionDetailPage({
                 />
               </Field>
               <Field
-                label="Paid amount"
+                label="Net paid"
                 htmlFor="paidAmount"
                 hint="Major units, e.g. 1500.50. Blank leaves it unchanged."
               >

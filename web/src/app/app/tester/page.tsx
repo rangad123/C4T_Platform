@@ -14,14 +14,13 @@ import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { formatDate, formatMoney, formatRating, titleCase } from '@/lib/admin/format'
-import { requestPayoutAction } from './actions'
+import { requestPayoutAction, cancelPayoutRequestAction } from './actions'
 
 const ROOT = { label: 'Tester', href: '/app/tester' }
 
 interface EarningsSummary {
   currency: string
   earnedTotalMinor: string
-  earnedPendingMinor: string
   paidOutMinor: string
   tdsWithheldMinor: string
 }
@@ -32,16 +31,13 @@ interface PayoutState {
   availableMinor: string
   /** Every earning, credited the moment it's recorded. */
   creditedMinor: string
+  /** Open payout requests — asked for, not yet paid. */
+  requestedMinor: string
   minimumMinor: string
   hasPaymentAccount: boolean
   meetsMinimum: boolean
-  openRequest: {
-    id: string
-    reference: string
-    amountMinor: string
-    status: string
-    occurredAt: string
-  } | null
+  /** A request is not a ledger row: it has no reference and no status, only an amount and a date. */
+  openRequest: { id: string; amountMinor: string; createdAt: string } | null
   canRequest: boolean
 }
 
@@ -59,7 +55,11 @@ const NOTICES: Record<string, NoticeCopy> = {
   'payout-requested': {
     tone: 'success',
     message:
-      'Your payout request has been submitted. You will see it move to paid once it settles.',
+      'Your payout request has been submitted. It will appear in your history once it has been paid.',
+  },
+  'payout-cancelled': {
+    tone: 'success',
+    message: 'Your payout request has been cancelled. The money is available again.',
   },
   'payout-rejected': {
     tone: 'warning',
@@ -80,7 +80,6 @@ interface TransactionRow {
   id: string
   reference: string
   type: string
-  status: string
   amountMinor: string
   currency: string
   description: string | null
@@ -290,7 +289,6 @@ export default async function TesterHomePage({
       renderSecondary: (row) => row.description ?? row.project?.reference ?? undefined,
     },
     { key: 'type', header: 'Type', render: (row) => titleCase(row.type) },
-    { key: 'status', header: 'Status', render: (row) => titleCase(row.status) },
     {
       key: 'amount',
       header: 'Amount',
@@ -620,6 +618,11 @@ export default async function TesterHomePage({
                 />
                 <StatTile label="Paid out" value={formatMoney(summary.paidOutMinor, currency)} />
                 <StatTile
+                  label="Requested"
+                  value={formatMoney(payout?.requestedMinor ?? '0', currency)}
+                  hint="Asked for, not yet paid"
+                />
+                <StatTile
                   label="TDS withheld"
                   value={formatMoney(summary.tdsWithheldMinor, currency)}
                   hint="Tax deducted on your behalf"
@@ -661,7 +664,7 @@ export default async function TesterHomePage({
                       }}
                     >
                       {payout.openRequest
-                        ? `${formatMoney(payout.openRequest.amountMinor, currency)} requested on ${formatDate(payout.openRequest.occurredAt)} · ${titleCase(payout.openRequest.status)}`
+                        ? `${formatMoney(payout.openRequest.amountMinor, currency)} requested on ${formatDate(payout.openRequest.createdAt)}`
                         : !payout.hasPaymentAccount
                           ? 'Add your payment details before you can be paid.'
                           : !payout.meetsMinimum
@@ -670,7 +673,14 @@ export default async function TesterHomePage({
                     </span>
                   </div>
 
-                  {payout.openRequest ? null : payout.hasPaymentAccount ? (
+                  {payout.openRequest ? (
+                    <form action={cancelPayoutRequestAction}>
+                      <input type="hidden" name="id" value={payout.openRequest.id} />
+                      <SubmitButton variant="secondary" pendingLabel="Cancelling…">
+                        Cancel request
+                      </SubmitButton>
+                    </form>
+                  ) : payout.hasPaymentAccount ? (
                     <form action={requestPayoutAction}>
                       <SubmitButton
                         variant="primary"
@@ -696,8 +706,9 @@ export default async function TesterHomePage({
                 }}
               >
                 <Icon name="info" size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-                Earnings are approved first, then released for withdrawal. Only released funds can
-                be paid out, so a credited balance is not always available yet.
+                Each earning is added to your balance as soon as it is recorded. When you ask to be
+                paid, that amount is set aside until it has been paid out, so the same money can
+                never be requested twice.
               </p>
             </>
           ) : (

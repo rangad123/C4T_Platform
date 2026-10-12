@@ -330,7 +330,12 @@ const paymentHistoryColumns: readonly TableColumn<PaymentHistoryRow>[] = [
     render: (row) => row.reference,
     renderSecondary: (row) => titleCase(row.type),
   },
-  { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+  {
+    key: 'movement',
+    header: 'Movement',
+    render: (row) =>
+      row.type === 'TESTER_EARNING' ? 'Credit' : row.type === 'TESTER_PAYOUT' ? 'Debit' : '—',
+  },
   {
     key: 'amount',
     header: 'Amount',
@@ -461,7 +466,6 @@ interface PaymentHistoryRow {
   id: string
   reference: string
   type: string
-  status: string
   amountMinor: string
   currency: string
   createdAt: string

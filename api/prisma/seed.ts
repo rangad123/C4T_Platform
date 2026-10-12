@@ -10,7 +10,6 @@ import {
   BugSeverity,
   BugStatus,
   TransactionType,
-  TransactionStatus,
   AnnouncementAudience,
   RatingSubjectType,
   ProjectPriority,
@@ -921,33 +920,30 @@ async function main() {
       {
         reference: `TXN-${new Date().getUTCFullYear()}-00001`,
         type: TransactionType.CUSTOMER_INVOICE,
-        status: TransactionStatus.PAID,
         amountMinor: BigInt(250000), // ₹2,500.00
         description: 'UPI regression — milestone 1',
       },
       {
         reference: `TXN-${new Date().getUTCFullYear()}-00002`,
-        type: TransactionType.TESTER_PAYOUT,
-        status: TransactionStatus.PENDING,
+        // A credit: it sits in the tester's wallet until a payout is recorded.
+        type: TransactionType.TESTER_EARNING,
         amountMinor: BigInt(75000), // ₹750.00
-        description: 'Tester payout — Hrvoje Nikolic',
+        description: 'Tester earning — Hrvoje Nikolic',
       },
       {
         reference: `TXN-${new Date().getUTCFullYear()}-00003`,
         type: TransactionType.ADJUSTMENT,
-        status: TransactionStatus.PAID,
         amountMinor: BigInt(-15000),
         description: 'Refund — duplicate charge',
       },
     ]
     for (const t of txnSeeds) {
-      const counterparty = t.type === TransactionType.TESTER_PAYOUT ? tester1?.id : customer.id
+      const counterparty = t.type === TransactionType.TESTER_EARNING ? tester1?.id : customer.id
       await prisma.transaction.upsert({
         where: { reference: t.reference },
         create: {
           reference: t.reference,
           type: t.type,
-          status: t.status,
           amountMinor: t.amountMinor,
           currency: 'INR',
           organisationId: org.id,
@@ -956,7 +952,6 @@ async function main() {
           recordedById: admin.id,
           description: t.description,
           occurredAt: new Date(),
-          settledAt: t.status === TransactionStatus.PAID ? new Date() : null,
         },
         update: {},
       })

@@ -1,4 +1,4 @@
-import { PaymentAccountStatus, TransactionStatus, TransactionType } from '@prisma/client'
+import { PaymentAccountStatus, TransactionType } from '@prisma/client'
 import type { PrismaClient } from '@prisma/client'
 import {
   encryptPaymentDetails,
@@ -12,7 +12,6 @@ import {
   PAYMENT_ACCOUNT_COUNTRY,
   PAYMENT_METHOD,
   PLATFORM_SETTING_KEYS,
-  TRANSACTION_STATUS,
   TRANSACTION_TYPE,
 } from '../mapping/lookups.js'
 import {
@@ -212,14 +211,12 @@ export const transactionLoader: Loader = {
     const type = enumValue(row.pmt_type, TRANSACTION_TYPE, TransactionType.ADJUSTMENT, 'pmt_type')
     problems.push(type.problem)
 
-    const status = enumValue(
-      row.pmt_status,
-      TRANSACTION_STATUS,
-      TransactionStatus.PAID,
-      'pmt_status',
-    )
-    problems.push(status.problem)
-
+    /*
+      `pmt_status` is deliberately not read. It was "new" on all 6,700 rows, and
+      a ledger row no longer carries a status: the type (credit → earning,
+      debit → payout) says what it is, and the legacy ledger only ever recorded
+      movements that had already happened.
+    */
     const method = text(row.pmt_method)
       ? enumValue(row.pmt_method, PAYMENT_METHOD, 'IND_BANK_ACCOUNT', 'pmt_method')
       : null
@@ -297,7 +294,6 @@ export const transactionLoader: Loader = {
 
     const data = {
       type: type.value,
-      status: status.value,
       amountMinor,
       currency,
       organisationId,
@@ -313,7 +309,6 @@ export const transactionLoader: Loader = {
         [summary, details ? `Paid via ${details}` : null].filter(Boolean).join(' — ') || null,
       externalRef: null,
       occurredAt,
-      settledAt: status.value === TransactionStatus.PAID ? occurredAt : null,
       paymentMethod: method?.value ?? null,
       tdsAmountMinor: tds,
       paidAmountMinor: tds !== null ? amountMinor - tds : amountMinor,

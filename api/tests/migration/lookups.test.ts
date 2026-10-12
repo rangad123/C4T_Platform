@@ -6,7 +6,6 @@ import {
   BUILD_STATUS,
   PAYMENT_METHOD,
   ROLE_BY_LEGACY_ID,
-  TRANSACTION_STATUS,
   TRANSACTION_TYPE,
 } from '../../scripts/migration/mapping/lookups.js'
 import { enumValue } from '../../scripts/migration/transform/values.js'
@@ -99,12 +98,6 @@ describe('the values the legacy columns actually hold', () => {
   it('reads a payment_history credit as a tester earning', () => {
     expect(resolves('credit', TRANSACTION_TYPE, 'ADJUSTMENT').value).toBe('TESTER_EARNING')
     expect(resolves('debit', TRANSACTION_TYPE, 'ADJUSTMENT').value).toBe('TESTER_PAYOUT')
-  })
-
-  it('maps pmt_status "new", the only value all 6,700 rows carry', () => {
-    const result = resolves('new', TRANSACTION_STATUS, 'PENDING')
-    expect(result.value).toBe('PAID')
-    expect(result.problem).toBeNull()
   })
 
   it('maps the test_status names an assignment can hold', () => {

@@ -2,12 +2,12 @@ import { requirePermission } from '@/lib/auth/session'
 import { AdminListPage } from '@/components/admin/AdminListPage'
 import { ListFilters } from '@/components/admin/ListFilters'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
-import { StatusBadge } from '@/components/admin/StatusBadge'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, formatMoney, hasFilter, personName, titleCase } from '@/lib/admin/format'
 import type { TableColumn } from '@/components/ds/admin/Table'
 import type { PageMeta } from '@/lib/api/types'
-import { PAYMENT_METHODS, TRANSACTION_STATUSES, isOneOf } from '@/lib/domain/enums'
+import { PAYMENT_METHODS, isOneOf } from '@/lib/domain/enums'
+import { OwedPayments } from './owed'
 
 const PAGE_SIZE = 25
 const BASE = '/app/admin/transactions'
@@ -16,23 +16,21 @@ const BASE = '/app/admin/transactions'
 // underlying TransactionType enum and every existing CUSTOMER_* row are
 // untouched on the API side; this is a UI scope, not a schema change).
 const TYPES = ['TESTER_EARNING', 'TESTER_PAYOUT', 'ADJUSTMENT'] as const
-const STATUSES = TRANSACTION_STATUSES
 const SORT_OPTIONS = [
   { value: 'occurredAt', label: 'Occurred' },
   { value: 'createdAt', label: 'Created' },
   { value: 'amountMinor', label: 'Amount' },
   { value: 'type', label: 'Type' },
-  { value: 'status', label: 'Status' },
   { value: 'reference', label: 'Reference' },
 ] as const
 const SORT_FIELDS = SORT_OPTIONS.map((o) => o.value)
 
 /**
- * §21-27 — Indian / International / Pending Payments as real backend
- * categories (`?category=`), not three client-side filters over one flat
- * fetch. "All transactions" is the pre-existing flat view and stays the
- * default tab — nothing that already worked here is narrowed by adding the
- * other three.
+ * §21-27 — Indian / International as real backend categories (`?category=`),
+ * not client-side filters over one flat fetch, plus Pending payments, which is
+ * not a filter over ledger rows at all but a per-tester balance of what is
+ * still owed (see `owed.tsx`). "All transactions" is the flat view and stays
+ * the default tab.
  */
 const SECTIONS = [
   { value: 'all', label: 'All transactions', icon: 'credit-card' },
@@ -41,21 +39,19 @@ const SECTIONS = [
   { value: 'pending', label: 'Pending payments', icon: 'clock' },
 ] as const
 
-type Category = Exclude<(typeof SECTIONS)[number]['value'], 'all'>
+type Category = 'indian' | 'international'
 
 function isCategory(value: string): value is Category {
-  return value === 'indian' || value === 'international' || value === 'pending'
+  return value === 'indian' || value === 'international'
 }
 
 interface TransactionRow {
   id: string
   reference: string
   type: string
-  status: string
   /** Minor units, serialised as a string because the column is a BigInt. */
   amountMinor: string
-  /** `amountMinor - paidAmountMinor`, computed by the API — not stored. */
-  outstandingMinor: string
+  /** What actually reached the tester, after TDS. Meaningful for a payout. */
   paidAmountMinor: string
   tdsAmountMinor: string | null
   paymentMethod: string | null
@@ -64,7 +60,6 @@ interface TransactionRow {
   description: string | null
   externalRef: string | null
   occurredAt: string
-  settledAt: string | null
   organisation: { id: string; name: string } | null
   project: { id: string; reference: string } | null
   paymentAccount: {
@@ -110,11 +105,11 @@ export default async function TransactionsPage({
 }: {
   searchParams: Promise<{
     type?: string
-    status?: string
     page?: string
     sort?: string
     order?: string
     section?: string
+    search?: string
     paymentMethod?: string
     financeYear?: string
     month?: string
@@ -124,6 +119,9 @@ export default async function TransactionsPage({
 
   const params = await searchParams
   const section = resolveSection(SECTIONS, params.section)
+  const tabs = <SectionTabs basePath={BASE} tabs={SECTIONS} active={section} />
+  if (section === 'pending') return <OwedPayments params={params} tabs={tabs} />
+
   const category = isCategory(section) ? section : undefined
   // `selectedType` is what the user explicitly chose (or nothing) -- used
   // for the filter select's displayed value and the "is a filter applied"
@@ -135,9 +133,6 @@ export default async function TransactionsPage({
     ? params.type
     : undefined
   const type = selectedType ?? TYPES.join(',')
-  const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
-    ? params.status
-    : undefined
   const paymentMethod = isOneOf(
     PAYMENT_METHODS,
     params.paymentMethod as (typeof PAYMENT_METHODS)[number],
@@ -153,7 +148,7 @@ export default async function TransactionsPage({
   const page = parsePage(params.page)
 
   // What the API's `listQuery` expects — keyed `category`.
-  const apiQuery = { category, type, status, paymentMethod, financeYear, month, sort, order }
+  const apiQuery = { category, type, paymentMethod, financeYear, month, sort, order }
   // What a page URL (pagination, filter resubmission, CSV export) needs to
   // carry so the NEXT request reconstructs the same tab — keyed `section`,
   // matching what `resolveSection` reads back above. These are deliberately
@@ -162,7 +157,6 @@ export default async function TransactionsPage({
   const pageParams = {
     section: category,
     type: selectedType,
-    status,
     paymentMethod,
     financeYear,
     month,
@@ -214,10 +208,9 @@ export default async function TransactionsPage({
       header: 'Type',
       render: (row) => titleCase(row.type),
     },
-    { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     {
       key: 'counterparty',
-      header: category === 'pending' ? 'Tester' : 'Counterparty',
+      header: 'Counterparty',
       render: (row) => personName(row.counterparty) || '—',
       renderSecondary: (row) => row.organisation?.name ?? undefined,
     },
@@ -231,35 +224,24 @@ export default async function TransactionsPage({
         </span>
       ),
     },
-    // Paid / Outstanding matter most for Pending Payments (the whole point
-    // of that tab), so they only take up table width there and on the
-    // Indian tab, which the brief also asks for them on.
-    ...(category === 'pending' || category === 'indian'
-      ? ([
-          {
-            key: 'paid',
-            header: 'Paid',
-            align: 'right',
-            render: (row) => (
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {formatMoney(row.paidAmountMinor, row.currency)}
-              </span>
-            ),
-          },
-          {
-            key: 'outstanding',
-            header: 'Outstanding',
-            align: 'right',
-            render: (row) => (
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {formatMoney(row.outstandingMinor, row.currency)}
-              </span>
-            ),
-          },
-        ] satisfies TableColumn<TransactionRow>[])
-      : []),
+    // The Indian tab carries the tax columns the brief asks for: TDS withheld
+    // and what actually reached the tester after it. Only a payout has a net
+    // paid figure — on a credit it would read as a meaningless zero.
     ...(category === 'indian'
       ? ([
+          {
+            key: 'netPaid',
+            header: 'Net paid',
+            align: 'right',
+            render: (row) =>
+              row.type === 'TESTER_PAYOUT' ? (
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {formatMoney(row.paidAmountMinor, row.currency)}
+                </span>
+              ) : (
+                '—'
+              ),
+          },
           {
             key: 'tds',
             header: 'TDS',
@@ -275,7 +257,7 @@ export default async function TransactionsPage({
           },
         ] satisfies TableColumn<TransactionRow>[])
       : []),
-    ...(category === 'international' || category === 'pending'
+    ...(category === 'international'
       ? ([
           {
             key: 'paymentMethod',
@@ -300,46 +282,40 @@ export default async function TransactionsPage({
       header: 'Occurred',
       align: 'right',
       render: (row) => formatDate(row.occurredAt),
-      renderSecondary: (row) =>
-        row.settledAt ? `Settled ${formatDate(row.settledAt)}` : undefined,
     },
   ]
 
-  const CATEGORY_DESCRIPTION: Record<(typeof SECTIONS)[number]['value'], string> = {
-    all: 'Customer invoices and tester payouts, recorded by hand. Nothing here moves money — the ledger is bookkeeping, and settlement happens outside the platform.',
+  const CATEGORY_DESCRIPTION: Record<'all' | Category, string> = {
+    all: 'Every credit and payout, recorded by hand. A credit is money owed to a tester; a payout is money already sent. Nothing here moves money — the ledger is bookkeeping, and settlement happens outside the platform.',
     indian:
-      'Settled transactions paid out to an Indian bank account or Paytm — or, for rows recorded before a payment method was attached, priced in INR.',
+      'Credits and payouts that go through an Indian bank account or Paytm — or, for rows recorded before a payment method was attached, priced in INR.',
     international:
-      'Settled transactions paid out to an international bank account or PayPal — or, for rows recorded before a payment method was attached, priced outside INR.',
-    pending:
-      'Every transaction still awaiting approval or payout, regardless of currency or payment method — this is the outstanding-amounts view.',
+      'Credits and payouts that go through an international bank account or PayPal — or, for rows recorded before a payment method was attached, priced outside INR.',
   }
 
   return (
     <AdminListPage
       eyebrow="Operations"
       title="Transactions"
-      description={CATEGORY_DESCRIPTION[section]}
+      description={CATEGORY_DESCRIPTION[category ?? 'all']}
       crumbs={[{ label: 'Transactions' }]}
       result={result}
       columns={columns}
       rowKey={(row) => row.id}
       rowHref={(row) => `${BASE}/${row.id}`}
       hrefFor={pageHrefBuilder(BASE, pageParams)}
-      filtered={hasFilter([selectedType, status, paymentMethod, financeYear, month])}
+      filtered={hasFilter([selectedType, paymentMethod, financeYear, month])}
       permission="transaction.read"
       emptyIcon="credit-card"
       emptyTitle={
-        category === 'pending'
-          ? 'Nothing pending'
-          : category === 'indian'
-            ? 'No Indian transactions yet'
-            : category === 'international'
-              ? 'No international transactions yet'
-              : 'No transactions yet'
+        category === 'indian'
+          ? 'No Indian transactions yet'
+          : category === 'international'
+            ? 'No international transactions yet'
+            : 'No transactions yet'
       }
-      emptyDescription="Record an invoice or a payout and it appears here."
-      tabs={<SectionTabs basePath={BASE} tabs={SECTIONS} active={section} />}
+      emptyDescription="Record a credit or a payout and it appears here."
+      tabs={tabs}
       toolbar={
         <div
           style={{
@@ -362,13 +338,6 @@ export default async function TransactionsPage({
                   allLabel: 'All types',
                 },
                 {
-                  name: 'status',
-                  label: 'Status',
-                  options: STATUSES,
-                  value: status,
-                  allLabel: 'All statuses',
-                },
-                {
                   name: 'paymentMethod',
                   label: 'Payment method',
                   options: PAYMENT_METHODS,
@@ -376,8 +345,8 @@ export default async function TransactionsPage({
                   allLabel: 'All methods',
                 },
               ]}
-              texts={[
-                ...(category === 'indian' || category === 'pending'
+              texts={
+                category
                   ? [
                       {
                         name: 'financeYear',
@@ -386,10 +355,6 @@ export default async function TransactionsPage({
                         placeholder: '2025',
                         maxLength: 4,
                       },
-                    ]
-                  : []),
-                ...(category === 'pending'
-                  ? [
                       {
                         name: 'month',
                         label: 'Month',
@@ -398,8 +363,8 @@ export default async function TransactionsPage({
                         maxLength: 7,
                       },
                     ]
-                  : []),
-              ]}
+                  : []
+              }
               sort={{ name: 'sort', orderName: 'order', options: SORT_OPTIONS, value: sort, order }}
             />
           </div>
