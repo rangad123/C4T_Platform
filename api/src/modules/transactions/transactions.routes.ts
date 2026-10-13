@@ -332,6 +332,7 @@ transactionsRouter.get(
       testerId: string
       currency: string
       owedMinor: bigint
+      lastCreditAt: Date | null
       openRequest: { id: string; amountMinor: bigint; createdAt: Date } | null
     }
     const rows = new Map<string, Row>()
@@ -343,6 +344,7 @@ transactionsRouter.get(
           testerId: b.testerId,
           currency: b.currency,
           owedMinor,
+          lastCreditAt: b.lastCreditAt,
           openRequest: null,
         })
       }
@@ -356,6 +358,7 @@ transactionsRouter.get(
           testerId: r.testerId,
           currency: r.currency,
           owedMinor: 0n,
+          lastCreditAt: null,
           openRequest,
         })
       }
@@ -404,6 +407,7 @@ transactionsRouter.get(
             countryCode: tester.testerProfile?.countryCode ?? null,
             currency: r.currency,
             owedMinor: r.owedMinor.toString(),
+            lastCreditAt: r.lastCreditAt,
             paymentAccount: tester.paymentAccount,
             openRequest: r.openRequest
               ? { ...r.openRequest, amountMinor: r.openRequest.amountMinor.toString() }
@@ -411,15 +415,11 @@ transactionsRouter.get(
           },
         ]
       })
-      // A request first, then biggest balance — what needs paying leads.
+      // A request first, then the most recently credited — newest work leads.
       .sort(
         (a, b) =>
           Number(Boolean(b.openRequest)) - Number(Boolean(a.openRequest)) ||
-          (BigInt(b.owedMinor) > BigInt(a.owedMinor)
-            ? 1
-            : BigInt(b.owedMinor) < BigInt(a.owedMinor)
-              ? -1
-              : 0),
+          (b.lastCreditAt?.getTime() ?? 0) - (a.lastCreditAt?.getTime() ?? 0),
       )
 
     const { skip, take } = toSkipTake(query)
@@ -699,9 +699,16 @@ async function testerCurrency(testerId: string): Promise<'INR' | 'USD'> {
  * as one global earnings-minus-payouts figure, which would let one tester's
  * overpayment quietly cancel another's balance.
  */
-export async function testerBalances(): Promise<
-  { testerId: string; currency: string; creditedMinor: bigint; paidOutMinor: bigint }[]
-> {
+export interface TesterBalance {
+  testerId: string
+  currency: string
+  creditedMinor: bigint
+  paidOutMinor: bigint
+  /** When the most recent credit was earned — what the Pending payments list is ordered by. */
+  lastCreditAt: Date | null
+}
+
+export async function testerBalances(): Promise<TesterBalance[]> {
   const grouped = await prisma.transaction.groupBy({
     by: ['counterpartyId', 'currency', 'type'],
     where: {
@@ -709,11 +716,9 @@ export async function testerBalances(): Promise<
       counterpartyId: { not: null },
     },
     _sum: { amountMinor: true },
+    _max: { occurredAt: true },
   })
-  const balances = new Map<
-    string,
-    { testerId: string; currency: string; creditedMinor: bigint; paidOutMinor: bigint }
-  >()
+  const balances = new Map<string, TesterBalance>()
   for (const g of grouped) {
     if (!g.counterpartyId) continue
     const key = `${g.counterpartyId}|${g.currency}`
@@ -722,10 +727,13 @@ export async function testerBalances(): Promise<
       currency: g.currency,
       creditedMinor: 0n,
       paidOutMinor: 0n,
+      lastCreditAt: null,
     }
     const sum = g._sum.amountMinor ?? 0n
-    if (g.type === TransactionType.TESTER_EARNING) row.creditedMinor += sum
-    else row.paidOutMinor += sum
+    if (g.type === TransactionType.TESTER_EARNING) {
+      row.creditedMinor += sum
+      row.lastCreditAt = g._max.occurredAt
+    } else row.paidOutMinor += sum
     balances.set(key, row)
   }
   return [...balances.values()]

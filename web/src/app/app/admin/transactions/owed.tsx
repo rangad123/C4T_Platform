@@ -30,6 +30,8 @@ interface OwedRow {
   currency: string
   /** Minor units, as a string. */
   owedMinor: string
+  /** When the most recent credit was earned; the list runs newest first. */
+  lastCreditAt: string | null
   paymentAccount: {
     paymentType: string
     bankName: string | null
@@ -111,6 +113,11 @@ export async function OwedPayments({
       ),
     },
     {
+      key: 'lastCredit',
+      header: 'Last credited',
+      render: (row) => (row.lastCreditAt ? formatDate(row.lastCreditAt) : '—'),
+    },
+    {
       key: 'request',
       header: 'Payout request',
       render: (row) =>
@@ -141,7 +148,7 @@ export async function OwedPayments({
     <AdminListPage
       eyebrow="Operations"
       title="Transactions"
-      description="What each tester is still owed — everything credited to them minus everything already paid out. A tester who has asked to be paid is listed first. Recording the payout closes their request."
+      description="What each tester is still owed — everything credited to them minus everything already paid out. Newest credits first, and a tester who has asked to be paid before that. Recording the payout closes their request."
       crumbs={[{ label: 'Transactions' }]}
       result={result}
       columns={columns}
