@@ -22,7 +22,7 @@ interface EarningsSummary {
   currency: string
   earnedTotalMinor: string
   paidOutMinor: string
-  tdsWithheldMinor: string
+  tdsDeductedMinor: string
 }
 
 /** `GET /v1/transactions/payouts/mine` — the authoritative payout state. */
@@ -616,16 +616,20 @@ export default async function TesterHomePage({
                   value={formatMoney(payout?.creditedMinor ?? summary.earnedTotalMinor, currency)}
                   hint="Every earning recorded, paid out or not"
                 />
-                <StatTile label="Paid out" value={formatMoney(summary.paidOutMinor, currency)} />
+                <StatTile
+                  label="Paid out"
+                  value={formatMoney(summary.paidOutMinor, currency)}
+                  hint="Received by you, after TDS"
+                />
                 <StatTile
                   label="Requested"
                   value={formatMoney(payout?.requestedMinor ?? '0', currency)}
                   hint="Asked for, not yet paid"
                 />
                 <StatTile
-                  label="TDS withheld"
-                  value={formatMoney(summary.tdsWithheldMinor, currency)}
-                  hint="Tax deducted on your behalf"
+                  label="TDS deducted"
+                  value={formatMoney(summary.tdsDeductedMinor, currency)}
+                  hint="Tax paid to the government on your behalf. Not part of your balance."
                 />
               </div>
 

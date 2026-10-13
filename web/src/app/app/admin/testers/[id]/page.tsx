@@ -459,6 +459,9 @@ interface WalletBalance {
   currency: string
   availableMinor: string
   creditedMinor: string
+  paidOutMinor: string
+  /** Withheld from payouts and paid to the government — not owed to the tester. */
+  tdsDeductedMinor: string
   requestedMinor: string
 }
 
@@ -1100,6 +1103,14 @@ export default async function TesterDetailPage({
                   {
                     label: 'Credited total',
                     value: formatMoney(walletBalance.creditedMinor, walletBalance.currency),
+                  },
+                  {
+                    label: 'Paid out',
+                    value: formatMoney(walletBalance.paidOutMinor, walletBalance.currency),
+                  },
+                  {
+                    label: 'TDS deducted',
+                    value: formatMoney(walletBalance.tdsDeductedMinor, walletBalance.currency),
                   },
                 ]}
               />

@@ -744,20 +744,30 @@ export async function owedByCurrency(): Promise<{ currency: string; amountMinor:
 /**
  * The tester's money. A ledger row carries no status — its type says it all:
  *
- *   credited   every TESTER_EARNING — in the wallet the moment it is recorded
- *   paid out   every TESTER_PAYOUT — a debit is only ever recorded once the
- *              money has been sent
- *   requested  open payout requests — not sent yet, but reserved so the same
- *              balance cannot be asked for twice
- *   available  credited − paid out − requested
+ *   credited     every TESTER_EARNING — in the wallet the moment it is recorded
+ *   paid out     what actually reached the tester: every TESTER_PAYOUT, minus
+ *                the TDS withheld from it
+ *   TDS deducted the withheld tax. It is paid to the government on the
+ *                tester's behalf, so it is NOT owed to the tester any more —
+ *                it leaves the wallet exactly like a payout does
+ *   requested    open payout requests — not sent yet, but reserved so the same
+ *                balance cannot be asked for twice
+ *   available    credited − paid out − TDS deducted − requested
+ *
+ * A payout's `amountMinor` is the whole amount that left the wallet, and its
+ * `tdsAmountMinor` is the part of that which went to the government. A TDS
+ * entry on its own (a legacy `tds_history` row) is a payout whose amount IS
+ * its TDS, so it deducts the tax and pays the tester nothing.
  */
 async function payoutBalance(testerId: string): Promise<{
-  /** Credited, minus everything already paid out or requested. What may be withdrawn now. */
+  /** Credited, minus paid out, TDS and requests. What may be withdrawn now. */
   availableMinor: bigint
   /** Every TESTER_EARNING. */
   creditedMinor: bigint
-  /** Every TESTER_PAYOUT — already sent. */
+  /** What reached the tester — payouts net of TDS. */
   paidOutMinor: bigint
+  /** Tax withheld from payouts and paid to the government. */
+  tdsDeductedMinor: bigint
   /** Open payout requests — not yet sent, still reserved against the balance. */
   requestedMinor: bigint
 }> {
@@ -768,7 +778,7 @@ async function payoutBalance(testerId: string): Promise<{
     }),
     prisma.transaction.aggregate({
       where: { counterpartyId: testerId, type: TransactionType.TESTER_PAYOUT },
-      _sum: { amountMinor: true },
+      _sum: { amountMinor: true, tdsAmountMinor: true },
     }),
     prisma.payoutRequest.aggregate({
       where: { testerId, ...OPEN_REQUEST },
@@ -777,13 +787,16 @@ async function payoutBalance(testerId: string): Promise<{
   ])
 
   const creditedMinor = credited._sum.amountMinor ?? 0n
-  const paidOutMinor = paidOut._sum.amountMinor ?? 0n
+  const leftWalletMinor = paidOut._sum.amountMinor ?? 0n
+  const tdsDeductedMinor = paidOut._sum.tdsAmountMinor ?? 0n
   const requestedMinor = requested._sum.amountMinor ?? 0n
-  const availableMinor = creditedMinor - paidOutMinor - requestedMinor
+  const paidOutMinor = leftWalletMinor - tdsDeductedMinor
+  const availableMinor = creditedMinor - leftWalletMinor - requestedMinor
 
   return {
     creditedMinor,
-    paidOutMinor,
+    paidOutMinor: paidOutMinor > 0n ? paidOutMinor : 0n,
+    tdsDeductedMinor,
     requestedMinor,
     availableMinor: availableMinor > 0n ? availableMinor : 0n,
   }
@@ -824,6 +837,7 @@ transactionsRouter.get('/payouts/mine', async (req, res) => {
       /** Every earning, credited the moment it's recorded — legacy "Credit Fund". */
       creditedMinor: balance.creditedMinor.toString(),
       paidOutMinor: balance.paidOutMinor.toString(),
+      tdsDeductedMinor: balance.tdsDeductedMinor.toString(),
       /** Open payout requests — not yet sent, still reserved against the balance. */
       requestedMinor: balance.requestedMinor.toString(),
       minimumMinor: PAYOUT_MINIMUM_MINOR.toString(),
@@ -873,6 +887,7 @@ transactionsRouter.get(
         availableMinor: balance.availableMinor.toString(),
         creditedMinor: balance.creditedMinor.toString(),
         paidOutMinor: balance.paidOutMinor.toString(),
+        tdsDeductedMinor: balance.tdsDeductedMinor.toString(),
         requestedMinor: balance.requestedMinor.toString(),
       },
     })
@@ -1012,39 +1027,19 @@ transactionsRouter.delete(
 
 /** §2.3 — a tester's own earnings summary. */
 transactionsRouter.get('/summary/mine', async (req, res) => {
-  const [grouped, tds, currency] = await Promise.all([
-    prisma.transaction.groupBy({
-      by: ['type'],
-      where: { counterpartyId: req.user!.id },
-      _sum: { amountMinor: true },
-      _count: true,
-    }),
-    // A separate aggregate: the groupBy above sums `amountMinor` only, so TDS
-    // cannot be derived from it.
-    prisma.transaction.aggregate({
-      where: { counterpartyId: req.user!.id },
-      _sum: { tdsAmountMinor: true },
-    }),
+  // The wallet's own figures, so "paid out" and "TDS deducted" mean the same
+  // thing here as they do on the wallet — one definition, not two.
+  const [balance, currency] = await Promise.all([
+    payoutBalance(req.user!.id),
     testerCurrency(req.user!.id),
   ])
-
-  const sum = (type: TransactionType) =>
-    grouped
-      .filter((g) => g.type === type)
-      .reduce((acc, g) => acc + (g._sum.amountMinor ?? 0n), 0n)
-      .toString()
 
   res.json({
     data: {
       currency,
-      earnedTotalMinor: sum(TransactionType.TESTER_EARNING),
-      paidOutMinor: sum(TransactionType.TESTER_PAYOUT),
-      /**
-       * TDS withheld across every row that recorded it. The column has existed
-       * since the payout-accounts pass but nothing surfaced it, so a tester
-       * could not see what had been deducted on their behalf.
-       */
-      tdsWithheldMinor: (tds._sum.tdsAmountMinor ?? 0n).toString(),
+      earnedTotalMinor: balance.creditedMinor.toString(),
+      paidOutMinor: balance.paidOutMinor.toString(),
+      tdsDeductedMinor: balance.tdsDeductedMinor.toString(),
     },
   })
 })

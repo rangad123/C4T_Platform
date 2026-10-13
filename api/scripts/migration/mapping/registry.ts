@@ -586,13 +586,14 @@ export const REGISTRY: readonly TableMapping[] = [
   {
     legacyTable: 'tds_history',
     legacyPk: 'tds_id',
-    targets: ['Transaction.tdsAmountMinor'],
+    targets: ['Transaction'],
     disposition: 'ACTIVE_EQUIVALENT',
-    kind: 'MERGED',
+    kind: 'DIRECT',
     phase: 7,
-    transformation: 'tds amount → tdsAmountMinor on the related Transaction',
+    transformation:
+      'tds_amount → a payout whose whole amount is its TDS (amountMinor = tdsAmountMinor, nothing paid to the tester), dated the end of tds_fy, legacyId=tds-<tds_id>',
     notes:
-      'Indian withholding tax. Merged onto the transaction it belongs to rather than kept as a separate ledger, which is how the new schema models it.',
+      'Indian withholding tax, held once per tester per financial year and not tied to any payment (there is no tds_payment_id). It was paid to the government, so it is not owed to the tester; one debit per row takes it out of the wallet and counts it under TDS deducted.',
   },
 
   // ── Phase 8 · Communication and system ────────────────────────────────────

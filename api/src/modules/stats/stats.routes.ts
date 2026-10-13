@@ -34,6 +34,27 @@ statsRouter.use(authenticate)
 const byCurrency = (rows: { currency: string; _sum: { amountMinor: bigint | null } }[]) =>
   rows.map((r) => ({ currency: r.currency, amountMinor: (r._sum.amountMinor ?? 0n).toString() }))
 
+type PayoutSums = {
+  currency: string
+  _sum: { amountMinor: bigint | null; tdsAmountMinor: bigint | null }
+}[]
+
+/**
+ * What actually reached testers: a payout's amount is the whole sum that left
+ * the wallet, and the TDS inside it went to the government, not to the tester.
+ */
+const paidToTesters = (rows: PayoutSums) =>
+  rows.map((r) => {
+    const net = (r._sum.amountMinor ?? 0n) - (r._sum.tdsAmountMinor ?? 0n)
+    return { currency: r.currency, amountMinor: (net > 0n ? net : 0n).toString() }
+  })
+
+/** Tax withheld from payouts and paid to the government on testers' behalf. */
+const tdsDeducted = (rows: PayoutSums) =>
+  rows
+    .filter((r) => (r._sum.tdsAmountMinor ?? 0n) > 0n)
+    .map((r) => ({ currency: r.currency, amountMinor: (r._sum.tdsAmountMinor ?? 0n).toString() }))
+
 statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req, res) => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   // A sub-admin can hold STATS_READ (a dashboard-wide grant) without also
@@ -86,7 +107,7 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
     prisma.transaction.groupBy({
       by: ['currency'],
       where: { type: TransactionType.TESTER_PAYOUT },
-      _sum: { amountMinor: true },
+      _sum: { amountMinor: true, tdsAmountMinor: true },
     }),
     canReadLeads
       ? prisma.lead.groupBy({
@@ -100,12 +121,12 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
     prisma.transaction.groupBy({
       by: ['currency'],
       where: { type: TransactionType.TESTER_PAYOUT, ...categoryFilter('indian') },
-      _sum: { amountMinor: true },
+      _sum: { amountMinor: true, tdsAmountMinor: true },
     }),
     prisma.transaction.groupBy({
       by: ['currency'],
       where: { type: TransactionType.TESTER_PAYOUT, ...categoryFilter('international') },
-      _sum: { amountMinor: true },
+      _sum: { amountMinor: true, tdsAmountMinor: true },
     }),
     owedByCurrency(),
   ])
@@ -144,13 +165,15 @@ statsRouter.get('/admin', requirePermission(PERMISSIONS.STATS_READ), async (req,
         : null,
       finance: {
         collected: byCurrency(revenue),
-        paidOut: byCurrency(payouts),
+        paidOut: paidToTesters(payouts),
       },
       payouts: {
         paidOut: {
-          indian: byCurrency(paidOutIndian),
-          international: byCurrency(paidOutInternational),
+          indian: paidToTesters(paidOutIndian),
+          international: paidToTesters(paidOutInternational),
         },
+        /** Withheld from payouts and already paid to the government — not owed to testers. */
+        tdsDeducted: tdsDeducted(payouts),
         /** Still owed to testers — credits not yet paid out, per tester, per currency. */
         owed,
       },

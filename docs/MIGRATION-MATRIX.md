@@ -104,7 +104,7 @@ Generated from `scripts/migration/mapping/registry.ts`. All **66** legacy tables
 | --- | --- | --- | --- | --- |
 | `payment_acc_details` | `PaymentAccount` | ACTIVE_EQUIVALENT / DIRECT | Bank/PayPal/Paytm details → encrypted PaymentAccount.secureDetails + masked display fields | The legacy table stores account numbers in the clear. The new model encrypts them into secureDetails and keeps only a last-4/masked form for display, so the migration encrypts on the way in. Raw values never reach a log or a report. |
 | `payment_history` | `Transaction` | ACTIVE_EQUIVALENT / DIRECT | pmt_amount → amountMinor (BigInt), pmt_type/method/status → enums, legacyId=pmt_id | Amounts move from float/varchar to integer minor units — the reason the new schema uses BigInt. Currency comes from the owning organisation’s org_currency. |
-| `tds_history` | `Transaction.tdsAmountMinor` | ACTIVE_EQUIVALENT / MERGED | tds amount → tdsAmountMinor on the related Transaction | Indian withholding tax. Merged onto the transaction it belongs to rather than kept as a separate ledger, which is how the new schema models it. |
+| `tds_history` | `Transaction` | ACTIVE_EQUIVALENT / DIRECT | tds_amount → a payout whose whole amount is its TDS (amountMinor = tdsAmountMinor, nothing paid to the tester), dated the end of tds_fy, legacyId=tds-<tds_id> | Indian withholding tax, held once per tester per financial year and not tied to any payment (there is no tds_payment_id). It was paid to the government, so it is not owed to the tester; one debit per row takes it out of the wallet and counts it under TDS deducted. |
 
 ## Phase 8 — Communication and system
 

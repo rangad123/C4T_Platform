@@ -48,6 +48,8 @@ interface StatsResponse {
   payouts: {
     /** Payouts already sent — a payout is only ever recorded once the money has gone. */
     paidOut: { indian: MoneyByCurrency; international: MoneyByCurrency }
+    /** Withheld from payouts and paid to the government — not owed to testers. */
+    tdsDeducted: MoneyByCurrency
     /** Credits not yet paid out, summed per tester so one overpayment never offsets another's balance. */
     owed: MoneyByCurrency
   }
@@ -195,7 +197,7 @@ export default async function AdminDashboardPage({
   const newLeads = stats.leads?.NEW ?? 0
   const narrative = buildNarrative(stats, newLeads)
 
-  // The three slices of the payments donut. Re-grouped by currency, not added
+  // The slices of the payments donut. Re-grouped by currency, not added
   // together as one number — Indian is minor units of INR, International and
   // Owed can each be a different currency, and summing across them would not be
   // a real amount in any of them (same reasoning as `byCurrency` on the API
@@ -203,6 +205,7 @@ export default async function AdminDashboardPage({
   const paymentSlices = [
     { label: 'Indian paid', tone: 'info', amounts: stats.payouts.paidOut.indian },
     { label: 'International paid', tone: 'accent', amounts: stats.payouts.paidOut.international },
+    { label: 'TDS deducted', tone: 'neutral', amounts: stats.payouts.tdsDeducted },
     { label: 'Still owed', tone: 'warning', amounts: stats.payouts.owed },
   ] as const
   const paymentTotal = totalByCurrency(...paymentSlices.map((slice) => slice.amounts))

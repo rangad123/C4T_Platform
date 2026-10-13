@@ -6,6 +6,7 @@ import {
   type PaymentDetailsPlain,
 } from '../../../src/lib/payment-encryption.js'
 import { query } from '../legacy/client.js'
+import { financialYearEnd } from '../transform/fiscal.js'
 import {
   ANNOUNCEMENT_AUDIENCE,
   CURRENCY_BY_LEGACY_SYMBOL,
@@ -157,9 +158,6 @@ export const paymentAccountLoader: Loader = {
 
 // ── payment_history → Transaction ────────────────────────────────────────────
 
-/** legacy payment id → TDS amount, merged onto the transaction it belongs to. */
-const tdsByPaymentId = new Map<string, bigint>()
-
 export const transactionLoader: Loader = {
   table: 'payment_history',
   target: 'Transaction',
@@ -169,28 +167,16 @@ export const transactionLoader: Loader = {
     { table: 'projects', model: 'Project' },
   ],
 
-  async prepare(ctx) {
-    await loadOrgCurrencies()
-
+  async prepare() {
     /*
-      tds_history is MERGED onto the transaction rather than migrated as rows
-      of its own — Transaction.tdsAmountMinor is where the new schema keeps
-      withholding tax. Read once here so the join is a map lookup per row.
+      TDS is NOT read here. This loader used to join `tds_history` onto each
+      payment through a `tds_payment_id` column — a column that table does not
+      have (it holds one figure per USER per financial year: tds_user_id,
+      tds_fy, tds_amount). The query failed, the failure was swallowed, and no
+      TDS ever reached the ledger, so withheld tax sat in testers' available
+      balances. `tdsLoader` below reads the table as it really is.
     */
-    tdsByPaymentId.clear()
-    try {
-      const rows = await query<Record<string, unknown>>(
-        'SELECT tds_payment_id, tds_amount FROM `tds_history`',
-      )
-      for (const r of rows) {
-        const id = legacyRef(r.tds_payment_id)
-        const amount = amountToMinor(r.tds_amount)
-        if (id && amount !== null) tdsByPaymentId.set(id, amount)
-      }
-      ctx.reporter.counter('tds_history', 'Transaction.tdsAmountMinor').read = rows.length
-    } catch {
-      ctx.reporter.review('tds_history', 'Could not read tds_history; TDS amounts not merged.')
-    }
+    await loadOrgCurrencies()
   },
 
   async row(ctx, tx, row): Promise<RowOutcome> {
@@ -281,7 +267,6 @@ export const transactionLoader: Loader = {
       (rowCurrency ? CURRENCY_BY_LEGACY_SYMBOL[rowCurrency.toLowerCase()] : null) ??
       (orgLegacy ? currencyByOrgLegacyId.get(orgLegacy) : null) ??
       'INR'
-    const tds = tdsByPaymentId.get(legacyId) ?? null
 
     /*
       `pmt_method_details` is the account the money moved through (a masked
@@ -310,8 +295,6 @@ export const transactionLoader: Loader = {
       externalRef: null,
       occurredAt,
       paymentMethod: method?.value ?? null,
-      tdsAmountMinor: tds,
-      paidAmountMinor: tds !== null ? amountMinor - tds : amountMinor,
       updatedAt: occurredAt,
     }
 
@@ -324,6 +307,10 @@ export const transactionLoader: Loader = {
             ...data,
             legacyId,
             recordedById,
+            // Only on first load: a re-run must not overwrite a figure an admin
+            // has since corrected. The legacy ledger recorded money that had
+            // already moved, so the whole amount counts as paid.
+            paidAmountMinor: amountMinor,
             reference: `TXN-LEG-${legacyId.padStart(6, '0')}`,
             createdAt: occurredAt,
           },
@@ -331,10 +318,125 @@ export const transactionLoader: Loader = {
         })
 
     await ctx.idMap.remember(tx, 'payment_history', legacyId, 'Transaction', record.id)
-    if (tds !== null) {
-      ctx.reporter.counter('tds_history', 'Transaction.tdsAmountMinor').inserted += 1
-    }
     reportProblems(ctx, 'payment_history', legacyId, 'Transaction', problems)
+    return { kind: 'written', created: !existing }
+  },
+}
+
+// ── tds_history → Transaction ────────────────────────────────────────────────
+
+/**
+ * Withheld tax, one ledger row per `tds_history` row.
+ *
+ * `tds_history` holds ONE figure per tester per financial year (`tds_user_id`,
+ * `tds_fy`, `tds_amount`) — it is not tied to any payment. That tax was paid to
+ * the government on the tester's behalf, so it is not owed to the tester, but
+ * the legacy ledger never recorded it as a debit: credits minus the debits that
+ * were recorded left the withheld amount sitting in the tester's balance.
+ *
+ * Each figure therefore becomes a payout whose whole amount IS its TDS
+ * (`amountMinor = tdsAmountMinor`, nothing paid to the tester). That takes it
+ * out of the wallet, counts it under "TDS deducted", and leaves everything the
+ * tester was actually paid untouched.
+ *
+ * Dated the last day of the financial year it belongs to, so the finance-year
+ * filter files it correctly; a label that cannot be read falls back to the
+ * date the row was recorded.
+ *
+ * Idempotent on `legacyId` (`tds-<tds_id>`), so it can be re-run safely.
+ */
+export const tdsLoader: Loader = {
+  table: 'tds_history',
+  target: 'Transaction',
+  dependsOn: [{ table: 'users', model: 'User' }],
+
+  async prepare(ctx) {
+    // More than one figure for the same tester and year would be summed here.
+    // If they are running totals rather than separate deductions that doubles
+    // the tax, so say so before anything is written.
+    try {
+      const dupes = await query<{ tds_user_id: unknown; tds_fy: unknown; n: unknown }>(
+        'SELECT tds_user_id, tds_fy, COUNT(*) AS n FROM `tds_history` GROUP BY tds_user_id, tds_fy HAVING COUNT(*) > 1',
+      )
+      if (dupes.length > 0) {
+        ctx.reporter.review(
+          'tds_history',
+          `${dupes.length} tester/financial-year pairs have more than one TDS row — check whether they are separate deductions or running totals before relying on the sums.`,
+        )
+      }
+    } catch {
+      ctx.reporter.review('tds_history', 'Could not check tds_history for duplicate years.')
+    }
+  },
+
+  async row(ctx, tx, row): Promise<RowOutcome> {
+    const tdsId = String(row.tds_id)
+    const legacyId = `tds-${tdsId}`
+
+    const amountMinor = amountToMinor(row.tds_amount)
+    if (amountMinor === null || amountMinor <= 0n) {
+      return {
+        kind: 'skipped',
+        code: 'NO_TDS_AMOUNT',
+        message: 'TDS figure is empty or zero, so there is nothing to deduct.',
+        field: 'tds_amount',
+        value: asText(row.tds_amount),
+      }
+    }
+
+    const testerId = await ctx.idMap.resolve('users', legacyRef(row.tds_user_id), 'User')
+    if (!testerId) {
+      ctx.reporter.orphan({
+        legacyTable: 'tds_history',
+        legacyId: tdsId,
+        field: 'tds_user_id',
+        referencedTable: 'users',
+        referencedId: asText(row.tds_user_id),
+      })
+      return { kind: 'skipped', code: 'ORPHAN_REFERENCE', message: 'TDS tester not migrated.' }
+    }
+
+    const recordedById = await firstAdmin(ctx)
+    if (!recordedById) {
+      return {
+        kind: 'skipped',
+        code: 'ORPHAN_REFERENCE',
+        message: 'No admin to attribute the TDS entry to.',
+      }
+    }
+
+    const fy = text(row.tds_fy)
+    const recordedAt = timestampOr(row.tds_added_date)
+    const occurredAt = financialYearEnd(fy) ?? recordedAt
+
+    const data = {
+      type: TransactionType.TESTER_PAYOUT,
+      amountMinor,
+      currency: 'INR',
+      counterpartyId: testerId,
+      description: fy ? `TDS deducted — FY ${fy}` : 'TDS deducted',
+      occurredAt,
+      tdsAmountMinor: amountMinor,
+      updatedAt: recordedAt,
+    }
+
+    const existing = await tx.transaction.findUnique({ where: { legacyId }, select: { id: true } })
+    const record = existing
+      ? await tx.transaction.update({ where: { id: existing.id }, data, select: { id: true } })
+      : await tx.transaction.create({
+          data: {
+            ...data,
+            legacyId,
+            recordedById,
+            // Nothing reached the tester: the whole amount went to the government.
+            paidAmountMinor: 0n,
+            reference: `TXN-LEG-TDS-${tdsId.padStart(6, '0')}`,
+            createdAt: recordedAt,
+          },
+          select: { id: true },
+        })
+
+    await ctx.idMap.remember(tx, 'tds_history', tdsId, 'Transaction', record.id)
     return { kind: 'written', created: !existing }
   },
 }
@@ -517,7 +619,7 @@ export const leadLoader: Loader = {
   },
 }
 
-export const financeLoaders: Loader[] = [paymentAccountLoader, transactionLoader]
+export const financeLoaders: Loader[] = [paymentAccountLoader, transactionLoader, tdsLoader]
 export const communicationLoaders: Loader[] = [
   announcementLoader,
   platformSettingLoader,

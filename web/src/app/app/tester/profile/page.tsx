@@ -156,6 +156,8 @@ interface PayoutState {
   availableMinor: string
   creditedMinor: string
   paidOutMinor: string
+  /** Tax withheld from payouts and paid to the government — not part of the balance. */
+  tdsDeductedMinor: string
   /** Open payout requests — asked for, not yet paid. */
   requestedMinor: string
   minimumMinor: string
@@ -2056,6 +2058,10 @@ export default async function TesterProfilePage({
                     {
                       label: 'Paid out',
                       value: formatMoney(payoutState.paidOutMinor, payoutState.currency),
+                    },
+                    {
+                      label: 'TDS deducted',
+                      value: formatMoney(payoutState.tdsDeductedMinor, payoutState.currency),
                     },
                     {
                       label: 'Requested',
