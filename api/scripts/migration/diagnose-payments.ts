@@ -77,58 +77,89 @@ async function main(): Promise<void> {
     v[c] += 1
     votes.set(norm(r.pmt_user_id), v)
   }
-  const testerCurrency = (id: string): Cur | null => {
+  const usualCurrency = (id: string): Cur | null => {
     const v = votes.get(id)
     if (!v) return null
     return v.USD > v.INR ? 'USD' : 'INR'
   }
   const mixed = [...votes.values()].filter((v) => v.INR > 0 && v.USD > 0).length
-  console.log(`\nTesters with rows in both currencies: ${mixed} of ${votes.size}`)
+  console.log(`
+Testers with rows in both currencies: ${mixed} of ${votes.size}`)
 
-  // ── 2 · Ways of reading a row's currency ──────────────────────────────────
-  const policies: Record<string, (r: LegacyRow) => Cur> = {
-    'pmt_in, else INR (what the loader did)': (r) => fromSymbol(r.pmt_in) ?? 'INR',
-    'pmt_in, else payment method, else INR': (r) =>
-      fromSymbol(r.pmt_in) ?? fromMethod(r.pmt_method) ?? 'INR',
-    "pmt_in, else the tester's usual currency, else INR": (r) =>
-      fromSymbol(r.pmt_in) ?? testerCurrency(norm(r.pmt_user_id)) ?? 'INR',
+  // What the tester says about themselves: the payout account, then the country.
+  const accountCountry = new Map<string, Cur>()
+  for (const a of await query<Record<string, unknown>>(
+    "SELECT pmt_user_id, pmt_country FROM `payment_acc_details` WHERE pmt_status = 'Active' ORDER BY pmt_acc_updated",
+  )) {
+    accountCountry.set(
+      norm(a.pmt_user_id),
+      norm(a.pmt_country).toLowerCase() === 'indian' ? 'INR' : 'USD',
+    )
   }
+  const profileCountry = new Map<string, Cur>()
+  for (const u of await query<Record<string, unknown>>('SELECT usr_id, usr_country FROM `users`')) {
+    const c = norm(u.usr_country).toLowerCase()
+    if (c) profileCountry.set(norm(u.usr_id), c === 'india' || c === 'in' ? 'INR' : 'USD')
+  }
+  console.log(
+    `Payout accounts: ${accountCountry.size} (${[...accountCountry.values()].filter((c) => c === 'USD').length} non-Indian); profiles with a country: ${profileCountry.size}`,
+  )
 
-  // ── 3 · Ways of adding up what is owed ────────────────────────────────────
-  const formulas: Record<
-    string,
-    (t: { credit: number; release: number; debit: number }) => number
-  > = {
-    'credit − debit': (t) => t.credit - t.debit,
-    'release − debit': (t) => t.release - t.debit,
-    'credit + release − debit': (t) => t.credit + t.release - t.debit,
-    'credit − release': (t) => t.credit - t.release,
+  // TDS the old system withheld, per tester (rupees).
+  const tdsByUser = new Map<string, number>()
+  for (const t of await query<Record<string, unknown>>(
+    'SELECT tds_user_id, tds_amount FROM `tds_history`',
+  )) {
+    const id = norm(t.tds_user_id)
+    tdsByUser.set(id, (tdsByUser.get(id) ?? 0) + (Number(t.tds_amount) || 0))
+  }
+  console.log(
+    `TDS rows: ${tdsByUser.size} testers, ${money([...tdsByUser.values()].reduce((a, b) => a + b, 0))} in total`,
+  )
+
+  // ── 2 · Ways of reading a currency ────────────────────────────────────────
+  const policies: Record<string, (r: LegacyRow) => Cur> = {
+    'row: pmt_in, else INR (what the loader did)': (r) => fromSymbol(r.pmt_in) ?? 'INR',
+    "row: pmt_in, else the tester's usual currency": (r) =>
+      fromSymbol(r.pmt_in) ?? usualCurrency(norm(r.pmt_user_id)) ?? 'INR',
+    'tester: payout account, else usual currency, else country': (r) => {
+      const id = norm(r.pmt_user_id)
+      return accountCountry.get(id) ?? usualCurrency(id) ?? profileCountry.get(id) ?? 'INR'
+    },
+    'tester: profile country only': (r) => profileCountry.get(norm(r.pmt_user_id)) ?? 'INR',
+    'tester: usual currency from their rows': (r) => usualCurrency(norm(r.pmt_user_id)) ?? 'INR',
   }
 
   const near = (got: number, want: number | undefined) =>
     want !== undefined && !Number.isNaN(want) && Math.abs(got - want) <= 1 ? '  <= matches' : ''
 
-  console.log('\nOutstanding per way of reading it (sum of positive per-tester balances)')
+  console.log('\nOutstanding (credit − debit) per way of reading the currency')
   for (const [pName, policy] of Object.entries(policies)) {
-    const perTester = new Map<string, { credit: number; release: number; debit: number }>()
+    const perTester = new Map<string, number>()
     for (const r of rows) {
       const type = norm(r.pmt_type).toLowerCase()
-      if (type !== 'credit' && type !== 'release' && type !== 'debit') continue
+      if (type !== 'credit' && type !== 'debit') continue
       const key = `${norm(r.pmt_user_id)}|${policy(r)}`
-      const t = perTester.get(key) ?? { credit: 0, release: 0, debit: 0 }
-      t[type] += Number(r.pmt_amount) || 0
-      perTester.set(key, t)
-    }
-    console.log(`\n  currency = ${pName}`)
-    for (const [fName, formula] of Object.entries(formulas)) {
-      const total: Record<Cur, number> = { INR: 0, USD: 0 }
-      for (const [key, t] of perTester) {
-        const owed = formula(t)
-        if (owed > 0) total[key.split('|')[1] as Cur] += owed
-      }
-      console.log(
-        `    ${fName.padEnd(26)} INR ${money(total.INR).padStart(12)}${near(total.INR, oldInr)}   USD ${money(total.USD).padStart(10)}${near(total.USD, oldUsd)}`,
+      perTester.set(
+        key,
+        (perTester.get(key) ?? 0) + (type === 'credit' ? 1 : -1) * (Number(r.pmt_amount) || 0),
       )
+    }
+    console.log(`
+  currency = ${pName}`)
+    for (const lessTds of [false, true]) {
+      for (const positiveOnly of [true, false]) {
+        const total: Record<Cur, number> = { INR: 0, USD: 0 }
+        for (const [key, balance] of perTester) {
+          const [id, cur] = key.split('|') as [string, Cur]
+          const owed = balance - (lessTds && cur === 'INR' ? (tdsByUser.get(id) ?? 0) : 0)
+          if (!positiveOnly || owed > 0) total[cur] += owed
+        }
+        const label = `${positiveOnly ? 'positive balances only' : 'all balances netted'}${lessTds ? ', less TDS' : ''}`
+        console.log(
+          `    ${label.padEnd(40)} INR ${money(total.INR).padStart(12)}${near(total.INR, oldInr)}   USD ${money(total.USD).padStart(10)}${near(total.USD, oldUsd)}`,
+        )
+      }
     }
   }
 
