@@ -478,6 +478,7 @@ export default async function TesterDetailPage({
   params: Promise<{ id: string }>
   searchParams: Promise<{
     ratingsPage?: string
+    paymentPage?: string
     section?: string
     edit?: string
     rate?: string
@@ -487,7 +488,7 @@ export default async function TesterDetailPage({
   const viewer = await requirePermission('tester.read')
 
   const { id } = await params
-  const { ratingsPage, section: rawSection, edit, rate, notice } = await searchParams
+  const { ratingsPage, paymentPage, section: rawSection, edit, rate, notice } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let tester: TesterDetail | null = null
@@ -584,8 +585,10 @@ export default async function TesterDetailPage({
     // tracks for this tester as counterparty.
     section === 'payment' && canReadTransactions
       ? loadList<PaymentHistoryRow>('transactions', {
-          page: 1,
-          limit: 10,
+          // Paged, not capped: a migrated tester can hold hundreds of rows,
+          // and a fixed first page of ten made everything older look missing.
+          page: parsePage(paymentPage),
+          limit: 25,
           query: {
             counterpartyId: tester.user.id,
             type: 'TESTER_EARNING,TESTER_PAYOUT',
@@ -1201,13 +1204,33 @@ export default async function TesterDetailPage({
             ) : paymentHistory.items.length === 0 ? (
               <Muted>No earnings or payouts recorded yet.</Muted>
             ) : (
-              <Table
-                ariaLabel="Payment history"
-                columns={paymentHistoryColumns}
-                rows={paymentHistory.items}
-                rowKey={(row) => row.id}
-                rowHref={(row) => `/app/admin/transactions/${row.id}`}
-              />
+              <>
+                <Table
+                  ariaLabel="Payment history"
+                  columns={paymentHistoryColumns}
+                  rows={paymentHistory.items}
+                  rowKey={(row) => row.id}
+                  rowHref={(row) => `/app/admin/transactions/${row.id}`}
+                />
+                <div
+                  style={{
+                    padding: 'var(--space-5) var(--space-6)',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <Pagination
+                    page={paymentHistory.meta.page}
+                    totalPages={Math.max(1, paymentHistory.meta.totalPages)}
+                    total={paymentHistory.meta.total}
+                    limit={paymentHistory.meta.limit}
+                    hrefFor={(target) =>
+                      target > 1
+                        ? `${detailPath}?section=payment&paymentPage=${target}`
+                        : `${detailPath}?section=payment`
+                    }
+                  />
+                </div>
+              </>
             )}
           </Panel>
         </>

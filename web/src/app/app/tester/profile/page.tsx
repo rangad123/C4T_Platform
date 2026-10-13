@@ -13,6 +13,8 @@ import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { DescriptionList } from '@/components/admin/DescriptionList'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { Table, type TableColumn } from '@/components/ds/admin/Table'
+import { Pagination } from '@/components/ds/admin/Pagination'
+import { loadList, parsePage } from '@/lib/admin/list'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { SingleFileUpload } from '@/components/admin/SingleFileUpload'
 import { DownloadLink } from '@/components/admin/DownloadLink'
@@ -401,7 +403,13 @@ interface AssignmentRow {
 export default async function TesterProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ section?: string; edit?: string; view?: string; notice?: string }>
+  searchParams: Promise<{
+    section?: string
+    edit?: string
+    view?: string
+    notice?: string
+    historyPage?: string
+  }>
 }) {
   // The session user, not the tester profile: the email lives on the account
   // and is what the close-account confirmation is checked against.
@@ -545,9 +553,14 @@ export default async function TesterProfilePage({
     section === 'payment'
       ? serverFetchOrNull<PayoutState>('transactions/payouts/mine')
       : Promise.resolve(null),
+    // Paged, not capped: this panel promises every credit and payout, and a
+    // migrated tester can hold hundreds. `loadList` keeps the page count that
+    // `serverFetchOrNull` would discard.
     section === 'payment'
-      ? serverFetchOrNull<readonly LedgerRow[]>('transactions', {
-          query: { page: 1, limit: 25, sort: 'occurredAt', order: 'desc' },
+      ? loadList<LedgerRow>('transactions', {
+          page: parsePage(resolvedParams.historyPage),
+          limit: 25,
+          query: { sort: 'occurredAt', order: 'desc' },
         })
       : Promise.resolve(null),
   ])
@@ -2127,13 +2140,15 @@ export default async function TesterProfilePage({
           <Panel
             title="Payout history"
             description="Every credit and payout on your account."
-            flush={(payoutHistory?.length ?? 0) > 0}
+            flush={
+              payoutHistory !== null && 'items' in payoutHistory && payoutHistory.items.length > 0
+            }
           >
-            {payoutHistory === null ? (
+            {payoutHistory === null || 'error' in payoutHistory ? (
               <div style={{ padding: 'var(--space-6)' }}>
                 <Muted>Your history could not be loaded. Refresh in a moment.</Muted>
               </div>
-            ) : payoutHistory.length === 0 ? (
+            ) : payoutHistory.items.length === 0 ? (
               <div style={{ padding: 'var(--space-6)' }}>
                 <EmptyState
                   icon="banknote"
@@ -2142,12 +2157,32 @@ export default async function TesterProfilePage({
                 />
               </div>
             ) : (
-              <Table
-                ariaLabel="Payout history"
-                columns={ledgerColumns}
-                rows={[...payoutHistory]}
-                rowKey={(row) => row.id}
-              />
+              <>
+                <Table
+                  ariaLabel="Payout history"
+                  columns={ledgerColumns}
+                  rows={payoutHistory.items}
+                  rowKey={(row) => row.id}
+                />
+                <div
+                  style={{
+                    padding: 'var(--space-5) var(--space-6)',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <Pagination
+                    page={payoutHistory.meta.page}
+                    totalPages={Math.max(1, payoutHistory.meta.totalPages)}
+                    total={payoutHistory.meta.total}
+                    limit={payoutHistory.meta.limit}
+                    hrefFor={(target) =>
+                      target > 1
+                        ? `/app/tester/profile?section=payment&historyPage=${target}`
+                        : '/app/tester/profile?section=payment'
+                    }
+                  />
+                </div>
+              </>
             )}
           </Panel>
 
