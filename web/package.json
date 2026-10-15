@@ -19,6 +19,7 @@
     "check": "npm run format:check && npm run lint && npm run typecheck",
     "routes:generate": "tsx scripts/generate-routes.ts",
     "verify:build": "tsx scripts/verify-build.ts",
+    "verify:report": "node --conditions=react-server --import tsx scripts/verify-report-xlsx.ts",
     "launch-check": "node scripts/launch-check.mjs"
   },
   "dependencies": {
@@ -36,6 +37,8 @@
     "@tiptap/starter-kit": "^3.30.5",
     "country-flag-icons": "^1.6.20",
     "country-state-city": "^3.2.1",
+    "exceljs": "4.4.0",
+    "jszip": "3.10.1",
     "lucide-react": "^1.30.0",
     "next": "16.3.0",
     "react": "19.2.8",
