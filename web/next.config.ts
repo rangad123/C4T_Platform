@@ -4,6 +4,18 @@ import { legacyRedirects } from './src/lib/seo/redirects'
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  experimental: {
+    /**
+     * The proxy buffers every request body it sees so a route can read it
+     * after the proxy has, and by default it keeps only the first 10MB. The
+     * upload routes accept files up to 50MB (screen recordings), so anything
+     * bigger than 10MB reached `formData()` cut short and failed with a bare
+     * 500 — the attachment simply never existed. Set above the 50MB file limit
+     * with room for the multipart framing around it.
+     */
+    proxyClientMaxBodySize: '60mb',
+  },
+
   /**
    * Where the build is written. `.next` unless told otherwise.
    *

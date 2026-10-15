@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { cookies } from 'next/headers'
 import { env } from '@/lib/env'
 import { getUser } from '@/lib/auth/session'
+import { readUploadForm } from '@/lib/uploads/read-upload-form'
 
 /**
  * Uploads one evidence file and returns its `fileId`.
@@ -35,7 +36,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Not permitted' }, { status: 403 })
   }
 
-  const form = await req.formData()
+  const form = await readUploadForm(req)
+  if (form instanceof NextResponse) return form
   const file = form.get('file')
   if (!(file instanceof File) || file.size === 0) {
     return NextResponse.json({ error: 'No file supplied' }, { status: 400 })

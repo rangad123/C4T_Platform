@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { env } from '@/lib/env'
 import { getUser } from '@/lib/auth/session'
+import { readUploadForm } from '@/lib/uploads/read-upload-form'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -48,7 +49,8 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'Not permitted' }, { status: 403 })
   }
 
-  const form = await request.formData()
+  const form = await readUploadForm(request)
+  if (form instanceof NextResponse) return form
   const file = form.get('file')
   const scopeField = form.get('scope')
   const scopeKey = (typeof scopeField === 'string' ? scopeField : '') as keyof typeof SCOPES
