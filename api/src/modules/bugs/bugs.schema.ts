@@ -2,6 +2,21 @@ import { z } from 'zod'
 import { BugSeverity, BugStatus, BugReproducibility, BugType } from '@prisma/client'
 import { paginationQuery } from '../../lib/pagination.js'
 
+/**
+ * A link a person will be asked to click — web addresses only. `.url()` alone
+ * accepts any scheme, `javascript:` included, and this value is shown as a link
+ * on the admin and customer pages as well as the reporter's own.
+ */
+const webUrl = z
+  .string()
+  .trim()
+  .url()
+  .max(2000)
+  .refine(
+    (value) => /^https?:\/\//i.test(value),
+    'Use a web address starting with http:// or https://',
+  )
+
 export const BUG_SORT_FIELDS = [
   'createdAt',
   'updatedAt',
@@ -117,7 +132,7 @@ export const createBugSchema = z
     featureId: z.string().cuid().optional(),
 
     /** A link to a recording hosted elsewhere, alongside any uploaded files. */
-    videoUrl: z.string().trim().url().max(2000).optional(),
+    videoUrl: webUrl.optional(),
 
     deviceModel: z.string().trim().max(120).optional(),
     osName: z.string().trim().max(60).optional(),
@@ -154,7 +169,7 @@ export const updateBugSchema = z
     severity: z.nativeEnum(BugSeverity).optional(),
     reproducibility: z.nativeEnum(BugReproducibility).optional(),
     ...occurrenceFields,
-    videoUrl: z.union([z.string().trim().url().max(2000), z.literal('')]).optional(),
+    videoUrl: z.union([webUrl, z.literal('')]).optional(),
     type: z.nativeEnum(BugType).nullable().optional(),
     featureId: z.string().cuid().nullable().optional(),
     deviceModel: z.string().trim().max(120).optional(),

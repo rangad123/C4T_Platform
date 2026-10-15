@@ -22,6 +22,7 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, personName } from '@/lib/admin/format'
+import { RecordingLink } from '@/components/admin/RecordingLink'
 import { addBugComment, moveBugStatus } from './actions'
 
 /**
@@ -75,6 +76,8 @@ interface BugDetail {
   stepsToReproduce: string
   expectedResult: string | null
   actualResult: string | null
+  /** A recording hosted elsewhere, pasted by the tester. */
+  videoUrl: string | null
   severity: string
   status: string
   reproducibility: string
@@ -344,7 +347,7 @@ export default async function CustomerBugDetailPage({
           basePath={detailPath}
           tabs={SECTIONS.map((t) =>
             t.value === 'attachments'
-              ? { ...t, count: bug.attachments.length }
+              ? { ...t, count: bug.attachments.length + (bug.videoUrl ? 1 : 0) }
               : t.value === 'comments'
                 ? { ...t, count: bug.comments.length }
                 : t,
@@ -533,8 +536,12 @@ export default async function CustomerBugDetailPage({
           description="Screenshots and recordings filed with the report. Download links are signed and short-lived."
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+            <RecordingLink url={bug.videoUrl} />
+
             {bug.attachments.length === 0 ? (
-              <Note>Nothing was attached to this report.</Note>
+              bug.videoUrl ? null : (
+                <Note>Nothing was attached to this report.</Note>
+              )
             ) : (
               <ul
                 style={{

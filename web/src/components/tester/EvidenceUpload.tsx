@@ -28,6 +28,20 @@ interface Attached {
  * rather than forgotten.
  */
 export function EvidenceUpload({ max = 10 }: { max?: number }) {
+  // No room left (the report already holds the most it may): say so, offer nothing.
+  if (max <= 0) {
+    return (
+      <p
+        style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--type-body-sm-size)' }}
+      >
+        This report already has the most files it can hold.
+      </p>
+    )
+  }
+  return <EvidencePicker max={max} />
+}
+
+function EvidencePicker({ max }: { max: number }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [attached, setAttached] = useState<Attached[]>([])
   const [busy, setBusy] = useState(false)
@@ -151,6 +165,15 @@ export function EvidenceUpload({ max = 10 }: { max?: number }) {
             'Attach a screenshot or recording'
           )}
         </Button>
+        <p
+          style={{
+            margin: 'var(--space-2) 0 0',
+            color: 'var(--text-muted)',
+            fontSize: 'var(--type-body-sm-size)',
+          }}
+        >
+          Up to {max} {max === 1 ? 'file' : 'files'}, 50MB each.
+        </p>
       </div>
     </div>
   )

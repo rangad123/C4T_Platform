@@ -10,7 +10,7 @@ import { Select } from '@/components/ds/forms/Select'
 import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
-import { EvidenceUpload } from '@/components/tester/EvidenceUpload'
+import { EvidenceFields } from '@/components/tester/EvidenceFields'
 import { EvidenceGuardedSubmit } from '@/components/tester/EvidenceGuardedSubmit'
 import { titleCase } from '@/lib/admin/format'
 import { reportBugAction } from '../actions'
@@ -526,22 +526,7 @@ export default async function NewTesterBugPage({
             title="Evidence"
             description="Attach a screenshot or recording, or paste a link to one. This is what turns a description into something the team can act on, so at least one is required."
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-              <Field
-                label="Video link"
-                htmlFor="videoUrl"
-                hint="A publicly reachable recording — Loom, Drive, anything the team can open without an account."
-              >
-                <Input
-                  id="videoUrl"
-                  name="videoUrl"
-                  type="url"
-                  maxLength={2000}
-                  placeholder="https://…"
-                />
-              </Field>
-              <EvidenceUpload />
-            </div>
+            <EvidenceFields />
           </Panel>
 
           <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>

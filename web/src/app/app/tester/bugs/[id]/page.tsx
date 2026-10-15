@@ -21,7 +21,9 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, formatDateTime, personName } from '@/lib/admin/format'
-import { addBugComment, moveBugStatus, updateBugAction } from './actions'
+import { addBugComment, addBugEvidenceAction, moveBugStatus, updateBugAction } from './actions'
+import { EvidenceFields } from '@/components/tester/EvidenceFields'
+import { linkHost, safeHttpUrl } from '@/lib/safe-url'
 import { PairSelect } from '@/components/ds/forms/PairSelect'
 import { loadBugEnvironmentOptions } from '@/lib/catalog/target-options'
 import { BUG_REPRODUCIBILITIES, BUG_SEVERITIES, BUG_TYPES } from '@/lib/domain/enums'
@@ -59,6 +61,9 @@ const REASON_COPY: Record<string, string> = {
   'occurrence-pair':
     'Give both how many times it happened and how many attempts you made, or leave both blank.',
   'occurrence-range': 'It cannot have happened more times than you tried.',
+  attach:
+    'The report was saved, but a file could not be attached. Add it again from the Evidence tab.',
+  'no-evidence': 'Choose a file or paste a link before saving.',
 }
 
 const SEVERITIES = BUG_SEVERITIES
@@ -301,6 +306,8 @@ export default async function TesterBugDetailPage({
   const transitions = capabilities.availableTransitions
   const isDuplicate = bug.status === 'DUPLICATE' || bug.duplicateOfId !== null
   const detailPath = `${DETAIL_BASE}/${bug.id}`
+  /** The pasted recording link, only if it is a web address — see `safeHttpUrl`. */
+  const recordingUrl = safeHttpUrl(bug.videoUrl)
   const closedHref = section === SECTIONS[0].value ? detailPath : `${detailPath}?section=${section}`
   const statusModalOpen = edit === 'status' || Boolean(error?.startsWith('status:'))
   const reportModalOpen = edit === 'edit-report' || Boolean(error?.startsWith('report:'))
@@ -404,7 +411,7 @@ export default async function TesterBugDetailPage({
           basePath={detailPath}
           tabs={SECTIONS.map((t) =>
             t.value === 'attachments'
-              ? { ...t, count: bug.attachments.length }
+              ? { ...t, count: bug.attachments.length + (recordingUrl ? 1 : 0) }
               : t.value === 'comments'
                 ? { ...t, count: visibleComments.length }
                 : t,
@@ -834,19 +841,21 @@ export default async function TesterBugDetailPage({
               </Field>
             </div>
 
-            <Field
-              label="Video link"
-              htmlFor="editVideoUrl"
-              hint="A publicly reachable recording — Loom, Drive, anything the team can open without an account."
-            >
-              <Input
-                id="editVideoUrl"
-                name="videoUrl"
-                type="url"
-                maxLength={2000}
-                defaultValue={bug.videoUrl ?? ''}
-              />
-            </Field>
+            <h3 className="c4t-heading-sm" style={{ margin: 0 }}>
+              Evidence
+            </h3>
+            {bug.attachments.length > 0 ? (
+              <Note>
+                {bug.attachments.length} {bug.attachments.length === 1 ? 'file is' : 'files are'}{' '}
+                already attached. Anything you add here goes alongside{' '}
+                {bug.attachments.length === 1 ? 'it' : 'them'}.
+              </Note>
+            ) : null}
+            <EvidenceFields
+              idPrefix="edit"
+              defaultVideoUrl={bug.videoUrl ?? ''}
+              existingFiles={bug.attachments.length}
+            />
 
             <SubmitButton variant="primary" fullWidth pendingLabel="Saving…">
               Save report
@@ -860,10 +869,10 @@ export default async function TesterBugDetailPage({
           title="Evidence"
           description="Screenshots and recordings filed with this report. Links are signed and short-lived."
         >
-          {bug.videoUrl ? (
+          {recordingUrl ? (
             <p style={{ margin: '0 0 var(--space-5)' }}>
               <a
-                href={bug.videoUrl}
+                href={recordingUrl}
                 target="_blank"
                 rel="noreferrer noopener"
                 style={{
@@ -876,12 +885,25 @@ export default async function TesterBugDetailPage({
                 <Icon name="video" size={16} />
                 Watch the recording
               </a>
+              <span
+                style={{
+                  marginLeft: 'var(--space-3)',
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                {linkHost(recordingUrl)}
+              </span>
             </p>
+          ) : bug.videoUrl ? (
+            <Note>
+              The recording link on this report is not a web address, so it is not shown as a link.
+            </Note>
           ) : null}
 
           {bug.attachments.length === 0 ? (
             <Note>
-              {bug.videoUrl
+              {recordingUrl
                 ? 'No files were attached — the recording above is the evidence on this report.'
                 : 'No evidence was attached to this report.'}
             </Note>
@@ -940,6 +962,36 @@ export default async function TesterBugDetailPage({
               ))}
             </ul>
           )}
+
+          {capabilities.canAttach ? (
+            <TrackedForm
+              action={addBugEvidenceAction}
+              style={{
+                ...FORM_STYLE,
+                marginTop: 'var(--space-6)',
+                paddingTop: 'var(--space-5)',
+                borderTop: '1px solid var(--border-subtle)',
+              }}
+            >
+              <input type="hidden" name="id" value={bug.id} />
+              <input type="hidden" name="currentVideoUrl" value={bug.videoUrl ?? ''} />
+              <FormError message={panelError(error, 'evidence')} />
+              <h3 className="c4t-heading-sm" style={{ margin: 0 }}>
+                Add evidence
+              </h3>
+              <EvidenceFields
+                idPrefix="add"
+                showLink={capabilities.canEdit}
+                defaultVideoUrl={bug.videoUrl ?? ''}
+                existingFiles={bug.attachments.length}
+              />
+              <div>
+                <SubmitButton variant="primary" pendingLabel="Saving…">
+                  Save evidence
+                </SubmitButton>
+              </div>
+            </TrackedForm>
+          ) : null}
         </Panel>
       ) : null}
 

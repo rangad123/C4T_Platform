@@ -96,6 +96,31 @@ function reasonFor(error: unknown): string {
   return 'failed'
 }
 
+/**
+ * The upload widget's finished uploads, from `attachmentFileIds` — one hidden
+ * input per file. Each id already names a completed file this tester owns; the
+ * API checks both again when it is attached.
+ */
+function uploadedFileIds(formData: FormData): string[] {
+  return formData
+    .getAll('attachmentFileIds')
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean)
+}
+
+/** Attaches each file to the bug. Returns how many the API refused. */
+async function attachFiles(bugId: string, fileIds: readonly string[]): Promise<number> {
+  let failed = 0
+  for (const fileId of fileIds) {
+    try {
+      await actionFetch(`bugs/${bugId}/attachments`, { method: 'POST', body: { fileId } })
+    } catch {
+      failed += 1
+    }
+  }
+  return failed
+}
+
 /** Post a comment. Never internal — a tester cannot post one, and the API refuses. */
 export async function addBugComment(formData: FormData): Promise<void> {
   await requireRole(['TESTER'])
@@ -247,11 +272,66 @@ export async function updateBugAction(formData: FormData): Promise<void> {
     )
   }
 
+  /*
+    The report is saved; now the files picked in the same form. A refused file
+    does not undo the save — the tester is told, on the Evidence tab where they
+    can add it again.
+  */
+  const unattached = await attachFiles(id, uploadedFileIds(formData))
+  if (unattached > 0) {
+    revalidatePath(detailPath(id))
+    closeModal(`${failurePath(id, 'evidence', 'attach')}&section=attachments`)
+  }
+
   revalidatePath(detailPath(id))
   /*
-    `closeModal`, not `redirect`: this save was submitted from the Edit report
+    `closeModal`, not `redirect`: this save was submitted from the Edit report: this save was submitted from the Edit report
     modal, whose open state IS the URL. A pushed redirect left that URL in
     history, so Back reopened the modal on changes already saved.
   */
   closeModal(detailPath(id))
+}
+
+/**
+ * Add evidence to a report that already exists: files, and — while the report
+ * can still be edited — a changed recording link.
+ *
+ * Files can be added at any status (the API allows it); the link is a field of
+ * the report, so it follows the same "still NEW" rule as the rest and the form
+ * only offers it then. `currentVideoUrl` lets this tell a changed link from
+ * one that was simply left alone.
+ */
+export async function addBugEvidenceAction(formData: FormData): Promise<void> {
+  await requireRole(['TESTER'])
+
+  const id = formTrimmed(formData, 'id')
+  if (!id) redirect(PROJECTS_PATH)
+
+  const fileIds = uploadedFileIds(formData)
+  const offeredLink = formData.has('videoUrl')
+  const videoUrl = formTrimmed(formData, 'videoUrl')
+  const linkChanged = offeredLink && videoUrl !== formTrimmed(formData, 'currentVideoUrl')
+
+  const back = (reason: string, extra = ''): string =>
+    `${failurePath(id, 'evidence', reason)}&section=attachments${extra}`
+
+  if (fileIds.length === 0 && !linkChanged) redirect(back('no-evidence'))
+
+  if (linkChanged) {
+    let caught: unknown = null
+    try {
+      await actionFetch(`bugs/${id}`, { method: 'PATCH', body: { videoUrl } })
+    } catch (error) {
+      caught = error
+    }
+    if (caught) redirect(back(reasonFor(caught), '&field=videoUrl'))
+  }
+
+  if (fileIds.length > 0 && (await attachFiles(id, fileIds)) > 0) {
+    revalidatePath(detailPath(id))
+    redirect(back('attach'))
+  }
+
+  revalidatePath(detailPath(id))
+  redirect(`${detailPath(id)}?section=attachments`)
 }

@@ -24,6 +24,7 @@ import { requireRole } from '@/lib/auth/session'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, personName } from '@/lib/admin/format'
+import { RecordingLink } from '@/components/admin/RecordingLink'
 import {
   triageBugSeverity,
   updateBugClassification,
@@ -82,6 +83,8 @@ interface BugDetail {
   stepsToReproduce: string
   expectedResult: string | null
   actualResult: string | null
+  /** A recording hosted elsewhere, pasted by the tester. */
+  videoUrl: string | null
   severity: string
   status: string
   reproducibility: string
@@ -423,7 +426,7 @@ export default async function BugDetailPage({
           basePath={`${LIST_PATH}/${bug.id}`}
           tabs={SECTIONS.map((t) =>
             t.value === 'attachments'
-              ? { ...t, count: bug.attachments.length }
+              ? { ...t, count: bug.attachments.length + (bug.videoUrl ? 1 : 0) }
               : t.value === 'comments'
                 ? { ...t, count: bug.comments.length }
                 : t,
@@ -759,11 +762,15 @@ export default async function BugDetailPage({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               <FormError message={panelError(error, 'attachment')} />
 
+              <RecordingLink url={bug.videoUrl} />
+
               {bug.attachments.length === 0 ? (
-                <Note>
-                  Nothing was attached. Testers add screenshots and recordings when they file the
-                  report, or from the tester portal afterwards.
-                </Note>
+                bug.videoUrl ? null : (
+                  <Note>
+                    Nothing was attached. Testers add screenshots and recordings when they file the
+                    report, or from the tester portal afterwards.
+                  </Note>
+                )
               ) : (
                 <ul
                   style={{
