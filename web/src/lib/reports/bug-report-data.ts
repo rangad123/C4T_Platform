@@ -17,9 +17,10 @@ import { serverFetch, serverFetchPage } from '@/lib/api/server'
  * way: widening these types is the decision that needs making on purpose
  * (see `report-csv.ts` for why the old export was removed).
  *
- * Attachment download links are not written either. They are short-lived
- * signed URLs — a bearer credential in a file that gets emailed around — so
- * the file lists each attachment by name, type and size instead.
+ * A signed attachment URL is not carried either. It is a short-lived bearer
+ * credential, and a workbook gets emailed around. Each attachment's `file.id`
+ * is kept instead, so the report can link to the portal's own download route —
+ * permanent, but it needs the reader to be signed in and allowed to see the file.
  *
  * What a caller may see is the API's decision, not this file's: internal
  * comments are filtered out for a customer before they get here, and the
@@ -72,6 +73,7 @@ export interface BugDetail {
     caption: string | null
     createdAt: string
     file: {
+      id: string
       originalName: string
       mimeType: string
       sizeBytes: number

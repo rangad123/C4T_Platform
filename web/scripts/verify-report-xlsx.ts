@@ -27,6 +27,10 @@ import { SaxesParser } from 'saxes'
 import type { BugReportRow } from '../src/lib/reports/bug-report-data'
 import type { BuildReportData } from '../src/lib/reports/build-report-data'
 import { buildReportWorkbook, reportFilename } from '../src/lib/reports/build-report-xlsx'
+import {
+  buildSummaryWorkbook,
+  type SummaryReportInput,
+} from '../src/lib/reports/summary-report-xlsx'
 
 /** A cell value as text — objects (formulas, links) as JSON rather than "[object Object]". */
 const show = (value: unknown): string =>
@@ -111,7 +115,7 @@ function bugs(count: number): BugReportRow[] {
       },
       customValues:
         i % 6 === 0 ? [{ value: 'a\nb', field: { name: 'Region', type: 'CHECKBOX' } }] : [],
-      _count: { attachments: i % 3, comments: i % 2 },
+      _count: { attachments: i % 3 === 0 ? 0 : 3, comments: i % 2 },
     }
   })
 }
@@ -131,10 +135,33 @@ function fixture(audience: 'admin' | 'customer', bugCount = 36): BuildReportData
                   caption: 'Screenshot',
                   createdAt: bug.createdAt,
                   file: {
+                    id: `file-${i}-shot`,
                     originalName: 'shot.png',
                     mimeType: 'image/png',
                     sizeBytes: 204800,
                     downloadUrl: 'https://signed.example.invalid/secret-token',
+                  },
+                },
+                {
+                  caption: null,
+                  createdAt: bug.createdAt,
+                  file: {
+                    id: `file-${i}-clip`,
+                    originalName: 'clip.mp4',
+                    mimeType: 'video/mp4',
+                    sizeBytes: 5_242_880,
+                    downloadUrl: 'https://signed.example.invalid/secret-token',
+                  },
+                },
+                {
+                  caption: 'Lost in storage',
+                  createdAt: bug.createdAt,
+                  file: {
+                    id: `file-${i}-gone`,
+                    originalName: 'old.pdf',
+                    mimeType: 'application/pdf',
+                    sizeBytes: 1024,
+                    downloadUrl: null,
                   },
                 },
               ],
@@ -164,6 +191,7 @@ function fixture(audience: 'admin' | 'customer', bugCount = 36): BuildReportData
   return {
     audience,
     generatedAt: new Date(Date.UTC(2026, 9, 15, 10, 30)),
+    siteUrl: 'https://portal.example.invalid',
     project: {
       reference: 'C4T-LEG-000467',
       title: 'Acme mobile app',
@@ -318,6 +346,49 @@ function assertWellFormed(xml: string, name: string): void {
   if (error) throw new Error(`${name}: ${(error as Error).message}`)
 }
 
+/** Every chart's cell ranges hold exactly the labels and numbers the chart caches. */
+async function verifyCharts(
+  zip: JSZip,
+  book: ExcelJS.Workbook,
+  chartParts: readonly string[],
+): Promise<Set<string>> {
+  const sheetsWithCharts = new Set<string>()
+  for (const part of chartParts) {
+    const xml = await zip.file(part)!.async('string')
+    const ranges = [
+      ...xml.matchAll(
+        /<c:(cat|val)><c:(?:str|num)Ref><c:f>([^<]+)<\/c:f>(.*?)<\/c:(?:str|num)Ref>/g,
+      ),
+    ]
+    let matched = ranges.length === 2
+    for (const [, , ref, cache] of ranges) {
+      const m = /^'(.+)'!\$([A-Z]+)\$(\d+):\$[A-Z]+\$(\d+)$/.exec(
+        ref!.replace(/&amp;/g, '&').replace(/''/g, "'"),
+      )
+      if (!m) {
+        matched = false
+        continue
+      }
+      sheetsWithCharts.add(m[1]!)
+      const sheet = book.getWorksheet(m[1])
+      const cached = [...cache!.matchAll(/<c:v>([^<]*)<\/c:v>/g)].map((x) =>
+        x[1]!.replace(/&amp;/g, '&'),
+      )
+      const actual: string[] = []
+      for (let r = Number(m[3]); r <= Number(m[4]); r += 1)
+        actual.push(show(sheet?.getCell(`${m[2]}${r}`).value))
+      if (JSON.stringify(cached) !== JSON.stringify(actual)) {
+        matched = false
+        console.log(
+          `        ${part}: cached ${JSON.stringify(cached)} != cells ${JSON.stringify(actual)}`,
+        )
+      }
+    }
+    check(matched, `${part}: its ranges hold the cached labels and numbers`)
+  }
+  return sheetsWithCharts
+}
+
 async function inspect(label: string, data: BuildReportData): Promise<void> {
   console.log(`\n${label}`)
   const file = await buildReportWorkbook(data)
@@ -375,40 +446,7 @@ async function inspect(label: string, data: BuildReportData): Promise<void> {
   check(names[0] === 'Executive summary' && names[1] === 'Bug analytics', 'key insights come first')
 
   // 3 · Each chart's ranges hold exactly what the chart caches.
-  const sheetsWithCharts = new Set<string>()
-  for (const part of chartParts) {
-    const xml = await zip.file(part)!.async('string')
-    const ranges = [
-      ...xml.matchAll(
-        /<c:(cat|val)><c:(?:str|num)Ref><c:f>([^<]+)<\/c:f>(.*?)<\/c:(?:str|num)Ref>/g,
-      ),
-    ]
-    let matched = ranges.length === 2
-    for (const [, , ref, cache] of ranges) {
-      const m = /^'(.+)'!\$([A-Z]+)\$(\d+):\$[A-Z]+\$(\d+)$/.exec(
-        ref!.replace(/&amp;/g, '&').replace(/''/g, "'"),
-      )
-      if (!m) {
-        matched = false
-        continue
-      }
-      sheetsWithCharts.add(m[1]!)
-      const sheet = book.getWorksheet(m[1])
-      const cached = [...cache!.matchAll(/<c:v>([^<]*)<\/c:v>/g)].map((x) =>
-        x[1]!.replace(/&amp;/g, '&'),
-      )
-      const actual: string[] = []
-      for (let r = Number(m[3]); r <= Number(m[4]); r += 1)
-        actual.push(show(sheet?.getCell(`${m[2]}${r}`).value))
-      if (JSON.stringify(cached) !== JSON.stringify(actual)) {
-        matched = false
-        console.log(
-          `        ${part}: cached ${JSON.stringify(cached)} != cells ${JSON.stringify(actual)}`,
-        )
-      }
-    }
-    check(matched, `${part}: its ranges hold the cached labels and numbers`)
-  }
+  const sheetsWithCharts = await verifyCharts(zip, book, chartParts)
   check(sheetsWithCharts.size >= 3, `charts live on ${[...sheetsWithCharts].join(', ')}`)
 
   // 4 · The numbers are the fixture's.
@@ -487,6 +525,42 @@ async function inspect(label: string, data: BuildReportData): Promise<void> {
   )
 
   // 5 · Nothing sensitive anywhere in the package.
+  // 4b · Screenshots and videos are reachable from the report.
+  check(names.includes('Attachments'), 'an Attachments sheet lists every file')
+  const portal = `https://portal.example.invalid/app/${data.audience}`
+  const linkOf = (cell: ExcelJS.Cell): string | undefined =>
+    typeof cell.value === 'object' && cell.value !== null && 'hyperlink' in cell.value
+      ? String(cell.value.hyperlink)
+      : undefined
+  const shot = linkOf(detail.getCell(6, col('Screenshot')))
+  check(
+    shot === `${portal}/download/file-1-shot`,
+    `the first screenshot links to the portal's download route (${shot})`,
+  )
+  const clip = linkOf(detail.getCell(6, col('Video file')))
+  check(
+    clip === `${portal}/download/file-1-clip`,
+    `the first video file links the same way (${clip})`,
+  )
+  check(
+    linkOf(detail.getCell(6, col('Open bug online'))) === `${portal}/bugs/bug-1`,
+    'each bug links to its page in the portal',
+  )
+  check(
+    show(detail.getCell(5, col('Screenshot')).value) === '—',
+    'a bug with no screenshot shows a dash, not a broken link',
+  )
+  const files = book.getWorksheet('Attachments')!
+  let fileRows = 0
+  let goneRows = 0
+  files.eachRow((row, n) => {
+    if (n < 5) return
+    fileRows += 1
+    if (show(row.getCell(3).value).includes('no longer available')) goneRows += 1
+  })
+  check(fileRows === 24 * 3, `all ${fileRows} attached files are listed`)
+  check(goneRows === 24, 'a file missing from storage is named but not linked')
+
   let leaked = ''
   for (const name of parts) {
     const text = await zip.file(name)!.async('string')
@@ -565,10 +639,159 @@ async function inspectEdges(): Promise<void> {
   )
 }
 
+async function inspectSummaries(): Promise<void> {
+  console.log('\nReports module workbooks')
+  const bugs = {
+    total: 30,
+    bySeverity: { CRITICAL: 6, HIGH: 9, MEDIUM: 10, LOW: 5 },
+    byStatus: { NEW: 8, TRIAGED: 4, FIXED: 10, VERIFIED: 3, REJECTED: 5 },
+    byType: { CRASH: 7, UI: 12, FUNCTIONAL: 11 },
+    byReproducibility: { ALWAYS: 12, SOMETIMES: 10, ONCE: 8 },
+  }
+  const base = {
+    generatedAt: new Date(Date.UTC(2026, 9, 15, 10, 30)),
+    figures: [{ label: 'Builds', value: 3, note: 'On this project' }],
+    bugs,
+  }
+  const cases: [string, SummaryReportInput, string[]][] = [
+    [
+      'By project',
+      {
+        ...base,
+        kind: 'By project',
+        subtitle: 'C4T-1 · Acme',
+        facts: [
+          ['Project', 'Acme'],
+          ['Organisation', 'Acme & Sons'],
+        ],
+        lists: [],
+      },
+      ['Summary', 'Bug analytics'],
+    ],
+    [
+      'By date',
+      {
+        ...base,
+        kind: 'By date',
+        subtitle: '2026-09-01 to 2026-09-30',
+        facts: [
+          ['From', '2026-09-01'],
+          ['To', '2026-09-30'],
+        ],
+        lists: [
+          {
+            sheetName: 'Bugs by project',
+            heading: 'Bugs by project',
+            headers: ['Reference', 'Project', 'Bugs'],
+            numeric: [2],
+            rows: Array.from({ length: 12 }, (_, i) => [`C4T-${i}`, `Project ${i}`, 12 - i]),
+            chart: {
+              labelColumn: 1,
+              valueColumn: 2,
+              title: 'Bugs by project',
+              valueHeader: 'Bugs',
+            },
+          },
+        ],
+      },
+      ['Summary', 'Bug analytics', 'Bugs by project'],
+    ],
+    [
+      'By build range',
+      {
+        ...base,
+        kind: 'By build range',
+        subtitle: '3 builds',
+        facts: [['Scope', 'A range of builds']],
+        lists: [
+          {
+            sheetName: 'Builds in range',
+            heading: 'Builds in range',
+            headers: ['No.', 'Build'],
+            numeric: [0],
+            rows: [
+              [1, 'Build 1'],
+              [2, 'Build 2'],
+            ],
+          },
+        ],
+      },
+      ['Summary', 'Bug analytics', 'Builds in range'],
+    ],
+    [
+      'Empty',
+      {
+        ...base,
+        kind: 'By date',
+        subtitle: 'none',
+        facts: [],
+        figures: [],
+        bugs: { total: 0, bySeverity: {}, byStatus: {}, byType: {}, byReproducibility: {} },
+        lists: [],
+      },
+      ['Summary', 'Bug analytics'],
+    ],
+  ]
+  for (const [label, input, expectedSheets] of cases) {
+    const file = await buildSummaryWorkbook(input)
+    mkdirSync(join(tmpdir(), 'c4t-report-check'), { recursive: true })
+    writeFileSync(
+      join(
+        tmpdir(),
+        'c4t-report-check',
+        `summary-${label.toLowerCase().replace(/\W+/g, '-')}.xlsx`,
+      ),
+      file,
+    )
+    const zip = await JSZip.loadAsync(file)
+    let wellFormed = true
+    for (const name of Object.keys(zip.files).filter((n) => /\.(xml|rels)$/.test(n))) {
+      try {
+        assertWellFormed(await zip.file(name)!.async('string'), name)
+      } catch (e) {
+        wellFormed = false
+        console.log(`        ${(e as Error).message}`)
+      }
+    }
+    check(wellFormed, `${label}: every XML part is well-formed`)
+    const book = new ExcelJS.Workbook()
+    await book.xlsx.load(file as never)
+    check(
+      JSON.stringify(book.worksheets.map((w) => w.name)) === JSON.stringify(expectedSheets),
+      `${label}: sheets are ${book.worksheets.map((w) => w.name).join(' | ')}`,
+    )
+    const charts = Object.keys(zip.files).filter((n) => /^xl\/charts\/chart\d+\.xml$/.test(n))
+    await verifyCharts(zip, book, charts)
+    if (label === 'Empty') {
+      check(charts.length === 0, 'Empty: no chart of nothing but zeros is drawn')
+    } else {
+      check(charts.length >= 5, `${label}: ${charts.length} charts`)
+    }
+    const texts: string[] = []
+    book.getWorksheet('Summary')!.eachRow((row) => row.eachCell((c) => texts.push(show(c.value))))
+    check(
+      label === 'Empty'
+        ? texts.some((t) => t.includes('No bugs were reported'))
+        : texts.some((t) => t.includes('30 bugs were reported')) &&
+            texts.some((t) => t === 'Critical and high'),
+      `${label}: the summary states the findings`,
+    )
+    const blob = (
+      await Promise.all(
+        Object.keys(zip.files)
+          .filter((n) => n.endsWith('.xml'))
+          .map((n) => zip.file(n)!.async('string')),
+      )
+    ).join(' ')
+    check(!/@[a-z0-9.-]+\.[a-z]{2,}/i.test(blob), `${label}: no email address anywhere in the file`)
+  }
+}
+
 async function main(): Promise<void> {
   await inspect('Admin report', fixture('admin'))
   await inspect('Customer report', fixture('customer'))
   await inspectEdges()
+  await inspectSummaries()
 
   console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`)
   process.exit(failures === 0 ? 0 : 1)

@@ -17,6 +17,7 @@ export const SHEET = {
   summary: 'Executive summary',
   analytics: 'Bug analytics',
   bugs: 'Detailed bug report',
+  attachments: 'Attachments',
   testers: 'Tester summary',
   tests: 'Test results',
   history: 'Bug history & comments',
@@ -361,7 +362,8 @@ export interface TableResult {
 }
 
 function styleBodyCell(cell: Cell, kind: ColumnKind): void {
-  cell.font = fontOf({})
+  const isLink = typeof cell.value === 'object' && cell.value !== null && 'hyperlink' in cell.value
+  cell.font = isLink ? fontOf({ underline: true, color: TEAL[600] }) : fontOf({})
   cell.border = { bottom: hairline }
   const wrap = kind === 'text' || kind === 'long' || kind === 'link'
   cell.alignment = {
@@ -430,6 +432,12 @@ export function addDataTable<T>(
   }
   return { firstRow, lastRow }
 }
+
+/** A clickable cell: `text` shown, `url` followed. Only ever called with an address this app built. */
+export const linkTo = (url: string, text: string): { text: string; hyperlink: string } => ({
+  text: clean(text) || url,
+  hyperlink: url,
+})
 
 /** A link only if it is plainly a web address — anything else stays inert text. */
 export function webLink(

@@ -9,6 +9,7 @@ import {
   type ReportFacts,
 } from '@/lib/reports/build-report-facts'
 import { addCharts, type ChartSpec } from '@/lib/reports/xlsx-charts'
+import { fileSlug } from '@/lib/reports/xlsx-response'
 import {
   DASH,
   FORMAT,
@@ -33,6 +34,7 @@ import {
   textOrDash,
   titleBlock,
   titleCase,
+  linkTo,
   webLink,
   type BreakdownItem,
   type TableColumn,
@@ -194,6 +196,67 @@ function activityRows(data: BuildReportData, facts: ReportFacts): ActivityRow[] 
     rows.push(...bugRows)
   }
   return rows
+}
+
+type MediaKind = 'Screenshot' | 'Video' | 'File'
+
+const mediaKind = (mimeType: string): MediaKind =>
+  mimeType.startsWith('image/') ? 'Screenshot' : mimeType.startsWith('video/') ? 'Video' : 'File'
+
+/**
+ * Where the portal's own pages for this reader live. A link into the portal is
+ * permanent but needs the reader to be signed in — which is what makes it safe
+ * to put in a file that gets emailed: it carries an id, never a credential.
+ */
+const portalBase = (data: BuildReportData): string => `${data.siteUrl}/app/${data.audience}`
+
+interface AttachmentRow {
+  reference: string
+  kind: MediaKind
+  name: string
+  /** Null when the file is gone from storage — there is nothing to open. */
+  url: string | null
+  caption: string
+  mimeType: string
+  sizeKb: number
+  when: Date | null
+}
+
+function attachmentRows(data: BuildReportData, facts: ReportFacts): AttachmentRow[] {
+  const rows: AttachmentRow[] = []
+  for (const bug of facts.bugs) {
+    for (const a of data.bugReport.details.get(bug.id)?.attachments ?? []) {
+      rows.push({
+        reference: bug.reference,
+        kind: mediaKind(a.file.mimeType),
+        name: clean(a.file.originalName) || 'Unnamed file',
+        url: a.file.downloadUrl ? `${portalBase(data)}/download/${a.file.id}` : null,
+        caption: textOrDash(a.caption),
+        mimeType: a.file.mimeType,
+        sizeKb: Math.max(1, Math.round(a.file.sizeBytes / 1024)),
+        when: parseDate(a.createdAt),
+      })
+    }
+  }
+  return rows
+}
+
+/** The first file of a kind as a link, with how many more there are. */
+function firstOfKind(
+  bug: { id: string; _count: { attachments: number } },
+  files: readonly AttachmentRow[],
+  kind: MediaKind,
+  details: BuildReportData['bugReport']['details'],
+): string | { text: string; hyperlink: string } {
+  // A bug that has attachments but whose detail could not be read: say so, don't claim none.
+  if (bug._count.attachments > 0 && !details.has(bug.id)) return 'Unavailable'
+  const matching = files.filter((f) => f.kind === kind)
+  const first = matching[0]
+  if (!first) return DASH
+  const more = matching.length > 1 ? ` (+${matching.length - 1} more)` : ''
+  return first.url
+    ? linkTo(first.url, `${first.name}${more}`)
+    : `${first.name}${more} — file no longer available`
 }
 
 interface FieldAnswerRow {
@@ -531,7 +594,17 @@ function analyticsSheet(
 
 // ── Detailed bug report ──────────────────────────────────────────────────────
 
-function bugsSheet(wb: ExcelJS.Workbook, data: BuildReportData, facts: ReportFacts): void {
+function bugsSheet(
+  wb: ExcelJS.Workbook,
+  data: BuildReportData,
+  facts: ReportFacts,
+  files: readonly AttachmentRow[],
+): void {
+  const filesByBug = new Map<string, AttachmentRow[]>()
+  for (const f of files) {
+    const bug = facts.bugs.find((b) => b.reference === f.reference)
+    if (bug) filesByBug.set(bug.id, [...(filesByBug.get(bug.id) ?? []), f])
+  }
   const sheet = wb.addWorksheet(SHEET.bugs, { properties: { tabColor: { argb: argb(INK[700]) } } })
   sheet.views = [{ showGridLines: false }]
   titleBlock(sheet, {
@@ -599,7 +672,27 @@ function bugsSheet(wb: ExcelJS.Workbook, data: BuildReportData, facts: ReportFac
     { header: 'Browser', width: 18, value: (b) => textOrDash(b.browser) },
     { header: 'App version', width: 14, value: (b) => textOrDash(b.appVersion) },
     { header: 'Network', width: 12, value: (b) => textOrDash(b.networkType) },
+    {
+      header: 'Screenshot',
+      width: 32,
+      kind: 'link',
+      value: (b) =>
+        firstOfKind(b, filesByBug.get(b.id) ?? [], 'Screenshot', data.bugReport.details) as never,
+    },
+    {
+      header: 'Video file',
+      width: 32,
+      kind: 'link',
+      value: (b) =>
+        firstOfKind(b, filesByBug.get(b.id) ?? [], 'Video', data.bugReport.details) as never,
+    },
     { header: 'Video link', width: 32, kind: 'link', value: (b) => webLink(b.videoUrl) as never },
+    {
+      header: 'Open bug online',
+      width: 16,
+      kind: 'link',
+      value: (b) => linkTo(`${portalBase(data)}/bugs/${b.id}`, 'Open bug') as never,
+    },
     {
       header: 'Duplicate of',
       width: 14,
@@ -979,6 +1072,50 @@ function testsSheet(wb: ExcelJS.Workbook, data: BuildReportData, charts: ChartSp
 
 // ── Bug history & comments ───────────────────────────────────────────────────
 
+function attachmentsSheet(
+  wb: ExcelJS.Workbook,
+  data: BuildReportData,
+  rows: readonly AttachmentRow[],
+): void {
+  const sheet = wb.addWorksheet(SHEET.attachments, {
+    properties: { tabColor: { argb: argb(INK[700]) } },
+  })
+  sheet.views = [{ showGridLines: false }]
+  const counts = (kind: MediaKind) => rows.filter((r) => r.kind === kind).length
+  titleBlock(sheet, {
+    row: 1,
+    fromCol: 1,
+    toCol: 1,
+    title: 'Attachments',
+    note: `${plural(counts('Screenshot'), 'screenshot')}, ${plural(counts('Video'), 'video')} and ${plural(counts('File'), 'other file')}. Each name opens the file in the portal — you will be asked to sign in. ${FONT_NOTE}`,
+  })
+  const columns: TableColumn<AttachmentRow>[] = [
+    { header: 'Bug ID', width: 14, value: (r) => r.reference },
+    { header: 'Kind', width: 14, value: (r) => r.kind },
+    {
+      header: 'File (click to open)',
+      width: 44,
+      kind: 'link',
+      value: (r) =>
+        (r.url ? linkTo(r.url, r.name) : `${r.name} — file no longer available`) as never,
+    },
+    { header: 'Caption', width: 36, kind: 'long', value: (r) => r.caption },
+    { header: 'File type', width: 22, value: (r) => r.mimeType },
+    { header: 'Size (KB)', width: 12, kind: 'integer', value: (r) => r.sizeKb },
+    { header: 'Added on', width: 18, kind: 'datetime', value: (r) => r.when ?? DASH },
+  ]
+  const headerRow = 4
+  const { firstRow, lastRow } = addDataTable(sheet, {
+    name: 'Attachments',
+    headerRow,
+    columns,
+    rows,
+  })
+  greyDashes(sheet, `A${firstRow}:${columnName(columns.length)}${lastRow}`)
+  sheet.views = [{ state: 'frozen', ySplit: headerRow, showGridLines: false }]
+  pageSetup(sheet, `${data.project.reference} · attachments`, 'landscape')
+}
+
 function historySheet(
   wb: ExcelJS.Workbook,
   data: BuildReportData,
@@ -1255,6 +1392,7 @@ export async function buildReportWorkbook(data: BuildReportData): Promise<Buffer
   const facts = computeFacts(data)
   const activity = activityRows(data, facts)
   const answers = fieldAnswers(facts)
+  const files = attachmentRows(data, facts)
 
   const hasTests =
     (data.summary?.testCaseCount ?? 0) > 0 ||
@@ -1268,7 +1406,18 @@ export async function buildReportWorkbook(data: BuildReportData): Promise<Buffer
       description:
         'Severity, status, type and reproducibility, bugs by feature and bugs over time.',
     },
-    { name: SHEET.bugs, description: `${plural(facts.total, 'bug')} with their full details.` },
+    {
+      name: SHEET.bugs,
+      description: `${plural(facts.total, 'bug')} with their full details, and links to each screenshot and video.`,
+    },
+    ...(files.length > 0
+      ? [
+          {
+            name: SHEET.attachments,
+            description: `${plural(files.length, 'file')} attached to bugs — screenshots, videos and documents, each with a link.`,
+          },
+        ]
+      : []),
     {
       name: SHEET.testers,
       description: `${plural(data.testers.length, 'tester')}, with participation, country and rating.`,
@@ -1310,7 +1459,8 @@ export async function buildReportWorkbook(data: BuildReportData): Promise<Buffer
   const charts: ChartSpec[] = []
   summarySheet(wb, data, facts, contents, charts)
   analyticsSheet(wb, data, facts, charts)
-  bugsSheet(wb, data, facts)
+  bugsSheet(wb, data, facts, files)
+  if (files.length > 0) attachmentsSheet(wb, data, files)
   testersSheet(wb, data, charts)
   if (hasTests) testsSheet(wb, data, charts)
   if (hasHistory) historySheet(wb, data, activity)
@@ -1323,12 +1473,5 @@ export async function buildReportWorkbook(data: BuildReportData): Promise<Buffer
 
 /** `P-0042-build-1-report.xlsx` — letters, digits and dashes only. */
 export function reportFilename(data: BuildReportData): string {
-  const slug = (value: string): string =>
-    value
-      .replace(/[^a-zA-Z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || 'report'
-  return `${slug(data.project.reference)}-${slug(data.build?.name ?? 'build')}-report.xlsx`
+  return `${fileSlug(data.project.reference)}-${fileSlug(data.build?.name ?? 'build')}-report.xlsx`
 }
-
-export const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'

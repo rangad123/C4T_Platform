@@ -2,11 +2,8 @@ import { NextResponse } from 'next/server'
 import { getUser, hasPermission } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { loadBuildReport } from '@/lib/reports/build-report-data'
-import {
-  XLSX_CONTENT_TYPE,
-  buildReportWorkbook,
-  reportFilename,
-} from '@/lib/reports/build-report-xlsx'
+import { buildReportWorkbook, reportFilename } from '@/lib/reports/build-report-xlsx'
+import { xlsxResponse } from '@/lib/reports/xlsx-response'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,13 +45,7 @@ export async function GET(
   try {
     const report = await loadBuildReport('admin', projectId, buildId)
     const file = await buildReportWorkbook(report)
-    return new NextResponse(new Uint8Array(file), {
-      headers: {
-        'content-type': XLSX_CONTENT_TYPE,
-        'content-disposition': `attachment; filename="${reportFilename(report)}"`,
-        'cache-control': 'no-store',
-      },
-    })
+    return xlsxResponse(file, reportFilename(report))
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 502
     if (status === 400 || status === 403 || status === 404) {

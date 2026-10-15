@@ -317,12 +317,12 @@ const DOWNLOAD_BASE = '/app/admin/reports/download'
  * The file carries aggregate counts only — see the route it points at, and
  * `lib/reports/report-csv.ts` for why that boundary exists.
  */
-function DownloadCsv({ query }: { query: Record<string, string> }) {
+function DownloadReport({ query }: { query: Record<string, string> }) {
   const href = `${DOWNLOAD_BASE}?${new URLSearchParams(query).toString()}`
   return (
     <div>
       <Button href={href} prefetch={false} variant="secondary" size="sm" iconLeft="download">
-        Download CSV
+        Download report
       </Button>
     </div>
   )
@@ -353,7 +353,7 @@ async function ByProject({ projectId }: { projectId: string }) {
         </p>
       </div>
       <BugBreakdownView bugs={report.bugs} />
-      <DownloadCsv query={{ section: 'by-project', projectId }} />
+      <DownloadReport query={{ section: 'by-project', projectId }} />
     </div>
   )
 }
@@ -444,7 +444,7 @@ async function ByBuild({ buildId }: { buildId: string }) {
         {summary.testCaseCompletion !== null ? ` · ${summary.testCaseCompletion}% complete` : ''}
       </p>
       <BugBreakdownView bugs={bugs} />
-      <DownloadCsv query={{ section: 'by-build', buildId }} />
+      <DownloadReport query={{ section: 'by-build', buildId }} />
     </div>
   )
 }
@@ -489,7 +489,7 @@ async function ByDate({ startDate, endDate }: { startDate: string; endDate: stri
           />
         </div>
       ) : null}
-      <DownloadCsv query={{ section: 'by-date', startDate, endDate }} />
+      <DownloadReport query={{ section: 'by-date', startDate, endDate }} />
     </div>
   )
 }
@@ -585,7 +585,7 @@ async function ByBuildRange({
         {report.builds.map((b) => b.name).join(' → ')}
       </p>
       <BugBreakdownView bugs={report.bugs} />
-      <DownloadCsv query={{ section: 'by-build-range', projectId, startBuildId, endBuildId }} />
+      <DownloadReport query={{ section: 'by-build-range', projectId, startBuildId, endBuildId }} />
     </div>
   )
 }

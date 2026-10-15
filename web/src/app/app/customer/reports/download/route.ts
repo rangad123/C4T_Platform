@@ -2,19 +2,14 @@ import { NextResponse } from 'next/server'
 import { serverFetch } from '@/lib/api/server'
 import { getUser } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
-import {
-  type BugBreakdown,
-  breakdownBlocks,
-  countBlock,
-  csvResponse,
-  row,
-  slug,
-} from '@/lib/reports/report-csv'
+import { buildSummaryWorkbook } from '@/lib/reports/summary-report-xlsx'
+import { fileSlug, xlsxResponse } from '@/lib/reports/xlsx-response'
+import { titleCase } from '@/lib/reports/xlsx-kit'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * `/app/customer/reports/download` — the report on screen, as a CSV.
+ * `/app/customer/reports/download` — the report on screen, as an Excel workbook.
  *
  * ── WHAT THIS DELIBERATELY DOES NOT CONTAIN
  *
@@ -34,6 +29,14 @@ export const dynamic = 'force-dynamic'
  * returns 404 rather than a report. The role check below only keeps
  * non-customers off a customer route; it is not what protects the data.
  */
+
+interface BugBreakdown {
+  total: number
+  bySeverity: Record<string, number>
+  byStatus: Record<string, number>
+  byType: Record<string, number>
+  byReproducibility: Record<string, number>
+}
 
 interface BuildOption {
   id: string
@@ -67,32 +70,31 @@ export async function GET(request: Request): Promise<Response> {
   const startDate = params.get('startDate') ?? ''
   const endDate = params.get('endDate') ?? ''
 
-  const generated = new Date().toISOString()
+  const generatedAt = new Date()
 
   try {
     if (section === 'by-project') {
       if (!projectId) return NextResponse.json({ error: 'Choose a project first' }, { status: 400 })
 
       const report = await serverFetch<ByProjectReport>(`reports/by-project/${projectId}`)
-      const lines = [
-        row('Crowd4Test report'),
-        row('Report', 'By project'),
-        row('Project', `${report.project.reference} · ${report.project.title}`),
-        row('Generated', generated),
-        '',
-        'Summary',
-        row('Metric', 'Value'),
-        row('Builds', report.builds.length),
-        row('Testers', report.testerCount),
-        row('Test cases', report.testCaseCount),
-        row('Total bugs', report.bugs.total),
-        '',
-        ...countBlock('Bugs by severity', 'Severity', report.bugs.bySeverity),
-        ...countBlock('Bugs by status', 'Status', report.bugs.byStatus),
-        ...countBlock('Bugs by type', 'Type', report.bugs.byType),
-        ...countBlock('Bugs by reproducibility', 'Reproducibility', report.bugs.byReproducibility),
-      ]
-      return csvResponse(lines, `report-by-project-${slug(report.project.reference)}.csv`)
+      const file = await buildSummaryWorkbook({
+        kind: 'By project',
+        generatedAt,
+        subtitle: `${report.project.reference} · ${report.project.title}`,
+        facts: [
+          ['Project', report.project.title],
+          ['Reference', report.project.reference],
+          ['Project status', titleCase(report.project.status)],
+        ],
+        figures: [
+          { label: 'Builds', value: report.builds.length, note: 'On this project' },
+          { label: 'Testers', value: report.testerCount, note: 'Across every build' },
+          { label: 'Test cases', value: report.testCaseCount, note: 'Across every build' },
+        ],
+        bugs: report.bugs,
+        lists: [],
+      })
+      return xlsxResponse(file, `report-by-project-${fileSlug(report.project.reference)}.xlsx`)
     }
 
     if (section === 'by-build') {
@@ -104,17 +106,26 @@ export async function GET(request: Request): Promise<Response> {
         query: { projectId, startBuildId, endBuildId },
       })
       const builds = report.builds ?? []
-      const lines = [
-        row('Crowd4Test report'),
-        row('Report', 'By build'),
-        row('Generated', generated),
-        '',
-        ...(builds.length > 0
-          ? ['Builds in range', row('Build'), ...builds.map((b) => row(b.name)), '']
-          : []),
-        ...breakdownBlocks(report.bugs),
-      ]
-      return csvResponse(lines, 'report-by-build.csv')
+      const file = await buildSummaryWorkbook({
+        kind: 'By build',
+        generatedAt,
+        subtitle: builds.length > 0 ? `${builds.length} builds` : 'A range of builds',
+        facts: [['Scope', 'A range of builds on one project']],
+        figures: [
+          { label: 'Builds in range', value: builds.length, note: 'Start to end, inclusive' },
+        ],
+        bugs: report.bugs,
+        lists: [
+          {
+            sheetName: 'Builds in range',
+            heading: 'Builds in range',
+            headers: ['No.', 'Build'],
+            numeric: [0],
+            rows: builds.map((b, i) => [i + 1, b.name]),
+          },
+        ],
+      })
+      return xlsxResponse(file, 'report-by-build.xlsx')
     }
 
     if (section === 'by-date') {
@@ -125,16 +136,23 @@ export async function GET(request: Request): Promise<Response> {
       const report = await serverFetch<RangeReport>('reports/by-date', {
         query: { startDate, endDate },
       })
-      const lines = [
-        row('Crowd4Test report'),
-        row('Report', 'By date'),
-        row('From', startDate),
-        row('To', endDate),
-        row('Generated', generated),
-        '',
-        ...breakdownBlocks(report.bugs),
-      ]
-      return csvResponse(lines, `report-by-date-${slug(startDate)}-to-${slug(endDate)}.csv`)
+      const file = await buildSummaryWorkbook({
+        kind: 'By date',
+        generatedAt,
+        subtitle: `${startDate} to ${endDate}`,
+        facts: [
+          ['From', startDate],
+          ['To', endDate],
+          ['Scope', 'Your projects'],
+        ],
+        figures: [],
+        bugs: report.bugs,
+        lists: [],
+      })
+      return xlsxResponse(
+        file,
+        `report-by-date-${fileSlug(startDate)}-to-${fileSlug(endDate)}.xlsx`,
+      )
     }
 
     return NextResponse.json({ error: 'Unknown report' }, { status: 400 })
@@ -145,6 +163,7 @@ export async function GET(request: Request): Promise<Response> {
     if (status === 403 || status === 404) {
       return NextResponse.json({ error: 'That report is not available' }, { status: 404 })
     }
+    console.error('[reports] could not be built', error)
     return NextResponse.json({ error: 'The report could not be built' }, { status: 502 })
   }
 }

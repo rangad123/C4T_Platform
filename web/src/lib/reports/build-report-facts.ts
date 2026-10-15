@@ -319,3 +319,17 @@ function findingsOf(data: BuildReportData, f: ReportFacts): string[] {
   }
   return out
 }
+
+/**
+ * A distribution the API already counted (`{ CRITICAL: 3, HIGH: 1 }`) in the
+ * same fixed order and with the same real zeros as the bug-level counts.
+ */
+export function countsFromRecord(
+  record: Record<string, number> | null | undefined,
+  order: readonly string[],
+): Count[] {
+  return ordered(new Map(Object.entries(record ?? {})), order)
+}
+
+export const sumOf = (counts: readonly Count[], keys: ReadonlySet<string>): number =>
+  counts.filter((c) => keys.has(c.key)).reduce((sum, c) => sum + c.value, 0)

@@ -2,19 +2,14 @@ import { NextResponse } from 'next/server'
 import { serverFetch } from '@/lib/api/server'
 import { getUser, hasPermission } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
-import {
-  type BugBreakdown,
-  breakdownBlocks,
-  countBlock,
-  csvResponse,
-  row,
-  slug,
-} from '@/lib/reports/report-csv'
+import { buildSummaryWorkbook, type SummaryFigure } from '@/lib/reports/summary-report-xlsx'
+import { fileSlug, xlsxResponse } from '@/lib/reports/xlsx-response'
+import { FORMAT, titleCase } from '@/lib/reports/xlsx-kit'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * `/app/admin/reports/download` — the report on screen, as a CSV.
+ * `/app/admin/reports/download` — the report on screen, as an Excel workbook.
  *
  * The admin twin of the customer route next door. Four sections rather than
  * three: the admin page can report on a SINGLE build as well as a range, and
@@ -40,6 +35,14 @@ export const dynamic = 'force-dynamic'
  * unentitled caller is refused here rather than one hop later; it is not what
  * protects the data.
  */
+
+interface BugBreakdown {
+  total: number
+  bySeverity: Record<string, number>
+  byStatus: Record<string, number>
+  byType: Record<string, number>
+  byReproducibility: Record<string, number>
+}
 
 interface BuildOption {
   id: string
@@ -102,62 +105,68 @@ export async function GET(request: Request): Promise<Response> {
   const startDate = params.get('startDate') ?? ''
   const endDate = params.get('endDate') ?? ''
 
-  const generated = new Date().toISOString()
+  const generatedAt = new Date()
 
   try {
     if (section === 'by-project') {
       if (!projectId) return NextResponse.json({ error: 'Choose a project first' }, { status: 400 })
 
       const report = await serverFetch<ByProjectReport>(`reports/by-project/${projectId}`)
-      const lines = [
-        row('Crowd4Test report'),
-        row('Report', 'By project'),
-        row('Project', `${report.project.reference} · ${report.project.title}`),
-        row('Organisation', report.project.organisation.name),
-        row('Generated', generated),
-        '',
-        'Summary',
-        row('Metric', 'Value'),
-        row('Builds', report.builds.length),
-        row('Testers', report.testerCount),
-        row('Test cases', report.testCaseCount),
-        row('Total bugs', report.bugs.total),
-        '',
-        ...countBlock('Bugs by severity', 'Severity', report.bugs.bySeverity),
-        ...countBlock('Bugs by status', 'Status', report.bugs.byStatus),
-        ...countBlock('Bugs by type', 'Type', report.bugs.byType),
-        ...countBlock('Bugs by reproducibility', 'Reproducibility', report.bugs.byReproducibility),
-      ]
-      return csvResponse(lines, `report-by-project-${slug(report.project.reference)}.csv`)
+      const file = await buildSummaryWorkbook({
+        kind: 'By project',
+        generatedAt,
+        subtitle: `${report.project.reference} · ${report.project.title}`,
+        facts: [
+          ['Project', report.project.title],
+          ['Reference', report.project.reference],
+          ['Organisation', report.project.organisation.name],
+          ['Project status', titleCase(report.project.status)],
+        ],
+        figures: [
+          { label: 'Builds', value: report.builds.length, note: 'On this project' },
+          { label: 'Testers', value: report.testerCount, note: 'Across every build' },
+          { label: 'Test cases', value: report.testCaseCount, note: 'Across every build' },
+        ],
+        bugs: report.bugs,
+        lists: [],
+      })
+      return xlsxResponse(file, `report-by-project-${fileSlug(report.project.reference)}.xlsx`)
     }
 
     if (section === 'by-build') {
       if (!buildId) return NextResponse.json({ error: 'Choose a build first' }, { status: 400 })
 
       const summary = await serverFetch<ByBuildReport>(`reports/by-build/${buildId}`)
-      const lines = [
-        row('Crowd4Test report'),
-        row('Report', 'By build'),
-        row('Generated', generated),
-        '',
-        'Summary',
-        row('Metric', 'Value'),
-        row('Testers', summary.testerCount),
-        row('Test cases', summary.testCaseCount),
-        row(
-          'Test case completion',
-          // Null is "no test cases to complete", which a bare 0% would
-          // misreport as "none done".
-          summary.testCaseCompletion === null ? 'Not applicable' : `${summary.testCaseCompletion}%`,
-        ),
-        row('Total bugs', summary.bugCount),
-        '',
-        ...countBlock('Bugs by severity', 'Severity', summary.bugsBySeverity),
-        ...countBlock('Bugs by status', 'Status', summary.bugsByStatus),
-        ...countBlock('Bugs by type', 'Type', summary.bugsByType),
-        ...countBlock('Bugs by reproducibility', 'Reproducibility', summary.bugsByReproducibility),
-      ]
-      return csvResponse(lines, 'report-by-build.csv')
+      const completion: SummaryFigure =
+        // Null is "no test cases to complete", which a bare 0% would misreport as "none done".
+        summary.testCaseCompletion === null
+          ? { label: 'Test case completion', value: 'Not applicable', note: 'No test cases' }
+          : {
+              label: 'Test case completion',
+              value: summary.testCaseCompletion / 100,
+              note: 'Reports filed ÷ test cases',
+              format: FORMAT.percent,
+            }
+      const file = await buildSummaryWorkbook({
+        kind: 'By build',
+        generatedAt,
+        subtitle: 'A single build',
+        facts: [['Scope', 'One build']],
+        figures: [
+          { label: 'Testers', value: summary.testerCount, note: 'Accepted, active or completed' },
+          { label: 'Test cases', value: summary.testCaseCount, note: 'Set up for this build' },
+          completion,
+        ],
+        bugs: {
+          total: summary.bugCount,
+          bySeverity: summary.bugsBySeverity,
+          byStatus: summary.bugsByStatus,
+          byType: summary.bugsByType,
+          byReproducibility: summary.bugsByReproducibility,
+        },
+        lists: [],
+      })
+      return xlsxResponse(file, 'report-by-build.xlsx')
     }
 
     if (section === 'by-date') {
@@ -169,30 +178,43 @@ export async function GET(request: Request): Promise<Response> {
         query: { startDate, endDate },
       })
       const perProject = report.byProject ?? []
-      const lines = [
-        row('Crowd4Test report'),
-        row('Report', 'By date'),
-        row('From', startDate),
-        row('To', endDate),
-        row('Generated', generated),
-        '',
-        ...breakdownBlocks(report.bugs),
-        ...(perProject.length > 0
-          ? [
-              'Bugs by project',
-              row('Reference', 'Project', 'Bugs'),
-              ...perProject.map((entry) =>
-                row(
-                  entry.project?.reference ?? '—',
-                  entry.project?.title ?? 'Deleted project',
-                  entry.bugCount,
-                ),
-              ),
-              '',
-            ]
-          : []),
-      ]
-      return csvResponse(lines, `report-by-date-${slug(startDate)}-to-${slug(endDate)}.csv`)
+      const file = await buildSummaryWorkbook({
+        kind: 'By date',
+        generatedAt,
+        subtitle: `${startDate} to ${endDate}`,
+        facts: [
+          ['From', startDate],
+          ['To', endDate],
+          ['Scope', 'Every project on the platform'],
+        ],
+        figures: [
+          { label: 'Projects with bugs', value: perProject.length, note: 'In this period' },
+        ],
+        bugs: report.bugs,
+        lists: [
+          {
+            sheetName: 'Bugs by project',
+            heading: 'Bugs by project',
+            headers: ['Reference', 'Project', 'Bugs'],
+            numeric: [2],
+            rows: perProject.map((entry) => [
+              entry.project?.reference ?? '—',
+              entry.project?.title ?? 'Deleted project',
+              entry.bugCount,
+            ]),
+            chart: {
+              labelColumn: 1,
+              valueColumn: 2,
+              title: 'Bugs by project',
+              valueHeader: 'Bugs',
+            },
+          },
+        ],
+      })
+      return xlsxResponse(
+        file,
+        `report-by-date-${fileSlug(startDate)}-to-${fileSlug(endDate)}.xlsx`,
+      )
     }
 
     if (section === 'by-build-range') {
@@ -204,17 +226,26 @@ export async function GET(request: Request): Promise<Response> {
         query: { projectId, startBuildId, endBuildId },
       })
       const builds = report.builds ?? []
-      const lines = [
-        row('Crowd4Test report'),
-        row('Report', 'By build range'),
-        row('Generated', generated),
-        '',
-        ...(builds.length > 0
-          ? ['Builds in range', row('Build'), ...builds.map((b) => row(b.name)), '']
-          : []),
-        ...breakdownBlocks(report.bugs),
-      ]
-      return csvResponse(lines, 'report-by-build-range.csv')
+      const file = await buildSummaryWorkbook({
+        kind: 'By build range',
+        generatedAt,
+        subtitle: builds.length > 0 ? `${builds.length} builds` : 'A range of builds',
+        facts: [['Scope', 'A range of builds on one project']],
+        figures: [
+          { label: 'Builds in range', value: builds.length, note: 'Start to end, inclusive' },
+        ],
+        bugs: report.bugs,
+        lists: [
+          {
+            sheetName: 'Builds in range',
+            heading: 'Builds in range',
+            headers: ['No.', 'Build'],
+            numeric: [0],
+            rows: builds.map((b, i) => [i + 1, b.name]),
+          },
+        ],
+      })
+      return xlsxResponse(file, 'report-by-build-range.xlsx')
     }
 
     return NextResponse.json({ error: 'Unknown report' }, { status: 400 })
@@ -223,6 +254,7 @@ export async function GET(request: Request): Promise<Response> {
     if (status === 403 || status === 404) {
       return NextResponse.json({ error: 'That report is not available' }, { status: 404 })
     }
+    console.error('[reports] could not be built', error)
     return NextResponse.json({ error: 'The report could not be built' }, { status: 502 })
   }
 }

@@ -1,5 +1,6 @@
 import 'server-only'
 import { serverFetch, serverFetchOrNull, serverFetchPage } from '@/lib/api/server'
+import { env } from '@/lib/env'
 import { loadBugReport, type BugReport } from '@/lib/reports/bug-report-data'
 
 /**
@@ -141,6 +142,8 @@ export interface ReportTestCase {
 export interface BuildReportData {
   audience: ReportAudience
   generatedAt: Date
+  /** Where the portal lives, so the report can link back into it (`https://…`, no trailing slash). */
+  siteUrl: string
   project: ReportProject
   build: ReportBuild | null
   summary: ReportSummary | null
@@ -200,6 +203,7 @@ export async function loadBuildReport(
   return {
     audience,
     generatedAt: new Date(),
+    siteUrl: env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, ''),
     project,
     build,
     summary,

@@ -92,11 +92,11 @@ const FORM_STYLE = {
  * the target on hover, so merely passing the cursor over this would build a
  * report. See the prop's own note on `Button`.
  */
-function DownloadCsv({ query }: { query: Record<string, string> }) {
+function DownloadReport({ query }: { query: Record<string, string> }) {
   const href = `${BASE}/download?${new URLSearchParams(query).toString()}`
   return (
     <Button href={href} prefetch={false} variant="secondary" size="sm" iconLeft="download">
-      Download CSV
+      Download report
     </Button>
   )
 }
@@ -195,7 +195,7 @@ export default async function CustomerReportsPage({
               description="Everything reported on one project, across every build."
               actions={
                 projectReport ? (
-                  <DownloadCsv query={{ section: 'by-project', projectId }} />
+                  <DownloadReport query={{ section: 'by-project', projectId }} />
                 ) : undefined
               }
             >
@@ -291,7 +291,7 @@ async function BuildRangeReport({
       description="Everything reported between two builds of one project, inclusive."
       actions={
         report ? (
-          <DownloadCsv query={{ section: 'by-build', projectId, startBuildId, endBuildId }} />
+          <DownloadReport query={{ section: 'by-build', projectId, startBuildId, endBuildId }} />
         ) : undefined
       }
     >
@@ -373,7 +373,7 @@ async function DateRangeReport({ startDate, endDate }: { startDate: string; endD
       title="Period report"
       description="Everything reported across your projects between two dates."
       actions={
-        report ? <DownloadCsv query={{ section: 'by-date', startDate, endDate }} /> : undefined
+        report ? <DownloadReport query={{ section: 'by-date', startDate, endDate }} /> : undefined
       }
     >
       <LiveGetForm action={BASE} style={FORM_STYLE}>
