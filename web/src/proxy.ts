@@ -5,6 +5,7 @@ import { spendRefreshToken } from '@/lib/auth/refresh-core'
 import { spendHrRefreshToken } from '@/lib/hrms/hr-refresh-core'
 import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
 import { authHeaders } from '@/lib/auth/request-context'
+import { domainFor, expireHostOnly, sharedSessionFixes } from '@/lib/auth/shared-session'
 
 /**
  * Next 16 Proxy — formerly `middleware.ts`.
@@ -182,7 +183,7 @@ async function refreshIfExpired(
   for (const raw of setCookies) {
     const parsed = parseSetCookie(raw)
     if (!parsed) continue
-    const options = authCookieOptions(parsed, isProduction)
+    const options = authCookieOptions(parsed, isProduction, domainFor(parsed.name))
     applied.push(options)
     // Onto the forwarded request too, so the render happening *now* sees the
     // new access token rather than running with the expired jar and
@@ -314,11 +315,30 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const isGuestOnly = GUEST_ONLY.some((p) => pathname === p || pathname.startsWith(`${p}/`))
   const arrivedFromAuthCheck = request.nextUrl.searchParams.has('next')
 
+  /**
+   * Keep the session cookies scoped to the parent domain so AI Studio shares
+   * them, and expire host-only copies left from before (shared-session.ts).
+   * Nothing to do unless AUTH_COOKIE_DOMAIN is set.
+   */
+  const sessionFixes = sharedSessionFixes(
+    request.headers.get('cookie') ?? '',
+    (name) => request.cookies.get(name)?.value,
+    refreshed.map((options) => options.name),
+  )
+  const withSharedSession = (response: NextResponse): NextResponse => {
+    for (const cookie of sessionFixes.set) response.cookies.set(cookie)
+    // Raw, and last: every `cookies.set` rewrites the Set-Cookie list and
+    // would drop a line appended before it.
+    for (const name of sessionFixes.expire)
+      response.headers.append('set-cookie', expireHostOnly(name))
+    return response
+  }
+
   if (hasSession && isGuestOnly && !arrivedFromAuthCheck) {
     const url = request.nextUrl.clone()
     url.pathname = '/app'
     url.search = ''
-    return NextResponse.redirect(url)
+    return withSharedSession(NextResponse.redirect(url))
   }
 
   /**
@@ -338,11 +358,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // `request.cookies.set` above updated the request's own jar; mirror it onto
   // the headers actually forwarded to the render, so this request is served
   // with the fresh access token rather than the expired one.
-  if (refreshed.length > 0) requestHeaders.set('cookie', request.cookies.toString())
+  // A name sent twice is forwarded once, newest value: Next's jar keeps the
+  // last copy, and the browser sends the older host-only one first.
+  if (refreshed.length > 0 || sessionFixes.expire.length > 0) {
+    requestHeaders.set('cookie', request.cookies.toString())
+  }
 
   const response = NextResponse.next({ request: { headers: requestHeaders } })
   for (const options of refreshed) response.cookies.set(options)
-  return response
+  return withSharedSession(response)
 }
 
 export const config = {

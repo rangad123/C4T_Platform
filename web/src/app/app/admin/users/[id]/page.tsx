@@ -36,6 +36,8 @@ import {
 import { CountrySelect } from '@/components/ds/forms/CountrySelect'
 import { timezoneOptions, withCurrent } from '@/lib/geo/source'
 import { ROLES, USER_STATUSES } from '@/lib/domain/enums'
+import { AiStudioAccessPanel } from '@/components/admin/AiStudioAccessPanel'
+import { isAiStudioCode } from '@/lib/admin/ai-studio-access'
 
 /**
  * `/app/admin/users/[id]` — one account, everything an administrator can change
@@ -51,7 +53,12 @@ import { ROLES, USER_STATUSES } from '@/lib/domain/enums'
  *
  *   user.read       — see this page at all
  *   user.write      — change the identity, role, status; archive the account
- *   subadmin.manage — read the permission catalogue and edit a sub-admin's grants
+ *   subadmin.manage — read the permission catalogue and edit a sub-admin's grants,
+ *                     and anyone's AI Studio access
+ *
+ * The AI Studio features are edited in their own panel for customers, testers
+ * and sub-admins alike, so the sub-admin editor leaves that group out and saves
+ * with `scope: 'back_office'`: neither panel's save can wipe the other's grants.
  *
  * A viewer holding only `user.read` gets the same page with every form replaced
  * by the values it would have edited, rather than forms that 403 on submit.
@@ -185,7 +192,14 @@ export default async function UserDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ section?: string; edit?: string; notice?: string }>
+  searchParams: Promise<{
+    section?: string
+    edit?: string
+    notice?: string
+    aiPreset?: string
+    aiStudioNotice?: string
+    aiStudioReason?: string
+  }>
 }) {
   const { id } = await params
   const viewer = await requirePermission('user.read', `${BASE}/${id}`)
@@ -238,7 +252,9 @@ export default async function UserDetailPage({
 
   // The grant set embedded in the detail read needs only user.read, so it stays
   // the fallback when the dedicated permissions endpoints are out of reach.
-  const embeddedGrants: GrantEntry[] = user.permissions.map((entry) => entry.permission)
+  const embeddedGrants: GrantEntry[] = user.permissions
+    .map((entry) => entry.permission)
+    .filter((grant) => !isAiStudioCode(grant.code))
 
   let catalogue: PermissionEntry[] = []
   let grants: GrantEntry[] = embeddedGrants
@@ -253,8 +269,8 @@ export default async function UserDetailPage({
           serverFetch<PermissionEntry[]>('users/permissions/catalogue'),
           serverFetch<GrantEntry[]>(`users/${id}/permissions`),
         ])
-        catalogue = catalogueResult
-        grants = grantsResult
+        catalogue = catalogueResult.filter((entry) => !isAiStudioCode(entry.code))
+        grants = grantsResult.filter((grant) => !isAiStudioCode(grant.code))
       } catch (err) {
         permissionsError = err instanceof ApiError && err.status === 403 ? 'forbidden' : 'unknown'
       }
@@ -358,6 +374,16 @@ export default async function UserDetailPage({
             <DescriptionList items={[{ label: 'Role', value: titleCase(user.role) }]} />
           </Panel>
 
+          <AiStudioAccessPanel
+            viewer={viewer}
+            user={user}
+            pagePath={`${BASE}/${user.id}?section=${section}`}
+            edit={edit}
+            preset={resolvedParams.aiPreset}
+            notice={resolvedParams.aiStudioNotice}
+            reason={resolvedParams.aiStudioReason}
+          />
+
           {canWrite ? (
             <Modal
               open={edit === 'role'}
@@ -369,7 +395,7 @@ export default async function UserDetailPage({
                 <Field
                   label="Role"
                   htmlFor="role"
-                  hint="Moving into sub-admin seeds a default read-only grant set. Moving out of it revokes every grant."
+                  hint="Moving into sub-admin seeds a default read-only grant set. Moving out of it revokes every grant. Between customer and tester, AI Studio features the new role cannot hold are withdrawn."
                 >
                   <Select id="role" name="role" defaultValue={user.role} options={ROLE_OPTIONS} />
                 </Field>

@@ -4,8 +4,10 @@
  *
  * ADMIN implicitly holds every permission and is never checked against this
  * table. SUB_ADMIN holds only what has been explicitly granted.
- * CUSTOMER and TESTER are not permission-driven at all: their access is scoped
- * by ownership (own organisation, own assignments), enforced in the services.
+ * CUSTOMER and TESTER are not permission-driven inside this API: their access
+ * is scoped by ownership (own organisation, own assignments), enforced in the
+ * services. They may hold AI Studio codes, which this API never checks — AI
+ * Studio reads them from `/v1/auth/me` (see `modules/users/permission-rules.ts`).
  *
  * Codes are a stable contract — grant rows reference them. Add freely, never
  * rename. If a code must change, migrate the grants in the same release.
@@ -23,6 +25,7 @@ export const PERMISSION_GROUPS = {
   USERS: 'Users & Access',
   PLATFORM: 'Platform',
   BLOG: 'Blog',
+  AI_STUDIO: 'AI Studio',
 } as const
 
 export interface PermissionDefinition {
@@ -97,6 +100,25 @@ export const PERMISSIONS = {
   BLOG_DELETE: 'blog.delete',
   BLOG_MANAGE_CATEGORIES: 'blog.manage_categories',
   BLOG_MANAGE_TAGS: 'blog.manage_tags',
+
+  // AI Studio — checked by AI Studio itself, never by this API. The table in
+  // AI_Studio/docs/product-restructure/ACCESS_MODEL.md is the spec.
+  AI_STUDIO_ACCESS: 'ai_studio.access',
+  AI_STUDIO_PROJECT_CREATE: 'ai_studio.project.create',
+  AI_STUDIO_PROJECT_SETTINGS: 'ai_studio.project.settings',
+  AI_STUDIO_PROJECT_MEMBERS: 'ai_studio.project.members',
+  AI_STUDIO_TESTS_WRITE: 'ai_studio.tests.write',
+  AI_STUDIO_TESTS_GENERATE: 'ai_studio.tests.generate',
+  AI_STUDIO_TESTS_APPROVE: 'ai_studio.tests.approve',
+  AI_STUDIO_TESTS_RUN: 'ai_studio.tests.run',
+  AI_STUDIO_AGENT_RUN: 'ai_studio.agent.run',
+  AI_STUDIO_REPORTS_EXPORT: 'ai_studio.reports.export',
+  AI_STUDIO_TESTS_DELETE: 'ai_studio.tests.delete',
+  AI_STUDIO_RUNNERS_MANAGE: 'ai_studio.runners.manage',
+  AI_STUDIO_AI_KEYS_MANAGE: 'ai_studio.ai_keys.manage',
+  AI_STUDIO_USAGE_VIEW: 'ai_studio.usage.view',
+  AI_STUDIO_SECURITY_USE: 'ai_studio.security.use',
+  AI_STUDIO_PLATFORM_SETTINGS: 'ai_studio.platform.settings',
 } as const
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS]
@@ -347,6 +369,106 @@ export const PERMISSION_CATALOGUE: PermissionDefinition[] = [
     group: PERMISSION_GROUPS.BLOG,
     label: 'Manage blog tags',
     description: 'Create and edit blog tags',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_ACCESS,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Open AI Studio',
+    description:
+      'Open AI Studio from the portal and view the projects this person has been added to.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_PROJECT_CREATE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Create projects',
+    description: 'Create AI Studio projects, which for a customer means in their own organisation.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_PROJECT_SETTINGS,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Change project settings',
+    description: "Change a project's settings, environments and test data.",
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_PROJECT_MEMBERS,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Manage project members',
+    description: 'Add or remove people on a project and choose who is its project admin.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_TESTS_WRITE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Write tests',
+    description: 'Create and edit requirements, test cases, suites and scripts.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_TESTS_GENERATE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Generate tests with AI',
+    description: 'Use the AI to write tests, which spends AI usage.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_TESTS_APPROVE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Approve tests',
+    description:
+      'Approve test cases and script versions on projects where this person is project admin.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_TESTS_RUN,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Run tests',
+    description: 'Run approved tests.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_AGENT_RUN,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Start agent runs',
+    description: 'Start live AI agent runs that pursue an objective on a runner.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_REPORTS_EXPORT,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Export reports',
+    description: 'Download reports, evidence and test code.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_TESTS_DELETE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Delete tests and runs',
+    description: 'Delete test cases, scripts, runs and projects.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_RUNNERS_MANAGE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Manage runners',
+    description:
+      'Register, drain and revoke runners for their own organisation, or for every organisation for staff.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_AI_KEYS_MANAGE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Manage AI keys',
+    description: "Set a project's AI configuration and customer-owned AI keys.",
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_USAGE_VIEW,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'View AI usage and cost',
+    description: 'See how much AI usage a project has spent and what it cost.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_SECURITY_USE,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Use security assessment',
+    description: 'Use the security assessment module.',
+  },
+  {
+    code: PERMISSIONS.AI_STUDIO_PLATFORM_SETTINGS,
+    group: PERMISSION_GROUPS.AI_STUDIO,
+    label: 'Manage AI Studio platform settings',
+    description:
+      'Change global AI provider policies, default models and other platform-wide settings.',
   },
 ]
 

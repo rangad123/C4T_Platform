@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { requireRole } from '@/lib/auth/session'
 import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
 import { AppShell } from '@/components/admin/AppShell'
+import { withAiStudio } from '@/lib/navigation/ai-studio'
 
 export const metadata: Metadata = {
   title: 'Customer',
@@ -61,7 +62,7 @@ export default async function CustomerLayout({ children }: { children: React.Rea
           userName={displayName}
           avatarFileId={user.avatarFileId}
           role={user.role}
-          sections={CUSTOMER_SECTIONS}
+          sections={withAiStudio(CUSTOMER_SECTIONS, user)}
           homeHref="/app/customer"
           portalLabel="Customer"
         />

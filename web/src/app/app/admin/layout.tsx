@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { requireRole, hasPermission } from '@/lib/auth/session'
 import { Sidebar, type SidebarSection } from '@/components/admin/Sidebar'
 import { AppShell } from '@/components/admin/AppShell'
+import { withAiStudio } from '@/lib/navigation/ai-studio'
 
 export const metadata: Metadata = {
   title: 'Admin',
@@ -180,7 +181,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           userName={displayName}
           avatarFileId={user.avatarFileId}
           role={user.role}
-          sections={sections}
+          sections={withAiStudio(sections, user)}
         />
       }
     >

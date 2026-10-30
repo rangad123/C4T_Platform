@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requirePermission, hasPermission } from '@/lib/auth/session'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
+import { AiStudioAccessPanel } from '@/components/admin/AiStudioAccessPanel'
 import { RevealPaymentDetails } from '@/components/admin/RevealPaymentDetails'
 import { Modal } from '@/components/admin/Modal'
 import { loadList, parsePage } from '@/lib/admin/list'
@@ -486,12 +487,25 @@ export default async function TesterDetailPage({
     edit?: string
     rate?: string
     notice?: string
+    aiPreset?: string
+    aiStudioNotice?: string
+    aiStudioReason?: string
   }>
 }) {
   const viewer = await requirePermission('tester.read')
 
   const { id } = await params
-  const { ratingsPage, paymentPage, section: rawSection, edit, rate, notice } = await searchParams
+  const {
+    ratingsPage,
+    paymentPage,
+    section: rawSection,
+    edit,
+    rate,
+    notice,
+    aiPreset,
+    aiStudioNotice,
+    aiStudioReason,
+  } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let tester: TesterDetail | null = null
@@ -788,6 +802,17 @@ export default async function TesterDetailPage({
               </div>
             </Modal>
           ) : null}
+
+          {/* Keyed on the account, not this profile: grants belong to the user. */}
+          <AiStudioAccessPanel
+            viewer={viewer}
+            user={tester.user}
+            pagePath={closedHref}
+            edit={edit}
+            preset={aiPreset}
+            notice={aiStudioNotice}
+            reason={aiStudioReason}
+          />
 
           <Panel
             title="Performance"

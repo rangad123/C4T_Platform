@@ -14,6 +14,7 @@ import { SubmitButton } from '@/components/ds/core/SubmitButton'
 import { EmptyState } from '@/components/ds/admin/EmptyState'
 import { CountryLabel } from '@/components/admin/CountryFlag'
 import { requirePermission } from '@/lib/auth/session'
+import { AiStudioAccessPanel } from '@/components/admin/AiStudioAccessPanel'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { assignProjectAction, unassignProjectAction } from '@/lib/admin/manager-actions'
@@ -94,11 +95,17 @@ export default async function ManagerDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ notice?: string }>
+  searchParams: Promise<{
+    notice?: string
+    edit?: string
+    aiPreset?: string
+    aiStudioNotice?: string
+    aiStudioReason?: string
+  }>
 }) {
-  await requirePermission('manager.read')
+  const viewer = await requirePermission('manager.read')
   const { id } = await params
-  const { notice } = await searchParams
+  const { notice, edit, aiPreset, aiStudioNotice, aiStudioReason } = await searchParams
 
   /**
    * Fetch the manager up front. 404 here means the URL is wrong — the
@@ -215,6 +222,16 @@ export default async function ManagerDetailPage({
           ]}
         />
       </Panel>
+
+      <AiStudioAccessPanel
+        viewer={viewer}
+        user={manager}
+        pagePath={`/app/admin/managers/${manager.id}`}
+        edit={edit}
+        preset={aiPreset}
+        notice={aiStudioNotice}
+        reason={aiStudioReason}
+      />
 
       {/*
         Deactivating a manager happens on their user record, and this is the

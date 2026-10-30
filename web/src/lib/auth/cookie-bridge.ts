@@ -1,6 +1,14 @@
 import { cookies } from 'next/headers'
 import { env } from '@/lib/env'
 import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
+import {
+  SESSION_COOKIE_NAMES,
+  SHARED_MARKER_COOKIE,
+  domainFor,
+  isSessionCookie,
+  markerCookie,
+  sessionCookieDomain,
+} from '@/lib/auth/shared-session'
 
 /**
  * Cookie bridging for Server Actions that call the auth API.
@@ -42,9 +50,30 @@ export async function applySetCookies(setCookies: readonly string[]): Promise<vo
   if (setCookies.length === 0) return
 
   const cookieStore = await cookies()
+  let sharedSession = false
   for (const raw of setCookies) {
     const parsed = parseSetCookie(raw)
     if (!parsed) continue
-    cookieStore.set(authCookieOptions(parsed, env.NEXT_PUBLIC_ENVIRONMENT === 'production'))
+    const domain = domainFor(parsed.name)
+    cookieStore.set(authCookieOptions(parsed, env.NEXT_PUBLIC_ENVIRONMENT === 'production', domain))
+    if (domain && isSessionCookie(parsed.name)) sharedSession = true
+  }
+  // Tells Proxy this session is already scoped to the domain (shared-session.ts).
+  const domain = sessionCookieDomain()
+  if (sharedSession && domain) cookieStore.set(markerCookie(domain))
+}
+
+/**
+ * Signs this browser out of crowd4test.com AND AI Studio: deletes the session
+ * cookies under the same Domain they were written with. A plain
+ * `cookieStore.delete(name)` targets the host-only cookie and would leave a
+ * domain one behind, still signed in. Pass the store a Server Action already
+ * holds; nothing else in it is touched.
+ */
+export function clearSessionCookies(cookieStore: Awaited<ReturnType<typeof cookies>>): void {
+  const domain = sessionCookieDomain()
+  for (const name of [...SESSION_COOKIE_NAMES, SHARED_MARKER_COOKIE]) {
+    if (domain) cookieStore.delete({ name, path: '/', domain })
+    else if (name !== SHARED_MARKER_COOKIE) cookieStore.delete(name)
   }
 }

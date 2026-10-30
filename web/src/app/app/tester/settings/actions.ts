@@ -1,6 +1,7 @@
 'use server'
 
 import { cookies } from 'next/headers'
+import { clearSessionCookies } from '@/lib/auth/cookie-bridge'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
@@ -18,10 +19,6 @@ import { formString, formTrimmed } from '@/lib/form-data'
 
 const SETTINGS_PATH = '/app/tester/settings'
 
-/** Must match the API's ACCESS_COOKIE / REFRESH_COOKIE. */
-const ACCESS_COOKIE = 'c4t_access'
-const REFRESH_COOKIE = 'c4t_refresh'
-
 function back(slug: string, kind: 'ok' | 'error', section?: 'sessions'): never {
   const sectionParam = section ? `section=${section}&` : ''
   redirect(`${SETTINGS_PATH}?${sectionParam}${kind}=${slug}`)
@@ -37,8 +34,7 @@ function back(slug: string, kind: 'ok' | 'error', section?: 'sessions'): never {
  */
 async function clearBridgedCookies(): Promise<void> {
   const cookieStore = await cookies()
-  cookieStore.delete(ACCESS_COOKIE)
-  cookieStore.delete(REFRESH_COOKIE)
+  clearSessionCookies(cookieStore)
 }
 
 export async function changePassword(formData: FormData): Promise<void> {

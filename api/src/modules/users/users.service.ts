@@ -6,6 +6,15 @@ import { NotFoundError, BadRequestError, ConflictError, ForbiddenError } from '.
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import { PERMISSION_CATALOGUE, DEFAULT_SUBADMIN_PERMISSIONS } from '../../config/permissions.js'
 import { sendVerificationEmail } from '../auth/auth.service.js'
+import {
+  AI_STUDIO_CODE_PREFIX,
+  assertGrantable,
+  codesKeptOnRoleChange,
+  inScope,
+  isGrantable,
+  permissionRefusal,
+  type PermissionScope,
+} from './permission-rules.js'
 import { USER_SORT_FIELDS, type ListUsersQuery } from './users.schema.js'
 
 const userSelect = {
@@ -222,7 +231,12 @@ export async function updateUser(id: string, input: Record<string, unknown>) {
 }
 
 /**
- * Role changes are deliberately narrow. Promoting into or out of ADMIN is
+ * Role changes are deliberately narrow.
+ *
+ * Returns the codes the change revoked, so the route can put them in the
+ * audit entry: a grant disappearing as a side effect of a role change should
+ * be as traceable as one withdrawn in the permissions editor.
+ * Promoting into or out of ADMIN is
  * allowed, but the last remaining active ADMIN can never be demoted — that
  * would lock everybody out of the back office.
  */
@@ -232,7 +246,10 @@ export async function changeRole(actor: Express.AuthenticatedUser, id: string, r
     select: { id: true, role: true },
   })
   if (!user) throw new NotFoundError('User')
-  if (user.role === role) return prisma.user.findUnique({ where: { id }, select: userSelect })
+  if (user.role === role) {
+    const unchanged = await prisma.user.findUnique({ where: { id }, select: userSelect })
+    return { user: unchanged, revokedPermissionCodes: [] as string[] }
+  }
 
   if (user.role === Role.ADMIN && role !== Role.ADMIN) {
     await assertNotLastAdmin(id)
@@ -240,9 +257,19 @@ export async function changeRole(actor: Express.AuthenticatedUser, id: string, r
   if (role === Role.SUB_ADMIN) assertMayGrant(actor, DEFAULT_SUBADMIN_PERMISSIONS)
 
   return prisma.$transaction(async (tx) => {
-    // Leaving SUB_ADMIN clears the grants; they are meaningless for other roles.
-    if (user.role === Role.SUB_ADMIN && role !== Role.SUB_ADMIN) {
-      await tx.userPermission.deleteMany({ where: { userId: id } })
+    // Grants the new role may not hold are dropped; see codesKeptOnRoleChange.
+    // Leaving SUB_ADMIN still clears every grant, as it always has.
+    const held = await tx.userPermission.findMany({
+      where: { userId: id },
+      select: { permission: { select: { code: true } } },
+    })
+    const heldCodes = held.map((grant) => grant.permission.code)
+    const kept = new Set(codesKeptOnRoleChange(user.role, role, heldCodes))
+    const revokedPermissionCodes = heldCodes.filter((code) => !kept.has(code))
+    if (revokedPermissionCodes.length > 0) {
+      await tx.userPermission.deleteMany({
+        where: { userId: id, permission: { code: { in: revokedPermissionCodes } } },
+      })
     }
     if (role === Role.SUB_ADMIN && user.role !== Role.SUB_ADMIN) {
       await grantPermissions(tx, id, DEFAULT_SUBADMIN_PERMISSIONS, actor.id)
@@ -254,7 +281,8 @@ export async function changeRole(actor: Express.AuthenticatedUser, id: string, r
         update: {},
       })
     }
-    return tx.user.update({ where: { id }, data: { role }, select: userSelect })
+    const updated = await tx.user.update({ where: { id }, data: { role }, select: userSelect })
+    return { user: updated, revokedPermissionCodes }
   })
 }
 
@@ -392,15 +420,23 @@ async function assertNotLastAdmin(excludingUserId: string): Promise<void> {
   }
 }
 
-// ─── Sub-Admin permissions (§2.2) ────────────────────────────────────────────
+// ─── Permissions (§2.2, and AI Studio access) ────────────────────────────────
 
-export async function listPermissionCatalogue() {
+/**
+ * The catalogue, optionally narrowed to what one kind of account may be given
+ * — the AI Studio access panel offers a tester only the codes the API would
+ * accept for a tester.
+ */
+export async function listPermissionCatalogue(grantableTo?: Role) {
   const permissions = await prisma.permission.findMany({
     orderBy: [{ group: 'asc' }, { code: 'asc' }],
     select: { id: true, code: true, group: true, label: true, description: true },
   })
   // Fall back to the in-code catalogue if the table has not been seeded yet.
-  return permissions.length > 0 ? permissions : PERMISSION_CATALOGUE
+  const catalogue = permissions.length > 0 ? permissions : PERMISSION_CATALOGUE
+  return grantableTo
+    ? catalogue.filter((permission) => isGrantable(grantableTo, permission.code))
+    : catalogue
 }
 
 export async function getUserPermissions(userId: string) {
@@ -414,34 +450,71 @@ export async function getUserPermissions(userId: string) {
   return grants.map((g) => ({ ...g.permission, grantedAt: g.grantedAt }))
 }
 
-/** Replaces a Sub-Admin's grant set wholesale. */
+/** Prisma filter for the grants one scope covers. */
+function scopeWhere(scope: PermissionScope): Prisma.UserPermissionWhereInput {
+  if (scope === 'ai_studio') return { permission: { code: { startsWith: AI_STUDIO_CODE_PREFIX } } }
+  if (scope === 'back_office') {
+    return { NOT: { permission: { code: { startsWith: AI_STUDIO_CODE_PREFIX } } } }
+  }
+  return {}
+}
+
+/**
+ * Replaces a person's grant set wholesale — or, with a `scope`, only the AI
+ * Studio codes or only the back-office ones, leaving the rest untouched.
+ *
+ * Sub-admins may hold any code; customers and testers only the AI Studio codes
+ * their kind of account allows (see permission-rules.ts). Returns the codes
+ * held before, for the audit entry.
+ */
 export async function setUserPermissions(
   actor: Express.AuthenticatedUser,
   userId: string,
   codes: string[],
+  scope: PermissionScope = 'all',
 ) {
   const user = await prisma.user.findFirst({
     where: { id: userId, deletedAt: null },
     select: { id: true, role: true },
   })
   if (!user) throw new NotFoundError('User')
-  if (user.role !== Role.SUB_ADMIN) {
-    throw new BadRequestError('Permissions can only be granted to a sub-admin')
+  if (user.role === Role.ADMIN || user.role === Role.USER) {
+    throw new BadRequestError(permissionRefusal(user.role, '')!)
   }
   if (userId === actor.id) {
     throw new ForbiddenError('You cannot change your own permissions')
   }
-  const current = await getUserPermissions(userId)
-  assertMayGrant(
-    actor,
-    codes,
-    current.map((grant) => grant.code),
-  )
+  if (actor.role !== Role.ADMIN) {
+    const current = await getUserPermissions(userId)
+    assertMayGrant(
+      actor,
+      codes,
+      current.map((grant) => grant.code),
+    )
+  }
+
+  const outside = codes.filter((code) => !inScope(scope, code))
+  if (outside.length > 0) {
+    throw new BadRequestError(
+      scope === 'ai_studio'
+        ? 'Only AI Studio features can be set here.'
+        : 'AI Studio features are set in the AI Studio access panel.',
+      { refused: outside },
+    )
+  }
+  assertGrantable(user.role, codes)
 
   return prisma.$transaction(async (tx) => {
-    await tx.userPermission.deleteMany({ where: { userId } })
+    const before = await tx.userPermission.findMany({
+      where: { userId, ...scopeWhere(scope) },
+      select: { permission: { select: { code: true } } },
+    })
+    await tx.userPermission.deleteMany({ where: { userId, ...scopeWhere(scope) } })
     await grantPermissions(tx, userId, codes, actor.id)
-    return getUserPermissionsTx(tx, userId)
+    return {
+      previousCodes: before.map((grant) => grant.permission.code),
+      permissions: await getUserPermissionsTx(tx, userId),
+    }
   })
 }
 

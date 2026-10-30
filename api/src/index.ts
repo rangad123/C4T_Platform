@@ -2,11 +2,23 @@ import { createApp } from './app.js'
 import { env } from './config/env.js'
 import { logger } from './lib/logger.js'
 import { prisma, disconnectPrisma } from './lib/prisma.js'
+import { syncPermissionCatalogue } from './lib/permission-catalogue.js'
 
 async function main(): Promise<void> {
   // Fail to boot rather than serve 500s if RDS is unreachable.
   await prisma.$connect()
   logger.info('Database connection established')
+
+  // New permission codes reach the database without a manual seed. A failure
+  // is logged, not fatal: every other feature works on the rows already there.
+  try {
+    const synced = await syncPermissionCatalogue(prisma)
+    if (synced.created > 0 || synced.updated > 0) {
+      logger.info(synced, 'Permission catalogue synced')
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'Permission catalogue sync failed')
+  }
 
   const app = createApp()
   const server = app.listen(env.PORT, () => {

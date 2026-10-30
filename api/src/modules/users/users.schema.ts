@@ -50,9 +50,21 @@ export const changeUserStatusSchema = z.object({
 })
 
 export const setPermissionsSchema = z.object({
-  /** Full replacement set of permission codes. */
-  permissionCodes: z.array(z.string().trim().max(80)).max(60),
+  /** Full replacement set of permission codes, within `scope`. */
+  permissionCodes: z.array(z.string().trim().max(80)).max(100),
+  /**
+   * Which grants the set replaces: every grant (the default, and the only
+   * behaviour before AI Studio), only the `ai_studio.*` ones, or only the rest.
+   */
+  scope: z.enum(['all', 'ai_studio', 'back_office']).default('all'),
 })
+
+/** Narrows the catalogue to what one kind of account may be given. */
+export const permissionCatalogueQuery = z.object({
+  grantableTo: z.enum([Role.SUB_ADMIN, Role.CUSTOMER, Role.TESTER]).optional(),
+})
+
+export type PermissionCatalogueQuery = z.infer<typeof permissionCatalogueQuery>
 
 export const userIdParam = z.object({ id: z.string().cuid() })
 

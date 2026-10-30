@@ -247,6 +247,15 @@ const schema = z.object({
    */
   SES_CONFIGURATION_SET: z.string().optional(),
 
+  /**
+   * Shared secret AI Studio (aistudio.crowd4test.com) presents as a bearer
+   * token on the read-only `/v1/ai-studio/*` routes: organisations, their
+   * projects and a people search. Unset, those routes answer 404. At least 32
+   * characters; a shorter value is treated as unset. Generate with:
+   *   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+   */
+  AI_STUDIO_SERVICE_TOKEN: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
@@ -278,6 +287,13 @@ export const isTest = env.NODE_ENV === 'test'
 export const googleOAuthEnabled = Boolean(
   env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI,
 )
+if (env.AI_STUDIO_SERVICE_TOKEN && env.AI_STUDIO_SERVICE_TOKEN.length < 32) {
+  // A warning, not a throw: one integration must not take the API down.
+  console.warn(
+    '[config] AI_STUDIO_SERVICE_TOKEN is shorter than 32 characters and is ignored, so the /v1/ai-studio routes answer 404. Generate a longer one.',
+  )
+}
+
 // Guard rails that only matter in production.
 if (isProduction) {
   if (env.STORAGE_DRIVER === 's3' && !env.S3_BUCKET) {

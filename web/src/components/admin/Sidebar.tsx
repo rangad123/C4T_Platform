@@ -27,6 +27,12 @@ export interface SidebarLink {
    * open.
    */
   permission?: string
+  /**
+   * Leaves the portal: a plain `<a>`, so the browser makes a real request
+   * instead of the client router fetching a page that is not there (the AI
+   * Studio entry, whose route redirects to another host).
+   */
+  external?: boolean
 }
 
 export interface SidebarSection {
@@ -387,6 +393,15 @@ export function Sidebar({
                       <Icon name={link.icon} size={18} className={styles.icon} />
                       <span className={styles.linkLabel}>{link.label}</span>
                     </span>
+                  )
+                }
+
+                if (link.external) {
+                  return (
+                    <a key={link.href} href={link.href} className={linkClass} {...collapsedProps}>
+                      <Icon name={link.icon} size={18} className={styles.icon} />
+                      <span className={styles.linkLabel}>{link.label}</span>
+                    </a>
                   )
                 }
 

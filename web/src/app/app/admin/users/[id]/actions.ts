@@ -168,12 +168,13 @@ export async function changeUserStatus(formData: FormData): Promise<void> {
 /**
  * PUT users/:id/permissions — §2.2 "Sub-Admin Permissions".
  *
- * The body is `{ permissionCodes }` and it is a full replacement set, not a
- * delta: the API deletes every grant for the user and re-creates the ones named
- * here. An unticked box is therefore a revoke, which is why the form says so
- * above the submit.
+ * The body is `{ permissionCodes, scope: 'back_office' }`: a full replacement
+ * of every grant OUTSIDE the AI Studio group, not a delta. An unticked box is
+ * therefore a revoke, which is why the form says so above the submit. AI Studio
+ * features have their own panel and action (`lib/admin/ai-studio-access-actions`),
+ * and the scope keeps this save from wiping them.
  *
- * Codes are deduplicated because the API caps the array at 60 entries and
+ * Codes are deduplicated because the API caps the array at 100 entries and
  * counts duplicates towards that cap.
  */
 export async function setSubAdminPermissions(formData: FormData): Promise<void> {
@@ -188,7 +189,7 @@ export async function setSubAdminPermissions(formData: FormData): Promise<void> 
         .getAll('permissionCodes')
         .filter((value): value is string => typeof value === 'string')
         .map((value) => value.trim())
-        .filter((value) => value.length > 0),
+        .filter((value) => value.length > 0 && !value.startsWith('ai_studio.')),
     ),
   ]
 
@@ -196,7 +197,7 @@ export async function setSubAdminPermissions(formData: FormData): Promise<void> 
   try {
     await actionFetch<unknown>(`users/${id}/permissions`, {
       method: 'PUT',
-      body: { permissionCodes },
+      body: { permissionCodes, scope: 'back_office' },
     })
     revalidateUser(id)
   } catch (error) {

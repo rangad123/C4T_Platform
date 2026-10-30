@@ -99,8 +99,13 @@ export function parseSetCookie(input: string): ParsedCookie | null {
  * so page JavaScript still cannot read them; only code running on the server
  * ever sees a value. Next's Server Actions carry their own CSRF origin check,
  * which is what the narrow path was buying on the API side.
+ *
+ * The one exception to "no Domain" is `domain`, which callers pass for the two
+ * session cookies when `AUTH_COOKIE_DOMAIN` shares them with AI Studio
+ * (`shared-session.ts`). It comes from this site's own configuration, never
+ * from the API's header.
  */
-export function authCookieOptions(parsed: ParsedCookie, isProduction: boolean) {
+export function authCookieOptions(parsed: ParsedCookie, isProduction: boolean, domain?: string) {
   return {
     name: parsed.name,
     value: parsed.value,
@@ -108,6 +113,7 @@ export function authCookieOptions(parsed: ParsedCookie, isProduction: boolean) {
     secure: parsed.secure ?? isProduction,
     sameSite: parsed.sameSite ?? ('lax' as const),
     path: '/',
+    ...(domain ? { domain } : {}),
     ...(typeof parsed.maxAge === 'number' ? { maxAge: parsed.maxAge } : {}),
   }
 }

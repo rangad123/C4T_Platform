@@ -22,6 +22,7 @@ import { testingRouter } from '../modules/testing/testing.routes.js'
 import { reportsRouter } from '../modules/reports/reports.routes.js'
 import { blogRouter } from '../modules/blog/blog.routes.js'
 import { hrmsRouter } from '../modules/hrms/hrms.routes.js'
+import { aiStudioRouter } from '../modules/ai-studio/ai-studio.routes.js'
 
 /**
  * API v1. Every route is mounted under /v1 so a future breaking change can ship
@@ -60,6 +61,12 @@ v1Router.use('/reports', reportsRouter)
  * router's blanket `authenticate` — see the warning on that line.
  */
 v1Router.use('/hrms', hrmsRouter)
+/**
+ * AI Studio's server-to-server reads, behind a service token instead of a
+ * session. Also above `testingRouter`, whose blanket `authenticate` would
+ * otherwise demand a user session as well.
+ */
+v1Router.use('/ai-studio', aiStudioRouter)
 /**
  * ⚠ `/leads` is the only router here whose POST is UNAUTHENTICATED — the
  * marketing site's contact form has no session to present. It applies its own

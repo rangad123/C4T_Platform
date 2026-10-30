@@ -14,8 +14,10 @@ import {
   changeUserRoleSchema,
   changeUserStatusSchema,
   setPermissionsSchema,
+  permissionCatalogueQuery,
   userIdParam,
   type ListUsersQuery,
+  type PermissionCatalogueQuery,
 } from './users.schema.js'
 
 export const usersRouter = Router()
@@ -58,13 +60,15 @@ usersRouter.delete('/me', async (req, res) => {
   res.json({ data: result })
 })
 
-// ─── Permission catalogue — needed to render the Sub-Admin editor ────────────
+// ─── Permission catalogue — renders the Sub-Admin and AI Studio editors ──────
 
 usersRouter.get(
   '/permissions/catalogue',
   requirePermission(PERMISSIONS.SUBADMIN_MANAGE),
+  validate({ query: permissionCatalogueQuery }),
   async (_req, res) => {
-    res.json({ data: await service.listPermissionCatalogue() })
+    const query = validatedQuery<PermissionCatalogueQuery>(res)
+    res.json({ data: await service.listPermissionCatalogue(query.grantableTo) })
   },
 )
 
@@ -123,13 +127,20 @@ usersRouter.post(
   validate({ params: userIdParam, body: changeUserRoleSchema }),
   async (req, res) => {
     await service.assertMayManage(req.user!, param(req, 'id'), req.body.role)
-    const user = await service.changeRole(req.user!, param(req, 'id'), req.body.role)
+    const { user, revokedPermissionCodes } = await service.changeRole(
+      req.user!,
+      param(req, 'id'),
+      req.body.role,
+    )
     await recordAudit({
       req,
       action: 'user.role_changed',
       entityType: 'User',
       entityId: param(req, 'id'),
-      after: { role: req.body.role },
+      after: {
+        role: req.body.role,
+        ...(revokedPermissionCodes.length > 0 ? { revokedPermissionCodes } : {}),
+      },
     })
     res.json({ data: user })
   },
@@ -186,7 +197,9 @@ usersRouter.post(
   },
 )
 
-// ─── Sub-Admin permission grants (§2.2 "Sub-Admin Permissions") ──────────────
+// ─── Permission grants (§2.2 "Sub-Admin Permissions", and AI Studio access) ──
+// Customers and testers may hold AI Studio codes too; the rules are in
+// permission-rules.ts. The guard stays subadmin.manage for every target.
 
 usersRouter.get(
   '/:id/permissions',
@@ -202,17 +215,19 @@ usersRouter.put(
   requirePermission(PERMISSIONS.SUBADMIN_MANAGE),
   validate({ params: userIdParam, body: setPermissionsSchema }),
   async (req, res) => {
-    const permissions = await service.setUserPermissions(
+    const { previousCodes, permissions } = await service.setUserPermissions(
       req.user!,
       param(req, 'id'),
       req.body.permissionCodes,
+      req.body.scope,
     )
     await recordAudit({
       req,
       action: 'user.permissions_set',
       entityType: 'User',
       entityId: param(req, 'id'),
-      after: { permissionCodes: req.body.permissionCodes },
+      before: { scope: req.body.scope, permissionCodes: previousCodes },
+      after: { scope: req.body.scope, permissionCodes: req.body.permissionCodes },
     })
     res.json({ data: permissions })
   },

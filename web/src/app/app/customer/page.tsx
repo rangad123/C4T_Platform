@@ -85,6 +85,11 @@ function buildNarrative(
  * role that account already has — said here rather than left to guess.
  */
 const NOTICES: Record<string, NoticeCopy> = {
+  /** Sent by `/app/ai-studio` to an account without the `ai_studio.access` grant. */
+  'ai-studio-no-access': {
+    tone: 'warning',
+    message: "You don't have access to AI Studio. Ask your Crowd4Test administrator.",
+  },
   'google-existing-account': {
     tone: 'info',
     message:

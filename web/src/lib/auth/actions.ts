@@ -6,7 +6,7 @@ import { env } from '@/lib/env'
 import { ROLE_HOME, type Role } from '@/lib/api/types'
 import { safeNext } from '@/lib/safe-redirect'
 import { formString, formTrimmed } from '@/lib/form-data'
-import { bridgeApiCookies } from '@/lib/auth/cookie-bridge'
+import { bridgeApiCookies, clearSessionCookies } from '@/lib/auth/cookie-bridge'
 import { currentAuthHeaders } from '@/lib/auth/request-context'
 
 /**
@@ -179,8 +179,7 @@ export async function logoutAction(formData?: FormData): Promise<void> {
     // is the worse failure mode.
   }
 
-  cookieStore.delete('c4t_access')
-  cookieStore.delete('c4t_refresh')
+  clearSessionCookies(cookieStore)
   /**
    * Home, not `/login`.
    *

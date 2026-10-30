@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
+import { clearSessionCookies } from '@/lib/auth/cookie-bridge'
 import { actionFetch } from '@/lib/api/action-fetch'
 import { ApiError } from '@/lib/api/types'
 import { requireRole } from '@/lib/auth/session'
@@ -717,8 +718,7 @@ export async function deleteAccountAction(formData: FormData): Promise<void> {
    * `logoutAction` already makes for the same reason.
    */
   const cookieStore = await cookies()
-  cookieStore.delete('c4t_access')
-  cookieStore.delete('c4t_refresh')
+  clearSessionCookies(cookieStore)
 
   redirect('/login?notice=account_deleted', 'replace')
 }

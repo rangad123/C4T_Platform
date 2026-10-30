@@ -1,6 +1,7 @@
 'use server'
 
 import { cookies } from 'next/headers'
+import { clearSessionCookies } from '@/lib/auth/cookie-bridge'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { actionFetch } from '@/lib/api/action-fetch'
@@ -32,10 +33,6 @@ import { combinePhoneFromForm } from '@/lib/phone/combine'
 
 const PROFILE_PATH = '/app/admin/profile'
 
-/** Cookie names must match the API's ACCESS_COOKIE / REFRESH_COOKIE. */
-const ACCESS_COOKIE = 'c4t_access'
-const REFRESH_COOKIE = 'c4t_refresh'
-
 /**
  * The page is tabbed, so the redirect has to name the tab the form lives on —
  * otherwise a failed password change lands back on Profile with an error
@@ -58,8 +55,7 @@ function back(slug: string, kind: 'ok' | 'error', section?: 'password' | 'sessio
  */
 async function clearBridgedCookies(): Promise<void> {
   const cookieStore = await cookies()
-  cookieStore.delete(ACCESS_COOKIE)
-  cookieStore.delete(REFRESH_COOKIE)
+  clearSessionCookies(cookieStore)
 }
 
 /**
