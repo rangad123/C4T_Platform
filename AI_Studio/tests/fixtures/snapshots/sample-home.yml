@@ -1,0 +1,16 @@
+- banner:
+  - strong: DemoShop
+  - navigation "Main":
+    - link "Home":
+      - /url: /
+    - link "Products":
+      - /url: /products
+    - link "Cart (0)":
+      - /url: /cart
+    - link "Login":
+      - /url: /login
+- main:
+  - heading "Welcome to DemoShop" [level=1]
+  - paragraph: Quality outdoor gear for every trip.
+  - link "Browse products":
+    - /url: /products

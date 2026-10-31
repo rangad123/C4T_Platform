@@ -1,0 +1,23 @@
+{
+    "//": "The apps the AI tester is measured on. Add your own websites and Android apps here (see corpus.example.json and docs/features/evaluation.md). Sign-in details are names of environment variables, never the values.",
+    "name": "default",
+    "entries": [
+        {
+            "id": "sample-app",
+            "kind": "web",
+            "fixture": "sample-app",
+            "targets": ["web"],
+            "maxPages": 6,
+            "maxScenarios": 4,
+            "checks": false,
+            "notes": "Local fixture: the DemoShop sample website (examples/sample-app), started by the harness. Checks the harness itself."
+        },
+        {
+            "id": "fake-shop",
+            "kind": "android",
+            "fixture": "fake-shop",
+            "appPackage": "com.example.shop",
+            "notes": "Local fixture: the mock shop app on the fake adb (no phone, no emulator). Only with the platform the harness starts itself."
+        }
+    ]
+}

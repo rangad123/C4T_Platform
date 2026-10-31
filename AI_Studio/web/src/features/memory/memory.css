@@ -1,0 +1,9 @@
+.memory-facts { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0; padding: 0; list-style: none; }
+.memory-facts li { color: var(--text-secondary); font-size: 13.5px; }
+.memory-facts strong { color: var(--text-primary); font-weight: 600; }
+.memory-changes { display: grid; gap: 6px; }
+.memory-group { display: grid; gap: 2px; }
+.memory-group h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.memory-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.memory-list code { font-size: 12.5px; overflow-wrap: anywhere; }
+.memory-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

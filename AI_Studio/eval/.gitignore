@@ -1,0 +1,4 @@
+# Runs of the evaluation harness: kept by the owner and sent back by hand, not committed.
+results/
+# Data folder of the platform the harness starts itself.
+.data/

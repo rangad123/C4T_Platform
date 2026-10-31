@@ -1,0 +1,40 @@
+{
+    "//": "EXAMPLE ONLY: never run by the tests. Copy the entries you want into corpus.json (or pass this file with --corpus). Use sites and apps you are allowed to test; public demo sites change and may be down.",
+    "name": "public-demos",
+    "entries": [
+        {
+            "//": "A public demo shop made for practising test automation. Its test account is published on the site; put it in your .env as SAUCE_USER and SAUCE_PASSWORD.",
+            "id": "saucedemo",
+            "kind": "web",
+            "url": "https://www.saucedemo.com",
+            "credentials": { "username": "SAUCE_USER", "password": "SAUCE_PASSWORD" },
+            "maxPages": 10,
+            "maxScenarios": 10,
+            "notes": "Sign-in, product list, cart. Checkout is a data change: left alone unless the project allows tests that change data."
+        },
+        {
+            "//": "A practice site with many small pages (forms, tables, dynamic content). No account needed.",
+            "id": "the-internet",
+            "kind": "web",
+            "url": "https://the-internet.herokuapp.com",
+            "maxPages": 15,
+            "checks": false
+        },
+        {
+            "//": "A practice shop with an API next to its pages.",
+            "id": "automation-exercise",
+            "kind": "web",
+            "url": "https://automationexercise.com",
+            "targets": ["web", "api"],
+            "maxPages": 12
+        },
+        {
+            "//": "Your own Android app: the package name, and the .apk on this computer if the phone does not have it yet. The phone or emulator is the one the project uses (this computer, or a runner).",
+            "id": "my-android-app",
+            "kind": "android",
+            "appPackage": "com.example.myapp",
+            "apk": "C:/apps/myapp-debug.apk",
+            "credentials": { "username": "MYAPP_USER", "password": "MYAPP_PASSWORD" }
+        }
+    ]
+}

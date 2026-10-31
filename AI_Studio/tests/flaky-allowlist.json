@@ -1,0 +1,4 @@
+{
+    "about": "Flaky tests the release gate tolerates for a short time. Each entry: file, test (the full name as the report prints it, or \"(file)\" for an error outside the tests), reason (why, and who is fixing it), expires (YYYY-MM-DD, at most 90 days ahead). At most 20 entries. Expired or incomplete entries allow nothing. Reviewed like code: prefer fixing the test.",
+    "allowed": []
+}

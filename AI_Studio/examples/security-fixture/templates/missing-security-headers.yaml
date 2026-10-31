@@ -1,0 +1,23 @@
+id: fixture-missing-security-headers
+info:
+  name: Security headers not set on the home page
+  author: freit-security-fixture
+  severity: info
+  tags: header,misconfig
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        negative: true
+        words:
+          - "content-security-policy"
+      - type: word
+        part: header
+        negative: true
+        words:
+          - "x-content-type-options"

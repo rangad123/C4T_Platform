@@ -1,0 +1,12 @@
+/* Test files and the test data reset (Library, Test data). Uses the app's design tokens only. */
+.wp-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.wp-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-default); min-height: 44px; }
+.wp-item:last-child { border-bottom: 0; }
+.wp-main { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.wp-main code { overflow-wrap: anywhere; }
+.wp-grid { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.wp-grow { flex: 1 1 220px; min-width: 0; }
+.wp-headers { border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 8px 12px 12px; margin: 0; display: grid; gap: 8px; min-width: 0; }
+.wp-headers legend { padding: 0 4px; font-weight: 600; }
+.wp-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+@media (max-width: 560px) { .wp-item { flex-wrap: wrap; } }

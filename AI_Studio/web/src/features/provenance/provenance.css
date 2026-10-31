@@ -1,0 +1,4 @@
+/* The line under a test's title that says where it came from. Design tokens only. */
+.origin { display: grid; gap: 6px; }
+.origin-line { margin: 0; }
+.origin-line svg { display: inline-block; vertical-align: -2px; margin-right: 2px; color: var(--text-brand); }

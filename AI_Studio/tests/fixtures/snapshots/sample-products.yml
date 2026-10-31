@@ -1,0 +1,30 @@
+- banner:
+  - strong: DemoShop
+  - navigation "Main":
+    - link "Home":
+      - /url: /
+    - link "Products":
+      - /url: /products
+    - link "Cart (0)":
+      - /url: /cart
+    - link "Login":
+      - /url: /login
+- main:
+  - heading "Products" [level=1]
+  - search:
+    - text: Search products
+    - textbox "Search products"
+    - button "Search"
+  - paragraph: 4 products
+  - link "Trail Backpack":
+    - /url: /products/1
+  - text: — $89.00
+  - link "Insulated Bottle":
+    - /url: /products/2
+  - text: — $24.50
+  - link "Merino Socks":
+    - /url: /products/3
+  - text: — $18.00
+  - link "Headlamp Pro":
+    - /url: /products/4
+  - text: — $45.00

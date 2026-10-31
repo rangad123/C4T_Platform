@@ -1,0 +1,764 @@
+// The runner, end to end, on the computer this runs on: the same steps a tester takes, checked by a script.
+//   node scripts/smoke-runner.mjs [--kit files|installer|complete] [--port 6950] [--no-node-on-path] [--out <dir>] ...
+//   node scripts/smoke-runner.mjs --help
+//
+// 1. Starts the sample app (examples/sample-app) and the platform (src/main.ts) on a new temporary data folder with a new access key.
+// 2. Creates a project with one web test and one API test, imported through the API (no AI, no model key).
+// 3. Downloads a runner through the platform's own route (plain files, the installer, or the complete download), unpacks it with the
+//    computer's own unzip tool (Windows' tar.exe, macOS' ditto, unzip on Linux) into a folder with a space and brackets in its name, and
+//    starts it the way the README says (start-runner.cmd, sh start-runner.sh, or the installer's --silent switch).
+// 4. Waits for the runner to be online, sends the project's runs to it, runs both tests and checks they passed ON THE RUNNER.
+// 5. Revokes the runner's access and checks the runner ends with the plain "no longer accepts this runner's token" message.
+// 6. Stops what it started: only its own child processes, by the handles it holds (a Windows process tree by the id of the child it
+//    started, a Unix process group it created). Never anything by name or by port. Deletes its temporary folder.
+// It prints a short report and writes report.json, report.md and the logs (secrets removed) to --out. Exit code: 0 passed or skipped
+// (for example: the complete download was not built on this platform), 1 failed, 2 wrong arguments.
+// See docs/features/real-machine-checks.md. CI: .github/workflows/runner-matrix.yml.
+import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WIN = process.platform === "win32";
+
+export const KITS = ["files", "installer", "complete"];
+export const DEFAULT_PORT = 6950;
+/** Kept per child process (the end of what it printed); older output is dropped so a chatty run cannot fill the memory. */
+export const MAX_OUTPUT_CHARS = 4 * 1024 * 1024;
+
+export const HELP = `Runner smoke check: start the platform and a sample app, download a runner, start it like a tester, run a web and an API test on it.
+
+  node scripts/smoke-runner.mjs [options]
+
+  --kit files|installer|complete   which download to use (default files). complete is skipped plainly when this platform has not built it.
+  --port <n>                       the platform's port (default ${DEFAULT_PORT}); the sample app uses the next one
+  --no-node-on-path                start the runner with no Node.js on the PATH (only with --kit complete)
+  --link-node-modules              use this checkout's node_modules instead of npm install (only with --kit files; no internet needed)
+  --build-runner                   build the runner bundle into the temporary folder first (otherwise dist/runner is used)
+  --runner-kit-dir <dir>           a runner bundle somewhere else (RUNNER_KIT_DIR)
+  --installer-dir <dir>            an installer build somewhere else (RUNNER_INSTALLER_DIR)
+  --online-timeout <seconds>       how long the runner may take to come online (default 900, or 180 with --link-node-modules)
+  --test-timeout <seconds>         how long one test may take (default 300)
+  --name <text>                    the runner's name (default "Smoke runner")
+  --out <dir>                      where the report and logs go (default .scratch/smoke-runner/<time>)
+  --keep                           keep the temporary folder (its path is printed)
+  --help                           this text
+
+Exit code: 0 passed or skipped, 1 failed, 2 wrong arguments.`;
+
+export class UsageError extends Error {}
+/** A plain, expected reason not to go on (for example: no complete download on this platform). The run ends as "skipped", exit 0. */
+export class Skip extends Error {}
+
+const intArg = (name, raw, min, max) => {
+    if (raw === undefined || !/^\d+$/.test(raw)) throw new UsageError(`${name} needs a whole number.`);
+    const n = Number(raw);
+    if (n < min || n > max) throw new UsageError(`${name} must be between ${min} and ${max}.`);
+    return n;
+};
+
+/** Reads the command line. Throws UsageError with a plain sentence for anything it does not understand. */
+export function parseArgs(argv) {
+    const o = { kit: "files", port: DEFAULT_PORT, noNodeOnPath: false, linkNodeModules: false, buildRunner: false, keep: false, help: false, name: "Smoke runner", testTimeout: 300 };
+    const value = (i, flag) => {
+        const v = argv[i + 1];
+        if (v === undefined || v.startsWith("--")) throw new UsageError(`${flag} needs a value.`);
+        return v;
+    };
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        switch (a) {
+            case "--kit":
+                o.kit = value(i++, a);
+                if (!KITS.includes(o.kit)) throw new UsageError(`--kit must be one of: ${KITS.join(", ")}.`);
+                break;
+            case "--port":
+                o.port = intArg("--port", value(i++, a), 1024, 65534);
+                break;
+            case "--online-timeout":
+                o.onlineTimeout = intArg("--online-timeout", value(i++, a), 10, 7200);
+                break;
+            case "--test-timeout":
+                o.testTimeout = intArg("--test-timeout", value(i++, a), 10, 3600);
+                break;
+            case "--name": {
+                const n = value(i++, a).trim();
+                // The platform's own rule for a runner name (src/platform/runner-kit.ts KitRequest).
+                // eslint-disable-next-line no-control-regex
+                if (!n || n.length > 60 || /[\u0000-\u001f\u007f/\\:*?"<>|]/.test(n)) throw new UsageError("--name must be 1 to 60 characters, without / \\ : * ? \" < > |.");
+                o.name = n;
+                break;
+            }
+            case "--out":
+                o.out = path.resolve(value(i++, a));
+                break;
+            case "--runner-kit-dir":
+                o.runnerKitDir = path.resolve(value(i++, a));
+                break;
+            case "--installer-dir":
+                o.installerDir = path.resolve(value(i++, a));
+                break;
+            case "--no-node-on-path":
+                o.noNodeOnPath = true;
+                break;
+            case "--link-node-modules":
+                o.linkNodeModules = true;
+                break;
+            case "--build-runner":
+                o.buildRunner = true;
+                break;
+            case "--keep":
+                o.keep = true;
+                break;
+            case "--help":
+            case "-h":
+                o.help = true;
+                break;
+            default:
+                throw new UsageError(`Unknown option ${a}. Run with --help to see the options.`);
+        }
+    }
+    if (o.noNodeOnPath && o.kit !== "complete") throw new UsageError("--no-node-on-path only makes sense with --kit complete: the other downloads need a Node.js on the computer.");
+    if (o.linkNodeModules && o.kit !== "files") throw new UsageError("--link-node-modules only works with --kit files.");
+    if (o.buildRunner && o.runnerKitDir) throw new UsageError("Use --build-runner or --runner-kit-dir, not both.");
+    o.onlineTimeout ??= o.linkNodeModules ? 180 : 900;
+    return o;
+}
+
+// ── the computer ────────────────────────────────────────────────────────────
+
+/** The system and processor this runs on, in the platform's words (kit `platform`, `arch`) and in a person's. */
+export function hostTarget(platform = process.platform, arch = process.arch) {
+    const system = platform === "win32" ? "windows" : platform === "darwin" ? "mac" : "linux";
+    const cpu = arch === "arm64" ? "arm64" : "x64";
+    const label = `${{ windows: "Windows", mac: "macOS", linux: "Linux" }[system]} ${cpu === "arm64" ? "ARM64" : "x64"}`;
+    return { system, kitPlatform: system === "windows" ? "windows" : "unix", arch: cpu, id: `${system === "windows" ? "win" : system}-${cpu}`, label };
+}
+
+/** The PATH without any folder that holds Node.js or npm, for the "nothing installed" check. `removed` says which folders went. */
+export function pathWithoutNode(value, { platform = process.platform, exists = fs.existsSync } = {}) {
+    const win = platform === "win32";
+    const sep = win ? ";" : ":";
+    const join = win ? path.win32.join : path.posix.join;
+    const names = win ? ["node.exe", "node.cmd", "node", "npm.cmd", "npx.cmd"] : ["node", "npm", "npx"];
+    const kept = [];
+    const removed = [];
+    for (const dir of String(value ?? "").split(sep).filter(Boolean)) (names.some((n) => exists(join(dir, n))) ? removed : kept).push(dir);
+    // The start script needs the system's own tools; a system folder that also holds node cannot be left out (say so rather than pretend).
+    const essential = win ? [] : removed.filter((d) => ["/bin", "/usr/bin"].includes(d.replace(/\/+$/, "")));
+    return { value: kept.join(sep), removed, essential };
+}
+
+/** What the platform is asked for. `complete`, `arch` and (Mac or Linux) `os` are the complete download's fields (runner-kit-complete.ts). */
+export function kitRequestBody(kit, target, name) {
+    if (kit === "complete") return { name, platform: target.kitPlatform, complete: true, arch: target.arch, ...(target.kitPlatform === "unix" ? { os: target.system } : {}) };
+    return { name, platform: target.kitPlatform, kind: kit === "installer" ? "installer" : "files" };
+}
+
+/**
+ * Decides what a download answer means: go on, a plain skip (the platform does not offer this download, or did not build it), or a failure.
+ * `answer` is { status, kind (x-runner-kit-kind), note (x-runner-kit-note), message (the server's own sentence) }.
+ */
+export function interpretKitAnswer(kit, target, answer) {
+    const { status, kind, note, message = "" } = answer;
+    if (kit === "installer" && target.system === "linux") return { skip: "There is no installer for Linux (the Mac app is for macOS). Use --kit files or --kit complete." };
+    if (kit === "complete") {
+        // Before the complete download existed, the route refused the unknown fields; that is "not offered here", not a failure.
+        // (Only that answer: any other 400 is a wrong request and fails.)
+        if (status === 400 && /unrecognized key/i.test(message)) return { skip: `This platform does not offer the complete download yet (it answered: ${message})` };
+        if (status === 503) return { skip: `The complete download for ${target.id} has not been built on this platform: ${message || "no reason given"}` };
+    }
+    if (status === 503 && kit !== "complete") return { fail: `The platform has no runner download: ${message}` };
+    if (status !== 200) return { fail: `The download was refused (${status}): ${message || "no reason given"}` };
+    if (kit === "installer" && kind && kind !== "installer") return { skip: `This platform has no installer for ${target.label}, it sent plain files instead. ${note ?? ""}`.trim() };
+    return { ok: true };
+}
+
+/** How the README says to start each download. `kitDir` is the unpacked folder, `installDir` where an installer may install. */
+export function startCommand(kit, target, kitDir, installDir) {
+    if (kit === "installer") {
+        if (target.system === "windows") return { command: path.join(kitDir, "AITestingRunnerSetup.exe"), args: ["--silent", "--install-dir", installDir] };
+        return { command: "sh", args: [path.join(kitDir, "AI Testing Runner.app", "Contents", "Resources", "runner-setup.sh"), "--silent", "--no-autostart", "--install-dir", installDir] };
+    }
+    if (target.system === "windows") return { command: path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"), args: ["/d", "/c", ".\\start-runner.cmd"] };
+    return { command: "sh", args: ["start-runner.sh"] };
+}
+
+/** Secrets never reach a report or log: the access key, the runner token and anything that looks like a project token. */
+export function redact(text, secrets = []) {
+    let out = String(text);
+    for (const s of secrets) if (s && s.length >= 8) out = out.split(s).join("***");
+    return out.replace(/aitg_[A-Za-z0-9_-]{6,}/g, "aitg_***");
+}
+
+/** Did the start script say it used the Node.js inside the download? */
+export function usedBundledNode(output, kitDir) {
+    if (/came with this download/i.test(output)) return true;
+    const m = /Using Node\.js v\d+\.\d+\.\d+ from (.+?)\.?\r?$/m.exec(output);
+    if (!m) return false;
+    const norm = (p) => p.replace(/\\/g, "/").toLowerCase();
+    return norm(m[1]).startsWith(norm(kitDir));
+}
+
+// ── child processes: only ours, by the handles we hold ─────────────────────
+
+export class Children {
+    constructor() {
+        this.list = [];
+    }
+
+    /** Starts a process. On Unix it leads a new process group so it can be stopped with everything it started, and nothing else. */
+    start(name, command, args, { cwd, env } = {}) {
+        const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: !WIN });
+        const entry = { name, child, output: "", code: undefined, error: undefined };
+        const add = (d) => {
+            entry.output += String(d);
+            if (entry.output.length > MAX_OUTPUT_CHARS) entry.output = entry.output.slice(-MAX_OUTPUT_CHARS);
+        };
+        child.stdout?.on("data", add);
+        child.stderr?.on("data", add);
+        entry.exited = new Promise((resolve) => {
+            child.on("error", (e) => {
+                entry.error = e.message;
+                if (entry.code === undefined) entry.code = null;
+                resolve(null);
+            });
+            child.on("exit", (code, signal) => {
+                entry.code = code ?? (signal ? `signal ${signal}` : null);
+                resolve(entry.code);
+            });
+        });
+        this.list.push(entry);
+        return entry;
+    }
+
+    static running(entry) {
+        return entry.code === undefined;
+    }
+
+    /** Stops one of ours: its Windows process tree (by the id of the child we started) or its Unix process group. */
+    async stop(entry) {
+        const pid = entry.child.pid;
+        if (pid && WIN) {
+            if (Children.running(entry)) spawnSync(path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        } else if (pid) {
+            // The group lives on while any member does, even after its leader has gone: always end the whole group.
+            const group = (sig) => {
+                try {
+                    process.kill(-pid, sig);
+                } catch {
+                    /* the group is gone */
+                }
+            };
+            group("SIGTERM");
+            await Promise.race([entry.exited, sleep(5000)]);
+            group("SIGKILL");
+        }
+        await Promise.race([entry.exited, sleep(10_000)]);
+    }
+
+    /** Stops everything this run started, newest first. */
+    async stopAll() {
+        for (const e of [...this.list].reverse()) await this.stop(e);
+    }
+}
+
+// ── small helpers ───────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const tail = (text, lines = 25) => String(text).replace(/\r/g, "").trimEnd().split("\n").slice(-lines).join("\n");
+export const fmtMs = (ms) => (ms >= 60_000 ? `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s` : `${(ms / 1000).toFixed(1)} s`);
+
+async function until(what, probe, ms, every = 1000) {
+    const end = Date.now() + ms;
+    for (;;) {
+        const v = await probe();
+        if (v) return v;
+        if (Date.now() > end) throw new Error(`Timed out after ${fmtMs(ms)} waiting for ${what}.`);
+        await sleep(every);
+    }
+}
+
+function client(base, apiKey) {
+    return async (method, url, body) => {
+        const res = await fetch(`${base}${url}`, {
+            method,
+            headers: { "x-api-key": apiKey, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+            signal: AbortSignal.timeout(120_000),
+        });
+        const buf = Buffer.from(await res.arrayBuffer());
+        const text = buf.toString("utf8");
+        let json;
+        try {
+            json = JSON.parse(text);
+        } catch {
+            json = undefined;
+        }
+        return { status: res.status, headers: res.headers, buf, text, json, message: json?.error ?? json?.message ?? (res.ok ? "" : text.slice(0, 300)) };
+    };
+}
+
+/** A complete download can be a few hundred MB: it is written to the file as it arrives, never held in memory. Larger than this is refused. */
+export const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
+
+async function downloadKit(base, apiKey, projectId, body, file) {
+    const res = await fetch(`${base}/api/projects/${projectId}/runner-kits`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(900_000),
+    });
+    if (res.status !== 200 || !res.body) {
+        const text = await res.text();
+        let json;
+        try {
+            json = JSON.parse(text);
+        } catch {
+            json = undefined;
+        }
+        return { status: res.status, headers: res.headers, bytes: 0, message: json?.error ?? json?.message ?? text.slice(0, 300) };
+    }
+    let bytes = 0;
+    const out = fs.createWriteStream(file);
+    try {
+        for await (const chunk of res.body) {
+            bytes += chunk.length;
+            if (bytes > MAX_DOWNLOAD_BYTES) throw new Error(`The download is larger than ${MAX_DOWNLOAD_BYTES / 1048576} MB.`);
+            if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+        }
+    } finally {
+        await new Promise((r) => out.end(r));
+    }
+    return { status: res.status, headers: res.headers, bytes, message: "" };
+}
+
+/** Process environment for the platform: the computer's basics only, so a developer's own settings (DATA_DIR, model keys, ...) never leak in. */
+const BASIC_ENV = /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|SYSTEMDRIVE|TEMP|TMP|TMPDIR|HOME|USERPROFILE|HOMEDRIVE|HOMEPATH|LOCALAPPDATA|APPDATA|PROGRAMDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES.*|USERNAME|USER|LOGNAME|SHELL|LANG|LC_.*|TZ|NUMBER_OF_PROCESSORS|PROCESSOR_.*|OS|XDG_.*|PLAYWRIGHT_BROWSERS_PATH|CI|GITHUB_ACTIONS|HTTPS?_PROXY|NO_PROXY|NODE_EXTRA_CA_CERTS)$/i;
+
+export function platformEnv(base, s) {
+    const env = Object.fromEntries(Object.entries(base).filter(([k, v]) => v !== undefined && BASIC_ENV.test(k)));
+    Object.assign(env, {
+        DATA_DIR: s.dataDir,
+        API_KEY: s.apiKey,
+        HOST: "127.0.0.1",
+        PORT: String(s.port),
+        PUBLIC_URL: `http://127.0.0.1:${s.port}`,
+        LLM_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "",
+        OPENAI_API_KEY: "",
+        GOOGLE_GENERATIVE_AI_API_KEY: "",
+        LLM_API_KEY: "",
+        WORKER_EMBEDDED: "true",
+        SCHEDULER_ENABLED: "false",
+        CONCURRENCY: "2",
+        MAX_REPAIR_ATTEMPTS: "0",
+        // A quicker runner conversation than the defaults; the protocol is the same.
+        AGENT_POLL_SECONDS: "2",
+        AGENT_LEASE_SECONDS: "30",
+        AGENT_NO_AGENT_GRACE_SECONDS: "60",
+    });
+    if (s.runnerKitDir) env.RUNNER_KIT_DIR = s.runnerKitDir;
+    if (s.installerDir) env.RUNNER_INSTALLER_DIR = s.installerDir;
+    return env;
+}
+
+/** Environment for the runner: the computer's own, as a person's window has it, without the platform's settings or our test switches. */
+export function runnerEnv(base, { linkNodeModules = false, path: pathValue } = {}) {
+    const env = Object.fromEntries(Object.entries(base).filter(([k, v]) => v !== undefined && !/^(AGENT_|RUNNER_|AITP_)/i.test(k) && !/^(API_KEY|DATA_DIR|PUBLIC_URL|SECRET_KEY)$/i.test(k)));
+    // No "press a key" pause and no window: the script must end on its own when the runner stops.
+    Object.assign(env, { AITP_KIT_NO_PAUSE: "1", AITP_INSTALLER_NO_PAUSE: "1", AITP_INSTALLER_NO_UI: "1" });
+    if (linkNodeModules) env.AITP_KIT_SKIP_INSTALL = "1";
+    if (pathValue !== undefined) {
+        for (const k of Object.keys(env)) if (k.toUpperCase() === "PATH") delete env[k];
+        env.PATH = pathValue;
+    }
+    return env;
+}
+
+// ── unpacking like a person ─────────────────────────────────────────────────
+
+/** The Unix permission bits each zip entry carries (central directory, external attributes), for the unpacker without a system tool. */
+export function zipModes(buf) {
+    const modes = new Map();
+    for (let i = buf.length - 22; i >= 0 && i > buf.length - 65_600; i--) {
+        if (buf.readUInt32LE(i) !== 0x06054b50) continue;
+        let p = buf.readUInt32LE(i + 16);
+        const count = buf.readUInt16LE(i + 10);
+        for (let n = 0; n < count && buf.readUInt32LE(p) === 0x02014b50; n++) {
+            const madeOnUnix = buf[p + 5] === 3;
+            const nameLen = buf.readUInt16LE(p + 28);
+            const extraLen = buf.readUInt16LE(p + 30);
+            const commentLen = buf.readUInt16LE(p + 32);
+            const attrs = buf.readUInt32LE(p + 38);
+            const name = buf.subarray(p + 46, p + 46 + nameLen).toString("utf8");
+            if (madeOnUnix && attrs >>> 16) modes.set(name, (attrs >>> 16) & 0o777);
+            p += 46 + nameLen + extraLen + commentLen;
+        }
+        break;
+    }
+    return modes;
+}
+
+async function unpackBuiltIn(zipFile, dest) {
+    const { unzipSync } = await import("fflate");
+    const buf = fs.readFileSync(zipFile);
+    const modes = zipModes(buf);
+    for (const [name, bytes] of Object.entries(unzipSync(new Uint8Array(buf)))) {
+        if (name.endsWith("/")) continue;
+        const target = path.resolve(dest, name);
+        if (!target.startsWith(path.resolve(dest) + path.sep)) throw new Error(`The zip holds a path outside its folder: ${name}`);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, bytes, { mode: modes.get(name) ?? 0o644 });
+    }
+}
+
+/** Unpacks with the tool a person's computer has (Windows' tar.exe, macOS' ditto, unzip), or the built-in reader when it is missing. */
+export async function unpackZip(zipFile, dest, { platform = process.platform, builtInOnly = false } = {}) {
+    fs.mkdirSync(dest, { recursive: true });
+    const tool = builtInOnly
+        ? undefined
+        : platform === "win32"
+          ? [path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", zipFile, "-C", dest]]
+          : platform === "darwin"
+            ? ["/usr/bin/ditto", ["-x", "-k", zipFile, dest]]
+            : ["unzip", ["-q", "-o", zipFile, "-d", dest]];
+    if (tool && (path.isAbsolute(tool[0]) ? fs.existsSync(tool[0]) : spawnSync(tool[0], ["-v"], { stdio: "ignore" }).status === 0)) {
+        const r = spawnSync(tool[0], tool[1], { encoding: "utf8", windowsHide: true, timeout: 600_000 });
+        if (r.status !== 0) throw new Error(`Unpacking with ${path.basename(tool[0])} failed: ${(r.stderr || r.stdout || r.error?.message || "").trim().slice(0, 300)}`);
+        return path.basename(tool[0]);
+    }
+    await unpackBuiltIn(zipFile, dest);
+    return "built-in unzip";
+}
+
+// ── the report ──────────────────────────────────────────────────────────────
+
+const KIT_WORDS = { files: "plain files", installer: "installer", complete: "complete download" };
+
+export function renderReport(r) {
+    const lines = [];
+    const verdict = { passed: "passed", failed: "FAILED", skipped: "skipped" }[r.verdict] ?? r.verdict;
+    lines.push(`Runner smoke check ${verdict}: ${KIT_WORDS[r.kit] ?? r.kit}${r.noNodeOnPath ? " with no Node.js on the PATH" : ""}, ${r.target?.label ?? "unknown computer"}, Node.js ${r.node}, ${fmtMs(r.durationMs ?? 0)}.`);
+    if (r.skipReason) lines.push(`Skipped: ${r.skipReason}`);
+    if (r.error) lines.push(`Problem: ${r.error}`);
+    for (const s of r.steps ?? []) lines.push(`  ${s.status === "ok" ? "ok  " : s.status === "skipped" ? "skip" : "FAIL"}  ${s.name} (${fmtMs(s.ms)})${s.detail ? `: ${s.detail}` : ""}`);
+    if (r.tests?.length) {
+        lines.push("Tests:");
+        for (const t of r.tests) lines.push(`  ${t.status === "passed" ? "ok  " : "FAIL"}  ${t.title} (${t.kind}): ${t.status}, ${t.where}${t.browser ? `, ${t.browser}` : ""}`);
+    }
+    for (const n of r.notes ?? []) lines.push(`Note: ${n}`);
+    if (r.outDir) lines.push(`Report and logs: ${r.outDir}`);
+    if (r.kept) lines.push(`Temporary folder kept: ${r.kept}`);
+    return lines.join("\n");
+}
+
+// ── the run ─────────────────────────────────────────────────────────────────
+
+/** The two tests: the sample app's home page in a browser, and its product list over HTTP. No AI is involved. */
+export function smokeSpecs(appUrl) {
+    return [
+        { title: "The home page welcomes people", kind: "web", category: "Web", steps: [{ action: "navigate", url: `${appUrl}/` }, { action: "assert", check: "visible", locator: { by: "text", value: "Welcome to DemoShop" } }] },
+        { title: "The product list answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/api/products" }, { action: "assertResponse", check: "status", expected: 200 }] },
+    ];
+}
+
+async function defaultStartApp({ children, port }) {
+    const entry = children.start("sample app", process.execPath, [path.join(REPO, "examples", "sample-app", "server.mjs"), String(port)], { cwd: REPO, env: { ...process.env, PORT: String(port) } });
+    const url = `http://127.0.0.1:${port}`;
+    await until("the sample app to answer", async () => {
+        if (!Children.running(entry)) throw new Error(`The sample app stopped (code ${entry.code}). Is port ${port} in use?\n${tail(entry.output)}`);
+        return fetch(`${url}/`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok, () => false);
+    }, 30_000, 300);
+    return { url, entry };
+}
+
+async function defaultStartPlatform({ children, port, env }) {
+    const entry = children.start("platform", process.execPath, [path.join(REPO, "node_modules", "tsx", "dist", "cli.mjs"), path.join("src", "main.ts")], { cwd: REPO, env });
+    const base = `http://127.0.0.1:${port}`;
+    await until("the platform to answer", async () => {
+        if (!Children.running(entry)) throw new Error(`The platform stopped while starting (code ${entry.code}). Is port ${port} in use?\n${tail(entry.output)}`);
+        return fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok, () => false);
+    }, 180_000, 500);
+    return { base, entry };
+}
+
+/**
+ * Runs the whole check and returns the report (it never throws for a failed check). `deps` replaces the parts that start the platform and
+ * the sample app (the unit test uses a small stand-in platform).
+ */
+export async function runSmoke(opts, deps = {}) {
+    const startApp = deps.startApp ?? defaultStartApp;
+    const startPlatform = deps.startPlatform ?? defaultStartPlatform;
+    const target = deps.target ?? hostTarget();
+    const children = deps.children ?? new Children();
+    const started = Date.now();
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const outDir = opts.out ?? path.join(REPO, ".scratch", "smoke-runner", `${opts.kit}-${stamp}`);
+    const apiKey = `smoke-${randomBytes(18).toString("hex")}`;
+    const secrets = [apiKey];
+    const report = { tool: "smoke-runner", format: 1, verdict: "failed", kit: opts.kit, noNodeOnPath: opts.noNodeOnPath, linkNodeModules: opts.linkNodeModules, target, node: process.version, startedAt: new Date(started).toISOString(), steps: [], tests: [], notes: [], outDir };
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-smoke-"));
+    const links = [];
+    let runner;
+    let kitDir;
+
+    const step = async (name, fn) => {
+        const t0 = Date.now();
+        try {
+            const detail = await fn();
+            report.steps.push({ name, status: "ok", ms: Date.now() - t0, ...(detail ? { detail: redact(detail, secrets) } : {}) });
+            return detail;
+        } catch (e) {
+            report.steps.push({ name, status: e instanceof Skip ? "skipped" : "failed", ms: Date.now() - t0, detail: redact(e.message, secrets) });
+            throw e;
+        }
+    };
+
+    try {
+        let runnerKitDir = opts.runnerKitDir;
+        if (opts.buildRunner) {
+            await step("Build the runner bundle", async () => {
+                const { buildRunner } = await import(pathToFileURL(path.join(REPO, "scripts", "build-runner.mjs")).href);
+                runnerKitDir = path.join(tmp, "dist-runner");
+                await buildRunner({ outDir: runnerKitDir });
+                return "built into the temporary folder";
+            });
+        }
+        let app;
+        await step("Start the sample app", async () => {
+            app = await startApp({ children, port: opts.port + 1 });
+            return app.url;
+        });
+        let platform;
+        await step("Start the platform on a new data folder", async () => {
+            const env = platformEnv(process.env, { dataDir: path.join(tmp, "data"), apiKey, port: opts.port, runnerKitDir, installerDir: opts.installerDir });
+            platform = await startPlatform({ children, port: opts.port, env, apiKey });
+            return platform.base;
+        });
+        const api = client(platform.base, apiKey);
+
+        let projectId;
+        let testIds = [];
+        const specs = smokeSpecs(app.url);
+        await step("Create a project with a web test and an API test (no AI)", async () => {
+            const p = await api("POST", "/api/projects", { name: `Runner smoke ${target.id}` });
+            if (p.status >= 300 || !p.json?.id) throw new Error(`Could not create the project (${p.status}): ${p.message}`);
+            projectId = p.json.id;
+            const imp = await api("POST", `/api/projects/${projectId}/specs`, { baseUrl: app.url, validate: false, specs });
+            if (imp.status !== 202 && imp.status !== 200) throw new Error(`Could not import the two tests (${imp.status}): ${imp.message}`);
+            testIds = (imp.json?.tests ?? []).map((t) => t.id);
+            if (testIds.length !== specs.length) throw new Error(`The import made ${testIds.length} tests, expected ${specs.length}.`);
+            return `project ${projectId}`;
+        });
+
+        let tokenId;
+        let zipFile;
+        await step(`Download the runner (${KIT_WORDS[opts.kit]})`, async () => {
+            const downloads = path.join(tmp, "Downloads");
+            fs.mkdirSync(downloads, { recursive: true });
+            const res = await downloadKit(platform.base, apiKey, projectId, kitRequestBody(opts.kit, target, opts.name), path.join(downloads, "download.part"));
+            const decision = interpretKitAnswer(opts.kit, target, { status: res.status, kind: res.headers.get("x-runner-kit-kind") ?? undefined, note: res.headers.get("x-runner-kit-note") ?? undefined, message: res.message });
+            if (decision.skip) throw new Skip(decision.skip);
+            if (decision.fail) throw new Error(decision.fail);
+            tokenId = res.headers.get("x-runner-token-id");
+            if (!tokenId) throw new Error("The download did not say which access it made (x-runner-token-id).");
+            const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "runner.zip";
+            if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName)) throw new Error(`Unexpected file name ${fileName}`);
+            zipFile = path.join(downloads, fileName);
+            fs.renameSync(path.join(downloads, "download.part"), zipFile);
+            return `${fileName}, ${(res.bytes / 1048576).toFixed(1)} MB`;
+        });
+
+        await step("Unpack it", async () => {
+            // A space and brackets on purpose: that is what a second download in a Downloads folder looks like.
+            const dest = path.join(tmp, "Downloads", "smoke runner (1)");
+            const tool = await unpackZip(zipFile, dest);
+            const top = fs.readdirSync(dest);
+            if (top.length !== 1 || !fs.statSync(path.join(dest, top[0])).isDirectory()) throw new Error(`The zip should hold one folder, it holds: ${top.join(", ")}`);
+            kitDir = path.join(dest, top[0]);
+            const tokenFile = path.join(kitDir, "runner.token");
+            if (!fs.existsSync(tokenFile)) throw new Error("The download has no runner.token.");
+            secrets.push(fs.readFileSync(tokenFile, "utf8").trim());
+            if (opts.kit === "complete") {
+                const own = ["node.exe", path.join("bin", "node")].some((f) => fs.existsSync(path.join(kitDir, "node", f)));
+                if (!own) throw new Error("The complete download has no Node.js of its own (no node folder with node.exe or bin/node).");
+            }
+            if (opts.linkNodeModules) {
+                const link = path.join(kitDir, "node_modules");
+                fs.symlinkSync(path.join(REPO, "node_modules"), link, WIN ? "junction" : "dir");
+                links.push(link);
+            }
+            return `with ${tool}${opts.linkNodeModules ? ", node_modules linked to this checkout" : ""}`;
+        });
+
+        let pathValue;
+        if (opts.noNodeOnPath) {
+            await step("Build a PATH without Node.js", async () => {
+                const clean = pathWithoutNode(process.env.PATH ?? process.env.Path ?? "");
+                if (clean.essential.length) throw new Error(`Node.js is in ${clean.essential.join(", ")}, which the start script also needs for its own tools, so a PATH without Node.js cannot be made on this computer.`);
+                pathValue = clean.value;
+                return clean.removed.length ? `left out ${clean.removed.length} folder(s): ${clean.removed.join(", ")}` : "no folder on the PATH held Node.js";
+            });
+        }
+
+        const cmd = startCommand(opts.kit, target, kitDir, path.join(tmp, "install folder"));
+        await step(`Start it (${[path.basename(cmd.command), ...cmd.args.map((a) => (a.length > 3 && path.isAbsolute(a) ? path.basename(a) : a))].join(" ")})`, async () => {
+            const program = opts.kit === "installer" ? (target.system === "windows" ? cmd.command : cmd.args[0]) : path.join(kitDir, target.system === "windows" ? "start-runner.cmd" : "start-runner.sh");
+            if (!fs.existsSync(program)) throw new Error(`${path.basename(program)} is not in the download.`);
+            runner = children.start("runner", cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
+            return undefined;
+        });
+
+        await step("Wait for the runner to be online", async () => {
+            const t0 = Date.now();
+            await until("the runner to be online", async () => {
+                if (!Children.running(runner)) throw new Error(`The runner stopped before it was online (code ${runner.code}${runner.error ? `, ${runner.error}` : ""}).\n${tail(runner.output)}`);
+                const list = await api("GET", `/api/projects/${projectId}/agents`);
+                return Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online);
+            }, opts.onlineTimeout * 1000, 2000).catch((e) => {
+                throw new Error(`${e.message}${Children.running(runner) ? `\nLast lines from the runner window:\n${tail(runner.output)}` : ""}`);
+            });
+            const nodeLine = /^.*(Using (the )?Node\.js[^\r\n]*)$/m.exec(runner.output)?.[1];
+            return `after ${fmtMs(Date.now() - t0)}${nodeLine ? `; ${nodeLine.trim()}` : ""}`;
+        });
+
+        if (opts.kit === "complete") {
+            await step("Check it used the Node.js inside the download", async () => {
+                if (!usedBundledNode(runner.output, kitDir)) throw new Error("The start script did not say it used the Node.js that came with the download.");
+                return undefined;
+            });
+        }
+
+        await step("Send the project's runs to the runner", async () => {
+            const r = await api("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" });
+            if (r.status !== 200) throw new Error(`The platform refused (${r.status}): ${r.message}`);
+            return undefined;
+        });
+
+        for (let i = 0; i < testIds.length; i++) {
+            const spec = specs[i];
+            await step(`Run the ${spec.kind === "web" ? "web" : "API"} test`, async () => {
+                const run = await api("POST", `/api/tests/${testIds[i]}/validate`);
+                if (run.status !== 202) throw new Error(`The run did not start (${run.status}): ${run.message}`);
+                const job = await until(`the ${spec.kind} test to finish`, async () => {
+                    const j = (await api("GET", `/api/test-generation/${run.json.jobId}`)).json;
+                    return j && ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"].includes(j.status) ? j : undefined;
+                }, opts.testTimeout * 1000, 1000);
+                const exec = (await api("GET", `/api/tests/${testIds[i]}/executions`)).json?.[0];
+                const where = job.ranOn?.kind === "agent" ? `ran on the runner "${job.ranOn.name}"` : job.ranOn?.kind === "platform" ? "ran on the platform" : "where it ran is not known";
+                const b = exec?.browser ?? job.browser;
+                const browser = b && typeof b === "object" ? `${b.name ?? "browser"} ${b.version ?? ""} (${b.source ?? "unknown source"})`.replace(/\s+/g, " ") : undefined;
+                const status = exec?.status ?? `no result (job ${job.status})`;
+                report.tests.push({ title: spec.title, kind: spec.kind, status, where, ...(browser ? { browser } : {}), jobStatus: job.status, ...(exec?.error ? { error: redact(String(exec.error).slice(0, 500), secrets) } : {}) });
+                if (job.ranOn?.kind !== "agent" || job.ranOn.name !== opts.name) throw new Error(`It ${where}, not on the runner "${opts.name}".`);
+                if (status !== "passed") throw new Error(`It ended ${status}${exec?.error ? `: ${String(exec.error).slice(0, 300)}` : ""}.`);
+                return where;
+            });
+        }
+
+        await step("Revoke the runner's access and check it stops with a plain message", async () => {
+            const r = await api("DELETE", `/api/projects/${projectId}/agent-tokens/${tokenId}`);
+            if (r.status !== 200) throw new Error(`Revoking failed (${r.status}): ${r.message}`);
+            await Promise.race([runner.exited, sleep(120_000)]);
+            if (Children.running(runner)) throw new Error(`The runner was still running 2 minutes after its access was revoked.\n${tail(runner.output)}`);
+            if (!/no longer accepts this runner/i.test(runner.output)) throw new Error(`The runner stopped (code ${runner.code}) without the plain "no longer accepts this runner's token" message.\n${tail(runner.output)}`);
+            return `ended with code ${runner.code}`;
+        });
+
+        await step("Check no secret was printed", async () => {
+            const leaks = children.list.filter((c) => secrets.slice(1).some((s) => s && c.output.includes(s))).map((c) => c.name);
+            if (leaks.length) throw new Error(`The runner token appeared in the output of: ${leaks.join(", ")}.`);
+            return undefined;
+        });
+        report.verdict = "passed";
+    } catch (e) {
+        if (e instanceof Skip) {
+            report.verdict = "skipped";
+            report.skipReason = e.message;
+        } else {
+            report.verdict = "failed";
+            report.error = redact(String(e?.message ?? e).split("\n")[0], secrets);
+        }
+    } finally {
+        const t0 = Date.now();
+        let cleanup = "stopped what this run started";
+        try {
+            await children.stopAll();
+            // The link to this checkout's node_modules goes first, and only the link (rmdir of a junction, unlink of a symlink): a recursive
+            // delete must never walk into the real folder.
+            for (const l of links) {
+                if (WIN) fs.rmdirSync(l);
+                else fs.unlinkSync(l);
+            }
+            if (links.some((l) => fs.existsSync(l))) throw new Error(`The link ${links.find((l) => fs.existsSync(l))} could not be removed, so the temporary folder was kept.`);
+            if (opts.linkNodeModules && !fs.existsSync(path.join(REPO, "node_modules", "playwright", "package.json"))) throw new Error("This checkout's node_modules is damaged after the clean-up.");
+            if (opts.keep) report.kept = tmp;
+            else {
+                try {
+                    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+                } catch {
+                    report.notes.push(`The temporary folder ${tmp} could not be deleted completely; the system cleans it up later.`);
+                }
+            }
+        } catch (e) {
+            cleanup = e.message;
+            report.verdict = "failed";
+            report.error ??= e.message;
+        }
+        report.steps.push({ name: "Clean up", status: cleanup.startsWith("stopped") ? "ok" : "failed", ms: Date.now() - t0, detail: cleanup });
+        report.durationMs = Date.now() - started;
+        writeReport(report, children, outDir, secrets);
+    }
+    return report;
+}
+
+function writeReport(report, children, outDir, secrets) {
+    try {
+        fs.mkdirSync(outDir, { recursive: true });
+        fs.writeFileSync(path.join(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+        fs.writeFileSync(path.join(outDir, "report.md"), `# Runner smoke check\n\n\`\`\`\n${renderReport(report)}\n\`\`\`\n`);
+        for (const c of children.list) fs.writeFileSync(path.join(outDir, `${c.name.replace(/[^a-z0-9]+/gi, "-")}.log`), redact(c.output, secrets));
+    } catch (e) {
+        report.notes.push(`The report could not be written to ${outDir}: ${e.message}`);
+    }
+}
+
+// ── command line ────────────────────────────────────────────────────────────
+
+async function main() {
+    let opts;
+    try {
+        opts = parseArgs(process.argv.slice(2));
+    } catch (e) {
+        if (!(e instanceof UsageError)) throw e;
+        console.error(e.message);
+        process.exit(2);
+    }
+    if (opts.help) {
+        console.log(HELP);
+        return;
+    }
+    const children = new Children();
+    // Ctrl-C: stop only what this run started, then leave.
+    const interrupt = async () => {
+        await children.stopAll();
+        process.exit(1);
+    };
+    process.once("SIGINT", interrupt);
+    process.once("SIGTERM", interrupt);
+    console.log(`Runner smoke check: ${KIT_WORDS[opts.kit]}${opts.noNodeOnPath ? ", no Node.js on the PATH" : ""}, port ${opts.port}. This takes a few minutes.`);
+    const report = await runSmoke(opts, { children });
+    console.log(renderReport(report));
+    process.exit(report.verdict === "failed" ? 1 : 0);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    main().catch((e) => {
+        console.error(`The smoke check itself could not run: ${e?.stack ?? e}`);
+        process.exit(1);
+    });
+}

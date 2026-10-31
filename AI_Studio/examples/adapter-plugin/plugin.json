@@ -1,0 +1,7 @@
+{
+    "name": "node-http-check",
+    "version": "1.0.0",
+    "apiVersion": 1,
+    "description": "Example plug-in: runs API tests as small plain Node.js scripts that use the built-in fetch and node:assert. No dependencies.",
+    "adapters": [{ "id": "node-http-check", "label": "Node HTTP check (example plug-in)" }]
+}

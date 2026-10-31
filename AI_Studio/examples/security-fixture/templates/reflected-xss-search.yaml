@@ -1,0 +1,16 @@
+id: fixture-reflected-xss-search
+info:
+  name: Reflected cross-site scripting in the search term
+  author: freit-security-fixture
+  severity: medium
+  tags: exposure,reflection
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "<script>alert(1)</script>"

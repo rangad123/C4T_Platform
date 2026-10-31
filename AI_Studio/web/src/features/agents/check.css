@@ -1,0 +1,11 @@
+/* "Check this computer" on a runner's row (check.tsx). Design tokens only. */
+.ag-check { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--status-warning-line); border-radius: var(--radius-sm); background: var(--status-warning-bg); }
+.ag-check-head { margin: 0; font-size: var(--type-body-sm-size); }
+.ag-check-count { color: var(--status-warning-fg); font-weight: var(--fw-medium); }
+.ag-check-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--type-body-sm-size); overflow-wrap: anywhere; }
+.ag-check-all { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: var(--type-body-sm-size); }
+.ag-check-all li { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 2px 12px; overflow-wrap: anywhere; }
+.ag-check-status { color: var(--text-secondary); font-weight: var(--fw-medium); }
+.ag-check-status.is-ok { color: var(--status-success-fg); }
+.ag-check-status.is-missing { color: var(--status-warning-fg); }
+@media (max-width: 640px) { .ag-check-all li { grid-template-columns: minmax(0, 1fr); } }

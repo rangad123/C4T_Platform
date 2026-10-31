@@ -1,0 +1,25 @@
+/* Add a runner: three steps in one card. Design tokens only; shared classes (card, callout, check, field) do the rest. */
+.ark-body { display: grid; gap: 16px; padding: var(--space-card-padding); }
+.ark-step { display: grid; gap: 16px; min-width: 0; }
+.ark-step-title { margin: 0; }
+.ark-step-title:focus { outline: none; }
+.ark-step-title:focus-visible { box-shadow: var(--focus-ring-soft); border-radius: var(--radius-xs); }
+.ark-progress { display: flex; align-items: center; gap: 12px; margin: 0; color: var(--text-secondary); font-size: var(--type-body-sm-size); }
+.ark-dots { display: inline-flex; gap: 6px; }
+.ark-dots i { width: 28px; height: 4px; border-radius: var(--radius-full); background: var(--border-default); }
+.ark-dots i.on { background: var(--accent, var(--text-brand)); }
+.ark-os-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
+.ark-os-grid.three { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.ark-os-pick { min-height: 72px; align-items: center; }
+.ark-size { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); font-weight: var(--fw-regular, 400); }
+.ark-os-pick:has(input:checked) { border-color: var(--text-brand); box-shadow: var(--focus-ring-soft); }
+.ark-os-pick:has(input:focus-visible) { box-shadow: var(--focus-ring-soft); }
+.ark-os { padding: 0; margin: 0; border: 0; min-width: 0; }
+.ark-ok { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--status-success-fg); font-weight: var(--fw-medium); }
+.ark-file { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 13px; }
+.ark-how { gap: 8px; }
+.ark-wait { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--text-secondary); }
+.ark-reasons { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.ark-reasons p { margin: 0; }
+.ark-reasons ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-secondary); font-size: var(--type-body-sm-size); overflow-wrap: anywhere; }
+@media (max-width: 640px) { .ark-os-grid { grid-template-columns: minmax(0, 1fr); } }

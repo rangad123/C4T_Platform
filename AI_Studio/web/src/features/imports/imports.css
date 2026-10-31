@@ -1,0 +1,9 @@
+/* Maestro import. Uses the app's design tokens only. */
+.flow-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.flow-list > li { border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 10px 12px; display: grid; gap: 4px; background: var(--surface-raised); min-width: 0; }
+.flow-list > li.left-out { background: var(--surface-sunken); }
+.flow-detail { font-size: 13.5px; color: var(--text-secondary); }
+.flow-detail summary { cursor: pointer; font-weight: 500; color: var(--text-primary); }
+.flow-detail ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.flow-detail li { overflow-wrap: anywhere; }
+.flow-problems { margin: 6px 0 0; padding-left: 18px; }

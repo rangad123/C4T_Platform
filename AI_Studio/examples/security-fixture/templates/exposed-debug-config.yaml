@@ -1,0 +1,16 @@
+id: fixture-exposed-debug-config
+info:
+  name: Debug configuration file readable by anyone
+  author: freit-security-fixture
+  severity: high
+  tags: exposure,misconfig,config
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/debug/config.json"
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - '"apiKey"\s*:\s*"[^"]+"\s*,\s*"debug"\s*:\s*true'

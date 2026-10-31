@@ -1,0 +1,31 @@
+/* Reusable steps: the page, the editor, the pick form in the palette. Shared tokens only. */
+.blk-row { display: flex; align-items: flex-start; gap: 16px; padding: 16px 24px; min-width: 0; }
+.blk-main { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.blk-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.blk-name .title { font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.blk-actions { display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+
+.blk-editor { min-width: 0; }
+.blk-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.blk-foot .spacer { flex: 1; }
+.blk-form { display: grid; gap: 14px; min-width: 0; }
+.blk-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.blk-params { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); margin: 0; min-width: 0; }
+.blk-params legend { font-size: var(--type-label-size); font-weight: var(--fw-medium); padding: 0 6px; }
+.blk-param-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.blk-form .blk-param-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+
+.blk-chip-note { color: var(--text-secondary); font-size: var(--type-caption-size); }
+.blk-pick { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.blk-pick-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.blk-inside summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--text-secondary); font-weight: var(--fw-medium); }
+.blk-inside-steps { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
+
+@media (max-width: 640px) {
+    .blk-row { flex-direction: column; padding: 16px 20px; }
+    .blk-actions { justify-content: flex-start; }
+    .blk-two { grid-template-columns: minmax(0, 1fr); }
+    .blk-param-row, .blk-form .blk-param-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .blk-param-row .field:nth-child(2), .blk-param-row .field:nth-child(3) { grid-column: 1; }
+}

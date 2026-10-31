@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Testing Platform report</title>
+<style>
+:root{--bg:#fff;--fg:#1a1d23;--mute:#5d6572;--line:#dfe3ea;--card:#f7f8fa;--ok:#17703a;--bad:#b42318;--warn:#a15c07}
+@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e8eaee;--mute:#9aa3b0;--line:#2c313a;--card:#1b1e24;--ok:#4cc38a;--bad:#ff8a80;--warn:#f0b35a}}
+body{font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:24px;max-width:980px;margin-inline:auto}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}.mute,.meta{color:var(--mute);font-size:13px}
+.banner{padding:12px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);margin:14px 0;font-weight:600}
+.banner.ok{border-color:var(--ok);color:var(--ok)}.banner.bad{border-color:var(--bad);color:var(--bad)}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px}.stat b{display:block;font-size:20px}
+.card{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:12px 16px;margin:10px 0}.card header{font-size:15px}
+.sev{display:inline-block;font-size:12px;font-weight:700;border-radius:6px;padding:1px 8px;border:1px solid currentColor;margin-right:6px}
+.sev-critical,.sev-high,.sev-none{color:var(--bad)}.sev-medium{color:var(--warn)}.sev-low{color:var(--mute)}
+.reason{white-space:pre-wrap;word-break:break-word;margin:8px 0}.shots{display:flex;gap:12px;flex-wrap:wrap}figure{margin:0}figure img{max-width:100%;max-height:320px;border:1px solid var(--line);border-radius:6px}figcaption{font-size:12px;color:var(--mute)}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.o-passed{color:var(--ok)}.o-finding{color:var(--warn)}.o-failed{color:var(--bad)}.o-not_run{color:var(--mute)}
+@media(max-width:600px){body{padding:14px}}
+</style></head><body>
+<h1>AI Testing Platform report</h1>
+<p class="mute">Golden &lt;project&gt; · http://app.test:3000 · replay · 12.3 s · 2026-01-02T03:04:05.000Z</p>
+<div class="banner ok" role="status">Passed: no blocking problems.</div>
+<div class="stats"><div class="stat"><b>1</b>run</div><div class="stat"><b>1</b>passed</div><div class="stat"><b>0</b>findings</div><div class="stat"><b>0</b>could not validate</div><div class="stat"><b>0</b>not run</div></div>
+
+<h2>All tests</h2><table><thead><tr><th>ID</th><th>Test</th><th>Area</th><th>Result</th><th>Time</th></tr></thead><tbody><tr><td>WEB-001</td><td>Home page loads</td><td>General</td><td class="o-passed">Passed</td><td>420 ms</td></tr></tbody></table>
+<p class="mute">Severity: critical 0 · high 0 · medium 0 · low 0</p>
+</body></html>

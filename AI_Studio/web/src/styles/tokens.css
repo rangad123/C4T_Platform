@@ -1,0 +1,205 @@
+/*
+ * Crowd4Test design tokens, reconstructed.
+ *
+ * The handoff says to copy design/_ds/tokens/*.css verbatim, but that folder was not supplied, so this file is rebuilt
+ * from the values the handoff README, readme.md and the component sources state. Every value that is NOT stated there
+ * carries an "inferred" comment, so the real token files can be swapped in later (search for "inferred").
+ * Components must use the semantic aliases, never a raw hex.
+ */
+:root {
+    /* ── Ink ramp (documented). No pure black and no pure white anywhere. ── */
+    --ink-950: #17130f;
+    --ink-900: #241e18;
+    --ink-800: #332b23;
+    --ink-700: #4a423b;
+    --ink-600: #625950;
+    --ink-500: #7a716a;
+    --ink-400: #9a928b;
+    --ink-300: #c9c3bc;
+    --ink-200: #e4dfd9;
+    --ink-100: #f1ede8;
+    --ink-50: #faf8f5;
+    --white: var(--ink-50); /* the system never uses pure white; components that say --white get ink-50 */
+
+    /* ── Accent: teal (documented 500/600/700). The shipped site remaps coral onto teal. ── */
+    --accent-500: #0b7a6e;
+    --accent-600: #086055;
+    --accent-700: #05463e;
+    --accent-50: #eaf6f3; /* crowd4test.com teal-50: tinted backgrounds */
+    --accent-100: #cfe9e3; /* crowd4test.com teal-100: accent hairlines */
+    --accent-300: #9fd8cc; /* inferred: pale mint for eyebrows on dark surfaces (4.5:1+ on ink-950) */
+    --accent-400: #4db6a8; /* inferred: fills and text on dark surfaces in the app's dark theme */
+    /* Aliases for the design system's own coral names, pointing at teal as the shipped site does. */
+    --coral-100: var(--accent-100);
+    --coral-400: var(--accent-300);
+    --coral-500: var(--accent-500);
+    --coral-600: var(--accent-600);
+    --coral-700: var(--accent-700);
+    --teal-100: var(--accent-100);
+    --teal-500: var(--accent-500);
+    --teal-600: var(--accent-600);
+    --teal-700: var(--accent-700);
+
+    /* ── Semantic aliases (documented, including the page-level overrides the prototype applies) ── */
+    --surface-canvas: var(--ink-50);
+    --surface-raised: var(--ink-50);
+    --surface-sunken: var(--ink-100);
+    --surface-inverse: var(--ink-950);
+    --surface-inverse-raised: var(--ink-900);
+    --surface-muted: var(--ink-200);
+    --surface-brand-subtle: var(--accent-50);
+    --surface-accent-subtle: var(--accent-50); /* inferred: same tint as brand-subtle */
+    --surface-hover: var(--ink-100); /* inferred: hover fill for rows and menu items (the system only names hover for buttons and cards) */
+    --border-default: var(--ink-200);
+    --border-subtle: var(--ink-100);
+    --border-strong: var(--ink-300);
+    --border-inverse: var(--ink-800);
+    --border-brand: var(--accent-500);
+    --text-primary: var(--ink-950);
+    --text-secondary: var(--ink-700);
+    --text-muted: var(--ink-600); /* 6.5:1 on canvas, 5.9:1 on sunken */
+    --text-disabled: var(--ink-400);
+    --text-inverse: var(--ink-50);
+    --text-inverse-muted: var(--ink-300);
+    --text-brand: var(--accent-600);
+    --text-link: var(--accent-600);
+    --text-link-hover: var(--accent-700);
+    --text-accent: var(--accent-600);
+    --text-on-brand: var(--ink-50);
+    --action-primary-bg: var(--accent-500);
+    --action-primary-bg-hover: var(--accent-600);
+    --action-primary-bg-press: var(--accent-700);
+    --action-secondary-bg: var(--ink-50);
+    --action-secondary-border: var(--ink-300);
+    --action-inverse-bg: var(--ink-50);
+    --action-inverse-text: var(--ink-950);
+
+    /* ── Status: UI feedback only, warm-leaning. All values inferred; every fg/bg pair is at least 5:1. ── */
+    --status-success-fg: #1f6b3a; /* inferred */
+    --status-success-bg: #e3f0e6; /* inferred */
+    --status-success-line: #a9d0b4; /* inferred */
+    --status-warning-fg: #8a5200; /* inferred */
+    --status-warning-bg: #f8ebd0; /* inferred */
+    --status-warning-line: #e2c88c; /* inferred */
+    --status-error-fg: #a8321f; /* inferred */
+    --status-error-bg: #f9e3dd; /* inferred */
+    --status-error-line: #e5b2a6; /* inferred */
+    --status-info-fg: #1f5f7a; /* inferred */
+    --status-info-bg: #e0edf2; /* inferred */
+    --status-info-line: #aacbd8; /* inferred */
+
+    /* The run ribbon: pass = accent teal, attention = warning, fail = error, idle = ink-300 (inferred mapping, per the brief). */
+    --tick-pass: var(--accent-500);
+    --tick-attention: #c98a1c; /* inferred: a warning-hued fill (fills need 3:1, not 4.5:1) */
+    --tick-fail: #c4402f; /* inferred */
+    --tick-idle: var(--ink-300);
+
+    /* Code blocks keep a dark ink surface in both themes. */
+    --code-bg: var(--ink-950);
+    --code-text: var(--ink-100);
+
+    /* ── Type ── */
+    --font-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-display: var(--font-sans);
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --fw-regular: 400;
+    --fw-medium: 500;
+    --fw-semibold: 600;
+    /* Documented: display 72/-2.6 and 56/-1.8, weight 600, never 700. Line heights and everything below are inferred. */
+    --type-display-2xl-size: 72px;
+    --type-display-2xl-line: 76px; /* inferred */
+    --type-display-2xl-tracking: -2.6px;
+    --type-display-xl-size: 56px;
+    --type-display-xl-line: 60px; /* inferred */
+    --type-display-xl-tracking: -1.8px;
+    --type-display-md-size: 40px; /* inferred */
+    --type-display-md-line: 44px; /* inferred */
+    --type-display-md-tracking: -1.2px; /* inferred */
+    --type-heading-lg-size: 32px; /* inferred: app page titles */
+    --type-heading-lg-line: 38px; /* inferred */
+    --type-heading-lg-tracking: -0.9px; /* inferred */
+    --type-heading-md-size: 24px; /* inferred */
+    --type-heading-md-line: 30px; /* inferred */
+    --type-heading-md-tracking: -0.5px; /* inferred */
+    --type-heading-sm-size: 18px; /* inferred */
+    --type-heading-sm-line: 26px; /* inferred */
+    --type-heading-sm-tracking: -0.2px; /* inferred */
+    --type-body-lg-size: 18px;
+    --type-body-lg-line: 28px; /* inferred (1.6) */
+    --type-body-md-size: 16px;
+    --type-body-md-line: 26px; /* inferred (1.6) */
+    --type-body-sm-size: 14px; /* inferred */
+    --type-body-sm-line: 22px; /* inferred */
+    --type-caption-size: 13px; /* inferred (the system says 12.5-13) */
+    --type-caption-line: 18px; /* inferred */
+    --type-label-size: 14px; /* inferred */
+    --type-label-line: 20px; /* inferred */
+    --type-eyebrow-size: 12px; /* documented 11-13px */
+    --type-eyebrow-tracking: 0.1em; /* documented 0.08-0.12em */
+    --type-metric-size: 56px; /* documented: the 56px tabular metric */
+    --type-metric-line: 1;
+    --type-metric-tracking: -1.8px;
+    --type-metric-md-size: 36px; /* inferred: app metrics, where 56px would swamp a card */
+    --type-metric-md-tracking: -1px; /* inferred */
+    --type-button-sm-size: 14px; /* inferred */
+    --type-button-md-size: 15px; /* inferred */
+    --type-button-lg-size: 16px; /* inferred */
+    --type-app-size: 15px; /* inferred: base size of the app UI, between body-sm and body-md for dense lists */
+    --type-app-line: 1.6;
+
+    /* ── Space: 4px grid with a 2px micro step ── */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-13: 52px; /* inferred: the one off-grid value the components name */
+    --container-max: 1200px;
+    --container-wide: 1360px;
+    --container-prose: 720px;
+    --container-gutter: 24px; /* inferred */
+    --space-card-padding: 24px;
+    --space-card-padding-lg: 32px;
+    --space-section-y: 96px;
+    --space-section-y-compact: 64px;
+    --sidebar-w: 240px; /* inferred */
+
+    /* ── Radii (documented) ── */
+    --radius-xs: 3px;
+    --radius-sm: 6px;
+    --radius-button: 6px;
+    --radius-input: 6px;
+    --radius-card: 10px;
+    --radius-media: 10px;
+    --radius-panel: 14px;
+    --radius-full: 999px;
+
+    /* ── Elevation: very soft warm shadows (values inferred, only the usage is documented) ── */
+    /* crowd4test.com's elevation (C4T_Platform/web/src/styles/tokens/elevation.css) */
+    --shadow-xs: 0 1px 2px rgb(23 19 15 / 0.06);
+    --shadow-sm: 0 1px 2px rgb(23 19 15 / 0.05), 0 2px 6px rgb(23 19 15 / 0.05);
+    --shadow-md: 0 2px 4px rgb(23 19 15 / 0.05), 0 8px 20px rgb(23 19 15 / 0.08); /* card hover and open menus only */
+    --shadow-lg: 0 4px 8px rgb(23 19 15 / 0.06), 0 20px 44px rgb(23 19 15 / 0.12); /* modals only */
+    --scrim: rgb(23 19 15 / 0.55); /* documented 55% scrim, tinted with ink-950 */
+    --focus-ring-soft: 0 0 0 3px rgb(23 19 15 / 0.14); /* inferred: the 3px soft ink ring inputs use */
+    --focus-outline: var(--ink-950);
+
+    /* ── Motion (documented) ── */
+    --duration-fast: 140ms;
+    --duration-base: 200ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --transition-control: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+    --transition-surface: transform var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard), border-color var(--duration-base) var(--ease-standard);
+    color-scheme: light;
+}
+
+/* Light only, like crowd4test.com. The dark theme this file once inferred was removed when AI Studio joined crowd4test.com. */
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --duration-fast: 0ms;
+        --duration-base: 0ms;
+    }
+}

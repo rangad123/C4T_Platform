@@ -1,0 +1,66 @@
+/*
+ * Base and interactions, rebuilt from the handoff README (the real base.css / interactions.css were not supplied).
+ * Behaviour rules that are documented: focus = 2px solid ink outline at 2px offset (white on dark surfaces), inputs use a
+ * 3px soft ink ring instead; buttons darken on hover and press, never lighten or scale; links are accent, one step darker
+ * on hover with a 3px underline offset; cards lift 2px with --shadow-md and a darker border; disabled = 55% opacity and not-allowed.
+ */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+    margin: 0;
+    background: var(--surface-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--type-app-size);
+    line-height: var(--type-app-line);
+    font-weight: var(--fw-regular);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+h1, h2, h3, h4, p { margin: 0; }
+h1, h2, h3, h4 { font-weight: var(--fw-semibold); color: var(--text-primary); text-wrap: balance; }
+p { max-width: 68ch; }
+a { color: var(--text-link); text-decoration: none; transition: var(--transition-control); }
+a:hover { color: var(--text-link-hover); text-decoration: underline; text-underline-offset: 3px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { transition: var(--transition-control); }
+::selection { background: var(--surface-brand-subtle); color: var(--text-primary); }
+
+/* Links that sit inside running text must not rely on colour alone (WCAG 1.4.1, axe link-in-text-block). */
+:is(p, .hint, .t-meta, .t-secondary, .muted, .sub, .callout .body, .callout p, .empty p, .error-text, li > span, dd) a:not(.btn):not(.menu-item):not(.list-row):not(.tab):not(.nav-item) {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+/* Focus: never suppressed. Outline on everything, a soft ring on text fields. */
+:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: 2px; }
+:is(input:not([type="checkbox"], [type="radio"]), select, textarea):focus-visible { outline: none; }
+.c4t-deep :focus-visible, .on-inverse :focus-visible { outline-color: var(--ink-50); }
+
+:disabled, [aria-disabled="true"] { cursor: not-allowed; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: var(--text-muted); }
+.nowrap { white-space: nowrap; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Mono eyebrow: instrumentation-flavoured label (uppercase, 11-13px, tracking 0.08-0.12em). */
+.eyebrow { font-family: var(--font-mono); font-size: var(--type-eyebrow-size); font-weight: var(--fw-semibold); letter-spacing: var(--type-eyebrow-tracking); text-transform: uppercase; color: var(--text-brand); line-height: 1.4; }
+
+/* Cards that are links or buttons lift 2px with a darker border. */
+.c4t-card-hover, a.card { transition: var(--transition-surface); }
+.c4t-card-hover:hover, a.card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--border-strong); text-decoration: none; }
+
+/*
+ * The one immersive dark section (welcome hero). Both layers are kept: a radial glow from ink-800 at 60% opacity from the
+ * top edge, and a 72px grid of ink-900 hairlines at 50% opacity, radially masked to fade downward. Children sit above them.
+ */
+.c4t-deep { position: relative; overflow: hidden; background: var(--ink-950); color: var(--ink-50); }
+.c4t-deep::before { content: ""; position: absolute; left: -10%; right: -10%; top: -30%; height: 80%; background: radial-gradient(55% 100% at 50% 0%, var(--ink-800), transparent 68%); opacity: 0.6; pointer-events: none; }
+.c4t-deep::after { content: ""; position: absolute; inset: 0; background-image: linear-gradient(var(--ink-900) 1px, transparent 1px), linear-gradient(90deg, var(--ink-900) 1px, transparent 1px); background-size: 72px 72px; opacity: 0.5; -webkit-mask-image: radial-gradient(80% 70% at 50% 0%, #000, transparent 75%); mask-image: radial-gradient(80% 70% at 50% 0%, #000, transparent 75%); pointer-events: none; }
+.c4t-deep > * { position: relative; z-index: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}

@@ -1,0 +1,66 @@
+/* Releases, manual cases and sign-off. Shared tokens only; colour appears only as a verdict, next to a word. */
+.rel-sentence { font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: -0.01em; max-width: 60ch; }
+.rel-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rel-reasons { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.rel-name { padding-bottom: 12px; }
+.rel-name .field { max-width: 360px; }
+.group-head-static { display: flex; align-items: baseline; gap: 10px; padding: 12px 18px; background: var(--surface-sunken); border-bottom: 1px solid var(--border-default); border-top: 1px solid var(--border-default); }
+.rel-area > ul:last-child > li:last-child { border-bottom: 0; }
+
+/* The checklist: title and steps on the left, the result as a radio group on the right, the note under both. */
+.mc-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 20px; padding: 14px 18px; align-items: start; }
+.mc-item-main { display: grid; gap: 3px; min-width: 0; }
+.mc-item-main .title { font-weight: 600; overflow-wrap: anywhere; }
+.mc-note { grid-column: 1 / -1; display: grid; gap: 8px; justify-items: start; }
+.mc-note .field { width: 100%; max-width: 640px; }
+.mc-issue { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mc-steps-view { margin-top: 4px; }
+.mc-steps-view summary { cursor: pointer; color: var(--text-secondary); font-weight: 500; width: fit-content; }
+.mc-steps-view ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+
+.mc-result { display: flex; flex-wrap: wrap; gap: 0; margin: 0; padding: 0; border: 0; min-width: 0; }
+.mc-opt { position: relative; display: inline-flex; }
+.mc-opt input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.mc-opt span { display: inline-flex; align-items: center; height: 32px; padding: 0 11px; border: 1px solid var(--border-strong); background: var(--surface-raised); color: var(--text-secondary); font-weight: 500; font-size: 13.5px; white-space: nowrap; margin-left: -1px; }
+.mc-opt:first-of-type span { margin-left: 0; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.mc-opt:last-of-type span { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.mc-opt:hover span { background: var(--surface-sunken); color: var(--text-primary); }
+.mc-opt input:focus-visible + span { box-shadow: var(--focus-ring-soft); position: relative; z-index: 1; }
+.mc-opt input:checked + span { font-weight: 600; position: relative; z-index: 1; }
+.mc-opt-not_run input:checked + span, .mc-opt-skipped input:checked + span { background: var(--surface-sunken); color: var(--text-primary); border-color: var(--text-muted); }
+.mc-opt-passed input:checked + span { background: var(--status-success-bg); color: var(--status-success-fg); border-color: var(--status-success-fg); }
+.mc-opt-failed input:checked + span { background: var(--status-error-bg); color: var(--status-error-fg); border-color: var(--status-error-fg); }
+.mc-opt-blocked input:checked + span { background: var(--status-warning-bg); color: var(--status-warning-fg); border-color: var(--status-warning-fg); }
+.mc-result:disabled .mc-opt input { cursor: default; }
+.mc-result:disabled .mc-opt span { opacity: 0.75; }
+.mc-result:disabled .mc-opt input:checked + span { opacity: 1; }
+
+@media (max-width: 720px) {
+    .mc-item { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
+    .mc-opt span { height: 36px; padding: 0 9px; }
+}
+
+/* History */
+.rel-history { list-style: none; margin: 0; padding: 0; }
+.rel-entry { padding: 12px 18px; display: grid; gap: 4px; }
+.rel-entry p { overflow-wrap: anywhere; }
+
+/* The decision dialog */
+dialog.rel-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-card); background: var(--surface-raised); color: var(--text-primary); overflow: auto; }
+dialog.rel-dialog::backdrop { background: rgba(10, 20, 20, 0.5); }
+.rel-dialog .inner { display: grid; gap: 16px; padding: 20px; }
+.rel-dialog .foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Manual cases */
+.mc-case { display: flex; align-items: center; gap: 12px; padding: 12px 18px; flex-wrap: wrap; }
+.mc-case-main { flex: 1 1 280px; min-width: 0; display: grid; gap: 2px; }
+.mc-case-main .title { font-weight: 600; overflow-wrap: anywhere; }
+.mc-case-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+fieldset.mc-steps { margin: 0; padding: 0; border: 0; display: grid; gap: 12px; min-width: 0; }
+fieldset.mc-steps > legend { padding: 0; font-weight: 600; font-size: 13.5px; margin-bottom: 8px; }
+.mc-step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; padding-bottom: 12px; border-bottom: 1px solid var(--border-default); }
+fieldset.mc-linked { margin: 0; padding: 0; border: 0; display: grid; gap: 6px; max-height: 260px; overflow: auto; min-width: 0; }
+@media (max-width: 720px) {
+    .mc-step { grid-template-columns: minmax(0, 1fr); }
+    .mc-step .btn { justify-self: start; }
+}

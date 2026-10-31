@@ -1,0 +1,29 @@
+/* "What the page did" on the test page. Design tokens only. */
+.evidence-summary { font-weight: 600; max-width: 72ch; padding-left: 12px; border-left: 3px solid var(--action-primary-bg); }
+.evidence-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.evidence-table th { text-align: left; font-weight: 600; color: var(--text-muted); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border-strong); }
+.evidence-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border-default); vertical-align: top; }
+.evidence-table tr.near td:first-child { box-shadow: inset 3px 0 0 var(--status-error-fg); padding-left: 10px; }
+.evidence-addr { overflow-wrap: anywhere; font: 13px/1.5 var(--font-mono); }
+.evidence-when { display: block; }
+.evidence-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.evidence-console { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.evidence-line { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; row-gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border-default); align-items: start; }
+.evidence-line.near { box-shadow: inset 3px 0 0 var(--status-error-fg); padding-left: 10px; }
+.evidence-line .evidence-text { overflow-wrap: anywhere; white-space: pre-wrap; font: 13px/1.5 var(--font-mono); }
+.evidence-line .t-meta { grid-column: 2; }
+.evidence-filter { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.evidence-filter .input { max-width: 340px; }
+@media (max-width: 640px) {
+    .evidence-table th:nth-child(3), .evidence-table td:nth-child(3) { padding-right: 0; }
+    .evidence-filter .input { max-width: none; }
+}
+
+/* The failure summary: what failed, expected and got, files, next actions. */
+.fail p { margin: 0; }
+.fail-facts { display: grid; gap: 6px; margin: 0; }
+.fail-facts > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.fail-facts dt { color: var(--text-muted); font-size: var(--type-caption-size); font-weight: var(--fw-semibold); }
+.fail-facts dd { margin: 0; font: 13px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.fail-files { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fail-acts { display: flex; flex-wrap: wrap; gap: 8px; }

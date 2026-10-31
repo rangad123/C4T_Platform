@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "tool": {
+    "name": "ai-test",
+    "version": "0.0.0-golden"
+  },
+  "generatedAt": "2026-01-02T03:04:05.000Z",
+  "mode": "replay",
+  "target": "http://app.test:3000",
+  "project": {
+    "name": "Golden <project>",
+    "id": "p1"
+  },
+  "durationMs": 12345,
+  "summary": {
+    "total": 6,
+    "passed": 1,
+    "findings": 3,
+    "failedValidation": 1,
+    "notRun": 1,
+    "bySeverity": {
+      "critical": 1,
+      "high": 0,
+      "medium": 1,
+      "low": 1
+    }
+  },
+  "gate": {
+    "failOn": "high",
+    "failOnFailedValidation": true,
+    "passed": false,
+    "reasons": [
+      "1 finding at high or higher severity (worst: critical).",
+      "1 test could not be validated."
+    ],
+    "exitCode": 1
+  },
+  "tests": [
+    {
+      "id": "t1",
+      "testId": "WEB-001",
+      "title": "Home page loads",
+      "suite": "General",
+      "kind": "web",
+      "type": "functional",
+      "priority": "high",
+      "outcome": "passed",
+      "validation": "VALIDATED",
+      "durationMs": 420,
+      "attempts": 1,
+      "evidence": []
+    },
+    {
+      "id": "t2",
+      "testId": "WEB-002",
+      "title": "Checkout <b>button</b> works | really",
+      "suite": "Checkout",
+      "kind": "web",
+      "type": "functional",
+      "priority": "high",
+      "outcome": "finding",
+      "validation": "NEEDS_REVIEW",
+      "durationMs": 2350,
+      "attempts": 1,
+      "evidence": [
+        {
+          "kind": "screenshot"
+        },
+        {
+          "kind": "video",
+          "file": "evidence/WEB-002.webm"
+        }
+      ],
+      "severity": "critical",
+      "severityBasis": "payment flow",
+      "category": "functional-defect",
+      "reason": "Expected the \"Pay\" button to be visible & enabled\nbut it was missing <script>alert(1)</script>",
+      "failedStep": {
+        "number": 3,
+        "title": "Click Pay"
+      },
+      "link": "http://platform.test/#/tests/t2?a=1&b=2"
+    },
+    {
+      "id": "t3",
+      "testId": "WEB-003",
+      "title": "Security headers",
+      "suite": "Security",
+      "kind": "web",
+      "type": "functional",
+      "priority": "high",
+      "outcome": "finding",
+      "validation": "NEEDS_REVIEW",
+      "durationMs": 900,
+      "attempts": 1,
+      "evidence": [],
+      "severity": "medium",
+      "severityBasis": "missing header",
+      "category": "security-check",
+      "reason": "Passive security check: Content-Security-Policy header is missing"
+    },
+    {
+      "id": "t4",
+      "testId": "WEB-004",
+      "title": "Contrast",
+      "suite": "Accessibility",
+      "kind": "web",
+      "type": "functional",
+      "priority": "high",
+      "outcome": "finding",
+      "validation": "NEEDS_REVIEW",
+      "durationMs": 1500,
+      "attempts": 1,
+      "evidence": [
+        {
+          "kind": "visual-diff"
+        },
+        {
+          "kind": "trace",
+          "file": "evidence/t4.zip"
+        }
+      ],
+      "severity": "low",
+      "category": "accessibility",
+      "reason": "Accessibility: 2 violations"
+    },
+    {
+      "id": "t5",
+      "testId": "API-001",
+      "title": "List orders",
+      "suite": "Orders",
+      "kind": "api",
+      "type": "functional",
+      "priority": "high",
+      "outcome": "failed",
+      "validation": "FAILED_VALIDATION",
+      "durationMs": 30000,
+      "attempts": 1,
+      "evidence": [],
+      "reason": "Timed out waiting for response after 30000 ms",
+      "failedStep": {
+        "number": 1,
+        "title": "GET /orders"
+      }
+    },
+    {
+      "id": "t6",
+      "testId": "WEB-005",
+      "title": "Not yet run",
+      "suite": "General",
+      "kind": "web",
+      "type": "functional",
+      "priority": "high",
+      "outcome": "not_run",
+      "validation": "PENDING",
+      "durationMs": 0,
+      "attempts": 1,
+      "evidence": []
+    }
+  ]
+}

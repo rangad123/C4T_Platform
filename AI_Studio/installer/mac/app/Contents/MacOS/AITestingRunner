@@ -1,0 +1,58 @@
+#!/bin/sh
+# The program macOS starts when you open "AI Testing Runner.app". It has no window of its own: it opens Terminal and runs
+# runner-setup.sh there, so you can watch what is checked, skipped and downloaded. Plain POSIX sh, nothing to compile.
+#
+# Test-only: AITP_INSTALLER_NO_TERMINAL=1 runs the setup in the current shell instead of opening Terminal.
+
+HERE=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+SETUP="$(cd "$HERE/../Resources" 2>/dev/null && pwd)/runner-setup.sh"
+
+if [ ! -f "$SETUP" ]; then
+    osascript -e 'display dialog "This copy of AI Testing Runner is damaged: a file inside it is missing. Download the runner kit again from the platform." with title "AI Testing Runner" buttons {"OK"} default button "OK" with icon stop' >/dev/null 2>&1
+    echo "runner-setup.sh is missing from this app." >&2
+    exit 1
+fi
+
+# Started from a Terminal (or a test): run the setup right here.
+if [ "${AITP_INSTALLER_NO_TERMINAL:-}" = "1" ] || { [ -t 0 ] && [ -t 1 ]; }; then
+    exec sh "$SETUP" "$@"
+fi
+
+# shell_quote TEXT: TEXT as one single-quoted word that any POSIX shell reads back unchanged, whatever characters it holds.
+shell_quote() {
+    sq_out=""
+    sq_rest=$1
+    while :; do
+        case "$sq_rest" in
+            *\'*)
+                sq_out="$sq_out${sq_rest%%\'*}'\\''"
+                sq_rest=${sq_rest#*\'}
+                ;;
+            *) break ;;
+        esac
+    done
+    printf "'%s%s'" "$sq_out" "$sq_rest"
+}
+
+# A double-clicked app has no terminal. Write a small .command file and ask Terminal to open it: that is the supported way to run a
+# script in a Terminal window without asking for any extra permission.
+CMD_FILE=$(mktemp "${TMPDIR:-/tmp}/ai-testing-runner.XXXXXX") || exit 1
+mv "$CMD_FILE" "$CMD_FILE.command" && CMD_FILE="$CMD_FILE.command"
+{
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'rm -f "$0" 2>/dev/null'
+    printf '%s\n' "printf '\\033]0;AI Testing Runner\\007'"
+    printf 'exec sh %s' "$(shell_quote "$SETUP")"
+    for arg in "$@"; do
+        printf ' %s' "$(shell_quote "$arg")"
+    done
+    printf '\n'
+} >"$CMD_FILE"
+chmod 755 "$CMD_FILE"
+
+if ! open -a Terminal "$CMD_FILE" >/dev/null 2>&1; then
+    osascript -e 'display dialog "I could not open Terminal. Open Terminal yourself, then run: sh \"<this app>/Contents/Resources/runner-setup.sh\"" with title "AI Testing Runner" buttons {"OK"} default button "OK" with icon stop' >/dev/null 2>&1
+    rm -f "$CMD_FILE"
+    exit 1
+fi
+exit 0

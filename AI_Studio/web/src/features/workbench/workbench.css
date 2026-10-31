@@ -1,0 +1,56 @@
+/* The test workbench: one page per test, four tabs, a results column that stays put. Design tokens only. */
+.wb { display: grid; gap: 16px; min-width: 0; }
+.wb [hidden] { display: none !important; }
+
+/* The tab strip is a real tablist; on a phone it scrolls sideways inside itself, the page does not. */
+.wb-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border-default); scrollbar-width: thin; }
+.wb-tab { position: relative; display: inline-flex; align-items: center; gap: 8px; flex: none; min-height: 44px; min-width: 44px; padding: 0 16px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font: inherit; font-weight: var(--fw-medium); cursor: pointer; white-space: nowrap; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.wb-tab:hover { background: var(--surface-hover); color: var(--text-primary); }
+.wb-tab[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--text-brand); }
+.wb-tab-dot, .wb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-warning-fg); flex: none; }
+
+/* Work on the left, the last run and the script on the right; stacked on a narrow screen. */
+.wb-grid { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1100px) { .wb-grid { grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); } }
+.wb-main, .wb-rail, .wb-results { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.wb-script-slot:empty { display: none; }
+.wb .bld-grid { grid-template-columns: minmax(0, 1fr); }
+
+/* The unsaved bar stays at the bottom of the work area while changes are not saved. */
+.wb-bar-slot { position: sticky; bottom: 0; z-index: 4; }
+.wb-bar-slot:empty { display: none; }
+.wb-unsaved { display: grid; gap: 10px; padding: 12px var(--space-card-padding); background: var(--surface-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-card); box-shadow: var(--shadow-md); }
+.wb-unsaved-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.wb-unsaved-label { display: inline-flex; align-items: center; gap: 8px; font-weight: var(--fw-medium); }
+.wb-unsaved-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.wb-unsaved-preview { max-height: 40vh; overflow: auto; padding-bottom: 10px; border-bottom: 1px solid var(--border-default); }
+.wb-unsaved-why { margin: 0; }
+@media (max-width: 640px) { .wb-unsaved-acts { width: 100%; } .wb-unsaved-acts .btn { flex: 1 1 auto; } }
+
+.wb-saved { margin: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; padding: 8px 8px 8px var(--space-card-padding); background: var(--status-success-bg); border: 1px solid var(--status-success-line); border-radius: var(--radius-card); color: var(--text-primary); }
+.wb-saved-acts { display: inline-flex; align-items: center; gap: 4px; }
+
+/* What the last run said about each step. A symbol and a word carry it; colour only backs it up. */
+.bld-mark { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; flex: none; }
+.bld-mark.is-passed { background: var(--status-success-bg); color: var(--status-success-fg); }
+.bld-mark.is-failed { background: var(--status-error-bg); color: var(--status-error-fg); }
+.bld-step.is-failed { box-shadow: inset 3px 0 0 var(--status-error-fg); }
+.bld-edited, .bld-err { flex-basis: 100%; padding-left: 0; }
+.bld-err { color: var(--status-error-fg); }
+
+/* Runs of this test as a strip of marks with times. */
+.wb-runstrip { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.wb-runchip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-full); font-size: var(--type-caption-size); }
+.wb-runchip.is-passed { color: var(--status-success-fg); border-color: var(--status-success-line); }
+.wb-runchip.is-failed { color: var(--status-error-fg); border-color: var(--status-error-line); }
+
+/* The History tab: one list of everything that happened. */
+.wb-history { list-style: none; margin: 0; padding: 0; }
+.wb-hist { display: flex; align-items: flex-start; gap: 8px 12px; padding: 12px var(--space-card-padding); flex-wrap: wrap; }
+.wb-hist-pick { display: inline-grid; place-items: center; width: 44px; min-height: 44px; flex: none; color: var(--text-muted); cursor: pointer; }
+.wb-hist-pick input { width: 18px; height: 18px; accent-color: var(--accent-500); }
+.wb-hist-main { display: grid; gap: 4px; flex: 1 1 260px; min-width: 0; }
+.wb-hist-title { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; }
+.wb-hist.is-run.is-failed .wb-hist-pick { color: var(--status-error-fg); }
+.wb-hist.is-run.is-passed .wb-hist-pick { color: var(--status-success-fg); }
+.wb-history-note { padding: var(--space-card-padding); }

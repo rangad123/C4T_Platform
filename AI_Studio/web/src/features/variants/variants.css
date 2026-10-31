@@ -1,0 +1,16 @@
+/* Cross-browser / responsive checks. Uses the app's design tokens only. */
+.variant-picker { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 8px; }
+.variant-picker .check[aria-disabled="true"] { opacity: 0.7; cursor: not-allowed; }
+.compat-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+.compat-list > li { display: grid; grid-template-columns: 22px minmax(0, 150px) minmax(0, 1fr); gap: 4px 12px; align-items: start; padding: 12px 14px; }
+.compat-list > li + li { border-top: 1px solid var(--border-default); }
+.compat-list .mark { margin-top: 2px; }
+.compat-list .mark.passed { color: var(--status-success-fg); }
+.compat-list .mark.failed { color: var(--status-error-fg); }
+.compat-list .mark.unavailable, .compat-list .mark.skipped { color: var(--text-muted); }
+.compat-list .name { font-weight: 500; }
+.compat-list .what { display: grid; gap: 4px; min-width: 0; }
+.compat-list .what .why { color: var(--text-secondary); overflow-wrap: anywhere; }
+.compat-list .what .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+.compat-list img { max-width: 220px; max-height: 140px; border: 1px solid var(--border-default); border-radius: var(--r-sm, 6px); display: block; }
+@media (max-width: 560px) { .compat-list > li { grid-template-columns: 22px minmax(0, 1fr); } .compat-list .what { grid-column: 2; } }

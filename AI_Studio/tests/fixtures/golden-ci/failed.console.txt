@@ -1,0 +1,20 @@
+AI Testing Platform — GATE FAILED
+Target: http://app.test:3000   Mode: replay   Took: 12.3 s
+5 tests run · 1 passed · 3 findings · 1 could not be validated · 1 not run
+
+Findings (problems the tests found in the application):
+  [CRITICAL] WEB-002 Checkout <b>button</b> works | really
+      Expected the "Pay" button to be visible & enabled but it was missing <script>alert(1)</script> (payment flow)
+  [MEDIUM] WEB-003 Security headers
+      Passive security check: Content-Security-Policy header is missing (missing header)
+  [LOW] WEB-004 Contrast
+      Accessibility: 2 violations
+
+Tests that could not be validated:
+  [FAILED] API-001 List orders
+      Timed out waiting for response after 30000 ms
+
+Evidence saved: 2 file(s)
+
+Gate failed: 1 finding at high or higher severity (worst: critical).
+Gate failed: 1 test could not be validated.

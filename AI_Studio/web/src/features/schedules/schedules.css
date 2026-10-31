@@ -1,0 +1,44 @@
+/* Schedule tab: trend chart, schedule list, alerts. Uses the app's design tokens only. */
+.card-head.wrap { flex-wrap: wrap; }
+.trend-chart { width: 100%; height: auto; display: block; }
+.trend-chart .grid { stroke: var(--border-default); stroke-width: 1; }
+.trend-chart .axis { fill: var(--text-muted); font-size: 11px; }
+.trend-chart .line { fill: none; stroke: var(--action-primary-bg); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend-chart .pt { stroke: var(--surface-raised); stroke-width: 2; }
+.trend-chart .pt.ok { fill: var(--status-success-fg); }
+.trend-chart .pt.warn { fill: var(--status-warning-fg); }
+.trend-chart .pt.bad { fill: var(--status-error-fg); }
+.trend-chart .pt.sched { stroke: var(--action-primary-bg); stroke-width: 2.5; }
+.trend-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); }
+.trend-legend .key { display: inline-flex; align-items: center; gap: 6px; }
+.trend-legend .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.trend-legend .swatch.ok { background: var(--status-success-fg); }
+.trend-legend .swatch.warn { background: var(--status-warning-fg); }
+.trend-legend .swatch.bad { background: var(--status-error-fg); }
+.trend-legend .swatch.sched { background: var(--surface-raised); border: 2.5px solid var(--action-primary-bg); }
+
+.run-mix { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-sunken); min-width: 90px; }
+.run-mix > span { display: block; height: 100%; }
+.run-mix .ok { background: var(--status-success-fg); }
+.run-mix .warn { background: var(--status-warning-fg); }
+.run-mix .bad { background: var(--status-error-fg); }
+
+.sched-form { display: grid; gap: 14px; padding: 18px 20px; border-top: 1px solid var(--border-default); background: var(--surface-sunken); }
+.sched-form .inline { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.sched-form .inline .input, .sched-form .inline select.input { width: auto; min-width: 90px; }
+.sched-form .inline .input.num { width: 88px; min-width: 0; }
+select.input { padding-right: 28px; }
+.sched-preview { font-weight: 500; }
+.events-pick { display: grid; gap: 8px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.events-pick legend { font-weight: 600; font-size: 13.5px; padding: 0; margin-bottom: 4px; }
+
+.sched-row { display: grid; gap: 10px; padding: 16px 20px; }
+.sched-row .facts { display: flex; gap: 6px 24px; flex-wrap: wrap; color: var(--text-secondary); font-size: 13.5px; }
+.sched-row .facts b { color: var(--text-primary); font-weight: 500; }
+.sched-row .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.log-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 18px; align-items: start; }
+.log-row .what { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .log-row { grid-template-columns: minmax(0, 1fr); } }
+
+/* The shared list row indents its trailing items on phones to line up under an icon; these rows have none. */
+.list.no-lead .list-row .tail { margin-left: 0; }

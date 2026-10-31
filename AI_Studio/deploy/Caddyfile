@@ -1,0 +1,18 @@
+# Caddy in front of the platform: gets and renews the HTTPS certificate for $DOMAIN by itself (ports 80 and 443 must reach this server,
+# and the domain's DNS A/AAAA record must point at it). See deploy/README.md.
+{$DOMAIN} {
+	reverse_proxy platform:4000 {
+		# Live updates (run progress, the Explorer view) are server-sent event streams: pass every byte on at once.
+		flush_interval -1
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+	log {
+		output stdout
+		format json
+	}
+}

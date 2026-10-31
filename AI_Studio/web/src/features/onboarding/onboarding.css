@@ -1,0 +1,38 @@
+/* First run: the three ways to start, the plan before anything is created, tests as they appear, next steps. Design tokens only. */
+
+/* ── Welcome: three equal cards ── */
+.welcome-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: stretch; width: 100%; }
+.welcome-card { align-content: start; min-width: 0; }
+.welcome-card .row { flex-wrap: wrap; }
+.welcome-problem { grid-column: 1 / -1; }
+.icon-tile { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--radius-sm); background: var(--surface-brand-subtle); color: var(--text-brand); }
+@media (max-width: 1040px) { .welcome-cards { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── the plan ── */
+.plan-create { font-weight: var(--fw-semibold); }
+.plan-lines { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+.plan-lines li { display: flex; justify-content: space-between; gap: 16px; padding: 10px 14px; border-top: 1px solid var(--border-default); }
+.plan-lines li:first-child { border-top: 0; }
+.plan-lines .num { font-family: var(--font-mono); color: var(--text-secondary); }
+.plan-actions { flex-wrap: wrap; }
+.plan-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.plan-fieldset legend { margin-bottom: 8px; }
+.plan-family { display: grid; gap: 8px; }
+.plan-ideas { list-style: none; margin: 0 0 0 24px; padding: 0; display: grid; gap: 8px; }
+.plan-pages { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 280px; overflow: auto; }
+.plan-pages li { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.plan-pages code { overflow-wrap: anywhere; }
+@media (max-width: 520px) { .plan-ideas { margin-left: 0; } .plan-actions .btn { flex: 1 1 auto; } }
+
+/* ── tests appearing while they are created ── */
+.created-tests { display: grid; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border-default); }
+.created-tests .t-card { margin-top: 12px; }
+
+/* ── next steps ── */
+.next-steps .next-step { display: flex; align-items: center; gap: 14px; padding: 14px 20px; flex-wrap: wrap; min-width: 0; }
+.next-step .tick { flex: none; display: grid; place-items: center; color: var(--text-muted); }
+.next-step.is-done .tick { color: var(--status-success-fg); }
+.next-step .what { flex: 1 1 260px; min-width: 0; display: grid; gap: 2px; }
+.next-step .title { font-weight: var(--fw-medium); color: var(--text-primary); overflow-wrap: anywhere; }
+.next-step.is-done .title { color: var(--text-secondary); }
+.next-step .act { flex: none; }

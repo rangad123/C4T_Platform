@@ -1,0 +1,37 @@
+# systemd unit for running the platform without Docker (Ubuntu). See deploy/README.md, "Without Docker".
+# Install: sudo cp deploy/ai-testing-platform.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ai-testing-platform
+# Assumes the code in /opt/ai-testing-platform (npm ci done, `npm run build:web` and `npm run build:runner` done), a user `aitp`,
+# Node 24 at /usr/bin/node, and the settings in /opt/ai-testing-platform/.env (DATA_DIR=/var/lib/ai-testing-platform, BACKUP_DIR=/var/backups/ai-testing-platform).
+[Unit]
+Description=AI Testing Platform
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aitp
+Group=aitp
+WorkingDirectory=/opt/ai-testing-platform
+EnvironmentFile=/opt/ai-testing-platform/.env
+Environment=NODE_ENV=production
+Environment=LOG_FORMAT=json
+# Browsers installed next to the code (ProtectHome hides the user's home folder, where Playwright would put them otherwise).
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/ai-testing-platform/.browsers
+ExecStart=/usr/bin/node --import tsx src/main.ts
+# SIGTERM starts the graceful shutdown: the running job gets SHUTDOWN_GRACE_SECONDS (default 60) to finish, then it is stopped and
+# recorded as interrupted. Give systemd longer than that before it kills the process.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=5
+# Hardening that keeps browsers working.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/ai-testing-platform /var/backups/ai-testing-platform /opt/ai-testing-platform/.validation
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

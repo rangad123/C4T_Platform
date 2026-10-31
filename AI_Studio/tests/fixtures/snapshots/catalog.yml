@@ -1,0 +1,494 @@
+- banner:
+  - link "Big Shop":
+    - /url: /
+  - navigation "Main":
+    - link "Home":
+      - /url: /
+    - text: "|"
+    - link "Catalog":
+      - /url: /catalog
+    - text: "|"
+    - link "Cart (0)":
+      - /url: /cart
+    - text: "|"
+    - link "Log in":
+      - /url: /login
+- main:
+  - heading "Catalog" [level=1]
+  - status
+  - search "Filter":
+    - text: Search the catalog
+    - textbox "Search the catalog"
+    - checkbox "In stock only"
+    - text: In stock only
+    - button "Filter"
+  - paragraph: Every item in this catalog is tested on real trails by our staff before it reaches the shelf. Every item in this catalog is tested on real trails by our staff before it reaches the shelf. Every item in this catalog is tested on real trails by our staff before it reaches the shelf. Every item in this catalog is tested on real trails by our staff before it reaches the shelf. Every item in this catalog is tested on real trails by our staff before it reaches the shelf. Every item in this catalog is tested on real trails by our staff before it reaches the shelf.
+  - separator
+  - region "Products":
+    - article:
+      - heading "Trail Backpack 1" [level=3]:
+        - link "Trail Backpack 1":
+          - /url: /product/1
+      - img
+      - paragraph: $10.50
+      - button "Add to cart"
+    - article:
+      - heading "Insulated Bottle 1" [level=3]:
+        - link "Insulated Bottle 1":
+          - /url: /product/2
+      - img
+      - paragraph: $17.50
+      - button "Add to cart"
+    - article:
+      - heading "Merino Socks 1" [level=3]:
+        - link "Merino Socks 1":
+          - /url: /product/3
+      - img
+      - paragraph: $24.50
+      - button "Add to cart"
+    - article:
+      - heading "Headlamp Pro 1" [level=3]:
+        - link "Headlamp Pro 1":
+          - /url: /product/4
+      - img
+      - paragraph: $31.50
+      - button "Add to cart"
+    - article:
+      - heading "Rain Shell 1" [level=3]:
+        - link "Rain Shell 1":
+          - /url: /product/5
+      - img
+      - paragraph: $38.50
+      - button "Add to cart"
+    - article:
+      - heading "Camp Mug 1" [level=3]:
+        - link "Camp Mug 1":
+          - /url: /product/6
+      - img
+      - paragraph: $45.50
+      - button "Add to cart"
+    - article:
+      - heading "Trekking Poles 1" [level=3]:
+        - link "Trekking Poles 1":
+          - /url: /product/7
+      - img
+      - paragraph: $52.50
+      - button "Add to cart"
+    - article:
+      - heading "Sleeping Pad 1" [level=3]:
+        - link "Sleeping Pad 1":
+          - /url: /product/8
+      - img
+      - paragraph: $59.50
+      - button "Add to cart"
+    - article:
+      - heading "Trail Backpack 2" [level=3]:
+        - link "Trail Backpack 2":
+          - /url: /product/9
+      - img
+      - paragraph: $66.50
+      - button "Add to cart"
+    - article:
+      - heading "Insulated Bottle 2" [level=3]:
+        - link "Insulated Bottle 2":
+          - /url: /product/10
+      - img
+      - paragraph: $73.50
+      - button "Add to cart"
+    - article:
+      - heading "Merino Socks 2" [level=3]:
+        - link "Merino Socks 2":
+          - /url: /product/11
+      - img
+      - paragraph: $80.50
+      - button "Add to cart"
+    - article:
+      - heading "Headlamp Pro 2" [level=3]:
+        - link "Headlamp Pro 2":
+          - /url: /product/12
+      - img
+      - paragraph: $87.50
+      - button "Add to cart"
+    - article:
+      - heading "Rain Shell 2" [level=3]:
+        - link "Rain Shell 2":
+          - /url: /product/13
+      - img
+      - paragraph: $94.50
+      - button "Add to cart"
+    - article:
+      - heading "Camp Mug 2" [level=3]:
+        - link "Camp Mug 2":
+          - /url: /product/14
+      - img
+      - paragraph: $11.50
+      - button "Add to cart"
+    - article:
+      - heading "Trekking Poles 2" [level=3]:
+        - link "Trekking Poles 2":
+          - /url: /product/15
+      - img
+      - paragraph: $18.50
+      - button "Add to cart"
+    - article:
+      - heading "Sleeping Pad 2" [level=3]:
+        - link "Sleeping Pad 2":
+          - /url: /product/16
+      - img
+      - paragraph: $25.50
+      - button "Add to cart"
+    - article:
+      - heading "Trail Backpack 3" [level=3]:
+        - link "Trail Backpack 3":
+          - /url: /product/17
+      - img
+      - paragraph: $32.50
+      - button "Add to cart"
+    - article:
+      - heading "Insulated Bottle 3" [level=3]:
+        - link "Insulated Bottle 3":
+          - /url: /product/18
+      - img
+      - paragraph: $39.50
+      - button "Add to cart"
+    - article:
+      - heading "Merino Socks 3" [level=3]:
+        - link "Merino Socks 3":
+          - /url: /product/19
+      - img
+      - paragraph: $46.50
+      - button "Add to cart"
+    - article:
+      - heading "Headlamp Pro 3" [level=3]:
+        - link "Headlamp Pro 3":
+          - /url: /product/20
+      - img
+      - paragraph: $53.50
+      - button "Add to cart"
+    - article:
+      - heading "Rain Shell 3" [level=3]:
+        - link "Rain Shell 3":
+          - /url: /product/21
+      - img
+      - paragraph: $60.50
+      - button "Add to cart"
+    - article:
+      - heading "Camp Mug 3" [level=3]:
+        - link "Camp Mug 3":
+          - /url: /product/22
+      - img
+      - paragraph: $67.50
+      - button "Add to cart"
+    - article:
+      - heading "Trekking Poles 3" [level=3]:
+        - link "Trekking Poles 3":
+          - /url: /product/23
+      - img
+      - paragraph: $74.50
+      - button "Add to cart"
+    - article:
+      - heading "Sleeping Pad 3" [level=3]:
+        - link "Sleeping Pad 3":
+          - /url: /product/24
+      - img
+      - paragraph: $81.50
+      - button "Add to cart"
+    - article:
+      - heading "Trail Backpack 4" [level=3]:
+        - link "Trail Backpack 4":
+          - /url: /product/25
+      - img
+      - paragraph: $88.50
+      - button "Add to cart"
+    - article:
+      - heading "Insulated Bottle 4" [level=3]:
+        - link "Insulated Bottle 4":
+          - /url: /product/26
+      - img
+      - paragraph: $95.50
+      - button "Add to cart"
+    - article:
+      - heading "Merino Socks 4" [level=3]:
+        - link "Merino Socks 4":
+          - /url: /product/27
+      - img
+      - paragraph: $12.50
+      - button "Add to cart"
+    - article:
+      - heading "Headlamp Pro 4" [level=3]:
+        - link "Headlamp Pro 4":
+          - /url: /product/28
+      - img
+      - paragraph: $19.50
+      - button "Add to cart"
+    - article:
+      - heading "Rain Shell 4" [level=3]:
+        - link "Rain Shell 4":
+          - /url: /product/29
+      - img
+      - paragraph: $26.50
+      - button "Add to cart"
+    - article:
+      - heading "Camp Mug 4" [level=3]:
+        - link "Camp Mug 4":
+          - /url: /product/30
+      - img
+      - paragraph: $33.50
+      - button "Add to cart"
+    - article:
+      - heading "Trekking Poles 4" [level=3]:
+        - link "Trekking Poles 4":
+          - /url: /product/31
+      - img
+      - paragraph: $40.50
+      - button "Add to cart"
+    - article:
+      - heading "Sleeping Pad 4" [level=3]:
+        - link "Sleeping Pad 4":
+          - /url: /product/32
+      - img
+      - paragraph: $47.50
+      - button "Add to cart"
+    - article:
+      - heading "Trail Backpack 5" [level=3]:
+        - link "Trail Backpack 5":
+          - /url: /product/33
+      - img
+      - paragraph: $54.50
+      - button "Add to cart"
+    - article:
+      - heading "Insulated Bottle 5" [level=3]:
+        - link "Insulated Bottle 5":
+          - /url: /product/34
+      - img
+      - paragraph: $61.50
+      - button "Add to cart"
+    - article:
+      - heading "Merino Socks 5" [level=3]:
+        - link "Merino Socks 5":
+          - /url: /product/35
+      - img
+      - paragraph: $68.50
+      - button "Add to cart"
+    - article:
+      - heading "Headlamp Pro 5" [level=3]:
+        - link "Headlamp Pro 5":
+          - /url: /product/36
+      - img
+      - paragraph: $75.50
+      - button "Add to cart"
+    - article:
+      - heading "Rain Shell 5" [level=3]:
+        - link "Rain Shell 5":
+          - /url: /product/37
+      - img
+      - paragraph: $82.50
+      - button "Add to cart"
+    - article:
+      - heading "Camp Mug 5" [level=3]:
+        - link "Camp Mug 5":
+          - /url: /product/38
+      - img
+      - paragraph: $89.50
+      - button "Add to cart"
+    - article:
+      - heading "Trekking Poles 5" [level=3]:
+        - link "Trekking Poles 5":
+          - /url: /product/39
+      - img
+      - paragraph: $96.50
+      - button "Add to cart"
+    - article:
+      - heading "Sleeping Pad 5" [level=3]:
+        - link "Sleeping Pad 5":
+          - /url: /product/40
+      - img
+      - paragraph: $13.50
+      - button "Add to cart"
+  - separator
+  - heading "Your recent orders" [level=2]
+  - table:
+    - rowgroup:
+      - row "Order Date Status Details":
+        - columnheader "Order"
+        - columnheader "Date"
+        - columnheader "Status"
+        - columnheader "Details"
+    - rowgroup:
+      - row "#1000 2026-10-01 Shipped View order 1000":
+        - cell "#1000"
+        - cell "2026-10-01"
+        - cell "Shipped"
+        - cell "View order 1000":
+          - link "View order 1000":
+            - /url: /orders/1000
+      - row "#1001 2026-10-02 Processing View order 1001":
+        - cell "#1001"
+        - cell "2026-10-02"
+        - cell "Processing"
+        - cell "View order 1001":
+          - link "View order 1001":
+            - /url: /orders/1001
+      - row "#1002 2026-10-03 Processing View order 1002":
+        - cell "#1002"
+        - cell "2026-10-03"
+        - cell "Processing"
+        - cell "View order 1002":
+          - link "View order 1002":
+            - /url: /orders/1002
+      - row "#1003 2026-10-04 Shipped View order 1003":
+        - cell "#1003"
+        - cell "2026-10-04"
+        - cell "Shipped"
+        - cell "View order 1003":
+          - link "View order 1003":
+            - /url: /orders/1003
+      - row "#1004 2026-10-05 Processing View order 1004":
+        - cell "#1004"
+        - cell "2026-10-05"
+        - cell "Processing"
+        - cell "View order 1004":
+          - link "View order 1004":
+            - /url: /orders/1004
+      - row "#1005 2026-10-06 Processing View order 1005":
+        - cell "#1005"
+        - cell "2026-10-06"
+        - cell "Processing"
+        - cell "View order 1005":
+          - link "View order 1005":
+            - /url: /orders/1005
+      - row "#1006 2026-10-07 Shipped View order 1006":
+        - cell "#1006"
+        - cell "2026-10-07"
+        - cell "Shipped"
+        - cell "View order 1006":
+          - link "View order 1006":
+            - /url: /orders/1006
+      - row "#1007 2026-10-08 Processing View order 1007":
+        - cell "#1007"
+        - cell "2026-10-08"
+        - cell "Processing"
+        - cell "View order 1007":
+          - link "View order 1007":
+            - /url: /orders/1007
+      - row "#1008 2026-10-09 Processing View order 1008":
+        - cell "#1008"
+        - cell "2026-10-09"
+        - cell "Processing"
+        - cell "View order 1008":
+          - link "View order 1008":
+            - /url: /orders/1008
+      - row "#1009 2026-10-10 Shipped View order 1009":
+        - cell "#1009"
+        - cell "2026-10-10"
+        - cell "Shipped"
+        - cell "View order 1009":
+          - link "View order 1009":
+            - /url: /orders/1009
+      - row "#1010 2026-10-11 Processing View order 1010":
+        - cell "#1010"
+        - cell "2026-10-11"
+        - cell "Processing"
+        - cell "View order 1010":
+          - link "View order 1010":
+            - /url: /orders/1010
+      - row "#1011 2026-10-12 Processing View order 1011":
+        - cell "#1011"
+        - cell "2026-10-12"
+        - cell "Processing"
+        - cell "View order 1011":
+          - link "View order 1011":
+            - /url: /orders/1011
+      - row "#1012 2026-10-13 Shipped View order 1012":
+        - cell "#1012"
+        - cell "2026-10-13"
+        - cell "Shipped"
+        - cell "View order 1012":
+          - link "View order 1012":
+            - /url: /orders/1012
+      - row "#1013 2026-10-14 Processing View order 1013":
+        - cell "#1013"
+        - cell "2026-10-14"
+        - cell "Processing"
+        - cell "View order 1013":
+          - link "View order 1013":
+            - /url: /orders/1013
+      - row "#1014 2026-10-15 Processing View order 1014":
+        - cell "#1014"
+        - cell "2026-10-15"
+        - cell "Processing"
+        - cell "View order 1014":
+          - link "View order 1014":
+            - /url: /orders/1014
+      - row "#1015 2026-10-16 Shipped View order 1015":
+        - cell "#1015"
+        - cell "2026-10-16"
+        - cell "Shipped"
+        - cell "View order 1015":
+          - link "View order 1015":
+            - /url: /orders/1015
+      - row "#1016 2026-10-17 Processing View order 1016":
+        - cell "#1016"
+        - cell "2026-10-17"
+        - cell "Processing"
+        - cell "View order 1016":
+          - link "View order 1016":
+            - /url: /orders/1016
+      - row "#1017 2026-10-18 Processing View order 1017":
+        - cell "#1017"
+        - cell "2026-10-18"
+        - cell "Processing"
+        - cell "View order 1017":
+          - link "View order 1017":
+            - /url: /orders/1017
+      - row "#1018 2026-10-19 Shipped View order 1018":
+        - cell "#1018"
+        - cell "2026-10-19"
+        - cell "Shipped"
+        - cell "View order 1018":
+          - link "View order 1018":
+            - /url: /orders/1018
+      - row "#1019 2026-10-20 Processing View order 1019":
+        - cell "#1019"
+        - cell "2026-10-20"
+        - cell "Processing"
+        - cell "View order 1019":
+          - link "View order 1019":
+            - /url: /orders/1019
+      - row "#1020 2026-10-21 Processing View order 1020":
+        - cell "#1020"
+        - cell "2026-10-21"
+        - cell "Processing"
+        - cell "View order 1020":
+          - link "View order 1020":
+            - /url: /orders/1020
+      - row "#1021 2026-10-22 Shipped View order 1021":
+        - cell "#1021"
+        - cell "2026-10-22"
+        - cell "Shipped"
+        - cell "View order 1021":
+          - link "View order 1021":
+            - /url: /orders/1021
+      - row "#1022 2026-10-23 Processing View order 1022":
+        - cell "#1022"
+        - cell "2026-10-23"
+        - cell "Processing"
+        - cell "View order 1022":
+          - link "View order 1022":
+            - /url: /orders/1022
+      - row "#1023 2026-10-24 Processing View order 1023":
+        - cell "#1023"
+        - cell "2026-10-24"
+        - cell "Processing"
+        - cell "View order 1023":
+          - link "View order 1023":
+            - /url: /orders/1023
+- contentinfo:
+  - link "About":
+    - /url: /about
+  - text: ·
+  - link "Help":
+    - /url: /help
+  - text: ·
+  - link "Terms":
+    - /url: /terms

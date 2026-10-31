@@ -1,0 +1,18 @@
+/* Environments and test data. Uses the app's design tokens only. */
+.env-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.env-list > li { border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 12px 14px; display: grid; gap: 8px; background: var(--surface-raised); }
+.env-list > li.production { border-color: var(--status-error-line); background: var(--status-error-bg); }
+.env-confirm { background: var(--surface-raised); }
+.env-production { border-color: var(--status-error-line); background: var(--status-error-bg); }
+.env-var-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; }
+@media (max-width: 560px) { .env-var-row { grid-template-columns: minmax(0, 1fr) auto; } .env-var-row .input:nth-child(2) { grid-column: 1; } }
+.env-strip { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.env-strip > li { border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 8px 12px; display: grid; gap: 4px; min-width: 150px; background: var(--surface-raised); }
+.env-strip > li.production { border-color: var(--status-error-line); }
+.env-strip .why { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; max-width: 360px; }
+.env-picker { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.env-picker select.input { width: auto; min-width: 150px; height: 36px; }
+.env-picker .check { padding: 6px 10px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th, .data-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-default); overflow-wrap: anywhere; }
+.data-table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }

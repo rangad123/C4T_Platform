@@ -1,0 +1,16 @@
+- banner:
+  - strong: DemoShop
+  - navigation "Main":
+    - link "Home":
+      - /url: /
+    - link "Products":
+      - /url: /products
+    - link "Cart (1)":
+      - /url: /cart
+    - link "Login":
+      - /url: /login
+- main:
+  - heading "Trail Backpack" [level=1]
+  - paragraph: "Price: $89.00"
+  - button "Add to cart"
+  - status: Added to cart

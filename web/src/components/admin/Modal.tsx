@@ -145,7 +145,10 @@ export function Modal({
     }
 
     function onClose() {
-      router.push(closedHref)
+      // Closed by Escape or X, so the URL still says open. When `open` went
+      // false the URL has already moved on (a save's redirect, carrying its
+      // `?notice=`), and pushing closedHref would throw that away.
+      if (open) router.push(closedHref)
     }
     // Both listened for on the dialog itself, so one place covers every
     // "the user is leaving this dialog toward a new page" path:

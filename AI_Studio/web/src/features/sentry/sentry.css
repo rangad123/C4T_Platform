@@ -1,0 +1,6 @@
+/* "Related errors in Sentry" on the test page. Design tokens only. */
+.sentry-list { list-style: none; margin: 0; padding: 0; }
+.sentry-item { display: grid; gap: 2px; padding: 12px 0; min-width: 0; }
+.sentry-item + .sentry-item { border-top: 1px solid var(--border-default); }
+.sentry-title { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; overflow-wrap: anywhere; }
+.sentry-connect { border-top: 1px solid var(--border-default); padding-top: 16px; }

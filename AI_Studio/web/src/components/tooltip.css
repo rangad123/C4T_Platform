@@ -1,0 +1,60 @@
+/*
+ * Tooltip and HelpTip (components/Tooltip.tsx). An inverse ink panel in light mode and a light ink panel in dark mode, so it reads as
+ * "on top of" the page in both; hairline border, 6px radius, the open-menu shadow, caption type. Fixed position in a portal, so it is
+ * never clipped; pointer-events: none, so it never takes a click. No fade: it appears fully opaque at once (a half-transparent panel
+ * reads as low contrast, to people and to an accessibility check that runs mid-fade), so there is no motion to reduce.
+ */
+.tt {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    max-width: min(280px, calc(100vw - 16px));
+    padding: 6px 10px;
+    border: 1px solid var(--ink-800);
+    border-radius: var(--radius-sm);
+    background: var(--ink-950);
+    color: var(--ink-50);
+    box-shadow: var(--shadow-md);
+    font-family: var(--font-sans);
+    font-size: var(--type-caption-size);
+    line-height: 1.45;
+    font-weight: var(--fw-regular);
+    letter-spacing: normal;
+    text-transform: none;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+}
+.tt[hidden] { display: none; }
+/* An icon-only control's name, above what it does. */
+.tt .tt-name { display: block; font-weight: var(--fw-semibold); }
+/* BadgeKey: one definition per line, the badge's word first. */
+.tt.tt-wide { max-width: min(360px, calc(100vw - 16px)); }
+.tt .tt-key { display: grid; gap: 4px; }
+.tt .tt-key-row { display: block; }
+.tt .tt-key-word { font-weight: var(--fw-semibold); }
+
+/* The "?" button: a 16px icon in a 44px target that takes only 24px of the line (negative margins). */
+.help-tip {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    margin: -10px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: help;
+    vertical-align: middle;
+}
+.help-tip:hover, .help-tip[aria-expanded="true"] { color: var(--text-brand); }
+.help-tip:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: -8px; }
+
+/* FieldHelp: label and its "?" on one row. */
+.field-label-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.field-label-row > label { font-size: var(--type-label-size); line-height: var(--type-label-line); font-weight: var(--fw-medium); color: var(--text-primary); }

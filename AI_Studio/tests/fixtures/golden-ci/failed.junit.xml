@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="Golden &lt;project&gt;" tests="6" failures="4" skipped="1" time="35.170">
+  <testsuite name="Golden &lt;project&gt;" tests="6" failures="4" skipped="1" time="35.170">
+    <testcase classname="General" name="WEB-001: Home page loads" time="0.420">
+      <properties><property name="validation" value="VALIDATED"/><property name="kind" value="web"/><property name="priority" value="high"/></properties>
+    </testcase>
+    <testcase classname="Checkout" name="WEB-002: Checkout &lt;b&gt;button&lt;/b&gt; works | really" time="2.350">
+      <properties><property name="validation" value="NEEDS_REVIEW"/><property name="kind" value="web"/><property name="priority" value="high"/></properties>
+      <failure type="application-finding" message="Expected the &quot;Pay&quot; button to be visible &amp; enabled">Expected the &quot;Pay&quot; button to be visible &amp; enabled
+but it was missing &lt;script&gt;alert(1)&lt;/script&gt;</failure>
+    </testcase>
+    <testcase classname="Security" name="WEB-003: Security headers" time="0.900">
+      <properties><property name="validation" value="NEEDS_REVIEW"/><property name="kind" value="web"/><property name="priority" value="high"/></properties>
+      <failure type="application-finding" message="Passive security check: Content-Security-Policy header is missing">Passive security check: Content-Security-Policy header is missing</failure>
+    </testcase>
+    <testcase classname="Accessibility" name="WEB-004: Contrast" time="1.500">
+      <properties><property name="validation" value="NEEDS_REVIEW"/><property name="kind" value="web"/><property name="priority" value="high"/></properties>
+      <failure type="application-finding" message="Accessibility: 2 violations">Accessibility: 2 violations</failure>
+    </testcase>
+    <testcase classname="Orders" name="API-001: List orders" time="30.000">
+      <properties><property name="validation" value="FAILED_VALIDATION"/><property name="kind" value="api"/><property name="priority" value="high"/></properties>
+      <failure type="test-failure" message="Timed out waiting for response after 30000 ms">Timed out waiting for response after 30000 ms</failure>
+    </testcase>
+    <testcase classname="General" name="WEB-005: Not yet run" time="0.000">
+      <properties><property name="validation" value="PENDING"/><property name="kind" value="web"/><property name="priority" value="high"/></properties>
+      <skipped message="not executed"/>
+    </testcase>
+  </testsuite>
+</testsuites>

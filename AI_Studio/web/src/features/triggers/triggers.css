@@ -1,0 +1,10 @@
+/* Deploy triggers panel on the Schedule tab. Design tokens only. */
+.trig-form { display: grid; gap: 14px; padding: 18px 20px; border-top: 1px solid var(--border-default); background: var(--surface-sunken); }
+.trig-row { display: grid; gap: 8px; padding: 14px 20px; }
+.trig-row .facts { display: flex; gap: 6px 24px; flex-wrap: wrap; color: var(--text-secondary); font-size: 13.5px; }
+.trig-row .facts b { color: var(--text-primary); font-weight: 500; }
+.trig-row .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.trig-new { display: grid; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--border-default); }
+.trig-secret { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.trig-secret code { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; padding: 8px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--code-bg); color: var(--code-text); font: 12.5px/1.5 var(--font-mono); }
+.trig-new pre.code { max-height: 200px; }

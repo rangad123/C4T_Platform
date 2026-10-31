@@ -1,0 +1,6 @@
+/* A setting that is rarely changed: title and one-line summary on the left, "Change" on the right. */
+.setting-row { display: flex; align-items: center; gap: 16px; padding: 16px 24px; flex-wrap: wrap; }
+.setting-text { flex: 1 1 280px; min-width: 0; display: grid; gap: 4px; }
+.setting-body { border-top: 1px solid var(--border-default); padding: 16px 24px 24px; }
+.setting-body > .card { border: 0; box-shadow: none; padding: 0; }
+@media (max-width: 640px) { .setting-row { padding: 14px 20px; } .setting-body { padding: 14px 20px 20px; } }

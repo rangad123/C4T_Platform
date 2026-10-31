@@ -1,0 +1,55 @@
+name: Deploy AI Studio
+
+# Fires once "AI Studio CI" finishes on main, like web-deploy.yml. Run it by
+# hand after a DNS change, and with enable_shared_sign_in to share the sign-in.
+# See AI_Studio/deploy/c4t-box/README.md.
+on:
+  workflow_run:
+    workflows: [AI Studio CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      enable_shared_sign_in:
+        description: Update the production web and API env files and restart them. Needs the site live over HTTPS.
+        type: boolean
+        default: false
+
+concurrency:
+  # Shared with api-deploy.yml and web-deploy.yml on purpose: all three SSH into
+  # the same EC2 checkout, and only one `git reset --hard` may run at a time.
+  group: c4t-ec2-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    # The first deploy downloads Node and Chromium on a small box at low priority.
+    timeout-minutes: 45
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          AI_STUDIO_SECRET_KEY: ${{ secrets.AI_STUDIO_SECRET_KEY }}
+          AI_STUDIO_API_KEY: ${{ secrets.AI_STUDIO_API_KEY }}
+          AI_STUDIO_SERVICE_TOKEN: ${{ secrets.AI_STUDIO_SERVICE_TOKEN }}
+          ENABLE_SHARED_SIGN_IN: ${{ inputs.enable_shared_sign_in && 'true' || 'false' }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: AI_STUDIO_SECRET_KEY,AI_STUDIO_API_KEY,AI_STUDIO_SERVICE_TOKEN,ENABLE_SHARED_SIGN_IN
+          # The action stops a command after 10 minutes unless told otherwise.
+          command_timeout: 40m
+          script_stop: true
+          script: |
+            cd /var/www/c4t
+            # The same clean-up as web-deploy.yml and api-deploy.yml: a web
+            # build leaves these two rewritten, and deploy-pull.sh refuses a
+            # dirty tree. See web-deploy.yml for why it lives here as well.
+            git checkout -- web/next-env.d.ts 2>/dev/null || rm -f web/next-env.d.ts
+            git checkout -- web/tsconfig.json 2>/dev/null || true
+            bash scripts/deploy-pull.sh
+            bash AI_Studio/deploy/c4t-box/deploy.sh

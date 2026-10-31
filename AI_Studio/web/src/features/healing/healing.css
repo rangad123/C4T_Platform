@@ -1,0 +1,12 @@
+/* Locator-healing suggestion on the test page. Design tokens only. */
+.heal { display: grid; gap: 14px; }
+.heal-head { display: flex; gap: 12px; align-items: flex-start; }
+.heal-head .ico { flex: none; color: var(--text-brand); margin-top: 2px; }
+.heal-head h2 { margin: 0; }
+.heal-diff { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.heal-diff .side { border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-sunken); min-width: 0; }
+.heal-diff .side.after { border-color: var(--success-line, var(--border-default)); background: var(--success-bg, var(--surface-sunken)); }
+.heal-diff .side .k { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+.heal-diff .side code { overflow-wrap: anywhere; font: 12.5px/1.5 var(--font-mono); display: block; }
+.heal-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 640px) { .heal-diff { grid-template-columns: minmax(0, 1fr); } }

@@ -1,0 +1,25 @@
+# docker compose up --build   →   http://localhost:4000
+# Put LLM credentials (and API_KEY / SECRET_KEY) in .env — see .env.example.
+services:
+  platform:
+    build: .
+    ports:
+      - "4000:4000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      DATA_DIR: /data
+    volumes:
+      - platform-data:/data
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: "1gb"
+    restart: unless-stopped
+    # Reap browser processes, and give the graceful shutdown (SHUTDOWN_GRACE_SECONDS, default 60) time before Docker kills the container.
+    # For a server on the internet use deploy/docker-compose.prod.yml (HTTPS, backups, health checks): see deploy/README.md.
+    init: true
+    stop_grace_period: 90s
+
+volumes:
+  platform-data:

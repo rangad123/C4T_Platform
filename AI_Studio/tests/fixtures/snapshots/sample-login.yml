@@ -1,0 +1,18 @@
+- banner:
+  - strong: DemoShop
+  - navigation "Main":
+    - link "Home":
+      - /url: /
+    - link "Products":
+      - /url: /products
+    - link "Cart (1)":
+      - /url: /cart
+    - link "Login":
+      - /url: /login
+- main:
+  - heading "Login" [level=1]
+  - text: Email
+  - textbox "Email"
+  - text: Password
+  - textbox "Password"
+  - button "Log in"

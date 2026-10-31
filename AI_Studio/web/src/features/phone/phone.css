@@ -1,0 +1,40 @@
+/* AI phone tests: the start panel, the phone-shaped picture, the counters and the skipped list. Design tokens only. */
+
+/* ── the start panel ── */
+dialog.ph-dialog { width: min(560px, calc(100vw - 32px)); }
+.ph-dialog .foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+/* On a short screen the panel scrolls: the two buttons stay in reach. */
+.ph-dialog form .foot { position: sticky; bottom: 0; padding: 12px 0 0; background: var(--surface-raised); border-top: 1px solid var(--border-default); }
+.ph-dialog .foot .btn { min-height: 44px; }
+.ph-where { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.ph-where legend { margin-bottom: 8px; padding: 0; }
+.ph-where .check.is-off { cursor: not-allowed; background: var(--surface-sunken); }
+.ph-where .check.is-off .title { color: var(--text-secondary); }
+.ph-where .check input { flex: none; }
+
+/* ── the welcome card's choice ── */
+.welcome-kind { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.welcome-kind-opt { flex: 1 1 150px; align-items: center; min-height: 44px; padding: 10px 14px; }
+.welcome-kind-opt .title { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── while the AI explores ── */
+.ph-progress { display: grid; gap: 12px; padding-top: 4px; border-top: 1px solid var(--border-default); }
+.ph-progress > p { margin: 12px 0 0; }
+.ph-skips { margin: 0; }
+.ph-skips li { overflow-wrap: anywhere; }
+
+/* ── the phone-shaped picture of the Explorer view ── */
+.ex-frame-phone { min-height: 0; padding: 16px; max-width: 760px; }
+.ph-device { display: grid; place-items: center; padding: 10px; border-radius: 28px; background: var(--ink-800, var(--surface-sunken)); border: 1px solid var(--border-strong); }
+.ph-screen { display: block; width: auto; max-width: 100%; height: auto; max-height: min(60vh, 520px); border-radius: 18px; background: var(--surface-raised); }
+@media (max-width: 640px) {
+    .ex-frame-phone { padding: 12px; }
+    .ph-screen { max-height: 50vh; }
+}
+
+/* ── the plan: screens found ── */
+.plan-screens { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-height: 360px; overflow: auto; }
+.plan-screens li { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.plan-screens li > span { min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.plan-thumb { flex: none; width: 54px; height: 96px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-default); background: var(--surface-sunken); }
+.ph-app { overflow-wrap: anywhere; }

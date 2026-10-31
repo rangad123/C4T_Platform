@@ -1,0 +1,46 @@
+/* Runbooks panel on the Schedule tab. Design tokens only; the step list reuses the shared .steps/.step styles. */
+.rb-row { display: grid; gap: 10px; padding: 16px 20px; }
+.rb-row .facts { display: flex; gap: 6px 24px; flex-wrap: wrap; align-items: center; color: var(--text-secondary); font-size: 13.5px; }
+.rb-row .facts b { color: var(--text-primary); font-weight: 500; }
+.rb-row .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.rb-summary { color: var(--text-secondary); max-width: 70ch; }
+.rb-ticks.ribbon.sm { width: 132px; }
+.rb-last { display: inline-flex; align-items: center; }
+
+.rb-run { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.rb-reason { font-weight: 500; }
+.rb-steps { padding-left: 2px; }
+.rb-step-status { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--text-muted); }
+.step.done .rb-step-status { color: var(--status-success-fg); }
+.step.failed .rb-step-status { color: var(--status-error-fg); }
+
+.rb-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rb-history li { display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; }
+
+.rb-form { display: grid; gap: 16px; padding: 18px 20px; border-top: 1px solid var(--border-default); background: var(--surface-sunken); }
+.rb-steplist { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.rb-step { margin: 0; min-width: 0; display: grid; gap: 14px; padding: 14px 16px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-raised); }
+.rb-step legend { padding: 0 6px; font-weight: 600; }
+.rb-step-head { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.rb-step-head .grow { flex: 1 1 220px; }
+.rb-step-acts { display: flex; gap: 2px; }
+.rb-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.rb-fields .span { grid-column: 1 / -1; }
+.rb-routes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding-top: 12px; border-top: 1px solid var(--border-default); }
+.rb-always { align-self: end; }
+.rb-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.rb-add .input { width: auto; min-width: 160px; }
+.rb-tests { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 220px; overflow: auto; }
+.rb-fields .input.num { width: 110px; }
+textarea.input { resize: vertical; min-height: 72px; font: inherit; }
+
+.rb-starters { margin-top: 2px; }
+.rb-starters > summary { cursor: pointer; font-weight: 500; color: var(--text-brand); padding: 4px 0; }
+.rb-starters-body { display: grid; gap: 10px; padding-top: 8px; }
+.rb-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+
+@media (max-width: 640px) {
+    .rb-row { padding: 14px 16px; }
+    .rb-fields, .rb-routes { grid-template-columns: minmax(0, 1fr); }
+    .rb-form { padding: 16px; }
+}

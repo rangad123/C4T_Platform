@@ -1,0 +1,16 @@
+node_modules
+data/
+dist/
+web/dist/
+.scratch/
+.env
+*.log
+test-results/
+playwright-report/
+# Cloned upstream repos are kept for reference only; see THIRD_PARTY_LICENSES.md
+references/
+.validation/
+.agent-work/
+.playwright-mcp/
+# A prebuilt Windows installer for the Docker image (see docs/features/runner-installer.md); never commit binaries
+installer/prebuilt/

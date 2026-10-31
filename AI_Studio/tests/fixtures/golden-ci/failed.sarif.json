@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "AI Testing Platform",
+          "version": "0.0.0-golden",
+          "rules": [
+            {
+              "id": "ai-testing/security-check",
+              "name": "SecurityCheck",
+              "shortDescription": {
+                "text": "A passive security check failed"
+              },
+              "fullDescription": {
+                "text": "A built-in security check found a weakness, such as missing browser security headers, an exposed file or an expiring certificate."
+              },
+              "help": {
+                "text": "A built-in security check found a weakness, such as missing browser security headers, an exposed file or an expiring certificate."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "ai-testing"
+                ]
+              }
+            },
+            {
+              "id": "ai-testing/accessibility",
+              "name": "AccessibilityViolation",
+              "shortDescription": {
+                "text": "An accessibility check failed"
+              },
+              "fullDescription": {
+                "text": "An automated accessibility audit (axe-core) found violations on a page."
+              },
+              "help": {
+                "text": "An automated accessibility audit (axe-core) found violations on a page."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "ai-testing"
+                ]
+              }
+            },
+            {
+              "id": "ai-testing/functional-defect",
+              "name": "FunctionalDefect",
+              "shortDescription": {
+                "text": "A test found a functional problem"
+              },
+              "fullDescription": {
+                "text": "A test failed in a way that points at the application, not at the test."
+              },
+              "help": {
+                "text": "A test failed in a way that points at the application, not at the test."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "ai-testing"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "endTimeUtc": "2026-01-02T03:04:05.000Z"
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "ai-testing/functional-defect",
+          "ruleIndex": 2,
+          "level": "error",
+          "message": {
+            "text": "WEB-002 Checkout <b>button</b> works | really: Expected the \"Pay\" button to be visible & enabled but it was missing <script>alert(1)</script> (payment flow)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "ai-tests.json"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "WEB-002",
+                  "fullyQualifiedName": "Checkout/WEB-002"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "aiTesting/v1": "60cc2a1879718fbea5e55927b07e1c836d3080d671d6927e26c19d448e5a244c"
+          },
+          "properties": {
+            "severity": "critical",
+            "testId": "WEB-002",
+            "target": "http://app.test:3000",
+            "link": "http://platform.test/#/tests/t2?a=1&b=2"
+          }
+        },
+        {
+          "ruleId": "ai-testing/security-check",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
+            "text": "WEB-003 Security headers: Passive security check: Content-Security-Policy header is missing (missing header)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "ai-tests.json"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "WEB-003",
+                  "fullyQualifiedName": "Security/WEB-003"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "aiTesting/v1": "5095f80fda8eb26fcb6ea8e52343453ac893e644930c16c518cc7885b3fd5f6d"
+          },
+          "properties": {
+            "severity": "medium",
+            "testId": "WEB-003",
+            "target": "http://app.test:3000"
+          }
+        },
+        {
+          "ruleId": "ai-testing/accessibility",
+          "ruleIndex": 1,
+          "level": "note",
+          "message": {
+            "text": "WEB-004 Contrast: Accessibility: 2 violations"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "ai-tests.json"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "WEB-004",
+                  "fullyQualifiedName": "Accessibility/WEB-004"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "aiTesting/v1": "258282180f8c43bc0ea02e1a6652075562585386c84a16a7118b5f18e2706716"
+          },
+          "properties": {
+            "severity": "low",
+            "testId": "WEB-004",
+            "target": "http://app.test:3000"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+- banner:
+  - strong: DemoShop
+  - navigation "Main":
+    - link "Home":
+      - /url: /
+    - link "Products":
+      - /url: /products
+    - link "Cart (1)":
+      - /url: /cart
+    - link "My account":
+      - /url: /account
+- main:
+  - heading "Welcome, Demo User" [level=1]
+  - button "Log out"

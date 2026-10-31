@@ -1,0 +1,78 @@
+# Production: the platform behind Caddy (automatic HTTPS for your domain), data and backups on volumes, health checks, restarts.
+# Step by step: deploy/README.md. Run from the repository root:
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+# Needs in the repository's .env (see .env.example): DOMAIN, PUBLIC_URL, API_KEY, SECRET_KEY, the AI settings.
+# Not verified with Docker on the machine this was written on (Docker could not be run there); check with `docker compose -f deploy/docker-compose.prod.yml config`.
+name: ai-testing-platform
+
+services:
+  platform:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ai-testing-platform:latest
+    env_file:
+      - path: ../.env
+        required: true
+    environment:
+      HOST: 0.0.0.0
+      PORT: "4000"
+      DATA_DIR: /data
+      BACKUP_DIR: /backups
+      LOG_FORMAT: json
+    volumes:
+      - platform-data:/data
+      - platform-backups:/backups
+      # Windows runner installer built on a Windows computer (optional; see docs/features/runner-installer.md). Uncomment both lines:
+      # - ./runner-installer:/app/runner-installer:ro
+    # environment: RUNNER_INSTALLER_DIR: /app/runner-installer   (add to the environment list above together with the volume)
+    # Not published to the internet: only Caddy reaches it.
+    expose:
+      - "4000"
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: "1gb"
+    # tini as PID 1 reaps browser processes; SIGTERM reaches the platform, which lets the running job finish (SHUTDOWN_GRACE_SECONDS, default 60).
+    init: true
+    stop_grace_period: 90s
+    restart: unless-stopped
+    healthcheck:
+      # Ready = database writable, migrations done, worker alive, disk space left.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2.8.4
+    depends_on:
+      platform:
+        condition: service_healthy
+    env_file:
+      - path: ../.env
+        required: true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  platform-data:
+  platform-backups:
+  caddy-data:
+  caddy-config:

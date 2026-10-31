@@ -1,0 +1,52 @@
+name: AI Studio CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['AI_Studio/**', '.github/workflows/ai-studio-ci.yml']
+  pull_request:
+    paths: ['AI_Studio/**', '.github/workflows/ai-studio-ci.yml']
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes an in-flight run on the same ref.
+  group: ai-studio-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: AI_Studio
+
+jobs:
+  quality:
+    name: Typecheck, build, access tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # AI Studio needs Node 24 (node:sqlite). Not the .nvmrc the C4T apps use.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: AI_Studio/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck the server
+        run: npx tsc --noEmit
+
+      - name: Typecheck the web app
+        run: npx tsc --noEmit -p web
+
+      - name: Build the web app
+        run: npm run build:web
+
+      - name: Access tests
+        run: npx vitest run tests/permissions.test.ts tests/permissions-unit.test.ts tests/project-access.test.ts tests/api-access.test.ts tests/crowd4test-signin.test.ts tests/secret-leak.test.ts tests/guide-unit.test.ts tests/studio-fixes-unit.test.ts tests/run-address-unit.test.ts
+        env:
+          # A path that does not exist, so no test can reach a real phone.
+          TAQWRIGHT_HOME: /nonexistent-taqwright

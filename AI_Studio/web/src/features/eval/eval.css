@@ -1,0 +1,28 @@
+/* Settings, Quality of the AI tester. Design tokens only. */
+.eval-runs { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+.eval-run + .eval-run { border-top: 1px solid var(--border-default); }
+.eval-run summary { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; justify-content: space-between; min-height: 44px; padding: 10px 14px; cursor: pointer; list-style: none; }
+.eval-run summary::-webkit-details-marker { display: none; }
+.eval-run summary:focus-visible { outline: 2px solid var(--action-primary-bg); outline-offset: -2px; }
+.eval-run-head { display: grid; gap: 2px; min-width: 0; }
+.eval-run-head .title { font-weight: 600; }
+.eval-scores { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.eval-score { display: inline-flex; align-items: baseline; gap: 6px; }
+.eval-score .lbl { color: var(--text-muted); font-size: 13px; }
+.eval-score .num { font-weight: 600; font-variant-numeric: tabular-nums; }
+.eval-detail { padding: 4px 14px 14px; }
+.eval-table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+.eval-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.eval-table th, .eval-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border-default); vertical-align: top; }
+.eval-table thead th { font-weight: 600; color: var(--text-muted); }
+.eval-table tbody th { font-weight: 400; }
+.eval-table tr:last-child th, .eval-table tr:last-child td { border-bottom: 0; }
+.eval-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.eval-kind, .eval-reason { display: block; font-size: 12.5px; }
+.eval-reason { max-width: 36ch; }
+.eval-gates, .eval-changes, .eval-tests { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.eval-changes li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.eval-tests li { overflow-wrap: anywhere; }
+.eval-command { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
+.eval-command code, .eval-hint code { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--surface-sunken); overflow-wrap: anywhere; }
+.eval-actions { flex-wrap: wrap; gap: 10px; }

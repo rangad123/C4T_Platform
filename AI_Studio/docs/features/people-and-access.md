@@ -1,0 +1,80 @@
+# People and access
+
+Until now the platform had one shared access key (`API_KEY`). Now each person can have an **account** with a **role**, sign in with email and password (or single sign-on), and everything they change is listed in **Activity**. The access key keeps working as an owner-level key for scripts, the MCP server, the `ai-test` command and runner kits.
+
+## What a person sees
+
+- **Sign in**: once anyone has an account, the platform opens on a sign-in page (email and password). "Use an access key instead" stays available under a disclosure. If single sign-on is set up, a button such as "Sign in with Corp" is shown too. While nobody has an account and an access key is set, the page asks for the key exactly as before.
+- **Settings, People** (owners): everyone with an account, their role, when they last signed in. **Add a person** (email, name, role) gives a one-time **invite link** that the owner sends themselves (the platform sends no mail); the person opens it and chooses a password. Per person: change the role, **Make reset link**, **Sign out everywhere**, **Turn off account**, **Remove**.
+- **Settings, Your account** (anyone signed in): change the password, make and remove **personal API tokens**, **Sign out everywhere**.
+- **Settings, Activity** (owners): who changed what, and when, with a "Contains" filter and a "Who" filter, newest first, with **Show older**.
+- **Settings, Single sign-on** (owners): issuer address, client ID, client secret (write-only), allowed email domain, role for people signing in for the first time, button text. **Check and save** reads the provider's discovery document before saving.
+- **Sidebar**: the person's name and role, and **Sign out** (for the access key: **Forget key**).
+
+## Roles
+
+| Role | Can |
+|---|---|
+| Owner | Everything, including people, Activity, single sign-on, runner tokens and runner kits, deploy-trigger tokens, alert channels, issue-tracker and Sentry connections, device-farm connections, retention and whole-project backups, AI prices and budgets, fallback models, evaluation runs. |
+| Editor | Create, change and run tests and projects: exploration, runs, steps, code, shared elements, reusable steps, test data, environments, test accounts, schedules, run sequences, quarantine, releases and sign-off. |
+| Viewer | Read everything and download reports, exports and scripts. Can watch live runs. Cannot change anything. |
+
+Roles are **workspace-wide** (one workspace). A person can also be **limited to some projects** (below): then they see only those, with a role in each.
+
+## Per-project access (projects a person may see)
+
+For clients who get their own login: an owner can limit a person to their own projects.
+
+- **What the owner does**: **Settings, People**, a person's row, **Projects <name> can see**: **All projects** (the default) or **Only these projects**, then tick each project and choose the role there (Viewer, Editor or Owner, never above the person's own role: higher roles are not offered), and **Save access**. The row shows **All projects** or **2 projects** (hover for the names). It takes effect at the person's next request, for their API tokens too. Nobody changes their own access, and the last active owner with access to all projects keeps it (so someone can always manage people); demoting that owner is refused for the same reason.
+- **Existing people keep today's access**: every person, existing and new, is "All projects" until an owner limits them. Nothing changes for the access key, open access, runners or deploy triggers.
+- **What a limited person sees**: the projects list, the dashboard (its counts too) and the security section list only their projects. Any address of another project, or of anything in it (a test, a run, a screenshot, a recording, an issue-tracker connection, a security application, assessment, finding or authorization) answers **404 "… not found"**, the same answer as for something that does not exist, so its existence is not revealed. A live-update link can only be made for their own project's runs. Inside an allowed project the role that counts is the lower of their role there and their own role (and a token's role lowers it further, as always): a Viewer there is told "This needs the Editor role in this project, and you have Viewer there." Settings shows them only their account (no usage, storage or evaluation panels), and says "You see only the projects an owner chose for you".
+- **Platform-wide pages stay for people with access to all projects**, even when the limited person is an owner: People, Activity, single sign-on, storage, AI usage and budgets (the usage of one of their own projects is allowed with `?projectId=`), prices, evaluation runs, model fallbacks, creating a project and restoring a backup answer 403 "This is for people with access to all projects."
+
+How it works:
+
+- **One check for every route** (`src/platform/auth/project-scope.ts`), called by the access hook right after the role check. Each route template is placed once: a **project** route (`/api/projects/:id/…`, `/api/v1/security/projects/:id/…`), an **object** route whose project is looked up in that one place (`/api/tests/:id`, `/api/test-generation/:jobId`, `/api/jobs/:id`, `/api/artifacts/:id`, `/api/recordings/:rid`, `/api/integrations/:id`, `/api/v1/security/applications/:appId`, `…/assessments/:aid`, `…/findings/:fid`, `…/authorizations/:authId`; a run named inside a project route, `…/:jobId`, is checked too), a **list** the handler narrows (`GET /api/projects`, `GET /api/dashboard`), the project in the **query** (`GET /api/usage?projectId=`), the stream path in the body of `POST /api/stream-tickets`, **none** (signing in, your own account, step-text conversions, `GET /api/config`, model health, the security module's status), or **platform-wide**. A route nobody placed counts as platform-wide (fail closed), and `tests/project-access.test.ts` fails when a registered route is not placed.
+- **API**: `GET /api/users` gives each person `access`: `{ mode: "all" }` or `{ mode: "only", projects: [{ projectId, name, role, effectiveRole }] }`. `PUT /api/users/:userId/projects` with `{ access: "all" }` or `{ access: "only", projects: [{ projectId, role }] }` (owners with access to all projects; at most 500 projects; each once; the projects must exist). `GET /api/auth/state` says `projectAccess: "all" | "only"` for the person asking.
+- **Storage**: migration slot 32 (`src/platform/project-access-store.ts`): a `project_access` column on `users` (`all` by default, so every existing person keeps access to all projects) and a `user_projects` table (person, project, role; removed with the person or the project). The role is stored as chosen; the lower of it and the platform role counts at use, so lowering someone's platform role later never leaves a higher role in a project.
+- **Tests**: `tests/project-access.test.ts` takes every registered route, calls each project and object route with another project's ids as a limited person (all must answer 404 with the words of a missing object), calls each GET route with the person's own ids and compares the answer with the access key's, and checks every platform-wide route answers 403; plus roles per project, tokens, sessions, lists, dashboard counts, tickets, security objects (also with a misleading `?projectId=`), the People API rules and the migration default. `tests/project-access-ui.test.ts` does it in a browser (People screen, the client's projects list, security home, Settings), with axe in light and dark and at 375 px.
+
+What is not covered: a limited person cannot create projects (an owner creates the project and adds it to their list); there are no groups or teams (each person's list is set on its own); whole-project backups and restores do not carry who may see the project; the Activity list of the whole platform stays owner-only and is not narrowed per project; a project's runner kits and runner tokens follow the project role like everything else in the project.
+
+## How it works
+
+- **One table** (`src/platform/auth/roles.ts`) gives every route its least role (`owner`, `editor`, `viewer`), or `public` (signing in) or `own` (routes with their own credential). The access hook (`src/platform/auth/access.ts`, installed by `server.ts` before any route) checks it on every `/api` request. A route that is missing from the table needs an **owner** (fail closed), and `tests/users-unit.test.ts` fails when any registered route is missing, so a new route must be mapped.
+- **Who is asking**, in order: the access key or a personal token in `x-api-key` (also `?key=` on artifact links, as before), a personal token as `Authorization: Bearer aitpu_…`, then the session cookie. With no `API_KEY` and nobody with an account the platform stays **open** (as before) and says so in Settings.
+- **Unchanged credentials**: `/api/health`, the deploy-trigger routes (trigger token), the runner protocol routes (runner token) and streams opened with a ticket are passed through before any of this, exactly as before.
+- **Passwords**: Node's `crypto.scrypt` (N=2^15, r=8, p=1, 16-byte salt, 64-byte key), at least 10 characters, not the email, not one character repeated. Unknown emails cost the same work, and the answer is the same sentence, so it does not reveal which emails exist.
+- **Sessions**: a random 32-byte value in the `aitp_session` cookie (HttpOnly, SameSite=Lax, Path=/, Secure when the request is https, `PUBLIC_URL` starts with https, or `COOKIE_SECURE=true`). Only its SHA-256 is stored. 12 hours idle, 7 days at most. Signing in always starts a new session and ends the one the browser had (rotation). A new password ends all other sessions; turning an account off ends all of them.
+- **CSRF**: a cookie-authenticated change must send the session's CSRF token in `x-csrf-token` (the page reads it from the `aitp_csrf` cookie) and, when the browser sends an `Origin`, come from the platform's own address (`Host`, or `PUBLIC_URL`). Sign-in and the invite forms check the Origin too. Keys and tokens in headers need no CSRF token (a browser never adds them on its own).
+- **Sign-in throttling** (in memory): 20 attempts per address per 10 minutes; 5 wrong passwords in a row lock that email for 15 minutes (for unknown emails too). A restart forgets the counters.
+- **First owner**: `POST /api/auth/setup` works only while nobody has an account, and only with the access key (or on an open platform). There is no default password.
+- **Personal API tokens** (`aitpu_…`, shown once, stored as SHA-256, last four characters shown): at most the person's role (the lower of the token's and the person's current role counts at use), optional expiry (30, 90, 365 days), up to 20 per person. A token cannot make tokens. They work wherever the access key works in a header (the MCP server, the `ai-test` command), but **not** on runner or trigger routes, which keep their own tokens.
+- **Invite and reset links**: random 32 bytes, stored as SHA-256, one use, invite 7 days, reset 24 hours, a new link replaces the old one. The token travels in the URL fragment (`#/invite/<token>`), so it is not in server logs.
+- **Activity** (table `activity`): every change through the API (method and route template, address, project, answer status, who), plus sign-in events (signed in, failed, locked, joined). Reading is not recorded, nor runner protocol traffic or streams. Refused changes are listed with who tried. Kept: the newest 20,000 rows and nothing older than 180 days.
+- **Audit actor**: the acting person (or "Access key", "Open access", "Deploy trigger", "Runner", "Platform" for background work) is carried per request (`AsyncLocalStorage`, `src/platform/auth/actor.ts`) and written to the `actor` column of the older audit tables: hand-written test history (`custom_audit`), release sign-offs (`release_audit`, next to the typed name), live sessions (`live_session_audit`).
+- **Single sign-on** (`src/platform/auth/oidc.ts`, Node `fetch` and `crypto` only): OpenID Connect discovery, authorization code with PKCE (S256), state and nonce (one use, 10 minutes), token request with `client_secret_post` (or `client_secret_basic` when that is all the provider lists), then the ID token check: **RS256 only** (`none`, HS256 and others are refused), signature against the provider's JWKS (fetched again once on an unknown key id), issuer, audience (and `azp`), expiry and issue time (2 minutes of clock skew), nonce, an email that is not marked unverified and is at the allowed domain. An existing person with that email is linked on first use (and refused afterwards if a different identity arrives); a new person gets the chosen role (Viewer or Editor, never Owner). The provider's addresses must be https (plain http only for this computer, used by the tests). The client secret is encrypted with SecretBox and never returned.
+- Storage: migration slot 26 (`src/platform/user-store.ts`): new columns on the existing `users` table (its built-in "Default user" row that owns projects has no role and is never a person), `user_sessions`, `user_tokens`, `user_invites`, `activity`, `auth_settings`, `oidc_pending`. The `actor` columns on the older audit tables are added after the migrations (`addActorColumns`, idempotent).
+
+## API
+
+Public: `GET /api/auth/state`, `POST /api/auth/sign-in`, `POST /api/auth/sign-out`, `POST /api/auth/setup`, `POST /api/auth/invite/check`, `POST /api/auth/invite/accept`, `GET /api/auth/sso/start`, `GET /api/auth/sso/callback`.
+Signed in: `PUT /api/me/password`, `POST /api/me/sign-out-everywhere`, `GET|POST /api/me/tokens`, `DELETE /api/me/tokens/:tokenId`.
+Owners: `GET|POST /api/users`, `PATCH|DELETE /api/users/:userId`, `PUT /api/users/:userId/projects` (per-project access), `POST /api/users/:userId/reset-link`, `POST /api/users/:userId/sign-out`, `GET /api/activity`, `GET|PUT|DELETE /api/sso-settings`.
+
+## Setting it up for real (what the owner provides)
+
+1. Keep `API_KEY` set (it is how you create the first owner and how scripts and runner kits keep working). Open the platform, enter the key, go to **Settings, People**, create your owner account.
+2. Set `PUBLIC_URL` to the address people use (for example `https://tests.example.com`): invite links and the single sign-on redirect use it, and cookies become Secure. Behind a proxy that ends TLS without `PUBLIC_URL`, set `COOKIE_SECURE=true`.
+3. For single sign-on: register an application (web, confidential client) at your provider with the redirect address shown in **Settings, Single sign-on** (`<PUBLIC_URL>/api/auth/sso/callback`), scopes `openid email profile`, and RS256-signed ID tokens. Enter the issuer, client ID, client secret and your email domain.
+
+## What is not covered
+
+- No e-mail is sent: the owner passes invite and reset links on. There is no self-service "forgot password".
+- Per-project access is a list per person (see above); there are no custom roles, no teams, and no groups from the provider.
+- No two-factor authentication for passwords (use single sign-on with the provider's own second factor).
+- Single sign-on: only RS256 ID tokens; no SAML, no encrypted ID tokens, no single logout, no SCIM provisioning. Verified with a local provider in the tests, not with a real Okta, Entra ID or Google tenant.
+- The sign-in limits live in memory (one process); several platform processes behind a load balancer would each count on their own.
+- The page does not yet hide buttons a Viewer cannot use: the server refuses the change with a plain sentence ("This needs the Editor role…").
+- Activity records what changed through the API, not what the AI did inside a job (that is in the job's own activity) and not reads.
+- On an open platform (no `API_KEY`, nobody with an account) anyone who can reach the server can create the first owner: set `API_KEY` before exposing the platform on a network.

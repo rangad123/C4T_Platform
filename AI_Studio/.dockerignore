@@ -1,0 +1,12 @@
+node_modules
+data
+.validation
+.scratch
+.playwright-mcp
+references
+web/dist
+test-results
+playwright-report
+.env
+*.log
+.git

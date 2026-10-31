@@ -1,0 +1,35 @@
+/* Phones (round 24): the ready check, the phone test settings and the sign-in pause. Design tokens only. */
+
+.pd-head { flex-wrap: wrap; gap: 8px; }
+.pd-head .btn { min-height: 44px; }
+
+.pd-phone { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--border-default); border-radius: var(--radius-card); background: var(--surface-raised); min-width: 0; }
+.pd-phone-head { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.pd-phone-head > svg { flex: none; margin-top: 3px; color: var(--text-muted); }
+.pd-phone-name { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.pd-phone-name h3 { margin: 0; }
+
+.pd-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.pd-check { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--border-default); min-width: 0; }
+.pd-check:first-child { border-top: 0; }
+.pd-check > .badge { flex: none; margin-top: 1px; }
+.pd-check-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.pd-check-title { margin: 0; font-size: var(--type-body-sm-size); font-weight: var(--fw-medium); line-height: 1.45; }
+.pd-check .btn { min-height: 44px; }
+.pd-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--type-body-sm-size); color: var(--text-secondary); }
+
+.pd-group { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.pd-group legend { margin-bottom: 4px; padding: 0; }
+.pd-group .check { min-height: 44px; }
+.pd-group .check input { flex: none; }
+.pd-group .check.is-off { cursor: not-allowed; background: var(--surface-sunken); }
+.pd-group .check.is-off .title { color: var(--text-secondary); }
+.pd-group .check .title, .pd-group .check .hint { overflow-wrap: anywhere; }
+
+.pd-pause-body { display: grid; gap: 6px; }
+.pd-coverage { margin: 0; }
+
+@media (max-width: 480px) {
+    .pd-phone { padding: 12px; }
+    .pd-check { flex-direction: column; gap: 6px; }
+}
