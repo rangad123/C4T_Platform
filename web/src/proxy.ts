@@ -5,7 +5,7 @@ import { spendRefreshToken } from '@/lib/auth/refresh-core'
 import { spendHrRefreshToken } from '@/lib/hrms/hr-refresh-core'
 import { authCookieOptions, parseSetCookie } from '@/lib/auth/set-cookie'
 import { authHeaders } from '@/lib/auth/request-context'
-import { domainFor, expireHostOnly, sharedSessionFixes } from '@/lib/auth/shared-session'
+import { domainFor, sharedSessionFixes } from '@/lib/auth/shared-session'
 
 /**
  * Next 16 Proxy — formerly `middleware.ts`.
@@ -316,21 +316,22 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const arrivedFromAuthCheck = request.nextUrl.searchParams.has('next')
 
   /**
-   * Keep the session cookies scoped to the parent domain so AI Studio shares
-   * them, and expire host-only copies left from before (shared-session.ts).
-   * Nothing to do unless AUTH_COOKIE_DOMAIN is set.
+   * Keep the access cookie scoped to the parent domain so AI Studio shares
+   * it, keep the refresh cookie on this host, and expire copies left in the
+   * wrong scope from before (shared-session.ts). Nothing to do unless
+   * AUTH_COOKIE_DOMAIN is set.
    */
   const sessionFixes = sharedSessionFixes(
     request.headers.get('cookie') ?? '',
     (name) => request.cookies.get(name)?.value,
     refreshed.map((options) => options.name),
+    request.headers.has('next-action'),
   )
   const withSharedSession = (response: NextResponse): NextResponse => {
     for (const cookie of sessionFixes.set) response.cookies.set(cookie)
     // Raw, and last: every `cookies.set` rewrites the Set-Cookie list and
     // would drop a line appended before it.
-    for (const name of sessionFixes.expire)
-      response.headers.append('set-cookie', expireHostOnly(name))
+    for (const line of sessionFixes.expire) response.headers.append('set-cookie', line)
     return response
   }
 
@@ -360,7 +361,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // with the fresh access token rather than the expired one.
   // A name sent twice is forwarded once, newest value: Next's jar keeps the
   // last copy, and the browser sends the older host-only one first.
-  if (refreshed.length > 0 || sessionFixes.expire.length > 0) {
+  if (refreshed.length > 0 || sessionFixes.duplicated) {
     requestHeaders.set('cookie', request.cookies.toString())
   }
 

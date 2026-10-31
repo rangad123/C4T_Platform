@@ -2,6 +2,7 @@
 
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { isSameOriginPath } from '@/lib/safe-redirect'
 import { HR_LIST_VIEW_COOKIE, type HrListView } from './list-view'
 
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
@@ -22,9 +23,7 @@ export async function setHrListView(formData: FormData): Promise<void> {
   const view: HrListView = formData.get('view') === 'cards' ? 'cards' : 'table'
   const requested = formData.get('returnTo')
   const returnTo =
-    typeof requested === 'string' && requested.startsWith('/') && !requested.startsWith('//')
-      ? requested
-      : '/admin'
+    typeof requested === 'string' && isSameOriginPath(requested) ? requested : '/admin'
 
   const store = await cookies()
   store.set({

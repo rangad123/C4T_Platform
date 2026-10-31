@@ -14,18 +14,39 @@
 
 const ROLE_HOME_FALLBACK = '/app' as const
 
+/** Any origin works: only whether `next` keeps it matters. */
+const PROBE_ORIGIN = 'https://c4t.invalid'
+
+/**
+ * True when `path` is a path on this site and nothing a browser could read as
+ * another host. Rejects:
+ *   "https://evil.com"   — full URL
+ *   "//evil.com"         — protocol-relative
+ *   "/\\evil.com"        — browsers read a backslash as a slash
+ *   "/<TAB>/evil.com"    — browsers strip tabs and newlines from a URL, which
+ *                          leaves "//evil.com"; so any control character or
+ *                          space (below 0x21, and DEL) is refused
+ *   "javascript:…"       — scheme-prefixed
+ * and, as a last check, anything that resolves to another origin.
+ */
+export function isSameOriginPath(path: string): boolean {
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return false
+  for (let i = 0; i < path.length; i++) {
+    const code = path.charCodeAt(i)
+    if (code < 0x21 || code === 0x7f) return false
+  }
+  try {
+    return new URL(path, PROBE_ORIGIN).origin === PROBE_ORIGIN
+  } catch {
+    return false
+  }
+}
+
 /** Returns a same-origin path from `next`, or `null` if `next` is unsafe. */
 export function safeNext(next: string | null | undefined): string | null {
   if (!next) return null
 
-  // Reject anything that isn't a relative path. Catches:
-  //   "https://evil.com"   — full URL
-  //   "//evil.com"         — protocol-relative
-  //   "/\\evil.com"        — backslash trick that some browsers normalise
-  //   "javascript:…"       — scheme-prefixed
-  if (!next.startsWith('/') || next.startsWith('//') || next.includes('\\')) {
-    return null
-  }
+  if (!isSameOriginPath(next)) return null
 
   // The form should never bounce a signed-in user back to the marketing site,
   // and never into another credential screen. /login etc. are guarded by

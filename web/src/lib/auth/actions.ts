@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 import { redirect, RedirectType } from 'next/navigation'
 import { env } from '@/lib/env'
 import { ROLE_HOME, type Role } from '@/lib/api/types'
-import { safeNext } from '@/lib/safe-redirect'
+import { isSameOriginPath, safeNext } from '@/lib/safe-redirect'
 import { formString, formTrimmed } from '@/lib/form-data'
 import { bridgeApiCookies, clearSessionCookies } from '@/lib/auth/cookie-bridge'
 import { currentAuthHeaders } from '@/lib/auth/request-context'
@@ -151,11 +151,12 @@ export async function logoutAction(formData?: FormData): Promise<void> {
 
     Guarded as a SAME-ORIGIN PATH. A `next` that a form controls is an open
     redirect if it is trusted: `//evil.example` and `https://evil.example` are
-    both valid values of `next` and both leave the site. Only a single leading
-    slash is accepted, which cannot express another host.
+    both valid values of `next` and both leave the site, and so does
+    `/<TAB>/evil.example` once a browser strips the tab. `isSameOriginPath`
+    refuses all three.
   */
   const requested = formData?.get('next')
-  const next = typeof requested === 'string' && /^\/(?!\/)/.test(requested) ? requested : null
+  const next = typeof requested === 'string' && isSameOriginPath(requested) ? requested : null
 
   // Read the refresh cookie so the API can destroy the session row even if
   // the access cookie has already expired.

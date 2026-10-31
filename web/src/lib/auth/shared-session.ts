@@ -3,34 +3,55 @@ import { env, isProduction } from '@/lib/env'
 /**
  * One sign-in for crowd4test.com and AI Studio (aistudio.crowd4test.com).
  *
- * AI Studio reads this site's session cookie and asks the API whether it is
+ * AI Studio reads this site's access cookie and asks the API whether it is
  * live, so it can only see the cookie when the cookie is scoped to the parent
  * domain. `AUTH_COOKIE_DOMAIN` (".crowd4test.com" in production) does that for
- * the two session cookies, and only for them: the HRMS cookies stay host-only,
- * as `hr-auth.controller.ts` explains. Unset, as in development, every cookie
- * stays host-bound exactly as `authCookieOptions` describes.
+ * the access cookie and the `c4t_shared` marker, and only for them. Unset, as
+ * in development, every cookie stays host-bound exactly as `authCookieOptions`
+ * describes.
+ *
+ * ── THE REFRESH COOKIE STAYS ON THIS HOST
+ *
+ * `c4t_refresh` is a 30-day credential. AI Studio never spends it: when its
+ * access cookie has gone it asks this site to renew (`/app/ai-studio/refresh`),
+ * and Proxy spends the refresh cookie here. Scoping it to the domain would
+ * hand it to every subdomain for nothing, so it is host-only. The HRMS cookies
+ * stay host-only too, as `hr-auth.controller.ts` explains.
  *
  * Framework-free, like `set-cookie.ts`: Proxy writes onto a `NextResponse` and
  * the cookie bridge writes through `next/headers`, and both need these rules.
  *
- * ── THE HOST-ONLY COPIES LEFT FROM BEFORE
+ * ── COPIES LEFT FROM BEFORE
  *
- * A browser that signed in before the domain was set holds host-only cookies.
- * Setting a domain cookie of the same name does not replace them: the browser
- * keeps both and sends both, oldest first. Next keeps the last value it parses
- * (the newer one) and forwards only that to the API, so nothing breaks, but
- * the stale copy would outlive a sign-out that deleted the domain cookie. So
- * Proxy expires host-only copies whenever it sees a name twice, and re-scopes
- * a session it has never scoped before (no `c4t_shared` marker yet).
+ * A cookie written with a Domain and one written without are two cookies to
+ * the browser, even under one name: it keeps both and sends both, oldest
+ * first. Next keeps the last value it parses (the newer one), so nothing
+ * breaks, but the other copy would outlive a sign-out that deleted only one.
+ * Two kinds exist: host-only access cookies from before the domain was set,
+ * and domain-scoped refresh cookies from before the refresh cookie stayed on
+ * this host. Proxy expires the wrong-scoped copy whenever it sees a name
+ * twice, and re-scopes the session of any browser whose `c4t_shared` marker
+ * is missing or older than `SHARED_MARKER_VALUE`.
  */
 
 export const SESSION_COOKIE_NAMES = ['c4t_access', 'c4t_refresh'] as const
 
 /**
- * Says "this browser's session cookies are domain cookies". Holds no secret;
- * it only spares Proxy re-issuing the session on every request.
+ * Says "this browser's session cookies are scoped as this file says". Holds
+ * no secret; it only spares Proxy re-issuing the session on every request.
+ * AI Studio also reads its presence as "this session can be renewed".
  */
 export const SHARED_MARKER_COOKIE = 'c4t_shared'
+
+/**
+ * The marker's current value. Raise it whenever the scoping rules change, so
+ * Proxy revisits browsers that hold an older marker. '1': both session
+ * cookies under the domain. '2': the refresh cookie host-only.
+ */
+export const SHARED_MARKER_VALUE = '2'
+
+/** The cookies written under AUTH_COOKIE_DOMAIN. Never the refresh cookie. */
+const DOMAIN_COOKIE_NAMES: readonly string[] = ['c4t_access', SHARED_MARKER_COOKIE]
 
 /** Matches the API's SESSION_ABSOLUTE_TTL: nothing outlives a session's hard ceiling. */
 const SESSION_CEILING_SECONDS = 30 * 24 * 60 * 60
@@ -45,7 +66,7 @@ export function isSessionCookie(name: string): boolean {
 
 /** The domain a cookie of this name is written under, or none (host-only). */
 export function domainFor(name: string): string | undefined {
-  return isSessionCookie(name) || name === SHARED_MARKER_COOKIE ? sessionCookieDomain() : undefined
+  return DOMAIN_COOKIE_NAMES.includes(name) ? sessionCookieDomain() : undefined
 }
 
 /** Session cookie names sent more than once — a host-only copy beside a domain one. */
@@ -66,6 +87,14 @@ export function duplicatedSessionCookies(cookieHeader: string): string[] {
  */
 export function expireHostOnly(name: string): string {
   return `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isProduction ? '; Secure' : ''}`
+}
+
+/**
+ * A `Set-Cookie` line that expires only the copy of `name` scoped to `domain`,
+ * leaving the host-only one alone. Raw for the same reason as above.
+ */
+export function expireUnderDomain(name: string, domain: string): string {
+  return `${name}=; Domain=${domain}; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isProduction ? '; Secure' : ''}`
 }
 
 /**
@@ -92,11 +121,17 @@ export interface SharedCookie {
   secure: boolean
   sameSite: 'lax'
   path: '/'
-  domain: string
+  /** Absent: host-only. */
+  domain?: string
   maxAge: number
 }
 
-function shared(name: string, value: string, maxAge: number, domain: string): SharedCookie {
+function shared(
+  name: string,
+  value: string,
+  maxAge: number,
+  domain: string | undefined,
+): SharedCookie {
   return {
     name,
     value,
@@ -104,45 +139,68 @@ function shared(name: string, value: string, maxAge: number, domain: string): Sh
     secure: isProduction,
     sameSite: 'lax',
     path: '/',
-    domain,
+    ...(domain ? { domain } : {}),
     maxAge,
   }
 }
 
 export function markerCookie(domain: string): SharedCookie {
-  return shared(SHARED_MARKER_COOKIE, '1', SESSION_CEILING_SECONDS, domain)
+  return shared(SHARED_MARKER_COOKIE, SHARED_MARKER_VALUE, SESSION_CEILING_SECONDS, domain)
 }
 
 /**
- * What Proxy must do to this request's session cookies, if anything:
- * cookies to (re)write under the domain, and host-only copies to expire.
- * `alreadySet` names cookies this response writes anyway (a refresh).
+ * What Proxy must do to this request's session cookies, if anything: cookies
+ * to (re)write in their proper scope, and raw `Set-Cookie` lines expiring the
+ * copies in the wrong one. `alreadySet` names cookies this response writes
+ * anyway (a refresh). `duplicated` says a name arrived twice, so the cookie
+ * header forwarded to the render must be rebuilt with one value per name.
+ *
+ * `serverAction` is a request that may be a sign-out. A Server Action can
+ * write only one cookie per name (Next keys its cookie store by name), so
+ * `clearSessionCookies` deletes the host-only refresh cookie and Proxy expires
+ * any copy under the domain here, on the same response.
  */
 export function sharedSessionFixes(
   cookieHeader: string,
   current: (name: string) => string | undefined,
   alreadySet: readonly string[],
-): { set: SharedCookie[]; expire: string[] } {
+  serverAction = false,
+): { set: SharedCookie[]; expire: string[]; duplicated: boolean } {
   const domain = sessionCookieDomain()
-  if (!domain) return { set: [], expire: [] }
+  if (!domain) return { set: [], expire: [], duplicated: false }
 
-  const expire = new Set(duplicatedSessionCookies(cookieHeader))
+  const duplicates = duplicatedSessionCookies(cookieHeader)
+  const stale = current(SHARED_MARKER_COOKIE) !== SHARED_MARKER_VALUE
   const set: SharedCookie[] = []
-  const present = SESSION_COOKIE_NAMES.filter((name) => current(name))
+  const expire: string[] = []
+  let present = false
 
-  if (present.length > 0 && !current(SHARED_MARKER_COOKIE)) {
-    for (const name of present) {
-      expire.add(name)
-      if (alreadySet.includes(name)) continue
-      const value = current(name)!
-      const maxAge =
-        name === 'c4t_access' ? (secondsUntilExpiry(value) ?? 0) : SESSION_CEILING_SECONDS
-      // An access token already past its expiry is not worth carrying over:
-      // without it, Proxy refreshes on the next navigation.
-      if (maxAge > 0) set.push(shared(name, value, maxAge, domain))
+  for (const name of SESSION_COOKIE_NAMES) {
+    const value = current(name)
+    if (!value) continue
+    present = true
+    const twice = duplicates.includes(name)
+
+    if (name === 'c4t_refresh') {
+      if (!stale && !twice && !serverAction) continue
+      // Whichever copy carried the value in use, it ends up host-only.
+      expire.push(expireUnderDomain(name, domain))
+      if ((stale || twice) && !alreadySet.includes(name)) {
+        set.push(shared(name, value, SESSION_CEILING_SECONDS, undefined))
+      }
+      continue
     }
-    set.push(markerCookie(domain))
+
+    if (!stale && !twice) continue
+    expire.push(expireHostOnly(name))
+    if (!stale || alreadySet.includes(name)) continue
+    const maxAge = secondsUntilExpiry(value) ?? 0
+    // An access token already past its expiry is not worth carrying over:
+    // without it, Proxy refreshes on the next navigation.
+    if (maxAge > 0) set.push(shared(name, value, maxAge, domain))
   }
 
-  return { set, expire: [...expire] }
+  if (present && stale) set.push(markerCookie(domain))
+
+  return { set, expire, duplicated: duplicates.length > 0 }
 }

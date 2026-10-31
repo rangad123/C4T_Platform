@@ -54,25 +54,35 @@ export async function applySetCookies(setCookies: readonly string[]): Promise<vo
   for (const raw of setCookies) {
     const parsed = parseSetCookie(raw)
     if (!parsed) continue
-    const domain = domainFor(parsed.name)
-    cookieStore.set(authCookieOptions(parsed, env.NEXT_PUBLIC_ENVIRONMENT === 'production', domain))
-    if (domain && isSessionCookie(parsed.name)) sharedSession = true
+    cookieStore.set(
+      authCookieOptions(
+        parsed,
+        env.NEXT_PUBLIC_ENVIRONMENT === 'production',
+        domainFor(parsed.name),
+      ),
+    )
+    if (isSessionCookie(parsed.name)) sharedSession = true
   }
-  // Tells Proxy this session is already scoped to the domain (shared-session.ts).
+  // Tells Proxy this session is already scoped as shared-session.ts says.
   const domain = sessionCookieDomain()
   if (sharedSession && domain) cookieStore.set(markerCookie(domain))
 }
 
 /**
- * Signs this browser out of crowd4test.com AND AI Studio: deletes the session
- * cookies under the same Domain they were written with. A plain
+ * Signs this browser out of crowd4test.com AND AI Studio: deletes each session
+ * cookie in the scope it is written with (`domainFor`). A plain
  * `cookieStore.delete(name)` targets the host-only cookie and would leave a
  * domain one behind, still signed in. Pass the store a Server Action already
  * holds; nothing else in it is touched.
+ *
+ * The refresh cookie is host-only, so that copy is deleted here. A browser may
+ * still hold an older copy under the domain, and Next keeps one cookie per
+ * name in a response, so that second deletion cannot be written from here:
+ * Proxy writes it onto every Server Action's response (`sharedSessionFixes`).
  */
 export function clearSessionCookies(cookieStore: Awaited<ReturnType<typeof cookies>>): void {
-  const domain = sessionCookieDomain()
   for (const name of [...SESSION_COOKIE_NAMES, SHARED_MARKER_COOKIE]) {
+    const domain = domainFor(name)
     if (domain) cookieStore.delete({ name, path: '/', domain })
     else if (name !== SHARED_MARKER_COOKIE) cookieStore.delete(name)
   }

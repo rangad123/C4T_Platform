@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { cookies } from 'next/headers'
 import { env } from '@/lib/env'
 import { bridgeApiCookies } from '@/lib/auth/cookie-bridge'
+import { sessionCookieDomain } from '@/lib/auth/shared-session'
 import { safeNextOrHome } from '@/lib/safe-redirect'
 import { authHeaders } from '@/lib/auth/request-context'
 
@@ -25,6 +27,15 @@ import { authHeaders } from '@/lib/auth/request-context'
  * The code is short-lived and single-use (enforced on the API side), so
  * sitting briefly in a URL is an accepted, standard trade-off — the same
  * shape as the `code` Google itself hands back to the API's own callback.
+ *
+ * ── THE CODE ONLY WORKS IN THE BROWSER THAT SIGNED IN
+ *
+ * The API's callback also writes `c4t_oauth_handoff` on the browser it
+ * redirects here, and redeems the code only with that cookie's value
+ * (`lib/oauth/handoff.ts` on the API). Without it, someone could finish a
+ * Google sign-in with their own account and send the link to someone else,
+ * whose browser would then be signed into the sender's account. The cookie is
+ * deleted here whatever happens: it is good for one code.
  *
  * ── WHY THE REDIRECTS ARE RELATIVE
  *
@@ -53,9 +64,22 @@ import { authHeaders } from '@/lib/auth/request-context'
 function redirectTo(path: string): NextResponse {
   return new NextResponse(null, { status: 307, headers: { location: path } })
 }
+
+/**
+ * Written by the API (`OAUTH_HANDOFF_COOKIE` in auth.controller.ts) under its
+ * COOKIE_DOMAIN, which is the same parent domain as AUTH_COOKIE_DOMAIN here.
+ */
+const HANDOFF_COOKIE = 'c4t_oauth_handoff'
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const code = request.nextUrl.searchParams.get('code')
   const target = safeNextOrHome(request.nextUrl.searchParams.get('target'))
+  const binding = request.cookies.get(HANDOFF_COOKIE)?.value
+
+  const cookieStore = await cookies()
+  const domain = sessionCookieDomain()
+  if (binding)
+    cookieStore.delete({ name: HANDOFF_COOKIE, path: '/', ...(domain ? { domain } : {}) })
 
   if (!code) {
     return redirectTo('/login?error=google_failed')
@@ -66,7 +90,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     response = await fetch(new URL('/v1/auth/google/exchange', env.API_ORIGIN), {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders(request.headers) },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify(binding ? { code, binding } : { code }),
       cache: 'no-store',
     })
   } catch (error) {
