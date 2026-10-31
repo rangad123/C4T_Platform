@@ -89,9 +89,10 @@ function groupCatalogue(catalogue: readonly PermissionEntry[]) {
 /**
  * POSTs the account and returns its id.
  *
- * A duplicate email (409) and a schema rejection (422) are ordinary outcomes of
- * a human filling in a form, so they come back to this page as a query flag and
- * render inline. Everything else is a genuine fault and propagates to the error
+ * A duplicate email (409), a schema rejection (422) and a role or permission
+ * the viewer may not hand out (403) are ordinary outcomes of a human filling in
+ * a form, so they come back to this page as a query flag and render inline.
+ * Everything else is a genuine fault and propagates to the error
  * boundary. Nothing is created in either case.
  */
 async function postUser(body: Record<string, unknown>): Promise<string> {
@@ -101,6 +102,7 @@ async function postUser(body: Record<string, unknown>): Promise<string> {
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) redirect(`${BASE}/new?error=email-taken`)
     if (err instanceof ApiError && err.status === 422) redirect(`${BASE}/new?error=rejected`)
+    if (err instanceof ApiError && err.status === 403) redirect(`${BASE}/new?error=forbidden`)
     throw err
   }
 }
@@ -158,6 +160,7 @@ export default async function NewUserPage({
   const emailError =
     error === 'email-taken' ? 'An account with this email already exists.' : undefined
   const rejected = error === 'rejected'
+  const forbidden = error === 'forbidden'
 
   let catalogue: PermissionEntry[] = []
   let catalogueError: 'forbidden' | 'unknown' | null = null
@@ -215,7 +218,7 @@ export default async function NewUserPage({
       }
     >
       <TrackedForm action={createAccount} style={formStyle}>
-        {rejected ? (
+        {rejected || forbidden ? (
           <div
             role="alert"
             style={{
@@ -227,8 +230,9 @@ export default async function NewUserPage({
               lineHeight: 1.55,
             }}
           >
-            The API rejected those details, so no account was created. Check the email address, the
-            password length and the country code, then enter the details again.
+            {forbidden
+              ? 'No account was created. Only an administrator can create an administrator, and you can only grant permissions you hold.'
+              : 'The API rejected those details, so no account was created. Check the email address, the password length and the country code, then enter the details again.'}
           </div>
         ) : null}
 

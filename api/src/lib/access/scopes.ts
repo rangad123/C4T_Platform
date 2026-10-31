@@ -5,8 +5,8 @@ import { PERMISSIONS } from '../../config/permissions.js'
  * List scoping — the same relationships as `relations.ts`, expressed as Prisma
  * filters.
  *
- * Every list endpoint MUST spread one of these into its `where`. The rule is
- * that "can I read this one?" (policy.ts) and "which ones can I read?" (here)
+ * Every list endpoint MUST apply one of these to its `where`, under `AND`
+ * wherever a query filter could set the same key. The rule is that "can I read this one?" (policy.ts) and "which ones can I read?" (here)
  * must agree; if they drift, a user either sees a row they cannot open, or a
  * list that hides something they are entitled to.
  *
@@ -148,11 +148,18 @@ export function transactionScope(user: Express.AuthenticatedUser): Prisma.Transa
 
 // ─── Ratings ─────────────────────────────────────────────────────────────────
 
-/** Hidden ratings are visible to the admin side only. */
+/**
+ * Hidden ratings are visible to the admin side only. Everyone else sees the
+ * ratings they gave or received, and a customer also those on their projects.
+ * Testers never see each other's ratings, even on a shared project. There is
+ * no public directory of who was rated what.
+ */
 export function ratingScope(user: Express.AuthenticatedUser): Prisma.RatingWhereInput {
   if (isScopedSubAdmin(user)) return { project: assignedProjectsRelation(user) }
   if (isPlatform(user)) return {}
-  return { isVisible: true }
+  const own: Prisma.RatingWhereInput[] = [{ subjectUserId: user.id }, { authorId: user.id }]
+  if (user.role === Role.CUSTOMER) own.push({ project: projectScope(user) })
+  return { isVisible: true, OR: own }
 }
 
 // ─── Testers ─────────────────────────────────────────────────────────────────

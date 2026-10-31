@@ -88,7 +88,44 @@ export async function getUser(id: string) {
   return user
 }
 
-export async function createUser(input: {
+/**
+ * ADMIN is the only role that can touch ADMIN. `user.write` is a day-to-day
+ * Sub-Admin permission, so without this it reaches every account above it,
+ * including its holder's own promotion. Pass `newRole` when one is being set.
+ */
+export async function assertMayManage(
+  actor: Express.AuthenticatedUser,
+  targetId: string,
+  newRole?: Role,
+): Promise<void> {
+  if (actor.role === Role.ADMIN) return
+  if (newRole === Role.ADMIN) {
+    throw new ForbiddenError('Only an administrator can assign the administrator role')
+  }
+  const target = await prisma.user.findUnique({ where: { id: targetId }, select: { role: true } })
+  if (target?.role === Role.ADMIN) {
+    throw new ForbiddenError('Only an administrator can change an administrator account')
+  }
+}
+
+/**
+ * Nobody hands out what they do not hold, ADMIN excepted. `keeping` is what the
+ * target already has: re-saving a grant set is not granting those codes again.
+ */
+function assertMayGrant(
+  actor: Express.AuthenticatedUser,
+  codes: readonly string[],
+  keeping: readonly string[] = [],
+): void {
+  if (actor.role === Role.ADMIN) return
+  const allowed = new Set([...actor.permissions, ...keeping])
+  const beyond = codes.filter((code) => !allowed.has(code))
+  if (beyond.length > 0) {
+    throw new ForbiddenError(`You cannot grant what you do not hold: ${beyond.join(', ')}`)
+  }
+}
+
+interface NewUser {
   email: string
   password: string
   role: Role
@@ -98,7 +135,17 @@ export async function createUser(input: {
   countryCode?: string
   permissionCodes?: string[]
   activateImmediately: boolean
-}) {
+}
+
+export async function createUser(actor: Express.AuthenticatedUser, input: NewUser) {
+  if (actor.role !== Role.ADMIN && input.role === Role.ADMIN) {
+    throw new ForbiddenError('Only an administrator can assign the administrator role')
+  }
+  const grantCodes = input.permissionCodes?.length
+    ? input.permissionCodes
+    : DEFAULT_SUBADMIN_PERMISSIONS
+  if (input.role === Role.SUB_ADMIN) assertMayGrant(actor, grantCodes)
+
   const existing = await prisma.user.findUnique({
     where: { email: input.email },
     select: { id: true },
@@ -135,10 +182,7 @@ export async function createUser(input: {
     }
 
     if (input.role === Role.SUB_ADMIN) {
-      const codes = input.permissionCodes?.length
-        ? input.permissionCodes
-        : DEFAULT_SUBADMIN_PERMISSIONS
-      await grantPermissions(tx, user.id, codes, null)
+      await grantPermissions(tx, user.id, grantCodes, null)
     }
 
     return user
@@ -182,7 +226,7 @@ export async function updateUser(id: string, input: Record<string, unknown>) {
  * allowed, but the last remaining active ADMIN can never be demoted — that
  * would lock everybody out of the back office.
  */
-export async function changeRole(actorId: string, id: string, role: Role) {
+export async function changeRole(actor: Express.AuthenticatedUser, id: string, role: Role) {
   const user = await prisma.user.findFirst({
     where: { id, deletedAt: null },
     select: { id: true, role: true },
@@ -193,6 +237,7 @@ export async function changeRole(actorId: string, id: string, role: Role) {
   if (user.role === Role.ADMIN && role !== Role.ADMIN) {
     await assertNotLastAdmin(id)
   }
+  if (role === Role.SUB_ADMIN) assertMayGrant(actor, DEFAULT_SUBADMIN_PERMISSIONS)
 
   return prisma.$transaction(async (tx) => {
     // Leaving SUB_ADMIN clears the grants; they are meaningless for other roles.
@@ -200,7 +245,7 @@ export async function changeRole(actorId: string, id: string, role: Role) {
       await tx.userPermission.deleteMany({ where: { userId: id } })
     }
     if (role === Role.SUB_ADMIN && user.role !== Role.SUB_ADMIN) {
-      await grantPermissions(tx, id, DEFAULT_SUBADMIN_PERMISSIONS, actorId)
+      await grantPermissions(tx, id, DEFAULT_SUBADMIN_PERMISSIONS, actor.id)
     }
     if (role === Role.TESTER) {
       await tx.testerProfile.upsert({
@@ -370,7 +415,11 @@ export async function getUserPermissions(userId: string) {
 }
 
 /** Replaces a Sub-Admin's grant set wholesale. */
-export async function setUserPermissions(actorId: string, userId: string, codes: string[]) {
+export async function setUserPermissions(
+  actor: Express.AuthenticatedUser,
+  userId: string,
+  codes: string[],
+) {
   const user = await prisma.user.findFirst({
     where: { id: userId, deletedAt: null },
     select: { id: true, role: true },
@@ -379,13 +428,19 @@ export async function setUserPermissions(actorId: string, userId: string, codes:
   if (user.role !== Role.SUB_ADMIN) {
     throw new BadRequestError('Permissions can only be granted to a sub-admin')
   }
-  if (userId === actorId) {
+  if (userId === actor.id) {
     throw new ForbiddenError('You cannot change your own permissions')
   }
+  const current = await getUserPermissions(userId)
+  assertMayGrant(
+    actor,
+    codes,
+    current.map((grant) => grant.code),
+  )
 
   return prisma.$transaction(async (tx) => {
     await tx.userPermission.deleteMany({ where: { userId } })
-    await grantPermissions(tx, userId, codes, actorId)
+    await grantPermissions(tx, userId, codes, actor.id)
     return getUserPermissionsTx(tx, userId)
   })
 }

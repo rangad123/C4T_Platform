@@ -95,7 +95,7 @@ usersRouter.post(
   requirePermission(PERMISSIONS.USER_WRITE),
   validate({ body: createUserSchema }),
   async (req, res) => {
-    const user = await service.createUser(req.body)
+    const user = await service.createUser(req.user!, req.body)
     await recordAudit({
       req,
       action: 'user.created',
@@ -112,6 +112,7 @@ usersRouter.patch(
   requirePermission(PERMISSIONS.USER_WRITE),
   validate({ params: userIdParam, body: updateUserSchema }),
   async (req, res) => {
+    await service.assertMayManage(req.user!, param(req, 'id'))
     res.json({ data: await service.updateUser(param(req, 'id'), req.body) })
   },
 )
@@ -121,7 +122,8 @@ usersRouter.post(
   requirePermission(PERMISSIONS.USER_WRITE),
   validate({ params: userIdParam, body: changeUserRoleSchema }),
   async (req, res) => {
-    const user = await service.changeRole(req.user!.id, param(req, 'id'), req.body.role)
+    await service.assertMayManage(req.user!, param(req, 'id'), req.body.role)
+    const user = await service.changeRole(req.user!, param(req, 'id'), req.body.role)
     await recordAudit({
       req,
       action: 'user.role_changed',
@@ -138,6 +140,7 @@ usersRouter.post(
   requirePermission(PERMISSIONS.USER_WRITE),
   validate({ params: userIdParam, body: changeUserStatusSchema }),
   async (req, res) => {
+    await service.assertMayManage(req.user!, param(req, 'id'))
     const user = await service.changeStatus(param(req, 'id'), req.body.status)
     await recordAudit({
       req,
@@ -155,6 +158,7 @@ usersRouter.delete(
   requirePermission(PERMISSIONS.USER_WRITE),
   validate({ params: userIdParam }),
   async (req, res) => {
+    await service.assertMayManage(req.user!, param(req, 'id'))
     const result = await service.deleteUser(param(req, 'id'))
     await recordAudit({
       req,
@@ -199,7 +203,7 @@ usersRouter.put(
   validate({ params: userIdParam, body: setPermissionsSchema }),
   async (req, res) => {
     const permissions = await service.setUserPermissions(
-      req.user!.id,
+      req.user!,
       param(req, 'id'),
       req.body.permissionCodes,
     )

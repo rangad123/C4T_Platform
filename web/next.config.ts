@@ -56,8 +56,13 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'cdn.crowd4test.com' },
       // Blog featured images (`PUBLIC_ASSETS_BASE_URL`) — the interim direct-
       // to-bucket URL, until a CDN sits in front of it and this resolves to
-      // cdn.crowd4test.com above instead.
-      { protocol: 'https', hostname: 'crowd4test.s3.ap-south-1.amazonaws.com' },
+      // cdn.crowd4test.com above instead. This prefix only: it is the one part
+      // of the bucket that is public, and the only one a page displays.
+      {
+        protocol: 'https',
+        hostname: 'crowd4test.s3.ap-south-1.amazonaws.com',
+        pathname: '/blog_featured_image/**',
+      },
     ],
   },
 

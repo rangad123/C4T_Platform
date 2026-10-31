@@ -236,7 +236,8 @@ export async function assertProjectAccess(
 export async function listProjects(user: Express.AuthenticatedUser, query: ListProjectsQuery) {
   const where: Prisma.ProjectWhereInput = {
     deletedAt: null,
-    ...visibilityFilter(user),
+    // AND, never spread: `testerId` below sets `assignments`, the tester scope's own key.
+    AND: [visibilityFilter(user)],
     ...(query.status ? { status: query.status } : {}),
     ...(query.priority ? { priority: query.priority } : {}),
     ...(query.organisationId ? { organisationId: query.organisationId } : {}),

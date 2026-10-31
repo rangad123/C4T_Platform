@@ -2,14 +2,15 @@ import { Router } from 'express'
 import { raw } from 'body-parser'
 import { param } from '../../lib/http.js'
 import { z } from 'zod'
-import { FileScope } from '@prisma/client'
+import { FileScope, Role } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { authenticate } from '../../middleware/authenticate.js'
-import { isAdminSide } from '../../middleware/authorize.js'
+import { hasPermission, isAdminSide } from '../../middleware/authorize.js'
 import { validate } from '../../middleware/validate.js'
 import { uploadLimiter } from '../../middleware/rateLimit.js'
 import { NotFoundError, ForbiddenError, BadRequestError } from '../../lib/errors.js'
 import { env } from '../../config/env.js'
+import { PERMISSIONS } from '../../config/permissions.js'
 import { bugRelations, projectRelations, threadRelations } from '../../lib/access/relations.js'
 import { authorize } from '../../lib/access/policy.js'
 import {
@@ -39,6 +40,33 @@ const presignSchema = z.object({
   sizeBytes: z.coerce.number().int().positive(),
 })
 
+/**
+ * Who may upload under which scope: the same lists as the web upload routes,
+ * which the browser can go around by calling this API directly. `scope` picks
+ * the storage prefix and the read rule, so this is not a labelling choice:
+ * `blog_featured_image/` is public, and PLATFORM_DOCUMENT is open to every
+ * account. A scope no web path uploads to is refused for everyone.
+ */
+const ADMIN_SCOPES: readonly FileScope[] = [
+  FileScope.PLATFORM_DOCUMENT,
+  FileScope.PROJECT_MATERIAL,
+  FileScope.PROJECT_LOGO,
+]
+const SCOPES_BY_ROLE: Partial<Record<Role, readonly FileScope[]>> = {
+  [Role.ADMIN]: ADMIN_SCOPES,
+  [Role.SUB_ADMIN]: ADMIN_SCOPES,
+  [Role.CUSTOMER]: [FileScope.PROJECT_MATERIAL, FileScope.PROJECT_LOGO],
+  [Role.TESTER]: [FileScope.AVATAR, FileScope.TESTER_DOCUMENT, FileScope.BUG_ATTACHMENT],
+}
+
+function assertMayUpload(user: Express.AuthenticatedUser, scope: FileScope): void {
+  const allowed =
+    scope === FileScope.BLOG_FEATURED_IMAGE
+      ? hasPermission(user, PERMISSIONS.BLOG_WRITE)
+      : (SCOPES_BY_ROLE[user.role] ?? []).includes(scope)
+  if (!allowed) throw new ForbiddenError('You cannot upload this kind of file')
+}
+
 uploadsRouter.post(
   '/presign',
   authenticate,
@@ -46,6 +74,7 @@ uploadsRouter.post(
   validate({ body: presignSchema }),
   async (req, res) => {
     const input = req.body as z.infer<typeof presignSchema>
+    assertMayUpload(req.user!, input.scope)
 
     const presigned = await createUploadUrl(input)
 

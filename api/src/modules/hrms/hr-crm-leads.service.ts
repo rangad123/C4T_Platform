@@ -173,9 +173,8 @@ export async function getDashboardStats(actor: CrmActor): Promise<CrmDashboardSt
 }
 
 export async function listLeads(actor: CrmActor, query: ListLeadsQuery) {
-  const where: Prisma.CrmLeadWhereInput = {
+  const filters: Prisma.CrmLeadWhereInput = {
     deletedAt: null,
-    ...ownershipWhere(actor, 'view_leads'),
     ...(query.status && query.status.length > 0 ? { status: { in: query.status } } : {}),
     ...(query.industryId ? { industryId: query.industryId } : {}),
     ...(query.leadSourceId ? { leadSourceId: query.leadSourceId } : {}),
@@ -215,6 +214,10 @@ export async function listLeads(actor: CrmActor, query: ListLeadsQuery) {
           })),
         }
       : {}),
+  }
+  // AND, never spread: `assignedToId` above is the ownership scope's own key.
+  const where: Prisma.CrmLeadWhereInput = {
+    AND: [ownershipWhere(actor, 'view_leads'), filters],
   }
 
   const [items, total] = await Promise.all([

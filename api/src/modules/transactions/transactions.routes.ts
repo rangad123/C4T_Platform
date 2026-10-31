@@ -236,7 +236,6 @@ function transactionWhere(
   query: z.infer<typeof listQuery>,
 ): Prisma.TransactionWhereInput {
   const base: Prisma.TransactionWhereInput = {
-    ...transactionScope(user),
     ...(query.type ? { type: { in: query.type } } : {}),
     ...(query.organisationId ? { organisationId: query.organisationId } : {}),
     ...(query.projectId ? { projectId: query.projectId } : {}),
@@ -256,8 +255,10 @@ function transactionWhere(
   // `category` and `financeYear`/`month` both potentially set keys (`OR`,
   // `occurredAt`) that `base` may already set too — composed as separate AND
   // branches instead of spread into `base` so neither can silently overwrite
-  // the other's key.
+  // the other's key. The caller's scope is one too: it must never be spread
+  // beside the filters, or `counterpartyId` replaces a tester's own scope.
   const extra = [
+    transactionScope(user),
     categoryFilter(query.category),
     financeYearRange(query.financeYear),
     monthRange(query.month),

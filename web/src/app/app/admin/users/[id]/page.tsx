@@ -70,7 +70,11 @@ const NOTICES: Record<string, NoticeCopy> = {
   'role-saved': { tone: 'success', message: 'Role updated.' },
   'status-saved': { tone: 'success', message: 'Status updated.' },
   'permissions-saved': { tone: 'success', message: 'Permissions updated.' },
-  forbidden: { tone: 'error', message: 'You are not able to change that right now.' },
+  forbidden: {
+    tone: 'error',
+    message:
+      'That is not yours to change. Only an administrator can change an administrator, and you can only grant permissions you hold.',
+  },
   invalid: {
     tone: 'error',
     message: 'Something on that form was not valid. Check it and try again.',

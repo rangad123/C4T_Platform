@@ -98,7 +98,8 @@ badgesRouter.get('/awards', validate({ query: listAwardsQuery }), async (req, re
       : { testerId: user.id }
 
   const where: Prisma.TesterBadgeWhereInput = {
-    ...scope,
+    // AND, never spread: `testerUserId` sets `testerId`, the tester scope's own key.
+    AND: [scope],
     ...(query.testerUserId ? { testerId: query.testerUserId } : {}),
     ...(query.projectId ? { projectId: query.projectId } : {}),
   }
