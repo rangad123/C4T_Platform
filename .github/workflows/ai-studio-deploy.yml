@@ -27,10 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     # The first deploy downloads Node and Chromium on a small box at low priority.
     timeout-minutes: 45
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     steps:
       - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         env:
           AI_STUDIO_SECRET_KEY: ${{ secrets.AI_STUDIO_SECRET_KEY }}
           AI_STUDIO_API_KEY: ${{ secrets.AI_STUDIO_API_KEY }}
