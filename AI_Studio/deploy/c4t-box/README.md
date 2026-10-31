@@ -27,7 +27,7 @@ Files:
 
 ### Memory
 
-`npm ci` peaks at about 650 MB and the web build at about 1 GB. `npm ci` runs only when `package-lock.json` changes. Both run at `nice` 15 and are the first thing the OOM killer takes. A deploy stops before it starts if memory plus swap has less than 1,500 MB free, or the disk has less than 2,500 MB free.
+`npm ci` peaks at about 650 MB and the web build at about 1 GB. `npm ci` runs only when `package-lock.json` changes. Both run at `nice` 15 and are the first thing the OOM killer takes. A deploy stops before it starts if memory plus swap has less than 1,500 MB free, or the disk has less than 2,500 MB free. To make room, enlarge the EBS volume in AWS; the next deploy grows the root partition and filesystem to match (`growpart`, then `resize2fs` or `xfs_growfs`).
 
 ## Tests are off
 
@@ -91,7 +91,7 @@ People already signed in keep cookies written for the parent domain until those 
 
 ## Keeping the data
 
-Nothing deletes `/home/ubuntu/.ai-studio/data`: not a deploy, a rollback or `deploy-pull.sh`. There is no automatic copy off the box either, so losing the disk loses it, and until a backup schedule is set, treat it as preview data. To keep run history from filling the disk, use each project's Storage and backup page, and set `BACKUP_DIR` and `BACKUP_SCHEDULE` in `env.local` for copies. Files in `backups` are not pruned, and they hold secrets, so clear old ones by hand.
+Nothing deletes `/home/ubuntu/.ai-studio/data`: not a deploy, a rollback or `deploy-pull.sh`. The deploy turns on a daily backup of the database into `backups/data` (7 kept) and keeps run evidence 14 days. Those backups are on the same disk, so losing the disk loses them too: set `BACKUP_UPLOAD_COMMAND` in `env.local` to copy each one off the box. Files in `backups` are not pruned, and they hold secrets, so clear old ones by hand.
 
 ## Not production-grade yet
 

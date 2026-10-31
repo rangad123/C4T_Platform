@@ -140,8 +140,30 @@ write_env() {
   mv -f "$tmp" "$ENV_FILE"
 }
 
+# After the EBS volume is enlarged in AWS, the root partition and filesystem
+# stay at their old size until grown. growpart says NOCHANGE, and the resize
+# does nothing, when there is nothing to grow, so this is safe on every run.
+grow_root_disk() {
+  local part disk num fstype
+  part="$(findmnt -no SOURCE /)"
+  fstype="$(findmnt -no FSTYPE /)"
+  disk="$(lsblk -no PKNAME "$part" 2>/dev/null | head -n 1)"
+  num="$(cat "/sys/class/block/$(basename "$part")/partition" 2>/dev/null || true)"
+  if [ -z "$disk" ] || [ -z "$num" ] || ! command -v growpart >/dev/null 2>&1; then
+    return 0
+  fi
+  if sudo -n growpart "/dev/$disk" "$num" >/dev/null 2>&1; then
+    say "grew partition $part to fill /dev/$disk"
+  fi
+  case "$fstype" in
+    ext4) sudo -n resize2fs "$part" >/dev/null 2>&1 || true ;;
+    xfs) sudo -n xfs_growfs / >/dev/null 2>&1 || true ;;
+  esac
+}
+
 check_room() {
   local free_mb disk_mb
+  grow_root_disk
   free_mb="$(awk '/^(MemAvailable|SwapFree):/ { kb += $2 } END { print int(kb / 1024) }' /proc/meminfo)"
   [ "$free_mb" -ge "$MIN_FREE_MB" ] || die "Only $free_mb MB of memory and swap are free, and this deploy needs $MIN_FREE_MB MB. Stopped so it cannot push the running apps out."
   disk_mb="$(df -Pm "$AI_STUDIO_HOME" | awk 'NR == 2 { print $4 }')"
