@@ -13,16 +13,19 @@ import {
   exchangeCodeForIdentity,
   verifyState,
 } from '../../lib/oauth/google.js'
-import { createHandoff, consumeHandoff } from '../../lib/oauth/handoff.js'
+import { createHandoff, consumeHandoff, HANDOFF_TTL_MS } from '../../lib/oauth/handoff.js'
 import * as authService from './auth.service.js'
 import type { SessionTokens } from './auth.service.js'
 
 const ACCESS_TTL_MS = parseDuration(env.JWT_ACCESS_TTL)
 
 /**
- * Cookies are httpOnly + SameSite=Lax and shared between the Next.js app and
- * this API via COOKIE_DOMAIN (e.g. ".crowd4test.com"). The access token is also
- * returned in the JSON body so non-browser clients can use Authorization headers.
+ * Cookies are httpOnly + SameSite=Lax. The access cookie is shared between the
+ * Next.js app and this API via COOKIE_DOMAIN (e.g. ".crowd4test.com"); the
+ * refresh cookie never is. It is a 30-day credential, and a Domain would hand
+ * it to every subdomain (AI Studio among them), none of which spends it. The
+ * access token is also returned in the JSON body so non-browser clients can
+ * use Authorization headers.
  */
 function setAuthCookies(res: Response, tokens: SessionTokens): void {
   const sameSite = env.COOKIE_SAME_SITE
@@ -34,9 +37,12 @@ function setAuthCookies(res: Response, tokens: SessionTokens): void {
     secure: env.COOKIE_SECURE || isProduction || sameSite === 'none',
     sameSite,
     path: '/',
-    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
   }
-  res.cookie(ACCESS_COOKIE, tokens.accessToken, { ...base, maxAge: ACCESS_TTL_MS })
+  res.cookie(ACCESS_COOKIE, tokens.accessToken, {
+    ...base,
+    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+    maxAge: ACCESS_TTL_MS,
+  })
   res.cookie(REFRESH_COOKIE, tokens.refreshToken, {
     ...base,
     // Scoped to the refresh endpoints only, so it is never sent on ordinary
@@ -52,11 +58,15 @@ function clearAuthCookies(res: Response): void {
     httpOnly: true,
     secure: env.COOKIE_SECURE || isProduction,
     sameSite: 'lax' as const,
-    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
   }
-  res.clearCookie(ACCESS_COOKIE, { ...base, path: '/' })
+  const domain = env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}
+  res.clearCookie(ACCESS_COOKIE, { ...base, ...domain, path: '/' })
   // The path must match exactly or the browser keeps the cookie.
   res.clearCookie(REFRESH_COOKIE, { ...base, path: env.REFRESH_COOKIE_PATH })
+  // And the copy an earlier release wrote under the domain, until those expire.
+  if (env.COOKIE_DOMAIN) {
+    res.clearCookie(REFRESH_COOKIE, { ...base, ...domain, path: env.REFRESH_COOKIE_PATH })
+  }
 }
 
 /**
@@ -229,6 +239,12 @@ export async function changePassword(req: Request, res: Response): Promise<void>
  */
 const OAUTH_NONCE_COOKIE = 'c4t_oauth_nonce'
 const OAUTH_ROLE_COOKIE = 'c4t_oauth_role'
+/**
+ * Ties the one-time handoff code to this browser (lib/oauth/handoff.ts). The
+ * web app's /auth/google/complete reads it, presents it with the code, and
+ * deletes it. Mirrors web/src/app/auth/google/complete/route.ts.
+ */
+const OAUTH_HANDOFF_COOKIE = 'c4t_oauth_handoff'
 
 function oauthCookieOptions() {
   return {
@@ -428,9 +444,13 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
      * exchanges this code for the same tokens server-to-server and sets its
      * own cookies from that response, exactly like password login does.
      */
-    const handoffCode = createHandoff(tokens)
+    const handoff = createHandoff(tokens)
+    res.cookie(OAUTH_HANDOFF_COOKIE, handoff.binding, {
+      ...oauthCookieOptions(),
+      maxAge: HANDOFF_TTL_MS,
+    })
     const completeUrl = new URL('/auth/google/complete', env.WEB_PUBLIC_URL)
-    completeUrl.searchParams.set('code', handoffCode)
+    completeUrl.searchParams.set('code', handoff.code)
     completeUrl.searchParams.set('target', target)
     res.redirect(completeUrl.toString())
   } catch (error) {
@@ -454,7 +474,8 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
  */
 export function googleExchange(req: Request, res: Response): void {
   const code = req.body.code as string
-  const tokens = consumeHandoff(code)
+  const binding = req.body.binding as string | undefined
+  const tokens = consumeHandoff(code, binding)
   if (!tokens) throw new UnauthorizedError('This sign-in link has expired or was already used')
 
   setAuthCookies(res, tokens)

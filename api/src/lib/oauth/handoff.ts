@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { SessionTokens } from '../../modules/auth/auth.service.js'
 
 /**
@@ -36,11 +36,23 @@ import type { SessionTokens } from '../../modules/auth/auth.service.js'
  * by code, or signing the tokens into the code so nothing is stored at all.
  * The second is tempting and worse: it puts session material in a URL, which
  * is exactly what this indirection exists to avoid.
+ *
+ * ── BOUND TO THE BROWSER THAT SIGNED IN
+ *
+ * A code alone is not enough to redeem. Otherwise anyone could finish a Google
+ * sign-in with their OWN account, stop at the completion link, and send it to
+ * someone else: opening it would sign the victim's browser into the
+ * attacker's account (login CSRF), and whatever they then typed or uploaded
+ * would land there. So each code is minted with a `binding`, a random value
+ * the callback also writes into a short-lived cookie on the browser it is
+ * talking to, the one that passed the state check. The web app's completion
+ * route reads that cookie and must present the same value with the code.
  */
 const TTL_MS = 60_000
 
 interface Entry {
   tokens: SessionTokens
+  binding: string
   expiresAt: number
 }
 
@@ -53,22 +65,36 @@ function sweep(): void {
   }
 }
 
-/** Mints a one-time code for these tokens, valid for TTL_MS. */
-export function createHandoff(tokens: SessionTokens): string {
+/** How long the binding cookie lives: the code's own TTL, so both go together. */
+export const HANDOFF_TTL_MS = TTL_MS
+
+/**
+ * Mints a one-time code for these tokens, valid for TTL_MS, and the binding
+ * the browser must hold to redeem it (put it in that browser's cookie).
+ */
+export function createHandoff(tokens: SessionTokens): { code: string; binding: string } {
   sweep()
   const code = randomBytes(32).toString('base64url')
-  store.set(code, { tokens, expiresAt: Date.now() + TTL_MS })
-  return code
+  const binding = randomBytes(32).toString('base64url')
+  store.set(code, { tokens, binding, expiresAt: Date.now() + TTL_MS })
+  return { code, binding }
+}
+
+function sameBinding(expected: string, given: string): boolean {
+  const a = Buffer.from(expected)
+  const b = Buffer.from(given)
+  return a.length === b.length && timingSafeEqual(a, b)
 }
 
 /**
  * Redeems a code — single-use, so it is deleted the moment it is read,
  * whether or not it turns out to be valid. Returns `null` for an unknown,
- * already-used, or expired code.
+ * already-used, or expired code, or one presented without its binding.
  */
-export function consumeHandoff(code: string): SessionTokens | null {
+export function consumeHandoff(code: string, binding: string | undefined): SessionTokens | null {
   const entry = store.get(code)
   store.delete(code)
   if (!entry || entry.expiresAt <= Date.now()) return null
+  if (!binding || !sameBinding(entry.binding, binding)) return null
   return entry.tokens
 }

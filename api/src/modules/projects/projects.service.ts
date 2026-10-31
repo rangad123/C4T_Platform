@@ -56,6 +56,45 @@ const projectSelect = {
   _count: { select: { bugs: true, assignments: true, materials: true } },
 } satisfies Prisma.ProjectSelect
 
+/**
+ * A file attached to a project or build must be one the caller uploaded, the
+ * same rule bugs and NDAs apply. Otherwise anyone able to edit a project could
+ * attach someone else's private upload (a tester's document, another
+ * customer's material) by its id and then read it through the project, whose
+ * readers the download check lets in. `current` is the value already stored:
+ * re-saving a form that still carries it is not a new attachment, whoever
+ * uploaded it.
+ */
+async function assertOwnUpload(
+  user: Express.AuthenticatedUser,
+  fileId: unknown,
+  current?: string | null,
+): Promise<void> {
+  if (typeof fileId !== 'string' || fileId.length === 0 || fileId === current) return
+  const file = await prisma.fileObject.findFirst({
+    where: { id: fileId, uploadedById: user.id, isComplete: true },
+    select: { id: true },
+  })
+  if (!file) {
+    throw new BadRequestError('That upload could not be found. Upload the file again.')
+  }
+}
+
+/**
+ * A tester sees who created a project by name only. The creator is customer
+ * staff, and their address serves no purpose in the tester's work while letting
+ * the crowd contact the client off-platform: the same reason the roster below
+ * hides tester addresses from the customer. The key is omitted, not blanked.
+ */
+function maskCreatorForTester<T extends { createdBy: { email: string } | null }>(
+  user: Express.AuthenticatedUser,
+  project: T,
+): T {
+  if (user.role !== Role.TESTER || !project.createdBy) return project
+  const { email: _omit, ...createdBy } = project.createdBy
+  return { ...project, createdBy: createdBy as T['createdBy'] }
+}
+
 /** The compact shape nested inside a project read — the build switcher only needs this much. */
 const buildSummarySelect = {
   id: true,
@@ -233,6 +272,21 @@ export async function assertProjectAccess(
   }
 }
 
+/**
+ * Gate for changing a project's roster. The route's `project.assign` check
+ * says the caller may assign testers somewhere; this says THIS project, so a
+ * Sub-Admin held to `project.scope_to_assigned` can staff only the projects
+ * they manage.
+ */
+export async function assertMayAssignTesters(
+  user: Express.AuthenticatedUser,
+  projectId: string,
+): Promise<void> {
+  const resolved = await projectRelations(user, projectId)
+  if (!resolved) throw new NotFoundError('Project')
+  authorize(user, 'project.assign_testers', resolved.relations)
+}
+
 export async function listProjects(user: Express.AuthenticatedUser, query: ListProjectsQuery) {
   const where: Prisma.ProjectWhereInput = {
     deletedAt: null,
@@ -302,7 +356,7 @@ export async function listProjects(user: Express.AuthenticatedUser, query: ListP
 
   return {
     items: items.map((p) => ({
-      ...p,
+      ...maskCreatorForTester(user, p),
       distinctTesterCount: distinctTesterCountByProject.get(p.id) ?? 0,
     })),
     meta: buildMeta(query, total),
@@ -451,7 +505,7 @@ export async function getProject(
     : []
 
   return {
-    ...project,
+    ...maskCreatorForTester(user, project),
     activeBuildId,
     instructions: seesBrief ? project.instructions : null,
     materials: seesBrief ? project.materials.filter((m) => m.buildId === activeBuildId) : [],
@@ -625,7 +679,7 @@ export async function createProject(
 
   if (logoId) {
     const logo = await prisma.fileObject.findFirst({
-      where: { id: logoId, isComplete: true },
+      where: { id: logoId, isComplete: true, uploadedById: user.id },
       select: { id: true },
     })
     if (!logo) {
@@ -680,6 +734,11 @@ export async function updateProject(
     }
     // progressPercent is maintained by the delivery team, not the customer.
     delete input.progressPercent
+  }
+
+  if ('logoFileId' in input) {
+    const stored = await prisma.project.findUnique({ where: { id }, select: { logoFileId: true } })
+    await assertOwnUpload(user, input.logoFileId, stored?.logoFileId)
   }
 
   return prisma.project.update({
@@ -821,6 +880,7 @@ export async function addMaterial(
     throw new NotFoundError('Project')
   }
   authorize(user, 'project.manage_materials', resolved.relations)
+  await assertOwnUpload(user, input.fileId)
 
   const buildId = await resolveBuildId(projectId, input.buildId)
 
@@ -1573,6 +1633,7 @@ export async function createBuild(
     select: { id: true },
   })
   if (existing) throw new ConflictError('A build with this name already exists on this project')
+  await assertOwnUpload(user, input.testDocumentFileId)
 
   return prisma.build.create({
     data: { ...input, projectId },
@@ -1601,9 +1662,10 @@ export async function updateBuild(
 
   const build = await prisma.build.findFirst({
     where: { id: buildId, projectId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, testDocumentFileId: true },
   })
   if (!build) throw new NotFoundError('Build')
+  await assertOwnUpload(user, input.testDocumentFileId, build.testDocumentFileId)
 
   if (input.name) {
     const clash = await prisma.build.findFirst({

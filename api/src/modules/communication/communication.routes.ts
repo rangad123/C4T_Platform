@@ -96,6 +96,67 @@ const createThreadSchema = z.object({
   message: z.string().trim().min(1).max(5000),
 })
 
+/**
+ * Who a non-admin may start a conversation with: the platform's staff, and
+ * people they work with on a project they can see (that project, when the
+ * thread is about one). Without this anyone could open a thread with any
+ * account on the platform. The portals only ever address a project's own
+ * contacts, which this always allows.
+ */
+async function assertMayAddress(
+  user: Express.AuthenticatedUser,
+  participantIds: string[],
+  projectId: string | undefined,
+): Promise<void> {
+  if (isAdminSide(user)) return
+  const others = participantIds.filter((id) => id !== user.id)
+  if (others.length === 0) return
+
+  const staff = await prisma.user.findMany({
+    where: { id: { in: others }, role: { in: [Role.ADMIN, Role.SUB_ADMIN] } },
+    select: { id: true },
+  })
+  const staffIds = new Set(staff.map((u) => u.id))
+
+  for (const id of others) {
+    if (staffIds.has(id)) continue
+    const shared = await prisma.project.findFirst({
+      where: {
+        AND: [
+          { deletedAt: null },
+          projectScope(user),
+          projectId ? { id: projectId } : {},
+          {
+            OR: [
+              { organisation: { members: { some: { userId: id } } } },
+              { managers: { some: { managerId: id } } },
+              {
+                assignments: {
+                  some: {
+                    testerId: id,
+                    status: {
+                      in: [
+                        AssignmentStatus.INVITED,
+                        AssignmentStatus.ACCEPTED,
+                        AssignmentStatus.ACTIVE,
+                        AssignmentStatus.COMPLETED,
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      select: { id: true },
+    })
+    if (!shared) {
+      throw new ForbiddenError('You can only message people you work with on a project')
+    }
+  }
+}
+
 communicationRouter.post('/threads', validate({ body: createThreadSchema }), async (req, res) => {
   const input = req.body as z.infer<typeof createThreadSchema>
 
@@ -128,6 +189,7 @@ communicationRouter.post('/threads', validate({ body: createThreadSchema }), asy
     throw new BadRequestError('One or more participants do not exist')
   }
   const participantIds = requested
+  await assertMayAddress(req.user!, participantIds, input.projectId)
 
   const thread = await prisma.$transaction(async (tx) => {
     const created = await tx.thread.create({

@@ -768,7 +768,10 @@ export async function owedByCurrency(): Promise<{ currency: string; amountMinor:
  * entry on its own (a legacy `tds_history` row) is a payout whose amount IS
  * its TDS, so it deducts the tax and pays the tester nothing.
  */
-async function payoutBalance(testerId: string): Promise<{
+async function payoutBalance(
+  testerId: string,
+  db: Prisma.TransactionClient = prisma,
+): Promise<{
   /** Credited, minus paid out, TDS and requests. What may be withdrawn now. */
   availableMinor: bigint
   /** Every TESTER_EARNING. */
@@ -781,15 +784,15 @@ async function payoutBalance(testerId: string): Promise<{
   requestedMinor: bigint
 }> {
   const [credited, paidOut, requested] = await Promise.all([
-    prisma.transaction.aggregate({
+    db.transaction.aggregate({
       where: { counterpartyId: testerId, type: TransactionType.TESTER_EARNING },
       _sum: { amountMinor: true },
     }),
-    prisma.transaction.aggregate({
+    db.transaction.aggregate({
       where: { counterpartyId: testerId, type: TransactionType.TESTER_PAYOUT },
       _sum: { amountMinor: true, tdsAmountMinor: true },
     }),
-    prisma.payoutRequest.aggregate({
+    db.payoutRequest.aggregate({
       where: { testerId, ...OPEN_REQUEST },
       _sum: { amountMinor: true },
     }),
@@ -941,35 +944,43 @@ transactionsRouter.post(
       throw new BadRequestError('Add your payment details before requesting a payout')
     }
 
-    // One open request at a time. Without this, two submits seconds apart both
-    // pass the balance check and the ledger owes twice what it should.
-    const openRequest = await prisma.payoutRequest.findFirst({
-      where: { testerId: req.user!.id, ...OPEN_REQUEST },
-      select: { id: true },
-    })
-    if (openRequest) {
-      throw new BadRequestError('You already have a payout request in progress')
-    }
+    const testerId = req.user!.id
+    const request = await prisma.$transaction(async (tx) => {
+      // Two submits in parallel would otherwise both read "no open request"
+      // and the same balance before either inserts, and the ledger would owe
+      // twice what it should. A per-tester advisory lock, held until this
+      // transaction ends, makes the second wait and then see the first's row.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`payout-request:${testerId}`}))`
 
-    const balance = await payoutBalance(req.user!.id)
-    const amountMinor = input.amountMinor ?? balance.availableMinor
+      // One open request at a time.
+      const openRequest = await tx.payoutRequest.findFirst({
+        where: { testerId, ...OPEN_REQUEST },
+        select: { id: true },
+      })
+      if (openRequest) {
+        throw new BadRequestError('You already have a payout request in progress')
+      }
 
-    if (amountMinor > balance.availableMinor) {
-      throw new BadRequestError('That is more than your available balance')
-    }
-    if (amountMinor < PAYOUT_MINIMUM_MINOR) {
-      throw new BadRequestError('That is below the minimum payout amount')
-    }
+      const balance = await payoutBalance(testerId, tx)
+      const amountMinor = input.amountMinor ?? balance.availableMinor
 
-    const request = await prisma.payoutRequest.create({
-      data: {
-        testerId: req.user!.id,
-        amountMinor,
-        currency: currencyForPaymentType(account.paymentType),
-        paymentAccountId: account.id,
-        note: input.note,
-      },
-      select: { id: true, amountMinor: true, currency: true, createdAt: true },
+      if (amountMinor > balance.availableMinor) {
+        throw new BadRequestError('That is more than your available balance')
+      }
+      if (amountMinor < PAYOUT_MINIMUM_MINOR) {
+        throw new BadRequestError('That is below the minimum payout amount')
+      }
+
+      return tx.payoutRequest.create({
+        data: {
+          testerId,
+          amountMinor,
+          currency: currencyForPaymentType(account.paymentType),
+          paymentAccountId: account.id,
+          note: input.note,
+        },
+        select: { id: true, amountMinor: true, currency: true, createdAt: true },
+      })
     })
 
     await recordAudit({

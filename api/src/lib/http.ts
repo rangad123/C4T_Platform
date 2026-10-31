@@ -25,12 +25,33 @@ export function param(req: Request, name: string): string {
  * design (see `web/src/lib/api/server.ts`'s doc comment: the browser never
  * talks to this service directly). `x-c4t-client-ip` is what the web tier
  * sends instead — see `web/src/lib/auth/request-context.ts` for the callers
- * that set it and why. Trusted only because the header can only be set by
- * that server's own outbound calls, never by a public caller reaching this
- * API through the one path that is actually exposed to the internet.
+ * that set it and why.
+ *
+ * The header is believed only from the web server's own calls, which is NOT
+ * the same as "anything on loopback": nginx also exposes this API publicly at
+ * `/api/v1` and proxies it to the same loopback port, so a public caller's
+ * request arrives from 127.0.0.1 too. What tells them apart is that nginx adds
+ * `X-Forwarded-For` to everything it forwards (which is also what makes
+ * `trust proxy` give `req.ip` the visitor's address), while the web server's
+ * own `fetch` to `API_ORIGIN` never sends it. A public caller cannot remove a
+ * header nginx sets, so a request carrying any forwarding header is treated as
+ * public and keyed on `req.ip`, whatever `x-c4t-client-ip` says.
  */
 export function clientAddress(req: Request): string {
   const forwarded = req.get('x-c4t-client-ip')?.trim()
-  if (forwarded) return forwarded.slice(0, 45)
+  if (forwarded && fromWebServer(req)) return forwarded.slice(0, 45)
   return req.ip ?? 'unknown'
+}
+
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+
+/** A direct loopback call that did not pass through a proxy. See `clientAddress`. */
+function fromWebServer(req: Request): boolean {
+  const peer = req.socket.remoteAddress
+  if (!peer || !LOOPBACK.has(peer)) return false
+  return (
+    req.get('x-forwarded-for') === undefined &&
+    req.get('x-real-ip') === undefined &&
+    req.get('forwarded') === undefined
+  )
 }

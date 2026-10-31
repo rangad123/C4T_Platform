@@ -131,8 +131,11 @@ uploadsRouter.post(
  * Resolves whether the caller may download this file, by walking to whatever
  * it's actually attached to and reusing that resource's own visibility rule
  * — the same `bugRelations`/`projectRelations`/`threadRelations` + `authorize`
- * pattern every other module uses. Admin-side roles bypass, matching how they
- * already read bugs/projects/threads platform-wide elsewhere.
+ * pattern every other module uses. An Admin bypasses. A Sub-Admin goes through
+ * those same checks, so a file on a bug, project or thread needs the matching
+ * read permission and respects `project.scope_to_assigned`, exactly as opening
+ * the bug, project or thread itself would; files that belong to no project (a
+ * tester's documents, for instance) stay readable to them as before.
  *
  * Avatars and organisation logos are treated as viewable by any authenticated
  * user: they render unscoped in list rows across the admin panel (a tester
@@ -148,7 +151,7 @@ async function assertCanDownload(
   user: Express.AuthenticatedUser,
   file: { id: string; scope: FileScope; uploadedById: string },
 ): Promise<void> {
-  if (isAdminSide(user)) return
+  if (user.role === Role.ADMIN) return
 
   if (file.scope === FileScope.AVATAR || file.scope === FileScope.ORG_LOGO) return
 
@@ -248,7 +251,8 @@ async function assertCanDownload(
   }
 
   // TESTER_DOCUMENT, OTHER, or an attachment row that no longer resolves —
-  // only the person who uploaded it may fetch it.
+  // only the person who uploaded it, or the platform's own staff, may fetch it.
+  if (isAdminSide(user)) return
   if (file.uploadedById !== user.id) {
     throw new ForbiddenError('You do not have access to this file')
   }

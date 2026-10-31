@@ -4,6 +4,7 @@ import { headers } from 'next/headers'
 import { z } from 'zod'
 import { env } from '@/lib/env'
 import { combinePhoneFromForm } from '@/lib/phone/combine'
+import { visitorAddress } from '@/lib/auth/request-context'
 
 /**
  * The demo-request server action.
@@ -114,12 +115,12 @@ export async function submitLead(_prev: LeadState, formData: FormData): Promise<
 
   /**
    * The visitor's address, for the API's rate limit and its abuse-triage
-   * column. `x-forwarded-for` is set by nginx in front of this server; the
-   * first entry is the client. Absent in local development, which is why the
-   * header is only sent when there is one.
+   * column, from the entry nginx appended to `x-forwarded-for` (see
+   * `visitorAddress`). Absent in local development, which is why the header is
+   * only sent when there is one.
    */
   const requestHeaders = await headers()
-  const clientIp = (requestHeaders.get('x-forwarded-for') ?? '').split(',')[0]?.trim() ?? ''
+  const clientIp = visitorAddress(requestHeaders) ?? ''
 
   /** Set when the API refused for rate limiting, so the catch can say so. */
   let rateLimited = false

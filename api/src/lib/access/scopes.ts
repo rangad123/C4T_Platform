@@ -38,6 +38,16 @@ function isScopedSubAdmin(user: Express.AuthenticatedUser): boolean {
   )
 }
 
+/**
+ * A Sub-Admin who does not hold `code`. `policy.ts` gives a Sub-Admin the
+ * platform-wide pass for an action only with that action's permission; without
+ * it they fall back to whatever real relation they have, like anyone else. The
+ * lists must do the same, or a Sub-Admin refused one row could list them all.
+ */
+function lacksPermission(user: Express.AuthenticatedUser, code: string): boolean {
+  return user.role === Role.SUB_ADMIN && !user.permissions.includes(code)
+}
+
 /** A project this manager is assigned to, via `ManagerAssignment`. */
 function assignedProjectsRelation(user: Express.AuthenticatedUser) {
   return { managers: { some: { managerId: user.id } } }
@@ -46,14 +56,17 @@ function assignedProjectsRelation(user: Express.AuthenticatedUser) {
 // ─── Projects ────────────────────────────────────────────────────────────────
 
 /**
- *   ADMIN / SUB_ADMIN — everything
+ *   ADMIN / SUB_ADMIN — everything (a Sub-Admin needs `project.read`, else only
+ *                       the projects they manage)
  *   CUSTOMER          — projects belonging to an organisation they are in
  *   TESTER            — projects they hold a live assignment on, plus any they
  *                       manage (a manager can be any admin-side user)
  *   USER              — nothing
  */
 export function projectScope(user: Express.AuthenticatedUser): Prisma.ProjectWhereInput {
-  if (isScopedSubAdmin(user)) return assignedProjectsRelation(user)
+  if (isScopedSubAdmin(user) || lacksPermission(user, PERMISSIONS.PROJECT_READ)) {
+    return assignedProjectsRelation(user)
+  }
   if (isPlatform(user)) return {}
 
   if (user.role === Role.CUSTOMER) {
@@ -72,7 +85,8 @@ export function projectScope(user: Express.AuthenticatedUser): Prisma.ProjectWhe
 // ─── Bugs ────────────────────────────────────────────────────────────────────
 
 /**
- *   ADMIN / SUB_ADMIN — everything
+ *   ADMIN / SUB_ADMIN — everything (a Sub-Admin needs `bug.read`, else only bugs
+ *                       on the projects they manage)
  *   CUSTOMER          — every bug on their organisations' projects
  *   TESTER            — only bugs they reported
  *
@@ -82,7 +96,9 @@ export function projectScope(user: Express.AuthenticatedUser): Prisma.ProjectWhe
  * title-and-status-only endpoint rather than widening this.
  */
 export function bugScope(user: Express.AuthenticatedUser): Prisma.BugWhereInput {
-  if (isScopedSubAdmin(user)) return { project: assignedProjectsRelation(user) }
+  if (isScopedSubAdmin(user) || lacksPermission(user, PERMISSIONS.BUG_READ)) {
+    return { project: assignedProjectsRelation(user) }
+  }
   if (isPlatform(user)) return {}
 
   if (user.role === Role.CUSTOMER) {
@@ -118,6 +134,9 @@ export function bugScope(user: Express.AuthenticatedUser): Prisma.BugWhereInput 
 // ─── Organisations ───────────────────────────────────────────────────────────
 
 export function organisationScope(user: Express.AuthenticatedUser): Prisma.OrganisationWhereInput {
+  if (lacksPermission(user, PERMISSIONS.ORGANISATION_READ)) {
+    return { members: { some: { userId: user.id } } }
+  }
   if (isPlatform(user)) return {}
   if (user.role === Role.CUSTOMER) return { members: { some: { userId: user.id } } }
   return DENY_ALL
@@ -126,6 +145,9 @@ export function organisationScope(user: Express.AuthenticatedUser): Prisma.Organ
 // ─── Threads ─────────────────────────────────────────────────────────────────
 
 export function threadScope(user: Express.AuthenticatedUser): Prisma.ThreadWhereInput {
+  if (lacksPermission(user, PERMISSIONS.COMMUNICATION_READ)) {
+    return { participants: { some: { userId: user.id } } }
+  }
   if (isScopedSubAdmin(user)) return { project: assignedProjectsRelation(user) }
   if (isPlatform(user)) return {}
   return { participants: { some: { userId: user.id } } }
@@ -138,6 +160,7 @@ export function threadScope(user: Express.AuthenticatedUser): Prisma.ThreadWhere
  *   TESTER   — rows where they are the counterparty (their earnings/payouts)
  */
 export function transactionScope(user: Express.AuthenticatedUser): Prisma.TransactionWhereInput {
+  if (lacksPermission(user, PERMISSIONS.TRANSACTION_READ)) return DENY_ALL
   if (isPlatform(user)) return {}
   if (user.role === Role.CUSTOMER) {
     return { organisation: { members: { some: { userId: user.id } } } }

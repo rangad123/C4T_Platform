@@ -86,10 +86,17 @@ export const authLimiter = rateLimit({
   ...shared,
 })
 
-/** Uploads are expensive; presign requests get their own budget. */
+/**
+ * Uploads are expensive; presign requests get their own budget.
+ *
+ * Keyed on the signed-in user (the route runs `authenticate` first), not the
+ * address: uploads are relayed by the web server, so an address key made one
+ * bucket for every uploader on the platform.
+ */
 export const uploadLimiter = rateLimit({
   windowMs: 60_000,
   max: 30,
+  keyGenerator: (req) => (req.user ? `user:${req.user.id}` : clientAddress(req)),
   ...shared,
 })
 

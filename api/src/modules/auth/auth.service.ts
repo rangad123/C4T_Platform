@@ -53,6 +53,7 @@ export type RevokeReason =
   | 'account_suspended'
   | 'account_deleted'
   | 'admin'
+  | 'google_claimed_unverified'
 
 export interface PublicUser {
   id: string
@@ -806,7 +807,7 @@ export async function signInWithGoogle(
   // ── 2. Existing local account with the same verified address ─────────────
   const existing = await prisma.user.findUnique({
     where: { email: identity.email },
-    select: { id: true, status: true, deletedAt: true },
+    select: { id: true, status: true, deletedAt: true, emailVerifiedAt: true },
   })
 
   if (existing) {
@@ -818,7 +819,26 @@ export async function signInWithGoogle(
     if (existing.deletedAt) throw new UnauthorizedError('This account is no longer active')
     assertUsableStatus(existing.status)
 
+    // An account whose address was never verified may not belong to the person
+    // who owns that mailbox: anyone can register someone else's address with a
+    // password of their own. Google proving the address is the first real proof
+    // of ownership, so whatever was set up before it (the password and any open
+    // session) is dropped. The owner can set a password later through "Forgot
+    // password", which mails the now-proven address.
+    const unverifiedClaim = existing.emailVerifiedAt === null
+
     await prisma.$transaction([
+      ...(unverifiedClaim
+        ? [
+            prisma.session.updateMany({
+              where: { userId: existing.id, revokedAt: null },
+              data: {
+                revokedAt: new Date(),
+                revokedReason: 'google_claimed_unverified' satisfies RevokeReason,
+              },
+            }),
+          ]
+        : []),
       prisma.oAuthAccount.create({
         data: {
           userId: existing.id,
@@ -833,6 +853,7 @@ export async function signInWithGoogle(
           lastLoginAt: new Date(),
           failedLoginCount: 0,
           lockedUntil: null,
+          ...(unverifiedClaim ? { passwordHash: null, emailVerifiedAt: new Date() } : {}),
           // Google vouching for the address is at least as strong as our own
           // emailed link, so an unverified local account becomes verified and
           // active here rather than being left in limbo.

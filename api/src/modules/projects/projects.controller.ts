@@ -119,6 +119,7 @@ export async function removeFeature(req: Request, res: Response): Promise<void> 
 }
 
 export async function assignTesters(req: Request, res: Response): Promise<void> {
+  await service.assertMayAssignTesters(req.user!, param(req, 'id'))
   const result = await service.assignTesters(
     param(req, 'id'),
     req.body.testerIds,
@@ -148,6 +149,7 @@ export async function respondToAssignment(req: Request, res: Response): Promise<
 }
 
 export async function updateAssignment(req: Request, res: Response): Promise<void> {
+  await service.assertMayAssignTesters(req.user!, param(req, 'id'))
   const assignment = await service.updateAssignment(
     param(req, 'id'),
     req.body.buildId as string,

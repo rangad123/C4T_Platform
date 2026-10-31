@@ -47,12 +47,26 @@ export function authHeaders(incoming: Headers): Record<string, string> {
   const userAgent = incoming.get('user-agent')
   if (userAgent) out['user-agent'] = userAgent
 
-  // The first hop in a forwarded chain is the actual client; anything after
-  // it is a proxy this request already passed through.
-  const forwarded = incoming.get('x-forwarded-for')?.split(',')[0]?.trim()
-  if (forwarded) out['x-c4t-client-ip'] = forwarded
+  const visitor = visitorAddress(incoming)
+  if (visitor) out['x-c4t-client-ip'] = visitor
 
   return out
+}
+
+/**
+ * The visitor's address as nginx saw it: the LAST entry of `X-Forwarded-For`.
+ *
+ * nginx appends the address of whoever connected to it, and that is the only
+ * entry anyone can vouch for. Everything before it came from the visitor's own
+ * request and can say anything, so taking the first entry let any caller pick
+ * the rate-limit bucket the API would count them in. Next.js adds the header
+ * only when nginx did not, so the last entry is never Next's own.
+ */
+export function visitorAddress(incoming: Headers): string | undefined {
+  const chain = incoming.get('x-forwarded-for')?.split(',')
+  const last = chain?.[chain.length - 1]?.trim()
+  if (!last) return undefined
+  return last
 }
 
 /** The Server Action / Route Handler convenience form — reads the incoming request's headers itself. */

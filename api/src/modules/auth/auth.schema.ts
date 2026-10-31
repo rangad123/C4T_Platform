@@ -74,6 +74,8 @@ export const refreshSchema = z.object({
 /** Body of `POST /v1/auth/google/exchange` — see auth.controller.ts's `googleExchange`. */
 export const googleExchangeSchema = z.object({
   code: z.string().min(1, 'code is required'),
+  /** The `c4t_oauth_handoff` cookie of the browser completing the sign-in. */
+  binding: z.string().min(1).max(256).optional(),
 })
 
 export const forgotPasswordSchema = z.object({ email })
