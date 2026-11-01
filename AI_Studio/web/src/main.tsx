@@ -11,7 +11,7 @@ import { ScriptsPage } from "./features/workspace/ScriptsPage";
 import { SuitesPage } from "./features/workspace/SuitesPage";
 import { TestCasesPage } from "./features/workspace/TestCasesPage";
 import { CreateProjectPage } from "./features/workspace/CreateProjectPage";
-import { DashboardPage, FoldersPage, ProfilePage, RunnersPage, TestDevelopmentPage } from "./features/workspace/GlobalPages";
+import { DashboardPage, FoldersPage, ProfilePage, RunnerPage, RunnersPage, TestDevelopmentPage } from "./features/workspace/GlobalPages";
 import { NewCodePage } from "./features/code/EditorPage";
 import { RecorderPage } from "./features/recorder/RecorderPage";
 import { ReleaseDetail } from "./features/manual/ReleaseDetail";
@@ -40,7 +40,7 @@ function Pages() {
     if (a === "dashboard") return <DashboardPage />;
     if (a === "create") return <CreateProjectPage />;
     if (a === "develop") return <TestDevelopmentPage />;
-    if (a === "runners") return <RunnersPage />;
+    if (a === "runners") return b ? <RunnerPage id={b} key={b} /> : <RunnersPage />;
     if (a === "folders") return <FoldersPage />;
     if (a === "profile") return <ProfilePage />;
     if (a === "settings") return <Settings />;
@@ -51,11 +51,11 @@ function Pages() {
     if (a === "projects" && b) {
         // The places, in lifecycle order. Older links (the Library, Release and Setup places, schedule, runners, objects, blocks,
         // helpers, releases, manual-cases, compliance) are redirected in App (lib/aliases.ts).
-        if (c === "requirements") return <RequirementsPage id={b} key={b} />;
+        if (c === "requirements") return <RequirementsPage id={b} rid={d} key={d ? `${b}/${d}` : b} />;
         if (c === "tests") return <TestCasesPage id={b} key={b} />;
-        if (c === "suites") return <SuitesPage id={b} key={b} />;
+        if (c === "suites") return <SuitesPage id={b} suiteId={d} key={`${b}/${d ?? ""}`} />;
         if (c === "scripts") return <ScriptsPage id={b} key={b} />;
-        if (c === "agent") return <AgentRunsPage id={b} key={b} />;
+        if (c === "agent") return <AgentRunsPage id={b} runId={d} key={`${b}/${d ?? ""}`} />;
         if (c === "runs") return d ? <RunDetail id={b} jobId={d} key={`${b}/${d}`} /> : <RunsPage id={b} key={b} />;
         if (c === "settings") return <SetupPage id={b} key={b} />;
         if (c === "release" && d) return <ReleaseDetail id={b} releaseId={d} key={`${b}/${d}`} />;

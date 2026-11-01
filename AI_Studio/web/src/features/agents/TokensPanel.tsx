@@ -173,7 +173,7 @@ function CommandBlock({ token }: { token?: string }) {
     );
 }
 
-function FreshToken({ secret, label, onDone }: { secret: string; label: string | null; onDone: () => void }) {
+export function FreshToken({ secret, label, onDone, who = "this project" }: { secret: string; label: string | null; onDone: () => void; who?: string }) {
     const { copied, copy } = useCopy(secret);
     const box = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -183,7 +183,7 @@ function FreshToken({ secret, label, onDone }: { secret: string; label: string |
     return (
         <div className="ag-fresh" role="region" aria-label="Your new token" ref={box} tabIndex={-1}>
             <Callout tone="warning" title={`Copy the token${label ? ` for “${label}”` : ""} now`}>
-                We show this only once. Anyone with it can run tests as this project. Revoke it if it leaks.
+                We show this only once. Anyone with it can run tests as {who}. Revoke it if it leaks.
             </Callout>
             <div className="ag-secret">
                 <textarea className="input ag-mono" readOnly rows={2} value={secret} aria-label="New token" data-testid="new-token" onFocus={(e) => e.currentTarget.select()} />

@@ -45,7 +45,7 @@ afterAll(async () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
+const call = async (method: "GET" | "POST" | "PUT", url: string, payload?: unknown) => {
     const res = await server.inject({ method, url, payload: payload as never });
     return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
 };
@@ -77,6 +77,8 @@ const addToCart = (title: string, extra: Record<string, unknown> = {}) => spec(t
 describe("locator healing", () => {
     it("records the shop while its button is still called “Add to cart”: every test passes", async () => {
         projectId = (await call("POST", "/api/projects", { name: "Shop that changes" })).body.id;
+        // This file is about applying a fix and seeing it run: with the default policy a fix is a draft and waits for approval (tests/reviews-api.test.ts).
+        await call("PUT", `/api/projects/${projectId}/review-policy`, { healing: false });
         const imp = await call("POST", `/api/projects/${projectId}/specs`, {
             baseUrl: FIXTURE,
             specs: [

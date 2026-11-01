@@ -84,6 +84,8 @@ const concrete = (title: string) => spec(title, [{ action: "navigate", url: "/" 
 describe("object repository: elements", () => {
     it("creates, reads and lists elements, with the locator in words and a version", async () => {
         pid = (await call("POST", "/api/projects", { name: "Shop with shared locators" })).body.id;
+        // This file is about applying a fix and seeing it run: with the default policy a fix is a draft and waits for approval (tests/reviews-api.test.ts).
+        await call("PUT", `/api/projects/${pid}/review-policy`, { healing: false });
         const empty = await call("GET", objectsUrl());
         expect(empty.body).toEqual({ total: 0, limit: 1000, elements: [] });
 

@@ -150,6 +150,15 @@ const EnvSchema = z.object({
         .optional()
         .transform((v) => (v ?? "").trim().toLowerCase() === "true"),
     /**
+     * Agent runs (the AI driving a browser toward an objective) use this server's own browser until runners can take them. That browser runs
+     * beside the platform, so agent runs start only when this is exactly "true" (default off). Local development and tests set it; a shared
+     * server does not.
+     */
+    AGENT_RUNS_ON_SERVER: z
+        .string()
+        .optional()
+        .transform((v) => (v ?? "").trim().toLowerCase() === "true"),
+    /**
      * Adapter plug-ins (a testing framework added as an ES module) are code that runs inside this server: they load only when this is exactly
      * "true" (default off) AND API_KEY is set, and only from the paths in ADAPTER_PLUGINS. See engine/frameworks/plugin-loader.ts.
      */

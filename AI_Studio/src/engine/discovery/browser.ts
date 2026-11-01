@@ -7,6 +7,7 @@
  * instead of being stopped after they start. Each session watches its page's API traffic (./network.ts).
  */
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { GuardProxy, privateTargetsBlocked } from "./guard-proxy.js";
 import { NetworkInterceptor } from "./network.js";
 
 export interface SessionOptions {
@@ -25,18 +26,27 @@ export class BrowserSession {
         readonly context: BrowserContext,
         readonly page: Page,
         private readonly host: string,
+        /** The address guard every request of this session goes through (BLOCK_PRIVATE_TARGETS on), else undefined. */
+        readonly guard?: GuardProxy,
     ) {}
 
     static async launch(browser: Browser, opts: SessionOptions): Promise<BrowserSession> {
         const host = new URL(opts.startUrl).host;
         const allowed = new Set([host, ...(opts.allowedHosts ?? [])]);
+        // Private addresses: every request, frame and redirect hop goes through the guard (guard-proxy.ts). "<-loopback>" stops Chromium from
+        // sending loopback addresses around the proxy.
+        const guard = privateTargetsBlocked() ? await GuardProxy.start() : undefined;
         const context = await browser.newContext({
+            ...(guard ? { proxy: { server: guard.address, bypass: "<-loopback>" } } : {}),
             viewport: { width: 1280, height: 800 },
             userAgent:
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 AITestingPlatform/0.1",
             storageState: opts.storageState,
             recordVideo: opts.recordVideoDir ? { dir: opts.recordVideoDir, size: { width: 1280, height: 800 } } : undefined,
             ignoreHTTPSErrors: false,
+        }).catch(async (e: unknown) => {
+            await guard?.close().catch(() => undefined);
+            throw e;
         });
         context.setDefaultTimeout(8_000);
         context.setDefaultNavigationTimeout(30_000);
@@ -52,13 +62,14 @@ export class BrowserSession {
         });
 
         const page = await context.newPage();
-        const session = new BrowserSession(browser, context, page, host);
+        const session = new BrowserSession(browser, context, page, host, guard);
         session.network.attach(page);
         return session;
     }
 
     async close(): Promise<void> {
         await this.context.close().catch(() => undefined);
+        await this.guard?.close().catch(() => undefined);
     }
 }
 

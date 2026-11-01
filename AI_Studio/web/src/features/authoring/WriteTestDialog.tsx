@@ -1,3 +1,4 @@
+import { useProjectAiReady } from "../aiconfig/aiconfig";
 import { PencilLine } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type Job, type TestSummary } from "../../api";
@@ -31,6 +32,7 @@ export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, 
     const ref = useRef<HTMLDialogElement>(null);
     const area = useRef<HTMLTextAreaElement>(null);
     const config = useConfig();
+    const aiReady = useProjectAiReady(projectId);
     const environments = useFetch<{ environments: Environment[] }>(`/projects/${projectId}/environments`);
     const [text, setText] = useState(rewrite?.description ?? "");
     const [environment, setEnvironment] = useState("");
@@ -77,7 +79,7 @@ export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, 
     }, [jobId]);
 
     const trimmed = text.trim();
-    const modelMissing = config !== undefined && !config.llm.configured;
+    const modelMissing = config !== undefined && !aiReady;
     const canSubmit = trimmed.length >= MIN_LENGTH && trimmed.length <= MAX_LENGTH && !starting && !busy && !modelMissing;
     const buildable = (environments.data?.environments ?? []).filter((e) => !e.production);
 

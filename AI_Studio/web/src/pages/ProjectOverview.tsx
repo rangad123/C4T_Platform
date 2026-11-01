@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { ArrowRight, ChevronRight, ExternalLink, ListChecks, RefreshCw, Sparkles } from "lucide-react";
 import { projectShape, type ProjectDetail, type Severity, type TestSummary, type TestingMode } from "../api";
 import { JobProgress } from "../components/JobProgress";
+import { ArchivedNote } from "../components/ProjectHub";
 import { ExplorerWatch } from "../features/explorer/ExplorerView";
 import { NextSteps } from "../features/onboarding/NextSteps";
 import { PlanPreview } from "../features/onboarding/PlanPreview";
@@ -17,6 +18,7 @@ import { PlainResult } from "../features/authoring/PlainResult";
 import { SecurityProjectTab } from "../features/security/TestingType";
 import { SecuritySummaryCard } from "../features/security/SecurityPage";
 import { SetupChecklist } from "../features/workspace/SetupChecklist";
+import { RequirementsCoverageCard } from "../features/requirements/CoverageCard";
 import { usePage } from "../components/Shell";
 import { TechnicalDetails } from "../components/TechnicalDetails";
 import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton, Metric, PageHeader, Ribbon, RibbonLegend, SeverityBadge, Skeleton, StatusBadge, severityKey, statusKey, type Tick } from "../components/ui";
@@ -24,7 +26,7 @@ import { BadgeKey } from "../components/Tooltip";
 import { useEmbedded } from "../lib/embedded";
 import type { ScheduleList } from "../features/schedules/schedules";
 import { hostOf, plural, relativeTime } from "../lib/format";
-import { cleanReason, friendlyError, friendlyJobErrors, isActive } from "../lib/labels";
+import { cleanReason, friendlyError, friendlyJobErrors, isActive, nothingRan } from "../lib/labels";
 import { useDocumentTitle, useFetch, useOnFinish, useProjectChanged } from "../lib/hooks";
 import { help } from "../lib/help";
 import { routes } from "../lib/router";
@@ -132,6 +134,7 @@ export function ProjectOverview({ id }: { id: string }) {
                 }
             />
             <ProjectTabs id={id} active="overview" count={tests.data?.length} modes={projectShape(p).testingModes} />
+            {p.archived_at && <ArchivedNote id={id} />}
 
             <div className="stack">
                 {/* What the project's platforms and modes still need (US-010); hidden when all is set. */}
@@ -145,6 +148,9 @@ export function ProjectOverview({ id }: { id: string }) {
                 )}
 
                 <SecuritySummaryCard id={id} />
+
+                {/* Coverage by requirement (RP-02): passing, failing, covered, not covered. */}
+                <RequirementsCoverageCard projectId={id} />
 
                 {(storage.data?.needsSecrets.length ?? 0) > 0 && (
                     <Callout tone="warning" title="Some details need entering again" actions={<LinkButton size="sm" href={routes.setup(id, "storage")}>Open Storage and backup</LinkButton>}>
@@ -246,11 +252,30 @@ function Result({ job, total, validated, attention, projectId }: { job: NonNulla
     if (job.mode === "variants") return <VariantsResult job={job} projectId={projectId} />;
     if (job.mode === "environment") return <EnvironmentResult job={job} projectId={projectId} />;
     if (job.mode === "plain") return <PlainResult job={job} projectId={projectId} />;
+    if (job.mode === "agent") {
+        return (
+            <div className="card card-pad">
+                <Callout tone="neutral" title="The last run was an agent run" actions={<LinkButton size="sm" href={routes.agentRuns(projectId)}>Open agent runs</LinkButton>}>
+                    Its steps and result are under Agent runs.
+                </Callout>
+            </div>
+        );
+    }
     if (job.status === "FAILED" && job.planOnly && job.error === "Cancelled") {
         return (
             <div className="card card-pad">
                 <Callout tone="neutral" title="Exploring was stopped" actions={<LinkButton size="sm" variant="primary" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>Explore again</LinkButton>}>
                     No plan was made and nothing was created. Tests you already had are unchanged.
+                </Callout>
+            </div>
+        );
+    }
+    if (nothingRan(job)) {
+        const e = friendlyError(job.error);
+        return (
+            <div className="card card-pad">
+                <Callout tone="info" title={e.title} actions={<LinkButton size="sm" href={routes.run(projectId, job.jobId)}>See each test</LinkButton>}>
+                    {e.body}
                 </Callout>
             </div>
         );

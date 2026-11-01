@@ -35,6 +35,7 @@ const api = async (method: string, url: string, body?: unknown, headers: Record<
 
 beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
+    process.env.AGENT_MAX_TOKENS = "25"; // this file gives one project several runners
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-net-ui-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "net-ui-secret-key-0123456789", HOST: "127.0.0.1", PORT: String(PORT) }));
     server = await buildServer(platform);

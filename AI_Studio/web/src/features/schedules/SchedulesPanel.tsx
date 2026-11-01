@@ -1,4 +1,4 @@
-import { CalendarClock, Pause, Play, Plus, Trash2, Workflow, Zap } from "lucide-react";
+import { CalendarClock, ListOrdered, Pause, Play, Plus, Trash2, Workflow, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
@@ -115,7 +115,7 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted }: { s: Schedule; p
             <div className="row">
                 <h3 className="t-card">{s.name}</h3>
                 <Badge tone={s.enabled ? "success" : "neutral"} tip={s.enabled ? SCHEDULE_HELP.on : SCHEDULE_HELP.off}>{s.enabled ? "Active" : "Paused"}</Badge>
-                {s.runbookName ? <Badge tone="info" icon={Workflow}>Runs the run sequence “{s.runbookName}”</Badge> : s.kind === "generate" && <Badge tone="info" tip="Each run explores the app again with the AI model, which uses AI tokens.">Uses AI</Badge>}
+                {s.suiteName ? <Badge tone="info" icon={ListOrdered}>Runs the suite “{s.suiteName}”</Badge> : s.runbookName ? <Badge tone="info" icon={Workflow}>Runs the run sequence “{s.runbookName}”</Badge> : s.kind === "generate" && <Badge tone="info" tip="Each run explores the app again with the AI model, which uses AI tokens.">Uses AI</Badge>}
             </div>
             <div className="facts">
                 <span>Next run: <b>{s.enabled ? whenText(s.nextRunAt) : "paused"}</b></span>
@@ -123,7 +123,7 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted }: { s: Schedule; p
                     Last run: <b>{s.lastRunAt ? relativeTime(s.lastRunAt) : "never"}</b>
                     {s.lastJobId && <> · <a href={routes.runs(projectId)}>View runs</a></>}
                 </span>
-                {!s.runbookName && s.kind === "validate" && s.retryFailures > 0 && <span>A failing test is run again once to spot unreliable tests</span>}
+                {!s.runbookName && !s.suiteName && s.kind === "validate" && s.retryFailures > 0 && <span>A failing test is run again once to spot unreliable tests</span>}
             </div>
             {s.lastOutcome === "skipped" && s.lastNote && <Callout tone="warning">Skipped {relativeTime(s.lastOutcomeAt)}: {s.lastNote}.</Callout>}
             {s.lastOutcome === "error" && s.lastNote && <Callout tone="danger" title="The last run couldn’t start">{s.lastNote}</Callout>}
@@ -159,13 +159,17 @@ function cadenceOf(freq: Frequency, every: number, time: string, weekday: number
     return freq === "daily" ? { type: "daily", time } : { type: "weekly", weekday, time };
 }
 
-function sentence(kind: ScheduleKind, c: Cadence): string {
+function sentence(kind: ScheduleKind, c: Cadence, suiteName?: string): string {
     const when = c.type === "interval" ? `every ${c.every === 1 ? (c.unit === "hours" ? "hour" : "minute") : `${c.every} ${c.unit}`}` : c.type === "daily" ? `every day at ${c.time}` : `every ${WEEKDAYS[c.weekday]} at ${c.time}`;
-    return `${KIND_TEXT[kind]} ${when}`;
+    return `${suiteName ? `Run the suite “${suiteName}”` : KIND_TEXT[kind]} ${when}`;
 }
 
 function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: string; zone: string; onCancel: () => void; onCreated: () => void }) {
     const [kind, setKind] = useState<ScheduleKind>("validate");
+    // The suites people built in this project: a schedule can run one of them (its tests, order and settings) instead of every test.
+    const suites = useFetch<{ suites: Array<{ id: string; name: string; testCount: number }> }>(`/projects/${projectId}/test-suites`);
+    const [suiteId, setSuiteId] = useState("");
+    const suite = suites.data?.suites.find((x) => x.id === suiteId);
     const [freq, setFreq] = useState<Frequency>("daily");
     const [every, setEvery] = useState(1);
     const [time, setTime] = useState("02:00");
@@ -180,7 +184,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
         setBusy(true);
         setError("");
         try {
-            await api(`/projects/${projectId}/schedules`, { method: "POST", body: { kind, cadence, retryFailures: kind === "validate" && retry ? 1 : 0 } });
+            await api(`/projects/${projectId}/schedules`, { method: "POST", body: suiteId ? { kind: "validate", cadence, suiteId } : { kind, cadence, retryFailures: kind === "validate" && retry ? 1 : 0 } });
             onCreated();
         } catch (e) {
             setError(describeApiError(e));
@@ -199,10 +203,30 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
         >
             <div className="field">
                 <label htmlFor="sched-kind">What should run</label>
-                <select id="sched-kind" className="input" value={kind} onChange={(e) => setKind(e.target.value as ScheduleKind)}>
+                <select
+                    id="sched-kind"
+                    className="input"
+                    value={suiteId ? `suite:${suiteId}` : kind}
+                    onChange={(e) => {
+                        const v = e.target.value;
+                        if (v.startsWith("suite:")) {
+                            setSuiteId(v.slice(6));
+                            setKind("validate");
+                        } else {
+                            setSuiteId("");
+                            setKind(v as ScheduleKind);
+                        }
+                    }}
+                >
                     <option value="validate">Re-run all tests</option>
                     <option value="generate">Explore again (looks for new things to test; needs the AI model)</option>
+                    {(suites.data?.suites ?? []).map((x) => (
+                        <option key={x.id} value={`suite:${x.id}`} disabled={x.testCount === 0}>
+                            Run the suite “{x.name}”{x.testCount === 0 ? " (no tests yet)" : ""}
+                        </option>
+                    ))}
                 </select>
+                {suite && <p className="hint">The suite runs its own tests, in its order, with the settings saved on the suite.</p>}
             </div>
             <div className="field">
                 <label htmlFor="sched-freq">How often</label>
@@ -235,7 +259,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
                 </div>
                 <p className="hint">Times use {zone}. Runs at most every 5 minutes.</p>
             </div>
-            {kind === "validate" && (
+            {kind === "validate" && !suiteId && (
                 <label className="check">
                     <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} />
                     <span>
@@ -244,7 +268,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
                     </span>
                 </label>
             )}
-            <p className="sched-preview" aria-live="polite">{sentence(kind, cadence)}</p>
+            <p className="sched-preview" aria-live="polite">{sentence(kind, cadence, suite?.name)}</p>
             {error && <Callout tone="danger">{error}</Callout>}
             <div className="row">
                 <Button type="submit" variant="primary" loading={busy}>Create schedule</Button>

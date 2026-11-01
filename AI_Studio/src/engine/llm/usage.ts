@@ -217,10 +217,20 @@ export interface UsageRow {
     /** Of the input tokens: read from / written to the provider's prompt cache (0 or missing when nothing was cached). */
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    /** Who pays for these tokens; missing = Crowd4Test (the server's key). */
+    billingOwner?: BillingOwner;
 }
 
-export type GroupBy = "day" | "project" | "purpose" | "model";
-export const GROUP_BYS: readonly GroupBy[] = ["day", "project", "purpose", "model"];
+/** Who pays for a model call: Crowd4Test (managed AI, the server's key) or the customer's organisation (its own key). Nothing is charged here. */
+export type BillingOwner = "crowd4test" | "organization";
+export interface UsageBilling {
+    owner: BillingOwner;
+    /** The organisation that pays; null for Crowd4Test, and for a project on its own key that has no organisation. */
+    organizationId?: string | null;
+}
+
+export type GroupBy = "day" | "project" | "purpose" | "model" | "billing";
+export const GROUP_BYS: readonly GroupBy[] = ["day", "project", "purpose", "model", "billing"];
 
 export interface Totals {
     calls: number;
@@ -282,7 +292,7 @@ export function groupRows(rows: readonly UsageRow[], by: GroupBy, prices: Readon
     for (const r of rows) {
         // Escalations belong to no purpose of their own: they show in the totals and by day, project and model.
         if (by === "purpose" && r.purpose === ESCALATION_PURPOSE) continue;
-        const key = by === "day" ? r.day : by === "project" ? r.projectId : by === "purpose" ? r.purpose : r.model;
+        const key = by === "day" ? r.day : by === "project" ? r.projectId : by === "purpose" ? r.purpose : by === "billing" ? (r.billingOwner ?? "crowd4test") : r.model;
         let g = map.get(key);
         if (!g) map.set(key, (g = { key, ...emptyTotals() }));
         add(g, r, prices);

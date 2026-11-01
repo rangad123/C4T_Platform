@@ -43,6 +43,14 @@ What this does not cover: some actions still open a Chromium browser inside the 
 
 Because nothing claims jobs, `/readyz` reports no worker and jobs in AI Studio show as queued. `/api/health` still answers, and that is what the deploy checks.
 
+Before turning tests on, these must be done:
+
+- Test processes isolated from this box's files and internal ports, or moved to runners.
+- Approved tests held back when a reusable step, helper or shared element they use changes. Today such an edit changes what an approved test does, with no review.
+- Environment runs given a project's accounts only on the project's own address.
+- A monthly AI limit per organisation, so one customer cannot use up the platform limit.
+- Agent runs moved to runners, with the plan-approval step. `AGENT_RUNS_ON_SERVER` stays unset here: agent runs use the server's own browser, so they are refused without it. While one waits for a person, it also holds the single worker for up to 10 minutes.
+
 ## Secrets
 
 These go in the repository's Actions secrets, each one the output of `openssl rand -hex 32`:
@@ -74,7 +82,12 @@ Until DNS exists, every deploy prints one line saying so and still succeeds.
 
 ## Rolling back
 
-**To an earlier version:** revert the commit on `main` and push. CI and the deploy run again. If the revert changes `package-lock.json`, `npm ci` runs again by itself.
+**To an earlier version:** every deploy first copies the database to `backups/data/pre-deploy-<time>.db` (the five newest are kept), at the schema the running app was on. Choose one:
+
+- *Exactly as before the deploy* (loses what changed since): `pm2 stop ai-studio`, copy the newest `pre-deploy-*.db` over `/home/ubuntu/.ai-studio/data/platform.db`, delete `platform.db-wal` and `platform.db-shm` beside it, then revert the commit on `main` and push.
+- *Keep the data:* revert the commit on `main` and push. The older code starts on the newer database, but ignores what it does not know: it runs a test's latest content even when that is an unapproved draft, shows archived projects, and gives runners registered meanwhile no project access. Do not edit tests or register runners while rolled back. After rolling forward again, approve tests made in that window, and give each runner made in that window access to its project from the Runners page.
+
+CI and the deploy run again either way. If the revert changes `package-lock.json`, `npm ci` runs again by itself.
 
 **Shared sign-in off:** on the box, restore the two newest files from `backups`, then restart:
 

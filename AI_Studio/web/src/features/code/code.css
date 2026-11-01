@@ -46,7 +46,7 @@
 .code-diff-row .cell.del { background: var(--status-error-bg); color: var(--status-error-fg); }
 .code-diff-row .cell.add { background: var(--status-success-bg); color: var(--status-success-fg); }
 .code-diff-row .n { flex: none; width: 3ch; text-align: right; color: var(--text-muted); user-select: none; }
-.code-diff-row .cell.del .n, .code-diff-row .cell.add .n { color: inherit; opacity: 0.85; }
+.code-diff-row .cell.del .n, .code-diff-row .cell.add .n { color: inherit; }
 .code-diff-row .sym { flex: none; width: 1ch; font-weight: var(--fw-semibold); user-select: none; }
 .code-diff-row code { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; color: inherit; background: transparent; padding: 0; }
 .code-diff-row .cell:not(.del):not(.add) code { color: var(--text-primary); }

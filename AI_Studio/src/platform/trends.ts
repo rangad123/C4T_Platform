@@ -9,6 +9,7 @@ import { quarantineGate } from "./quarantine-store.js";
 import { NO_GATE, type QuarantineGate } from "../engine/quarantine/rules.js";
 import type { JobRow, Repo } from "./repo.js";
 import { NOT_FROM_CANCELLED_JOB } from "./cancel-summary.js";
+import { isNothingRan } from "./review-store.js";
 import { passRate } from "../engine/summary/pass-rate.js";
 
 /** p = passed, f = the test failed validation (a broken or unreliable test), r = needs review (an application finding). */
@@ -184,7 +185,8 @@ export function summarizeJob(repo: Repo, job: JobRow, min: Severity, gate: Quara
         durationMs: jobDuration(job),
         results,
         diff: diffRuns(results, knownBefore(repo.db, job, finishedAt), min, (earlier?.n ?? 0) > 0),
-        jobError: total === 0 && job.status === "FAILED" ? (job.error ?? "The run failed") : null,
+        // A run of only drafts did not go wrong: there is nothing to alert about.
+        jobError: total === 0 && job.status === "FAILED" && !isNothingRan(job) ? (job.error ?? "The run failed") : null,
         ...(held.length ? { quarantined: { tests: held.length, passed: held.filter((r) => r.s === "p").length, failed: held.filter((r) => r.s === "f").length, needsReview: held.filter((r) => r.s === "r").length } } : {}),
     };
 }

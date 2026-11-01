@@ -131,7 +131,12 @@ const call = async (method: "GET" | "POST" | "PUT" | "DELETE", url: string, payl
     const res = await server.inject({ method, url, payload: payload as never });
     return { status: res.statusCode, body: res.body.startsWith("{") || res.body.startsWith("[") ? JSON.parse(res.body) : res.body } as { status: number; body: any };
 };
-const newProject = async (name: string) => (await call("POST", "/api/projects", { name })).body.id as string;
+const newProject = async (name: string) => {
+    const id = (await call("POST", "/api/projects", { name })).body.id as string;
+    // This file runs the tests the AI wrote: with the default policy they are drafts and wait for approval (tests/reviews-api.test.ts).
+    await call("PUT", `/api/projects/${id}/review-policy`, { aiGenerated: false });
+    return id;
+};
 const TERMINAL = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
 async function waitJob(jobId: string, ms = 200_000) {
     const end = Date.now() + ms;

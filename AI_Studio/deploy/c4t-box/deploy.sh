@@ -385,6 +385,21 @@ enable_shared_sign_in() {
   say "shared sign-in is on (backups in $BACKUP_DIR)"
 }
 
+# A copy of the database at the schema the running app is on, taken before new
+# code can migrate it. Rolling back to the previous commit needs this file: the
+# old code starts on a migrated database, but it ignores approvals and new data.
+backup_before_start() {
+  local db="$DATA_DIR/platform.db" out
+  [ -f "$db" ] || return 0
+  out="$BACKUP_DIR/data/pre-deploy-$(date -u +%Y%m%d-%H%M%S).db"
+  "$NODE_DIR/bin/node" -e 'const s = require("node:sqlite"); const db = new s.DatabaseSync(process.argv[1], { readOnly: true }); s.backup(db, process.argv[2]).then(() => db.close())' "$db" "$out" \
+    || die "Could not copy the database before starting the new code. Nothing was restarted."
+  chmod 600 "$out"
+  say "database copied to $out"
+  # Keep the five newest; each holds encrypted secrets.
+  ls -1t "$BACKUP_DIR/data"/pre-deploy-*.db 2>/dev/null | tail -n +6 | xargs -r rm -f
+}
+
 main() {
   check_secrets
   prepare_dirs
@@ -393,6 +408,7 @@ main() {
   write_env
   install_packages
   build_app
+  backup_before_start
   start_app
   check_tree
 

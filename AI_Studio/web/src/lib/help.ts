@@ -72,6 +72,7 @@ export const JOB_STATUS: Record<JobStatus, string> = {
 export function jobHelp(job: { status: JobStatus; error?: string | null; mode?: string | null; planOnly?: boolean }): string {
     const stopped = job.status === "FAILED" && job.error === "Cancelled";
     if (job.status === "QUEUED") return JOB_STATUS.QUEUED;
+    if (job.status === "FAILED" && /^Nothing ran: /.test(job.error ?? "")) return "No test ran: every test in this run is a draft waiting for approval. Nothing went wrong.";
     if (stopped) return "Someone stopped it. Results recorded before that are kept; tests that did not finish keep their previous result.";
     if (job.planOnly) {
         if (job.status === "COMPLETED" || job.status === "PARTIALLY_COMPLETED") return "The exploration made a plan of tests. Nothing is created until you choose what to make from it.";
@@ -83,6 +84,11 @@ export function jobHelp(job: { status: JobStatus; error?: string | null; mode?: 
         if (job.status === "PARTIALLY_COMPLETED") return "The check finished; some tests failed or found something on another browser or screen size.";
         if (job.status === "FAILED") return "The browser check stopped with a problem; the reason is shown.";
         return "Running your tests on other browsers or screen sizes.";
+    }
+    if (job.mode === "agent") {
+        if (job.status === "COMPLETED") return "The agent reached the objective and a check of the page passed.";
+        if (job.status === "FAILED") return "The agent run ended without a pass; its result says why.";
+        return "The AI is working towards an objective in a real browser. Its page shows each step.";
     }
     if (job.mode === "plain") {
         if (job.status === "COMPLETED") return "The test was built from your description and passed its first run.";

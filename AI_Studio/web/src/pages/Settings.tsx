@@ -10,6 +10,8 @@ import { PromptCacheSetting } from "../features/usage/PromptCacheSetting";
 import { CompactSnapshotsSetting } from "../features/usage/CompactSnapshotsSetting";
 import { WithoutAiSetting } from "../features/usage/WithoutAiSetting";
 import { FastModelSetting } from "../features/usage/FastModelSetting";
+import { AiConfigurationsCard } from "../features/aiconfig/AiConfigurationsCard";
+import { useCan } from "../features/auth/permissions";
 import { useAuth } from "../features/auth/auth";
 import { PeopleSettings } from "../features/auth/PeopleSettings";
 import { QualityPanel } from "../features/eval/QualityPanel";
@@ -23,6 +25,7 @@ export function Settings() {
     usePage({ crumbs: [{ label: "Settings" }], nav: "settings" });
     const config = useConfig();
     const auth = useAuth();
+    const can = useCan();
     // A person limited to some projects: the platform-wide panels (AI usage across projects, storage, evaluation) are not theirs.
     const limited = auth.state?.projectAccess === "only";
     const [key, setKeyValue] = useState(getKey());
@@ -62,6 +65,9 @@ export function Settings() {
                         </>
                     )}
                 </section>
+
+                {/* The keys projects can use: the organisation's or the platform's (features/aiconfig). */}
+                {can("ai_studio.ai_keys.manage") && <AiConfigurationsCard />}
 
                 <section className="card card-pad stack-sm">
                     <h2 className="t-section">Access to this platform</h2>

@@ -28,6 +28,26 @@ export async function environmentFor(repo: Repo, config: Pick<Config, "dataDir" 
     return { env, secrets: store.secretsOf(env) };
 }
 
+/**
+ * The sign-in a job uses on an environment. The environment's own secrets always; the application's (the project's) fill what the environment
+ * leaves out only when the environment is on the application's own site, since stored sign-in details only go to that site (CREDENTIAL_ORIGIN_RULE).
+ * An environment on another host gets its own details or none.
+ */
+export function environmentCredentials<C extends Record<string, unknown>>(appUrl: string, appCredentials: C | undefined, envBaseUrl: string, secrets: object): C | undefined {
+    const own = Object.fromEntries(Object.entries(secrets).filter(([, v]) => v)) as Partial<C>;
+    if (sameSite(appUrl, envBaseUrl)) return { ...appCredentials, ...own } as C;
+    return Object.keys(own).length ? (own as C) : undefined;
+}
+
+/** Is the environment on the application's own site? An address that cannot be read is not. */
+export function sameSite(appUrl: string, envBaseUrl: string): boolean {
+    try {
+        return new URL(appUrl).origin === new URL(envBaseUrl).origin;
+    } catch {
+        return false;
+    }
+}
+
 /** Run one plain-English job: resolve its inputs at the time it runs (an environment may have changed since it was queued), then build and run the test. */
 export async function runPlainJob(args: {
     repo: Repo;
@@ -54,9 +74,10 @@ export async function runPlainJob(args: {
         const { env, secrets } = await environmentFor(repo, args.config, job.projectId, o.environment);
         url = env.baseUrl;
         apiBaseUrl = env.apiBaseUrl ?? undefined;
-        // The environment's own sign-in wins; whatever it leaves out comes from the application.
-        credentials = { ...app.credentials, ...Object.fromEntries(Object.entries(secrets).filter(([, v]) => v)) };
-        roles = env.useProjectAccounts ? args.roles : [];
+        // The environment's own sign-in wins; whatever it leaves out comes from the application, only on the application's own site.
+        credentials = environmentCredentials(app.url, app.credentials, env.baseUrl, secrets);
+        // The project's accounts are stored sign-in details too: "use the project's accounts" holds on the application's own site only.
+        roles = env.useProjectAccounts && sameSite(app.url, env.baseUrl) ? args.roles : [];
     }
 
     let replace: PlainRequest["replace"];

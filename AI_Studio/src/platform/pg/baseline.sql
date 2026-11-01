@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-37 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 37;
+-- Equal to SQLite migration slots 1-44 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 44;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -38,6 +38,17 @@ CREATE TABLE organizations (
     synced_at TEXT NOT NULL
 );
 
+CREATE TABLE project_folders (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT REFERENCES organizations(id),
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_project_folders_org ON project_folders (organization_id, name_key);
+
 CREATE TABLE projects (
     id TEXT PRIMARY KEY,
     owner_id TEXT NOT NULL REFERENCES users(id),
@@ -49,8 +60,12 @@ CREATE TABLE projects (
     platforms TEXT NOT NULL DEFAULT '["web"]',
     testing_modes TEXT NOT NULL DEFAULT '["agent","code"]',
     code_engines TEXT NOT NULL DEFAULT '{"web":"playwright"}',
-    c4t_project_id TEXT
+    c4t_project_id TEXT,
+    folder_id TEXT REFERENCES project_folders(id) ON DELETE SET NULL,
+    archived_at TEXT,
+    archived_by TEXT
 );
+CREATE INDEX idx_projects_folder ON projects (folder_id);
 CREATE INDEX idx_projects_organization ON projects (organization_id);
 
 CREATE TABLE applications (
@@ -145,6 +160,33 @@ CREATE TABLE generated_scripts (
 CREATE INDEX idx_scripts_test ON generated_scripts (test_case_id, is_current);
 CREATE UNIQUE INDEX idx_scripts_version ON generated_scripts (test_case_id, framework, version);
 
+CREATE TABLE test_versions (
+    id TEXT PRIMARY KEY,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    version BIGINT NOT NULL,
+    state TEXT NOT NULL,
+    source TEXT NOT NULL,
+    spec_json TEXT NOT NULL,
+    code TEXT,
+    framework TEXT NOT NULL,
+    script_id TEXT,
+    regen_note TEXT,
+    author_kind TEXT NOT NULL,
+    author_id TEXT,
+    author_name TEXT NOT NULL,
+    auto BIGINT NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    submitted_at TEXT,
+    decided_by_id TEXT,
+    decided_by_name TEXT,
+    decided_at TEXT,
+    decision_note TEXT,
+    UNIQUE (test_case_id, version)
+);
+CREATE INDEX idx_test_versions_state ON test_versions (project_id, state);
+
 CREATE TABLE test_executions (
     id TEXT PRIMARY KEY,
     test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
@@ -158,6 +200,7 @@ CREATE TABLE test_executions (
     finished_at TEXT,
     variant TEXT,
     environment TEXT,
+    test_version_id TEXT REFERENCES test_versions(id) ON DELETE SET NULL,
     seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
 CREATE INDEX idx_exec_environment ON test_executions (test_case_id, environment);
@@ -637,10 +680,13 @@ CREATE TABLE ai_usage (
     output_tokens BIGINT NOT NULL DEFAULT 0,
     images BIGINT NOT NULL DEFAULT 0,
     estimated_calls BIGINT NOT NULL DEFAULT 0,
+    billing_owner TEXT NOT NULL DEFAULT 'crowd4test',
+    billing_organization_id TEXT,
     cache_read_tokens BIGINT NOT NULL DEFAULT 0,
     cache_write_tokens BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (job_id, purpose, model, day)
 );
+CREATE INDEX idx_ai_usage_billing ON ai_usage (billing_owner, day);
 CREATE INDEX idx_ai_usage_day ON ai_usage (day, project_id);
 CREATE INDEX idx_ai_usage_project ON ai_usage (project_id, day);
 
@@ -709,38 +755,6 @@ CREATE TABLE quarantine_history (
 );
 CREATE INDEX idx_quarantine_history ON quarantine_history (project_id, id);
 CREATE INDEX idx_quarantine_history_test ON quarantine_history (test_id, id);
-
-CREATE TABLE agent_tokens (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    label TEXT,
-    token_hash TEXT NOT NULL,
-    hint TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    last_used_at TEXT,
-    last_used_ms BIGINT,
-    revoked_at TEXT,
-    seq BIGINT GENERATED ALWAYS AS IDENTITY,
-    UNIQUE (token_hash)
-);
-CREATE INDEX idx_agent_tokens_project ON agent_tokens (project_id);
-
-CREATE TABLE agents (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    token_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    version TEXT NOT NULL,
-    os TEXT NOT NULL,
-    arch TEXT NOT NULL,
-    node TEXT NOT NULL,
-    capabilities_json TEXT NOT NULL,
-    concurrency BIGINT NOT NULL,
-    first_seen_ms BIGINT NOT NULL,
-    last_seen_ms BIGINT NOT NULL,
-    UNIQUE (token_id, name)
-);
-CREATE INDEX idx_agents_project ON agents (project_id, last_seen_ms);
 
 CREATE TABLE runner_settings (
     project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -1279,6 +1293,265 @@ CREATE TABLE runner_update_settings (
     reported TEXT,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE requirements (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    ref TEXT NOT NULL,
+    ref_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    acceptance_criteria TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX idx_requirements_ref ON requirements (project_id, ref_key);
+
+CREATE TABLE requirement_links (
+    id TEXT PRIMARY KEY,
+    requirement_id TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    manual_case_id TEXT REFERENCES manual_cases(id) ON DELETE CASCADE,
+    origin TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_requirement_links_by_manual ON requirement_links (manual_case_id);
+CREATE INDEX idx_requirement_links_by_test ON requirement_links (test_case_id);
+CREATE UNIQUE INDEX idx_requirement_links_manual ON requirement_links (requirement_id, manual_case_id);
+CREATE INDEX idx_requirement_links_project ON requirement_links (project_id);
+CREATE UNIQUE INDEX idx_requirement_links_test ON requirement_links (requirement_id, test_case_id);
+
+CREATE TABLE built_suites (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    environment TEXT,
+    confirm_production BIGINT NOT NULL DEFAULT 0,
+    browsers_json TEXT NOT NULL DEFAULT '[]',
+    retries BIGINT NOT NULL DEFAULT 0,
+    stop_on_failure BIGINT NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_built_suites_project ON built_suites (project_id, created_at);
+
+CREATE TABLE built_suite_tests (
+    suite_id TEXT NOT NULL REFERENCES built_suites(id) ON DELETE CASCADE,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    position BIGINT NOT NULL,
+    PRIMARY KEY (suite_id, test_case_id)
+);
+CREATE INDEX idx_built_suite_tests_test ON built_suite_tests (test_case_id);
+
+CREATE TABLE built_suite_runs (
+    job_id TEXT PRIMARY KEY REFERENCES generation_jobs(id) ON DELETE CASCADE,
+    suite_id TEXT NOT NULL REFERENCES built_suites(id) ON DELETE CASCADE,
+    trigger_kind TEXT NOT NULL,
+    schedule_id TEXT,
+    test_count BIGINT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_built_suite_runs_suite ON built_suite_runs (suite_id, created_at);
+
+CREATE TABLE built_suite_schedules (
+    schedule_id TEXT PRIMARY KEY REFERENCES schedules(id) ON DELETE CASCADE,
+    suite_id TEXT NOT NULL REFERENCES built_suites(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules (suite_id);
+
+CREATE TABLE test_version_comments (
+    id TEXT PRIMARY KEY,
+    version_id TEXT NOT NULL REFERENCES test_versions(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    body TEXT,
+    author_id TEXT,
+    author_name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_test_version_comments ON test_version_comments (version_id, created_at);
+
+CREATE TABLE review_policies (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    ai_generated BIGINT NOT NULL DEFAULT 1,
+    edits BIGINT NOT NULL DEFAULT 1,
+    healing BIGINT NOT NULL DEFAULT 1,
+    sole_admin_self_approve BIGINT NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT
+);
+
+CREATE TABLE test_run_versions (
+    job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    version_id TEXT REFERENCES test_versions(id) ON DELETE SET NULL,
+    version BIGINT,
+    outcome TEXT NOT NULL,
+    PRIMARY KEY (job_id, test_case_id)
+);
+
+CREATE TABLE user_preferences (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    prefs_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE agent_tokens (
+    id TEXT PRIMARY KEY,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    organization_id TEXT REFERENCES organizations(id),
+    label TEXT,
+    token_hash TEXT NOT NULL,
+    hint TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    last_used_at TEXT,
+    last_used_ms BIGINT,
+    revoked_at TEXT,
+    seq BIGINT GENERATED ALWAYS AS IDENTITY,
+    UNIQUE (token_hash)
+);
+CREATE INDEX idx_agent_tokens_org ON agent_tokens (organization_id);
+CREATE INDEX idx_agent_tokens_project ON agent_tokens (project_id);
+
+CREATE TABLE agents (
+    id TEXT PRIMARY KEY,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    token_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    os TEXT NOT NULL,
+    arch TEXT NOT NULL,
+    node TEXT NOT NULL,
+    capabilities_json TEXT NOT NULL,
+    concurrency BIGINT NOT NULL,
+    first_seen_ms BIGINT NOT NULL,
+    last_seen_ms BIGINT NOT NULL,
+    UNIQUE (token_id, name)
+);
+CREATE INDEX idx_agents_project ON agents (project_id, last_seen_ms);
+CREATE INDEX idx_agents_token ON agents (token_id);
+
+CREATE TABLE runner_access (
+    token_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    granted_by TEXT,
+    granted_at TEXT NOT NULL,
+    PRIMARY KEY (token_id, project_id)
+);
+CREATE INDEX idx_runner_access_project ON runner_access (project_id);
+
+CREATE TABLE device_reservations (
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    family TEXT NOT NULL,
+    device TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    reserved_ms BIGINT NOT NULL,
+    PRIMARY KEY (agent_id, family, device)
+);
+CREATE INDEX idx_device_reservations_task ON device_reservations (task_id);
+
+CREATE TABLE ai_configurations (
+    id TEXT PRIMARY KEY,
+    owner_kind TEXT NOT NULL,
+    organization_id TEXT,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    fast_model TEXT,
+    base_url TEXT,
+    key_enc TEXT NOT NULL,
+    key_hint TEXT NOT NULL,
+    status TEXT NOT NULL,
+    status_note TEXT,
+    last_validated_at TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_ai_configurations_owner ON ai_configurations (owner_kind, organization_id);
+CREATE INDEX idx_ai_configurations_project ON ai_configurations (project_id);
+
+CREATE TABLE project_ai_settings (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL,
+    configuration_id TEXT REFERENCES ai_configurations(id) ON DELETE SET NULL,
+    updated_by TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_project_ai_configuration ON project_ai_settings (configuration_id);
+
+CREATE TABLE objective_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    job_id TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    success_criteria TEXT,
+    environment TEXT,
+    start_address TEXT NOT NULL,
+    max_steps BIGINT NOT NULL,
+    max_minutes BIGINT NOT NULL,
+    max_tokens BIGINT NOT NULL,
+    approval_seconds BIGINT NOT NULL,
+    state TEXT NOT NULL,
+    verdict TEXT,
+    reasoning TEXT,
+    stop_reason TEXT,
+    failure_category TEXT,
+    steps_taken BIGINT NOT NULL DEFAULT 0,
+    input_tokens BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    started_by_id TEXT,
+    started_by_name TEXT NOT NULL,
+    draft_test_id TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_objective_runs_job ON objective_runs (job_id);
+CREATE INDEX idx_objective_runs_project ON objective_runs (project_id, created_at);
+
+CREATE TABLE objective_run_steps (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES objective_runs(id) ON DELETE CASCADE,
+    seq BIGINT NOT NULL,
+    tool TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    status TEXT NOT NULL,
+    detail TEXT,
+    url TEXT NOT NULL,
+    step_json TEXT,
+    screenshot_id TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (run_id, seq)
+);
+
+CREATE TABLE objective_run_approvals (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES objective_runs(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    why TEXT NOT NULL,
+    url TEXT NOT NULL,
+    state TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    decided_by_id TEXT,
+    decided_by_name TEXT,
+    decided_at TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_objective_run_approvals_run ON objective_run_approvals (run_id, state);
 
 CREATE TABLE security_scan_runs (
     id TEXT PRIMARY KEY,

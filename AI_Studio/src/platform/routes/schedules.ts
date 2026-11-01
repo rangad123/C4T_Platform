@@ -10,6 +10,7 @@ import { assertAllowedTarget } from "../net-guard.js";
 import { getScheduleServices } from "../schedule-services.js";
 import { CadenceSchema, describeCadence, SCHEDULE_KINDS, type Schedule } from "../schedule-store.js";
 import { RunbookOverlapError, getRunbookServices } from "../runbook-runner.js";
+import { suiteStoreFor } from "../suite-run.js";
 import { isRunbookStart, OverlapError, runnableTestIds } from "../scheduler.js";
 import { detectFlaky, getRunSummary, trendsFor } from "../trends.js";
 import type { RouteCtx } from "./types.js";
@@ -32,9 +33,11 @@ const ScheduleBody = z.object({
     confirmProduction: z.boolean().optional(),
     /** Start a run of this runbook instead of a plain job (see routes/runbooks.ts). */
     runbookId: z.string().min(1).max(64).nullable().optional(),
+    /** Run this test suite (its tests, order and settings) instead of every test (see routes/suites.ts). */
+    suiteId: z.string().min(1).max(64).nullable().optional(),
 });
 const SchedulePatch = z
-    .object({ name: z.string().trim().min(1).max(80), kind: z.enum(SCHEDULE_KINDS), cadence: CadenceSchema, enabled: z.boolean(), retryFailures: z.number().int().min(0).max(3), environment: z.string().regex(ENV_NAME).nullable(), confirmProduction: z.boolean(), runbookId: z.string().min(1).max(64).nullable() })
+    .object({ name: z.string().trim().min(1).max(80), kind: z.enum(SCHEDULE_KINDS), cadence: CadenceSchema, enabled: z.boolean(), retryFailures: z.number().int().min(0).max(3), environment: z.string().regex(ENV_NAME).nullable(), confirmProduction: z.boolean(), runbookId: z.string().min(1).max(64).nullable(), suiteId: z.string().min(1).max(64).nullable() })
     .partial()
     .strict();
 
@@ -117,7 +120,22 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
     const checkRunbook = (projectId: string, runbookId: string) => {
         if (runbooks.get(runbookId)?.projectId !== projectId) throw new HttpError(404, "This project has no runbook with that id.");
     };
-    const pub = (s: Schedule) => ({ ...publicSchedule(s), ...scheduleEnvironment(repo.db, s.id), ...runbookOf(s.id) });
+    const suites = suiteStoreFor(p);
+    const suiteOf = async (sid: string) => {
+        const su = await suites.get((await suites.scheduleLink(sid)) ?? "");
+        return { suiteId: su?.id ?? null, suiteName: su?.name ?? null };
+    };
+    /** A schedule runs a suite of its own project, in place of "every test": not an analysis, not a runbook, not an environment of its own. */
+    const checkSuite = async (projectId: string, suiteId: string, kind: Schedule["kind"], other: { runbookId?: string | null; environment?: string | null }) => {
+        const su = await suites.get(suiteId);
+        if (!su || su.projectId !== projectId) throw new HttpError(404, "This project has no suite with that id.");
+        if (kind !== "validate") throw new HttpError(400, "Only a schedule that runs tests can run a suite.");
+        if (other.runbookId) throw new HttpError(400, "A schedule runs either a run sequence or a suite, not both.");
+        if (other.environment) throw new HttpError(400, "A suite runs against the environment in its own settings. Leave the schedule's environment empty.");
+        if (!repo.getLatestApplicationPublic(projectId)) throw new HttpError(409, "This project has no application yet. Run an analysis first.");
+        if (su.testCount === 0) throw new HttpError(409, `The suite “${su.name}” has no tests yet.`);
+    };
+    const pub = async (s: Schedule) => ({ ...publicSchedule(s), ...scheduleEnvironment(repo.db, s.id), ...runbookOf(s.id), ...(await suiteOf(s.id)) });
     /** An environment run needs an environment that exists, and a production one needs the owner's confirmation. */
     const checkScheduleEnvironment = (projectId: string, kind: Schedule["kind"], name: string, confirm: boolean | undefined) => {
         if (kind !== "validate") throw new HttpError(400, "Only “Re-run all tests” schedules can run against an environment.");
@@ -131,7 +149,7 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
     app.get("/api/projects/:id/schedules", async (req) => {
         const { id } = req.params as { id: string };
         project(id);
-        return { serverTime: new Date().toISOString(), timezone: timezone(), schedulerEnabled: p.config.SCHEDULER_ENABLED, schedules: svc.store.list(id).map(pub) };
+        return { serverTime: new Date().toISOString(), timezone: timezone(), schedulerEnabled: p.config.SCHEDULER_ENABLED, schedules: await Promise.all(svc.store.list(id).map(pub)) };
     });
 
     app.post("/api/projects/:id/schedules", async (req, reply) => {
@@ -139,13 +157,15 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         project(id);
         const body = ScheduleBody.parse(req.body);
         if (svc.store.list(id).length >= MAX_SCHEDULES) throw new HttpError(409, `A project can have up to ${MAX_SCHEDULES} schedules`);
-        await assertRunnable(id, body.kind);
+        if (body.suiteId) await checkSuite(id, body.suiteId, body.kind, body);
+        else await assertRunnable(id, body.kind);
         if (body.environment) checkScheduleEnvironment(id, body.kind, body.environment, body.confirmProduction);
         if (body.runbookId) checkRunbook(id, body.runbookId);
         const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures });
         if (body.environment) setScheduleEnvironment(repo.db, created.id, { environment: body.environment, confirmProduction: Boolean(body.confirmProduction) });
         if (body.runbookId) runbooks.setScheduleLink(created.id, body.runbookId);
-        return reply.code(201).send(pub(created));
+        if (body.suiteId) await suites.setScheduleLink(created.id, body.suiteId);
+        return reply.code(201).send(await pub(created));
     });
 
     app.patch("/api/projects/:id/schedules/:sid", async (req) => {
@@ -153,12 +173,16 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         project(id);
         const cur = schedule(id, sid);
         const patch = SchedulePatch.parse(req.body);
-        if (patch.kind && patch.kind !== cur.kind) await assertRunnable(id, patch.kind);
+        const curSuite = await suites.scheduleLink(sid);
+        const nextSuite = patch.suiteId === undefined ? curSuite : patch.suiteId;
+        if (nextSuite && (patch.suiteId !== undefined || patch.kind || patch.runbookId || patch.environment)) {
+            await checkSuite(id, nextSuite, patch.kind ?? cur.kind, { runbookId: patch.runbookId === undefined ? runbooks.scheduleLink(sid) : patch.runbookId, environment: patch.environment === undefined ? scheduleEnvironment(repo.db, sid).environment : patch.environment });
+        } else if (patch.kind && patch.kind !== cur.kind) await assertRunnable(id, patch.kind);
         // A name made from the old settings follows them; a name the user typed stays.
         const wasAuto = cur.name === autoName(cur);
         const next = { kind: patch.kind ?? cur.kind, cadence: patch.cadence ?? cur.cadence };
         const renamed = patch.name === undefined && wasAuto && (patch.kind || patch.cadence) ? autoName(next) : patch.name;
-        const { environment, confirmProduction, runbookId, ...own } = patch;
+        const { environment, confirmProduction, runbookId, suiteId, ...own } = patch;
         if (runbookId) checkRunbook(id, runbookId);
         const target = scheduleEnvironment(repo.db, sid);
         const nextEnv = environment === undefined ? target.environment : environment;
@@ -167,7 +191,8 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         const updated = svc.store.update(sid, { ...own, name: renamed })!;
         if (environment !== undefined || confirmProduction !== undefined) setScheduleEnvironment(repo.db, sid, { environment: nextEnv, confirmProduction: nextConfirm });
         if (runbookId !== undefined) runbooks.setScheduleLink(sid, runbookId);
-        return pub(updated);
+        if (suiteId !== undefined) await suites.setScheduleLink(sid, suiteId);
+        return await pub(updated);
     });
 
     app.delete("/api/projects/:id/schedules/:sid", async (req, reply) => {

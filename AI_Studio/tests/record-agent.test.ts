@@ -27,7 +27,7 @@ const APP = "http://localhost:6031";
 const API_KEY = "ao-admin-key-93d1b6e0";
 const PASSWORD = "AOLEAK-Password-4e82c1";
 const TYPED = "AOLEAK-TypedSecret-77aa3f";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "BLOCK_PRIVATE_TARGETS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "BLOCK_PRIVATE_TARGETS", "AGENT_MAX_TOKENS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 let platform: Platform;
@@ -91,7 +91,7 @@ async function endRecording(rid: string): Promise<void> {
 }
 
 beforeAll(async () => {
-    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "3", AGENT_WATCH_MS: "50" });
+    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "3", AGENT_WATCH_MS: "50", AGENT_MAX_TOKENS: "25" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     Object.assign(recorderOptions, { remote: { lostContactMs: 1500, claimWaitMs: 2500, settleMs: 700 } });

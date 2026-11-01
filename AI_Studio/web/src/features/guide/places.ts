@@ -80,7 +80,9 @@ export type PlaceId =
     | "profile"
     | "requirements"
     | "suites"
+    | "suite-detail"
     | "scripts"
+    | "script-version"
     | "agent-runs"
     | "settings-general"
     | "settings-members"
@@ -610,9 +612,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     "runners-global": {
         title: "Runners",
-        what: "The computers that run your tests, and the Android emulator on this computer.",
+        what: "Every computer that runs your tests: its health, its phones and browsers, and the projects that use it. Also the Android emulator on this computer.",
         canDo: [
-            { text: "Set up a runner for a project in that project's settings.", button: "Read about runners", to: { topic: "runners" } },
+            { text: "Choose Register a runner to add a computer once, then give it to any of your projects in the project's settings.", button: "Read about runners", to: { topic: "runners" }, ui: ["Register a runner"] },
+            { text: "Open a runner to see its current work, the phones in use, recent failures and the projects that use it, and to rename or retire it.", button: "Read about runners", to: { topic: "runners" } },
             { text: "Set up an Android emulator to test phone apps.", button: "Read about phones and emulators", to: { topic: "phones-and-emulators" } },
             { text: "Check that a computer is ready to run tests.", button: "Read about checking a computer", to: { topic: "doctor" } },
         ],
@@ -622,11 +625,11 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     folders: {
         title: "Folders",
-        what: "Folders will keep projects in order inside your organisation. They are not built yet.",
+        what: "Folders group your organisation's projects, for example by client or product line. A project is in one folder at most.",
         canDo: [
-            { text: "Find all your projects in the project list.", button: "Open projects", to: here("projects") },
-            { text: "Read how a project is laid out.", button: "Read about places", to: { topic: "places" } },
-            { text: "Start a project for another application.", button: "Start a project", to: here("new-project") },
+            { text: "Choose Make folder to start a folder, if you can create projects.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Make folder"] },
+            { text: "Move a project into a folder from the folder itself, or take it out with Move out. Remove folder keeps its projects.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Move out", "Remove folder"] },
+            { text: "Sort the project list with Grouped by folder, or show one folder only.", button: "Open projects", to: here("projects"), ui: ["Grouped by folder"] },
         ],
         words: ["test"],
         next: [{ text: "Open a project to work on its tests.", button: "Open projects", to: here("projects") }],
@@ -634,11 +637,11 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     profile: {
         title: "Profile",
-        what: "Your account, and the features you can use in AI Studio.",
+        what: "Your account, the features you can use in AI Studio, your personal API tokens and your own preferences.",
         canDo: [
             { text: "See which features a Crowd4Test administrator gave you.", button: "Read about people and access", to: { topic: "people-and-access" } },
+            { text: "Pick the alert emails you get and how the Projects page opens, then use Save preferences.", button: "Read about people and access", to: { topic: "people-and-access" }, ui: ["Save preferences"] },
             { text: "Make a personal API token for scripts, on an account of this platform.", button: "Read about access", to: { topic: "people-and-access" } },
-            { text: "Go back to your projects.", button: "Open projects", to: here("projects") },
         ],
         words: ["test"],
         next: [{ text: "Ask your administrator if you need a feature you do not have.", button: "Read about people and access", to: { topic: "people-and-access" } }],
@@ -646,26 +649,39 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     requirements: {
         title: "Requirements",
-        what: "What the application must do, and which test cases check it. Today a requirements document goes with an exploration.",
+        what: "What the application must do, one requirement at a time, and which test cases check each one. Coverage says which requirements pass, fail or have nothing checking them.",
         canDo: [
-            { text: "Add a requirements document when you explore, so the AI plans tests from it.", button: "Read about requirements coverage", to: { topic: "requirements-coverage" } },
-            { text: "Start an exploration of the application.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
-            { text: "See the test cases the AI wrote.", button: "Open test cases", to: here("tests") },
+            { text: "Add a requirement, or import them from a requirements document (pasted, or a .txt, .md, .docx or .pdf file). You see what was found before it is saved.", button: "Read about requirements coverage", to: { topic: "requirements-coverage" } },
+            { text: "Open a requirement and link the automated tests and manual cases that check it.", button: "Open test cases", to: here("tests") },
+            { text: "Explore with the same document so the AI plans tests from it; each test it writes is linked to the requirements it names.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
         ],
         words: ["test", "exploration", "plan"],
-        next: [{ text: "After the exploration, read the plan and the tests it made.", button: "Read about the plan", to: { topic: "explore-my-app" } }],
+        next: [{ text: "Link a test case to every requirement marked Not covered.", button: "Open test cases", to: here("tests") }],
         topic: "requirements-coverage",
     },
     suites: {
         title: "Test suites",
-        what: "Groups of test cases that run together. Today the platform groups tests by the area of the application they check.",
+        what: "Groups of test cases that run together. Build your own suites in the order you choose, or use the groups by area the platform makes.",
         canDo: [
+            { text: "Choose New suite to build a list of test cases that run in your order.", button: "Read about the tests list", to: { topic: "tests-list" }, ui: ["New suite"] },
             { text: "See how many tests each area has and how many pass.", button: "Read about the tests list", to: { topic: "tests-list" } },
-            { text: "Pick the tests to run in the test cases.", button: "Open test cases", to: here("tests") },
-            { text: "Run tests on a timetable.", button: "Read about schedules", to: { topic: "schedules" } },
+            { text: "Run a suite on a timetable.", button: "Read about schedules", to: { topic: "schedules" } },
         ],
         words: ["test", "run"],
         next: [{ text: "Schedule the tests that matter most.", button: "Open schedules", to: here("runs", "schedules") }],
+        topic: "tests-list",
+    },
+    "suite-detail": {
+        title: "A test suite",
+        what: "One suite: its test cases in the order they run, where and how they run, and its last runs.",
+        canDo: [
+            { text: "Add tests, then move them up or down to set the order.", button: "Read about the tests list", to: { topic: "tests-list" }, ui: ["Add tests"] },
+            { text: "Choose Run suite to run its tests in this order with its settings.", button: "Read how to read a run", to: { topic: "runs-page" }, ui: ["Run suite"] },
+            { text: "Change where it runs, other browsers, and what happens when a test fails.", button: "Open environments", to: here("setup", "environments") },
+            { text: "Run the suite on a timetable.", button: "Open schedules", to: here("runs", "schedules") },
+        ],
+        words: ["test", "run"],
+        next: [{ text: "Open a run to see each test's result.", button: "Open runs", to: here("runs") }],
         topic: "tests-list",
     },
     scripts: {
@@ -673,6 +689,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "What actually runs: the script of every test case, in plain English and as code, and the pieces scripts share.",
         canDo: [
             { text: "Open a script to see its plain-English text, its code and its history.", button: "Read about the test page", to: { topic: "test-page" } },
+            { text: "See which versions are drafts and which are approved: only approved versions run.", button: "Read about the test page", to: { topic: "test-page" } },
             { text: "Write a test as code.", button: "Read about writing code", to: { topic: "write-code" } },
             { text: "Share steps between tests.", button: "Read about reusable steps", to: { topic: "reusable-steps" } },
         ],
@@ -680,13 +697,25 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "See what changed in a script over time.", button: "Read about history", to: { topic: "history-and-undo" } }],
         topic: "test-page",
     },
+    "script-version": {
+        title: "A script version",
+        what: "One version of a test's script: its plain-English steps and code beside the approved version's, its comments, and its review.",
+        canDo: [
+            { text: "Choose Approve so it runs, Ask for changes, or Reject with a reason. Deciding needs Project Admin on this project.", button: "Read about the test page", to: { topic: "test-page" }, ui: ["Approve", "Ask for changes", "Reject"] },
+            { text: "Choose Send for review to ask the Project Admins, and add a comment.", button: "Read about history", to: { topic: "history-and-undo" }, ui: ["Send for review"] },
+            { text: "Compare the steps and the code with the approved version, line by line.", button: "Read about writing code", to: { topic: "write-code" } },
+        ],
+        words: ["test", "run"],
+        next: [{ text: "See what changed in a script over time.", button: "Read about history", to: { topic: "history-and-undo" } }],
+        topic: "test-page",
+    },
     "agent-runs": {
         title: "Agent runs",
-        what: "Give the AI an objective and it tests the application live on a runner. Not built yet; the AI already writes tests for you.",
+        what: "Give the AI an objective. It works through the application in a real browser and reports passed, failed, blocked or inconclusive. Deleting, paying, sending and submitting forms wait for a person.",
         canDo: [
-            { text: "Let the AI explore the application and write tests.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
-            { text: "Describe one test in your own words.", button: "Read about describing a test", to: { topic: "describe-a-test" } },
-            { text: "Watch what the AI does while it explores.", button: "Read about watching the AI", to: { topic: "watch-the-ai" } },
+            { text: "Write an objective, choose where it starts and set its limits, then choose Start agent run.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["Start agent run"] },
+            { text: "Follow a run live. Choose Stop to end it, and Approve or Refuse when it asks.", button: "Read about watching the AI", to: { topic: "watch-the-ai" }, ui: ["Stop", "Approve", "Refuse"] },
+            { text: "Choose Turn into a draft test on a finished run. It goes through review like any draft.", button: "Read about describing a test", to: { topic: "describe-a-test" }, ui: ["Turn into a draft test"] },
         ],
         words: ["exploration", "plan", "runner"],
         next: [{ text: "Open the test cases the AI wrote.", button: "Open test cases", to: here("tests") }],
@@ -718,10 +747,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     "settings-ai": {
         title: "AI configuration",
-        what: "The AI model, key and budget this project uses. Today every project uses the platform's AI model.",
+        what: "Who pays for this project's AI: Crowd4Test's managed AI, or your organisation's own key. If your own key fails, the AI work stops; it never moves to Crowd4Test's key.",
         canDo: [
             { text: "See how much AI the projects used.", button: "Read about AI usage", to: { topic: "ai-usage" } },
-            { text: "Change the platform's AI model in Settings.", button: "Open settings", to: here("settings") },
+            { text: "Add the keys your organisation shares in Settings, under AI configurations.", button: "Open settings", to: here("settings") },
             { text: "Read how the AI is kept reliable.", button: "Read about settings", to: { topic: "settings-page" } },
         ],
         words: ["exploration"],
@@ -762,11 +791,11 @@ export function placeOf(route: RouteLike): PlaceId {
         // Round 25 places. A section that moved keeps the help it had in its old place (the same page, under a new name).
         if (c === "tests") return q.get("section") === "manual" ? "release-manual" : "tests";
         if (c === "requirements") return "requirements";
-        if (c === "suites") return "suites";
+        if (c === "suites") return d ? "suite-detail" : "suites";
         if (c === "agent") return "agent-runs";
         if (c === "scripts") {
             const s = pick(SCRIPTS_SECTIONS, q.get("section"));
-            if (s === "scripts") return "scripts";
+            if (s === "scripts") return q.get("test") && q.get("version") ? "script-version" : "scripts";
             return s === "steps" && q.get("edit") ? "library-steps-edit" : (`library-${s}` as PlaceId);
         }
         if (c === "settings") {

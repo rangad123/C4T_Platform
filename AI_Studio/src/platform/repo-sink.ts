@@ -15,19 +15,22 @@ import { localPathOf, putText } from "./object-store.js";
 import { addVariantExecution, isRepeatedSkip } from "./variants-store.js";
 import { rememberPhone } from "./phone-run-store.js";
 import { JobWriteQueue } from "./job-write-queue.js";
+import { linkGeneratedTest } from "./requirement-store.js";
 import type { EngineEvent } from "../engine/context.js";
+import { CustomScriptStore } from "./custom-script-store.js";
+import type { VersionSource } from "./review-store.js";
 
 /**
  * Stores a rendered script as the test's current version for its framework. An unchanged script
  * (same content as the current version) is not versioned again — re-validation re-renders every
  * time, and identical versions would only bury the real history.
  */
-export async function storeScript(repo: Repo, store: ArtifactStore, projectId: string, testDbId: string, suiteSlug: string, script: RenderedScript, executable: boolean): Promise<string> {
+export async function storeScript(repo: Repo, store: ArtifactStore, projectId: string, testDbId: string, suiteSlug: string, script: RenderedScript, executable: boolean, makeCurrent = true): Promise<string> {
     const rel = path.posix.join(projectId, suiteSlug, script.filename);
     const stored = await putText(store, rel, script.content);
     const current = repo.getCurrentScript(testDbId, script.framework);
     if (current && current.content === script.content && current.storage_path === rel && Boolean(current.executable) === executable) return current.id as string;
-    return repo.addScript(testDbId, { framework: script.framework, filename: script.filename, content: script.content, hash: stored.hash, storagePath: rel, executable });
+    return repo.addScript(testDbId, { framework: script.framework, filename: script.filename, content: script.content, hash: stored.hash, storagePath: rel, executable, current: makeCurrent });
 }
 
 /**
@@ -75,8 +78,11 @@ export class RepoSink implements GenerationSink {
         this.writes.run(() => {
             const slug = slugify(spec.category);
             const suiteId = this.repo.getOrCreateSuite(this.job.projectId, spec.category, slug);
-            const id = this.repo.insertTest({ projectId: this.job.projectId, suiteId, jobId: this.job.id, spec, framework, validationStatus: validation, meta });
+            const id = this.repo.insertTest({ projectId: this.job.projectId, suiteId, jobId: this.job.id, spec, framework, validationStatus: validation, meta, versionSource: this.versionSource });
             if (reason) this.repo.updateTest(id, { reason });
+            // A test written from a requirements document names the requirements it covers: each that is a requirement record of the
+            // project (by its reference) gets a link (requirement-store.ts).
+            linkGeneratedTest(this.repo.db, this.job.projectId, id, spec.source.requirements);
             this.suiteSlugByTest.set(id, slug);
             return { id, testId: spec.testId };
         });
@@ -90,8 +96,19 @@ export class RepoSink implements GenerationSink {
                 const t = this.repo.getTest(h.id);
                 if (t) this.before.set(h.id, { status: t.validationStatus as ValidationState, reason: t.validationReason ?? null });
             }
-            this.repo.updateTest(h.id, { spec: patch.spec, validationStatus: patch.validation, reason: patch.reason, attempts: patch.attempts, meta: patch.meta });
+            // A test that ran its approved version while a newer draft waits: the run's steps are never written over the draft.
+            const spec = this.keepSteps.has(h.id) ? undefined : patch.spec;
+            this.repo.updateTest(h.id, { spec, validationStatus: patch.validation, reason: patch.reason, attempts: patch.attempts, meta: patch.meta, versionSource: this.versionSource });
         });
+
+    /** Tests whose steps this run must not write back (set by the job runner from the versions it pinned, review-store.ts). */
+    keepSteps: ReadonlySet<string> = new Set();
+
+    /** Review and approval: what this job writes is the AI's work while it writes tests, and a repair when it runs existing ones. */
+    private get versionSource(): VersionSource {
+        const mode = this.job.mode ?? "generate";
+        return mode === "generate" || mode === "plain" ? "ai" : "healing";
+    }
 
     /**
      * A cancelled job did not get to this test: its status and reason go back to what they were before the job marked it as being
@@ -132,7 +149,8 @@ export class RepoSink implements GenerationSink {
         return slug;
     }
 
-    saveScript: GenerationSink["saveScript"] = (h, script, executable) => storeScript(this.repo, this.store, this.job.projectId, h.id, this.suiteSlug(h.id), script, executable);
+    // A person's draft code stays what the test holds when a run used the approved steps instead: the script of that run is only its record.
+    saveScript: GenerationSink["saveScript"] = (h, script, executable) => storeScript(this.repo, this.store, this.job.projectId, h.id, this.suiteSlug(h.id), script, executable, !(this.keepSteps.has(h.id) && new CustomScriptStore(this.repo.db).isCustom(h.id)));
 
     recordExecution: GenerationSink["recordExecution"] = async (h: TestHandle, scriptId: string | null, attempt: number, run: ScriptRun, startedAt: string) => {
         const executionId = this.repo.addExecution({

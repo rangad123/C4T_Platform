@@ -1,4 +1,6 @@
 import { registerAgentRoutes } from "./agents.js";
+import { registerAgentRunRoutes } from "./agent-runs.js";
+import { registerRunnerRoutes } from "./runners.js";
 import { registerAuthoringRoutes } from "./authoring.js";
 import { registerBlockRoutes } from "./blocks.js";
 import { registerCleanupRoutes } from "./cleanup.js";
@@ -15,10 +17,12 @@ import { registerUserRoutes } from "./users.js";
 import { registerProjectAccessRoutes } from "./project-access.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerProjectSettingsRoutes } from "./project-settings.js";
+import { registerProjectFolderRoutes } from "./project-folders.js";
 import { registerLlmHealthRoutes } from "../llm-health-routes.js";
 import { registerCompactSnapshotRoutes } from "../snapshot-settings.js";
 import { registerPromptCacheRoutes } from "../prompt-cache-settings.js";
 import { registerLlmRoutingRoutes } from "../llm-routing.js";
+import { registerAiConfigRoutes } from "./ai-config.js";
 import { registerWithoutAiRoutes } from "../without-ai-settings.js";
 import { registerEmulatorSetupRoutes } from "../emulator-setup.js";
 import { registerEvalRoutes } from "./eval.js";
@@ -34,6 +38,7 @@ import { registerMemoryRoutes } from "./memory.js";
 import { registerOpsRoutes } from "./ops.js";
 import { registerLocatorRoutes } from "./locators.js";
 import { registerManualCaseRoutes } from "./manual-cases.js";
+import { registerRequirementRoutes } from "./requirements.js";
 import { registerPerformanceRoutes } from "./performance.js";
 import { registerPlanRoutes } from "./plans.js";
 import { registerQuarantineRoutes } from "./quarantine.js";
@@ -50,12 +55,14 @@ import { registerRunnerKitRoutes } from "./runner-kits.js";
 import { registerRunnerUpdateRoutes } from "./runner-updates.js";
 import { registerRunRoutes } from "./runs.js";
 import { registerScheduleRoutes } from "./schedules.js";
+import { registerSuiteRoutes } from "./suites.js";
 import type { RouteCtx } from "./types.js";
 import { registerVariantRoutes } from "./variants.js";
 import { registerWebPageRoutes } from "./web-pages.js";
 import { registerPhoneStateRoutes } from "./phone-state.js";
 import { registerPhoneDeviceRoutes } from "./phone-device.js";
 import { registerPortableRoutes } from "./portable.js";
+import { registerReviewRoutes } from "./reviews.js";
 import { registerSecurityRoutes } from "../../security/routes/index.js";
 
 export type { RouteCtx } from "./types.js";
@@ -83,11 +90,14 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerEvidenceRoutes(ctx);
     registerRunbookRoutes(ctx);
     registerManualCaseRoutes(ctx);
+    // Requirements as records and the tests that cover them (routes/requirements.ts).
+    registerRequirementRoutes(ctx);
     registerSentryRoutes(ctx);
     registerRetentionRoutes(ctx);
     registerUsageRoutes(ctx);
     registerQuarantineRoutes(ctx);
     registerAgentRoutes(ctx);
+    registerRunnerRoutes(ctx);
     registerRunnerKitRoutes(ctx);
     registerRunnerUpdateRoutes(ctx);
     registerLocatorRoutes(ctx);
@@ -106,6 +116,11 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     // Phone settings, "Is this phone ready?", reversible phone changes, the sign-in pause (round 24, DEVICE).
     registerPhoneDeviceRoutes(ctx);
     registerRunRoutes(ctx);
+    // Test suites a person builds: ordered tests, how they run, runs and schedules (routes/suites.ts).
+    registerSuiteRoutes(ctx);
+    registerAgentRunRoutes(ctx);
+    // Review and approval of test versions, the scripts list and the review queue (routes/reviews.ts).
+    registerReviewRoutes(ctx);
     registerPlanRoutes(ctx);
     registerExplorerRoutes(ctx);
     // People and access: signing in, a person's own account, people, activity, single sign-on (routes/auth.ts, routes/users.ts).
@@ -116,6 +131,7 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     // A project's people and Project Admins (routes/members.ts, round 25: ACCESS_MODEL.md).
     registerMemberRoutes(ctx);
     registerProjectSettingsRoutes(ctx);
+    registerProjectFolderRoutes(ctx);
     registerLlmHealthRoutes(ctx);
     // Smaller page snapshots switch, Settings, AI model (platform/snapshot-settings.ts, docs/features/smaller-snapshots.md).
     registerCompactSnapshotRoutes(ctx);
@@ -123,6 +139,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerPromptCacheRoutes(ctx);
     // Fast model for routine steps, Settings, AI model (platform/llm-routing.ts, docs/features/model-routing.md).
     registerLlmRoutingRoutes(ctx);
+    // Who pays for a project's AI, which configuration it uses, and the keys (routes/ai-config.ts).
+    registerAiConfigRoutes(ctx);
     // Repair without AI first and exploration reuse, Settings, AI model (platform/without-ai-settings.ts, docs/features/repair-and-reuse-without-ai.md).
     registerWithoutAiRoutes(ctx);
     // Downloadable "set up the Android emulator" script, Settings, Mobile testing (platform/emulator-setup.ts, docs/features/emulator-setup.md).

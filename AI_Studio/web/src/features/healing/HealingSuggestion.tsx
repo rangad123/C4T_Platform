@@ -25,6 +25,9 @@ export function HealingSuggestion({ testId, projectId, onChanged }: { testId: st
     const [error, setError] = useState("");
     const [rerunning, setRerunning] = useState(false);
     const [undone, setUndone] = useState<string | null>(null);
+    /** What the run just queued really runs, when that is not this fix: a draft never runs. */
+    const [runNote, setRunNote] = useState("");
+    const runNoteBox = runNote ? <Callout tone="info" title="This run does not use the fix yet">{runNote}</Callout> : null;
 
     const proposals = list.data?.proposals ?? [];
     const open = proposals.find((p) => p.status === "proposed" && p.canApply);
@@ -50,7 +53,8 @@ export function HealingSuggestion({ testId, projectId, onChanged }: { testId: st
         try {
             // A fix of a shared element changes every test that uses it: pressing the button is the person's confirmation.
             const body = kind === "apply" && p.shared ? { acceptSharedChange: true } : undefined;
-            const out = await api<{ jobId?: string | null }>(`/tests/${testId}/healing/${p.id}/${kind}`, { method: "POST", ...(body ? { body } : {}) });
+            const out = await api<{ jobId?: string | null; note?: string }>(`/tests/${testId}/healing/${p.id}/${kind}`, { method: "POST", ...(body ? { body } : {}) });
+            if (kind === "apply" && out.jobId) setRunNote(out.note ?? "");
             // The test now runs again with the new locator; wait for the result, then show the test page as it stands.
             if (kind === "apply" && out.jobId) await waitFor(out.jobId);
             await list.reload();
@@ -70,8 +74,9 @@ export function HealingSuggestion({ testId, projectId, onChanged }: { testId: st
             // The whole spec as it is now, with only this step's locator put back: nothing else about the test changes.
             const now = await bapi<{ spec: { steps: Array<Record<string, unknown>> } & Record<string, unknown> }>(`/tests/${testId}/spec`);
             const steps = now.spec.steps.map((s, i) => (i === p.stepIndex ? { ...s, locator: p.oldLocator } : s));
-            const saved = await bapi<{ jobId: string | null }>(`/tests/${testId}/spec`, { method: "PUT", body: { spec: { ...now.spec, steps }, note: `Undid the repair of ${p.oldDescription}` } });
+            const saved = await bapi<{ jobId: string | null; note?: string }>(`/tests/${testId}/spec`, { method: "PUT", body: { spec: { ...now.spec, steps }, note: `Undid the repair of ${p.oldDescription}` } });
             setUndone(p.oldDescription);
+            setRunNote(saved.jobId ? (saved.note ?? "") : "");
             if (saved.jobId) await waitFor(saved.jobId);
             await list.reload();
             await onChanged();
@@ -88,7 +93,7 @@ export function HealingSuggestion({ testId, projectId, onChanged }: { testId: st
     if (undone) {
         return (
             <Callout tone="info" title="Repair undone">
-                The step finds {undone} the way it did before. {rerunning ? "Running the test again…" : "The test was run again."}
+                The step finds {undone} the way it did before. {rerunning ? "Running the test again…" : "The test was run again."} {runNote}
             </Callout>
         );
     }
@@ -128,6 +133,7 @@ export function HealingSuggestion({ testId, projectId, onChanged }: { testId: st
                         </p>
                     )}
                     {error && <Callout tone="danger">{error}</Callout>}
+                    {runNoteBox}
                     {canUndo && (
                         <div className="heal-acts">
                             <Button icon={Undo2} loading={busy === "undo"} disabled={!!busy} onClick={() => void undo(applied)}>
@@ -140,9 +146,12 @@ export function HealingSuggestion({ testId, projectId, onChanged }: { testId: st
             );
         }
         return last ? (
-            <p className="t-meta" data-testid="healing-history">
-                {last.status === "applied" ? `You applied a suggested fix for ${last.oldDescription}` : `You dismissed a suggestion for ${last.oldDescription}`} {last.decidedAt ? relativeTime(last.decidedAt) : ""}.
-            </p>
+            <>
+                {runNoteBox}
+                <p className="t-meta" data-testid="healing-history">
+                    {last.status === "applied" ? `You applied a suggested fix for ${last.oldDescription}` : `You dismissed a suggestion for ${last.oldDescription}`} {last.decidedAt ? relativeTime(last.decidedAt) : ""}.
+                </p>
+            </>
         ) : null;
     }
 
@@ -190,6 +199,7 @@ export function HealingSuggestion({ testId, projectId, onChanged }: { testId: st
                 )}
             </p>
             {error && <Callout tone="danger">{error}</Callout>}
+            {runNoteBox}
             <div className="heal-acts">
                 <Button variant="primary" loading={busy === "apply"} disabled={!!busy} onClick={() => decide(open, "apply")}>
                     {rerunning ? "Running the test again…" : open.shared && open.shared.otherTests > 0 ? `Apply to ${open.shared.otherTests + 1} tests and run again` : "Apply and run again"}

@@ -1,0 +1,226 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { clean } from "../../engine/manual/cases.js";
+import { projectLlm } from "../ai-config.js";
+import { JobMeter } from "../../engine/llm/metered.js";
+import { extractDocumentText, REQUIREMENTS_MAX_CHARS, RequirementsDocumentError } from "../../engine/requirements/extract.js";
+import { HttpError } from "../http-error.js";
+import {
+    candidatesFromText,
+    candidatesWithAi,
+    COVERAGE_STATES,
+    MAX_LINK_BATCH,
+    MAX_REF,
+    MAX_REQUIREMENTS,
+    MAX_TEXT,
+    MAX_TITLE,
+    REF_PATTERN,
+    REQUIREMENT_PRIORITIES,
+    REQUIREMENT_STATUSES,
+    RequirementError,
+    RequirementStore,
+    type ImportCandidate,
+} from "../requirement-store.js";
+import { aiSkipReason, usageStoreFor } from "../usage-store.js";
+import type { RouteCtx } from "./types.js";
+
+/**
+ * Requirements as records, and which test cases cover them (requirement-store.ts).
+ *
+ *   GET/POST      /api/projects/:id/requirements                    list (?q, status, coverage) with coverage; add one
+ *   GET           /api/projects/:id/requirements/coverage           the coverage summary (the project dashboard)
+ *   GET           /api/projects/:id/requirements/links              every link: what each test covers (the test lists)
+ *   POST          /api/projects/:id/requirements/import/preview     { text } or { file: { filename, contentBase64 } }: what would be imported, no AI
+ *   POST          /api/projects/:id/requirements/import/refine      the same, refined by the AI model (only when one is set up)
+ *   POST          /api/projects/:id/requirements/import             { requirements: [...], source } save what the person kept
+ *   GET/PATCH/DELETE /api/projects/:id/requirements/:rid            one requirement with its tests; change; delete (?confirm=1 when tests link to it)
+ *   POST          /api/projects/:id/requirements/:rid/tests         { automated: [ids], manual: [ids] } link tests
+ *   DELETE        /api/projects/:id/requirements/:rid/tests/:testId unlink one
+ *   GET           /api/tests/:id/requirements                       the requirements a test covers
+ *
+ * Every lookup is by project and id together: another project's requirement or test answers 404.
+ */
+
+const Text = (max: number, what: string) =>
+    z
+        .string({ invalid_type_error: `${what} must be text` })
+        .transform(clean)
+        .pipe(z.string().max(max, `${what} can be at most ${max} characters`));
+const Ref = Text(MAX_REF, "The reference").pipe(z.string().refine((s) => s === "" || REF_PATTERN.test(s), "A reference uses letters, digits and . _ # -, like REQ-12"));
+const Title = Text(MAX_TITLE, "The title").pipe(z.string().min(1, "The title is required"));
+
+const Fields = {
+    ref: Ref,
+    title: Title,
+    description: Text(MAX_TEXT, "The description"),
+    acceptanceCriteria: Text(MAX_TEXT, "The acceptance criteria"),
+    priority: z.enum(REQUIREMENT_PRIORITIES, { errorMap: () => ({ message: "The priority is critical, high, medium or low" }) }),
+    status: z.enum(REQUIREMENT_STATUSES, { errorMap: () => ({ message: "The status is draft, active or retired" }) }),
+};
+const NewRequirement = z.object({ ...Fields, ref: Fields.ref.optional(), description: Fields.description.default(""), acceptanceCriteria: Fields.acceptanceCriteria.default(""), priority: Fields.priority.default("medium"), status: Fields.status.default("active") });
+const Patch = z.object(Fields).partial().refine((p) => Object.keys(p).length > 0, "Nothing to change");
+const ListQuery = z.object({ q: z.string().max(200).optional(), status: z.enum(REQUIREMENT_STATUSES).optional(), coverage: z.enum(COVERAGE_STATES).optional() });
+const Source = z
+    .object({
+        text: z.string().max(REQUIREMENTS_MAX_CHARS, `The text can be at most ${REQUIREMENTS_MAX_CHARS} characters`).optional(),
+        file: z.object({ filename: z.string().min(1).max(200), contentBase64: z.string().min(1) }).optional(),
+    })
+    .refine((b) => Boolean(b.text?.trim()) !== Boolean(b.file), "Paste the requirements or choose a file (one of them)");
+const ImportBody = z.object({
+    requirements: z.array(z.object({ ...Fields, ref: Fields.ref.optional(), description: Fields.description.default(""), acceptanceCriteria: Fields.acceptanceCriteria.default(""), priority: Fields.priority.default("medium"), status: Fields.status.default("active") })).min(1, "There is nothing to import").max(MAX_REQUIREMENTS),
+    source: z.enum(["imported", "ai"]).default("imported"),
+});
+const LinkBody = z.object({ automated: z.array(z.string().max(64)).max(MAX_LINK_BATCH).default([]), manual: z.array(z.string().max(64)).max(MAX_LINK_BATCH).default([]) }).refine((b) => b.automated.length + b.manual.length > 0, "Choose at least one test to link");
+
+const NO_MODEL = "No AI model is set up here, so the requirements can only be read without AI. The preview without AI still works.";
+
+export function registerRequirementRoutes(ctx: RouteCtx): void {
+    const { app, p, repo } = ctx;
+    const store = new RequirementStore(p.sql);
+    const projectId = (req: { params: unknown }): string => {
+        const { id } = req.params as { id: string };
+        ctx.project(id);
+        return id;
+    };
+    const requirement = async (pid: string, rid: string) => {
+        const r = await store.get(pid, rid);
+        if (!r) throw new HttpError(404, "Requirement not found");
+        return r;
+    };
+    const refusal = (e: unknown): never => {
+        if (e instanceof RequirementError) throw new HttpError(e.code === "duplicate" || e.code === "limit" ? 409 : 400, e.message);
+        throw e;
+    };
+    /** The document's text: pasted, or read from a .txt, .md, .docx or .pdf file. */
+    const sourceText = async (body: unknown): Promise<string> => {
+        const b = Source.parse(body);
+        if (b.text !== undefined && b.text.trim()) return b.text;
+        try {
+            return await extractDocumentText({ name: b.file!.filename, data: Buffer.from(b.file!.contentBase64, "base64") });
+        } catch (e) {
+            if (e instanceof RequirementsDocumentError) throw new HttpError(400, e.message);
+            throw e;
+        }
+    };
+    const preview = async (pid: string, candidates: ImportCandidate[], usedAi: boolean, note: string | null = null) => {
+        const taken = await store.takenRefs(pid);
+        const list = candidates.slice(0, MAX_REQUIREMENTS).map((c) => ({ ...c, exists: taken.has(c.ref.toUpperCase()) }));
+        return { candidates: list, total: candidates.length, existing: list.filter((c) => c.exists).length, usedAi, note, max: MAX_REQUIREMENTS };
+    };
+
+    app.get("/api/projects/:id/requirements", async (req) => {
+        const pid = projectId(req);
+        const f = ListQuery.parse(req.query);
+        const all = await store.list(pid);
+        const q = f.q?.trim().toLowerCase();
+        const shown = all.filter((r) => (!f.status || r.status === f.status) && (!f.coverage || r.coverage === f.coverage) && (!q || `${r.ref}\n${r.title}\n${r.description}\n${r.acceptanceCriteria}`.toLowerCase().includes(q)));
+        return { requirements: shown, total: all.length, max: MAX_REQUIREMENTS, summary: await store.summary(pid) };
+    });
+
+    app.post("/api/projects/:id/requirements", async (req, reply) => {
+        const pid = projectId(req);
+        const input = NewRequirement.parse(req.body);
+        try {
+            return reply.code(201).send(await store.create(pid, input, "typed"));
+        } catch (e) {
+            return refusal(e);
+        }
+    });
+
+    app.get("/api/projects/:id/requirements/coverage", async (req) => store.summary(projectId(req)));
+
+    app.get("/api/projects/:id/requirements/links", async (req) => ({ links: await store.allLinks(projectId(req)) }));
+
+    app.post("/api/projects/:id/requirements/import/preview", async (req) => {
+        const pid = projectId(req);
+        return preview(pid, candidatesFromText(await sourceText(req.body)), false);
+    });
+
+    app.post("/api/projects/:id/requirements/import/refine", async (req) => {
+        const pid = projectId(req);
+        const text = await sourceText(req.body);
+        // The project's AI and who pays for it (ai-config.ts): a project on its own key never reaches the server's key from here.
+        const { llm, billing, blocked } = await projectLlm(p, pid);
+        if (llm.modelName === "unavailable") throw new HttpError(422, blocked ?? NO_MODEL, { modelMissing: true });
+        const usage = usageStoreFor(p.db, p.config);
+        const skip = aiSkipReason(usage, pid);
+        if (skip) throw new HttpError(409, "The AI token limit was reached, so the AI cannot read these now. Reading without AI still works.");
+        // Counted against the AI budgets like a job's calls, under an id of its own (ai_usage keeps no foreign key on it).
+        const meter = new JobMeter({ backend: usage, jobId: `requirements-${randomUUID()}`, projectId: pid, billing });
+        const r = await candidatesWithAi({ config: p.config, llm: meter.wrap(llm) }, text).finally(() => meter.finish());
+        return preview(pid, r.candidates, r.usedAi, r.note);
+    });
+
+    app.post("/api/projects/:id/requirements/import", async (req, reply) => {
+        const pid = projectId(req);
+        const body = ImportBody.parse(req.body);
+        try {
+            const r = await store.importMany(pid, body.requirements, body.source);
+            return reply.code(r.created.length ? 201 : 200).send({ created: r.created.length, duplicates: r.duplicates, total: await store.count(pid) });
+        } catch (e) {
+            return refusal(e);
+        }
+    });
+
+    app.get("/api/projects/:id/requirements/:rid", async (req) => {
+        const pid = projectId(req);
+        const { rid } = req.params as { rid: string };
+        const r = await requirement(pid, rid);
+        const [summary] = (await store.list(pid)).filter((x) => x.id === rid);
+        return { ...r, coverage: summary!.coverage, counts: summary!.tests, tests: await store.linkedTests(pid, rid) };
+    });
+
+    app.patch("/api/projects/:id/requirements/:rid", async (req) => {
+        const pid = projectId(req);
+        const { rid } = req.params as { rid: string };
+        await requirement(pid, rid);
+        const patch = Patch.parse(req.body);
+        try {
+            return await store.update(pid, rid, patch);
+        } catch (e) {
+            return refusal(e);
+        }
+    });
+
+    app.delete("/api/projects/:id/requirements/:rid", async (req, reply) => {
+        const pid = projectId(req);
+        const { rid } = req.params as { rid: string };
+        const r = await requirement(pid, rid);
+        const { confirm } = z.object({ confirm: z.enum(["1", "true"]).optional() }).parse(req.query);
+        const linked = await store.linkCount(pid, rid);
+        if (linked > 0 && !confirm) {
+            throw new HttpError(409, `${r.ref} is covered by ${linked} test${linked === 1 ? "" : "s"}. Deleting it removes those links; the tests stay. Confirm to delete it.`, { linked });
+        }
+        await store.remove(pid, rid);
+        return reply.code(204).send();
+    });
+
+    app.post("/api/projects/:id/requirements/:rid/tests", async (req) => {
+        const pid = projectId(req);
+        const { rid } = req.params as { rid: string };
+        await requirement(pid, rid);
+        const body = LinkBody.parse(req.body);
+        try {
+            const added = await store.link(pid, rid, body);
+            return { added, tests: await store.linkedTests(pid, rid) };
+        } catch (e) {
+            if (e instanceof RequirementError && e.code === "not-found") throw new HttpError(404, e.message);
+            return refusal(e);
+        }
+    });
+
+    app.delete("/api/projects/:id/requirements/:rid/tests/:testId", async (req, reply) => {
+        const pid = projectId(req);
+        const { rid, testId } = req.params as { rid: string; testId: string };
+        await requirement(pid, rid);
+        if (!(await store.unlink(pid, rid, testId))) throw new HttpError(404, "That test is not linked to this requirement.");
+        return reply.code(204).send();
+    });
+
+    app.get("/api/tests/:id/requirements", async (req) => {
+        const { id } = req.params as { id: string };
+        const t = repo.getTest(id);
+        if (!t) throw new HttpError(404, "Test not found");
+        return { requirements: await store.forTest(t.projectId, id) };
+    });
+}

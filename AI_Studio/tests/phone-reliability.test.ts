@@ -114,6 +114,8 @@ async function finished(jobId: string): Promise<any> {
 const events = async (jobId: string) => (await call("GET", `/api/test-generation/${jobId}/events`)).body as Array<{ kind: string; message: string }>;
 const newProject = async (name: string, mobile: Record<string, unknown> = { appPackage: PKG }) => {
     const id = (await call("POST", "/api/projects", { name })).body.id as string;
+    // This file applies a repair and sees it run: with the default policy a repair is a draft and waits for approval (tests/reviews-api.test.ts).
+    await call("PUT", `/api/projects/${id}/review-policy`, { healing: false });
     const r = await call("PUT", `/api/projects/${id}/mobile-app`, mobile);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     return id;

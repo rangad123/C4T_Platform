@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
-import { AGENTS_MIGRATION } from "./agent-store.js";
+import { AGENTS_MIGRATION, RUNNER_SHARING_MIGRATION } from "./agent-store.js";
 import { BLOCKS_MIGRATION } from "./block-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
@@ -10,6 +10,7 @@ import { DEVICE_FARM_MIGRATION } from "./device-farm-store.js";
 import { SPEC_VERSIONS_MIGRATION } from "./spec-version-store.js";
 import { DRIFT_MIGRATION } from "./drift-store.js";
 import { EVAL_MIGRATION } from "./eval-store.js";
+import { AGENT_RUNS_MIGRATION } from "./agent-run-store.js";
 import { ENVIRONMENTS_MIGRATION } from "./environments-store.js";
 import { FRAMEWORK_SETTINGS_MIGRATION } from "./framework-settings-store.js";
 import { HEALING_MIGRATION } from "./healing-store.js";
@@ -25,6 +26,7 @@ import { RUNBOOKS_MIGRATION } from "./runbook-store.js";
 import { SESSIONS_MIGRATION } from "./session-store.js";
 import { SCHEDULES_MIGRATION } from "./schedule-schema.js";
 import { addCacheColumns, USAGE_MIGRATION } from "./usage-store.js";
+import { AI_CONFIG_MIGRATION } from "./ai-config-store.js";
 import { WEB_PAGES_MIGRATION } from "./test-data-reset-store.js";
 import { addActorColumns, USERS_MIGRATION } from "./user-store.js";
 import { SECURITY_MIGRATION } from "../security/store.js";
@@ -32,6 +34,8 @@ import { MEMBERSHIP_MIGRATION, PROJECT_ACCESS_MIGRATION } from "./project-access
 import { SECURITY_SIGNIN_MIGRATION } from "../security/extras.js";
 import { PROJECT_SETUP_MIGRATION } from "./project-setup.js";
 import { SHARED_STATE_MIGRATION } from "./shared-state.js";
+import { FOLDERS_MIGRATION } from "./project-folders.js";
+import { REVIEW_MIGRATION } from "./review-store.js";
 import { sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { sqliteSql, type Sql } from "./sql.js";
 
@@ -187,6 +191,91 @@ CREATE UNIQUE INDEX idx_issue_links_once ON issue_links(test_case_id, integratio
 CREATE UNIQUE INDEX idx_scripts_version ON generated_scripts(test_case_id, framework, version);
 `,
     /* 37: state every process must see, out of DATA_DIR: the worker heartbeat and the runner update settings (schema lives in shared-state.ts) */ SHARED_STATE_MIGRATION,
+    // 38-41 are reserved for round 34, one per builder, so they can be filled in any order. Each is replaced by its SQL before release.
+    /* 38: requirements as records, and which test cases cover each (the rules live in requirement-store.ts) */ `
+-- One requirement of a project. ref is what people call it (REQ-12), unique in the project whatever its case (ref_key is its upper case).
+CREATE TABLE requirements (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    ref TEXT NOT NULL,
+    ref_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    acceptance_criteria TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL,               -- critical high medium low
+    status TEXT NOT NULL,                 -- draft active retired
+    source TEXT NOT NULL,                 -- typed imported ai
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX idx_requirements_ref ON requirements(project_id, ref_key);
+-- A requirement and a test case that checks it, many to many: an automated test (test_cases) or a manual case, exactly one of them.
+CREATE TABLE requirement_links (
+    id TEXT PRIMARY KEY,
+    requirement_id TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    manual_case_id TEXT REFERENCES manual_cases(id) ON DELETE CASCADE,
+    origin TEXT NOT NULL,                 -- person generated
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    CHECK ((test_case_id IS NULL) <> (manual_case_id IS NULL))
+);
+CREATE UNIQUE INDEX idx_requirement_links_test ON requirement_links(requirement_id, test_case_id);
+CREATE UNIQUE INDEX idx_requirement_links_manual ON requirement_links(requirement_id, manual_case_id);
+CREATE INDEX idx_requirement_links_project ON requirement_links(project_id);
+CREATE INDEX idx_requirement_links_by_test ON requirement_links(test_case_id);
+CREATE INDEX idx_requirement_links_by_manual ON requirement_links(manual_case_id);
+`,
+    /* 39: user-built test suites: their ordered tests, how they run, their runs and the schedules that start them (the rules live in suite-store.ts) */ `
+-- A suite a person builds in a project, and how it runs. environment NULL = the project's own address; browsers_json lists extra browser ids.
+CREATE TABLE built_suites (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    environment TEXT,
+    confirm_production INTEGER NOT NULL DEFAULT 0,
+    browsers_json TEXT NOT NULL DEFAULT '[]',
+    retries INTEGER NOT NULL DEFAULT 0,
+    stop_on_failure INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_built_suites_project ON built_suites(project_id, created_at);
+-- The suite's test cases in run order (position 0..n-1). A deleted test leaves every suite it was in.
+CREATE TABLE built_suite_tests (
+    suite_id TEXT NOT NULL REFERENCES built_suites(id) ON DELETE CASCADE,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (suite_id, test_case_id)
+);
+CREATE INDEX idx_built_suite_tests_test ON built_suite_tests(test_case_id);
+-- Which jobs ran a suite: trigger_kind manual | schedule.
+CREATE TABLE built_suite_runs (
+    job_id TEXT PRIMARY KEY REFERENCES generation_jobs(id) ON DELETE CASCADE,
+    suite_id TEXT NOT NULL REFERENCES built_suites(id) ON DELETE CASCADE,
+    trigger_kind TEXT NOT NULL,
+    schedule_id TEXT,
+    test_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_built_suite_runs_suite ON built_suite_runs(suite_id, created_at);
+-- A schedule that runs a suite instead of every test (kept apart so the schedules table is unchanged).
+CREATE TABLE built_suite_schedules (
+    schedule_id TEXT PRIMARY KEY REFERENCES schedules(id) ON DELETE CASCADE,
+    suite_id TEXT NOT NULL REFERENCES built_suites(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
+`,
+    /* 40: reviews and approved versions: test versions with their review state, comments, the review policy, the version each run ran; existing tests start approved (schema lives in review-store.ts) */ REVIEW_MIGRATION,
+    /* 41: project folders, archived projects, profile preferences (schema lives in project-folders.ts) */ FOLDERS_MIGRATION,
+    /* 42: runners shared across projects, project access to runners, device reservations (schema lives in agent-store.ts; existing runners keep their tokens and get access to their project) */ RUNNER_SHARING_MIGRATION,
+    /* 43: AI configuration per project and billing owner: configurations with their encrypted keys, which one a project uses, who pays on usage rows (schema lives in ai-config-store.ts) */ AI_CONFIG_MIGRATION,
+    /* 44: agent runs toward an objective: the runs, every step, the approvals of high-impact actions (schema lives in agent-run-store.ts) */ AGENT_RUNS_MIGRATION,
 ];
 
 /** Slots that were reserved before their SQL existed: the slot number and a table only that slot creates. */
@@ -194,6 +283,11 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
     { slot: 14, table: "runbooks" },
     { slot: 22, table: "custom_tests" },
     { slot: 23, table: "spec_versions" },
+    { slot: 40, table: "test_versions" },
+    { slot: 41, table: "project_folders" },
+    { slot: 42, table: "runner_access" },
+    { slot: 44, table: "objective_runs" },
+    { slot: 43, table: "ai_configurations" },
 ];
 
 export type Row = Record<string, any>;

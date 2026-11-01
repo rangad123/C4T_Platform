@@ -75,6 +75,7 @@ import { exportPath, portableFiles, type ExportScript } from "./portable-export.
 import { c4tServiceOf, clientIpOf } from "./c4t-service.js";
 import { PlatformsSchema, TestingModesSchema } from "./project-setup.js";
 import { linkedC4tProject, parsePlain, withSetup } from "./routes/project-settings.js";
+import { isProjectNameTaken, projectNameTaken } from "./project-folders.js";
 
 const CredentialsSchema = z
     .object({
@@ -301,6 +302,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const body = z
             .object({
                 name: z.string().min(1).max(120),
+                /** The name was made by the page, not typed: a name in use gets a number instead of a refusal. */
+                autoName: z.boolean().optional(),
                 description: z.string().max(1000).optional(),
                 organizationId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, "An organization id is letters, digits, - and _ (at most 64).").optional(),
             })
@@ -325,16 +328,22 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             }
         }
         const scope = access.projects;
-        const made = repo.createProject({ name: body.name, description: body.description, ...setup });
+        // One name per organisation (archived projects count too), so people can tell their projects apart (project-folders.ts).
+        let name = body.name;
+        if (body.autoName) for (let n = 2; isProjectNameTaken(p.db, name, organizationId); n++) name = `${body.name.slice(0, 110)} ${n}`;
+        if (isProjectNameTaken(p.db, name, organizationId)) throw new HttpError(409, projectNameTaken(name));
+        const made = repo.createProject({ name, description: body.description, ...setup });
         const id = made.id as string;
         if (organizationId) scope.store.setProjectOrganization(id, organizationId);
         if (actor && isCrowd4TestActor(actor) && actor.id) scope.store.addMember(id, actor.id, { role: actor.role, projectAdmin: true, source: "creator", addedBy: actorLabel(actor) });
         return reply.code(201).send(withSetup(organizationId ? repo.getProject(id)! : made));
     });
     // A person limited to some projects sees only those (auth/project-scope.ts).
+    // Archived projects are left out unless `?archived=include` asks for them (project-folders.ts).
     app.get("/api/projects", async (req) => {
         const visible = visibleProjectsOf(req, actorOf(req));
-        return (visible ? repo.listProjects().filter((r) => visible.has(r.id as string)) : repo.listProjects()).map(withSetup);
+        const withArchived = (req.query as { archived?: string } | undefined)?.archived === "include";
+        return (visible ? repo.listProjects().filter((r) => visible.has(r.id as string)) : repo.listProjects()).filter((r) => withArchived || !r.archived_at).map(withSetup);
     });
     app.get("/api/projects/:id", async (req) => {
         const { id } = req.params as { id: string };

@@ -13,6 +13,7 @@ import { SecretBox } from "./secrets.js";
 import { saveRunSummary, summarizeJob, type RunSummary } from "./trends.js";
 import { getAgentServices } from "./agent-services.js";
 import { getTriggerServices } from "./trigger-services.js";
+import { startSuiteForSchedule } from "./suite-run.js";
 
 export interface ScheduleServiceOptions {
     clock?: () => number;
@@ -53,8 +54,9 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
         }
         return startPlain(s);
     };
-    // A schedule linked to a runbook starts a run of it (see runbook-runner.ts); every other schedule starts its plain job.
-    const startRun = async (s: Schedule): Promise<JobRow | RunbookStart> => (await getRunbookServices(p).startForSchedule(s)) ?? plainStart(s);
+    // A schedule linked to a runbook starts a run of it (see runbook-runner.ts); one that points at a suite runs the suite (suite-run.ts);
+    // every other schedule starts its plain job.
+    const startRun = async (s: Schedule): Promise<JobRow | RunbookStart> => (await getRunbookServices(p).startForSchedule(s)) ?? (await startSuiteForSchedule(p, s)) ?? plainStart(s);
     // The daily retention pass (old evidence files) rides on the scheduler's tick; it only acts on projects that switched retention on.
     const scheduler = new Scheduler({ store, repo: p.repo, startRun, clock: opts.clock, tickMs: p.config.SCHEDULER_TICK_MS, onTick: (now) => {
         void new QuarantineStore(p.db, () => now).sweep(now);
@@ -94,6 +96,8 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
                 if ((job.options.mode as string | undefined) === "environment") return;
                 // Building one test from a description adds a test; it is not a run of the suite either.
                 if ((job.options.mode as string | undefined) === "plain") return;
+                // An agent run has its own result (agent-run.ts); it is not a run of the suite.
+                if ((job.options.mode as string | undefined) === "agent") return;
                 // An exploration that stopped at a plan created and ran nothing: there is no run to count.
                 if (job.options.planOnly) return;
                 const summary = summarizeJob(p.repo, job, "low");

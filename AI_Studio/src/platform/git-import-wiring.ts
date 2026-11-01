@@ -8,6 +8,7 @@ import { TestSpecSchema } from "../engine/spec/schema.js";
 import { CustomScriptStore, GitRepoStore, type GitProvenance as StoredProvenance } from "./custom-script-store.js";
 import type { CustomTestPort, GitImportPorts, GitRepoPort } from "./git-import-service.js";
 import { HttpError } from "./http-error.js";
+import { trackTestVersion } from "./review-store.js";
 import type { RouteCtx } from "./routes/types.js";
 import { slugify } from "./storage.js";
 import { putText } from "./object-store.js";
@@ -90,6 +91,8 @@ export function buildGitImportPorts(ctx: RouteCtx): GitImportPorts {
                 repo.addScript(testId, { framework: "playwright", filename, content: f.content, hash: stored.hash, storagePath: rel, executable: true });
                 custom.mark(testId, projectId, { origin: "git", git: prov, imports: guard.helperImports });
                 custom.addVersion(testId, { content: f.content, kind: "git", note, by: "git import" });
+                // The script was stored before the test was marked as code: the code is recorded as a version here (a run never approves what it finds; review-store.ts).
+                trackTestVersion(p.db, testId, "import");
                 custom.audit(projectId, testId, "git-import", `${f.path} from ${f.provenance.path}`);
             } catch (e) {
                 // Never leave a test that is half made (a test without its script or custom marking).

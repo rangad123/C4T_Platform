@@ -11,6 +11,10 @@ import { SecretBox } from "./secrets.js";
 import { retryOnUniqueViolation } from "./sql-dialect.js";
 import { eventBus } from "./event-bus.js";
 import { codeEnginesFor, DEFAULT_PLATFORMS, DEFAULT_TESTING_MODES, type ProjectPlatform, type TestingMode } from "./project-setup.js";
+import { HttpError } from "./http-error.js";
+import { trackTestVersion, type VersionSource } from "./review-store.js";
+import { currentActor } from "./auth/actor.js";
+import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
 
 export const JOB_STATES = [
     "QUEUED",
@@ -40,7 +44,15 @@ export interface Credentials {
     oauth2?: { tokenUrl: string; clientId: string; clientSecret: string; scope?: string; audience?: string; authMethod?: "basic" | "body" };
 }
 
+/** The person (or key) acting now, as a job records its starter; undefined for a schedule, a trigger, a runner or the system. */
+function startedByOf(): { kind: string; id: string | null } | undefined {
+    const a = currentActor();
+    return a.kind === "user" || a.kind === "key" || a.kind === "open" ? { kind: a.kind, id: a.id ?? null } : undefined;
+}
+
 export interface JobOptions {
+    /** Who started the job (set by createJob from the person acting). */
+    startedBy?: { kind: string; id: string | null };
     maxPages: number;
     maxDepth: number;
     maxScenarios: number;
@@ -101,6 +113,8 @@ export interface JobOptions {
     deploy?: { commit?: string; environment?: string; label?: string };
     /** validate mode: re-run a failing test this many times straight away; a pass after a fail is a flaky pass. */
     retryFailures?: number;
+    /** validate mode: run the tests one at a time in the order given and stop at the first that does not pass (test suites); the rest are not run. */
+    stopOnFirstFailure?: boolean;
     /** environment mode: the project's named environment (staging, production...) the tests run against. */
     environment?: string;
     /** environment mode: the person (or schedule) confirmed that this run may touch a production environment. */
@@ -110,6 +124,8 @@ export interface JobOptions {
     /** plain mode: the test described in the person's own words (see engine/authoring/plain.ts). `environment` (above) is the project environment it is built on, if any. */
     plainDescription?: string;
     plainKind?: "web" | "api";
+    /** agent mode: the agent run this job carries out (agent-run.ts). */
+    agentRunId?: string;
     /** plain mode: rebuild this existing test (test_cases.id) from the new description instead of adding one. */
     rewriteTestId?: string;
     /** Set when the project's scripts run on a runner agent (stamped by the job gate in agent-services.ts). */
@@ -126,8 +142,9 @@ export interface JobOptions {
  * "variants": only add browser / screen-size compatibility results for existing tests (`testIds`, `variants`).
  * "environment": run existing tests (`testIds`) against a named environment and store the results for it (`environment`).
  * "plain": build one test from a description in plain words (`plainDescription`), run it, store it.
+ * "agent": the AI pursues an objective in a browser and reports what it found (`agentRunId`, see agent-run.ts). Nothing here runs a test.
  */
-export type JobMode = "generate" | "validate" | "variants" | "environment" | "plain";
+export type JobMode = "generate" | "validate" | "variants" | "environment" | "plain" | "agent";
 
 export const DEFAULT_JOB_OPTIONS: JobOptions = {
     maxPages: 25,
@@ -432,6 +449,8 @@ export class Repo {
 
     /** Async because its gates are (POSTGRES_S3_MIGRATION.md 3.2): they will read asynchronous stores; the insert itself is unchanged. */
     async createJob(projectId: string, applicationId: string, options: JobOptions): Promise<JobRow> {
+        // An archived project starts no run, whoever asks (a person, a schedule, a deploy trigger): project-folders.ts.
+        if (isArchived(this.db, projectId)) throw new HttpError(409, PROJECT_ARCHIVED);
         await this.pluginGate?.(projectId, options);
         await this.frameworkGate?.(projectId, options);
         await this.jobGate?.(projectId, options);
@@ -445,7 +464,8 @@ export class Repo {
             projectId,
             applicationId,
             "QUEUED",
-            JSON.stringify(options),
+            // Who started it: the AI's drafts of this job are that person's change for review (routes/reviews.ts).
+            JSON.stringify(options.startedBy || !startedByOf() ? options : { ...options, startedBy: startedByOf() }),
             JSON.stringify(emptyProgress()),
             JSON.stringify(emptyCounters()),
             t,
@@ -666,6 +686,8 @@ export class Repo {
         framework: Framework;
         validationStatus: ValidationState;
         meta?: Record<string, unknown>;
+        /** What made this test, for review and approval (review-store.ts); left out, it is inferred from who is acting. */
+        versionSource?: VersionSource;
     }): string {
         const id = randomUUID();
         const t = now();
@@ -689,14 +711,18 @@ export class Repo {
             t,
         );
         if (refNames(args.spec).length) syncLocatorUsage(this.db, args.projectId, id, args.spec);
+        // Review and approval: the new test's first version, a draft or approved as the project's policy says.
+        trackTestVersion(this.db, id, args.versionSource);
         return id;
     }
 
-    updateTest(id: string, patch: { spec?: TestSpec; validationStatus?: ValidationState; reason?: string | null; attempts?: number; meta?: Record<string, unknown> }): void {
+    updateTest(id: string, patch: { spec?: TestSpec; validationStatus?: ValidationState; reason?: string | null; attempts?: number; meta?: Record<string, unknown>; versionSource?: VersionSource }): void {
         const sets: string[] = ["updated_at = ?"];
         const vals: Array<string | number | null> = [now()];
         // A hand-written test's script is its source of truth: its (archived) spec is never rewritten, whoever asks (repairs, healing, rewrites).
-        if (patch.spec && this.db.get("SELECT 1 AS x FROM custom_tests WHERE test_case_id = ?", id)) patch = { ...patch, spec: undefined };
+        // The refused change is told to review and approval, so the code's sync status says the steps moved on without it.
+        let refusedSpec: string | undefined;
+        if (patch.spec && this.db.get("SELECT 1 AS x FROM custom_tests WHERE test_case_id = ?", id)) (refusedSpec = JSON.stringify(collapseRefs(collapseBlocks(patch.spec)))), (patch = { ...patch, spec: undefined });
         if (patch.spec) {
             // The engine works on resolved specs; the stored form keeps the reference to a shared element (see engine/locators/refs.ts).
             // The same for reusable steps: unchanged expanded steps go back to the one `useBlock` step they came from.
@@ -716,6 +742,8 @@ export class Repo {
             if (row) syncLocatorUsage(this.db, row.project_id, id, patch.spec);
             else this.db.run("DELETE FROM locator_usage WHERE test_case_id = ?", id);
         }
+        // Review and approval: changed steps make a new version (a draft or approved as the project's policy says).
+        if (patch.spec || refusedSpec !== undefined) trackTestVersion(this.db, id, patch.versionSource, refusedSpec);
     }
 
     getTest(id: string): TestRow | undefined {
@@ -745,14 +773,15 @@ export class Repo {
     }
 
     // ── scripts / executions / artifacts ────────────────────────────────────
-    addScript(testId: string, s: { framework: Framework; filename: string; content: string; hash: string; storagePath: string; executable: boolean }): string {
+    addScript(testId: string, s: { framework: Framework; filename: string; content: string; hash: string; storagePath: string; executable: boolean; /** False: kept as a record of a run, and what the test holds stays as it is. */ current?: boolean }): string {
+        const current = s.current !== false;
         const id = randomUUID();
         // The unique index on (test_case_id, framework, version) turns a concurrent writer taking the same number into an error; the whole transaction is then tried again.
         retryOnUniqueViolation(this.db.dialect, () => this.db.tx(() => {
             const v = this.db.get<{ v: number | null }>("SELECT MAX(version) AS v FROM generated_scripts WHERE test_case_id = ? AND framework = ?", testId, s.framework);
-            this.db.run("UPDATE generated_scripts SET is_current = 0 WHERE test_case_id = ? AND framework = ?", testId, s.framework);
+            if (current) this.db.run("UPDATE generated_scripts SET is_current = 0 WHERE test_case_id = ? AND framework = ?", testId, s.framework);
             this.db.run(
-                "INSERT INTO generated_scripts (id, test_case_id, framework, filename, content, content_hash, storage_path, version, is_current, executable, created_at) VALUES (?,?,?,?,?,?,?,?,1,?,?)",
+                "INSERT INTO generated_scripts (id, test_case_id, framework, filename, content, content_hash, storage_path, version, is_current, executable, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 id,
                 testId,
                 s.framework,
@@ -761,10 +790,13 @@ export class Repo {
                 s.hash,
                 s.storagePath,
                 (v?.v ?? 0) + 1,
+                current ? 1 : 0,
                 s.executable ? 1 : 0,
                 now(),
             );
         }));
+        // A person's code is what such a test runs: new code is a new version for review and approval (review-store.ts).
+        if (current && this.db.get("SELECT 1 AS x FROM custom_tests WHERE test_case_id = ?", testId)) trackTestVersion(this.db, testId);
         return id;
     }
 

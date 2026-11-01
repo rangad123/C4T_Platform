@@ -32,7 +32,7 @@ export interface MonthBlock {
     level: Level;
     warnPercent: number;
 }
-export type GroupBy = "project" | "purpose" | "model";
+export type GroupBy = "project" | "purpose" | "model" | "billing";
 export interface UsageAnswer {
     from: string;
     to: string;

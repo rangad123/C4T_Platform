@@ -164,7 +164,21 @@ export interface ResilientOptions {
      * own request, so nothing about it is told to a job.
      */
     probe?: boolean;
+    /**
+     * A key that is not the server's own (a project's AI configuration, platform/ai-config.ts). Its failures stay out of the server's model
+     * health, `explain` puts them in the project's words, and once the key is refused or out of credit the calls after it fail at once.
+     */
+    ownKey?: OwnKeyHandling;
 }
+
+export interface OwnKeyHandling {
+    explain: (err: LlmCallError) => Error;
+    /** The key itself failed (refused, out of credit, or a model it cannot use): called once per model. */
+    onKeyFailed?: (err: LlmCallError) => void;
+}
+
+/** Failures that asking again with the same key cannot cure. */
+const KEY_FAULTS: ReadonlySet<LlmCallError["cls"]> = new Set(["auth", "credit", "model"]);
 
 function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -190,6 +204,9 @@ export class ResilientModel implements ModelV3 {
     private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
     private readonly random: () => number;
     private readonly probe: boolean;
+    private readonly ownKey?: OwnKeyHandling;
+    /** Set when a key of a project failed for good: the calls that follow stop here, with the same words. */
+    private keyFailure?: Error;
     private sink?: (e: EngineEvent) => void;
     private events = 0;
     private readonly answeredOnce = new Set<string>();
@@ -209,6 +226,7 @@ export class ResilientModel implements ModelV3 {
         this.sleep = opts.sleep ?? defaultSleep;
         this.random = opts.random ?? Math.random;
         this.probe = opts.probe ?? false;
+        this.ownKey = opts.ownKey;
     }
 
     get supportedUrls() {
@@ -248,7 +266,23 @@ export class ResilientModel implements ModelV3 {
         return this.run(options, (entry, opts) => entry.model.doStream(opts), false);
     }
 
+    /** The error a failed call ends with: as it is, or in the words of the project whose key this is. */
+    private failure(err: LlmCallError): Error {
+        if (!this.ownKey) return err;
+        const out = this.ownKey.explain(err);
+        if (KEY_FAULTS.has(err.cls) && !this.keyFailure) {
+            this.keyFailure = out;
+            try {
+                this.ownKey.onKeyFailed?.(err);
+            } catch {
+                // Recording the key's state must not hide the failure.
+            }
+        }
+        return out;
+    }
+
     private async run<R>(options: CallOptions, call: (entry: ChainEntry, opts: CallOptions) => PromiseLike<R>, retry: boolean): Promise<R> {
+        if (this.keyFailure) throw this.keyFailure;
         const callerSignal = options.abortSignal;
         const started = this.now();
         const deadline = started + this.policy.deadlineMs;
@@ -294,7 +328,7 @@ export class ResilientModel implements ModelV3 {
                 try {
                     const res = await call(entry, { ...options, abortSignal: ctrl.signal });
                     breaker.success();
-                    healthLog.record({ at: this.now(), model: entry.name, provider: entry.provider, ok: true, ms: this.now() - t0 });
+                    if (!this.ownKey) healthLog.record({ at: this.now(), model: entry.name, provider: entry.provider, ok: true, ms: this.now() - t0 });
                     this.answered(entry, i);
                     return res;
                 } catch (err) {
@@ -306,7 +340,7 @@ export class ResilientModel implements ModelV3 {
                     info = classifyLlmError(err, { timedOut, now: this.now() });
                     last = new LlmCallError(info, { modelName: entry.name, cause: err });
                     const rule = CLASS_RULES[info.cls];
-                    healthLog.record({ at: this.now(), model: entry.name, provider: entry.provider, ok: false, ms: this.now() - t0, cls: info.cls, message: scrubDetail(describeLlmError(info), 300) });
+                    if (!this.ownKey) healthLog.record({ at: this.now(), model: entry.name, provider: entry.provider, ok: false, ms: this.now() - t0, cls: info.cls, message: scrubDetail(describeLlmError(info), 300) });
                     if (rule.breaker) {
                         if (breaker.failure(rule.label)) {
                             this.emit("ai_provider_paused", "warn", `The AI provider of ${entry.name} failed ${p.breakerFailures} times in a row (${rule.label.toLowerCase()}); calls to it are paused for ${seconds(p.breakerCooldownMs)}.`, {
@@ -330,13 +364,13 @@ export class ResilientModel implements ModelV3 {
                 }
             }
             // A failure no other model would fix (a refused answer, an invalid request) ends the call here.
-            if (!info || !CLASS_RULES[info.cls].fallback) throw last!;
+            if (!info || !CLASS_RULES[info.cls].fallback) throw this.failure(last!);
             const next = this.chain[i + 1];
             if (next) {
                 this.emit("ai_model_fallback", "warn", `${entry.name} is unavailable (${CLASS_RULES[info.cls].label.toLowerCase()}); asking the fallback model ${next.name}.`, { from: entry.name, to: next.name, cls: info.cls });
             }
         }
-        throw last!;
+        throw this.failure(last!);
     }
 }
 

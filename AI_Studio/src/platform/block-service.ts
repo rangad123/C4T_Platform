@@ -299,7 +299,7 @@ export class BlockService {
                     // Every spec and every block that used the old name now uses the new one, or none of this happened.
                     for (const t of this.stepTests(projectId)) {
                         const changed = renameBlockRefs(t.spec, cur.name, next.name);
-                        if (changed !== t.spec) this.repo.updateTest(t.id, { spec: changed });
+                        if (changed !== t.spec) this.repo.updateTest(t.id, { spec: changed, versionSource: "shared" });
                     }
                     for (const b of others) {
                         const steps = renameBlockRefs({ steps: b.steps }, cur.name, next.name).steps;

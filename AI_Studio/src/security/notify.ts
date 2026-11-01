@@ -28,6 +28,7 @@ import { buildEmail, sendEmail, serverSmtp, type MessageContent } from "../platf
 import { AlertStore, deliver, teamsPayload, type AlertChannel, type DeliveryOptions, type DeliveryResult } from "../platform/alerts.js";
 import type { Db } from "../platform/db.js";
 import { SecretBox } from "../platform/secrets.js";
+import { EVERYONE_OPTED_OUT } from "../platform/project-folders.js";
 import { SEVERITIES, type SecurityApplication, type SecurityAssessment, type Severity } from "./contract.js";
 
 export interface SecurityNotificationSettings {
@@ -273,7 +274,9 @@ export async function notifyAssessmentFinished(
                     else {
                         const mail = buildEmail(notice.content);
                         const swap = (s: string) => s.split(EMAIL_FOOTER_FROM).join(EMAIL_FOOTER_TO);
-                        result = await sendEmail(smtp, store.emailOf(ch.id).to, { subject: mail.subject, text: swap(mail.text), html: swap(mail.html) }, opts.delivery);
+                        // People who turned security emails off in their profile are left out (project-folders.ts).
+                        const to = store.wantedRecipients(ch.id, "securityEmails");
+                        result = to.length === 0 ? { ok: false, attempts: 0, error: EVERYONE_OPTED_OUT } : await sendEmail(smtp, to, { subject: mail.subject, text: swap(mail.text), html: swap(mail.html) }, opts.delivery);
                     }
                 } else {
                     const body = ch.kind === "slack" ? notice.slack : ch.kind === "teams" ? teamsPayload(notice.content) : notice.webhook;

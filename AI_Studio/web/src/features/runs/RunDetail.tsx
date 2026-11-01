@@ -4,11 +4,12 @@ import { usePage } from "../../components/Shell";
 import { TechnicalDetails } from "../../components/TechnicalDetails";
 import { Badge, Callout, EmptyState, ErrorState, ListSkeleton, PageHeader } from "../../components/ui";
 import { duration, plural, relativeTime } from "../../lib/format";
-import { friendlyJobErrors, friendlyError, isActive } from "../../lib/labels";
+import { friendlyJobErrors, friendlyError, isActive, nothingRan } from "../../lib/labels";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
 import { browserSentence } from "../agents/agents";
+import { versionHref } from "../review/review";
 import { RunMenu } from "./RunMenu";
 import { RunStrip } from "./RunStrip";
 import { RunTestList } from "./RunStrip";
@@ -57,7 +58,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                 title={runTitle(job)}
                 subtitle={
                     <>
-                        {active ? <Badge tone="info">Running</Badge> : job.cancelled ? <Badge tone="neutral">Stopped</Badge> : job.status === "FAILED" ? <Badge tone="danger">Did not finish</Badge> : c.failed + c.findings > 0 ? <Badge tone="warning">Finished, with problems</Badge> : <Badge tone="success">Finished</Badge>}
+                        {active ? <Badge tone="info">Running</Badge> : job.cancelled ? <Badge tone="neutral">Stopped</Badge> : nothingRan(job) ? <Badge tone="neutral">Nothing ran</Badge> : job.status === "FAILED" ? <Badge tone="danger">Did not finish</Badge> : c.failed + c.findings > 0 ? <Badge tone="warning">Finished, with problems</Badge> : <Badge tone="success">Finished</Badge>}
                         <span>{relativeTime(job.startedAt ?? job.createdAt)}</span>
                     </>
                 }
@@ -74,7 +75,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                 <section className="card card-pad stack-sm" aria-label="About this run">
                     <dl className="run-facts">
                         <dt>What ran</dt>
-                        <dd>{exploration ? `The AI explored the app and created ${plural(c.planned, "test")}` : job.mode === "plain" ? "A test built from a description" : job.mode === "variants" ? `${plural(c.planned, "test")} on other browsers and screen sizes` : `${plural(c.planned, "test")}${job.environment ? ` against ${job.environment}` : ""}`}</dd>
+                        <dd>{exploration ? `The AI explored the app and created ${plural(c.planned, "test")}` : job.mode === "agent" ? "An agent run" : job.mode === "plain" ? "A test built from a description" : job.mode === "variants" ? `${plural(c.planned, "test")} on other browsers and screen sizes` : `${plural(c.planned, "test")}${job.environment ? ` against ${job.environment}` : ""}`}</dd>
                         <dt>Where</dt>
                         <dd>{whereOf(job) === "this server" ? "On this server" : `On ${whereOf(job)}`}</dd>
                         {job.ranOn?.kind === "agent" && job.ranOn.browser && (
@@ -114,10 +115,27 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                 </section>
 
                 {!job.cancelled && problems.map((e) => (
-                    <Callout key={e.title + e.body} tone={job.status === "FAILED" ? "danger" : "warning"} title={e.title}>
+                    <Callout key={e.title + e.body} tone={nothingRan(job) ? "info" : job.status === "FAILED" ? "danger" : "warning"} title={e.title}>
                         {e.body}
                     </Callout>
                 ))}
+
+                {a.heldBack.length > 0 && (
+                    <section className="card card-pad stack-sm" aria-labelledby="run-held" data-testid="run-held-back">
+                        <h2 className="t-section" id="run-held">
+                            Waiting for approval ({a.heldBack.length})
+                        </h2>
+                        <p className="t-secondary">{a.heldBack.length === 1 ? "This test was left out of the run" : "These tests were left out of the run"}: only approved versions run. A Project Admin reviews a draft and approves it.</p>
+                        <ul className="run-changes">
+                            {a.heldBack.map((t) => (
+                                <li key={t.id}>
+                                    <a href={t.version !== null ? versionHref(id, t.id, t.version) : routes.scripts(id)}>Review {t.testId}</a>
+                                    <span className="t-meta"> {t.title}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                )}
 
                 {a.changes && (a.changes.newlyFailing.length > 0 || a.changes.newlyPassing.length > 0) && (
                     <section className="card card-pad stack-sm" aria-labelledby="run-changed">

@@ -9,8 +9,9 @@
  * The output keeps line structure (headings, list items one per line) because the deterministic
  * requirement parser (./parse.ts) works line by line.
  */
-import mammoth from "mammoth";
-import { extractText } from "unpdf";
+import { fork } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import zlib from "node:zlib";
 
 /** Upper bound on the uploaded file. Word/PDF files carry images, so this is larger than the text bound. */
 export const REQUIREMENTS_MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -18,6 +19,14 @@ export const REQUIREMENTS_MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const REQUIREMENTS_MAX_CHARS = 200_000;
 
 export const REQUIREMENTS_EXTENSIONS = [".txt", ".md", ".markdown", ".pdf", ".docx"] as const;
+
+/**
+ * What a .docx may unpack to. A Word file is a zip, and a zip of a few kilobytes can unpack to gigabytes: every part is unpacked here,
+ * up to these limits, before anything else reads the file, so the reader that follows never meets more than this.
+ */
+export const DOCX_LIMITS = { maxEntries: 1000, maxDocumentBytes: 20 * 1024 * 1024, maxPartBytes: 20 * 1024 * 1024, maxTotalBytes: 60 * 1024 * 1024 };
+/** The separate process that reads a .docx or .pdf: its memory, and how long it may take. */
+export const PARSE_LIMITS = { memoryMb: 512, timeoutMs: 30_000 };
 
 export class RequirementsDocumentError extends Error {
     constructor(message: string) {
@@ -80,15 +89,87 @@ function decodeText(file: { name: string; data: Buffer }): string {
     return new TextDecoder("utf-8").decode(d).replace(/^﻿/, "");
 }
 
+const CHILD = fileURLToPath(new URL("./extract-child.mjs", import.meta.url));
+
+/** Run the reader in its own process with a memory limit and a timeout: whatever the file does, the server goes on. */
+function inChild(kind: "docx" | "pdf", data: Buffer, name: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const tooMuch = () => new RequirementsDocumentError(`"${name}" could not be read: it needs more memory or time than a requirements document should. Save it again, or paste the text.`);
+        let settled = false;
+        const child = fork(CHILD, [], { execArgv: [`--max-old-space-size=${PARSE_LIMITS.memoryMb}`], serialization: "advanced", stdio: ["ignore", "ignore", "ignore", "ipc"] });
+        const done = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (child.exitCode === null) child.kill("SIGKILL");
+            fn();
+        };
+        const timer = setTimeout(() => done(() => reject(tooMuch())), PARSE_LIMITS.timeoutMs);
+        child.once("message", (m: { ok: boolean; value?: string; message?: string }) => done(() => (m.ok ? resolve(String(m.value ?? "")) : reject(new Error(String(m.message ?? "unreadable"))))));
+        child.once("error", (e) => done(() => reject(e)));
+        child.once("exit", () => done(() => reject(tooMuch())));
+        child.send({ kind, data: new Uint8Array(data) });
+    });
+}
+
+/**
+ * Unpack every part of a .docx up to DOCX_LIMITS, from the zip's own directory, before any reader sees it. The sizes the zip claims are
+ * not trusted: each part is really unpacked, with a cap on the output, so a part that claims 1 KB and unpacks to 1 GB is caught at the cap.
+ */
+export function checkDocxSize(data: Buffer, name: string, limits = DOCX_LIMITS): void {
+    const bad = (why: string) => new RequirementsDocumentError(`"${name}" cannot be read: ${why} Save it again from Word, or paste the text.`);
+    const tooBig = bad(`it unpacks to more than a requirements document should (at most ${limits.maxDocumentBytes / 1024 / 1024} MB of text).`);
+    let eocd = -1;
+    for (let i = data.length - 22; i >= Math.max(0, data.length - 22 - 65_535); i--) {
+        if (data.readUInt32LE(i) === 0x06054b50) {
+            eocd = i;
+            break;
+        }
+    }
+    if (eocd < 0) throw bad("it is not a complete Word file.");
+    const count = data.readUInt16LE(eocd + 10);
+    const cdOffset = data.readUInt32LE(eocd + 16);
+    if (count === 0xffff || cdOffset === 0xffffffff) throw bad("it is a kind of zip Word does not write (zip64).");
+    if (count > limits.maxEntries) throw bad(`it has more than ${limits.maxEntries} parts.`);
+    let at = cdOffset;
+    let total = 0;
+    for (let n = 0; n < count; n++) {
+        if (at + 46 > data.length || data.readUInt32LE(at) !== 0x02014b50) throw bad("its table of contents is damaged.");
+        const method = data.readUInt16LE(at + 10);
+        const compressed = data.readUInt32LE(at + 20);
+        const nameLen = data.readUInt16LE(at + 28);
+        const extraLen = data.readUInt16LE(at + 30);
+        const commentLen = data.readUInt16LE(at + 32);
+        const local = data.readUInt32LE(at + 42);
+        const part = data.subarray(at + 46, at + 46 + nameLen).toString("utf8");
+        at += 46 + nameLen + extraLen + commentLen;
+        if (local + 30 > data.length || data.readUInt32LE(local) !== 0x04034b50) throw bad("its table of contents is damaged.");
+        const start = local + 30 + data.readUInt16LE(local + 26) + data.readUInt16LE(local + 28);
+        const raw = data.subarray(start, start + compressed);
+        const cap = Math.min(part === "word/document.xml" ? limits.maxDocumentBytes : limits.maxPartBytes, limits.maxTotalBytes - total);
+        let size: number;
+        if (method === 0) size = raw.length;
+        else if (method === 8) {
+            try {
+                size = zlib.inflateRawSync(raw, { maxOutputLength: Math.max(1, cap + 1) }).length;
+            } catch (e) {
+                if ((e as { code?: string }).code === "ERR_BUFFER_TOO_LARGE" || e instanceof RangeError) throw tooBig;
+                throw bad("one of its parts is damaged.");
+            }
+        } else throw bad("it uses a kind of compression Word does not write.");
+        if (size > cap) throw tooBig;
+        total += size;
+    }
+}
+
 async function pdfText(file: { name: string; data: Buffer }): Promise<string> {
     if (file.data.subarray(0, 1024).indexOf("%PDF-") === -1) {
         throw new RequirementsDocumentError(`"${file.name}" is not a valid PDF file.`);
     }
     try {
-        // Copy: PDF.js may transfer/detach the buffer it is given.
-        const { text } = await extractText(new Uint8Array(file.data), { mergePages: true });
-        return text;
+        return await inChild("pdf", file.data, file.name);
     } catch (e) {
+        if (e instanceof RequirementsDocumentError) throw e;
         const msg = e instanceof Error ? e.message : String(e);
         throw new RequirementsDocumentError(
             /password/i.test(msg) ? `"${file.name}" is password-protected.` : `Could not read PDF "${file.name}": ${msg}`,
@@ -101,11 +182,12 @@ async function docxText(file: { name: string; data: Buffer }): Promise<string> {
     if (!(file.data[0] === 0x50 && file.data[1] === 0x4b)) {
         throw new RequirementsDocumentError(`"${file.name}" is not a valid .docx file.`);
     }
+    checkDocxSize(file.data, file.name);
     try {
         // HTML rather than extractRawText: raw text drops list structure, which the parser relies on.
-        const { value } = await mammoth.convertToHtml({ buffer: file.data });
-        return htmlToText(value);
+        return htmlToText(await inChild("docx", file.data, file.name));
     } catch (e) {
+        if (e instanceof RequirementsDocumentError) throw e;
         throw new RequirementsDocumentError(`Could not read Word document "${file.name}": ${e instanceof Error ? e.message : String(e)}`);
     }
 }

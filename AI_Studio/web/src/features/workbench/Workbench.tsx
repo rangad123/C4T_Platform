@@ -12,6 +12,7 @@ import { HistoryTab, type Restored } from "./HistoryTab";
 import { announceRunsChanged, useActiveRun } from "../runs/runs";
 import { TEST_CHANGED } from "./changed";
 import { ResultsPane } from "./ResultsPane";
+import { CoveredRequirements } from "../requirements/CoverageCard";
 import { StepsTab } from "./StepsTab";
 import { TestHeader } from "./TestHeader";
 import { SavedBar } from "./UnsavedBar";
@@ -49,6 +50,9 @@ function RunEndWatcher({ projectId, onEnded }: { projectId: string; onEnded: () 
  * One page per test: Steps, Text, Code and History are tabs of the same page (and routes), the header and the results stay put when
  * the tab changes, and a run started from here shows its result here. Work that is not saved survives a change of tab.
  */
+/** What a saved bar says about the run a save queued; the note says when that run does not use the saved change (a draft never runs). */
+const runningWords = (note?: string) => (note ? `A run has started. ${note}` : "The test is running.");
+
 export function Workbench({ id, tab }: { id: string; tab: Tab }) {
     // While the test is running (from here or from anywhere) the page keeps asking, so the verdict and the editors catch up by themselves.
     const test = useFetch<Detail>(`/tests/${id}`, (d) => (d?.validationStatus === "VALIDATING" ? 2500 : null));
@@ -171,7 +175,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
             setSaved((s) => ({
                 n: (s?.n ?? 0) + 1,
                 headline: !r.changed ? "Nothing changed." : version !== null ? `Saved version ${version}.` : "Saved.",
-                detail: !r.changed ? (r.note ?? "So nothing was saved or run.") : r.jobId ? "The test is running." : (r.note ?? "It has not been run since this change."),
+                detail: !r.changed ? (r.note ?? "So nothing was saved or run.") : r.jobId ? runningWords(r.note) : (r.note ?? "It has not been run since this change."),
                 version: r.changed ? version : null,
                 ran: !!r.jobId,
             }));
@@ -188,7 +192,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
         setActionError("");
         try {
             const r = await restoreSpecVersion(id, version, { run: o.run, note: o.note });
-            setSaved((s) => ({ n: (s?.n ?? 0) + 1, headline: o.headline, detail: r.jobId ? "The test is running." : "It has not been run since this change.", version: null, ran: !!r.jobId }));
+            setSaved((s) => ({ n: (s?.n ?? 0) + 1, headline: o.headline, detail: r.jobId ? runningWords(r.note) : "It has not been run since this change.", version: null, ran: !!r.jobId }));
             setEpoch((n) => n + 1);
             await Promise.all([test.reload(), versions.reload()]);
             setHistoryKey((k) => k + 1);
@@ -409,6 +413,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                         undoing={undoing}
                         onUndo={() => undo && void goBackTo(undo.goBackTo, { run: true, note: `Undid version ${undo.version}`, headline: `Went back to version ${undo.goBackTo}.` })}
                     />
+                    <CoveredRequirements testId={t.id} projectId={t.projectId} />
                     <div className="stack wb-script-slot" ref={setScriptSlot} />
                 </aside>
             </div>

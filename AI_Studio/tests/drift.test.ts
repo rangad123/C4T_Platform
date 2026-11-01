@@ -335,7 +335,7 @@ describe("on a real API that changes between runs", () => {
     let svc: ScheduleServices;
     let server: Awaited<ReturnType<typeof buildServer>>;
     let dir: string;
-    const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
+    const call = async (method: "GET" | "POST" | "PUT", url: string, payload?: unknown) => {
         const res = await server.inject({ method, url, payload: payload as never });
         return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
     };
@@ -385,6 +385,8 @@ describe("on a real API that changes between runs", () => {
 
     it("has nothing to compare after the first run, and an identical second run changes nothing", async () => {
         projectA = await newProject("Drift A");
+        // This file re-runs tests the AI wrote: with the default policy they are drafts and wait for approval (tests/reviews-api.test.ts).
+        await call("PUT", `/api/projects/${projectA}/review-policy`, { aiGenerated: false });
         const ch = await call("POST", `/api/projects/${projectA}/alert-channels`, { kind: "webhook", url: `http://127.0.0.1:${HOOK_PORT}/hook`, events: ["api_breaking_change"] });
         expect(ch.status).toBe(201);
         expect((await changes(projectA)).message).toMatch(/No API requests have been recorded yet/);

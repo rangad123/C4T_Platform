@@ -120,6 +120,9 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
         const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
         const project = await call("POST", "/api/projects", "Creating the project", { name: `Eval: ${entry.id} (${stamp})`.slice(0, 100) });
         out.projectId = project.id;
+        // The evaluation measures the tests the AI writes, by running them again: in its own throwaway project they need no review first
+        // (otherwise they are drafts and drafts never run).
+        await call("PUT", `/api/projects/${project.id}/review-policy`, "Letting the AI's tests run without review", { aiGenerated: false });
         const targets = targetsOf(entry);
         if (entry.kind === "android") {
             await call("PUT", `/api/projects/${project.id}/mobile-app`, "Setting the Android app", { appPackage: fixture.appPackage ?? entry.appPackage });

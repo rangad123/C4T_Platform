@@ -58,6 +58,11 @@ export function changesDataCall(description: string): boolean {
     return CHANGING_CALL.test(description);
 }
 
+/** The two refusals that hold whatever the work is: using someone else's account, and attacking the application. An agent run pauses for the rest (engine/agent/high-impact.ts). */
+export function misuseRefusal(description: string): string | undefined {
+    return RULES.find((r) => (r.id === "others" || r.id === "attack") && r.re.test(description))?.reason;
+}
+
 /**
  * Why this request must not be built, in plain words, or undefined when it may go ahead.
  * `allowChanges` is the project's "include API tests that change data" switch.

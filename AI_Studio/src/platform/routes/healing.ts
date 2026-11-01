@@ -10,6 +10,7 @@ import { describeStep } from "../../engine/spec/schema.js";
 import { HealingStore, type StoredProposal } from "../healing-store.js";
 import { HttpError } from "../http-error.js";
 import { storeScript } from "../repo-sink.js";
+import { draftRunNote } from "../review-store.js";
 import { refOf } from "../../engine/locators/refs.js";
 import { locatorServices } from "./locators.js";
 import type { RouteCtx } from "./types.js";
@@ -120,8 +121,10 @@ export function registerHealingRoutes(ctx: RouteCtx): void {
             shared.store.update(t.projectId, sh.element.id, { locator: prop.newLocator });
             const outcome = await shared.propagate(t.projectId, [t.id, ...sh.others.map((u) => u.id)], sh.name);
             const started = outcome.revalidation.status === "started" ? outcome.revalidation.jobId : null;
+            const note = started ? draftRunNote(repo.db, [t.id, ...sh.others.map((u) => u.id)]) : undefined;
             return reply.code(202).send({
                 jobId: started,
+                ...(note ? { note } : {}),
                 status: started ? repo.getJob(started)?.status ?? "QUEUED" : "waiting",
                 scriptId: (repo.getCurrentScript(t.id)?.id as string | undefined) ?? null,
                 proposal: publicProposal(repo.getTest(t.id)!, store.get(prop.id)!),
@@ -145,13 +148,14 @@ export function registerHealingRoutes(ctx: RouteCtx): void {
         try {
             await ctx.assertNoActiveJob(t.projectId);
             if (!store.decide(prop.id, "applied")) throw new HttpError(409, "This suggestion was just decided by someone else.");
-            repo.updateTest(t.id, { spec: changed.spec });
+            repo.updateTest(t.id, { spec: changed.spec, versionSource: "healing" });
             job = await ctx.startValidationJob(t.projectId, application.id, [t.id]);
         } catch (e) {
             // A run started while the new script was being saved: put the stored script back in line with the unchanged test.
             await storeScript(repo, p.store, t.projectId, t.id, suiteSlug, renderWithAdapter(t.spec, framework, { baseUrl: origin }), adapter.executable);
             throw e;
         }
-        return reply.code(202).send({ jobId: job.id, status: job.status, scriptId, proposal: publicProposal(repo.getTest(t.id)!, store.get(prop.id)!) });
+        const note = draftRunNote(repo.db, [t.id]);
+        return reply.code(202).send({ jobId: job.id, status: job.status, scriptId, proposal: publicProposal(repo.getTest(t.id)!, store.get(prop.id)!), ...(note ? { note } : {}) });
     });
 }

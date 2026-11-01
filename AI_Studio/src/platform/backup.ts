@@ -28,6 +28,7 @@ import { blockSecretProblems } from "../engine/builder/index.js";
 import { BlockStore } from "./block-store.js";
 import { LocatorStore } from "./locator-store.js";
 import { CustomScriptStore } from "./custom-script-store.js";
+import { trackTestVersion } from "./review-store.js";
 import { checkScript } from "../engine/custom/guard.js";
 import type { Framework } from "../engine/generators/index.js";
 import { listAdapters } from "../engine/frameworks/index.js";
@@ -40,6 +41,7 @@ import { DataSetStore, scheduleEnvironment, setScheduleEnvironment } from "./env
 import { HttpError } from "./http-error.js";
 import { IdentityStore } from "./identity-store.js";
 import { ManualCaseStore } from "./manual-case-store.js";
+import { backupRequirements, MAX_REQUIREMENTS, RequirementBackupSchema, restoreRequirements } from "./requirement-store.js";
 import { retentionStore } from "./retention-runner.js";
 import { RunbookStore } from "./runbook-store.js";
 import { CadenceSchema, ScheduleStore } from "./schedule-store.js";
@@ -171,6 +173,7 @@ export async function buildBackup(p: Platform, projectId: string, opts: BackupOp
         steps: c.steps,
         linkedTests: c.linkedTestIds.map((id) => keyOfId.get(id) ?? id),
     }));
+    const requirementDocs = backupRequirements(db, projectId, keyOfId);
     const releaseDocs = manual.listReleases(projectId).map((r) => ({
         name: r.name,
         notes: r.notes,
@@ -311,6 +314,7 @@ export async function buildBackup(p: Platform, projectId: string, opts: BackupOp
         ...(customOf.size ? { customTests: customOf.size } : {}),
         ...(helperDocs.length ? { helpers: helperDocs.length } : {}),
         ...(blockDocs.length ? { blocks: blockDocs.length } : {}),
+        ...(requirementDocs.length ? { requirements: requirementDocs.length } : {}),
     };
     const manifest: Manifest = { kind: BACKUP_KIND, format: BACKUP_FORMAT, platformVersion: await platformVersion(), createdAt: now(), project: { name: projectDoc.name }, includesFiles: opts.evidence, counts };
 
@@ -319,6 +323,7 @@ export async function buildBackup(p: Platform, projectId: string, opts: BackupOp
         "project.json": json(projectDoc),
         "tests.json": json(testDocs),
         "manual-cases.json": json(caseDocs),
+        ...(requirementDocs.length ? { "requirements.json": json(requirementDocs) } : {}),
         "releases.json": json(releaseDocs),
         "runbooks.json": json(runbookDocs),
         "environments.json": json(environmentDocs),
@@ -464,6 +469,7 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
     const testDocs = doc(files, "tests.json", z.array(TestEntrySchema).max(BACKUP_LIMITS.maxTests), []);
     const caseDocs = doc(files, "manual-cases.json", z.array(ManualCaseEntrySchema).max(2000), []);
     const releaseDocs = doc(files, "releases.json", z.array(ReleaseEntrySchema).max(500), []);
+    const requirementDocs = doc(files, "requirements.json", z.array(RequirementBackupSchema).max(MAX_REQUIREMENTS), []);
     const runbookDocs = doc(files, "runbooks.json", z.array(RunbookEntrySchema).max(100), []);
     const envDocs = doc(files, "environments.json", z.array(EnvironmentEntrySchema).max(50), []);
     const dataSetDocs = doc(files, "test-data.json", z.array(DataSetEntrySchema).max(200), []);
@@ -626,6 +632,9 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
             );
             counts.scripts!++;
         }
+        // Code tests got their code after their first version was made: record it now, so the restored code is reviewed like an import
+        // (a run never approves what it finds; review-store.ts).
+        for (const t of tests) if (t.custom) trackTestVersion(db, idOfKey.get(t.testKey)!, "import");
         for (const b of baselineRows) {
             repo.addArtifact({ projectId: pid, testId: idOfKey.get(b.testKey)!, kind: "baseline", path: b.rel, size: b.size });
             counts.baselines!++;
@@ -642,6 +651,7 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
             );
             counts.manualCases!++;
         }
+        if (requirementDocs.length) counts.requirements = restoreRequirements(db, pid, requirementDocs, idOfKey, caseIds);
         for (const r of releaseDocs) {
             const rid = randomUUID();
             const frozen = remapFrozen(r.frozen, caseIds);

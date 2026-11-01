@@ -45,6 +45,8 @@ export interface RunAnswer {
     active: boolean;
     counts: RunCounts;
     tests: RunTest[];
+    /** Tests left out because they are waiting for approval. */
+    heldBack: { id: string; testId: string; title: string; version: number | null }[];
     startedBy: { kind: "person" | "schedule" | "deploy" | "sequence"; label?: string };
     changes: { comparedWith: { jobId: string; at: string }; newlyFailing: RunChange[]; newlyPassing: RunChange[] } | null;
 }
@@ -61,6 +63,8 @@ export function runTitle(job: Pick<Job, "mode" | "environment"> & { planOnly?: b
     switch (job.mode) {
         case "plain":
             return "Test from a description";
+        case "agent":
+            return "Agent run";
         case "environment":
             return `Run on ${job.environment ?? "an environment"}`;
         case "variants":
@@ -93,6 +97,7 @@ export function runningLine(mode: Mode, c: RunCounts, scopedToTest: boolean): st
     if (scopedToTest) return "Running this test";
     if (mode === "generate" || mode === undefined) return c.planned ? `Exploring, ${plural(c.planned, "test")} created so far` : "Exploring your app";
     if (mode === "plain") return "Building your test";
+    if (mode === "agent") return "The AI agent is working";
     if (mode === "variants") return `Checking ${plural(c.planned, "test")} on other browsers`;
     return `Running ${plural(c.planned, "test")}`;
 }
@@ -102,6 +107,7 @@ export function stopQuestion(mode: Mode, counts: RunCounts | undefined, planOnly
     // An exploration that stops at a plan has created nothing: stopping it only means there is no plan.
     if (planOnly) return { title: "Stop exploring?", body: "No plan is made and nothing is created. Tests you already have are unchanged. You can explore again at any time." };
     if (mode === "plain") return { title: "Stop building this test?", body: "Stopping ends this attempt. You can describe the test again at any time." };
+    if (mode === "agent") return { title: "Stop this agent run?", body: "The agent stops at its next step. What it did so far is kept." };
     if (mode === "generate" || mode === undefined) {
         const made = counts ? (counts.planned === 0 ? "No tests have been created yet." : `The ${plural(counts.planned, "test")} created so far ${counts.planned === 1 ? "is" : "are"} kept.`) : "Tests that were already created are kept.";
         return { title: "Stop exploring?", body: `${made} Tests that were not run yet show as Not run yet.` };

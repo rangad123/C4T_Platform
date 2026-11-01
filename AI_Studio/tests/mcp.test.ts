@@ -253,6 +253,8 @@ describe("MCP server over stdio against a real platform", () => {
         expect(started.text).toContain("browser tests: no");
         const jobId = jobIdOf(started.text);
         projectId = /Project: DemoShop {2}\(id (\S+),/.exec(started.text)![1]!;
+        // This file runs the tests the AI wrote: with the default policy they are drafts and wait for approval (tests/reviews-api.test.ts).
+        await platformJson("PUT", `/projects/${projectId}/review-policy`, { aiGenerated: false });
 
         // a second job for the same project is refused with the platform's own message
         const dup = await call(client, "analyze_application", { url: APP, projectId, includeWebTests: false });

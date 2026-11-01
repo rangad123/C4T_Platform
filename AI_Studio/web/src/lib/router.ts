@@ -76,6 +76,8 @@ export const routes = {
     createProject: "#/create",
     project: (id: string) => `#/projects/${id}`,
     tests: (id: string) => `#/projects/${id}/tests`,
+    /** The test cases page with one way of making a test already open: described in words, or step by step. */
+    newTest: (id: string, how: "describe" | "build") => `#/projects/${id}/tests?start=${how}`,
     /** What happened: the run list, Schedules, After a deploy, Trends. */
     runs: (id: string, section?: RunsSection) => place(id, "runs", "runs", section),
     /** One run opened: its tests, what changed, ways to run again. */
@@ -84,14 +86,20 @@ export const routes = {
     schedule: (id: string, run?: string) => place(id, "runs", "runs", "schedules", { run }),
     /** Requirements: what the application must do, and which test cases cover it. */
     requirements: (id: string) => `#/projects/${id}/requirements`,
+    /** One requirement: what it says and the test cases that cover it. */
+    requirement: (id: string, rid: string) => `#/projects/${id}/requirements/${rid}`,
     /** Test cases: automated and manual, one section open. */
     cases: (id: string, section?: CasesSection) => place(id, "tests", "automated", section),
     /** Test suites: ordered groups of test cases with how they run. */
     suites: (id: string) => `#/projects/${id}/suites`,
+    /** One suite a person built: its ordered tests, how it runs, its runs. */
+    suite: (id: string, suiteId: string) => `#/projects/${id}/suites/${suiteId}`,
     /** Test scripts: the scripts themselves and the building blocks they share. `edit` opens one set of reusable steps. */
     scripts: (id: string, section?: ScriptsSection, edit?: string) => place(id, "scripts", "scripts", section, { edit }),
-    /** Agent runs: the AI pursues an objective on a runner (flow B). */
+    /** Agent runs: the AI pursues an objective in a real browser (flow B). */
     agentRuns: (id: string) => `#/projects/${id}/agent`,
+    /** One agent run: live while it goes, then its result. */
+    agentRun: (id: string, runId: string) => `#/projects/${id}/agent/${runId}`,
     /** The project's settings, one section open. */
     projectSettings: (id: string, section?: SettingsSection) => place(id, "settings", "general", section),
     /** Where tests run: the runners this project may use. */
@@ -138,6 +146,7 @@ export const routes = {
     dashboard: "#/dashboard",
     develop: "#/develop",
     allRunners: "#/runners",
+    runner: (id: string) => `#/runners/${id}`,
     folders: "#/folders",
     profile: "#/profile",
     settings: "#/settings",

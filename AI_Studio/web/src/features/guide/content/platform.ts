@@ -142,7 +142,7 @@ export const platform: Topic[] = [
         goodToKnow: [
             "When a limit is reached, the job stops cleanly, keeps the tests it made and still runs them.",
             "A scheduled exploration is skipped.",
-            "No prices are built in.",
+            "A project on your own key: if the key fails, the AI work stops. It never moves to Crowd4Test’s key.",
         ],
         open: { label: "Open Settings", to: { place: "settings" } },
         words: ["exploration", "schedule"],

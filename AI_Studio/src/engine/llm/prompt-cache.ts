@@ -174,7 +174,7 @@ export interface CachePlan {
     wrap<M>(model: M): M;
 }
 
-export function cachePlan(provider: LlmProviderId, modelName: string, isOn: () => boolean): CachePlan {
+export function cachePlan(provider: LlmProviderId, modelName: string, isOn: () => boolean, inner?: typeof fetch): CachePlan {
     const style = cacheStyleFor(provider, modelName);
     if (style === "anthropic")
         return {
@@ -184,7 +184,7 @@ export function cachePlan(provider: LlmProviderId, modelName: string, isOn: () =
                 return (typeof m === "object" && m?.specificationVersion === "v3" ? wrapLanguageModel({ model: m, middleware: anthropicMiddleware(isOn) }) : model) as M;
             },
         };
-    if (style === "anthropic-passthrough") return { style, fetch: passthroughCacheFetch(isOn), wrap: (m) => m };
+    if (style === "anthropic-passthrough") return { style, fetch: passthroughCacheFetch(isOn, inner), wrap: (m) => m };
     return { style, wrap: (m) => m };
 }
 

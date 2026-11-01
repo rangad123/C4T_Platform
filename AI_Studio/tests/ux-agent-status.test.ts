@@ -19,6 +19,7 @@ let server: Awaited<ReturnType<typeof buildServer>>;
 let dir: string;
 
 beforeAll(async () => {
+    process.env.AGENT_MAX_TOKENS = "25"; // this file gives one project several runners
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-ux-agent-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dir }));
     server = await buildServer(platform);

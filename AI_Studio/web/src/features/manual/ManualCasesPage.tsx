@@ -10,6 +10,7 @@ import { routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
 import { apiMessage, groupByArea, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
 import "./manual.css";
+import type { RequirementLink } from "../requirements/requirements";
 
 const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement: "", steps: [{ action: "", expected: "" }], linkedTestIds: [] };
 
@@ -17,6 +18,9 @@ const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement:
 export function ManualCasesPage({ id }: { id: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     const list = useFetch<CaseList>(`/projects/${id}/manual-cases`);
+    // The requirement records each case covers (Requirements place), shown on its row.
+    const reqLinks = useFetch<{ links: RequirementLink[] }>(`/projects/${id}/requirements/links`);
+    const coversOf = (caseId: string) => (reqLinks.data?.links ?? []).filter((l) => l.kind === "manual" && l.testId === caseId);
     const [editing, setEditing] = useState<{ id?: string; input: CaseInput } | null>(null);
     const [notice, setNotice] = useState<{ tone: "success" | "danger" | "warning"; text: string; detail?: string[] } | null>(null);
     const [confirming, setConfirming] = useState<string | null>(null);
@@ -188,6 +192,20 @@ export function ManualCasesPage({ id }: { id: string }) {
                                                         <>
                                                             <span className="dot-sep" />
                                                             {c.requirement}
+                                                        </>
+                                                    )}
+                                                    {coversOf(c.id).length > 0 && (
+                                                        <>
+                                                            <span className="dot-sep" />
+                                                            Covers{" "}
+                                                            {coversOf(c.id).map((l, i) => (
+                                                                <span key={l.requirementId}>
+                                                                    {i > 0 && ", "}
+                                                                    <a href={routes.requirement(id, l.requirementId)} title={l.title}>
+                                                                        {l.ref}
+                                                                    </a>
+                                                                </span>
+                                                            ))}
                                                         </>
                                                     )}
                                                 </span>

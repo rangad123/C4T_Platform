@@ -2,6 +2,7 @@ import { getAgentServices } from "../agent-services.js";
 import { RateLimiter } from "../agent-routing.js";
 import { CustomScriptStore } from "../custom-script-store.js";
 import { HttpError } from "../http-error.js";
+import { assertMayAddRunner } from "../runner-health.js";
 import { buildInstallerZip, installerFileName, installerInfo, loadInstaller, type KitKind } from "../runner-installer.js";
 import { buildKitZip, decideAddress, kitFileName, KitRequest, loadBundle, maxTokensFrom, NODE_MIN_MAJOR, projectSlugOf, runnerLimitMessage } from "../runner-kit.js";
 import { buildCompleteZip, completeFileName, completeInfo, loadComplete, MAX_COMPLETE_AT_ONCE, targetOf } from "../runner-kit-complete.js";
@@ -60,6 +61,8 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/runner-kits", async (req, reply) => {
         const { id } = req.params as { id: string };
         const project = ctx.project(id);
+        // The kit holds a new runner token: the same rule as registering a runner on the Runners page.
+        assertMayAddRunner(app, req, svc.store, (project.organization_id as string | null) ?? null);
         const parsed = KitRequest.safeParse(req.body ?? {});
         if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "The runner name or system is not valid.");
         const request = parsed.data;

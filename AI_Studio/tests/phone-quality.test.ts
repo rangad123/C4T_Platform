@@ -191,6 +191,8 @@ describe("the AI explores a crashing app through the platform", { timeout: 300_0
     };
     const newProject = async (name: string, mobile: Record<string, unknown>) => {
         const id = (await call("POST", "/api/projects", { name })).body.id as string;
+        // This file runs the tests the AI wrote: with the default policy they are drafts and wait for approval (tests/reviews-api.test.ts).
+        await call("PUT", `/api/projects/${id}/review-policy`, { aiGenerated: false });
         const put = await call("PUT", `/api/projects/${id}/mobile-app`, mobile);
         expect(put.status, JSON.stringify(put.body)).toBe(200);
         return id;

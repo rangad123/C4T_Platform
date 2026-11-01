@@ -10,7 +10,7 @@ import { BadgeKey } from "../components/Tooltip";
 import { jobHelp } from "../lib/help";
 import { duration } from "../lib/format";
 import { RelTime } from "../features/runs/RunTime";
-import { friendlyJobErrors, isActive } from "../lib/labels";
+import { friendlyJobErrors, isActive, nothingRan } from "../lib/labels";
 import { useDocumentTitle, useFetch } from "../lib/hooks";
 import { useProjectStream } from "../lib/stream";
 import { LiveBadge } from "../features/live/LiveStatus";
@@ -85,7 +85,7 @@ export function ProjectRuns({ id }: { id: string }) {
                                 )}
                                 {line && <p className="t-secondary">{line}</p>}
                                 {problems.filter(() => !j.cancelled).map((e) => (
-                                    <Callout key={e.title + e.body} tone={j.status === "FAILED" ? "danger" : "warning"} title={e.title}>
+                                    <Callout key={e.title + e.body} tone={nothingRan(j) ? "info" : j.status === "FAILED" ? "danger" : "warning"} title={e.title}>
                                         {e.body}
                                     </Callout>
                                 ))}

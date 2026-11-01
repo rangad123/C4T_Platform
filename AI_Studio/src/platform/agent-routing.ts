@@ -9,6 +9,25 @@ import type { RunEnv } from "../engine/validation/runner.js";
 import type { RunnerNeeds } from "../engine/frameworks/types.js";
 import { iosCapabilityProblem } from "../engine/mobile/ios-capability.js";
 
+// ── the device a task holds ──────────────────────────────────────────────────
+
+/**
+ * The phone, emulator or simulator a task will use on its runner, read from the offer: a named device, or "*" when the runner picks
+ * (it then holds all of that kind, because the platform cannot know which one it takes). A task that uses no device: undefined.
+ */
+export function deviceNeedOf(offer: { adapterId: string; kind?: string; mobile?: { deviceSerial?: string; avd?: string; runsOn?: { kind: string; serial?: string }; exploredOn?: { serial: string } }; ios?: { simulator?: string; defaultSimulator?: string }; device?: { deviceSerial?: string; avd?: string } }): { family: "android" | "ios"; device: string } | undefined {
+    if (offer.kind === "device") {
+        const d = offer.device;
+        return { family: "android", device: d?.deviceSerial ?? (d?.avd ? `avd:${d.avd}` : "*") };
+    }
+    if (offer.adapterId === "taqwright-ios") return { family: "ios", device: offer.ios?.simulator ?? offer.ios?.defaultSimulator ?? "*" };
+    if (offer.adapterId !== "taqwright") return undefined;
+    const m = offer.mobile;
+    const kind = m?.runsOn?.kind;
+    const named = m?.deviceSerial ?? (kind === "phone" || kind === "explored" ? (m?.runsOn?.serial ?? (kind === "explored" ? m?.exploredOn?.serial : undefined)) : undefined);
+    return { family: "android", device: named ?? (kind === "emulator" || !kind ? (m?.avd ? `avd:${m.avd}` : "*") : "*") };
+}
+
 // ── the six agent routes ─────────────────────────────────────────────────────
 
 const ID = "[A-Za-z0-9-]{8,64}";

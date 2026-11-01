@@ -318,6 +318,9 @@ describe("linking a Crowd4Test project (US-011, D-27)", () => {
         expect((await as("t-cust-read", "PATCH", `/api/projects/${id}`, { c4tProjectId: null })).status).toBe(403);
         expect((await as("t-cust-read", "GET", `/api/projects/${id}/c4t-projects`)).status).toBe(403);
         expect((await as("t-cust-read", "GET", `/api/projects/${id}/setup-check`)).status).toBe(200);
+        // A tester on the project never gets the organisation's list of Crowd4Test projects, whatever they hold.
+        expect((await as("t-admin", "POST", `/api/projects/${id}/members`, { personId: await personOf("t-tester") })).status).toBe(201);
+        expect((await as("t-tester", "GET", `/api/projects/${id}/c4t-projects`)).status).toBe(403);
 
         const unlinked = await as("t-admin", "PATCH", `/api/projects/${id}`, { c4tProjectId: null });
         expect(unlinked.body).toMatchObject({ c4t_project_id: null, c4tProject: null });

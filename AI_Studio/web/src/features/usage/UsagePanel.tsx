@@ -138,13 +138,14 @@ function DayBars({ series }: { series: UsageGroup[] }) {
     );
 }
 
-const BY_LABEL: Record<GroupBy, string> = { project: "By project", purpose: "By purpose", model: "By model" };
+const BY_LABEL: Record<GroupBy, string> = { project: "By project", purpose: "By purpose", model: "By model", billing: "By who pays" };
+const OWNER_LABEL: Record<string, string> = { crowd4test: "Crowd4Test", organization: "The customer’s organisation" };
 
 function Breakdown({ by, onBy, state, currency }: { by: GroupBy; onBy: (b: GroupBy) => void; state: ReturnType<typeof useFetch<UsageAnswer>>; currency: string }) {
     const rows = state.data?.groups ?? [];
     // The prompt-cache column appears only once something was cached.
     const cached = rows.some((g) => (g.cacheReadTokens ?? 0) > 0);
-    const nameOf = (g: UsageGroup) => (by === "purpose" ? (PURPOSE_LABEL[g.key] ?? g.key) : by === "project" ? (g.label ?? g.key) : g.key);
+    const nameOf = (g: UsageGroup) => (by === "purpose" ? (PURPOSE_LABEL[g.key] ?? g.key) : by === "project" ? (g.label ?? g.key) : by === "billing" ? (OWNER_LABEL[g.key] ?? g.key) : g.key);
     return (
         <div className="stack-sm">
             <div className="row">
@@ -171,7 +172,7 @@ function Breakdown({ by, onBy, state, currency }: { by: GroupBy; onBy: (b: Group
                     <table className="usage-table" data-testid="usage-table">
                         <thead>
                             <tr>
-                                <th scope="col">{by === "project" ? "Project" : by === "purpose" ? "Purpose" : "Model"}</th>
+                                <th scope="col">{by === "project" ? "Project" : by === "purpose" ? "Purpose" : by === "billing" ? "Who pays" : "Model"}</th>
                                 <th scope="col" className="num">Calls</th>
                                 <th scope="col" className="num">In</th>
                                 {cached && <th scope="col" className="num">From cache</th>}

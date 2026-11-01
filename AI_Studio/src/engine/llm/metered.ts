@@ -20,12 +20,12 @@ import { wrapLanguageModel, type LanguageModel } from "ai";
 import type { EngineEvent } from "../context.js";
 import type { LlmClient, Usage } from "./provider.js";
 import { answeredSlot } from "./resilience.js";
-import { BudgetExceeded, budgetTokens, capDetail, capMessage, decideBudget, estimateTokens, monthOf, normalisePurpose, warningMessage, type CapHit, type Caps, type LlmPurpose, type Used } from "./usage.js";
+import { BudgetExceeded, budgetTokens, capDetail, capMessage, decideBudget, estimateTokens, monthOf, normalisePurpose, warningMessage, type CapHit, type Caps, type LlmPurpose, type Used, type UsageBilling } from "./usage.js";
 
 /** What the meter needs from the store (implemented by `platform/usage-store.ts`, replaced by plain objects in unit tests). */
 export interface MeterBackend {
     /** `cacheReadTokens`/`cacheWriteTokens`: of the input tokens, prompt-cache reads and writes (prompt-cache.ts); missing = none. */
-    addUsage(d: { jobId: string; projectId: string; purpose: string; model: string; at: Date; calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number }): void;
+    addUsage(d: { jobId: string; projectId: string; purpose: string; model: string; at: Date; calls: number; failedCalls: number; inputTokens: number; outputTokens: number; images: number; estimatedCalls: number; cacheReadTokens?: number; cacheWriteTokens?: number; billing?: UsageBilling }): void;
     totalsFor(jobId: string, projectId: string, month: string): Used;
     capsFor(projectId: string): { caps: Caps; warnPercent: number };
     recordStop(s: { jobId: string; projectId: string; cap: string; used: number; limit: number; at: string }): void;
@@ -39,6 +39,8 @@ export interface MeterOptions {
     now?: () => Date;
     /** Re-read the stored totals and caps after this many calls (default 5). */
     refreshEvery?: number;
+    /** Who pays for this job's calls, written on every usage row; left out, Crowd4Test. */
+    billing?: UsageBilling;
 }
 
 export class JobMeter {
@@ -225,7 +227,7 @@ export class JobMeter {
         const tokens = budgetTokens(c);
         // In memory first: the totals stay right even if the store write fails.
         this.used = { job: this.used.job + tokens, project: this.used.project + tokens, month: this.used.month + tokens };
-        this.backend.addUsage({ jobId: this.opts.jobId, projectId: this.opts.projectId, purpose, model: this.modelName, at: this.now(), ...c });
+        this.backend.addUsage({ jobId: this.opts.jobId, projectId: this.opts.projectId, purpose, model: this.modelName, at: this.now(), ...c, ...(this.opts.billing ? { billing: this.opts.billing } : {}) });
     }
 
     private refreshIfDue(): void {

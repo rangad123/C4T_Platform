@@ -197,7 +197,18 @@ export class ProjectAccessStore {
 
     setProjectOrganization(projectId: string, organizationId: string | null): void {
         if (organizationId) this.ensureOrganization(organizationId);
-        this.db.run("UPDATE projects SET organization_id = ? WHERE id = ?", organizationId, projectId);
+        this.db.tx(() => {
+            this.db.run("UPDATE projects SET organization_id = ? WHERE id = ?", organizationId, projectId);
+            // Runners stay inside their organisation: one registered from this project and used by no other moves with it; any other
+            // organisation's runner stops serving it. Crowd4Test's shared machines (no organisation) keep their access.
+            this.db.run("UPDATE agent_tokens SET organization_id = ? WHERE project_id = ? AND NOT EXISTS (SELECT 1 FROM runner_access a WHERE a.token_id = agent_tokens.id AND a.project_id <> ?)", organizationId, projectId, projectId);
+            const foreign = this.db.all<{ id: string }>("SELECT t.id FROM agent_tokens t JOIN runner_access a ON a.token_id = t.id WHERE a.project_id = ? AND t.organization_id IS NOT NULL", projectId).map((r) => r.id);
+            for (const id of foreign) {
+                const owner = this.db.get<{ o: string | null }>("SELECT organization_id AS o FROM agent_tokens WHERE id = ?", id)?.o ?? null;
+                if (owner !== organizationId) this.db.run("DELETE FROM runner_access WHERE token_id = ? AND project_id = ?", id, projectId);
+            }
+            this.db.run("UPDATE runner_settings SET agent_id = NULL WHERE project_id = ? AND agent_id IS NOT NULL AND agent_id NOT IN (SELECT g.id FROM agents g JOIN runner_access a ON a.token_id = g.token_id WHERE a.project_id = ?)", projectId, projectId);
+        });
     }
 }
 

@@ -34,6 +34,7 @@ import { RunbookBusy, RunbookStore, type Runbook, type RunbookRun, type RunStepR
 import { getScheduleServices } from "./schedule-services.js";
 import { activeJobOf, OverlapError, runnableTestIds, type RunbookStart } from "./scheduler.js";
 import type { Schedule } from "./schedule-store.js";
+import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
 
 /** The longest one step may take, and the longest a whole run may take. Tests inject small values. */
 export const STEP_CAP_MS = 30 * 60_000;
@@ -522,6 +523,8 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
             const runbook: Runbook | undefined = store.get(runbookId);
             if (!runbook) throw new HttpError(404, "Runbook not found");
             if (stopping) throw new HttpError(503, "The platform is shutting down");
+            // An archived project runs nothing, a runbook started by a deploy trigger included (project-folders.ts).
+            if (isArchived(repo.db, runbook.projectId)) throw new HttpError(409, PROJECT_ARCHIVED);
             services.sweep();
             // From here to the insert only the check below is awaited, which yields to nothing else while the stores are synchronous: no other job or run can slip in between the checks and the create.
             const activeRun = store.activeRun(runbook.projectId);

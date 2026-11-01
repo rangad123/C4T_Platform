@@ -26,6 +26,9 @@ export interface Schedule {
     /** The runbook this schedule starts instead of a plain run (see features/runbooks). */
     runbookId?: string | null;
     runbookName?: string | null;
+    /** The test suite this schedule runs instead of every test (see features/suites). */
+    suiteId?: string | null;
+    suiteName?: string | null;
 }
 
 export interface ScheduleList {

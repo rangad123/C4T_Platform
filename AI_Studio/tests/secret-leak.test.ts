@@ -44,6 +44,8 @@ const SECRETS = {
     // The tokens of a Notion issue tracker and of a Sentry connection (write-only, encrypted).
     notionToken: "LEAKCHECK-NotionTok-4d7e61",
     sentryToken: "LEAKCHECK-SentryTok-b30a8f",
+    // A project's own AI key (write-only, encrypted; only its last four characters are ever shown).
+    aiKey: "LEAKCHECK-AiKey-7c20e4",
     // A run sent to a runner agent: the sign-in and API token travel in the task (encrypted at rest), the agent's own answer echoes
     // them, and the agent token itself (added at run time) is shown once and stored only as a hash.
     agentPassword: "LEAKCHECK-AgentPw-6a1d93",
@@ -223,6 +225,11 @@ describe("secrets never leave the encrypted store", () => {
         expect(notion.status).toBe(201);
         expect(notion.body.config).toMatchObject({ kind: "notion", titleProperty: "Name" });
         await call("PATCH", `/api/integrations/${notion.body.id}`, { token: SECRETS.notionToken });
+        const aiConfig = await call("POST", `/api/projects/${projectId}/ai/configurations`, { label: "Own key", provider: "anthropic", model: "stand-in", apiKey: SECRETS.aiKey });
+        expect(aiConfig.status).toBe(201);
+        expect(aiConfig.body.keyEnding).toBe("20e4");
+        await call("GET", `/api/projects/${projectId}/ai`);
+        await call("GET", "/api/ai-configurations");
         const sentry = await call("PUT", `/api/projects/${projectId}/sentry`, { organization: "acme", project: "shop", token: SECRETS.sentryToken, verify: false });
         expect(sentry.status).toBe(201);
         expect(sentry.body.connection).toMatchObject({ organization: "acme", project: "shop" });
@@ -266,6 +273,7 @@ describe("secrets never leave the encrypted store", () => {
 
     it("a run on a runner agent: the task carries the credentials, the agent's answer echoes them, and they are stored nowhere readable (the token only as a hash)", async () => {
         const small = (await call("POST", "/api/projects", { name: "Agent audit" })).body.id as string;
+        await call("PUT", `/api/projects/${small}/review-policy`, { edits: false }); // drafts never run, and this test is about a run
         const imp = await call("POST", `/api/projects/${small}/specs`, { baseUrl: BASE, validate: false, credentials: { username: "agent@example.com", password: SECRETS.agentPassword, apiToken: SECRETS.agentApiToken }, specs: [{ title: "About page answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/about" }, { action: "assertResponse", check: "status", expected: 200 }] }] });
         expect(imp.status).toBe(202);
         const testId = imp.body.tests[0].id as string;
@@ -300,6 +308,7 @@ describe("secrets never leave the encrypted store", () => {
     }, 90_000);
 
     it("failure evidence: the password a failing web test types is hidden in the recorded address, console and everywhere stored (the page also sent it in a response header, which is never recorded)", async () => {
+        await call("PUT", `/api/projects/${projectId}/review-policy`, { edits: false }); // drafts never run, and this test is about a run
         // Imported without credentials of its own: it runs with the project's sign-in, i.e. with SECRETS.password.
         const imp = await call("POST", `/api/projects/${projectId}/specs`, {
             specs: [{ title: "The password check accepts the password", kind: "web", category: "Evidence", steps: [{ action: "navigate", url: "/evidence-leak" }, { action: "fill", locator: { by: "label", value: "Password" }, value: "{{credentials.password}}" }, { action: "click", locator: { by: "role", role: "button", value: "Check", exact: true } }, { action: "assert", check: "text", locator: { by: "role", role: "status" }, expected: "Accepted" }] }],

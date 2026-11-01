@@ -265,11 +265,14 @@ export const checks: Topic[] = [
         what: "Checks that every requirement you supplied has a test.",
         why: "You show that nothing on the list was forgotten.",
         steps: [
-            step("Add a requirements document when you explore."),
-            step("Read how many requirements are covered, on the job."),
-            step("Open a test to see which requirements it covers."),
+            step("Open Requirements and add your requirements, or import them from a requirements document."),
+            step("Open a requirement and link the test cases that check it."),
+            step("Read its coverage: passing, failing, covered or not covered. The project dashboard adds them up."),
         ],
-        goodToKnow: ["A requirement with no matching screen is listed as uncovered in the activity log, never faked."],
+        goodToKnow: [
+            "When you explore with the same document, each test the AI writes is linked to the requirements it names.",
+            "A requirement with no matching screen is listed as uncovered in the activity log, never faked.",
+        ],
         words: ["exploration", "test"],
         related: ["explore-my-app", "compliance", "release-signoff"],
         keywords: ["requirements", "coverage", "user stories", "spec document", "traceability", "missing tests", "acceptance criteria", "forgotten"],

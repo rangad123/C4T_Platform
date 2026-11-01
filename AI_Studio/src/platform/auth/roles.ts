@@ -20,7 +20,7 @@
  *                                plans, recordings, run sequences, site memory
  *   ai_studio.tests.approve      sign-offs: the client's permission to assess (security), accepting a risk (checked in the route).
  *                                Approving a test also needs Project Admin on the project (canApprove in auth/project-scope.ts)
- *   ai_studio.runners.manage     runner tokens, runner kits, runner updates
+ *   ai_studio.runners.manage     runner tokens, runner kits, runner updates, registering, renaming and retiring a runner, giving projects access to it
  *   ai_studio.ai_keys.manage     keys and connections to other systems: issue trackers, Sentry, alert channels, the test mailbox,
  *                                deploy-trigger tokens, device-farm credentials
  *   ai_studio.usage.view         reading AI usage, prices and budgets
@@ -124,6 +124,23 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/projects/:id/test-generation": "ai_studio.tests.generate",
     "GET /api/projects/:id/tests": "read",
     "GET /api/projects/:id/suites": "read",
+    // Test suites a person builds (routes/suites.ts): reading is access, changing is tests.write, running is tests.run.
+    "GET /api/projects/:id/agent-runs": "read",
+    "POST /api/projects/:id/agent-runs": "ai_studio.agent.run",
+    "GET /api/projects/:id/agent-runs/:rid": "read",
+    "POST /api/projects/:id/agent-runs/:rid/stop": "ai_studio.agent.run",
+    "POST /api/projects/:id/agent-runs/:rid/approvals/:aid": "ai_studio.agent.run",
+    "POST /api/projects/:id/agent-runs/:rid/draft": "ai_studio.tests.write",
+    "GET /api/projects/:id/test-suites": "read",
+    "POST /api/projects/:id/test-suites": "ai_studio.tests.write",
+    "GET /api/projects/:id/test-suites/:sid": "read",
+    "PATCH /api/projects/:id/test-suites/:sid": "ai_studio.tests.write",
+    "DELETE /api/projects/:id/test-suites/:sid": "ai_studio.tests.write",
+    "POST /api/projects/:id/test-suites/:sid/tests": "ai_studio.tests.write",
+    "DELETE /api/projects/:id/test-suites/:sid/tests/:testId": "ai_studio.tests.write",
+    "PUT /api/projects/:id/test-suites/:sid/order": "ai_studio.tests.write",
+    "POST /api/projects/:id/test-suites/:sid/duplicate": "ai_studio.tests.write",
+    "POST /api/projects/:id/test-suites/:sid/run": "ai_studio.tests.run",
     "GET /api/projects/:id/specs": "read",
     "POST /api/projects/:id/specs": "ai_studio.tests.write",
     "GET /api/projects/:id/compliance": "read",
@@ -243,6 +260,16 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     // runner updates (routes/runner-updates.ts): turning automatic updates off or asking one runner to update is managing runners
     "PUT /api/projects/:id/agents/:agentId/updates": "ai_studio.runners.manage",
     "POST /api/projects/:id/agents/:agentId/update": "ai_studio.runners.manage",
+    // Runners as machines of an organisation (routes/runners.ts, round 34): reading is narrowed by the handler; changing one is also limited there to its owner's side.
+    "GET /api/runners": "read",
+    "GET /api/runners/summary": "read",
+    "GET /api/runners/:runnerId": "read",
+    "POST /api/runners": "ai_studio.runners.manage",
+    "PATCH /api/runners/:runnerId": "ai_studio.runners.manage",
+    "POST /api/runners/:runnerId/retire": "ai_studio.runners.manage",
+    "GET /api/projects/:id/runner-access": "read",
+    "PUT /api/projects/:id/runner-access/:runnerId": "ai_studio.runners.manage",
+    "DELETE /api/projects/:id/runner-access/:runnerId": "ai_studio.runners.manage",
 
     // ── issue trackers, Sentry (tokens of other systems) ──
     "GET /api/projects/:id/integrations": "read",
@@ -271,6 +298,20 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/manual-cases/:cid": "read",
     "PUT /api/projects/:id/manual-cases/:cid": "ai_studio.tests.write",
     "DELETE /api/projects/:id/manual-cases/:cid": "ai_studio.tests.delete",
+    // Requirements as records and the tests that cover them (routes/requirements.ts). Refining an import with the AI spends tokens.
+    "GET /api/projects/:id/requirements": "read",
+    "POST /api/projects/:id/requirements": "ai_studio.tests.write",
+    "GET /api/projects/:id/requirements/coverage": "read",
+    "GET /api/projects/:id/requirements/links": "read",
+    "POST /api/projects/:id/requirements/import/preview": "ai_studio.tests.write",
+    "POST /api/projects/:id/requirements/import/refine": "ai_studio.tests.generate",
+    "POST /api/projects/:id/requirements/import": "ai_studio.tests.write",
+    "GET /api/projects/:id/requirements/:rid": "read",
+    "PATCH /api/projects/:id/requirements/:rid": "ai_studio.tests.write",
+    "DELETE /api/projects/:id/requirements/:rid": "ai_studio.tests.write",
+    "POST /api/projects/:id/requirements/:rid/tests": "ai_studio.tests.write",
+    "DELETE /api/projects/:id/requirements/:rid/tests/:testId": "ai_studio.tests.write",
+    "GET /api/tests/:id/requirements": "read",
     "GET /api/projects/:id/releases": "read",
     "POST /api/projects/:id/releases": "ai_studio.tests.run",
     "GET /api/projects/:id/releases/:rid": "read",
@@ -385,6 +426,15 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /readyz": "own",
     "GET /metrics": "own",
     // AI model reliability (LLM): a check is one small paid call; the fallback models are a platform-wide setting.
+    // AI configuration (routes/ai-config.ts): the project's answer is narrowed by the handler; keys need "manage keys", and the handler limits a customer to their organisation
+    "GET /api/projects/:id/ai": "read",
+    "PUT /api/projects/:id/ai": "ai_studio.ai_keys.manage",
+    "POST /api/projects/:id/ai/configurations": "ai_studio.ai_keys.manage",
+    "GET /api/ai-configurations": "ai_studio.ai_keys.manage",
+    "POST /api/ai-configurations": "ai_studio.ai_keys.manage",
+    "PATCH /api/ai-configurations/:configId": "ai_studio.ai_keys.manage",
+    "DELETE /api/ai-configurations/:configId": "ai_studio.ai_keys.manage",
+    "POST /api/ai-configurations/:configId/test": "ai_studio.ai_keys.manage",
     "GET /api/llm/health": "read",
     "POST /api/llm/check": "ai_studio.tests.generate",
     "PUT /api/llm/fallbacks": "ai_studio.platform.settings",
@@ -488,6 +538,39 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/c4t-projects": "ai_studio.project.settings",
     // Narrowed by the handler: a customer's own organisation, all for staff, none for testers.
     "GET /api/organizations": "read",
+
+    // ── review and approval of test versions, the scripts list and the review queue (routes/reviews.ts, round 34) ──
+    "GET /api/projects/:id/scripts": "read",
+    "GET /api/projects/:id/review-policy": "read",
+    // Turning review off is an approver's call: it also needs Project Admin of the project (canApprove, checked in the route).
+    "PUT /api/projects/:id/review-policy": "ai_studio.tests.approve",
+    "GET /api/tests/:id/review": "read",
+    "GET /api/tests/:id/review/:version": "read",
+    "POST /api/tests/:id/review/:version/submit": "ai_studio.tests.write",
+    // Approving, rejecting and asking for changes also need Project Admin of the project (canApprove, checked in the route).
+    "POST /api/tests/:id/review/:version/approve": "ai_studio.tests.approve",
+    "POST /api/tests/:id/review/:version/reject": "ai_studio.tests.approve",
+    "POST /api/tests/:id/review/:version/request-changes": "ai_studio.tests.approve",
+    // Commenting needs ai_studio.tests.write or canApprove in the project (checked in the route).
+    "POST /api/tests/:id/review/:version/comments": "read",
+    // Narrowed by the handler to the projects the caller may approve in.
+    "GET /api/reviews": "read",
+    "GET /api/jobs/:id/test-versions": "read",
+
+    // ── project folders, archiving and deleting a project, a person's preferences (routes/project-folders.ts, round 34) ──
+    // Folders: reading is narrowed by the handler; changing them is for people who create projects, in their own organisation (checked there).
+    "GET /api/folders": "read",
+    "POST /api/folders": "ai_studio.project.create",
+    "PATCH /api/folders/:folderId": "ai_studio.project.create",
+    "DELETE /api/folders/:folderId": "ai_studio.project.create",
+    "PUT /api/projects/:id/folder": "ai_studio.project.create",
+    // Archive, restore and delete also need Project Admin of the project (checked in the route).
+    "POST /api/projects/:id/archive": "ai_studio.project.settings",
+    "POST /api/projects/:id/unarchive": "ai_studio.project.settings",
+    // Deleting also needs ai_studio.tests.delete in the project (checked in the route).
+    "DELETE /api/projects/:id": "ai_studio.project.settings",
+    "GET /api/me/preferences": "read",
+    "PUT /api/me/preferences": "read",
 };
 
 const key = (method: string, template: string) => `${method.toUpperCase() === "HEAD" ? "GET" : method.toUpperCase()} ${template}`;

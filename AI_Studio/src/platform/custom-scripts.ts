@@ -22,6 +22,7 @@ import { HttpError } from "./http-error.js";
 import { blocksFor } from "./block-store.js";
 import { LocatorStore } from "./locator-store.js";
 import { storeScript } from "./repo-sink.js";
+import { draftRunNote, trackTestVersion } from "./review-store.js";
 import { TERMINAL_STATES, type JobRow, type Repo, type TestRow } from "./repo.js";
 import { slugify } from "./storage.js";
 
@@ -138,6 +139,8 @@ export class CustomScripts {
             this.s.p.db.run("DELETE FROM locator_usage WHERE test_case_id = ?", t.id);
             this.store.audit(t.projectId, t.id, "take-over", `${t.testKey} was taken over`);
         });
+        // The code is the script that already ran, so the test keeps the review state it had (review-store.ts).
+        trackTestVersion(this.s.p.db, t.id, "takeover");
         return this.repo.getTest(t.id)!;
     }
 
@@ -238,6 +241,9 @@ export class CustomScripts {
         const kind: VersionKind = o.origin === "git" ? "git" : "edited";
         this.store.mark(id, projectId, { origin: o.origin ?? "written", imports: r.helperImports, ...(o.git ? { git: o.git } : {}) });
         const v = this.store.addVersion(id, { content: o.content, kind, note: o.note ?? (o.origin === "git" ? "Imported from Git" : "Written from scratch"), by: o.by ?? null, force: true });
+        // The script was stored before the test was marked as code, so the hook in Repo.addScript did not see it: the code is recorded
+        // as a version here, as the person's change it is (a run never approves what it finds; review-store.ts).
+        trackTestVersion(this.s.p.db, id, o.origin === "git" ? "import" : "person");
         this.store.audit(projectId, id, o.origin === "git" ? "git-import" : "write", `${key} ${o.title.slice(0, 80)}`);
         const queued = o.queue === false ? { jobId: null } : await this.queueValidation(projectId, [id]);
         return { testId: id, testKey: key, version: v.version, diagnostics: r.diagnostics, ...queued };
@@ -296,7 +302,8 @@ export class CustomScripts {
         if (this.repo.listJobs(projectId).some((j) => !TERMINAL_STATES.includes(j.status))) return { jobId: null, note: "A run is in progress. The test is marked Not validated; run it again when it has finished." };
         try {
             const job = await this.s.startValidationJob(projectId, application.id, testIds);
-            return { jobId: job.id };
+            const note = draftRunNote(this.repo.db, testIds);
+            return { jobId: job.id, ...(note ? { note } : {}) };
         } catch (e) {
             const why = e instanceof HttpError ? e.message : "The run could not be started.";
             return { jobId: null, note: `${why} The test stays Not validated.` };

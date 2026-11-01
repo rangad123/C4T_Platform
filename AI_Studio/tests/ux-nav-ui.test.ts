@@ -19,6 +19,7 @@ import { expect as pwExpect } from "@playwright/test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
+import { AgentRunStore } from "../src/platform/agent-run-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { ROUTE_ALIASES, resolveAlias } from "../web/src/lib/aliases.js";
@@ -38,6 +39,10 @@ let shop: Seed;
 let empty: Seed;
 let jobId = "";
 let releaseId = "";
+let requirementId = "";
+let agentRunId = "";
+let suiteId = "";
+let runnerId = "";
 const consoleErrors: string[] = [];
 
 const api = async (method: string, url: string, payload?: unknown) => {
@@ -63,6 +68,13 @@ beforeAll(async () => {
     await api("POST", `/api/projects/${shop.projectId}/blocks`, { name: "Sign in", description: "Sign in with a nickname", kind: "web", params: [], steps: [{ action: "navigate", url: "/" }] });
     await api("POST", `/api/projects/${shop.projectId}/objects`, { name: "Checkout / Pay button", kind: "web", locator: { by: "role", role: "button", value: "Pay" } });
     releaseId = (await api("POST", `/api/projects/${shop.projectId}/releases`, { name: "Release 1.0" })).body.id;
+    requirementId = (await api("POST", `/api/projects/${shop.projectId}/requirements`, { title: "A shopper can pay by card" })).body.id;
+    const agentRuns = new AgentRunStore(platform.sql);
+    const agentRun = await agentRuns.create({ projectId: shop.projectId, objective: "A shopper can open the shop", startAddress: "http://127.0.0.1:6459/", limits: { maxSteps: 5, maxMinutes: 1, maxTokens: 1_000, approvalSeconds: 60 }, startedBy: { id: null, name: "Test" } });
+    await agentRuns.finish(agentRun.id, { state: "finished", verdict: "inconclusive", reasoning: "Nothing was checked." });
+    agentRunId = agentRun.id;
+    suiteId = (await api("POST", `/api/projects/${shop.projectId}/test-suites`, { name: "Checkout suite" })).body.id;
+    runnerId = (await api("POST", "/api/runners", { name: "Lab laptop" })).body.runner.id;
 
     browser = await chromium.launch();
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -242,26 +254,28 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         await pwExpect(page.locator('.content [role="alert"]')).toHaveCount(0);
     });
 
-    it("Test scripts > Scripts lists every test's script and opens its Code tab", async () => {
+    it("Test scripts > Scripts lists every test's script with its review state and opens its latest version (round 34)", async () => {
         await visit(routes.scripts(P()));
         const list = page.getByRole("list", { name: "Test scripts", exact: true });
         await pwExpect(list.getByRole("link")).toHaveCount(3);
         const testId = [...shop.tests.values()][0]!;
-        await pwExpect(list.locator(`a[href="${routes.testTab(testId, "code")}"]`)).toHaveCount(1);
-        await pwExpect(page.getByTestId("planned-script-approval")).toBeVisible();
+        await pwExpect(list.locator(`a[href^="#/projects/${P()}/scripts?test=${testId}&version="]`)).toHaveCount(1);
+        await pwExpect(page.getByTestId("script-review-list")).toBeVisible();
+        await pwExpect(page.getByTestId("planned-script-approval")).toHaveCount(0);
     });
 
-    it("Settings > General edits the project's details, AI configuration says what is planned, Members lists who is on the project; the testing type is under General", async () => {
-        // General is real since round 26: name, platforms and testing modes (US-010), the Crowd4Test link, and archiving still planned.
+    it("Settings > General edits the project's details, AI configuration says whether AI is available and who pays, Members lists who is on the project; the testing type is under General", async () => {
+        // General is real since round 26: name, platforms and testing modes (US-010), the Crowd4Test link, and archive or delete (round 34).
         await visit(routes.projectSettings(P(), "general"));
         const general = page.getByTestId("project-general");
         await pwExpect(general.getByLabel("Name", { exact: true })).toBeVisible();
         await pwExpect(general.getByRole("group", { name: "Platforms" }).getByRole("checkbox", { name: "Web" })).toBeChecked();
         await pwExpect(general.getByRole("group", { name: "Testing modes" }).getByRole("checkbox", { name: "AI agent" })).toBeChecked();
         await pwExpect(general.getByTestId("project-c4t-link")).toBeVisible();
-        await pwExpect(general.getByTestId("planned-project-archive")).toBeVisible();
+        await pwExpect(general.getByTestId("project-archive").getByRole("button", { name: "Archive project" })).toBeVisible();
         await visit(routes.projectSettings(P(), "ai"));
-        await pwExpect(page.getByTestId("planned-project-ai")).toBeVisible();
+        await pwExpect(page.getByTestId("project-ai-available")).toBeVisible();
+        await pwExpect(page.getByTestId("project-ai-choice").getByRole("heading", { name: "Who pays for this project’s AI" })).toBeVisible();
         await visit(routes.projectSettings(P(), "members"));
         await pwExpect(page.getByTestId("project-members").getByRole("heading", { name: "Members", exact: true })).toBeVisible();
         // The security module is on by default (round 18), so the project's testing type shows; it moved here from Setup.
@@ -615,15 +629,19 @@ describe("every route builder opens a page without an error", () => {
             newProject: [routes.newProject(), routes.newProject({ project: P() }), routes.newProject({ url: "http://127.0.0.1:6459" })],
             project: [routes.project(P())],
             tests: [routes.tests(P())],
+            newTest: [routes.newTest(P(), "describe"), routes.newTest(P(), "build")],
             runs: RUNS.map((k) => routes.runs(P(), k)),
             run: [routes.run(P(), jobId)],
             schedule: [routes.schedule(P()), routes.schedule(P(), "run-1")],
             runners: [routes.runners(P())],
             requirements: [routes.requirements(P())],
+            requirement: [routes.requirement(P(), requirementId)],
             cases: CASES.map((k) => routes.cases(P(), k)),
             suites: [routes.suites(P())],
+            suite: [routes.suite(P(), suiteId)],
             scripts: [...SCRIPTS.map((k) => routes.scripts(P(), k)), routes.scripts(P(), "steps", "Sign in")],
             agentRuns: [routes.agentRuns(P())],
+            agentRun: [routes.agentRun(P(), agentRunId)],
             projectSettings: SETTINGS.map((k) => routes.projectSettings(P(), k)),
             setup: [routes.setup(P()), routes.setup(P(), "environments"), routes.setup(P(), "alerts"), routes.setup(P(), "issues")],
             library: [routes.library(P()), routes.library(P(), "data"), routes.library(P(), "accounts")],
@@ -645,6 +663,7 @@ describe("every route builder opens a page without an error", () => {
             develop: [routes.develop],
             createProject: [routes.createProject],
             allRunners: [routes.allRunners],
+            runner: [routes.runner(runnerId)],
             folders: [routes.folders],
             profile: [routes.profile],
             settings: [routes.settings],

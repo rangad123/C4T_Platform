@@ -1,43 +1,92 @@
-import { projectShape, type ProjectDetail } from "../../api";
-import { Planned } from "../../components/Planned";
+import { Bot, ChevronRight } from "lucide-react";
+import { type ProjectDetail } from "../../api";
 import { ProjectPlace } from "../../components/ProjectHub";
-import { Callout } from "../../components/ui";
+import { Badge, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
+import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
-import { routes } from "../../lib/router";
+import { friendlyError } from "../../lib/labels";
+import { go, routes } from "../../lib/router";
+import { AgentRunDetail } from "../agent-runs/AgentRunDetail";
+import { AgentRunForm } from "../agent-runs/AgentRunForm";
+import { isActive, runBadge, type AgentRunList } from "../agent-runs/agent-runs";
+import "../agent-runs/agent-runs.css";
 
 /**
- * The Agent runs place (decision D-21, flow B): the AI pursues an objective in the application, live, on a runner. Not built yet
- * (Phase 5 builds it on the runner and run work of Phase 4). The AI writing tests, the other half of agent mode, already exists and
- * is linked from here.
+ * The Agent runs place (decision D-21, flow B): a person gives an objective, the AI pursues it in a real browser, and a person approves its
+ * high-impact actions. `runId` opens one run (`#/projects/:id/agent/:runId`). The AI writing tests, the other half of agent mode, is under Test cases.
  */
-export function AgentRunsPage({ id }: { id: string }) {
-    const project = useFetch<ProjectDetail>(`/projects/${id}`);
-    const agentOff = project.data && !projectShape(project.data).testingModes.includes("agent");
+export function AgentRunsPage({ id, runId }: { id: string; runId?: string }) {
     return (
-        <ProjectPlace id={id} place="agent" title="Agent runs" subtitle="Give the AI an objective. It plans, you approve the plan, and it tests the application on a runner.">
-            {agentOff && (
+        <ProjectPlace id={id} place="agent" title="Agent runs" subtitle="Give the AI an objective. It works through the application in a real browser and reports what it found.">
+            {runId ? <AgentRunDetail projectId={id} runId={runId} /> : <RunIndex id={id} />}
+        </ProjectPlace>
+    );
+}
+
+function RunIndex({ id }: { id: string }) {
+    const list = useFetch<AgentRunList>(`/projects/${id}/agent-runs`, (d) => (d?.runs.some(isActive) ? 3000 : null));
+    const project = useFetch<ProjectDetail>(`/projects/${id}`);
+    const access = project.data?.access?.permissions;
+    const canRun = !access || access.includes("ai_studio.agent.run");
+    const seesUsage = !access || access.includes("ai_studio.usage.view");
+    const data = list.data;
+
+    return (
+        <div className="stack">
+            {data && !data.agentModeOn && (
                 <Callout tone="info" title="Agent mode is off for this project">
                     Turn it on in <a href={routes.projectSettings(id, "general")}>Settings → General</a> to use agent runs.
                 </Callout>
             )}
-            <Planned
-                title="Agent runs"
-                phase="Phase 5"
-                testId="planned-agent-runs"
-                will={[
-                    "Write an objective, for example “A new customer can sign up and buy a gift card”, and choose the environment.",
-                    "The AI writes a plan and lists what the runner needs. A Project Admin approves the plan before anything runs.",
-                    "The run happens on an eligible runner of this project, with only the actions the project allows.",
-                    "Live progress, then a report with every action, screenshots and logs. It says whether a failure is in the application, the agent, the environment or the runner.",
-                    "Turn a good run into a test case to keep.",
-                ]}
-                today={
-                    <>
-                        The AI already writes tests for you: <a href={routes.newProject({ project: id })}>explore the application</a>, or describe one test in your own words from{" "}
-                        <a href={routes.tests(id)}>Test cases</a> (New test → Describe it).
-                    </>
-                }
-            />
-        </ProjectPlace>
+            {data && !data.canStart.ok && (
+                <Callout tone="warning" title="Agent runs cannot start here">
+                    {data.canStart.reason}
+                </Callout>
+            )}
+            {data && <p className="t-secondary">{data.whereItRuns}</p>}
+            {data && canRun && <AgentRunForm projectId={id} list={data} seesUsage={seesUsage} onStarted={(r) => go(routes.agentRun(id, r.id))} />}
+            <section className="card" aria-labelledby="agent-runs-title">
+                <div className="card-head">
+                    <h2 className="t-section" id="agent-runs-title">
+                        Runs
+                    </h2>
+                </div>
+                {list.loading ? (
+                    <ListSkeleton rows={3} />
+                ) : !data ? (
+                    <div className="card-pad">
+                        <ErrorState error={friendlyError(list.error?.message)} onRetry={list.reload} />
+                    </div>
+                ) : data.runs.length === 0 ? (
+                    <EmptyState icon={Bot} title="No agent runs yet">
+                        A run takes an objective in plain words, like “a new customer can add a gift card to the cart”. {canRun ? "" : "Starting one needs permission to run agents."}
+                    </EmptyState>
+                ) : (
+                    <ul className="list divided" aria-label="Agent runs">
+                        {data.runs.map((r) => {
+                            const badge = runBadge(r);
+                            return (
+                                <li key={r.id}>
+                                    <a className="list-row" href={routes.agentRun(id, r.id)} data-agent-run={r.id}>
+                                        <span className="main">
+                                            <span className="title">{r.objective}</span>
+                                            <span className="meta">
+                                                {plural(r.stepsTaken, "step")}, started by {r.startedBy.name} {relativeTime(r.createdAt)}
+                                            </span>
+                                        </span>
+                                        <span className="tail">
+                                            <Badge tone={badge.tone} tip={badge.help}>
+                                                {badge.label}
+                                            </Badge>
+                                        </span>
+                                        <ChevronRight size={16} className="chev" aria-hidden />
+                                    </a>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </section>
+        </div>
     );
 }

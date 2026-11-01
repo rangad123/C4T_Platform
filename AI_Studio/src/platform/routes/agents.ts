@@ -21,6 +21,9 @@ import { redactCredentials } from "../../engine/net/company-network.js";
 import { RUNNER_UPDATE_HEADER } from "../../agent-protocol/schema.js";
 import { runnerUpdatesFor } from "../runner-update.js";
 import { maxTokensFrom, runnerLimitMessage } from "../runner-kit.js";
+import { accessControlOf, actorOf } from "../auth/access.js";
+import { currentActor } from "../auth/actor.js";
+import { assertMayAddRunner, CANNOT_MANAGE_RUNNER, canManageRunner } from "../runner-health.js";
 import { registerUpdateAgentRoutes } from "./runner-updates.js";
 import type { RouteCtx } from "./types.js";
 
@@ -29,7 +32,7 @@ const RESULT_CAP = 8_000_000;
 
 const publicToken = (t: AgentTokenRecord) => ({ id: t.id, label: t.label, hint: `aitg_…${t.hint}`, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt, revokedAt: t.revokedAt });
 
-function publicAgent(a: ReturnType<AgentService["store"]["listAgents"]>[number]) {
+export function publicAgent(a: ReturnType<AgentService["store"]["listAgents"]>[number]) {
     const c = a.capabilities;
     return {
         id: a.id,
@@ -128,12 +131,13 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
     app.get("/api/projects/:id/agent-tokens", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
-        return svc.store.listTokens(id).map(publicToken);
+        return svc.store.listTokens(id).map((t) => ({ ...publicToken(t), ...(t.projectId !== id ? { shared: true } : {}) }));
     });
 
     app.post("/api/projects/:id/agent-tokens", async (req, reply) => {
         const { id } = req.params as { id: string };
-        ctx.project(id);
+        const project = ctx.project(id);
+        assertMayAddRunner(app, req, svc.store, (project.organization_id as string | null) ?? null);
         const body = z.object({ label: z.string().trim().max(60).optional() }).parse(req.body ?? {});
         // One runner per project (same limit as the kit download): refuse a new token until the current runner is removed.
         const max = maxTokensFrom();
@@ -146,7 +150,17 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
     app.delete("/api/projects/:id/agent-tokens/:tid", async (req) => {
         const { id, tid } = req.params as { id: string; tid: string };
         ctx.project(id);
-        if (!svc.store.revokeToken(id, tid)) throw new HttpError(404, "Token not found, or already revoked.");
+        const token = svc.store.getToken(tid);
+        if (!token || token.revokedAt || !svc.store.hasAccess(tid, id)) throw new HttpError(404, "Token not found, or already revoked.");
+        // Registered from this project and used by no other: it goes, as it always did. Otherwise only this project's access ends.
+        const others = svc.store.projectsOf(tid).some((x) => x.projectId !== id);
+        if (token.projectId === id && !others) {
+            if (!svc.store.revokeToken(id, tid)) throw new HttpError(404, "Token not found, or already revoked.");
+            return { ok: true };
+        }
+        const actor = actorOf(req) ?? currentActor();
+        if (!canManageRunner(accessControlOf(app).projects, actor, token.organizationId)) throw new HttpError(403, CANNOT_MANAGE_RUNNER);
+        svc.store.removeAccess(tid, id);
         return { ok: true };
     });
 
@@ -171,7 +185,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         await ctx.assertNoActiveJob(id);
         if (body.runOn === "agent") {
             const agentId = body.agentId ?? null;
-            if (agentId && svc.store.getAgent(agentId)?.projectId !== id) throw new HttpError(404, "That runner agent does not belong to this project.");
+            if (agentId && !svc.store.agentServes(agentId, id)) throw new HttpError(404, "That runner agent does not belong to this project.");
             const online = svc.eligibleAgents(id, { runOn: "agent", agentId });
             if (online.length === 0) throw new HttpError(409, agentId ? "That runner agent is not online. Start it, then try again." : "No runner agent is online for this project. Start one, then try again.");
             svc.store.setRunner(id, { runOn: "agent", agentId });
@@ -210,7 +224,8 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             other(req);
             let project = "";
             try {
-                project = String((ctx.project(token(req).projectId) as { name?: unknown }).name ?? "").slice(0, 120);
+                const home = token(req).projectId;
+                if (home) project = String((ctx.project(home) as { name?: unknown }).name ?? "").slice(0, 120);
             } catch {
                 /* the name is only for the sentence */
             }
@@ -234,7 +249,8 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             let lastSeen = svc.clock();
             try {
                 for (;;) {
-                    if (closed || poll.superseded()) return reply.code(204).send();
+                    // A runner retired while its poll was open gets nothing more: the token is read again on every turn.
+                    if (closed || poll.superseded() || !svc.store.tokenLive(token(req).id)) return reply.code(204).send();
                     const offer = svc.offerTo(svc.store.getAgent(agent.id) ?? fresh, body.freeSlots);
                     if (offer) return reply.code(200).send(offer);
                     if (svc.clock() >= until) return reply.code(204).send();

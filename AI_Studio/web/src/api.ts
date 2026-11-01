@@ -27,7 +27,7 @@ export interface Job {
     jobId: string;
     projectId: string;
     status: JobStatus;
-    mode?: "generate" | "validate" | "variants" | "environment" | "plain";
+    mode?: "generate" | "validate" | "variants" | "environment" | "plain" | "agent";
     /** An exploration that stops at a plan: nothing is created or run until the person confirms it (see features/onboarding). */
     planOnly?: boolean;
     /** Creation that starts from the plan an earlier exploration kept (that plan job's id). */
@@ -100,6 +100,10 @@ export interface ProjectRow {
     validated_count: number;
     url: string | null;
     last_job_status: JobStatus | null;
+    /** Round 34: the folder the project is in, and when it was archived (archived ones are listed only with ?archived=include). */
+    folder_id?: string | null;
+    archived_at?: string | null;
+    organization_id?: string | null;
 }
 
 export interface ProjectDetail {
@@ -121,6 +125,9 @@ export interface ProjectDetail {
     c4tProject?: { id: string; reference: string | null; title: string | null } | null;
     /** What the person asking may do on this project, and whether they are its Project Admin. */
     access?: { projectAdmin: boolean; permissions: string[] };
+    /** Round 34: set while the project is archived (read-only, no runs). */
+    archived_at?: string | null;
+    folder_id?: string | null;
 }
 
 export type Platform = "web" | "android" | "ios";

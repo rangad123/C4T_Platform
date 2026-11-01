@@ -92,6 +92,9 @@ export interface ValidationHooks {
     onCleanup?(items: FinishedItem[]): void | Promise<void>;
 }
 
+/** Said on a failed run of an approved test whose repair was saved instead of run. */
+export const REPAIR_WAITS_FOR_REVIEW = "A repair was saved as a new version for review. It was not run: only approved versions run.";
+
 export interface ValidationDeps {
     /** Needed only to repair web tests; a mobile-only batch runs without a browser. */
     browser?: Browser;
@@ -100,6 +103,11 @@ export interface ValidationDeps {
     render: RenderContext;
     model: AppModel;
     maxRepairAttempts: number;
+    /**
+     * Runs of tests a person already approved: a repair is kept as a new version for review and is never run here (only approved versions run).
+     * The run's failure stands as it is. Repairs that need test runs to find (det-repair.ts) are not tried.
+     */
+    repairsAreDrafts?: boolean;
     workers: number;
     /** Re-run a failing script this many times before analysing/repairing it (scheduled runs). Default 0. */
     retryFailures?: number;
@@ -274,7 +282,7 @@ export async function validateBatch(
                 break;
             }
             // Repair without AI first (det-repair.ts): plain-rule fixes for a missing element, each tried with a real run; the model is asked only when none passes.
-            if (t.spec.kind === "web" && t.scenario && deps.browser && deterministicRepairOn(ctx.config)) {
+            if (!deps.repairsAreDrafts && t.spec.kind === "web" && t.scenario && deps.browser && deterministicRepairOn(ctx.config)) {
                 const det = await repairWithoutAi({ ctx, browser: deps.browser, baseUrl: deps.render.baseUrl, spec: t.spec, run, credentials: deps.env.credentials, rerun: (spec) => runAgain(t, renderWithAdapter(spec, t.framework, deps.render)) });
                 if (det.status === "stopped") {
                     outcome = cancelledOutcome(t, script, run, attempt);
@@ -335,6 +343,12 @@ export async function validateBatch(
 
             t.spec = repair.spec;
             await hooks.onRepaired?.(t, repair.spec, repair.reason);
+            if (deps.repairsAreDrafts) {
+                // Kept for a person to review; the approved version's failure is the result of this run.
+                ctx.emit({ stage: "validation", kind: "repair_saved_for_review", level: "warn", message: `${t.spec.testId}: a repair was saved as a new version for review. It was not run.` });
+                outcome = { status: "FAILED_VALIDATION", reason: `${summarise(run)} ${REPAIR_WAITS_FOR_REVIEW}`, spec: t.spec, script, attempts: attempt, lastRun: run };
+                break;
+            }
             ctx.emit({ stage: "validation", kind: "script_regenerated", message: `${t.spec.testId} regenerated (attempt ${attempt + 1}): ${repair.reason}` });
             attempt++;
             repairs++;

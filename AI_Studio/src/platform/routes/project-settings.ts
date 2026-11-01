@@ -10,6 +10,7 @@
  * platform or mode turned off stays where it is and keeps showing. The linked Crowd4Test project is a reference only (D-27): it is
  * checked to belong to the project's organisation through Crowd4Test's service, and it grants nobody anything.
  */
+import { projectAiGate } from "../ai-config.js";
 import { z } from "zod";
 import { MobileTargetSchema } from "../../engine/mobile/target.js";
 import { isAppUri } from "../../engine/desktop/target.js";
@@ -21,6 +22,7 @@ import type { Platform } from "../bootstrap.js";
 import type { Row } from "../db.js";
 import { HttpError } from "../http-error.js";
 import { PlatformsSchema, projectSetupOf, setupItems, TestingModesSchema } from "../project-setup.js";
+import { isProjectNameTaken, projectNameTaken } from "../project-folders.js";
 import type { RouteCtx } from "./types.js";
 
 export const NO_ORGANIZATION_TO_LINK = "This project is not part of an organisation, so it cannot be linked to a Crowd4Test project.";
@@ -79,6 +81,10 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
         const { id } = req.params as { id: string };
         const row = project(id);
         const body = parsePlain(PatchBody, req.body);
+        // A new name must not be one another project of the organisation already has (project-folders.ts).
+        if (body.name !== undefined && body.name.trim().toLowerCase() !== String(row.name).trim().toLowerCase() && isProjectNameTaken(p.db, body.name, (row.organization_id as string | null) ?? null, id)) {
+            throw new HttpError(409, projectNameTaken(body.name));
+        }
         let linked: { reference: string; title: string } | undefined;
         if (body.c4tProjectId) {
             const service = c4tServiceOf(p);
@@ -125,12 +131,13 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
                 hasAndroidApp: Boolean(m?.appPackage || m?.apkPath),
                 hasIosApp: Boolean(m?.iosBundleId),
                 canRunIos: runner.canRunIos,
-                aiConfigured: p.llm.modelName !== "unavailable",
+                aiConfigured: (await projectAiGate(p, id)).ok,
                 runner: runner.runOn === "platform" ? { runOn: "platform" } : { runOn: "agent", online: agents.eligibleAgents(id).length },
             }),
         };
     });
 
+    const C4T_PROJECTS_NOT_FOR_YOU = "Linking a Crowd4Test project is done by the organisation's own people or Crowd4Test staff.";
     app.get("/api/projects/:id/c4t-projects", async (req) => {
         const { id } = req.params as { id: string };
         const row = project(id);
@@ -139,6 +146,9 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
         if (!service) return { available: false, projects: [], c4tProjectId, message: C4T_SERVICE_OFF };
         const org = row.organization_id as string | null;
         if (!org) return { available: false, projects: [], c4tProjectId, message: NO_ORGANIZATION_TO_LINK };
+        // The organisation's whole list of Crowd4Test projects: for its own people and for staff, never for a tester (or another organisation).
+        const actor = currentActor();
+        if (sideOf(actor) === "tester" || (sideOf(actor) === "customer" && actor.organizationId !== org)) throw new HttpError(403, C4T_PROJECTS_NOT_FOR_YOU);
         const theirs = await service.projectsOf(org, clientIpOf(req));
         if (!theirs) return { available: false, projects: [], c4tProjectId, message: C4T_ORGANISATION_UNKNOWN };
         return { available: true, projects: theirs, c4tProjectId };

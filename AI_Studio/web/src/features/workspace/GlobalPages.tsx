@@ -1,17 +1,16 @@
-import { ChevronRight, FolderKanban, Sparkles } from "lucide-react";
+import { FolderKanban, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ProjectRow } from "../../api";
-import { Planned } from "../../components/Planned";
 import { usePage } from "../../components/Shell";
 import { Badge, EmptyState, ErrorState, LinkButton, ListSkeleton, PageHeader, Skeleton } from "../../components/ui";
 import { EmbeddedContext } from "../../lib/embedded";
 import { useConfig, useDocumentTitle, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { useAuth } from "../auth/auth";
-import { YourAccount } from "../auth/PeopleSettings";
-import { PERMISSION_WORDS, SIDE_WORDS, permissionsOf, sideOf, useCan, type Permission } from "../auth/permissions";
+import { useCan } from "../auth/permissions";
 import { FleetDashboard } from "../dashboard/FleetDashboard";
+import { ReviewQueueCard } from "../review/ReviewCards";
+import { RunnerHealthCard, RunnersList } from "../runners/RunnersPages";
 import { EmulatorSetup } from "../setup/EmulatorSetup";
 
 /**
@@ -45,33 +44,28 @@ export function DashboardPage() {
                     }
                 />
             </EmbeddedContext.Provider>
-            <Planned
-                title="Runner health"
-                phase="Phase 4"
-                testId="planned-dashboard-runners"
-                will={["Runners online, busy and offline, the phones and browsers they offer, and how long runs wait in the queue."]}
-                today={<>Each project shows its own runner in Settings → Runners.</>}
-            />
+            {/* Outstanding reviews across the person's projects (features/review/ReviewCards.tsx). */}
+            <ReviewQueueCard />
+            <RunnerHealthCard />
             {can("ai_studio.usage.view") && (
                 <section className="card card-pad stack-sm" data-testid="dashboard-ai">
                     <h2 className="t-section">AI usage</h2>
-                    <p className="t-secondary">Usage and the estimated cost of every project, by model and by month, with the limits that stop a run.</p>
+                    <p className="t-secondary">Usage and the estimated cost of every project, by model, by month and by who pays (Crowd4Test or the customer), with the limits that stop a run.</p>
                     <div>
                         <LinkButton href={routes.settings}>Open AI usage</LinkButton>
                     </div>
-                    <p className="t-meta">Planned (Phase 7): cost by who pays, Crowd4Test or the customer.</p>
                 </section>
             )}
         </GlobalPage>
     );
 }
 
-/** Test development: start writing tests in any of your projects, with the AI or by hand. */
+/** Test development: a launcher that opens each way of writing tests in any of your projects, and the review queue of drafts across them. */
 export function TestDevelopmentPage() {
     const projects = useFetch<ProjectRow[]>("/projects");
     const can = useCan();
     return (
-        <GlobalPage title="Test development" nav="develop" subtitle="Write tests in any of your projects: with the AI, by recording, step by step, or as code.">
+        <GlobalPage title="Test development" nav="develop" subtitle="Pick a project and write tests: with the AI, in your own words, by recording, or step by step. Drafts wait below for review.">
             {projects.loading ? (
                 <ListSkeleton rows={3} />
             ) : projects.error ? (
@@ -96,9 +90,19 @@ export function TestDevelopmentPage() {
                                         Explore with AI
                                     </LinkButton>
                                 )}
+                                {can("ai_studio.tests.generate") && (
+                                    <LinkButton size="sm" href={routes.newTest(p.id, "describe")} tip="Say what to test in your own words. The AI writes the steps.">
+                                        Describe in words
+                                    </LinkButton>
+                                )}
                                 {can("ai_studio.tests.write") && (
                                     <LinkButton size="sm" href={routes.record(p.id)} tip="Use the application while the platform writes down each step.">
                                         Record
+                                    </LinkButton>
+                                )}
+                                {can("ai_studio.tests.write") && (
+                                    <LinkButton size="sm" href={routes.newTest(p.id, "build")} tip="Add the steps one by one. The script is made for you.">
+                                        Build steps
                                     </LinkButton>
                                 )}
                                 <LinkButton size="sm" variant="ghost" href={routes.tests(p.id)} tip="The project's test cases, with every way to add one (New test).">
@@ -109,12 +113,8 @@ export function TestDevelopmentPage() {
                     ))}
                 </ul>
             )}
-            <Planned
-                title="Drafts waiting for review"
-                phase="Phase 3"
-                testId="planned-review-queue"
-                will={["Every test case and script the AI wrote that is still a draft, across your projects, with Approve and Ask for changes for Project Admins."]}
-            />
+            {/* The review queue across projects (GET /api/reviews, features/review/ReviewCards.tsx). */}
+            <ReviewQueueCard />
         </GlobalPage>
     );
 }
@@ -145,112 +145,18 @@ function MobileTooling() {
     );
 }
 
-/** Runners: the machines that run tests. One registry of machines, granted to projects, is Phase 4 (decision D-16). */
+/** Runners: every machine the person may see, each given to any number of projects (features/runners/RunnersPages.tsx). */
 export function RunnersPage() {
-    const projects = useFetch<ProjectRow[]>("/projects");
     return (
         <GlobalPage title="Runners" nav="runners" subtitle="The computers that run your tests: Windows and Mac machines, their browsers and phones.">
-            <Planned
-                title="One list of machines"
-                phase="Phase 4"
-                testId="planned-runner-registry"
-                will={[
-                    "Register a computer once, then give it to any number of projects.",
-                    "See each runner online, busy or offline, with its browsers, phones and current work, and diagnose problems.",
-                    "Approve new runners, pause one so it finishes its work and takes no more (drain), or remove one at once (revoke).",
-                ]}
-                today={<>Today a runner belongs to one project. Set it up in that project’s Settings → Runners.</>}
-            />
-            {(projects.data ?? []).length > 0 && (
-                <section className="stack-sm" aria-labelledby="runners-by-project">
-                    <h2 className="t-section" id="runners-by-project">
-                        Runners by project
-                    </h2>
-                    <ul className="card list divided">
-                        {(projects.data ?? []).map((p) => (
-                            <li key={p.id}>
-                                <a className="list-row" href={routes.runners(p.id)}>
-                                    <span className="main">
-                                        <span className="title truncate">{p.name}</span>
-                                        <span className="meta">Settings → Runners</span>
-                                    </span>
-                                    <ChevronRight size={18} className="chev" aria-hidden />
-                                </a>
-                            </li>
-                        ))}
-                    </ul>
-                </section>
-            )}
+            <RunnersList />
             <MobileTooling />
         </GlobalPage>
     );
 }
 
-/** Folders: projects grouped inside an organisation (open question Q-08 in the decisions document). */
-export function FoldersPage() {
-    return (
-        <GlobalPage title="Folders" nav="folders" subtitle="Keep projects in order.">
-            <Planned
-                title="Folders"
-                phase="after the MVP"
-                testId="planned-folders"
-                will={["Put projects into folders within your organisation, and see a folder’s projects together.", "Later: building blocks shared by several projects (reusable steps, shared elements)."]}
-                today={<>All your projects are listed in Projects.</>}
-            />
-        </GlobalPage>
-    );
-}
+export { RunnerPage } from "../runners/RunnersPages";
 
-/** Profile: who is signed in, which features they have, and their own settings. */
-export function ProfilePage() {
-    const { state } = useAuth();
-    const me = state?.me;
-    const perms = permissionsOf(me);
-    const side = sideOf(me);
-    const fromCrowd4Test = me?.via === "crowd4test";
-    const granted = (Object.keys(PERMISSION_WORDS) as Permission[]).filter((p) => perms.has(p));
-    return (
-        <GlobalPage title="Profile" nav="profile" subtitle="Your account, and what you can do in AI Studio.">
-            <section className="card card-pad stack-sm" data-testid="profile-account">
-                <h2 className="t-section">Account</h2>
-                <dl className="kv">
-                    <dt>Name</dt>
-                    <dd>{me?.name ?? "—"}</dd>
-                    {me?.email && (
-                        <>
-                            <dt>Email</dt>
-                            <dd>{me.email}</dd>
-                        </>
-                    )}
-                    {side !== "local" && (
-                        <>
-                            <dt>Side</dt>
-                            <dd>{SIDE_WORDS[side]}</dd>
-                        </>
-                    )}
-                </dl>
-                {fromCrowd4Test && state?.crowd4test && (
-                    <p className="t-secondary">
-                        You sign in with your Crowd4Test account. Change your name, email or password in <a href={state.crowd4test.portalUrl}>your Crowd4Test portal</a>.
-                    </p>
-                )}
-            </section>
-            <section className="card card-pad stack-sm" data-testid="profile-permissions">
-                <h2 className="t-section">What you can do</h2>
-                {granted.length === 0 ? (
-                    <p className="t-secondary">Nothing yet. Ask your Crowd4Test administrator.</p>
-                ) : (
-                    <ul className="planned-list">
-                        {granted.map((p) => (
-                            <li key={p}>{PERMISSION_WORDS[p]}</li>
-                        ))}
-                    </ul>
-                )}
-                <p className="t-meta">{fromCrowd4Test ? "A Crowd4Test administrator chooses these. Projects open to you are the ones you were added to." : "These follow your role on this platform."}</p>
-            </section>
-            {/* Password and personal API tokens: only for accounts of this platform itself. A Crowd4Test sign-in has neither here. */}
-            {me?.kind === "user" && !fromCrowd4Test && <YourAccount />}
-            <Planned title="Preferences and notifications" phase="after the MVP" testId="planned-profile-preferences" will={["Choose which emails and alerts you receive, and your default project."]} />
-        </GlobalPage>
-    );
-}
+// Folders and Profile have their own files (round 34); main.tsx keeps importing them from here.
+export { FoldersPage } from "./FoldersPage";
+export { ProfilePage } from "./ProfilePage";

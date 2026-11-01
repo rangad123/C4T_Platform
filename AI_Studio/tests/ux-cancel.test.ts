@@ -238,7 +238,8 @@ describe("the pieces", () => {
         } finally {
             slowServer.closeAllConnections?.();
             slowServer.close();
-            fs.rmSync(scratch, { recursive: true, force: true });
+            // The killed run's browser can still be writing its trace for a moment: try the removal again rather than fail on it.
+            fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
         }
     }, 120_000);
 });

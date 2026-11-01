@@ -26,7 +26,7 @@ export const BACKUP_LIMITS = {
 } as const;
 
 /** The documents a backup holds. Anything else in a zip is refused. */
-export const DOCUMENTS = ["manifest.json", "project.json", "tests.json", "manual-cases.json", "releases.json", "runbooks.json", "environments.json", "test-data.json", "objects.json", "blocks.json", "schedules.json", "alert-channels.json", "secrets-needed.json", "files.json", "helpers.json", "security.json"] as const;
+export const DOCUMENTS = ["manifest.json", "project.json", "tests.json", "manual-cases.json", "requirements.json", "releases.json", "runbooks.json", "environments.json", "test-data.json", "objects.json", "blocks.json", "schedules.json", "alert-channels.json", "secrets-needed.json", "files.json", "helpers.json", "security.json"] as const;
 export const BASELINE_DIR = "baselines/";
 export const EVIDENCE_DIR = "evidence/";
 

@@ -9,11 +9,16 @@ export default defineConfig({
     test: {
         include: [
             "tests/agent-platform-unit.test.ts",
+            "tests/live-hardening.test.ts",
             "tests/hard-signin-unit.test.ts",
             "tests/floating-promises-unit.test.ts",
             "tests/crowd4test-signin.test.ts",
             "tests/permissions.test.ts",
             "tests/permissions-unit.test.ts",
+            "tests/agent-runs-unit.test.ts",
+            "tests/agent-safety-unit.test.ts",
+            "tests/requirements-api.test.ts",
+            "tests/ai-config-api.test.ts",
             "tests/projects-phase1.test.ts",
             "tests/device-session-unit.test.ts",
             "tests/device-farm-unit.test.ts",

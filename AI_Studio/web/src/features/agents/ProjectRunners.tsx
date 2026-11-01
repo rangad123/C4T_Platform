@@ -9,6 +9,7 @@ import { AccessPanel, RemoveAccessDialog, type AccessTarget } from "./RemoveAcce
 import { RunnerChoicePanel } from "./RunnerChoicePanel";
 import { TokensPanel } from "./TokensPanel";
 import { usePolled, type Agent, type AgentToken } from "./agents";
+import { RunnerAccessPanel } from "../runners/RunnerAccessPanel";
 import "./agents.css";
 
 /**
@@ -25,7 +26,7 @@ export function ProjectRunners({ id }: { id: string }) {
     const running = !!jobs.data?.some((j) => isActive(j.status));
     // One runner per project (server default; AGENT_MAX_TOKENS can raise it). Count the active tokens here, falling back to the info answer.
     const maxRunners = info.data?.maxRunners ?? 1;
-    const activeRunners = tokens.data ? tokens.data.filter((t) => !t.revokedAt).length : (info.data?.activeRunners ?? 0);
+    const activeRunners = tokens.data ? tokens.data.filter((t) => !t.revokedAt && !t.shared).length : (info.data?.activeRunners ?? 0);
     const atLimit = activeRunners >= maxRunners;
     const [adding, setAdding] = useState(false);
     const [removing, setRemoving] = useState<AccessTarget | null>(null);
@@ -44,6 +45,7 @@ export function ProjectRunners({ id }: { id: string }) {
             <div className="stack">
                 <AgentsList projectId={id} agents={agents} addOpen={adding} atLimit={atLimit} maxRunners={maxRunners} onAdd={() => setAdding(true)} onRemove={setRemoving} />
                 {adding && <AddRunner projectId={id} agents={agents.data ?? []} onClose={() => setAdding(false)} onChanged={changed} />}
+                <RunnerAccessPanel projectId={id} onChanged={changed} />
                 <AccessPanel projectId={id} agents={agents.data ?? []} tokens={tokens} onChanged={changed} />
                 <RunnerChoicePanel projectId={id} agents={agents.data ?? []} jobRunning={running} />
                 <details className="card ag-add" open={advanced} onToggle={(e) => setAdvanced((e.currentTarget as HTMLDetailsElement).open)}>

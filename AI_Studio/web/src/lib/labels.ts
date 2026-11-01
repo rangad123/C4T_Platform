@@ -59,7 +59,11 @@ export function frameworkLabel(framework: string): string {
 
 export const isActive = (s: JobStatus | undefined | null) => !!s && !["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(s);
 
+/** A run of only drafts: no test was allowed to run. Nothing went wrong, so it is not shown as a failure (review-store.ts). */
+export const nothingRan = (job: { status: JobStatus; error?: string | null }) => job.status === "FAILED" && /^Nothing ran: /.test(job.error ?? "");
+
 export function jobLabel(job: Pick<Job, "status" | "error" | "mode"> & { planOnly?: boolean; targets?: Job["targets"] }): { label: string; tone: Tone } {
+    if (nothingRan(job)) return { label: "Nothing ran", tone: "neutral" };
     // An exploration of an Android app and nothing else says so.
     const exploring = job.targets?.length && job.targets.every((t) => t === "mobile") ? "Exploring your phone app" : "Exploring your application";
     // An exploration that stops at a plan has created nothing yet: say that, not "Test suite ready".
@@ -68,6 +72,14 @@ export function jobLabel(job: Pick<Job, "status" | "error" | "mode"> & { planOnl
         if (job.status === "COMPLETED" || job.status === "PARTIALLY_COMPLETED") return { label: "Plan ready", tone: "info" };
         if (job.status === "FAILED") return job.error === "Cancelled" ? { label: "Stopped", tone: "neutral" } : { label: "Exploration failed", tone: "danger" };
         return { label: exploring, tone: "info" };
+    }
+    // An agent run has its own result on its own page: here it only says how the job went.
+    if (job.mode === "agent") {
+        if (job.status === "QUEUED") return { label: "Waiting to start", tone: "neutral" };
+        if (job.status === "COMPLETED") return { label: "Agent run passed", tone: "success" };
+        if (job.status === "PARTIALLY_COMPLETED") return { label: "Agent run finished", tone: "warning" };
+        if (job.status === "FAILED") return job.error === "Cancelled" ? { label: "Stopped", tone: "neutral" } : { label: "Agent run did not pass", tone: "warning" };
+        return { label: "Agent run in progress", tone: "info" };
     }
     // A browser / screen-size check is not an analysis: say what it is.
     if (job.mode === "variants") {
@@ -238,6 +250,7 @@ export function friendlyError(message: string | null | undefined): FriendlyError
     if (/isn't installed on the computer that runs the platform/i.test(m)) {
         return { title: "A browser isn’t installed here", body: `${m} To include it, run “npx playwright install” for that browser on the computer that runs the platform.` };
     }
+    if (/^Nothing ran: /.test(m)) return { title: "Nothing ran", body: `${m.replace(/^Nothing ran: /, "").replace(/^./, (c) => c.toUpperCase())} Only approved versions run. Once a Project Admin approves a test, run it again.` };
     // The pages show the run's own facts (how many tests finished) when they have them; this is what is always true.
     if (/^Cancelled$/i.test(m)) return { title: "This run was stopped", body: "Tests that had not finished kept the results they had before. You can start a new run at any time." };
     if (/Worker lost|lease expired/i.test(m)) return { title: "The run was interrupted", body: "The server restarted or stopped while working. Start it again." };

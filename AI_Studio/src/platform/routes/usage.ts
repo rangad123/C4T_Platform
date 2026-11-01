@@ -152,6 +152,8 @@ export function registerUsageRoutes(ctx: RouteCtx): void {
             totals,
             byPurpose: groupRows(rows, "purpose", prices),
             byModel: groupRows(rows, "model", prices),
+            // Who pays for this job (ai-config.ts): a job has one owner. Nothing is charged here.
+            billingOwner: rows[0]?.billingOwner ?? "crowd4test",
             // Smaller page snapshots (SNAP): estimated snapshot tokens saved in this job, from its job events; null when none were used.
             snapshotSavings: snapshotSavingsOfJob(p.db, id),
             // Repair without AI and exploration reuse (DET): what this job did without asking the model, from its job events; null when nothing.

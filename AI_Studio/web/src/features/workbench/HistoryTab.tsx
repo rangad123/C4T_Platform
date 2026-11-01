@@ -28,6 +28,8 @@ export interface Restored {
     from: number;
     changed: boolean;
     jobId: string | null;
+    /** What the run really runs, when that is not this version (a draft never runs). */
+    note?: string | undefined;
 }
 
 /**
@@ -103,12 +105,12 @@ export function HistoryTab({ test: t, versions, versionsState, refreshKey, unsav
         try {
             if (family === "steps") {
                 const r = await restoreSpecVersion(t.id, n, { run: true });
-                setDone({ family, from: n, changed: r.changed, jobId: r.jobId });
-                onRestored({ family, from: n, changed: r.changed, jobId: r.jobId });
+                setDone({ family, from: n, changed: r.changed, jobId: r.jobId, note: r.note });
+                onRestored({ family, from: n, changed: r.changed, jobId: r.jobId, note: r.note });
             } else {
-                const r = await capi<{ jobId?: string | null }>(`/tests/${t.id}/script-versions/${n}/restore`, { method: "POST" });
-                setDone({ family, from: n, changed: true, jobId: r.jobId ?? null });
-                onRestored({ family, from: n, changed: true, jobId: r.jobId ?? null });
+                const r = await capi<{ jobId?: string | null; note?: string }>(`/tests/${t.id}/script-versions/${n}/restore`, { method: "POST" });
+                setDone({ family, from: n, changed: true, jobId: r.jobId ?? null, note: r.note });
+                onRestored({ family, from: n, changed: true, jobId: r.jobId ?? null, note: r.note });
             }
             setRestoring(null);
             setPicked([]);
@@ -149,7 +151,7 @@ export function HistoryTab({ test: t, versions, versionsState, refreshKey, unsav
             {done && (
                 <div className="wb-history-note" role="status">
                     <Callout tone="success" title={`${done.family === "steps" ? "Steps" : "Code"} version ${done.from} is restored`}>
-                        {done.changed ? "It was saved as the newest version." : "These were already the current steps, so nothing was saved."} {done.jobId ? "The test is running again." : ""}
+                        {done.changed ? "It was saved as the newest version." : "These were already the current steps, so nothing was saved."} {done.jobId ? "The test is running again." : ""} {done.jobId && done.note ? done.note : ""}
                     </Callout>
                 </div>
             )}

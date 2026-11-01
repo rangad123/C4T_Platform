@@ -13,6 +13,7 @@
  */
 import { TERMINAL_STATES, type JobRow, type Repo, type TestRow } from "./repo.js";
 import type { Db, Row } from "./db.js";
+import { ReviewStore } from "./review-store.js";
 
 export type RunTestState = "waiting" | "running" | "passed" | "failed" | "finding" | "not_run";
 
@@ -27,6 +28,15 @@ export interface RunTestRow {
     durationMs?: number;
     /** Passed, but only on a re-run after failing in this run. */
     flaky?: true;
+}
+
+/** A test the run left out because it has no approved version. */
+export interface HeldBackTest {
+    id: string;
+    testId: string;
+    title: string;
+    /** The version waiting for review, for the link to it. */
+    version: number | null;
 }
 
 export interface RunCounts {
@@ -57,6 +67,8 @@ export interface RunDetail {
     active: boolean;
     counts: RunCounts;
     tests: RunTestRow[];
+    /** Tests left out because they are waiting for approval: drafts never run. */
+    heldBack: HeldBackTest[];
     /** Who started it: a person, a schedule, a deploy pipeline, or a run sequence. */
     startedBy: { kind: "person" | "schedule" | "deploy" | "sequence"; label?: string };
     /** Compared with the previous result of each test that ran. Null when nothing ran before or the run is not a plain re-run. */
@@ -216,9 +228,25 @@ function changesSince(db: Db, job: JobRow, tests: TestRow[], now: Map<string, Ve
     return compared ? { comparedWith: compared, newlyFailing, newlyPassing } : null;
 }
 
+const HELD_BACK_REASON = "Waiting for approval: only approved versions run.";
+
+/** The tests this run recorded as held back (review-store.ts `pinRun`), even after they were moved or their draft was decided. */
+function heldBackTests(repo: Repo, job: JobRow): HeldBackTest[] {
+    const reviews = new ReviewStore(repo.db);
+    const out: HeldBackTest[] = [];
+    for (const r of reviews.runVersions(job.id)) {
+        if (r.outcome !== "waiting") continue;
+        const t = repo.getTest(r.testId);
+        if (t && t.projectId === job.projectId) out.push({ id: t.id, testId: t.testKey, title: t.title, version: reviews.latest(t.id)?.version ?? null });
+    }
+    return out.sort((a, b) => a.testId.localeCompare(b.testId, undefined, { numeric: true }));
+}
+
 export function buildRunDetail(repo: Repo, job: JobRow): RunDetail {
     const db = repo.db;
     const tests = plannedTests(repo, job);
+    const heldBack = heldBackTests(repo, job);
+    const held = new Set(heldBack.map((t) => t.id));
     // Waiting in the queue counts as going: the run has not ended.
     const active = !TERMINAL_STATES.includes(job.status);
     const got = verdicts(db, job, tests);
@@ -230,6 +258,7 @@ export function buildRunDetail(repo: Repo, job: JobRow): RunDetail {
         const v = got.get(t.id);
         const base = { id: t.id, testId: t.testKey, title: t.title, suite: t.suite };
         if (v) return { ...base, state: v.state, ...(v.reason ? { reason: v.reason } : {}), ...(v.durationMs !== undefined ? { durationMs: v.durationMs } : {}), ...(v.flaky ? { flaky: true as const } : {}) };
+        if (held.has(t.id)) return { ...base, state: "not_run", reason: HELD_BACK_REASON };
         if (active) {
             // Scripts run together and are recorded when they finish: before that a test is waiting for the run to begin, or part of the run in progress.
             const running = started && (mode === "environment" || mode === "variants" ? true : t.validationStatus === "VALIDATING");
@@ -246,5 +275,5 @@ export function buildRunDetail(repo: Repo, job: JobRow): RunDetail {
     const order: Record<RunTestState, number> = { failed: 0, finding: 1, running: 2, waiting: 3, not_run: 4, passed: 5 };
     rows.sort((a, b) => order[a.state] - order[b.state] || a.testId.localeCompare(b.testId, undefined, { numeric: true }));
 
-    return { jobId: job.id, projectId: job.projectId, mode, active, counts, tests: rows, startedBy: startedBy(db, job), changes: changesSince(db, job, tests, got) };
+    return { jobId: job.id, projectId: job.projectId, mode, active, counts, tests: rows, heldBack, startedBy: startedBy(db, job), changes: changesSince(db, job, tests, got) };
 }

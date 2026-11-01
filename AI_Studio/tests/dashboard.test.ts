@@ -44,6 +44,7 @@ describe("readiness rules", () => {
         ["high-severity findings", { findings: { critical: 0, high: 2, medium: 0, low: 0 } }, "blocked", ["high-findings"], ["2 high-severity findings"]],
         ["critical and high together, critical first", { findings: { critical: 1, high: 2, medium: 0, low: 0 } }, "blocked", ["critical-findings", "high-findings"], ["1 critical finding", "2 high-severity findings"]],
         ["the last run failed", { latestJob: { status: "FAILED", mode: "validate" } }, "blocked", ["job-failed"], ["The last run failed"]],
+        ["a run of only drafts is held back, not a failure", { latestJob: { status: "FAILED", mode: "validate", nothingRan: true } }, "needs-attention", ["nothing-ran"], ["The last run ran nothing: its tests are waiting for approval"]],
         ["the last analysis failed", { latestJob: { status: "FAILED", mode: "generate" }, tests: { total: 0, validated: 0, needsReview: 0, failedValidation: 0, waiting: 0 }, latestRun: null }, "blocked", ["job-failed"], ["The last analysis failed"]],
         ["tests failing in the last run", { latestRun: { failed: 2, needsReview: 0, total: 4 }, tests: { total: 4, validated: 2, needsReview: 0, failedValidation: 2, waiting: 0 } }, "needs-attention", ["failing-tests"], ["2 tests failing in the last run"]],
         ["tests that could not be validated (no run summary)", { latestRun: null, tests: { total: 4, validated: 3, needsReview: 0, failedValidation: 1, waiting: 0 } }, "needs-attention", ["failing-tests"], ["1 test could not be run"]],

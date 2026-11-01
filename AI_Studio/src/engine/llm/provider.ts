@@ -16,7 +16,7 @@ import type { z } from "zod";
 import type { Config } from "../../config.js";
 import type { EngineEvent } from "../context.js";
 import { classifyLlmError, LlmCallError, scrubDetail } from "./errors.js";
-import { isResilientModel, ResilientModel, type ChainEntry, type ModelV3, type ResiliencePolicy, type ResilientOptions } from "./resilience.js";
+import { isResilientModel, ResilientModel, type ChainEntry, type ModelV3, type OwnKeyHandling, type ResiliencePolicy, type ResilientOptions } from "./resilience.js";
 import type { LlmPurpose } from "./usage.js";
 import { addUsage, cachePlan, promptCacheSetting } from "./prompt-cache.js";
 
@@ -29,6 +29,9 @@ const DEFAULT_MODELS: Record<string, string> = {
     google: "gemini-2.5-flash",
     "openai-compatible": "llama3.1",
 };
+
+/** The model a provider starts with when none is named. */
+export const defaultModelOf = (provider: LlmProviderId): string => DEFAULT_MODELS[provider]!;
 
 /**
  * OpenAI's structured outputs default to strict mode, which forbids optional properties; the
@@ -167,10 +170,10 @@ export function createLlmClientOrUnavailable(cfg: Config): LlmClient {
  * The SDK model for one provider and model name. `baseURL` overrides the provider's address (custom endpoints, and tests' local fake).
  * `promptCache` (the switch, read at every call) adds the prompt-caching markers where the provider needs them (prompt-cache.ts).
  */
-export function buildProviderModel(provider: LlmProviderId, modelName: string, o: { apiKey?: string; baseURL?: string; promptCache?: () => boolean }): LanguageModel {
+export function buildProviderModel(provider: LlmProviderId, modelName: string, o: { apiKey?: string; baseURL?: string; promptCache?: () => boolean; fetch?: typeof fetch }): LanguageModel {
     if (!o.promptCache) return sdkModel(provider, modelName, o);
-    const plan = cachePlan(provider, modelName, o.promptCache);
-    return plan.wrap(sdkModel(provider, modelName, { ...o, fetch: plan.fetch }));
+    const plan = cachePlan(provider, modelName, o.promptCache, o.fetch);
+    return plan.wrap(sdkModel(provider, modelName, { ...o, fetch: plan.fetch ?? o.fetch }));
 }
 
 function sdkModel(provider: LlmProviderId, modelName: string, o: { apiKey?: string; baseURL?: string; fetch?: typeof fetch }): LanguageModel {
@@ -290,23 +293,37 @@ export interface CreateClientOptions {
     resilience?: ResilientOptions;
     /** Address for every provider (tests point it at a local fake provider). Default: LLM_BASE_URL for custom endpoints only. */
     baseURLFor?: (provider: LlmProviderId) => string | undefined;
+    /**
+     * A key that is not the server's (a project's AI configuration, platform/ai-config.ts): `id` keeps its failures from pausing the
+     * provider for everyone else, and resilience.ts says the rest. Such a client is built with `fallbacks: []`.
+     */
+    ownKey?: OwnKeyHandling & { id: string };
+    /** After this client's own models, the chain of these settings: a managed project's configuration, then the server's key. */
+    thenServer?: Config;
+    /** The `fetch` of this client's own models (an AI configuration's: no redirects, address checked at connection; platform/guarded-fetch.ts). */
+    fetch?: typeof fetch;
 }
 
-export function createLlmClient(cfg: Config, opts: CreateClientOptions = {}): LlmClient {
-    assertLlmConfigured(cfg);
+function modelChain(cfg: Config, opts: CreateClientOptions): ChainEntry[] {
     const modelName = cfg.LLM_MODEL ?? DEFAULT_MODELS[cfg.LLM_PROVIDER]!;
     const baseURLFor = opts.baseURLFor ?? ((p: LlmProviderId) => (p === "openai-compatible" ? cfg.LLM_BASE_URL : undefined));
     const entry = (provider: LlmProviderId, name: string): ChainEntry => {
         const baseURL = baseURLFor(provider);
         // Prompt caching (prompt-cache.ts): the switch is read at every call, so Settings applies without rebuilding the client.
         const promptCache = () => promptCacheSetting(cfg).enabled;
-        return { name, provider, breakerKey: breakerKeyOf(provider, baseURL), model: buildProviderModel(provider, name, { apiKey: keyFor(cfg, provider), baseURL, promptCache }) as ModelV3 };
+        return { name, provider, breakerKey: opts.ownKey ? `own ${opts.ownKey.id}` : breakerKeyOf(provider, baseURL), model: buildProviderModel(provider, name, { apiKey: keyFor(cfg, provider), baseURL, promptCache, ...(opts.fetch ? { fetch: opts.fetch } : {}) }) as ModelV3 };
     };
     const fallbacks = opts.fallbacks ?? configuredFallbacks(cfg).entries;
     // Fallbacks the server cannot use (no key, no address) are left out rather than failing every call that reaches them.
     const usable = describeFallbacks(cfg, fallbacks).filter((f) => f.ready);
-    const chain = [entry(cfg.LLM_PROVIDER, modelName), ...usable.map((f) => entry(f.provider, f.model))];
-    const model = new ResilientModel(chain, { ...opts.resilience, policy: { ...policyFromConfig(cfg), ...opts.resilience?.policy } });
+    return [entry(cfg.LLM_PROVIDER, modelName), ...usable.map((f) => entry(f.provider, f.model))];
+}
+
+export function createLlmClient(cfg: Config, opts: CreateClientOptions = {}): LlmClient {
+    assertLlmConfigured(cfg);
+    const modelName = cfg.LLM_MODEL ?? DEFAULT_MODELS[cfg.LLM_PROVIDER]!;
+    const chain = [...modelChain(cfg, opts), ...(opts.thenServer ? modelChain(opts.thenServer, {}) : [])];
+    const model = new ResilientModel(chain, { ...opts.resilience, ownKey: opts.ownKey, policy: { ...policyFromConfig(cfg), ...opts.resilience?.policy } });
     return llmClientFromModel(model, modelName);
 }
 

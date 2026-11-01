@@ -1,3 +1,4 @@
+import { useProjectAiReady } from "../aiconfig/aiconfig";
 import { Smartphone, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type ProjectDetail } from "../../api";
@@ -20,6 +21,7 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     const runner = useFetch<RunnerChoice>(`/projects/${projectId}/runner`);
     const agents = useFetch<Agent[]>(`/projects/${projectId}/agents`);
     const config = useConfig();
+    const aiReady = useProjectAiReady(projectId);
     const [where, setWhere] = useState<string | null>(null);
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
@@ -53,7 +55,7 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     const chosen = where ?? defaultWhere(options, runner.data);
     const picked = options.find((o) => o.id === chosen);
     const anyWhere = options.some((o) => o.can);
-    const aiMissing = config ? !config.llm.configured : false;
+    const aiMissing = config ? !aiReady : false;
     const current = runner.data ? (runner.data.runOn === "agent" ? runner.data.agentId : "platform") : "platform";
     const changesRunner = Boolean(picked?.can) && chosen !== current;
 

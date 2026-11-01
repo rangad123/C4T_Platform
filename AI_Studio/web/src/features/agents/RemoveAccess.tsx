@@ -45,7 +45,7 @@ export function RemoveAccessDialog({ projectId, target, onClose, onDone }: { pro
         <dialog ref={ref} className="ag-dialog" aria-labelledby="ag-remove-title" onClose={onClose} onCancel={onClose}>
             <div className="inner">
                 <h2 className="t-section" id="ag-remove-title">Remove access for {target.name}?</h2>
-                <p className="t-secondary">This runner will stop and can’t connect again. Tests keep their results. You can add a runner again at any time.</p>
+                <p className="t-secondary">This runner will stop and can’t connect again. Tests keep their results. You can add a runner again at any time. If other projects use it too, only this project loses it.</p>
                 {error && <Callout tone="danger">{error}</Callout>}
                 <div className="foot">
                     <Button onClick={onClose}>Keep access</Button>
@@ -64,7 +64,7 @@ export function RemoveAccessDialog({ projectId, target, onClose, onDone }: { pro
  */
 export function AccessPanel({ projectId, agents, tokens: list, onChanged }: { projectId: string; agents: Agent[]; tokens: Fetched<AgentToken[]>; onChanged: () => void }) {
     const [removing, setRemoving] = useState<AccessTarget | null>(null);
-    const active = (list.data ?? []).filter((t) => !t.revokedAt);
+    const active = (list.data ?? []).filter((t) => !t.revokedAt && !t.shared);
     // Nothing to list yet is not worth a card; the empty state of the runner list already invites the one action.
     if (!list.loading && !list.error && active.length === 0) return <span id="ark-access" />;
 

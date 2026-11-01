@@ -31,7 +31,7 @@ let dataDir: string;
 let projectId: string;
 const tests: Record<string, string> = {};
 
-const api = async (method: "GET" | "POST", url: string, body?: unknown) => {
+const api = async (method: "GET" | "POST" | "PUT", url: string, body?: unknown) => {
     const res = await fetch(BASE + url, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
     const text = await res.text();
     return { status: res.status, body: text ? JSON.parse(text) : null } as { status: number; body: any };
@@ -61,6 +61,8 @@ beforeAll(async () => {
 
     // Two tests that pass while the button is called "Add to cart", then the shop renames it and both are run again.
     projectId = (await api("POST", "/api/projects", { name: "Renamed shop" })).body.id;
+    // This file is about applying a fix and seeing it run: with the default policy a fix is a draft and waits for approval (tests/reviews-api.test.ts).
+    await api("PUT", `/api/projects/${projectId}/review-policy`, { healing: false });
     const imp = await api("POST", `/api/projects/${projectId}/specs`, { baseUrl: `http://127.0.0.1:${SHOP_PORT}`, specs: [addToCart("Add an item to the cart"), addToCart("Add another item to the cart")] });
     expect(imp.status, JSON.stringify(imp.body)).toBe(202);
     imp.body.tests.forEach((t: { id: string }, i: number) => (tests[`T${i + 1}`] = t.id));

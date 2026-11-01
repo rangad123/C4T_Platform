@@ -86,7 +86,8 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
         try {
             let id = projectId ?? createdProject.current;
             if (!id) {
-                id = (await api("/projects", { method: "POST", body: { name: name.trim() || hostOf(n.url) || "Untitled project" } })).id as string;
+                // A name made here, not typed: a second project for the same site gets a number. A typed name that is taken is refused.
+                id = (await api("/projects", { method: "POST", body: name.trim() ? { name: name.trim() } : { name: hostOf(n.url) || "Untitled project", autoName: true } })).id as string;
                 createdProject.current = id;
                 await applyPendingTestingType(id);
             }

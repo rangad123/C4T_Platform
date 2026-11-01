@@ -1,10 +1,11 @@
-import { Save } from "lucide-react";
+import { Archive, ArchiveRestore, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError, MODE_WORDS, PLATFORM_WORDS, api, projectShape, type Platform, type ProjectDetail, type TestingMode } from "../../api";
-import { Planned } from "../../components/Planned";
-import { Button, Callout, ErrorState, Skeleton } from "../../components/ui";
+import { Button, Callout, ErrorState, LinkButton, Skeleton } from "../../components/ui";
+import { formatBytes } from "../storage/storage";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
+import { routes } from "../../lib/router";
 
 interface C4tProjectRow {
     id: string;
@@ -21,7 +22,8 @@ interface C4tProjectRow {
 export function ProjectGeneral({ id }: { id: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     const p = project.data;
-    const canEdit = !p?.access || p.access.permissions.includes("ai_studio.project.settings");
+    const archived = Boolean(p?.archived_at);
+    const canEdit = (!p?.access || p.access.permissions.includes("ai_studio.project.settings")) && !archived;
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [platforms, setPlatforms] = useState<Platform[]>([]);
@@ -105,12 +107,14 @@ export function ProjectGeneral({ id }: { id: string }) {
                             Save changes
                         </Button>
                     </div>
+                ) : archived ? (
+                    <p className="t-meta">This project is archived, so its settings are read-only. Restore it below to change them.</p>
                 ) : (
                     <p className="t-meta">Changing these needs “Change project settings”. Ask your Crowd4Test administrator.</p>
                 )}
             </section>
             <C4tLink id={id} project={p} canEdit={canEdit} onSaved={project.reload} />
-            <Planned title="Archive or delete" phase="Phase 1, next" testId="planned-project-archive" will={["Archive the project: it becomes read-only and leaves the lists, and can be restored.", "Delete it after typing its name, with its files."]} />
+            <ArchiveOrDelete id={id} project={p} onChanged={project.reload} />
         </div>
     );
 }
@@ -164,6 +168,150 @@ function C4tLink({ id, project, canEdit, onSaved }: { id: string; project: Proje
                         ))}
                     </select>
                 </div>
+            )}
+            {error && <Callout tone="danger">{error}</Callout>}
+        </section>
+    );
+}
+
+interface DeleteReport {
+    tests: number;
+    runs: number;
+    files: number;
+    bytes: number;
+    kept: string[];
+}
+
+/**
+ * Archive, restore and delete (US-012). Archiving makes the project read-only, takes it out of the lists and stops its runs and
+ * schedules; it can be restored. Only an archived project can be deleted, after typing its name: its data and stored files go,
+ * AI usage and the Activity list stay. Each needs "Change project settings" and Project Admin of this project.
+ */
+function ArchiveOrDelete({ id, project, onChanged }: { id: string; project: ProjectDetail; onChanged: () => Promise<void> }) {
+    const archived = Boolean(project.archived_at);
+    const canAct = !project.access || (project.access.projectAdmin && project.access.permissions.includes("ai_studio.project.settings"));
+    const [confirmArchive, setConfirmArchive] = useState(false);
+    const [typed, setTyped] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [deleted, setDeleted] = useState<DeleteReport | null>(null);
+
+    const act = async (fn: () => Promise<void>) => {
+        setBusy(true);
+        setError(null);
+        try {
+            await fn();
+        } catch (e) {
+            setError(e instanceof ApiError ? e.message : "That did not work. Try again.");
+        } finally {
+            setBusy(false);
+        }
+    };
+    const archive = () =>
+        act(async () => {
+            await api(`/projects/${id}/archive`, { method: "POST" });
+            setConfirmArchive(false);
+            announceProjectChanged(id);
+            await onChanged();
+        });
+    const restore = () =>
+        act(async () => {
+            await api(`/projects/${id}/unarchive`, { method: "POST" });
+            announceProjectChanged(id);
+            await onChanged();
+        });
+    const remove = () =>
+        act(async () => {
+            const r = await api<{ deleted: boolean; report: DeleteReport }>(`/projects/${id}`, { method: "DELETE", body: { name: typed } });
+            setDeleted(r.report);
+        });
+
+    if (deleted) {
+        return (
+            <section className="card card-pad stack-sm" aria-labelledby="archive-title" data-testid="project-archive">
+                <h2 className="t-section" id="archive-title">
+                    Project deleted
+                </h2>
+                <Callout tone="success" title={`${project.name} was deleted.`}>
+                    Removed {deleted.tests === 1 ? "1 test" : `${deleted.tests} tests`}, {deleted.runs === 1 ? "1 run" : `${deleted.runs} runs`} and {deleted.files === 1 ? "1 stored file" : `${deleted.files} stored files`} ({formatBytes(deleted.bytes)}), with its settings and results. Its AI usage and the Activity list are kept.
+                </Callout>
+                <div>
+                    <LinkButton href={routes.home}>Back to projects</LinkButton>
+                </div>
+            </section>
+        );
+    }
+
+    return (
+        <section className="card card-pad stack-sm" aria-labelledby="archive-title" data-testid="project-archive">
+            <h2 className="t-section" id="archive-title">
+                Archive or delete
+            </h2>
+            {!archived ? (
+                <>
+                    <p className="t-secondary">Archiving makes the project read-only and takes it out of the project lists. Its schedules and deploy triggers stop starting runs. You can restore it at any time.</p>
+                    {!canAct ? (
+                        <p className="t-meta">Only a Project Admin with “Change project settings” can archive or delete this project.</p>
+                    ) : confirmArchive ? (
+                        <Callout
+                            tone="warning"
+                            title={`Archive ${project.name}?`}
+                            actions={
+                                <>
+                                    <Button size="sm" variant="primary" icon={Archive} loading={busy} onClick={() => void archive()}>
+                                        Archive
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={() => setConfirmArchive(false)}>
+                                        Cancel
+                                    </Button>
+                                </>
+                            }
+                        >
+                            Nobody can change it or run its tests until it is restored. Everything in it stays.
+                        </Callout>
+                    ) : (
+                        <div>
+                            <Button icon={Archive} onClick={() => setConfirmArchive(true)}>
+                                Archive project
+                            </Button>
+                        </div>
+                    )}
+                    <p className="t-meta">To delete the project, archive it first.</p>
+                </>
+            ) : (
+                <>
+                    <Callout tone="info" title="This project is archived">
+                        It is read-only, left out of the project lists, and starts no runs. Restore it to work on it again.
+                    </Callout>
+                    {canAct ? (
+                        <>
+                            <div>
+                                <Button icon={ArchiveRestore} loading={busy} onClick={() => void restore()}>
+                                    Restore project
+                                </Button>
+                            </div>
+                            <div className="stack-sm" style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+                                <h3 className="t-card">Delete for good</h3>
+                                <p className="t-secondary">
+                                    Deleting removes the project with its tests, scripts, runs and results, settings, test accounts and every stored file (screenshots, videos, traces, apps). Its AI usage and the Activity list are kept. This cannot be undone.
+                                </p>
+                                <div className="field" style={{ maxWidth: 420 }}>
+                                    <label htmlFor="delete-confirm">
+                                        Type <strong>{project.name}</strong> to confirm
+                                    </label>
+                                    <input id="delete-confirm" className="input" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+                                </div>
+                                <div>
+                                    <Button variant="danger" icon={Trash2} loading={busy} disabled={busy || typed.trim() !== project.name.trim()} onClick={() => void remove()}>
+                                        Delete project
+                                    </Button>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <p className="t-meta">Only a Project Admin with “Change project settings” can restore or delete this project.</p>
+                    )}
+                </>
             )}
             {error && <Callout tone="danger">{error}</Callout>}
         </section>

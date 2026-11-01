@@ -381,10 +381,15 @@ function TourCard({ session, setSession, end }: { session: Session; setSession: 
         };
         // A section that fills in after its data arrives moves what is below it without any event: look again now and then.
         const watch = window.setInterval(again, 250);
+        // The element itself growing would cover the card until then, so that one is caught as it happens.
+        const target = find(shown);
+        const resized = target && typeof ResizeObserver !== "undefined" ? new ResizeObserver(again) : null;
+        if (target) resized?.observe(target);
         addEventListener("resize", again);
         addEventListener("scroll", again, true);
         return () => {
             window.clearInterval(watch);
+            resized?.disconnect();
             removeEventListener("resize", again);
             removeEventListener("scroll", again, true);
         };

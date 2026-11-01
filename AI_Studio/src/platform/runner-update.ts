@@ -52,7 +52,8 @@ export function targetOfAgent(c: Pick<Capabilities, "os" | "arch">): CompleteTar
 export const partNames = (target: CompleteTarget, folder: PartFolder) => ({ list: `complete-${target}-${folder}.json`, pack: `complete-${target}-${folder}.pack` });
 
 export interface ActivityRow {
-    projectId: string;
+    /** The project the runner was registered from; a runner registered on the Runners page has none. */
+    projectId: string | null;
     agentId: string;
     agentName: string;
     action: "runner-updated" | "runner-update-failed" | "runner-rolled-back";

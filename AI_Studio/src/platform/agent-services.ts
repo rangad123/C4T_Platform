@@ -5,7 +5,7 @@
  * Only script EXECUTION goes to the agent. Analysis (discovery, planning, writing tests), plain-English authoring, repair, healing
  * and vision judging still run on the platform: they need the model and the browser-driving loop.
  *
- * Security notes (the doc has the long version): a token belongs to one project; only the agent that claimed a task may heartbeat,
+ * Security notes (the doc has the long version): a token belongs to one runner, which serves only the projects given access to it (runner_access); only the agent that claimed a task may heartbeat,
  * download for, upload to or answer it; every file name is checked and anchored under the task's own folder; uploads are streamed
  * with a size cap and hashed here; the task payload and the result are encrypted at rest and every credential of the run is scrubbed
  * from whatever the agent sends back before it is stored.
@@ -25,8 +25,8 @@ import { secretsOfRun } from "../engine/evidence/model.js";
 import { agentDesktopProblem, assertHostDesktop, desktopApps } from "./desktop-guard.js";
 import { desktopUnavailableReason, lastProbe, probeDesktop } from "../engine/desktop/probe.js";
 import type { Platform } from "./bootstrap.js";
-import { AgentStore, MAX_OFFERS, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type RunnerSetting, type TaskFile, type TaskRecord } from "./agent-store.js";
-import { androidSummary, bearerToken, capabilityProblem, envSecrets, RateLimiter, scrubSecrets, toWireEnv } from "./agent-routing.js";
+import { AgentStore, MAX_OFFERS, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type RunnerSetting, type TaskFile, type TaskRecord } from "./agent-store.js";
+import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecrets, RateLimiter, scrubSecrets, toWireEnv } from "./agent-routing.js";
 import { DeviceHub, deviceAgentOf, isDeviceAdapter } from "./agent-device.js";
 import { isRecordAdapter, RecordHub, RemoteDriver, recordAdapterId, recordAgentOf, recordJobId, type RemoteInit } from "./agent-record.js";
 import { IdentityStore } from "./identity-store.js";
@@ -116,6 +116,9 @@ export function ledgerFromAgent(lines: Array<Record<string, unknown>> | undefine
 
 const FILE_NAME_SHA = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 
+/** How often a poll may sweep expired leases (a lease is a minute or more, so a few seconds late changes nothing). */
+export const SWEEP_EVERY_MS = 5_000;
+
 export class AgentService {
     readonly store: AgentStore;
     readonly limits: AgentLimits;
@@ -124,6 +127,8 @@ export class AgentService {
     private readonly generalLimit: RateLimiter;
     /** The long-poll in flight per agent: a new poll replaces the old one (one at a time per agent). */
     private readonly polls = new Map<string, () => void>();
+    /** When offerTo last swept expired leases: polling runners ask four times a second, the sweep (a write transaction) runs at most every SWEEP_EVERY_MS. */
+    private lastSweepMs = Number.NEGATIVE_INFINITY;
     private apkHashes = new Map<string, { size: number; mtimeMs: number; sha: string }>();
     private lastPrune = 0;
     /** Recordings that live on an agent, by record task id (see agent-record.ts). */
@@ -165,12 +170,13 @@ export class AgentService {
     hello(token: AgentTokenRecord, body: HelloRequest) {
         if (body.protocol !== PROTOCOL_VERSION) throw new HttpError(409, `This runner agent speaks protocol ${body.protocol} and the platform speaks protocol ${PROTOCOL_VERSION}. Update the agent.`);
         // One token stands for one agent: it is what ties a task to the agent that claimed it.
-        const other = this.store.listAgents(token.projectId).find((a) => a.tokenId === token.id && a.name !== body.name && a.online);
+        const other = this.store.agentsOfToken(token.id).find((a) => a.name !== body.name && this.clock() - a.lastSeenMs <= ONLINE_MS);
         if (other) throw new HttpError(409, `This token is already used by the agent “${other.name}”, which is online. Make a token for each machine.`);
         const agent = this.store.upsertAgent(token, body);
         return {
             agentId: agent.id,
-            projectId: token.projectId,
+            // Always a string, as protocol 1 says. An installed runner only prints it; a runner registered on the Runners page has no project of its own.
+            projectId: token.projectId ?? "shared",
             protocol: PROTOCOL_VERSION,
             pollSeconds: this.limits.pollSeconds,
             heartbeatSeconds: this.limits.heartbeatSeconds,
@@ -186,39 +192,63 @@ export class AgentService {
         return a;
     }
 
-    /** Hand the oldest queued task of the project this agent can run to it, or nothing. */
+    /**
+     * Hand this agent the oldest queued task it can run, from any project its runner has access to, or nothing. A task whose device
+     * another task holds stays queued and the next one is tried, so a busy phone does not hold up browser work.
+     */
     offerTo(agent: AgentRecord, freeSlots: number): TaskOffer | undefined {
         if (freeSlots < 1) return undefined;
-        this.store.sweep();
+        if (this.clock() - this.lastSweepMs >= SWEEP_EVERY_MS) {
+            this.lastSweepMs = this.clock();
+            this.store.sweep();
+        }
         if (this.store.runningCount(agent.id) >= agent.concurrency) return undefined;
-        const setting = this.store.getRunner(agent.projectId);
-        const pinnedElsewhere = setting.runOn === "agent" && Boolean(setting.agentId) && setting.agentId !== agent.id;
-        for (const t of this.store.queued(agent.projectId)) {
+        for (const t of this.store.queuedFor(agent.tokenId)) {
+            const setting = this.store.getRunner(t.projectId);
+            const pinnedElsewhere = setting.runOn === "agent" && Boolean(setting.agentId) && setting.agentId !== agent.id;
             // A record task goes only to the agent the recording was started on (and only if it can record), whatever the project's runner setting says.
             if (isRecordAdapter(t.adapterId)) {
                 if (recordAgentOf(t.adapterId) !== agent.id || agent.capabilities.record !== true) continue;
-                const rec = this.store.claim(t.id, agent.id, this.limits.leaseSeconds * 1000);
+                const rec = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000);
                 if (!rec) continue;
                 return { ...this.secrets.decrypt<TaskOffer>(rec.payloadEnc), leaseSeconds: this.limits.leaseSeconds };
             }
             // A phone session likewise goes only to the agent it was started on, and only if that agent reports it can host one (an older agent never sees it).
             if (isDeviceAdapter(t.adapterId)) {
                 if (deviceAgentOf(t.adapterId) !== agent.id || agent.capabilities.deviceSession !== true) continue;
-                const dev = this.store.claim(t.id, agent.id, this.limits.leaseSeconds * 1000);
+                const dev = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, this.deviceOf(t));
                 if (!dev) continue;
                 return { ...this.secrets.decrypt<TaskOffer>(dev.payloadEnc), leaseSeconds: this.limits.leaseSeconds };
             }
             if (pinnedElsewhere) continue;
             const adapter = this.adapterOrUndefined(t.adapterId);
             if (!adapter || capabilityProblem(adapter, agent.capabilities)) continue;
-            // A task with hand-written scripts goes only to an agent whose owner agreed to run them (it reports customScripts).
-            if (agent.capabilities.customScripts !== true && this.hasCustomScripts(t)) continue;
-            const claimed = this.store.claim(t.id, agent.id, this.limits.leaseSeconds * 1000);
+            // A task with hand-written scripts goes only to an agent whose owner agreed to run them (it reports customScripts), and never to a
+            // shared runner (no organisation, no project): one customer's code must not run on a machine that serves others.
+            if ((agent.capabilities.customScripts !== true || this.isSharedRunner(agent)) && this.hasCustomScripts(t)) continue;
+            const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, this.deviceOf(t));
             if (!claimed) continue;
             const offer = this.secrets.decrypt<TaskOffer>(claimed.payloadEnc);
             return { ...offer, leaseSeconds: this.limits.leaseSeconds };
         }
         return undefined;
+    }
+
+    /** A Crowd4Test shared runner: its token belongs to no organisation and no project. An unknown token counts as shared (fail closed). */
+    private isSharedRunner(agent: AgentRecord): boolean {
+        const t = this.store.getToken(agent.tokenId);
+        return !t || (t.organizationId === null && t.projectId === null);
+    }
+
+    /** The device a queued task will hold on its runner. An unreadable task holds them all: it can never share a phone by accident. */
+    private deviceOf(t: TaskRecord): DeviceNeed | undefined {
+        const family = t.adapterId === IOS_ADAPTER_ID ? "ios" : t.adapterId === "taqwright" || isDeviceAdapter(t.adapterId) ? "android" : undefined;
+        if (!family) return undefined;
+        try {
+            return deviceNeedOf(this.secrets.decrypt<TaskOffer>(t.payloadEnc));
+        } catch {
+            return { family, device: "*" };
+        }
     }
 
     /** Register a long-poll; the returned function says whether a newer poll of the same agent replaced it. */
@@ -242,7 +272,7 @@ export class AgentService {
     ownedTask(token: AgentTokenRecord, taskId: string): TaskRecord {
         const t = this.store.getTask(taskId);
         const owner = t?.agentId ? this.store.getAgent(t.agentId) : undefined;
-        if (!t || t.projectId !== token.projectId || !owner || owner.tokenId !== token.id) throw new HttpError(404, "Task not found.");
+        if (!t || !owner || owner.tokenId !== token.id) throw new HttpError(404, "Task not found.");
         this.store.touchAgent(owner.id);
         return t;
     }
@@ -477,6 +507,8 @@ export class AgentService {
 
     /** Refuse a job that cannot run where its project runs. Called by `Repo.createJob`. */
     assertJobAllowed(projectId: string, options: JobOptions): void {
+        // An agent run uses the worker's own browser and cannot go to a runner yet (agent-run.ts), so no runner is needed for it.
+        if (options.mode === "agent") return;
         const setting = this.store.getRunner(projectId);
         // Windows desktop tests start an application: the computer that runs them must be set up for it (allow-list), whoever runs them.
         const desktop = this.adaptersFor(options).includes("windows-uia") ? desktopApps(this.specsOf(options)) : [];

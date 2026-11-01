@@ -12,6 +12,7 @@ import type { Severity } from "../engine/validation/severity.js";
 import type { Db, Row } from "./db.js";
 import { buildEmail, mergeSmtp, publicSmtp, sendEmail, type EmailDeliveryOptions, type MessageContent, type SmtpPatchT, type SmtpSettings } from "./alert-email.js";
 import { HttpError } from "./http-error.js";
+import { EVERYONE_OPTED_OUT, wantedRecipients, type EmailKind } from "./project-folders.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import type { SecretBox } from "./secrets.js";
 import { isFailing, severityAtLeast, type Change, type RunSummary } from "./trends.js";
@@ -124,6 +125,11 @@ export class AlertStore {
         const r = this.db.get<{ url_enc: string }>("SELECT url_enc FROM alert_channels WHERE id = ?", id);
         if (!r) throw new Error("Channel not found");
         return this.secrets.decrypt<{ email: { to: string[]; smtp?: SmtpSettings } }>(r.url_enc).email;
+    }
+
+    /** An email channel's recipients for a real alert: those who turned this kind of email off in their profile are left out. */
+    wantedRecipients(id: string, kind: EmailKind): string[] {
+        return wantedRecipients(this.db, kind, this.emailOf(id).to);
     }
 
     /** The mail server an email channel sends through: its own settings, else the server's. */
@@ -604,12 +610,15 @@ export class AlertService {
     constructor(private readonly deps: AlertServiceDeps) {}
 
     /** Deliver one message the way the channel's kind wants it: JSON to a URL (webhook, Slack, Teams) or an email over SMTP. */
-    private async send(ch: AlertChannel, out: { slack: () => unknown; webhook: () => unknown; content: () => MessageContent }, opts?: DeliveryOptions & EmailDeliveryOptions): Promise<DeliveryResult> {
+    private async send(ch: AlertChannel, out: { slack: () => unknown; webhook: () => unknown; content: () => MessageContent }, opts?: DeliveryOptions & EmailDeliveryOptions, everyone = false): Promise<DeliveryResult> {
         const { store } = this.deps;
         if (ch.kind === "email") {
             const smtp = store.smtpFor(ch.id);
             if (!smtp) return { ok: false, attempts: 0, error: "No mail server is set up for this channel any more. Set SMTP_HOST and SMTP_FROM on the server or give the channel its own." };
-            return sendEmail(smtp, store.emailOf(ch.id).to, buildEmail(out.content()), opts);
+            // A test message goes to every address listed; a real alert skips the people who turned run alert emails off (Profile).
+            const to = everyone ? store.emailOf(ch.id).to : store.wantedRecipients(ch.id, "runAlertEmails");
+            if (to.length === 0) return { ok: false, attempts: 0, error: EVERYONE_OPTED_OUT };
+            return sendEmail(smtp, to, buildEmail(out.content()), opts);
         }
         const body = ch.kind === "slack" ? out.slack() : ch.kind === "teams" ? teamsPayload(out.content()) : out.webhook();
         return deliver(store.urlOf(ch.id), body, opts);
@@ -679,7 +688,7 @@ export class AlertService {
     /** Send a harmless message and report exactly what the receiver answered. One attempt, so the answer is the real one. */
     async sendTest(channel: AlertChannel, subject: AlertSubject): Promise<DeliveryResult> {
         const { store } = this.deps;
-        const result = await this.send(channel, { slack: () => testSlackPayload(subject), webhook: () => testWebhookPayload(subject), content: () => testContent(subject) }, { ...this.deps.delivery, backoffMs: [] });
+        const result = await this.send(channel, { slack: () => testSlackPayload(subject), webhook: () => testWebhookPayload(subject), content: () => testContent(subject) }, { ...this.deps.delivery, backoffMs: [] }, true);
         store.log({ projectId: channel.projectId, channelId: channel.id, channelName: channel.name, channelKind: channel.kind, event: "test", jobId: null, status: result.ok ? "sent" : "failed", httpStatus: result.status ?? null, attempts: result.attempts, error: result.error ?? null, summary: "Test message" });
         return result;
     }

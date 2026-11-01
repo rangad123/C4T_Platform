@@ -2,7 +2,7 @@ import { ArrowRight } from "lucide-react";
 import type { Job } from "../../api";
 import { Callout, LinkButton } from "../../components/ui";
 import { plural } from "../../lib/format";
-import { friendlyError, friendlyJobErrors } from "../../lib/labels";
+import { friendlyError, friendlyJobErrors, nothingRan } from "../../lib/labels";
 import { routes } from "../../lib/router";
 
 /** What the project page says when the latest job was a run against a named environment (not an analysis). */
@@ -12,7 +12,7 @@ export function EnvironmentResult({ job, projectId }: { job: Job; projectId: str
         const e = friendlyError(job.error);
         return (
             <div className="card card-pad">
-                <Callout tone={job.error === "Cancelled" ? "neutral" : "danger"} title={job.error === "Cancelled" ? "The run was cancelled" : `The run on ${where} didn’t finish`}>
+                <Callout tone={nothingRan(job) ? "info" : job.error === "Cancelled" ? "neutral" : "danger"} title={nothingRan(job) ? e.title : job.error === "Cancelled" ? "The run was cancelled" : `The run on ${where} didn’t finish`}>
                     {e.body}
                 </Callout>
             </div>

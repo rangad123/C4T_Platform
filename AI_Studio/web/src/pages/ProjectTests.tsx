@@ -5,6 +5,7 @@ import { FrameworksLine } from "../features/frameworks/FrameworksLine";
 import { CheckVariantsPanel } from "../features/variants/CheckVariantsPanel";
 import { MaestroImportPanel } from "../features/imports/MaestroImportPanel";
 import { WriteTestDialog } from "../features/authoring/WriteTestDialog";
+import { BuildTestDialog } from "../features/builder/BuildTestButton";
 import { NewTestMenu } from "../features/authoring/NewTestMenu";
 import { EXPORT_ICONS, ExportDialog, ImportDialog, type ExportItem } from "../features/authoring/ImportExport";
 import { GitImportDialog } from "../features/code/GitImportDialog";
@@ -67,7 +68,9 @@ export function ProjectTests({ id }: { id: string }) {
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
     const [limits, setLimits] = useState<Record<string, number>>({});
     const [notice, setNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
-    const [showWrite, setShowWrite] = useState(false);
+    // Test development opens a way of writing a test straight away (routes.newTest).
+    const [showWrite, setShowWrite] = useState(route.query.get("start") === "describe");
+    const [showBuild, setShowBuild] = useState(route.query.get("start") === "build");
     // The first-run page ("Start from tests I have") opens the import chooser straight away.
     const [showImport, setShowImport] = useState(route.query.get("start") === "import");
     const [showVariants, setShowVariants] = useState(false);
@@ -172,6 +175,7 @@ export function ProjectTests({ id }: { id: string }) {
                 <FrameworksLine projectId={id} />
                 {notice && <Callout tone={notice.tone}>{notice.text}</Callout>}
                 {showWrite && <WriteTestDialog projectId={id} busy={isActive(job?.status)} onClose={() => setShowWrite(false)} onStarted={() => void project.reload()} onDone={() => void Promise.all([tests.reload(), project.reload()])} />}
+                {showBuild && <BuildTestDialog projectId={id} onClose={() => setShowBuild(false)} />}
                 {showMaestro && <MaestroImportPanel projectId={id} busy={isActive(job?.status)} onClose={() => setShowMaestro(false)} onImported={() => void Promise.all([tests.reload(), project.reload()])} />}
                 {showGit && <GitImportDialog projectId={id} onClose={() => setShowGit(false)} onImported={() => void Promise.all([tests.reload(), project.reload()])} />}
                 {showImport && <ImportDialog onClose={() => setShowImport(false)} disabled={isActive(job?.status)} onJsonFile={(file) => void importSpecs(file)} onMaestro={() => setShowMaestro(true)} onGit={() => setShowGit(true)} />}

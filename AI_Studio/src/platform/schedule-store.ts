@@ -143,7 +143,10 @@ export class ScheduleStore {
 
     /** Enabled schedules whose time has come. */
     due(nowMs: number): Schedule[] {
-        return this.db.all("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at", nowMs).map(toSchedule);
+        // An archived project's schedules wait, untouched, until it is restored (project-folders.ts).
+        return this.db
+            .all("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? AND project_id NOT IN (SELECT id FROM projects WHERE archived_at IS NOT NULL) ORDER BY next_run_at", nowMs)
+            .map(toSchedule);
     }
 
     /**

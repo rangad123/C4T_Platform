@@ -8,7 +8,7 @@
  * Several processes share one database (the API and a separate worker): every write is a single SQL statement and every
  * read goes to the file, so two instances of this class always agree on the totals.
  */
-import { BUDGET_TOKENS_SQL, DEFAULT_WARN_PERCENT, dayOf, decideBudget, monthBounds, monthOf, storedPurpose, type CapHit, type Caps, type Price, type UsageRow, type Used } from "../engine/llm/usage.js";
+import { BUDGET_TOKENS_SQL, DEFAULT_WARN_PERCENT, dayOf, decideBudget, monthBounds, monthOf, storedPurpose, type CapHit, type Caps, type Price, type UsageBilling, type UsageRow, type Used } from "../engine/llm/usage.js";
 import type { Config } from "../config.js";
 import type { EngineEvent } from "../engine/context.js";
 import { JobMeter } from "../engine/llm/metered.js";
@@ -102,6 +102,8 @@ export interface UsageDelta {
     /** Of the input tokens: prompt-cache reads and writes (missing = none). */
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    /** Who pays (slot 43); missing = Crowd4Test. A job has one owner, so its rows never mix two. */
+    billing?: UsageBilling;
 }
 
 export interface PlatformBudget {
@@ -139,8 +141,8 @@ export class UsageStore {
     /** Add counts to the job's row for the day of `at` (created on first use). One statement, so processes never lose an update. */
     addUsage(d: UsageDelta): void {
         this.db.run(
-            `INSERT INTO ai_usage (job_id, project_id, purpose, model, day, calls, failed_calls, input_tokens, output_tokens, images, estimated_calls, cache_read_tokens, cache_write_tokens)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            `INSERT INTO ai_usage (job_id, project_id, purpose, model, day, calls, failed_calls, input_tokens, output_tokens, images, estimated_calls, cache_read_tokens, cache_write_tokens, billing_owner, billing_organization_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(job_id, purpose, model, day) DO UPDATE SET
                 calls = calls + excluded.calls, failed_calls = failed_calls + excluded.failed_calls,
                 input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens,
@@ -160,6 +162,8 @@ export class UsageStore {
             d.estimatedCalls,
             Math.round(d.cacheReadTokens ?? 0),
             Math.round(d.cacheWriteTokens ?? 0),
+            d.billing?.owner ?? "crowd4test",
+            d.billing?.organizationId ?? null,
         );
     }
 
@@ -173,12 +177,15 @@ export class UsageStore {
         return this.db.get<{ t: number }>(`SELECT COALESCE(SUM(${BUDGET_TOKENS_SQL}), 0) AS t FROM ai_usage WHERE job_id = ?`, jobId)?.t ?? 0;
     }
 
-    /** Tokens used in a calendar month (UTC), for one project or for all of them (counted like `jobTokens`). */
+    /**
+     * Tokens used in a calendar month (UTC), for one project, or across projects (counted like `jobTokens`). Across projects means what
+     * Crowd4Test pays for: that total is what the platform's monthly limit protects, and a customer's own key is not part of it.
+     */
     monthTokens(month: string, projectId?: string): number {
         const { from, to } = monthBounds(month);
         const row = projectId
             ? this.db.get<{ t: number }>(`SELECT COALESCE(SUM(${BUDGET_TOKENS_SQL}), 0) AS t FROM ai_usage WHERE project_id = ? AND day >= ? AND day < ?`, projectId, from, to)
-            : this.db.get<{ t: number }>(`SELECT COALESCE(SUM(${BUDGET_TOKENS_SQL}), 0) AS t FROM ai_usage WHERE day >= ? AND day < ?`, from, to);
+            : this.db.get<{ t: number }>(`SELECT COALESCE(SUM(${BUDGET_TOKENS_SQL}), 0) AS t FROM ai_usage WHERE day >= ? AND day < ? AND billing_owner = 'crowd4test'`, from, to);
         return row?.t ?? 0;
     }
 
@@ -188,8 +195,8 @@ export class UsageStore {
 
     /** Rows summed per day, project, purpose and model in a day range (inclusive), optionally for one project. */
     rows(from: string, to: string, projectId?: string): UsageRow[] {
-        const sql = `SELECT day, project_id, purpose, model, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw
-                     FROM ai_usage WHERE day >= ? AND day <= ? ${projectId ? "AND project_id = ?" : ""} GROUP BY day, project_id, purpose, model`;
+        const sql = `SELECT day, project_id, purpose, model, billing_owner, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw
+                     FROM ai_usage WHERE day >= ? AND day <= ? ${projectId ? "AND project_id = ?" : ""} GROUP BY day, project_id, purpose, model, billing_owner`;
         const found = projectId ? this.db.all(sql, from, to, projectId) : this.db.all(sql, from, to);
         return found.map(usageRowOf);
     }
@@ -198,8 +205,8 @@ export class UsageStore {
     jobRows(jobId: string): UsageRow[] {
         return this.db
             .all(
-                `SELECT day, project_id, purpose, model, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw
-                 FROM ai_usage WHERE job_id = ? GROUP BY day, project_id, purpose, model`,
+                `SELECT day, project_id, purpose, model, billing_owner, SUM(calls) AS calls, SUM(failed_calls) AS failed, SUM(input_tokens) AS i, SUM(output_tokens) AS o, SUM(images) AS img, SUM(estimated_calls) AS est, SUM(cache_read_tokens) AS cr, SUM(cache_write_tokens) AS cw
+                 FROM ai_usage WHERE job_id = ? GROUP BY day, project_id, purpose, model, billing_owner`,
                 jobId,
             )
             .map(usageRowOf);
@@ -302,12 +309,18 @@ export class UsageStore {
 
     /**
      * The limits that apply to a project's jobs: the platform's monthly cap, the project's monthly cap, and the lower of the two per-job caps.
+     * A project on its own key spends its organisation's money, so only its own limits apply (ai-config-store.ts).
      */
     capsFor(projectId: string): { caps: Caps; warnPercent: number } {
         const platform = this.platformBudget();
         const project = this.projectBudget(projectId);
+        if (this.onOwnKey(projectId)) return { caps: { month: null, project: project.monthlyTokens, job: project.jobTokens }, warnPercent: platform.warnPercent };
         const jobs = [platform.jobTokens, project.jobTokens].filter((v): v is number => v !== null);
         return { caps: { month: platform.monthlyTokens, project: project.monthlyTokens, job: jobs.length ? Math.min(...jobs) : null }, warnPercent: platform.warnPercent };
+    }
+
+    private onOwnKey(projectId: string): boolean {
+        return this.db.get("SELECT 1 AS x FROM project_ai_settings WHERE project_id = ? AND mode = 'own'", projectId) !== undefined;
     }
 
     /**
@@ -346,13 +359,14 @@ function usageRowOf(r: Record<string, any>): UsageRow {
     const row: UsageRow = { day: r.day, projectId: r.project_id, purpose: r.purpose, model: r.model, calls: r.calls, failedCalls: r.failed, inputTokens: r.i, outputTokens: r.o, images: r.img, estimatedCalls: r.est };
     if (r.cr) row.cacheReadTokens = r.cr;
     if (r.cw) row.cacheWriteTokens = r.cw;
+    if (r.billing_owner === "organization") row.billingOwner = "organization";
     return row;
 }
 
 /** The meter for one job (null if the store cannot be opened: a job must never fail because its usage could not be counted). */
-export function meterFor(repo: { db: Db; addEvent(jobId: string, e: EngineEvent): void }, config: Pick<Config, "AI_MONTHLY_TOKEN_LIMIT" | "AI_JOB_TOKEN_LIMIT">, job: { id: string; projectId: string }, refreshEvery?: number): JobMeter | null {
+export function meterFor(repo: { db: Db; addEvent(jobId: string, e: EngineEvent): void }, config: Pick<Config, "AI_MONTHLY_TOKEN_LIMIT" | "AI_JOB_TOKEN_LIMIT">, job: { id: string; projectId: string }, refreshEvery?: number, billing?: UsageBilling): JobMeter | null {
     try {
-        return new JobMeter({ backend: usageStoreFor(repo.db, config), jobId: job.id, projectId: job.projectId, emit: (e) => repo.addEvent(job.id, e), refreshEvery });
+        return new JobMeter({ backend: usageStoreFor(repo.db, config), jobId: job.id, projectId: job.projectId, emit: (e) => repo.addEvent(job.id, e), refreshEvery, billing });
     } catch (e) {
         console.error("[usage] AI usage is not being counted for this job:", e instanceof Error ? e.message : e);
         return null;

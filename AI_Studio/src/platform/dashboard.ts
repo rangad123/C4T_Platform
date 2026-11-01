@@ -14,6 +14,7 @@ import { describeRun } from "../engine/summary/pass-rate.js";
 import type { Db, Row } from "./db.js";
 import { notCountedText } from "../engine/quarantine/rules.js";
 import { quarantineGate } from "./quarantine-store.js";
+import { isNothingRan } from "./review-store.js";
 import { flakyCountsByProject, type TestResult } from "./trends.js";
 
 export type Readiness = "ready" | "needs-attention" | "blocked" | "unknown";
@@ -35,6 +36,7 @@ export type ReasonCode =
     | "critical-findings"
     | "high-findings"
     | "job-failed"
+    | "nothing-ran"
     | "failing-tests"
     | "medium-findings"
     | "low-findings"
@@ -56,7 +58,7 @@ export interface ReadinessInput {
     /** The newest job is still working (analysis or run). */
     activeJob: boolean;
     /** The newest job that finished (cancelled jobs ignored), or null when none has. */
-    latestJob: { status: string; mode: string } | null;
+    latestJob: { status: string; mode: string; nothingRan?: boolean } | null;
     tests: { total: number; validated: number; needsReview: number; failedValidation: number; waiting: number };
     /** Open findings (tests needing review) by severity. */
     findings: Record<Severity, number>;
@@ -98,10 +100,11 @@ export function assessReadiness(i: ReadinessInput, nowMs = Date.now()): Readines
     const blocked: Reason[] = [];
     if (i.findings.critical > 0) blocked.push(reason("critical-findings", n(i.findings.critical, "critical finding")));
     if (i.findings.high > 0) blocked.push(reason("high-findings", n(i.findings.high, "high-severity finding")));
-    if (i.latestJob?.status === "FAILED") blocked.push(reason("job-failed", i.latestJob.mode === "generate" ? "The last analysis failed" : "The last run failed"));
+    if (i.latestJob?.status === "FAILED" && !i.latestJob.nothingRan) blocked.push(reason("job-failed", i.latestJob.mode === "generate" ? "The last analysis failed" : "The last run failed"));
 
     // 2. Needs attention: worth a look before releasing.
     const attention: Reason[] = [];
+    if (i.latestJob?.nothingRan) attention.push(reason("nothing-ran", "The last run ran nothing: its tests are waiting for approval"));
     const failing = i.latestRun && i.latestRun.failed > 0 ? i.latestRun.failed : i.tests.failedValidation;
     if (failing > 0) attention.push(reason("failing-tests", i.latestRun && i.latestRun.failed > 0 ? `${n(failing, "test")} failing in the last run` : `${n(failing, "test")} could not be run`));
     if (i.findings.medium > 0) attention.push(reason("medium-findings", n(i.findings.medium, "medium-severity finding")));
@@ -277,14 +280,14 @@ export function buildDashboard(db: Db, opts: DashboardFilter & { now?: number } 
     const now = opts.now ?? Date.now();
 
     // A person limited to some projects (auth/project-scope.ts) sees only those, and the fleet counts are of those only.
-    const projects = db.all<Row>(`SELECT p.id, p.name, (SELECT url FROM applications a WHERE a.project_id = p.id ORDER BY created_at DESC LIMIT 1) AS url FROM projects p`).filter((r) => !opts.projectIds || opts.projectIds.has(r.id as string));
+    const projects = db.all<Row>(`SELECT p.id, p.name, (SELECT url FROM applications a WHERE a.project_id = p.id ORDER BY created_at DESC LIMIT 1) AS url FROM projects p WHERE p.archived_at IS NULL`).filter((r) => !opts.projectIds || opts.projectIds.has(r.id as string));
     const latestJob = groupBy(
         db.all<Row>(`SELECT * FROM (SELECT project_id, status, created_at, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at DESC, ${db.dialect.insertionOrder()} DESC) AS rn FROM generation_jobs) AS j WHERE rn = 1`),
     );
     // The newest job that actually finished; a cancelled one says nothing about the application.
     const finishedJob = groupBy(
         db.all<Row>(
-            `SELECT * FROM (SELECT project_id, status, options_json, COALESCE(finished_at, created_at) AS at,
+            `SELECT * FROM (SELECT project_id, status, error, options_json, COALESCE(finished_at, created_at) AS at,
                     ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY COALESCE(finished_at, created_at) DESC, ${db.dialect.insertionOrder()} DESC) AS rn
                FROM generation_jobs WHERE status IN ('COMPLETED','PARTIALLY_COMPLETED','FAILED') AND COALESCE(error, '') != 'Cancelled') AS j WHERE rn = 1`,
         ),
@@ -368,7 +371,7 @@ export function buildDashboard(db: Db, opts: DashboardFilter & { now?: number } 
             const readiness = assessReadiness(
                 {
                     activeJob: active,
-                    latestJob: fin ? { status: fin.status, mode: modeOf(fin.options_json) } : null,
+                    latestJob: fin ? { status: fin.status, mode: modeOf(fin.options_json), ...(isNothingRan({ status: fin.status, error: fin.error }) ? { nothingRan: true } : {}) } : null,
                     tests: { total, validated: tests.validated, needsReview: tests.needsAttention, failedValidation: tests.couldNotValidate - heldFailedValidation, waiting: tests.waiting },
                     findings,
                     latestRun: latest ? (gatedRun ?? { failed: latest.failed, needsReview: latest.needs_review, total: latest.total }) : null,

@@ -24,9 +24,9 @@ Access is permission-based (decision D-20). The full model is in [../product-res
 
 ## How it works
 
-1. **One cookie for both sites.** crowd4test.com writes its session cookies (`c4t_access`, `c4t_refresh`) for `.crowd4test.com`, so the browser also sends them to aistudio.crowd4test.com (`AUTH_COOKIE_DOMAIN` in `C4T_Platform/web`).
+1. **One cookie for both sites.** crowd4test.com writes `c4t_access` and a small marker, `c4t_shared`, for `.crowd4test.com`, so the browser also sends them to aistudio.crowd4test.com (`AUTH_COOKIE_DOMAIN` in `C4T_Platform/web`). The refresh cookie, `c4t_refresh`, stays on crowd4test.com alone.
 2. **AI Studio checks every cookie with the Crowd4Test API.** It calls `GET /v1/auth/me`, the same check every crowd4test.com page makes. It never trusts the cookie by itself. A cookie's answer is reused for 30 seconds, so a page that makes many calls costs one check.
-3. **Renewing stays on crowd4test.com.** The access cookie lasts 15 minutes. When it has run out but the refresh cookie remains, AI Studio answers *renew*.
+3. **Renewing stays on crowd4test.com.** The access cookie lasts 15 minutes. When it has run out but the `c4t_shared` marker remains, AI Studio answers *renew*.
    - The page then requests `crowd4test.com/app/ai-studio/refresh` in the background, which renews the session, and retries the call.
    - AI Studio never spends the refresh token itself. The API treats a refresh token used twice as stolen and ends the session, and crowd4test.com already guards against that for its own renewals.
 4. **Changes need AI Studio's own page.** Every crowd4test.com subdomain receives the cookie, so a change (anything other than reading) must also carry the `x-requested-with: ai-studio` header and come from AI Studio's own address. Another site's script cannot add that header without AI Studio agreeing first, and it never agrees.

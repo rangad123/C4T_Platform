@@ -52,6 +52,8 @@ export interface ValidationOnlyRequest {
     deleteOps?: string[];
     /** Shared helper modules the hand-written tests import (./helpers/<name>). */
     helpers?: Array<{ name: string; content: string }>;
+    /** Run the tests one at a time, in the order given, and stop at the first that does not pass; the tests after it are not run. */
+    stopOnFirstFailure?: boolean;
 }
 
 export interface TestToValidate {
@@ -143,6 +145,8 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
     /** Current script row per test, so executions always reference the script version that ran. */
     const scriptIds = new Map<string, string>();
     const pending: TestUnderValidation[] = [];
+    /** With stopOnFirstFailure: the test whose failure ended the run. */
+    let stoppedBy: string | undefined;
     for (const t of runnable) {
         handles.set(t.spec.testId, t.handle);
         await sink.updateTest(t.handle, { validation: "VALIDATING" });
@@ -160,6 +164,11 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
             await sink.updateTest(t.handle, { validation: "FAILED_VALIDATION", reason: `Script could not be rendered: ${msg}` });
             summary.testsFailedValidation++;
             summary.errors.push(`${t.spec.testId}: ${msg}`);
+            // Stopping at the first failure: a test that cannot even be rendered is that failure; the tests after it are not touched.
+            if (req.stopOnFirstFailure) {
+                stoppedBy = t.spec.testId;
+                break;
+            }
             continue;
         }
         // Visual tests compare against their approved baselines (none yet → this run captures them).
@@ -175,15 +184,18 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
         const agentOnlyTarget = ctx.executor?.remote === true && isPrivateHost(new URL(req.url).hostname.replace(/^\[|\]$/g, ""));
         const browser = !agentOnlyTarget && pending.some((t) => !t.custom && getAdapter(t.framework).traits.browserRepair) ? await launchChromium(ctx.config.HEADLESS) : undefined;
         try {
-            const outcomes: ValidationOutcome[] = await validateBatch(
+            const apiToken = await resolveApiToken(ctx, req.credentials);
+            const batch = (items: TestUnderValidation[]): Promise<ValidationOutcome[]> => validateBatch(
                 ctx,
                 {
                     browser,
                     scratchDir: ctx.config.scratchDir,
-                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken: await resolveApiToken(ctx, req.credentials), apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS },
+                    env: { baseUrl: origin, apiBaseUrl: renderCtx.apiBaseUrl, credentials: creds, roles: req.roles, apiToken, apiAuthHeader: req.credentials?.apiAuthHeader, headless: ctx.config.HEADLESS },
                     render: renderCtx,
                     model,
-                    maxRepairAttempts: ctx.config.MAX_REPAIR_ATTEMPTS,
+                    // These are existing tests, run as approved: a repair waits for review and is not run in this job.
+                    maxRepairAttempts: Math.min(ctx.config.MAX_REPAIR_ATTEMPTS, 1),
+                    repairsAreDrafts: true,
                     workers: ctx.config.CONCURRENCY,
                     retryFailures: req.retryFailures,
                     mobile: mobile.env,
@@ -191,7 +203,7 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
                     cleanup: req.cleanup,
                     ...(req.helpers?.length ? { helpers: req.helpers } : {}),
                 },
-                pending,
+                items,
                 {
                     onCleanup: sink.saveCleanup ? (items) => sink.saveCleanup!(items) : undefined,
                     async onAttempt(t, attempt, _script, run) {
@@ -217,6 +229,22 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
                     onHealing: sink.saveHealing ? async (t, heal) => void (await sink.saveHealing!(handles.get(t.spec.testId)!, heal)) : undefined,
                 },
             );
+            let outcomes: ValidationOutcome[];
+            if (!req.stopOnFirstFailure) outcomes = await batch(pending);
+            else {
+                // One at a time, in order: the first test that does not pass ends the run, and the tests after it keep what they had.
+                outcomes = [];
+                for (let i = 0; i < pending.length; i++) {
+                    const [o] = await batch([pending[i]!]);
+                    if (o) outcomes.push(o);
+                    const failed = o && o.status !== "VALIDATED" && o.status !== "NOT_RUN";
+                    if (failed || ctx.signal?.aborted) {
+                        if (failed) stoppedBy = o!.spec.testId;
+                        for (const rest of pending.slice(i + 1)) await sink.restoreTest?.(handles.get(rest.spec.testId)!);
+                        break;
+                    }
+                }
+            }
             for (const o of outcomes) {
                 if (o.status === "NOT_RUN") continue;
                 validated.push({ handle: handles.get(o.spec.testId)!, spec: o.spec, validationStatus: o.status, scriptId: scriptIds.get(o.spec.testId), ...(pending.find((p) => p.spec.testId === o.spec.testId)?.custom ? { custom: pending.find((p) => p.spec.testId === o.spec.testId)!.custom } : {}) });
@@ -227,6 +255,11 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
         } finally {
             await browser?.close().catch(() => undefined);
         }
+    }
+    if (stoppedBy) {
+        const ran = new Set([...validated.map((v) => v.spec.testId), stoppedBy]);
+        const notRun = runnable.filter((t) => !ran.has(t.spec.testId)).length;
+        ctx.emit({ stage: "validation", kind: "stopped_on_failure", level: "warn", message: `Stopped at the first failure (${stoppedBy})${notRun ? `: ${notRun} test(s) after it were not run` : ""}.`, data: { testId: stoppedBy, notRun } });
     }
     await sink.counters({
         testsValidated: summary.testsValidated,

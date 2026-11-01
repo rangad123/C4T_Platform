@@ -29,7 +29,8 @@ import { CSRF_COOKIE, readCookie, SESSION_COOKIE } from "./cookies.js";
 import { installCostHiding } from "./cost-hiding.js";
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, type Permission } from "./permissions.js";
 import { permissionRuleFor, UNLISTED_NEEDS } from "./roles.js";
-import { attachProjectScope, createProjectScope, type ProjectScope } from "./project-scope.js";
+import { attachProjectScope, classifyRoute, createProjectScope, type ProjectScope } from "./project-scope.js";
+import { isArchived, PROJECT_ARCHIVED } from "../project-folders.js";
 import { crowd4testFromConfig, personFor, type Crowd4Test } from "./crowd4test.js";
 import { c4tServiceOf, clientIpOf } from "../c4t-service.js";
 
@@ -45,6 +46,8 @@ export const C4T_REQUEST_HEADER = "x-requested-with";
 export const C4T_REQUEST_VALUE = "ai-studio";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+/** The changes an archived project still accepts: restoring it and deleting it (routes/project-folders.ts). */
+const ARCHIVE_EXEMPT = new Set(["POST /api/projects/:id/archive", "POST /api/projects/:id/unarchive", "DELETE /api/projects/:id"]);
 const ACTOR = Symbol("aitp.actor");
 const REFUSED = Symbol("aitp.refusedPermission");
 const USED = Symbol("aitp.usedPermission");
@@ -292,6 +295,14 @@ export function installAccessControl(app: FastifyInstance, p: Platform): AccessC
                 }
                 // A person limited to some projects: 404 for anything of another project, and what they hold there counts (auth/project-scope.ts).
                 projects.check(req, actor, template, need);
+                // An archived project is read-only for everyone: every change to it or to anything in it is refused, except restoring
+                // and deleting it (project-folders.ts). Reading, downloads and POSTs that store nothing ("read") stay open.
+                if (!SAFE_METHODS.has(req.method) && rule !== "read" && !ARCHIVE_EXEMPT.has(`${req.method} ${template}`)) {
+                    const scope = classifyRoute(req.method, template, rule);
+                    const params = (req.params ?? {}) as Record<string, string | undefined>;
+                    const projectId = scope?.kind === "project" ? params[scope.param] : scope?.kind === "object" ? projects.projectOf(scope.object, String(params[scope.param] ?? "")) : undefined;
+                    if (projectId && isArchived(p.db, projectId)) throw new HttpError(409, PROJECT_ARCHIVED);
+                }
                 (req as unknown as Record<symbol, Permission>)[USED] = need;
             }
             return enter(req, actor, done);

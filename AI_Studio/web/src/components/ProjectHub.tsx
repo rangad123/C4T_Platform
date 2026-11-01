@@ -5,7 +5,7 @@ import { EmbeddedContext } from "../lib/embedded";
 import { useDocumentTitle, useFetch, useProjectChanged } from "../lib/hooks";
 import { routes } from "../lib/router";
 import { usePage } from "./Shell";
-import { PageHeader } from "./ui";
+import { Callout, PageHeader } from "./ui";
 import { Tooltip } from "./Tooltip";
 
 export interface HubSection {
@@ -38,6 +38,7 @@ export function ProjectHub({ id, place, title, subtitle, sections, current, href
         <>
             <PageHeader title={title} subtitle={subtitle} actions={actions} />
             <ProjectTabs id={id} active={place} count={project.data?.test_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
+            {project.data?.archived_at && <ArchivedNote id={id} />}
             {below}
             <nav className="subtabs" aria-label={`${title} sections`} ref={nav}>
                 {sections.map((s) => (
@@ -68,6 +69,7 @@ export function ProjectPlace({ id, place, title, subtitle, actions, children }: 
         <>
             <PageHeader title={title} subtitle={subtitle} actions={actions} />
             <ProjectTabs id={id} active={place} count={project.data?.test_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
+            {project.data?.archived_at && <ArchivedNote id={id} />}
             <div className="stack">{children}</div>
         </>
     );
@@ -96,3 +98,14 @@ export function CollapsedSetting({ title, summary, children, defaultOpen, testId
     );
 }
 
+
+/** Shown on every place of an archived project (round 34): it is read-only until a Project Admin restores it. */
+export function ArchivedNote({ id }: { id: string }) {
+    return (
+        <div style={{ marginBottom: 16 }} data-testid="archived-note">
+            <Callout tone="info" title="This project is archived">
+                It is read-only and starts no runs. A Project Admin can restore it in <a href={routes.projectSettings(id, "general")}>Settings → General</a>.
+            </Callout>
+        </div>
+    );
+}

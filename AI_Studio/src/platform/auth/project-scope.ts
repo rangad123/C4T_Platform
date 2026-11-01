@@ -105,9 +105,29 @@ export const EXPLICIT_SCOPES: Record<string, Scope["kind"]> = {
     "GET /api/v1/security/scanners": "none",
     // Organisations, not projects: the handler shows a customer only their own and a tester none (routes/project-settings.ts).
     "GET /api/organizations": "none",
+    // A person's own preferences; folders, whose handlers narrow them to the person's organisation and reachable projects (routes/project-folders.ts).
+    "GET /api/me/preferences": "none",
+    "PUT /api/me/preferences": "none",
+    "POST /api/folders": "none",
+    "PATCH /api/folders/:folderId": "none",
+    "DELETE /api/folders/:folderId": "none",
+    // Registering, renaming and retiring a runner: the handlers limit them to the runner's owner side (routes/runners.ts).
+    "POST /api/ai-configurations": "none",
+    "PATCH /api/ai-configurations/:configId": "none",
+    "DELETE /api/ai-configurations/:configId": "none",
+    "POST /api/ai-configurations/:configId/test": "none",
+    "POST /api/runners": "none",
+    "PATCH /api/runners/:runnerId": "none",
+    "POST /api/runners/:runnerId/retire": "none",
     // ── lists narrowed to the allowed projects by their handlers ──
     "GET /api/projects": "list",
     "GET /api/dashboard": "list",
+    "GET /api/reviews": "list",
+    "GET /api/folders": "list",
+    "GET /api/ai-configurations": "list",
+    "GET /api/runners": "list",
+    "GET /api/runners/summary": "list",
+    "GET /api/runners/:runnerId": "list",
     // ── the project in the query ──
     "GET /api/usage": "query",
     // ── a stream path in the body ──

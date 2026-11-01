@@ -278,6 +278,9 @@ export class PhoneFake {
         // The Security Assessment module (round 18): the shell asks whether it is on; these phone screens run with it off.
         if (method === "GET" && p === "/v1/security/status") return { body: { enabled: false } };
         if (method === "GET" && p === "/projects") return { body: [...this.projects.values()].map((x) => this.publicProject(x)) };
+        // The Projects page (round 34): open access saves no preferences, and these screens use no folders.
+        if (method === "GET" && p === "/me/preferences") return { body: { preferences: {}, saved: false } };
+        if (method === "GET" && p === "/folders") return { body: { folders: [], canCreate: true, organizations: [] } };
         if (method === "POST" && p === "/projects") {
             const proj = this.addProject(String(body?.name ?? "Untitled"), null);
             return { status: 201, body: { id: proj.id, name: proj.name } };
@@ -296,6 +299,9 @@ export class PhoneFake {
             // A quiet line on the Tests page; a server that does not answer shows nothing, which is all these tests need.
             // Cards on the Overview and lines on the Tests page that have nothing to say about a phone project: an answer that is not there shows nothing.
             if (method === "GET" && ["framework-settings", "api-changes", "memory", "performance", "cleanup", "application-model"].includes(rest)) return { status: 404, body: { error: "Not found" } };
+            // Cards of the project's Dashboard (round 34), as a project with nothing to report answers them.
+            if (method === "GET" && rest === "setup-check") return { body: { items: [] } };
+            if (method === "GET" && rest === "requirements/coverage") return { body: { total: 0, notCovered: 0, covered: 0, passing: 0, failing: 0, retired: 0 } };
             if (method === "GET" && rest === "agent-tokens") return { body: [] };
             if (method === "GET" && rest === "agents") return { body: this.agents };
             // Round 24 (Settings, Mobile app): the ready check and the phone test settings, as a platform with no phone connected answers them.
@@ -304,6 +310,8 @@ export class PhoneFake {
                 const depths = [["quick", "Quick", 40, 150, 10, 15], ["standard", "Standard", 150, 600, 30, 40], ["thorough", "Thorough", 300, 1200, 60, 80]].map(([id, label, screens, actions, minutes, ideas]) => ({ id, label, screens, actions, minutes, ideas, line: `About ${screens} screens.` }));
                 return { body: { hasApp: Boolean(proj.mobile?.appPackage || proj.mobile?.apk), appPackage: proj.mobile?.appPackage ?? null, runsOn: null, effective: { kind: "auto" }, sentence: "Phone tests run on a connected phone that has the app, else on an emulator.", exploredOn: null, depth: "standard", depths, keepSignedIn: false, cleanStart: proj.mobile?.cleanStart === true, farm: { connections: [], chosen: null } } };
             }
+            // What every project page may ask: can this project use AI (routes/ai-config.ts). Here it follows the server's word.
+            if (method === "GET" && rest === "ai") return { body: { available: this.config.llm.configured, ready: this.config.llm.configured, runsHere: true } };
             if (method === "GET" && rest === "runner") {
                 const a = proj.runner.agentId ? this.agents.find((x) => x.id === proj.runner.agentId) : undefined;
                 const canMobile = proj.runner.runOn === "agent" ? Boolean(a?.online && a?.capabilities?.android) : this.config.mobile?.available === true;

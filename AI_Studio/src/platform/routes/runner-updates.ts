@@ -75,7 +75,10 @@ export function registerRunnerUpdateRoutes(ctx: RouteCtx): void {
     const agentOf = (projectId: string, agentId: string) => {
         ctx.project(projectId);
         const a = getAgentServices(p).store.getAgent(agentId);
-        if (!a || a.projectId !== projectId) throw new HttpError(404, "That runner does not belong to this project.");
+        if (!a || !getAgentServices(p).store.agentServes(agentId, projectId)) throw new HttpError(404, "That runner does not belong to this project.");
+        // Updating is managing the machine: a shared runner is its owner's to update, not each project's.
+        const owner = getAgentServices(p).store.getToken(a.tokenId)?.organizationId ?? null;
+        if (owner !== accessControlOf(app).projects.store.projectOrganization(projectId)) throw new HttpError(403, "This runner is shared with this project. Its owner updates it from the Runners page.");
         return a;
     };
 

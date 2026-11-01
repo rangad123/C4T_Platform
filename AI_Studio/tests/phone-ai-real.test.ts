@@ -250,6 +250,6 @@ describe.skipIf(missing.length > 0)("the screens on the real platform with a fak
         await pwExpect(page.getByText("Exploring was stopped", { exact: true })).toBeVisible({ timeout: 60_000 });
         await pwExpect(page.getByTestId("explorer-finished")).toHaveText(/^Exploration stopped: \d+ screens? seen$/);
         expect((await api("GET", `/api/projects/${other}/tests`)).body).toEqual([]);
-        await pwExpect(page.getByRole("link", { name: "Explore again", exact: true }).first()).toHaveAttribute("href", `#/projects/${other}/setup?section=mobile&start=phone`);
+        await pwExpect(page.getByRole("link", { name: "Explore again", exact: true }).first()).toHaveAttribute("href", `#/projects/${other}/settings?section=mobile&start=phone`);
     }, 180_000);
 });

@@ -19,8 +19,9 @@ import { AlertsPanel } from "../schedules/AlertsPanel";
 import { ProjectStorage } from "../storage/ProjectStorage";
 import { formatBytes, type ProjectStorage as ProjectStorageData } from "../storage/storage";
 import { TestingTypeSetting } from "../security/TestingType";
-import { Planned } from "../../components/Planned";
+import { ProjectAiSettings } from "../aiconfig/ProjectAiSettings";
 import { MembersPanel } from "../workspace/MembersPanel";
+import { ReviewPolicyCard } from "../review/ReviewCards";
 import { ProjectGeneral } from "../workspace/ProjectGeneral";
 import { CleanupCard } from "../cleanup/CleanupCard";
 import { TestDataPanel } from "../environments/TestDataPanel";
@@ -73,23 +74,6 @@ function StorageSetting({ id }: { id: string }) {
     );
 }
 
-/** What the AI uses for this project. The project's own provider, model and key (customer-owned or Crowd4Test-managed) arrive later. */
-function AiSetting() {
-    return (
-        <Planned
-            title="AI configuration"
-            phase="Phase 7"
-            testId="planned-project-ai"
-            will={[
-                "Choose the AI provider and model for this project, within the platform's policy.",
-                "Use the customer's own AI key or a Crowd4Test-managed one. A customer key never falls back to a Crowd4Test key unless that is set on purpose.",
-                "A monthly budget for this project, with a warning before it runs out.",
-            ]}
-            today={<>Every project uses the platform’s AI model, set in Settings → AI model (global).</>}
-        />
-    );
-}
-
 /** The project's details, what it tests and how, and its organisation (features/workspace/ProjectGeneral.tsx). */
 function GeneralSetting({ id }: { id: string }) {
     return (
@@ -110,7 +94,18 @@ export function SetupPage({ id }: { id: string }) {
     const section = (useRoute().query.get("section") as SettingsSection | null) ?? "general";
     const sections: HubSection[] = [
         { key: "general", label: "General", hint: "The project, its platforms and testing modes", render: () => <GeneralSetting id={id} /> },
-        { key: "members", label: "Members", hint: "Who can work on this project, and who approves", render: () => <MembersPanel projectId={id} /> },
+        {
+            key: "members",
+            label: "Members",
+            hint: "Who can work on this project, who approves, and what needs approval",
+            render: () => (
+                <div className="stack">
+                    <MembersPanel projectId={id} />
+                    {/* What needs a Project Admin's approval before it runs (features/review/ReviewCards.tsx). */}
+                    <ReviewPolicyCard projectId={id} />
+                </div>
+            ),
+        },
         { key: "environments", label: "Environments", hint: "Staging, production and other addresses to run against", render: () => <EnvironmentsPanel projectId={id} onStarted={() => undefined} /> },
         {
             key: "data",
@@ -136,7 +131,7 @@ export function SetupPage({ id }: { id: string }) {
                 </div>
             ),
         },
-        { key: "ai", label: "AI configuration", hint: "The AI model, key and budget this project uses", render: () => <AiSetting /> },
+        { key: "ai", label: "AI configuration", hint: "Who pays, which key this project uses, and its budget", render: () => <ProjectAiSettings id={id} /> },
         { key: "runners", label: "Runners", hint: "The computers that run this project's tests", render: () => <ProjectRunners id={id} /> },
         { key: "frameworks", label: "Frameworks", hint: "Which test technologies run and their limits", render: () => <FrameworksSetting id={id} /> },
         { key: "mobile", label: "Mobile app", hint: "The app your phone tests run against", render: () => <MobileSetting id={id} /> },

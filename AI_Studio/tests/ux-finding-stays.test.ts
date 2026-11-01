@@ -55,7 +55,7 @@ afterAll(async () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
+const call = async (method: "GET" | "POST" | "PUT", url: string, payload?: unknown) => {
     const res = await server.inject({ method, url, payload: payload as never });
     return { status: res.statusCode, body: res.body && /^[{[]/.test(res.body) ? JSON.parse(res.body) : res.body } as { status: number; body: any };
 };
@@ -82,6 +82,8 @@ async function expectStillAFinding(label: string) {
 describe("a finding stays a finding", () => {
     it("is Needs review, medium severity, on the first analysis", async () => {
         projectId = (await call("POST", "/api/projects", { name: "Weak shop" })).body.id;
+        // This file runs the tests the AI wrote: with the default policy they are drafts and wait for approval (tests/reviews-api.test.ts).
+        await call("PUT", `/api/projects/${projectId}/review-policy`, { aiGenerated: false });
         const queued = await call("POST", `/api/projects/${projectId}/test-generation`, { url: APP, maxPages: 3, targets: ["web"] });
         expect(queued.status).toBe(202);
         await jobDone(queued.body.jobId);

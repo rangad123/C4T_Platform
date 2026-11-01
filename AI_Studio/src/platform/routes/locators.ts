@@ -270,7 +270,7 @@ export function registerLocatorRoutes(ctx: RouteCtx): void {
             updated = p.db.tx(() => {
                 const u = store.update(id, cur.id, { name: next.name, locator: next.locator, page: next.page ?? null, notes: next.notes ?? null, alternatives: next.alternatives ?? [] });
                 // Every spec that referred to the old name now refers to the new one, or none of this happened.
-                if (renamed) for (const t of repo.listTests(id)) if (refNames(t.spec).includes(cur.name)) repo.updateTest(t.id, { spec: renameRefs(t.spec, cur.name, next.name) });
+                if (renamed) for (const t of repo.listTests(id)) if (refNames(t.spec).includes(cur.name)) repo.updateTest(t.id, { spec: renameRefs(t.spec, cur.name, next.name), versionSource: "shared" });
                 // Reusable steps that use the element follow the new name too.
                 if (renamed) {
                     const blockStore = new BlockStore(p.db);

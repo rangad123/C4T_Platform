@@ -43,6 +43,8 @@ export interface AgentToken {
     createdAt: string;
     lastUsedAt: string | null;
     revokedAt: string | null;
+    /** Given to this project from outside it (a runner of the organisation or a shared machine): the access list above manages it. */
+    shared?: boolean;
 }
 
 export interface AndroidDevice {

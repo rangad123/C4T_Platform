@@ -41,6 +41,7 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
+    process.env.AGENT_MAX_TOKENS = "25"; // this file gives one project several runners
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-upd-ui-"));
     // The platform's runner bundle: version 9.2.0 (stand-in program files, a real manifest the platform checks).
     const bundle = path.join(dataDir, "bundle");

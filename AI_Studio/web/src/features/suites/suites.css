@@ -1,0 +1,35 @@
+/* Test suites a person builds (features/suites). Tokens only. */
+.suite-back { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--type-body-sm-size); }
+.suite-back:hover { color: var(--text-primary); }
+.suite-description { white-space: pre-wrap; max-width: 75ch; }
+.suite-form { max-width: 640px; }
+.suite-skipped { margin: 8px 0 0; padding-left: 18px; }
+
+.suite-tests .suite-test { display: flex; align-items: center; gap: 12px; padding: 12px 24px; min-width: 0; background: var(--surface-raised); }
+.suite-tests .suite-test[draggable="true"] { cursor: grab; }
+.suite-tests .suite-test.dragging { opacity: 0.5; }
+.suite-tests .suite-grip { color: var(--text-muted); flex: none; }
+.suite-tests .suite-pos { flex: none; width: 28px; text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.suite-tests .main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.suite-tests .title { font-weight: var(--fw-medium); color: var(--text-primary); overflow-wrap: anywhere; }
+.suite-tests .meta { color: var(--text-muted); font-size: var(--type-caption-size); }
+.suite-tests .suite-acts { display: flex; gap: 2px; flex: none; }
+@media (max-width: 640px) { .suite-tests .suite-test { flex-wrap: wrap; padding: 12px 20px; } .suite-tests .suite-grip { display: none; } .suite-tests .suite-acts { margin-left: 40px; } }
+
+.suite-picker { border-bottom: 1px solid var(--border-default); }
+.suite-pick-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+.suite-pick-list > li + li { border-top: 1px solid var(--border-default); }
+.suite-pick-list > li.t-secondary { padding: 12px 16px; }
+.suite-pick { display: flex; gap: 12px; align-items: flex-start; padding: 10px 16px; cursor: pointer; }
+.suite-pick:hover { background: var(--surface-hover); }
+.suite-pick input { margin-top: 3px; }
+.suite-pick .main { display: grid; gap: 2px; min-width: 0; }
+.suite-pick .title { font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.suite-pick .meta { color: var(--text-muted); font-size: var(--type-caption-size); }
+
+.suite-settings fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.suite-settings fieldset:disabled .check { cursor: not-allowed; opacity: 0.6; }
+.suite-settings legend { margin-bottom: 6px; }
+.suite-browsers { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.suite-settings .field { max-width: 480px; }
+.suite-schedules { border-top: 1px solid var(--border-default); }

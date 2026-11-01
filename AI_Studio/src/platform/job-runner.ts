@@ -20,6 +20,7 @@ import { isLoadSpec } from "../engine/performance/load.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { prepareEnvironmentRun } from "./environment-run.js";
 import { runPlainJob } from "./plain-run.js";
+import { runAgentJob } from "./agent-run.js";
 import { resetBeforeRun } from "./test-data-reset-run.js";
 import { DataSetStore } from "./environments-store.js";
 import { IdentityStore } from "./identity-store.js";
@@ -33,6 +34,7 @@ import { frameHub } from "./frame-hub.js";
 import { PLAN_ARTIFACT, PLAN_FILE, planOptionsOf, requireStoredPlan } from "./plan-store.js";
 import { planFamilies, planTotal } from "../engine/planning/preview.js";
 import { RepoSink } from "./repo-sink.js";
+import { nothingRanMessage, pinRunVersions, ReviewStore, withJobStarter } from "./review-store.js";
 import { deviceOpenerFor } from "./phone-device.js";
 import { MobileTargetSchema } from "../engine/mobile/target.js";
 import type { DeviceOpener } from "../engine/mobile/explore/types.js";
@@ -40,6 +42,7 @@ import { SecretBox } from "./secrets.js";
 import { prepareJobSignIn, type JobSignIn } from "./hard-signin-service.js";
 import { meterFor } from "./usage-store.js";
 import { routedLlmForJob } from "./llm-routing.js";
+import { configuredLlmForJob, resolveProjectAi } from "./ai-config.js";
 import { jobPersonGate } from "./phone-person-gate.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
 import type { ArtifactStore } from "./storage.js";
@@ -86,19 +89,30 @@ export function leaseTick(o: { beat: () => boolean; cancelRequested: () => boole
 
 /** Executes one claimed job end to end and records its final state. Never throws. */
 export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Promise<void> {
+    // What the AI writes in this job is the change of the person who started it, for review (review-store.ts).
+    return withJobStarter(job.options.startedBy, () => runJobAs(deps, job, owner));
+}
+
+async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<void> {
     const { repo, store, config } = deps;
+    // Which AI this job uses and who pays: read once, here, so the engine never waits for it (ai-config.ts).
+    const ai = await resolveProjectAi({ sql: repo.db.sql, config }, job.projectId);
     // A client per job so its token usage is this job's alone (the shared client's counters span jobs).
     // Every model call of the job is counted and checked against the AI budgets before it is made (engine/llm/metered.ts).
-    const meter = meterFor(repo, config, job);
+    const meter = meterFor(repo, config, job, undefined, ai.billing);
     // The job's events and its agents' actions go through this sink's ordered queue, with the sink's database-only writes (repo-sink.ts).
     const sink = new RepoSink(repo, store, { id: job.id, projectId: job.projectId, applicationId: job.applicationId, mode: job.options.mode });
     // With a fast model set, routine steps go to it and hard ones (or ones it fumbles) to the main model; without one this is the main client itself (llm-routing.ts).
-    const rawLlm = routedLlmForJob(
-        { db: repo.db, config, emit: (e) => (job.options.mode === "validate" ? undefined : sink.event(e)) },
-        job,
-        (deps.makeLlm ?? createLlmClientOrUnavailable)(config),
-        deps.makeFastLlm ? { fast: deps.makeFastLlm(config) } : {},
-    );
+    // A project's own configuration keeps to its own models: the server's fallback and fast models are never used for it (ai-config.ts).
+    const rawLlm =
+        ai.source === "server"
+            ? routedLlmForJob(
+                  { db: repo.db, config, emit: (e) => (job.options.mode === "validate" ? undefined : sink.event(e)) },
+                  job,
+                  (deps.makeLlm ?? createLlmClientOrUnavailable)(config),
+                  deps.makeFastLlm ? { fast: deps.makeFastLlm(config) } : {},
+              )
+            : configuredLlmForJob({ sql: repo.db.sql, db: repo.db, config }, job, ai, deps.makeLlm);
     const llm = meter ? meter.wrap(rawLlm) : rawLlm;
     const app = repo.getApplication(job.applicationId);
     if (!app) {
@@ -151,6 +165,8 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
     const validateOnly = o.mode === "validate";
 
     try {
+        // A project on its own key that cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
+        if (ai.blocked && !validateOnly) throw new Error(ai.blocked);
         const ctx: EngineContext = {
             config,
             llm,
@@ -204,7 +220,7 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
         ctx.emit({
             stage: "orchestration",
             kind: "job_started",
-            message: o.mode === "plain" ? `Building a test from your description for ${app.url}` : o.mode === "environment" ? `Run against the environment “${o.environment}” started: ${o.testIds?.length ?? 0} test(s)` : o.mode === "variants" ? `Browser and screen-size check started for ${app.url}: ${o.testIds?.length ?? 0} test(s) on ${(o.variants ?? []).join(", ")}` : validateOnly ? `Validation job started (attempt ${job.attempts}) for ${app.url}: ${o.testIds?.length ?? 0} test(s)` : `Job started (attempt ${job.attempts}) for ${app.url}`,
+            message: o.mode === "agent" ? `Agent run started for ${app.url}` : o.mode === "plain" ? `Building a test from your description for ${app.url}` : o.mode === "environment" ? `Run against the environment “${o.environment}” started: ${o.testIds?.length ?? 0} test(s)` : o.mode === "variants" ? `Browser and screen-size check started for ${app.url}: ${o.testIds?.length ?? 0} test(s) on ${(o.variants ?? []).join(", ")}` : validateOnly ? `Validation job started (attempt ${job.attempts}) for ${app.url}: ${o.testIds?.length ?? 0} test(s)` : `Job started (attempt ${job.attempts}) for ${app.url}`,
         });
         // Where the project's phone tests run (a device farm, several phones at once): before the framework settings so their time limits still apply. Defaults: nothing changes.
         applyDeviceFarm(ctx, repo, config, job);
@@ -216,8 +232,26 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
             frameHub.addSecrets(job.id, [app.credentials?.password, app.credentials?.totpSecret, app.credentials?.apiToken, ...roles.flatMap((r) => [r.password, r.totpSecret, r.apiToken])]);
             ctx.frames = createFrameSink(frameHub.targetFor(job.id), { secrets: () => frameHub.secretsOf(job.id) });
         }
+        // Drafts never run (review-store.ts): each test runs its latest approved version, recorded against this run; a test
+        // with none is left out and said to be waiting for approval. The AI writing tests (generate, plain) tries its own drafts.
+        const runsTests = o.mode === "validate" || o.mode === "variants" || o.mode === "environment";
+        const pins = runsTests ? pinRunVersions(repo.db, job.id, o.testIds ?? []) : undefined;
+        if (pins) {
+            sink.keepSteps = pins.stale;
+            for (const id of pins.waiting) ctx.emit({ stage: "validation", kind: "waiting_for_approval", level: "warn", message: `${repo.getTest(id)?.testKey ?? id}: not run. It is waiting for approval: only approved versions run.` });
+            for (const id of pins.stale) ctx.emit({ stage: "validation", kind: "approved_version_ran", message: `${repo.getTest(id)?.testKey ?? id}: ran its approved version. A newer draft is waiting for approval.` });
+            if (pins.waiting.length) {
+                const waiting = new Set(pins.waiting);
+                o.testIds = (o.testIds ?? []).filter((id) => !waiting.has(id));
+                if (o.testIds.length === 0) {
+                    await finish("FAILED", nothingRanMessage(pins.waiting.length));
+                    return;
+                }
+            }
+        }
         // Code tests in this job: the run policy goes around the executor, and their scripts and helpers are loaded once.
-        const custom = customRunInputs(repo, job.projectId, o.mode === "validate" || o.mode === "variants" || o.mode === "environment" ? (o.testIds ?? []) : []);
+        const custom = customRunInputs(repo, job.projectId, runsTests ? (o.testIds ?? []) : []);
+        pins?.applyCustom(custom);
         applyExecutorPolicy(ctx, config, custom.byTest.size > 0);
         for (const name of custom.missing) ctx.emit({ stage: "validation", kind: "custom_helper_missing", level: "warn", message: `A code test imports the helper “${name}”, which this project does not have. Add it on the Code page, or the test will fail.` });
 
@@ -235,10 +269,25 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
             await finish("FAILED", signIn.stop);
             return;
         }
+        if (o.mode === "agent") {
+            // The AI pursues an objective and keeps its own record (agent-run.ts): the job only says how it ended.
+            const ended = await runAgentJob({ repo, store, config, ctx, job, app, roles, ...(signIn.savedSession ? { storageState: signIn.savedSession.storageState } : {}) });
+            await finish(ended.status, ended.error);
+            return;
+        }
         let summary: GenerationSummary;
         if (o.mode === "environment") {
             // Results for one named environment only: the tests' own validation status and history are never touched.
             const prepared = await prepareEnvironmentRun(repo, config, job, app, roles);
+            // The approved version's steps and code, where a newer draft waits (review-store.ts).
+            if (pins) {
+                prepared.tests = prepared.tests.map((et) => {
+                    if (!pins.stale.has(et.handle.id)) return et;
+                    const { custom: hand, ...rest } = et;
+                    const approved = custom.byTest.get(et.handle.id);
+                    return { ...rest, spec: view(pins.test({ id: et.handle.id, spec: et.spec }).spec), ...(hand && approved ? { custom: { ...hand, content: approved.content } } : {}) };
+                });
+            }
             for (const id of prepared.missing) ctx.emit({ stage: "validation", kind: "test_missing", level: "warn", message: `Test ${id} no longer exists; skipped` });
             summary = await runEnvironmentJob(ctx, { ...prepared.request, render: { ...prepared.request.render, deleteOps: projectDeleteOps((app.model ?? repo.getLatestAppModel(job.projectId))?.apis) }, cleanup, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, prepared.tests, sink);
         } else if (o.mode === "plain") {
@@ -249,7 +298,8 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
             // Compatibility checks only: the tests' own validation status is never touched.
             const tests: VariantTest[] = [];
             for (const id of o.testIds ?? []) {
-                const t = repo.getTest(id);
+                const found = repo.getTest(id);
+                const t = found && pins ? pins.test(found) : found;
                 if (!t || t.projectId !== job.projectId) {
                     ctx.emit({ stage: "validation", kind: "test_missing", level: "warn", message: `Test ${id} no longer exists; skipped` });
                     continue;
@@ -266,7 +316,8 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
             // Load checks only go to an allowed address that is not a production environment; decided once, before any is run.
             let loadRefusal: string | undefined | null = null;
             for (const id of o.testIds ?? []) {
-                const t = repo.getTest(id);
+                const found = repo.getTest(id);
+                const t = found && pins ? pins.test(found) : found;
                 if (!t || t.projectId !== job.projectId) {
                     ctx.emit({ stage: "validation", kind: "test_missing", level: "warn", message: `Test ${id} no longer exists; skipped` });
                     continue;
@@ -295,7 +346,7 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
                     ...(custom.byTest.has(t.id) ? { custom: custom.byTest.get(t.id)! } : {}),
                 });
             }
-            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, tests, sink);
+            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}) }, tests, sink);
         } else {
             // Creating from a plan the person approved: the plan is read back here, so a missing one fails before anything is touched.
             const fromPlan = o.fromPlan ? await requireStoredPlan(repo, store, o.fromPlan) : undefined;
@@ -396,6 +447,12 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
         meter?.finish();
         // Writes still waiting (a lease lost, an early return) are stored before the finished-job hook reads the job.
         await sink.writes.flush();
+        // Each execution names the test version it ran (review-store.ts).
+        try {
+            new ReviewStore(repo.db).finishRun(job.id);
+        } catch (e) {
+            console.warn(`[job ${job.id.slice(0, 8)}] could not record the test versions this run ran: ${e instanceof Error ? e.message : String(e)}`);
+        }
         await cleanScratch(config.scratchDir).catch(() => undefined);
         await notifyFinished(deps, job.id);
     }
