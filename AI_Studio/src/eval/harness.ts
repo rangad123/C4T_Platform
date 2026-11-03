@@ -117,7 +117,8 @@ async function runEntry(client: PlatformClient, entry: CorpusEntry, o: HarnessOp
     const t0 = Date.now();
     const out: EntryResult = { ...base, status: "failed" };
     try {
-        const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+        // To the second: project names are unique in an organisation, and two runs can start in the same minute.
+        const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
         const project = await call("POST", "/api/projects", "Creating the project", { name: `Eval: ${entry.id} (${stamp})`.slice(0, 100) });
         out.projectId = project.id;
         // The evaluation measures the tests the AI writes, by running them again: in its own throwaway project they need no review first

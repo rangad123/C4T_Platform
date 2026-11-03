@@ -5,7 +5,9 @@ import { TrackerError } from "../issues/http.js";
 import { SentryClient, SentrySettings, type SentryConfig } from "../sentry/client.js";
 import { relatedCache, relatedErrors } from "../sentry/related.js";
 import { SentryStore } from "../sentry/store.js";
+import { sharedOrigin, sharedRowMessage } from "../shared-integrations.js";
 import { z } from "zod";
+import { NEW_SECRET_NEEDED } from "./shared-integrations.js";
 import type { RouteCtx } from "./types.js";
 
 /**
@@ -21,6 +23,13 @@ export function registerSentryRoutes(ctx: RouteCtx): void {
         throw e;
     };
 
+    /** A Sentry connection shared from Integrations is changed and removed there, never from one project. */
+    const notShared = (projectId: string) => {
+        const c = store.get(projectId);
+        const origin = c ? sharedOrigin(p.db, c.id) : undefined;
+        if (origin) throw new HttpError(409, sharedRowMessage(origin.name), { code: "shared_integration", integrationId: origin.integrationId });
+    };
+
     app.get("/api/projects/:id/sentry", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
@@ -33,8 +42,12 @@ export function registerSentryRoutes(ctx: RouteCtx): void {
     app.put("/api/projects/:id/sentry", async (req, reply) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
+        notShared(id);
         const { verify, ...settings } = Body.parse(req.body);
-        if (!settings.token && !store.get(id)) throw new HttpError(400, "Enter the Sentry token to connect.");
+        const before = store.get(id);
+        if (!settings.token && !before) throw new HttpError(400, "Enter the Sentry token to connect.");
+        // The stored token is only sent where it was entered for: a new address needs it again, before any check uses it.
+        if (!settings.token && before && settings.baseUrl.replace(/\/+$/, "") !== before.baseUrl.replace(/\/+$/, "")) throw new HttpError(400, NEW_SECRET_NEEDED);
         await assertAllowedTarget(settings.baseUrl);
         if (verify) {
             // Check with the token that will be used: the new one, or the stored one when it was left out.
@@ -55,6 +68,7 @@ export function registerSentryRoutes(ctx: RouteCtx): void {
     app.delete("/api/projects/:id/sentry", async (req, reply) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
+        notShared(id);
         if (!store.remove(id)) throw new HttpError(404, "Sentry is not connected to this project");
         relatedCache.clearProject(id);
         return reply.code(204).send();

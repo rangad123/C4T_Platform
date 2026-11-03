@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-44 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 44;
+-- Equal to SQLite migration slots 1-48 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 48;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -1552,6 +1552,104 @@ CREATE TABLE objective_run_approvals (
     created_at TEXT NOT NULL
 );
 CREATE INDEX idx_objective_run_approvals_run ON objective_run_approvals (run_id, state);
+
+CREATE TABLE library_folders (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT REFERENCES organizations(id),
+    parent_id TEXT REFERENCES library_folders(id),
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_library_folders_org ON library_folders (organization_id, parent_id, name_key);
+
+CREATE TABLE library_items (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT REFERENCES organizations(id),
+    folder_id TEXT REFERENCES library_folders(id),
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    version BIGINT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_library_items_folder ON library_items (folder_id);
+CREATE INDEX idx_library_items_org ON library_items (organization_id, kind, name_key);
+
+CREATE TABLE library_item_versions (
+    item_id TEXT NOT NULL REFERENCES library_items(id) ON DELETE CASCADE,
+    version BIGINT NOT NULL,
+    content_json TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    source_project_id TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (item_id, version)
+);
+
+CREATE TABLE library_uses (
+    item_id TEXT NOT NULL REFERENCES library_items(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    version BIGINT NOT NULL,
+    local_name TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (item_id, project_id)
+);
+CREATE INDEX idx_library_uses_project ON library_uses (project_id);
+
+CREATE TABLE project_testing_agents (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    chosen_by TEXT,
+    chosen_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, agent_id)
+);
+CREATE INDEX idx_project_testing_agents_agent ON project_testing_agents (agent_id);
+
+CREATE TABLE project_app_details (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    play_store_url TEXT,
+    app_store_url TEXT,
+    ios_app_name TEXT,
+    ios_app_bytes BIGINT,
+    ios_app_uploaded_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE shared_integrations (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    secret_enc TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'unchecked',
+    status_note TEXT,
+    checked_at TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_shared_integrations_org ON shared_integrations (organization_id);
+
+CREATE TABLE shared_integration_links (
+    integration_id TEXT NOT NULL REFERENCES shared_integrations(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL,
+    linked_by TEXT,
+    linked_at TEXT NOT NULL,
+    PRIMARY KEY (integration_id, project_id)
+);
+CREATE INDEX idx_shared_integration_links_project ON shared_integration_links (project_id);
+CREATE INDEX idx_shared_integration_links_target ON shared_integration_links (target_id);
 
 CREATE TABLE security_scan_runs (
     id TEXT PRIMARY KEY,

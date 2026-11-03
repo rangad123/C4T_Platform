@@ -9,6 +9,8 @@ import { loadTargetProblem } from "../load-guard.js";
 import { discardStoredPlan, loadStoredPlan, planOptionsOf, PLAN_GONE } from "../plan-store.js";
 import { ACTIVE_STATES, type JobOptions, type JobRow } from "../repo.js";
 import type { RouteCtx } from "./types.js";
+import { droppedChecksNote, narrowedByChoice, type AskedSwitches } from "../testing-agents.js";
+import { testingAgentsOf } from "./testing-agents.js";
 
 /**
  * Explore first, create after the person has looked.
@@ -153,21 +155,30 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
 
         const { planOnly: _p, fromPlan: _f, excludeIdeas: _e, requirementsText: _r, ...kept } = job.options;
         const { targets: _t, excludeIdeas: _x, ...switches } = body;
-        const options: JobOptions = {
+        const asked: JobOptions = {
             ...kept,
             ...Object.fromEntries(Object.entries(switches).filter(([, v]) => v !== undefined)),
             targets,
             fromPlan: jobId,
             ...(body.excludeIdeas?.length ? { excludeIdeas: [...new Set(body.excludeIdeas)] } : {}),
         };
+        // The project's current testing agents decide the checks, by narrowing: a check whose agent was removed since the plan was made is
+        // left out (the job's events say which), never refused.
+        const narrowed = await narrowedByChoice(testingAgentsOf(p, repo), ctx.project(id), asked, asked as unknown as AskedSwitches);
+        const options = narrowed.options;
+        // Never wider than what the plan explored (a phone-only plan stays phone-only).
+        options.targets = (options.targets ?? targets).filter((t) => targets.includes(t));
         if (options.loadChecks === true && targets.includes("api")) {
             // Load is only ever sent to an allowed address that is not a production environment of this project.
             const refused = await loadTargetProblem(repo.db, id, [options.apiBaseUrl, planned.url]);
             if (refused) throw new HttpError(409, refused);
         }
-        const chosen = planOptionsOf(options, planned.credentials);
+        // Without the Test Case Generation Agent the plan's journeys are not created: they are not counted either.
+        const webIdeas = options.functionalTests === false ? plan.scenarios.map((s) => s.scenarioId).filter((x) => !/^M-\d+$/.test(x)) : [];
+        const chosen = planOptionsOf(webIdeas.length ? { ...options, excludeIdeas: [...new Set([...(options.excludeIdeas ?? []), ...webIdeas])] } : options, planned.credentials);
         const families = planFamilies(plan, chosen);
-        if (planTotal(families, targets) === 0) throw new HttpError(400, "Nothing is selected to create. Choose at least one kind of test.");
+        if (!options.targets.length || planTotal(families, options.targets) === 0)
+            throw new HttpError(400, narrowed.dropped.length ? `Nothing is left to create. ${droppedChecksNote(narrowed.dropped)}` : "Nothing is selected to create. Choose at least one kind of test.");
 
         await ctx.assertNoActiveJob(id);
         // The application keeps the generation settings and the sign-in details of the plan, minus the one-off plan fields.
@@ -175,6 +186,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         const keptMobile = planned.config.mobile;
         const appId = repo.createApplication(id, planned.url, keptMobile ? { ...config, mobile: keptMobile } : config, planned.credentials);
         const created = await repo.createJob(id, appId, options);
+        if (narrowed.dropped.length) repo.addEvent(created.id, { stage: "planning", kind: "agent_checks_dropped", level: "warn", message: droppedChecksNote(narrowed.dropped), data: { dropped: narrowed.dropped } });
         return reply.code(202).send({ jobId: created.id, status: created.status });
     });
 

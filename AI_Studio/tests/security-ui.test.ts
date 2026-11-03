@@ -137,11 +137,10 @@ describe("the switch", () => {
         fake.addProject("Only functional", "functional");
         await visit("#/");
         const sidebar = page.getByRole("complementary", { name: "Main navigation" });
-        // Round 25: the sidebar's groups are the global places; Security assessment has its own group.
-        await pwExpect(sidebar.locator(".nav-label")).toHaveText(["Workspace", "Operations", "Security", "System"]);
-        await sidebar.getByRole("link", { name: "Security assessment", exact: true }).click();
-        await pwExpect(page).toHaveURL(/#\/security$/);
-        await pwExpect(sidebar.getByRole("link", { name: "Security assessment", exact: true })).toHaveAttribute("aria-current", "page");
+        // Round 37: Security assessment is no longer in the left panel, even with the module on; #/security still lists the projects.
+        await pwExpect(sidebar.locator(".nav-label")).toHaveText(["Workspace", "Operations", "System"]);
+        expect(await sidebar.getByRole("link", { name: "Security assessment", exact: true }).count()).toBe(0);
+        await visit("#/security");
         const list = page.getByTestId("sec-projects");
         await pwExpect(list.getByRole("link", { name: /Acme/ })).toHaveAttribute("href", `#/projects/${p.id}/security`);
         expect(await list.getByRole("link", { name: /Only functional/ }).count()).toBe(0);

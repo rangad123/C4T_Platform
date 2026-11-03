@@ -11,11 +11,11 @@ export const platform: Topic[] = [
         why: "You always know where to look.",
         steps: [
             step("Choose Projects in the sidebar to see your applications.", "Projects"),
-            step("Open a project and use its tabs: Dashboard, Requirements, Test cases, Test suites, Test scripts, Agent runs, Runs and Settings.", "Dashboard", "Requirements", "Test cases", "Test suites", "Test scripts", "Agent runs", "Runs", "Settings"),
+            step("Open a project and use its tabs: Dashboard, Requirements, Test cases, Test scripts, Test suites, Agent runs, Runs and Settings.", "Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Agent runs", "Runs", "Settings"),
             step("On Test cases, use Run, New test and More actions.", "Test cases", "Run", "New test", "More actions"),
             step("Press a word with a dotted underline for a one-sentence explanation."),
         ],
-        goodToKnow: ["The tabs follow testing: what must work, the checks, how they group, what runs, and what happened. Settings holds the project's setup."],
+        goodToKnow: ["The tabs follow testing: what must work, the checks, what runs, how they group, and what happened. Settings holds the project's setup."],
         words: ["library"],
         related: ["first-steps", "help", "overview"],
         keywords: ["navigation", "where is", "menu", "tabs", "sidebar", "lost", "find", "layout of the app"],

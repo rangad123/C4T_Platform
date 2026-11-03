@@ -1,4 +1,4 @@
-import { ChevronRight, Folder, FolderKanban, LayoutDashboard, Menu, Server, Settings, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Bot, ChevronRight, FolderKanban, LayoutDashboard, Library, Menu, Plug, Server, Settings, Sparkles, X } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import crowd4testMark from "../assets/crowd4test-mark.png";
 import { useEmbedded } from "../lib/embedded";
@@ -10,14 +10,13 @@ import { useMedia } from "../features/guide/useMedia";
 import { routes } from "../lib/router";
 import { Button } from "./ui";
 import { AccountChip } from "../features/auth/AccountChip";
-import { sec, useSecurityStatus } from "../features/security/security";
 import { SIDE_WORDS, sideOf, useCan } from "../features/auth/permissions";
 import { useAuth } from "../features/auth/auth";
 
 export interface PageMeta {
     crumbs: Array<{ label: string; href?: string }>;
     /** Which top-level destination is current (everything inside a project counts as "projects"). */
-    nav: "dashboard" | "projects" | "develop" | "folders" | "runners" | "settings" | "guide" | "security" | "profile";
+    nav: "dashboard" | "projects" | "agents" | "develop" | "libraries" | "runners" | "integrations" | "settings" | "guide" | "security" | "profile";
 }
 
 const Ctx = createContext<(m: PageMeta) => void>(() => undefined);
@@ -37,7 +36,6 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
     const [meta, setMeta] = useState<PageMeta>({ crumbs: [], nav: "projects" });
     const [open, setOpen] = useState(false);
     const config = useConfig();
-    const security = useSecurityStatus();
     const help = useHelp();
     // Wide screens keep the Help panel beside the page; the page makes room for it.
     const docked = useMedia(DOCK_QUERY) && help.open;
@@ -67,20 +65,20 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
                     <div className="nav-label">Workspace</div>
                     {item(routes.dashboard, "Dashboard", LayoutDashboard, "dashboard", "nav-dashboard")}
                     {item(routes.home, "Projects", FolderKanban, "projects", "nav-projects")}
+                    {/* Agents: read-level like Projects, so everyone who can see a project sees them. */}
+                    {item(routes.agents, "Agents", Bot, "agents", "nav-agents")}
                     {(can("ai_studio.tests.write") || can("ai_studio.tests.generate")) && item(routes.develop, "Test development", Sparkles, "develop", "nav-develop")}
-                    {item(routes.folders, "Folders", Folder, "folders", "nav-folders")}
-                    {can("ai_studio.runners.manage") && (
+                    {item(routes.libraries, "Reusable libraries", Library, "libraries", "nav-libraries")}
+                    {(can("ai_studio.runners.manage") || can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && (
                         <>
                             <div className="nav-label">Operations</div>
-                            {item(routes.allRunners, "Runners", Server, "runners", "nav-runners")}
+                            {can("ai_studio.runners.manage") && item(routes.allRunners, "Runners", Server, "runners", "nav-runners")}
+                            {/* Integrations: set up with "manage keys and connections", chosen per project with project settings. */}
+                            {(can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && item(routes.integrations, "Integrations", Plug, "integrations", "nav-integrations")}
                         </>
                     )}
-                    {security?.enabled && can("ai_studio.security.use") && (
-                        <>
-                            <div className="nav-label">Security</div>
-                            {item(sec.home, "Security assessment", ShieldCheck, "security", "nav-security")}
-                        </>
-                    )}
+                    {/* Round 37: Security assessment is no longer in the left panel. Its pages stay: a project that includes it has
+                        a Security assessment tab, and #/security still lists those projects. */}
                     <div className="nav-label">System</div>
                     {(can("ai_studio.platform.settings") || can("ai_studio.usage.view")) && item(routes.settings, "Settings", Settings, "settings", "nav-settings")}
                     <HelpNavItem />

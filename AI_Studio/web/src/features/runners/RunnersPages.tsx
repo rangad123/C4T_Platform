@@ -10,6 +10,7 @@ import { friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { capabilitySummary, deviceState, OS_LABEL, usePolled } from "../agents/agents";
 import { FreshToken } from "../agents/TokensPanel";
+import { RunnerProjects } from "./ProjectRunnersSection";
 import { STATUS_WORDS, type Runner, type RunnerStatus, type RunnerSummary, type RunnersAnswer } from "./runners";
 import "../agents/agents.css";
 
@@ -331,29 +332,8 @@ export function RunnerPage({ id }: { id: string }) {
                         </ul>
                     )}
                 </section>
-                <section className="card card-pad stack-sm" aria-labelledby="runner-projects-title">
-                    <h2 className="t-section" id="runner-projects-title">
-                        Projects that use it
-                    </h2>
-                    {r.projects.length === 0 && r.otherProjects === 0 ? (
-                        <p className="t-secondary">No project uses this runner yet. Give it to a project in that project's Settings, Runners.</p>
-                    ) : (
-                        <ul className="list divided" aria-label="Projects that use this runner">
-                            {r.projects.map((p) => (
-                                <li key={p.id}>
-                                    <a className="list-row" href={routes.runners(p.id)}>
-                                        <span className="main">
-                                            <span className="title truncate">{p.name}</span>
-                                            <span className="meta">Since {relativeTime(p.grantedAt)}</span>
-                                        </span>
-                                        <ChevronRight size={18} className="chev" aria-hidden />
-                                    </a>
-                                </li>
-                            ))}
-                            {r.otherProjects > 0 && <li className="list-row t-secondary">{plural(r.otherProjects, "other project")} you can't open</li>}
-                        </ul>
-                    )}
-                </section>
+                {/* Which projects use it, and (for someone who manages it) giving it to a project or taking it away: round 37 moved this out of the projects. */}
+                <RunnerProjects runner={r} onChanged={f.reload} />
                 {r.canManage && active && (
                     <section className="card card-pad stack-sm" aria-labelledby="runner-actions-title">
                         <h2 className="t-section" id="runner-actions-title">

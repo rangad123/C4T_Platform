@@ -238,6 +238,23 @@ describe("secrets never leave the encrypted store", () => {
         expect((await call("GET", `/api/projects/${projectId}/integrations`)).body.map((i: { kind: string }) => i.kind)).toEqual(["notion"]);
     });
 
+    it("shared integrations: a Jira token and a Slack address set up once in Integrations are stored encrypted and shown nowhere, in the project either", async () => {
+        const jiraToken = "LEAKCHECK-SharedJira-5a0c3e";
+        const slackHook = "LEAKCHECK-SharedSlack-9e41d7";
+        Object.assign(SECRETS as Record<string, string>, { jiraToken, slackHook });
+        // verify: false keeps this offline; a Slack connection sends nothing until it is tested.
+        const jira = await call("POST", "/api/shared-integrations", { kind: "jira", baseUrl: "https://acme.atlassian.example", projectKey: "SHOP", email: "qa@example.com", token: jiraToken, verify: false });
+        expect(jira.status).toBe(201);
+        const slack = await call("POST", "/api/shared-integrations", { kind: "slack", url: `https://hooks.slack.example/services/${slackHook}` });
+        expect(slack.status).toBe(201);
+        expect(slack.body.config).toEqual({ host: "hooks.slack.example" });
+        for (const s of [jira.body, slack.body]) expect((await call("PUT", `/api/projects/${projectId}/shared-integrations/${s.id}`)).status).toBe(200);
+        await call("PATCH", `/api/shared-integrations/${jira.body.id}`, { token: jiraToken });
+        for (const path of ["/api/shared-integrations", `/api/projects/${projectId}/shared-integrations`, `/api/projects/${projectId}/integrations`, `/api/projects/${projectId}/alert-channels`]) expect((await call("GET", path)).status).toBe(200);
+        // The project's own rows carry the same encrypted secret, searched with everything else below.
+        expect((await call("GET", `/api/projects/${projectId}/alert-channels`)).body.some((c: { name: string }) => c.name === slack.body.name)).toBe(true);
+    });
+
     it("a device farm connection: its access key is stored encrypted and shown nowhere (device-farms.md)", async () => {
         // Nothing is sent to the provider: creating and listing a connection makes no outbound call.
         const farmKey = "LEAKCHECK-FarmKey-4c7e02";

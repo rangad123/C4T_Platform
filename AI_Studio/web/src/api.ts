@@ -300,5 +300,37 @@ export async function uploadApk(projectId: string, file: File): Promise<void> {
     }
 }
 
+/** Round 37: the app a project tests, by platform (GET /api/projects/:id/app-details). */
+export interface AppDetails {
+    webUrl: string | null;
+    android: { apk: string | null; appPackage: string | null; playStoreUrl: string | null };
+    ios: { ipa: { name: string; bytes: number; uploadedAt: string } | null; bundleId: string | null; appStoreUrl: string | null };
+}
+
+/** Upload an iPhone app (.ipa). It is stored for runners; the server never opens or runs it. */
+export async function uploadIpa(projectId: string, file: File): Promise<AppDetails> {
+    let res: Response;
+    try {
+        res = await fetch(`/api/projects/${projectId}/app-details/ipa?filename=${encodeURIComponent(file.name)}`, {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream", ...(getKey() ? { "x-api-key": getKey() } : {}), ...csrfHeader("POST") },
+            body: file,
+        });
+    } catch {
+        throw new ApiError(0, "Could not reach the platform server");
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error || res.statusText);
+    return data as AppDetails;
+}
+
+/** One page of the project list (GET /api/projects with limit and offset). */
+export interface ProjectPage {
+    projects: ProjectRow[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+
 /** URL for an artifact (screenshot, video...) that works in <img>/<video>/<a>, including when an API key is required. */
 export const artifactUrl = (id: string) => `/api/artifacts/${id}${getKey() ? `?key=${encodeURIComponent(getKey())}` : ""}`;

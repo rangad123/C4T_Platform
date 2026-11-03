@@ -8,6 +8,7 @@ import { findEnvironment, scheduleEnvironment, setScheduleEnvironment } from "..
 import { HttpError } from "../http-error.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import { getScheduleServices } from "../schedule-services.js";
+import { sharedOrigin, sharedRowMessage } from "../shared-integrations.js";
 import { CadenceSchema, describeCadence, SCHEDULE_KINDS, type Schedule } from "../schedule-store.js";
 import { RunbookOverlapError, getRunbookServices } from "../runbook-runner.js";
 import { suiteStoreFor } from "../suite-run.js";
@@ -290,6 +291,9 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
             return svc.alertStore.update(cid, own)!;
         }
         const patch = ChannelPatch.parse(req.body);
+        // A channel shared from Integrations keeps its name and address there; what it hears about stays this project's choice.
+        const origin = sharedOrigin(p.db, cid);
+        if (origin && (patch.url !== undefined || (patch.name !== undefined && patch.name !== current.name))) throw new HttpError(409, sharedRowMessage(origin.name), { code: "shared_integration", integrationId: origin.integrationId });
         if (patch.url) await assertAllowedTarget(patch.url);
         return svc.alertStore.update(cid, patch)!;
     });
@@ -298,6 +302,8 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         const { id, cid } = req.params as { id: string; cid: string };
         project(id);
         channel(id, cid);
+        const origin = sharedOrigin(p.db, cid);
+        if (origin) throw new HttpError(409, sharedRowMessage(origin.name), { code: "shared_integration", integrationId: origin.integrationId });
         svc.alertStore.delete(cid);
         return reply.code(204).send();
     });

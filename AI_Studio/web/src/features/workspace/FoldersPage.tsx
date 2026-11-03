@@ -31,8 +31,8 @@ const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.mes
  * that hold a project they can open. Removing a folder never removes a project.
  */
 export function FoldersPage() {
-    useDocumentTitle("Folders");
-    usePage({ crumbs: [{ label: "Folders" }], nav: "folders" });
+    useDocumentTitle("Project folders");
+    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: "Project folders" }], nav: "projects" });
     const folders = useFetch<FoldersAnswer>("/folders");
     const projects = useFetch<ProjectRow[]>("/projects");
     const [note, setNote] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
@@ -45,7 +45,7 @@ export function FoldersPage() {
 
     return (
         <>
-            <PageHeader title="Folders" subtitle="Group your organisation's projects, for example by client or product line. A project is in one folder at most." />
+            <PageHeader title="Project folders" subtitle="Group your organisation's projects, for example by client or product line. A project is in one folder at most." />
             <div className="stack">
                 {folders.loading || projects.loading ? (
                     <ListSkeleton rows={3} />

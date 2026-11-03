@@ -20,7 +20,16 @@ export interface CodeEngines {
 }
 
 export const DEFAULT_PLATFORMS: ProjectPlatform[] = ["web"];
+/** A row from before slot 35 reads as both modes (what it had then); a new project left without a mode gets agent mode. */
 export const DEFAULT_TESTING_MODES: TestingMode[] = ["agent", "code"];
+export const NEW_PROJECT_TESTING_MODES: TestingMode[] = ["agent"];
+
+/**
+ * Round 37: a project has exactly one platform and one testing mode. New choices are refused with more than one; a project made
+ * before keeps the several it has (nothing is changed on upgrade) until its settings are saved with one choice.
+ */
+export const ONE_PLATFORM = "A project tests one platform. Choose web, android or ios.";
+export const ONE_TESTING_MODE = "A project has one testing mode. Choose agent or code.";
 
 /**
  * Portable SQL only (POSTGRES_S3_MIGRATION.md §1.2, §5.3). Existing projects get web and both modes; a project whose latest
@@ -59,6 +68,7 @@ export const PlatformsSchema = z
         const unknown = list.find((x) => !(PLATFORMS as readonly string[]).includes(x));
         if (unknown !== undefined) ctx.addIssue({ code: "custom", message: `"${String(unknown).slice(0, 40)}" is not a platform. Choose web, android or ios.` });
         else if (list.length === 0) ctx.addIssue({ code: "custom", message: "Choose at least one platform." });
+        else if (new Set(list).size > 1) ctx.addIssue({ code: "custom", message: ONE_PLATFORM });
     })
     .transform((list) => ordered(PLATFORMS, list as ProjectPlatform[]));
 
@@ -69,6 +79,7 @@ export const TestingModesSchema = z
         const unknown = list.find((x) => !(TESTING_MODES as readonly string[]).includes(x));
         if (unknown !== undefined) ctx.addIssue({ code: "custom", message: `"${String(unknown).slice(0, 40)}" is not a testing mode. Choose agent or code.` });
         else if (list.length === 0) ctx.addIssue({ code: "custom", message: "Choose at least one testing mode." });
+        else if (new Set(list).size > 1) ctx.addIssue({ code: "custom", message: ONE_TESTING_MODE });
     })
     .transform((list) => ordered(TESTING_MODES, list as TestingMode[]));
 

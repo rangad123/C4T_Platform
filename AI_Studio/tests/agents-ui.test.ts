@@ -206,7 +206,7 @@ afterAll(async () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-const runnersUrl = () => `${BASE}/#/projects/${projectId}/runners`; // an old address: it lands on Settings > Runners
+const runnersUrl = () => `${BASE}/#/projects/${projectId}/runners`; // an old address: it lands on the Runners page, open on the project (round 37); its own section and the machine list are both empty
 async function open() {
     await page.goto(runnersUrl());
     await page.reload(); // a hash change alone would not re-run the page's loads
@@ -252,7 +252,7 @@ describe("Runners tab", () => {
         await pwExpect(page.getByText("A runner is a small program you start on your own computer")).toBeVisible();
         const steps = page.getByRole("list").filter({ hasText: "Create a token." });
         await pwExpect(steps.getByRole("listitem")).toHaveCount(3);
-        await pwExpect(page.getByText("No runners yet", { exact: true })).toBeVisible();
+        await pwExpect(page.getByTestId("project-runners").getByText("No runners yet", { exact: true })).toBeVisible();
         await pwExpect(page.getByText("No tokens yet.")).toBeVisible();
         // the command is shown with a placeholder and the page's own address
         await pwExpect(page.getByTestId("agent-command")).toHaveText(`node bin/ai-test-agent.mjs --url ${BASE} --token <your token>`);
@@ -270,7 +270,7 @@ describe("Runners tab", () => {
             await page.emulateMedia({ colorScheme: scheme });
             await page.waitForTimeout(400); // colours ease over 140ms when the scheme flips; audit the settled state
             await open();
-            await pwExpect(page.getByText("No runners yet", { exact: true })).toBeVisible();
+            await pwExpect(page.getByTestId("project-runners").getByText("No runners yet", { exact: true })).toBeVisible();
             await shot(`empty-${scheme}-1280`);
             await axe();
         }

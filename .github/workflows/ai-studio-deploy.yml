@@ -3,6 +3,11 @@ name: Deploy AI Studio
 # Fires once "AI Studio CI" finishes on main, like web-deploy.yml. Run it by
 # hand after a DNS change, and with enable_shared_sign_in to share the sign-in.
 # See AI_Studio/deploy/c4t-box/README.md.
+#
+# The runner downloads (the runner program, the complete downloads with their
+# own Node.js and packages, and the installers) are built here, not on the box:
+# the box is small and shared with crowd4test.com. The finished files are copied
+# over with the same SSH secrets, and deploy.sh puts them in place.
 on:
   workflow_run:
     workflows: [AI Studio CI]
@@ -15,20 +20,163 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  # Shared with api-deploy.yml and web-deploy.yml on purpose: all three SSH into
-  # the same EC2 checkout, and only one `git reset --hard` may run at a time.
-  group: c4t-ec2-deploy
-  cancel-in-progress: false
+# Read-only token: the build jobs run npm install scripts, and nothing here pushes.
+permissions:
+  contents: read
 
 jobs:
+  installer-windows:
+    name: Build the Windows installer
+    # csc.exe, the C# compiler that comes with Windows, builds it (scripts/build-installer-win.mjs).
+    runs-on: windows-latest
+    timeout-minutes: 15
+    # A run by hand builds the downloads only from main, which is what the box deploys (deploy-pull.sh).
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
+    defaults:
+      run:
+        working-directory: AI_Studio
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Only Node's own modules are needed: no npm ci here.
+      - name: Compile the installer
+        run: node scripts/build-installer.mjs --skip-mac
+      - name: Check that it was built
+        shell: bash
+        run: test -s dist/installer/win/AITestingRunnerSetup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-installer-windows
+          path: AI_Studio/dist/installer/win/AITestingRunnerSetup.exe
+          retention-days: 1
+          if-no-files-found: error
+
+  runner-downloads:
+    name: Build the runner downloads
+    needs: installer-windows
+    # Still built when the Windows installer failed: the downloads then carry
+    # Node.js and the packages without the installer program.
+    # A run by hand builds the downloads only from main, which is what the box deploys (deploy-pull.sh).
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: AI_Studio
+    env:
+      # Windows and Mac on both processors, and Linux on Intel or AMD. About 60 MB each.
+      RUNNER_TARGETS: win-x64,win-arm64,mac-arm64,mac-x64,linux-x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: AI_Studio/package-lock.json
+      # The complete downloads copy these packages, so they are exactly the lock file's versions.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Fetch the Windows installer
+        if: ${{ needs.installer-windows.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: runner-installer-windows
+          path: AI_Studio/dist/installer-win
+      - name: Build the runner, its complete downloads and the installers
+        run: |
+          npm run build:runner -- --complete --targets "$RUNNER_TARGETS"
+          if [ -s dist/installer-win/AITestingRunnerSetup.exe ]; then
+            node scripts/build-installer.mjs --windows-exe dist/installer-win/AITestingRunnerSetup.exe
+          else
+            echo "::warning::The Windows installer was not built; the Windows downloads go out without it."
+            node scripts/build-installer.mjs --skip-windows
+          fi
+          COMMIT="$(git rev-parse HEAD)" node -e 'const fs = require("node:fs"); fs.writeFileSync("dist/build-info.json", JSON.stringify({ commit: process.env.COMMIT, builtAt: new Date().toISOString(), targets: process.env.RUNNER_TARGETS.split(",") }, null, 2) + "\n")'
+      - name: Check every download before it leaves
+        run: |
+          test -s dist/runner/manifest.json
+          for t in ${RUNNER_TARGETS//,/ }; do
+            test -s "dist/runner-complete/$t/manifest.json" && test -s "dist/runner-complete/$t/pack.bin" || { echo "::error::The complete download for $t is missing."; exit 1; }
+          done
+          test -s dist/installer/manifest.json
+          tar -cf runner-downloads.tar -C dist runner runner-complete installer build-info.json
+          sha256sum runner-downloads.tar >runner-downloads.tar.sha256
+          du -h runner-downloads.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-downloads
+          path: |
+            AI_Studio/runner-downloads.tar
+            AI_Studio/runner-downloads.tar.sha256
+          retention-days: 1
+          # The packs inside are compressed already.
+          compression-level: 0
+          if-no-files-found: error
+
   deploy:
     name: Deploy to EC2
+    needs: runner-downloads
     runs-on: ubuntu-latest
     # The first deploy downloads Node and Chromium on a small box at low priority.
     timeout-minutes: 45
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
+    # Deploys even when the runner downloads could not be built: the box then keeps the ones it has.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) }}
+    concurrency:
+      # Shared with api-deploy.yml and web-deploy.yml on purpose: all three SSH into
+      # the same EC2 checkout, and only one `git reset --hard` may run at a time.
+      # On this job, not the workflow, so the builds above do not hold the queue.
+      group: c4t-ec2-deploy
+      cancel-in-progress: false
     steps:
+      # Neither this step nor the copy may stop the deploy: the box then keeps the downloads it has.
+      - name: Fetch the runner downloads
+        if: ${{ needs.runner-downloads.result == 'success' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: runner-downloads
+          path: incoming
+      # Into ~/.ai-studio/incoming, outside the checkout. deploy.sh checks the
+      # SHA-256 and the room on the disk before it swaps them in.
+      - name: Copy the runner downloads to the box
+        if: ${{ needs.runner-downloads.result == 'success' }}
+        continue-on-error: true
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          key=~/.ssh/c4t_deploy
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$EC2_SSH_KEY" >"$key"
+          opts=(-i "$key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30)
+          size_mb=$(( $(stat -c %s incoming/runner-downloads.tar) / 1048576 + 1 ))
+          free_mb="$(ssh "${opts[@]}" "$EC2_USER@$EC2_HOST" 'umask 077 && mkdir -p "$HOME/.ai-studio/incoming" && rm -f "$HOME/.ai-studio/incoming/runner-downloads.tar" "$HOME/.ai-studio/incoming/runner-downloads.tar.sha256" && df -Pm "$HOME/.ai-studio" | awk "NR == 2 { print \$4 }"')"
+          # The upload, its unpacked copy, and the 2500 MB the deploy itself needs.
+          need_mb=$(( size_mb * 2 + 2500 ))
+          if ! [[ "$free_mb" =~ ^[0-9]+$ ]]; then
+            echo "::warning::The free disk on the box could not be read, so the runner downloads were not copied. The box keeps the ones it has."
+            exit 0
+          fi
+          if [ "$free_mb" -lt "$need_mb" ]; then
+            echo "::warning::Only $free_mb MB are free on the box and the runner downloads need $need_mb MB, so they were not copied. The box keeps the ones it has."
+            exit 0
+          fi
+          # The checksum goes last: deploy.sh trusts a file only when both are there and they match.
+          scp "${opts[@]}" incoming/runner-downloads.tar "$EC2_USER@$EC2_HOST:.ai-studio/incoming/runner-downloads.tar"
+          scp "${opts[@]}" incoming/runner-downloads.tar.sha256 "$EC2_USER@$EC2_HOST:.ai-studio/incoming/runner-downloads.tar.sha256"
+          echo "Copied $size_mb MB of runner downloads."
       - name: Deploy over SSH
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         env:

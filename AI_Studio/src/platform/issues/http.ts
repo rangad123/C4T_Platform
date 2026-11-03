@@ -1,3 +1,4 @@
+import { guardedFetch } from "../guarded-fetch.js";
 import { assertAllowedTarget } from "../net-guard.js";
 
 /** Why an outbound call to an issue tracker (or GitHub) failed, in terms a user can act on. */
@@ -45,7 +46,9 @@ export async function trackerRequest(req: TrackerRequest): Promise<TrackerRespon
     }
     let res: Response;
     try {
-        res = await fetch(req.url, {
+        // The same fetch as an AI configuration's: no redirect is followed, and with BLOCK_PRIVATE_TARGETS on the address is checked on
+        // the very connection (so a name that turns private after the check above is refused too).
+        res = await guardedFetch(req.url, {
             method: req.method,
             headers: {
                 accept: "application/json",
@@ -56,10 +59,13 @@ export async function trackerRequest(req: TrackerRequest): Promise<TrackerRespon
             },
             body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
             signal: AbortSignal.timeout(req.timeoutMs ?? TIMEOUT_MS),
-            // A redirect would resend the Authorization header to wherever it points.
+            // A redirect would resend the Authorization header to wherever it points: guardedFetch refuses it.
             redirect: "manual",
         });
     } catch (e) {
+        const cause = (e as { cause?: unknown }).cause;
+        if (cause instanceof Error && /redirect/i.test(cause.message)) throw new TrackerError("rejected", `${req.service} redirected the request; check the address you entered.`, (cause as { status?: number }).status);
+        if (cause instanceof Error && cause.name === "BlockedAddressError") throw new TrackerError("blocked", cause.message);
         const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
         throw new TrackerError("unreachable", timedOut ? `${req.service} did not answer in time. Try again in a moment.` : `We couldn’t reach ${req.service}. Check the address and your network.`);
     }

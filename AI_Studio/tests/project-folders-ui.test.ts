@@ -96,8 +96,11 @@ describe("folders, archive and delete, and Profile in the web app", () => {
         await owner.getByLabel("Password").fill("olga's long password");
         await owner.getByRole("button", { name: "Sign in" }).click();
         await pwExpect(owner.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+        // Round 37: the Folders place became Reusable libraries; an old link lands there, and project folders open from Projects.
         await owner.goto(`${BASE}/#/folders`);
-        await pwExpect(owner.getByRole("heading", { name: "Folders", level: 1 })).toBeVisible();
+        await pwExpect(owner.getByRole("heading", { name: "Reusable libraries", level: 1 })).toBeVisible();
+        await owner.goto(`${BASE}/#/project-folders`);
+        await pwExpect(owner.getByRole("heading", { name: "Project folders", level: 1 })).toBeVisible();
         await pwExpect(owner.getByText("No folders yet")).toBeVisible();
         await pwExpect(owner.getByTestId("planned-folders")).toHaveCount(0);
         await owner.getByLabel("Folder name").fill("Clients");
@@ -111,14 +114,14 @@ describe("folders, archive and delete, and Profile in the web app", () => {
         await owner.getByLabel("New name for Clients").fill("Key clients");
         await owner.getByRole("button", { name: "Save name" }).click();
         await pwExpect(owner.getByRole("heading", { name: "Key clients" })).toBeVisible();
-        // The project list: three projects open on the dashboard; the list groups them by folder.
+        // The project list (round 37: always the list, in pages) groups them by folder.
         await owner.goto(`${BASE}/#/`);
-        await owner.getByRole("button", { name: /Show as a list/ }).click();
         await owner.getByLabel("Folder", { exact: true }).selectOption("grouped");
         await pwExpect(owner.getByRole("region", { name: "Key clients" }).getByText("Alpha shop")).toBeVisible();
         await pwExpect(owner.getByRole("region", { name: "Not in a folder" }).getByText("Bravo bank")).toBeVisible();
-        // Removing the folder keeps its project.
-        await owner.goto(`${BASE}/#/folders`);
+        // Removing the folder keeps its project. The Projects page links to the folders.
+        await owner.getByRole("link", { name: "Project folders" }).click();
+        await pwExpect(owner.getByRole("heading", { name: "Project folders", level: 1 })).toBeVisible();
         await owner.getByRole("button", { name: "Remove folder" }).click();
         await owner.getByRole("button", { name: "Remove", exact: true }).click();
         await pwExpect(owner.getByText("Folder “Key clients” removed. Its projects are still in Projects.")).toBeVisible();
@@ -138,7 +141,6 @@ describe("folders, archive and delete, and Profile in the web app", () => {
         await owner.goto(`${BASE}/#/projects/${cargo}`);
         await pwExpect(owner.getByTestId("archived-note")).toContainText("It is read-only and starts no runs.");
         await owner.goto(`${BASE}/#/`);
-        await owner.getByRole("button", { name: /Show as a list/ }).click();
         await pwExpect(owner.getByText("Bravo bank")).toBeVisible();
         await pwExpect(owner.getByText("Cargo app")).toHaveCount(0);
         await owner.getByLabel("Show archived projects").check();
@@ -154,13 +156,14 @@ describe("folders, archive and delete, and Profile in the web app", () => {
         expect(platform.repo.getProject(cargo)).toBeUndefined();
     });
 
-    it("saves preferences per person, and the Projects page opens the way they chose", async () => {
+    it("saves preferences per person; the Projects page is the list and links to the dashboard", async () => {
         await owner.goto(`${BASE}/#/profile`);
         const prefs = owner.getByRole("region", { name: "Preferences" });
         await pwExpect(owner.getByTestId("planned-profile-preferences")).toHaveCount(0);
         await pwExpect(owner.getByRole("region", { name: "Your account" })).toBeVisible();
         await prefs.getByLabel(/Run alert emails/).uncheck();
-        await prefs.getByLabel(/^List/).check();
+        // Round 37: how the Projects page opens is no longer a preference (it is always the list).
+        await pwExpect(prefs.getByLabel(/^List/)).toHaveCount(0);
         await prefs.getByRole("button", { name: "Save preferences" }).click();
         await pwExpect(prefs.getByText("Preferences saved.")).toBeVisible();
         expect(await axeClean(owner)).toEqual([]);
@@ -168,7 +171,7 @@ describe("folders, archive and delete, and Profile in the web app", () => {
         await pwExpect(prefs.getByLabel(/Run alert emails/)).not.toBeChecked();
         await owner.goto(`${BASE}/#/`);
         await pwExpect(owner.getByLabel("Show archived projects")).toBeVisible();
-        await pwExpect(owner.getByRole("button", { name: "Show the dashboard" })).toBeVisible();
+        await pwExpect(owner.getByRole("link", { name: "Open the dashboard" })).toHaveAttribute("href", "#/dashboard");
     });
 
     it("shows a Crowd4Test account read-only, with the link to change it on crowd4test.com", async () => {

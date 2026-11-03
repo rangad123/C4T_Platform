@@ -314,7 +314,8 @@ describe("Releases tab", () => {
 
     it("links to Releases from the dashboard row once there are two projects", async () => {
         seedProject(platform, "Second project", "https://second.example.test");
-        await open(`${BASE}/#/`, async () => pwExpect(page.getByRole("list", { name: "Projects" })).toBeVisible());
+        // Round 37: the fleet rows are on the Dashboard; the Projects page is the plain list.
+        await open(`${BASE}/#/dashboard`, async () => pwExpect(page.getByRole("list", { name: "Projects" })).toBeVisible());
         const row = page.getByRole("list", { name: "Projects" }).getByRole("listitem").filter({ hasText: "Atlas shop" });
         await row.getByRole("link", { name: "Releases" }).click();
         await pwExpect(page.getByRole("heading", { name: "Releases", exact: true })).toBeVisible();

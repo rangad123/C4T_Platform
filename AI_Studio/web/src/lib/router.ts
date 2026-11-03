@@ -28,13 +28,14 @@ export const go = (href: string) => {
 
 /**
  * The sections of the project places that hold several (the first of each is what the bare place shows). The places follow the
- * testing lifecycle (docs/product-restructure/INFORMATION_ARCHITECTURE.md): Dashboard, Requirements, Test cases, Test suites, Test
- * scripts, Agent runs, Runs, Settings. The older places (Library, Release, Setup) are gone; their sections live on in these.
+ * testing lifecycle (docs/product-restructure/INFORMATION_ARCHITECTURE.md; round 37 order): Dashboard, Requirements, Test cases,
+ * Test scripts, Test suites, Agent runs, Runs, Settings. The older places (Library, Release, Setup) are gone; their sections live on in these.
  */
 export const CASES_SECTIONS = ["automated", "manual"] as const;
-export const SCRIPTS_SECTIONS = ["scripts", "steps", "elements", "helpers"] as const;
+export const SCRIPTS_SECTIONS = ["scripts", "steps", "elements", "helpers", "library"] as const;
 export const RUNS_SECTIONS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
-export const SETTINGS_SECTIONS = ["general", "members", "environments", "data", "accounts", "ai", "runners", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+// Round 37: runners are machine-level, so they are not a project setting: a project's runners are on the Runners page (`projectRunners`).
+export const SETTINGS_SECTIONS = ["general", "members", "environments", "data", "accounts", "ai", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 export type CasesSection = (typeof CASES_SECTIONS)[number];
 export type ScriptsSection = (typeof SCRIPTS_SECTIONS)[number];
 export type RunsSection = (typeof RUNS_SECTIONS)[number];
@@ -102,10 +103,10 @@ export const routes = {
     agentRun: (id: string, runId: string) => `#/projects/${id}/agent/${runId}`,
     /** The project's settings, one section open. */
     projectSettings: (id: string, section?: SettingsSection) => place(id, "settings", "general", section),
-    /** Where tests run: the runners this project may use. */
-    runners: (id: string) => place(id, "settings", "general", "runners"),
-    /** The old Setup place: each section is a Settings section of the same name. */
-    setup: (id: string, section?: SetupSection) => place(id, "settings", "general", section ?? "runners"),
+    /** Where tests run: the runners this project may use, on the Runners page (round 37: not inside the project). */
+    runners: (id: string) => `#/runners?project=${encodeURIComponent(id)}`,
+    /** The old Setup place: each section is a Settings section of the same name; its Runners section is on the Runners page. */
+    setup: (id: string, section?: SetupSection) => (section === "runners" ? `#/runners?project=${encodeURIComponent(id)}` : place(id, "settings", "general", section)),
     /** The old Library place: each section moved (`libraryHome`). */
     library: (id: string, section?: LibrarySection) => libraryHome(id, section),
     objects: (id: string) => libraryHome(id, "elements"),
@@ -147,7 +148,17 @@ export const routes = {
     develop: "#/develop",
     allRunners: "#/runners",
     runner: (id: string) => `#/runners/${id}`,
+    /** Integrations: every system the projects connect to, set up once for an organisation, and which projects use each. */
+    integrations: "#/integrations",
+    /** An old link (the Folders place of round 34): it lands on Reusable libraries (lib/aliases.ts). */
     folders: "#/folders",
+    /** Reusable libraries of an organisation (round 37); `?org=&folder=&item=` (features/libraries/LibrariesPage.tsx, libraryHref). */
+    libraries: "#/libraries",
+    /** Grouping projects into folders, opened from the Projects page (it was the Folders place). */
+    projectFolders: "#/project-folders",
+    /** The testing agents, and one agent opened (features/testing-agents). */
+    agents: "#/agents",
+    agent: (id: string) => `#/agents/${encodeURIComponent(id)}`,
     profile: "#/profile",
     settings: "#/settings",
     /** The in-app guide: the "I want to…" chooser, one topic, and the words page. */

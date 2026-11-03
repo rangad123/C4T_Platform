@@ -164,9 +164,12 @@ describe("AI judgement results in the UI", () => {
 });
 
 describe("New project form", () => {
+    let made = 0;
     async function openAdvanced(url: string) {
         await page.goto(`${BASE}/#/new?url=${encodeURIComponent(url)}`);
         await pwExpect(page.getByLabel("Application URL")).toHaveValue(url);
+        // Round 37: a new project's name is always typed (a taken name is refused, so each form gets its own).
+        await page.getByLabel("Project name").fill(`Vision project ${++made}`);
         await page.getByText("Advanced options", { exact: true }).click();
     }
 

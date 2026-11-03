@@ -72,6 +72,8 @@ export interface GenerationRequest {
     roles?: RoleLogin[];
     /** Generate access-control checks when the project has test accounts. Default true. */
     accessChecks?: boolean;
+    /** Plan and write functional test cases for the journeys (web target). Default true; false: only the checks are generated. */
+    functionalTests?: boolean;
     /** Generate axe-core accessibility audits for key pages (web target). Default true. */
     accessibility?: boolean;
     /** Generate page health checks (JavaScript errors, failed requests, broken links...) for key pages (web target). Default true. */
@@ -429,6 +431,11 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             const left = new Set(req.excludeIdeas ?? []);
             // Test ideas for a phone app (M-01...) belong to the phone branch, never to the browser.
             scenarios = wantWeb ? req.plan.scenarios.filter((x) => !left.has(x.scenarioId) && !/^M-\d+$/.test(x.scenarioId)) : [];
+            // The project's testing agents may have dropped the Test Case Generation Agent since the plan was made: its ideas are left out.
+            if (req.functionalTests === false && scenarios.length) {
+                ctx.emit({ stage: "planning", kind: "functional_tests_off", message: `No functional test cases are created: this project's testing agents do not include the Test Case Generation Agent any more, so the plan's ${scenarios.length} test idea(s) are left out.` });
+                scenarios = [];
+            }
             if (analysed) memory.analysed(model);
             await sink.counters({ journeysIdentified: model.journeys.length, scenariosPlanned: scenarios.length });
             await sink.phase("ANALYZING", "understanding", analysed ? "done" : "skipped");
@@ -456,13 +463,18 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 if (req.requirements) {
                     ctx.emit({ stage: "planning", kind: "requirements_parsed", message: `${requirements!.length} requirements extracted from ${req.requirements.name}` });
                 }
-                scenarios = await planScenarios(ctx, model, {
-                    maxScenarios: req.maxScenarios,
-                    hasCredentials: Boolean(creds && authState.loggedIn),
-                    scope: req.scope,
-                    requirements,
-                    memory: memory.context("planning"),
-                });
+                // The project's testing agents leave out the Test Case Generation Agent: no journeys are planned, only the checks run.
+                if (req.functionalTests === false) ctx.emit({ stage: "planning", kind: "functional_tests_off", message: "No functional test cases are planned: this project's testing agents do not include the Test Case Generation Agent." });
+                scenarios =
+                    req.functionalTests === false
+                        ? []
+                        : await planScenarios(ctx, model, {
+                              maxScenarios: req.maxScenarios,
+                              hasCredentials: Boolean(creds && authState.loggedIn),
+                              scope: req.scope,
+                              requirements,
+                              memory: memory.context("planning"),
+                          });
                 await sink.counters({ scenariosPlanned: scenarios.length });
                 if (requirements?.length) {
                     const coverage = requirementsCoverage(requirements, scenarios);

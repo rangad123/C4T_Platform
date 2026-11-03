@@ -211,9 +211,9 @@ async function shot(name: string) {
 const panel = () => page.getByRole("region", { name: "Add a runner", exact: true });
 const status = () => page.getByTestId("kit-status");
 
-/** Open Settings > Runners fresh. `wait` shortens the "still waiting" timer for the tests that need to see it. */
+/** Open the project's runners fresh (on the Runners page since round 37). `wait` shortens the "still waiting" timer for the tests that need to see it. */
 async function open(wait?: number) {
-    await page.goto(`${BASE}/#/projects/${projectId}/settings?section=runners${wait ? `&runnerWaitMs=${wait}` : ""}`);
+    await page.goto(`${BASE}/#/runners?project=${projectId}${wait ? `&runnerWaitMs=${wait}` : ""}`);
     await page.reload(); // a hash change alone would not re-run the page's loads
     await pwExpect(page.getByRole("heading", { name: "Runners", exact: true })).toBeVisible();
     await pwExpect(page.locator(".skeleton")).toHaveCount(0);
@@ -450,6 +450,8 @@ describe("Add a runner panel", () => {
         await pwExpect(panel()).toContainText("This file contains a secret that lets a computer run tests for this project. Don’t share it. Delete it after the runner connects.");
         expect(fake.kitRequests).toEqual([]);
         await shot("step2-light-1280");
+        // Round 37: the downloads are unsigned, so the step says what SmartScreen shows and how to get past it.
+        await pwExpect(panel().getByTestId("unsigned-windows")).toContainText("SmartScreen shows Windows protected your PC. Choose More info, then Run anyway.");
 
         const [dl] = await Promise.all([page.waitForEvent("download"), panel().getByRole("button", { name: "Download runner", exact: true }).click()]);
         expect(dl.suggestedFilename()).toBe("runner-maya-s-laptop-windows.zip");
@@ -482,6 +484,9 @@ describe("Add a runner panel", () => {
         await chooseAndDownload("Build box", "Mac or Linux");
         expect(fake.kitRequests.at(-1)).toMatchObject({ name: "Build box", platform: "unix", key: "k-test" });
         await pwExpect(panel()).toContainText("double-click the file on a Mac, or run unzip on Linux");
+        // Round 37: what Gatekeeper says about the unsigned download, and how to get past it.
+        await pwExpect(panel().getByTestId("unsigned-mac")).toContainText("Apple could not verify “start-runner.command” is free of malware");
+        await pwExpect(panel().getByTestId("unsigned-mac")).toContainText("choose Open Anyway");
         await panel().getByRole("button", { name: "Continue", exact: true }).click();
         await pwExpect(panel().getByRole("heading", { name: "Start it", exact: true })).toBeFocused();
         await pwExpect(panel().getByTestId("kit-command")).toHaveText("sh start-runner.sh");

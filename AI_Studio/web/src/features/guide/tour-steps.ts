@@ -45,6 +45,8 @@ export type TourPage =
     /** The latest release of the project. */
     | { kind: "release-detail" }
     | { kind: "setup"; section: SetupSection }
+    /** The Runners page, open on the tour's project (runners are machine-level, round 37). */
+    | { kind: "runners" }
     | { kind: "settings"; section: SettingsSection }
     | { kind: "security-home" }
     | { kind: "security"; section: "overview" | "applications" | "findings" | "reports" }
@@ -80,22 +82,23 @@ export const TOUR_STEPS: TourStep[] = [
     // ── Getting around ──
     { id: "nav-dashboard", chapter: "around", target: "nav-dashboard", page: any, title: "Dashboard", text: "How all your projects are doing, the machines that run them, and the AI they use." },
     { id: "projects", chapter: "around", target: "nav-projects", page: any, title: "Your projects", text: "Each project is one application you test. Projects lists them all, with how each one is doing." },
+    { id: "nav-agents", chapter: "around", target: "nav-agents", page: any, title: "Agents", text: "The kinds of checking the AI does when it explores an application. Open one to see what it checks and which projects use it." },
     { id: "nav-develop", chapter: "around", target: "nav-develop", page: any, title: "Test development", text: "Start writing tests in any of your projects: with the AI, by recording, step by step or as code." },
-    { id: "nav-folders", chapter: "around", target: "nav-folders", page: any, title: "Folders", text: "Folders will keep projects in order inside your organisation. They are planned; the page says what is coming." },
+    { id: "nav-libraries", chapter: "around", target: "nav-libraries", page: any, title: "Reusable libraries", text: "Reusable steps, helpers and shared elements your organisation's projects share. A project takes a copy and updates it when it chooses." },
     { id: "nav-runners", chapter: "around", target: "nav-runners", page: any, title: "Runners", text: "The computers that run your tests, and the Android emulator on this computer." },
-    { id: "nav-security", chapter: "around", target: "nav-security", page: any, needs: ["module"], title: "Security assessment", text: "Passive, read-only checks of applications a client authorized. They are kept apart from your tests." },
+    { id: "nav-integrations", chapter: "around", target: "nav-integrations", page: any, title: "Integrations", text: "Issue trackers, Sentry, alert channels and the other systems your projects connect to. Set one up once, then choose the projects that use it." },
     { id: "nav-settings", chapter: "around", target: "nav-settings", page: any, title: "Settings", text: "How the platform itself is set up: the AI model, people and their access, and the access key." },
     { id: "nav-help", chapter: "around", target: "nav-help", page: any, title: "Help in the sidebar", text: "Opens the Help panel for the page you are on. The full Guide is one click from there." },
     { id: "account", chapter: "around", target: "nav-account", page: any, needs: ["account"], title: "Who you are", text: "Who is using the platform, and their role. Sign out here, or forget the access key, when you are done." },
-    { id: "places", chapter: "around", target: "project-tabs", page: project, needs: P, title: "The places of a project", text: "They follow how testing goes: Dashboard, Requirements, Test cases, Test suites, Test scripts, Agent runs, Runs and Settings." },
+    { id: "places", chapter: "around", target: "project-tabs", page: project, needs: P, title: "The places of a project", text: "They follow how testing goes: Dashboard, Requirements, Test cases, Test scripts, Test suites, Agent runs (AI agent projects), Runs and Settings." },
     { id: "tab-overview", chapter: "around", target: "tab-overview", page: project, needs: P, title: "Dashboard: is it healthy?", text: "The latest results, the tests that need you, and the next scheduled run. A good first stop each day." },
     { id: "tab-requirements", chapter: "around", target: "tab-requirements", page: project, needs: P, title: "Requirements", text: "What the application must do, and which test cases check it." },
     { id: "tab-tests", chapter: "around", target: "tab-tests", page: project, needs: P, title: "Test cases: every check", text: "Every test case of the project, automated and manual, with its status. Pick some to run them or change them together." },
-    { id: "tab-suites", chapter: "around", target: "tab-suites", page: project, needs: P, title: "Test suites", text: "Groups of test cases that run together." },
     { id: "tab-scripts", chapter: "around", target: "tab-scripts", page: project, needs: P, title: "Test scripts: what runs", text: "Each test case's script in plain English and as code, and the pieces scripts share: reusable steps, shared elements and helpers." },
+    { id: "tab-suites", chapter: "around", target: "tab-suites", page: project, needs: P, title: "Test suites", text: "Groups of test cases that run together." },
     { id: "tab-agent", chapter: "around", target: "tab-agent", page: project, needs: P, title: "Agent runs", text: "Give the AI an objective and it tests the application on a runner. Planned; the page says what is coming." },
     { id: "runs", chapter: "around", target: "tab-runs", page: project, needs: P, title: "Runs: what happened", text: "Every exploration and every run of tests is kept here, with schedules and trends." },
-    { id: "tab-settings", chapter: "around", target: "tab-settings", page: project, needs: P, title: "Settings: the project's setup", text: "Members, environments, test data and accounts, runners, alerts, the issue tracker and storage. Most of it is set once." },
+    { id: "tab-settings", chapter: "around", target: "tab-settings", page: project, needs: P, title: "Settings: the project's setup", text: "Members, the app, environments, test data and accounts, alerts, the issue tracker and storage. Most of it is set once." },
 
     // ── Making tests ──
     { id: "new-test", chapter: "making", target: "new-test", page: tests, needs: P, title: "Make a test", text: "New test lists every way to make one. Each way says in a line what it does and what it needs." },
@@ -128,8 +131,8 @@ export const TOUR_STEPS: TourStep[] = [
     { id: "signoff", chapter: "release", target: "release-signoff", page: { kind: "release-detail" }, needs: [...P, "release"], title: "The decision", text: "Sign-off lists anything that stands in the way of approval. Approve or Reject records who decided, when and why." },
     { id: "manual", chapter: "release", target: "tests-manual", page: { kind: "release", section: "manual" }, needs: P, title: "Manual checks", text: "Checks a person does by hand, kept next to the automated tests and counted in the sign-off." },
     { id: "compliance", chapter: "release", target: "runs-compliance", page: { kind: "release", section: "compliance" }, needs: P, title: "Compliance", text: "Which security-control topics your tests touch, from the tests you already have." },
-    { id: "runners", chapter: "release", target: "settings-runners", page: { kind: "setup", section: "runners" }, needs: P, title: "Runners", text: "The computers that run your tests. A runner on your own computer reaches sites that only your network can reach." },
-    { id: "add-runner", chapter: "release", target: "add-runner", page: { kind: "setup", section: "runners" }, needs: P, title: "Add a runner", text: "Add a runner walks you through it: choose the computer, download the kit, start it and watch it connect." },
+    { id: "runners", chapter: "release", target: "project-runners", page: { kind: "runners" }, needs: P, title: "Runners", text: "The computers that run your tests, on the Runners page. A runner on your own computer reaches sites that only your network can reach." },
+    { id: "add-runner", chapter: "release", target: "add-runner", page: { kind: "runners" }, needs: P, title: "Add a runner", text: "Add a runner walks you through it: choose the computer, download the kit, start it and watch it connect." },
     { id: "environments", chapter: "release", target: "settings-environments", page: { kind: "setup", section: "environments" }, needs: P, title: "Environments", text: "Staging, production and other addresses to run against. Production is read-only: nothing risky runs there without asking." },
     { id: "alerts", chapter: "release", target: "settings-alerts", page: { kind: "setup", section: "alerts" }, needs: P, title: "Alerts", text: "Who is told when a run finds something: Slack, Teams, email or a webhook." },
     { id: "issues", chapter: "release", target: "settings-issues", page: { kind: "setup", section: "issues" }, needs: P, title: "Issue tracker", text: "Connect GitHub, Jira or Notion to file a problem straight from a failing test." },
@@ -281,6 +284,8 @@ export function pageHref(page: TourPage, h: TourHave): string | null {
             return h.release ? routes.release(p, h.release) : null;
         case "setup":
             return routes.setup(p, page.section);
+        case "runners":
+            return routes.runners(p);
         case "settings":
             return routes.projectSettings(p, page.section);
         case "security":

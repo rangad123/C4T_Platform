@@ -101,9 +101,8 @@ describe("one project name per organisation", () => {
         // Projects without an organisation (made with the access key) are one group of their own.
         expect((await asKey("POST", "/api/projects", { name: "Storefront" })).status).toBe(201);
         expect((await asKey("POST", "/api/projects", { name: "STOREFRONT" })).status).toBe(409);
-        // A name the page made from the address gets a number; a typed one stays refused.
-        expect((await asKey("POST", "/api/projects", { name: "storefront", autoName: true })).body.name).toBe("storefront 2");
-        expect((await asKey("POST", "/api/projects", { name: "storefront", autoName: true })).body.name).toBe("storefront 3");
+        // Round 37: names are always typed, never made from the address, so the old "autoName" no longer numbers a taken name.
+        expect((await asKey("POST", "/api/projects", { name: "storefront", autoName: true })).status).toBe(409);
         expect((await asKey("POST", "/api/projects", { name: "A free name", autoName: true })).body.name).toBe("A free name");
     });
 

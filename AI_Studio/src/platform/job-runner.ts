@@ -366,6 +366,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                     allowMutatingApiTests: o.allowMutatingApiTests,
                     openApiUrl: o.openApiUrl,
                     apiBaseUrl: o.apiBaseUrl,
+                    ...(o.functionalTests === false ? { functionalTests: false } : {}),
                     accessibility: o.accessibility,
                     healthChecks: o.healthChecks,
                     securityChecks: o.securityChecks,

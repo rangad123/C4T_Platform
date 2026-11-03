@@ -3,6 +3,7 @@ import { routes, useRoute, type ScriptsSection } from "../../lib/router";
 import { BlocksPage } from "../blocks/BlocksPage";
 import { HelpersPage } from "../code/HelpersPage";
 import { LibrarySearch } from "../library/LibraryPage";
+import { ProjectLibrary } from "../libraries/ProjectLibrary";
 import { ProjectObjects } from "../objects/ProjectObjects";
 import { ScriptList, VersionPage } from "../review/ScriptReview";
 
@@ -24,6 +25,7 @@ export function ScriptsPage({ id }: { id: string }) {
         { key: "steps", label: "Reusable steps", hint: "Named groups of steps that many tests use", render: () => <BlocksPage id={id} edit={edit} key={edit ?? ""} /> },
         { key: "elements", label: "Shared elements", hint: "Buttons and fields named once and used by many tests", render: () => <ProjectObjects id={id} /> },
         { key: "helpers", label: "Helpers (code)", hint: "Code that several code tests import", render: () => <HelpersPage id={id} /> },
+        { key: "library", label: "Reusable libraries", hint: "Take steps, helpers and elements from your organisation's library, and publish this project's own", render: () => <ProjectLibrary id={id} /> },
     ];
     return (
         <ProjectHub
@@ -34,7 +36,7 @@ export function ScriptsPage({ id }: { id: string }) {
             sections={sections}
             current={section}
             hrefOf={(k) => routes.scripts(id, k as ScriptsSection)}
-            below={section === "scripts" ? undefined : <LibrarySearch id={id} />}
+            below={section === "scripts" || section === "library" ? undefined : <LibrarySearch id={id} />}
         />
     );
 }

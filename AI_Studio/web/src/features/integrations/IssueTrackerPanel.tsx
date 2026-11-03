@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiError, api } from "../../api";
 import { Button, Callout, Disclosure, ListSkeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
+import { routes } from "../../lib/router";
 import { describeApiError } from "../../lib/labels";
 import { SentryConnect } from "../sentry/SentryConnect";
 import { TRACKER_LABEL, describeConnection, type Integration, type TrackerKind } from "./types";
@@ -28,6 +29,9 @@ function parseRepo(text: string): { owner: string; repo: string } | null {
  */
 export function IssueTrackerPanel({ projectId, onClose }: { projectId: string; onClose?: () => void }) {
     const list = useFetch<Integration[]>(`/projects/${projectId}/integrations`);
+    // Connections set up once in Integrations: changed and removed there, not here.
+    const shared = useFetch<Array<{ targetId: string }>>(`/projects/${projectId}/shared-integrations`);
+    const sharedIds = new Set((shared.data ?? []).map((s) => s.targetId));
     const [adding, setAdding] = useState(false);
     const connections = list.data ?? [];
 
@@ -52,7 +56,7 @@ export function IssueTrackerPanel({ projectId, onClose }: { projectId: string; o
                         <ul className="list divided" aria-label="Connected issue trackers">
                             {connections.map((c) => (
                                 <li key={c.id}>
-                                    <Connection c={c} onRemoved={() => void list.reload()} />
+                                    <Connection c={c} shared={sharedIds.has(c.id)} onRemoved={() => void list.reload()} />
                                 </li>
                             ))}
                         </ul>
@@ -71,7 +75,7 @@ export function IssueTrackerPanel({ projectId, onClose }: { projectId: string; o
     );
 }
 
-function Connection({ c, onRemoved }: { c: Integration; onRemoved: () => void }) {
+function Connection({ c, shared, onRemoved }: { c: Integration; shared?: boolean; onRemoved: () => void }) {
     const [state, setState] = useState<{ kind: "idle" } | { kind: "testing" } | { kind: "ok" | "bad"; text: string }>({ kind: "idle" });
     const [confirm, setConfirm] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -103,6 +107,11 @@ function Connection({ c, onRemoved }: { c: Integration; onRemoved: () => void })
             <span className="main">
                 <span className="title">{c.name}</span>
                 <span className="meta">{TRACKER_LABEL[c.kind]} · {describeConnection(c)}</span>
+                {shared && (
+                    <span className="meta">
+                        Shared from <a href={routes.integrations}>Integrations</a>: change it or stop using it there.
+                    </span>
+                )}
                 {state.kind === "ok" && <span className="meta" role="status" style={{ color: "var(--status-success-fg)" }}><CircleCheck size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> {state.text}</span>}
                 {state.kind === "bad" && <span className="meta" role="alert" style={{ color: "var(--status-error-fg)" }}><CircleX size={13} aria-hidden style={{ verticalAlign: "-2px" }} /> {state.text}</span>}
                 {error && <span className="meta" role="alert" style={{ color: "var(--status-error-fg)" }}>{error}</span>}
@@ -117,7 +126,7 @@ function Connection({ c, onRemoved }: { c: Integration; onRemoved: () => void })
                 ) : (
                     <>
                         <Button size="sm" loading={state.kind === "testing"} tip="Checks the saved address and token with a read-only request. No issue is created." onClick={() => void test()}>Test connection</Button>
-                        <Button size="sm" variant="ghost" icon={Trash2} aria-label={`Remove ${c.name}`} onClick={() => setConfirm(true)}>Remove</Button>
+                        {!shared && <Button size="sm" variant="ghost" icon={Trash2} aria-label={`Remove ${c.name}`} onClick={() => setConfirm(true)}>Remove</Button>}
                     </>
                 )}
             </span>

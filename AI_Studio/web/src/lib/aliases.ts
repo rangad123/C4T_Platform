@@ -35,9 +35,19 @@ const sectionOf = <T extends string>(q: URLSearchParams, list: readonly T[]): T 
 /** Where an old link now lives, or null when the link is already current. */
 export function resolveAlias(parts: string[], query: URLSearchParams): string | null {
     const [a, id, c, d] = parts;
+    // The Folders place became Reusable libraries (round 37).
+    if (a === "folders") return routes.libraries;
     // The step editor was its own page; it is the Steps tab of the test's workbench now.
     if (a === "tests" && id && c === "builder") return routes.testTab(id, "steps");
     if (a !== "projects" || !id || !c) return null;
+    // Round 37: a project's runners moved out of its Settings to the Runners page.
+    if (c === "settings" && query.get("section") === "runners") {
+        const rest = new URLSearchParams(query);
+        rest.delete("section");
+        rest.delete("project");
+        const extra = rest.toString();
+        return extra ? `${routes.runners(id)}&${extra}` : routes.runners(id);
+    }
     // Round 25 replaced three places: Setup became Settings, and the sections of Library and Release moved to Test scripts,
     // Settings, Test cases and Runs. The old route helpers already point at the new homes (lib/router.ts). Any other query (the
     // welcome page's `start=phone`) is kept.

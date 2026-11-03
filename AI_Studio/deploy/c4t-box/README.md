@@ -14,6 +14,7 @@ A preview of AI Studio at `aistudio.crowd4test.com`, on the same EC2 box as crow
 | Data | `/home/ubuntu/.ai-studio/data`. |
 | Logs | `/home/ubuntu/.ai-studio/logs`. |
 | Backups of changed files | `/home/ubuntu/.ai-studio/backups`. |
+| Runner downloads | `/home/ubuntu/.ai-studio/runner-downloads` (`runner`, `runner-complete`, `installer`, `build-info.json`), built by the deploy workflow, never on this box. Uploads wait in `/home/ubuntu/.ai-studio/incoming`. |
 | Browser | Playwright's Chromium, in `/home/ubuntu/.cache/ms-playwright`. |
 | Web server | nginx site `aistudio.crowd4test.com`, with a Let's Encrypt certificate from certbot. |
 
@@ -24,6 +25,18 @@ Files:
 - `nginx-site.conf` is the site, before certbot adds TLS.
 - `.github/workflows/ai-studio-ci.yml` checks a push.
 - `.github/workflows/ai-studio-deploy.yml` deploys after CI succeeds on `main`, or when run by hand.
+
+### Runner downloads
+
+The Runners page offers a complete download for each system and processor (its own Node.js, the runner and every test tool, plus the installer program on Windows and Mac), so a tester installs nothing else. Building those needs the internet and about 1 GB more memory, so this box never builds them. `.github/workflows/ai-studio-deploy.yml` does, in three jobs:
+
+1. **Build the Windows installer** on `windows-latest` (`csc.exe` comes with Windows).
+2. **Build the runner downloads** on `ubuntu-latest`: `npm ci`, then `npm run build:runner -- --complete --targets win-x64,win-arm64,mac-arm64,mac-x64,linux-x64` (Node.js from nodejs.org, every archive checked against its SHA-256), then `build:installer` with that Windows program and the Mac app. They are packed into one tar (about 300 MB) with its SHA-256 and `build-info.json` (the commit they came from).
+3. **Deploy to EC2** copies the tar into `~/.ai-studio/incoming` over the same SSH secrets (no new secret), if the box has room for it twice plus the 2,500 MB the deploy needs, then runs `deploy.sh` as before.
+
+`deploy.sh` checks the SHA-256, that the tar holds only those four names, only files and folders, and nothing that climbs out, and that the disk has room, then swaps the folder in and points `RUNNER_KIT_DIR`, `RUNNER_COMPLETE_DIR` and `RUNNER_INSTALLER_DIR` at it in `env`. Anything wrong (no upload, a damaged one, no room) keeps the downloads from the last deploy and the deploy still succeeds; the log says which. If the Windows installer could not be built, the downloads go out without it; if the downloads could not be built at all, the app is still deployed.
+
+The downloads are not code-signed: the Runners page tells people what SmartScreen and Gatekeeper show and how to get past it.
 
 ### Memory
 
@@ -112,5 +125,5 @@ Nothing deletes `/home/ubuntu/.ai-studio/data`: not a deploy, a rollback or `dep
 - **No isolation.** AI Studio runs as `ubuntu`, so [tests are off](#tests-are-off) here.
 - **Shared memory.** AI Studio and its browsers compete with `c4t-api` and `c4t-web`. `max_memory_restart` (1200 MB) covers the Node process only, not its browsers. `CONCURRENCY=1` is set for when tests run.
 - **Deploys share one queue.** All three deploy workflows use the `c4t-ec2-deploy` group, and GitHub keeps only one waiting run in it, so a slow AI Studio deploy can replace a waiting web or API deploy. If that happens, re-run the replaced one.
-- **Downloads for runners are not built.** The deploy does not run `npm run build:runner`, so Setup, Runners has no kit to offer.
+- **Runner downloads are not signed.** Windows SmartScreen and macOS Gatekeeper warn on the first start; signing needs a code-signing certificate and an Apple developer account.
 - **A failed deploy's log is public.** The repository is public, and a failed health check prints the last 20 lines of the error log. GitHub masks the secrets, but other text in those lines is visible.

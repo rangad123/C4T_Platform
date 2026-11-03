@@ -88,7 +88,7 @@ export const guardedFetch: typeof fetch = async (input, init) => {
             if (status >= 300 && status < 400 && res.headers.location) {
                 res.resume();
                 req.destroy();
-                return reject(new TypeError("fetch failed", { cause: new Error("The address answered with a redirect, which is not followed.") }));
+                return reject(new TypeError("fetch failed", { cause: Object.assign(new Error("The address answered with a redirect, which is not followed."), { status }) }));
             }
             const h = new Headers();
             for (let i = 0; i + 1 < res.rawHeaders.length; i += 2) h.append(res.rawHeaders[i]!, res.rawHeaders[i + 1]!);

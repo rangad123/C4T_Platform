@@ -13,11 +13,11 @@ import { RunnerAccessPanel } from "../runners/RunnerAccessPanel";
 import "./agents.css";
 
 /**
- * Setup > Runners: the runners that are connected first, a guided "Add a runner" (choose the computer, download, start it),
+ * A project's runners, on the Runners page (round 37: no longer inside the project's Settings): the runners that are connected first, a guided "Add a runner" (choose the computer, download, start it),
  * where tests run, and, tucked away, the older way of starting a runner from the project folder.
- * Shown inside the Setup place, which owns the page title and the tab bar.
+ * `embedded`: the page around it owns the title.
  */
-export function ProjectRunners({ id }: { id: string }) {
+export function ProjectRunners({ id, embedded = false }: { id: string; embedded?: boolean }) {
     // Polled with the agents, so a run that starts elsewhere locks the form within a few seconds.
     const jobs = usePolled<Job[]>(`/projects/${id}/jobs`);
     const agents = usePolled<Agent[]>(`/projects/${id}/agents`);
@@ -41,7 +41,7 @@ export function ProjectRunners({ id }: { id: string }) {
 
     return (
         <>
-            <PageHeader title="Runners" subtitle="Runners run your tests on another computer. Most people do not need one." />
+            {embedded ? <p className="t-secondary">Runners run your tests on another computer. Most people do not need one.</p> : <PageHeader title="Runners" subtitle="Runners run your tests on another computer. Most people do not need one." />}
             <div className="stack">
                 <AgentsList projectId={id} agents={agents} addOpen={adding} atLimit={atLimit} maxRunners={maxRunners} onAdd={() => setAdding(true)} onRemove={setRemoving} />
                 {adding && <AddRunner projectId={id} agents={agents.data ?? []} onClose={() => setAdding(false)} onChanged={changed} />}

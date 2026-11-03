@@ -76,7 +76,14 @@ export type PlaceId =
     | "dashboard"
     | "develop"
     | "runners-global"
+    // Round 37: integrations set up once for an organisation (features/integrations/IntegrationsPage.tsx).
+    | "integrations"
     | "folders"
+    // Round 37: Reusable libraries took the Folders place in the menu; project folders open from the Projects page.
+    | "libraries"
+    | "library-library"
+    // Round 37: the testing agents (features/testing-agents).
+    | "agents"
     | "profile"
     | "requirements"
     | "suites"
@@ -614,7 +621,8 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         title: "Runners",
         what: "Every computer that runs your tests: its health, its phones and browsers, and the projects that use it. Also the Android emulator on this computer.",
         canDo: [
-            { text: "Choose Register a runner to add a computer once, then give it to any of your projects in the project's settings.", button: "Read about runners", to: { topic: "runners" }, ui: ["Register a runner"] },
+            { text: "Choose Register a runner to add a computer once, then open it and give it to any of your projects.", button: "Read about runners", to: { topic: "runners" }, ui: ["Register a runner"] },
+            { text: "Use Runners for a project to add a runner for one project, get its kit, and set where its tests run.", button: "Read about runners", to: { topic: "runners", search: "runner" }, ui: ["Runners for a project"] },
             { text: "Open a runner to see its current work, the phones in use, recent failures and the projects that use it, and to rename or retire it.", button: "Read about runners", to: { topic: "runners" } },
             { text: "Set up an Android emulator to test phone apps.", button: "Read about phones and emulators", to: { topic: "phones-and-emulators" } },
             { text: "Check that a computer is ready to run tests.", button: "Read about checking a computer", to: { topic: "doctor" } },
@@ -623,9 +631,46 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         next: [{ text: "After a runner is set up, run tests on it from the project.", button: "Read about runs", to: { topic: "runs-page" } }],
         topic: "runners",
     },
+    integrations: {
+        title: "Integrations",
+        what: "Every system your projects connect to: issue trackers, Sentry, alert channels, Git import, device farms and the test mailbox. Set a tracker or a channel up once for your organisation, then choose the projects that use it.",
+        canDo: [
+            { text: "Set up Jira, GitHub Issues, Notion, Sentry, Slack, Teams or a webhook once, with its address and token. The token is stored encrypted and never shown again.", button: "Read about issue trackers", to: { topic: "issue-trackers", search: "issue tracker" } },
+            { text: "Choose Use in a project to give a project the connection, without entering the details again. Stop using it there with the cross next to the project.", button: "Read about alerts", to: { topic: "alerts", search: "alerts told when tests fail" }, ui: ["Use in a project"] },
+            { text: "Choose Test the connection to make one real call and see whether it works.", button: "Read how to check it", to: { topic: "issue-trackers", search: "test connection" }, ui: ["Test the connection"] },
+            { text: "Learn where the keys are kept.", button: "Read about staying in control", to: { topic: "control", search: "secrets stay hidden" } },
+        ],
+        words: ["finding", "access-key"],
+        next: [{ text: "Open a project to see the connections it uses in its settings.", button: "Open projects", to: here("projects") }],
+        topic: "issue-trackers",
+    },
+    libraries: {
+        title: "Reusable libraries",
+        what: "Reusable steps, helpers and shared elements that your organisation's projects share, in folders. A project takes a copy and chooses when to update it.",
+        canDo: [
+            { text: "Choose New folder to sort the library, and Move to put a folder or an item somewhere else.", button: "Read about reusable steps", to: { topic: "reusable-steps" }, ui: ["New folder", "Move"] },
+            { text: "Choose Add item to add a helper or a shared element; reusable steps are published from a project.", button: "Read about reusable steps", to: { topic: "reusable-steps" }, ui: ["Add item"] },
+            { text: "Open an item to see its versions and the projects that use it.", button: "Read about reusable steps", to: { topic: "reusable-steps" } },
+        ],
+        words: ["test"],
+        next: [{ text: "Open a project's Test scripts, then Reusable libraries, to add an item to it.", button: "Open projects", to: here("projects") }],
+        topic: "reusable-steps",
+    },
+    "library-library": {
+        title: "Reusable libraries",
+        what: "Your organisation's library, seen from this project. Add an item to get your own copy, update it when the library has a newer version, and publish your own items.",
+        canDo: [
+            { text: "Choose Add to project to copy an item into this project. Its tests use it like anything else of the project.", button: "Read about reusable steps", to: { topic: "reusable-steps" }, ui: ["Add to project"] },
+            { text: "Choose Update when the library has a newer version. Nothing changes here until you do; the tests that use it are checked again.", button: "Read about reusable steps", to: { topic: "reusable-steps" }, ui: ["Update"] },
+            { text: "Choose Publish to library to offer this project's own item to the other projects, as a new version.", button: "Read about reusable steps", to: { topic: "reusable-steps" }, ui: ["Publish to library"] },
+        ],
+        words: ["test"],
+        next: [{ text: "Use the steps you added in a test's Steps tab.", button: "Open Tests", to: here("tests"), ui: ["Tests"] }],
+        topic: "reusable-steps",
+    },
     folders: {
-        title: "Folders",
-        what: "Folders group your organisation's projects, for example by client or product line. A project is in one folder at most.",
+        title: "Project folders",
+        what: "Folders group your organisation's projects, for example by client or product line. A project is in one folder at most. Open them from Projects.",
         canDo: [
             { text: "Choose Make folder to start a folder, if you can create projects.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Make folder"] },
             { text: "Move a project into a folder from the folder itself, or take it out with Move out. Remove folder keeps its projects.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Move out", "Remove folder"] },
@@ -634,6 +679,18 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         words: ["test"],
         next: [{ text: "Open a project to work on its tests.", button: "Open projects", to: here("projects") }],
         topic: "places",
+    },
+    agents: {
+        title: "Agents",
+        what: "The testing agents: API, accessibility, security, responsive UI, UX, performance and test case generation. Each is a kind of checking the AI does when it explores an application. A project tested by the AI agent uses the agents chosen for it.",
+        canDo: [
+            { text: "Open an agent to see what it checks, which platforms it works on, what it needs and which of your projects use it.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
+            { text: "Pick a project's agents when you create it. Change them later in its Settings → General, then use Save agents.", button: "Open projects", to: here("projects"), ui: ["Save agents"] },
+            { text: "An agent marked Not available yet cannot be chosen: AI Studio cannot do that kind of testing yet.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
+        ],
+        words: ["test", "exploration"],
+        next: [{ text: "Explore a project's application to run the checks its agents turn on.", button: "Read how exploring works", to: { topic: "explore-my-app" } }],
+        topic: "explore-my-app",
     },
     profile: {
         title: "Profile",
@@ -723,7 +780,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     "settings-general": {
         title: "Project settings",
-        what: "The project, who works on it, what tests use, where they run, and who is told.",
+        what: "The project, its one platform and testing mode, its app, who works on it, what tests use, and who is told.",
         canDo: [
             { text: "Set the addresses tests run against.", button: "Open environments", to: here("setup", "environments") },
             { text: "Set up the computers that run this project's tests.", button: "Open runners", to: here("setup", "runners") },
@@ -781,7 +838,10 @@ export function placeOf(route: RouteLike): PlaceId {
     if (a === "dashboard") return "dashboard";
     if (a === "develop") return "develop";
     if (a === "runners") return "runners-global";
-    if (a === "folders") return "folders";
+    if (a === "integrations") return "integrations";
+    if (a === "project-folders") return "folders";
+    if (a === "libraries" || a === "folders") return "libraries";
+    if (a === "agents") return "agents";
     if (a === "profile") return "profile";
     if (a === "settings") return "settings";
     if (a === "security") return "security-home";

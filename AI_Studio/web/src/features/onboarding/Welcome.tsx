@@ -2,7 +2,6 @@ import { Compass, FolderInput, Globe, Smartphone, Sparkles, Video } from "lucide
 import { useState } from "react";
 import { api, uploadApk } from "../../api";
 import { Button, Callout, FilePicker, LinkButton } from "../../components/ui";
-import { hostOf } from "../../lib/format";
 import { describeApiError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
 import { normalizeUrl } from "../../lib/url";
@@ -25,8 +24,16 @@ export interface ExploreCard {
     autoFocus?: boolean;
 }
 
-async function newProject(name: string): Promise<string> {
-    const id = (await api("/projects", { method: "POST", body: { name } })).id as string;
+/** The project's typed name, shared by the three ways to start (round 37: never made from the address or the app's package). */
+export interface NameField {
+    value: string;
+    set: (v: string) => void;
+    error: string;
+    setError: (e: string) => void;
+}
+
+async function newProject(name: string, platform: "web" | "android", mode: "agent" | "code"): Promise<string> {
+    const id = (await api("/projects", { method: "POST", body: { name, platforms: [platform], testingModes: [mode] } })).id as string;
     // "Both" chosen above the ways to start (security module on): the new project also gets the Security assessment section.
     await applyPendingTestingType(id);
     return id;
@@ -37,10 +44,15 @@ async function newProject(name: string): Promise<string> {
  * "Explore my app" lets the AI look at the application and show a plan first; "Record a test" and "Start from tests I have"
  * make an empty project and open the place where that work happens. None of them needs the others.
  */
-export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | undefined; explore: ExploreCard }) {
+export function Welcome({ aiConfigured, explore, name }: { aiConfigured: boolean | undefined; explore: ExploreCard; name: NameField }) {
     const [recordUrl, setRecordUrl] = useState("");
     const [recordError, setRecordError] = useState("");
-    const [ownName, setOwnName] = useState("");
+    /** The typed name, or null after saying it is missing. */
+    const typedName = (): string | null => {
+        const n = name.value.trim();
+        if (!n) name.setError("Give the project a name.");
+        return n || null;
+    };
     const [busy, setBusy] = useState<"" | "record" | "import" | "hand">("");
     const [problem, setProblem] = useState("");
     // The first card explores a website or API (the address) or an Android app (its package or an .apk).
@@ -56,14 +68,15 @@ export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | und
         setPhoneProblem("");
         const p = pkg.trim();
         // The AI explores an app by its package name; an .apk is only installed first.
+        const projectName = typedName();
         if (!p) return setPkgError("Enter the app’s package name, for example com.example.shop.");
         const bad = packageError(p);
         if (bad) return setPkgError(bad);
         setPkgError("");
+        if (!projectName) return;
         setPhoneBusy(true);
         try {
-            const name = p ? (p.split(".").slice(-2).join(" ") || p) : (apk!.name.replace(/.apk$/i, "") || "Android app");
-            const id = await newProject(name);
+            const id = await newProject(projectName, "android", "agent");
             if (apk) await uploadApk(id, apk);
             await api(`/projects/${id}/mobile-app`, { method: "PUT", body: { appPackage: p || null, iosBundleId: null } });
             go(`${routes.setup(id, "mobile")}&start=phone`);
@@ -76,12 +89,14 @@ export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | und
     async function record(e: React.FormEvent) {
         e.preventDefault();
         setProblem("");
+        const projectName = typedName();
         const n = normalizeUrl(recordUrl);
         if (!n.url) return setRecordError(n.error!);
         setRecordError("");
+        if (!projectName) return;
         setBusy("record");
         try {
-            const id = await newProject(hostOf(n.url) || "Untitled project");
+            const id = await newProject(projectName, "web", "code");
             go(`${routes.record(id)}?url=${encodeURIComponent(n.url)}`);
         } catch (err) {
             setProblem(describeApiError(err));
@@ -91,9 +106,11 @@ export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | und
 
     async function own(kind: "import" | "hand") {
         setProblem("");
+        const projectName = typedName();
+        if (!projectName) return;
         setBusy(kind);
         try {
-            const id = await newProject(ownName.trim() || "My tests");
+            const id = await newProject(projectName, "web", "code");
             go(kind === "import" ? `${routes.tests(id)}?start=import` : routes.tests(id));
         } catch (err) {
             setProblem(describeApiError(err));
@@ -102,6 +119,15 @@ export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | und
     }
 
     return (
+        <>
+        <div className="card card-pad field" style={{ maxWidth: 520 }} data-testid="welcome-name">
+            <label htmlFor="w-name">Project name</label>
+            <p className="hint" id="w-name-hint">
+                What you call the application you test. It is not taken from the address, and you can change it later in Settings.
+            </p>
+            <input id="w-name" className="input" required maxLength={120} autoComplete="off" placeholder="Gift shop website" value={name.value} onChange={(e) => name.set(e.target.value)} aria-describedby="w-name-hint" aria-invalid={!!name.error} />
+            {name.error && <div className="error-text">{name.error}</div>}
+        </div>
         <div className="welcome-cards" role="group" aria-label="Ways to start">
             <form className="card card-pad stack welcome-card" onSubmit={(e) => (e.preventDefault(), what === "android" ? void explorePhone() : explore.onExplore())} noValidate aria-labelledby="w-explore">
                 <span className="icon-tile" aria-hidden>
@@ -254,7 +280,7 @@ export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | und
                     {recordError && <div className="error-text">{recordError}</div>}
                 </div>
                 <div className="row">
-                    <Button type="submit" icon={Video} loading={busy === "record"} disabled={busy !== "" && busy !== "record"} tip="Makes a project named after the address, then opens the recorder on it.">
+                    <Button type="submit" icon={Video} loading={busy === "record"} disabled={busy !== "" && busy !== "record"} tip="Makes the project with the name above, then opens the recorder on it.">
                         {busy === "record" ? "Opening…" : "Record a test"}
                     </Button>
                 </div>
@@ -269,10 +295,6 @@ export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | und
                         Start from tests I have
                     </h2>
                     <p className="t-secondary">Bring tests you already have from a file, Maestro or a Git repository, or write one yourself as text or code. No AI needed.</p>
-                </div>
-                <div className="field">
-                    <label htmlFor="own-name">Project name</label>
-                    <input id="own-name" className="input" autoComplete="off" placeholder="My tests" value={ownName} onChange={(e) => setOwnName(e.target.value)} />
                 </div>
                 <div className="row">
                     <Button type="button" icon={FolderInput} loading={busy === "import"} disabled={busy !== "" && busy !== "import"} onClick={() => void own("import")} tip="Makes the project, then asks where the tests come from: a JSON file, Maestro flows or a Git repository.">
@@ -292,5 +314,6 @@ export function Welcome({ aiConfigured, explore }: { aiConfigured: boolean | und
                 </div>
             )}
         </div>
+        </>
     );
 }

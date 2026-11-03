@@ -1,5 +1,6 @@
 import { noteCustomSkipped, splitCustom } from "./custom-policy.js";
 import { notePluginSkipped, pluginSkips, type RunShape } from "./plugin-policy.js";
+import { droppedChecksNote, narrowedByChoice, TestingAgentStore, type AgentSwitch, type AskedSwitches } from "./testing-agents.js";
 import { adapterForSpec, needsDevice } from "../engine/frameworks/index.js";
 import { localPhoneRunsProblem } from "../engine/mobile/device/choose.js";
 import { isAppUri } from "../engine/desktop/target.js";
@@ -78,6 +79,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     for (const extra of [config.openApiUrl, config.apiBaseUrl]) if (typeof extra === "string" && extra) await assertAllowedTarget(extra);
 
     let options: JobOptions;
+    let dropped: AgentSwitch[] = [];
     if (s.kind === "validate") {
         let testIds = await runnableTestIds(repo, s.projectId);
         if (testIds.length === 0) throw new Error("This project has no tests that can be run yet.");
@@ -99,6 +101,14 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
         const { mobile: _m, mode: _mode, testIds: _t, trigger: _tr, scheduleId: _s, retryFailures: _r, requirementsText: _rt, ...saved } = config;
         // A schedule never turns the load check on again, whatever the saved settings say (a person starts that on purpose).
         options = { ...DEFAULT_JOB_OPTIONS, ...saved, mode: "generate", loadChecks: false } as JobOptions;
+        // The project's current testing agents decide the checks, not only what the last exploration ran with: a removed agent's checks
+        // are left out (the job's events say which), a chosen agent's checks are on.
+        const row = repo.getProject(s.projectId);
+        if (row) {
+            const narrowed = await narrowedByChoice(new TestingAgentStore(repo.db.sql, repo), row, options, saved as AskedSwitches, { followChoice: true });
+            options = { ...narrowed.options, loadChecks: false };
+            dropped = narrowed.dropped;
+        }
     }
     options.trigger = "schedule";
     options.scheduleId = s.id;
@@ -108,6 +118,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     if (busy) throw new OverlapError(busy.id, busy.status);
     const job = await repo.createJob(s.projectId, app.id as string, options);
     await noteCustomSkipped(repo, job.id, s.projectId);
+    if (dropped.length) repo.addEvent(job.id, { stage: "planning", kind: "agent_checks_dropped", level: "warn", message: droppedChecksNote(dropped), data: { dropped } });
     if (s.kind === "validate") await notePluginSkipped(repo, job.id, s.projectId, options.mode === "environment" ? "environment" : "validate");
     return job;
 }

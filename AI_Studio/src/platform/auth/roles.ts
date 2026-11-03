@@ -159,6 +159,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/projects/:id/api-diff": "ai_studio.tests.write",
     "PUT /api/projects/:id/mobile-app": "ai_studio.project.settings",
     "POST /api/projects/:id/mobile-app/apk": "ai_studio.project.settings",
+    // The app by platform (round 37, routes/project-app.ts): store links and an uploaded iPhone app.
+    "GET /api/projects/:id/app-details": "read",
+    "PUT /api/projects/:id/app-details": "ai_studio.project.settings",
+    "POST /api/projects/:id/app-details/ipa": "ai_studio.project.settings",
     "GET /api/projects/:id/memory": "read",
     "DELETE /api/projects/:id/memory": "ai_studio.tests.delete",
     "GET /api/projects/:id/cleanup": "read",
@@ -281,6 +285,17 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "PUT /api/projects/:id/sentry": "ai_studio.ai_keys.manage",
     "DELETE /api/projects/:id/sentry": "ai_studio.ai_keys.manage",
     "POST /api/projects/:id/sentry/test": "ai_studio.ai_keys.manage",
+    // Integrations set up once for an organisation (routes/shared-integrations.ts): setting one up is managing connections to other systems,
+    // the code that guards the same connections inside a project (the handler keeps a customer to their organisation); which projects use
+    // it is a project setting. Reading is narrowed by the handler.
+    "GET /api/shared-integrations": "read",
+    "POST /api/shared-integrations": "ai_studio.ai_keys.manage",
+    "PATCH /api/shared-integrations/:sid": "ai_studio.ai_keys.manage",
+    "DELETE /api/shared-integrations/:sid": "ai_studio.ai_keys.manage",
+    "POST /api/shared-integrations/:sid/test": "ai_studio.ai_keys.manage",
+    "GET /api/projects/:id/shared-integrations": "read",
+    "PUT /api/projects/:id/shared-integrations/:sid": "ai_studio.project.settings",
+    "DELETE /api/projects/:id/shared-integrations/:sid": "ai_studio.project.settings",
 
     // ── storage, retention, AI budget ──
     "GET /api/projects/:id/retention": "read",
@@ -533,6 +548,11 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
 
     // ── a project's general settings and the organisations (routes/project-settings.ts, round 26) ──
     "PATCH /api/projects/:id": "ai_studio.project.settings",
+    // Testing agents: the catalogue and the agents a project uses (routes/testing-agents.ts, round 37).
+    "GET /api/testing-agents": "read",
+    "GET /api/testing-agents/:agentId": "read",
+    "GET /api/projects/:id/testing-agents": "read",
+    "PUT /api/projects/:id/testing-agents": "ai_studio.project.settings",
     "GET /api/projects/:id/setup-check": "read",
     // Crowd4Test projects of the project's organisation: only for choosing the reference link (US-011).
     "GET /api/projects/:id/c4t-projects": "ai_studio.project.settings",
@@ -571,6 +591,24 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "DELETE /api/projects/:id": "ai_studio.project.settings",
     "GET /api/me/preferences": "read",
     "PUT /api/me/preferences": "read",
+    // ── reusable libraries of an organisation (routes/libraries.ts, round 37) ──
+    // Reading is narrowed by the handler to the organisations the person works in. Changing a library also needs a place in the whole
+    // organisation (checked there): a person of that organisation, a Crowd4Test administrator, or a local account with every project.
+    "GET /api/libraries": "read",
+    "POST /api/libraries/folders": "ai_studio.tests.write",
+    "PATCH /api/libraries/folders/:folderId": "ai_studio.tests.write",
+    "DELETE /api/libraries/folders/:folderId": "ai_studio.tests.delete",
+    "POST /api/libraries/items": "ai_studio.tests.write",
+    "GET /api/libraries/items/:itemId": "read",
+    "PATCH /api/libraries/items/:itemId": "ai_studio.tests.write",
+    "PUT /api/libraries/items/:itemId/content": "ai_studio.tests.write",
+    "GET /api/libraries/items/:itemId/versions/:version": "read",
+    "DELETE /api/libraries/items/:itemId": "ai_studio.tests.delete",
+    // A project copying an item, updating its copy, or offering its own one to the library (publishing also needs the library rights above).
+    "GET /api/projects/:id/library": "read",
+    "POST /api/projects/:id/library/use": "ai_studio.tests.write",
+    "POST /api/projects/:id/library/update": "ai_studio.tests.write",
+    "POST /api/projects/:id/library/publish": "ai_studio.tests.write",
 };
 
 const key = (method: string, template: string) => `${method.toUpperCase() === "HEAD" ? "GET" : method.toUpperCase()} ${template}`;

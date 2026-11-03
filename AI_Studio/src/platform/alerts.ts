@@ -12,6 +12,7 @@ import type { Severity } from "../engine/validation/severity.js";
 import type { Db, Row } from "./db.js";
 import { buildEmail, mergeSmtp, publicSmtp, sendEmail, type EmailDeliveryOptions, type MessageContent, type SmtpPatchT, type SmtpSettings } from "./alert-email.js";
 import { HttpError } from "./http-error.js";
+import { guardedFetch } from "./guarded-fetch.js";
 import { EVERYONE_OPTED_OUT, wantedRecipients, type EmailKind } from "./project-folders.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import type { SecretBox } from "./secrets.js";
@@ -279,7 +280,8 @@ export async function deliver(url: string, body: unknown, opts: DeliveryOptions 
             return { ok: false, attempts: attempt, error: e instanceof HttpError ? e.message : "The address is not allowed" };
         }
         try {
-            const res = await fetch(url, {
+            // No redirect is followed and, with BLOCK_PRIVATE_TARGETS on, the address is checked on the connection itself (guarded-fetch.ts).
+            const res = await guardedFetch(url, {
                 method: "POST",
                 headers: { "content-type": "application/json", "user-agent": "ai-testing-platform-alerts/1" },
                 body: JSON.stringify(body),
@@ -292,6 +294,12 @@ export async function deliver(url: string, body: unknown, opts: DeliveryOptions 
             last = { ok: false, status: res.status, attempts: attempt, error: `The receiver answered HTTP ${res.status}` };
             if (!retryable(res.status)) return last;
         } catch (e) {
+            const cause = (e as { cause?: unknown }).cause;
+            if (cause instanceof Error && /redirect/i.test(cause.message)) {
+                const status = (cause as { status?: number }).status;
+                return { ok: false, ...(status ? { status } : {}), attempts: attempt, error: `The address redirects${status ? ` (HTTP ${status})` : ""}; use the final URL` };
+            }
+            if (cause instanceof Error && cause.name === "BlockedAddressError") return { ok: false, attempts: attempt, error: cause.message };
             const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
             const code = (e as { cause?: { code?: string } }).cause?.code;
             last = { ok: false, attempts: attempt, error: timedOut ? "The receiver did not answer in time" : `Could not reach the receiver${code ? ` (${code})` : ""}` };

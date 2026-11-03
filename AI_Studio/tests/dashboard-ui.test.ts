@@ -92,7 +92,8 @@ afterAll(async () => {
 const rows = () => page.locator("ul.dash-list > li");
 const open = async () => {
     await page.goto("about:blank"); // a hash-only navigation would keep the previous filters
-    await page.goto(`${BASE}/#/`);
+    // Round 37: the Projects page is the paged list; the readiness view of every project is on the Dashboard.
+    await page.goto(`${BASE}/#/dashboard`);
     await pwExpect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
     await pwExpect(rows()).toHaveCount(3);
 };

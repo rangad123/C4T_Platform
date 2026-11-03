@@ -11,6 +11,7 @@ import { useCan } from "../auth/permissions";
 import { FleetDashboard } from "../dashboard/FleetDashboard";
 import { ReviewQueueCard } from "../review/ReviewCards";
 import { RunnerHealthCard, RunnersList } from "../runners/RunnersPages";
+import { ProjectRunnersSection } from "../runners/ProjectRunnersSection";
 import { EmulatorSetup } from "../setup/EmulatorSetup";
 
 /**
@@ -18,7 +19,7 @@ import { EmulatorSetup } from "../setup/EmulatorSetup";
  * Each shows what exists today and, where its backend is not built yet, says so plainly (decision D-28).
  */
 
-function GlobalPage({ title, nav, subtitle, actions, children }: { title: string; nav: "dashboard" | "develop" | "runners" | "folders" | "profile"; subtitle: ReactNode; actions?: ReactNode; children: ReactNode }) {
+function GlobalPage({ title, nav, subtitle, actions, children }: { title: string; nav: "dashboard" | "develop" | "runners" | "libraries" | "profile"; subtitle: ReactNode; actions?: ReactNode; children: ReactNode }) {
     useDocumentTitle(title);
     usePage({ crumbs: [{ label: title }], nav });
     return (
@@ -149,6 +150,8 @@ function MobileTooling() {
 export function RunnersPage() {
     return (
         <GlobalPage title="Runners" nav="runners" subtitle="The computers that run your tests: Windows and Mac machines, their browsers and phones.">
+            {/* A project's runners live here, not in the project (round 37): `#/runners?project=<id>`. */}
+            <ProjectRunnersSection />
             <RunnersList />
             <MobileTooling />
         </GlobalPage>

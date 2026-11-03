@@ -18,6 +18,7 @@ import { registerProjectAccessRoutes } from "./project-access.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerProjectSettingsRoutes } from "./project-settings.js";
 import { registerProjectFolderRoutes } from "./project-folders.js";
+import { registerLibraryRoutes } from "./libraries.js";
 import { registerLlmHealthRoutes } from "../llm-health-routes.js";
 import { registerCompactSnapshotRoutes } from "../snapshot-settings.js";
 import { registerPromptCacheRoutes } from "../prompt-cache-settings.js";
@@ -46,6 +47,7 @@ import { registerLiveSessionRoutes } from "./live-session.js";
 import { registerRecorderRoutes } from "./recorder.js";
 import { registerReportRoutes } from "./reports.js";
 import { registerSentryRoutes } from "./sentry.js";
+import { registerSharedIntegrationRoutes } from "./shared-integrations.js";
 import { registerUsageRoutes } from "./usage.js";
 import { registerStreamRoutes } from "./stream.js";
 import { registerTriggerRoutes } from "./triggers.js";
@@ -63,6 +65,7 @@ import { registerPhoneStateRoutes } from "./phone-state.js";
 import { registerPhoneDeviceRoutes } from "./phone-device.js";
 import { registerPortableRoutes } from "./portable.js";
 import { registerReviewRoutes } from "./reviews.js";
+import { registerTestingAgentRoutes } from "./testing-agents.js";
 import { registerSecurityRoutes } from "../../security/routes/index.js";
 
 export type { RouteCtx } from "./types.js";
@@ -93,6 +96,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     // Requirements as records and the tests that cover them (routes/requirements.ts).
     registerRequirementRoutes(ctx);
     registerSentryRoutes(ctx);
+    // Integrations set up once for an organisation, and the projects that use them (routes/shared-integrations.ts).
+    registerSharedIntegrationRoutes(ctx);
     registerRetentionRoutes(ctx);
     registerUsageRoutes(ctx);
     registerQuarantineRoutes(ctx);
@@ -132,6 +137,10 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerMemberRoutes(ctx);
     registerProjectSettingsRoutes(ctx);
     registerProjectFolderRoutes(ctx);
+    // Testing agents and the agents chosen for a project (routes/testing-agents.ts, round 37).
+    registerTestingAgentRoutes(ctx);
+    // Reusable libraries of an organisation, and a project using and publishing their items (routes/libraries.ts, round 37).
+    registerLibraryRoutes(ctx);
     registerLlmHealthRoutes(ctx);
     // Smaller page snapshots switch, Settings, AI model (platform/snapshot-settings.ts, docs/features/smaller-snapshots.md).
     registerCompactSnapshotRoutes(ctx);

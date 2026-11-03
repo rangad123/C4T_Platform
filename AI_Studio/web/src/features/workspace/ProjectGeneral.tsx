@@ -1,11 +1,13 @@
 import { Archive, ArchiveRestore, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ApiError, MODE_WORDS, PLATFORM_WORDS, api, projectShape, type Platform, type ProjectDetail, type TestingMode } from "../../api";
+import { ApiError, MODE_WORDS, PLATFORM_WORDS, api, projectShape, type AppDetails, type Platform, type ProjectDetail, type TestingMode } from "../../api";
 import { Button, Callout, ErrorState, LinkButton, Skeleton } from "../../components/ui";
 import { formatBytes } from "../storage/storage";
+import { ProjectAgentsPanel } from "../testing-agents/ProjectAgentsPanel";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
+import { AppDetailsFields, EMPTY_APP_DRAFT, appDraftProblem, appErrorText, saveAppDraft, type AppDraft } from "./AppDetailsFields";
 
 interface C4tProjectRow {
     id: string;
@@ -15,8 +17,9 @@ interface C4tProjectRow {
 }
 
 /**
- * Project Settings → General (stories US-010, US-011): the name, what the project tests (platforms) and how (testing modes), the
- * organisation, and the Crowd4Test project it belongs to. Turning a platform or mode off only hides it: tests already made stay.
+ * Project Settings → General (stories US-010, US-011): the name, the one platform the project tests and its one testing mode
+ * (round 37), the app, the organisation, and the Crowd4Test project it belongs to. A project made earlier with several platforms
+ * or both modes shows them all and asks for one choice when it is next saved; nothing changes until then, and tests stay.
  * Changing anything needs "Change project settings"; without it the values are shown read-only.
  */
 export function ProjectGeneral({ id }: { id: string }) {
@@ -26,8 +29,9 @@ export function ProjectGeneral({ id }: { id: string }) {
     const canEdit = (!p?.access || p.access.permissions.includes("ai_studio.project.settings")) && !archived;
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
-    const [platforms, setPlatforms] = useState<Platform[]>([]);
-    const [modes, setModes] = useState<TestingMode[]>([]);
+    // One of each, or null while an older project with several has not been given one yet.
+    const [platform, setPlatform] = useState<Platform | null>(null);
+    const [mode, setMode] = useState<TestingMode | null>(null);
     const [busy, setBusy] = useState(false);
     const [note, setNote] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
 
@@ -36,25 +40,27 @@ export function ProjectGeneral({ id }: { id: string }) {
         const shape = projectShape(p);
         setName(p.name);
         setDescription((p as { description?: string | null }).description ?? "");
-        setPlatforms(shape.platforms);
-        setModes(shape.testingModes);
+        setPlatform(shape.platforms.length === 1 ? shape.platforms[0]! : null);
+        setMode(shape.testingModes.length === 1 ? shape.testingModes[0]! : null);
     }, [p]);
 
     if (project.loading) return <Skeleton h={220} />;
     if (project.error || !p) return <ErrorState error={friendlyError(project.error?.message ?? "Project not found")} onRetry={project.reload} />;
 
     const shape = projectShape(p);
-    const changed = name.trim() !== p.name || description.trim() !== ((p as { description?: string | null }).description ?? "") || platforms.join() !== shape.platforms.join() || modes.join() !== shape.testingModes.join();
-    const toggle = <T extends string>(list: T[], value: T, set: (l: T[]) => void) => set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+    // An older project with several platforms or both modes: saving asks for one of each (nothing changes before).
+    const severalPlatforms = shape.platforms.length > 1;
+    const severalModes = shape.testingModes.length > 1;
+    const changed = name.trim() !== p.name || description.trim() !== ((p as { description?: string | null }).description ?? "") || [platform].join() !== shape.platforms.join() || [mode].join() !== shape.testingModes.join();
 
     const save = async () => {
         if (!name.trim()) return setNote({ tone: "danger", text: "Give the project a name." });
-        if (platforms.length === 0) return setNote({ tone: "danger", text: "Choose at least one platform." });
-        if (modes.length === 0) return setNote({ tone: "danger", text: "Choose at least one testing mode." });
+        if (!platform) return setNote({ tone: "danger", text: "Choose the one platform this project tests. Tests of the others stay." });
+        if (!mode) return setNote({ tone: "danger", text: "Choose the one testing mode of this project. Tests already made stay." });
         setBusy(true);
         setNote(null);
         try {
-            await api(`/projects/${id}`, { method: "PATCH", body: { name: name.trim(), description: description.trim(), platforms, testingModes: modes } });
+            await api(`/projects/${id}`, { method: "PATCH", body: { name: name.trim(), description: description.trim(), platforms: [platform], testingModes: [mode] } });
             await project.reload();
             announceProjectChanged(id);
             setNote({ tone: "success", text: "Saved." });
@@ -80,25 +86,35 @@ export function ProjectGeneral({ id }: { id: string }) {
                     <input id="general-description" className="input" maxLength={1000} disabled={!canEdit} value={description} onChange={(e) => setDescription(e.target.value)} />
                 </div>
                 <fieldset className="choice-group stack-sm">
-                    <legend className="t-card">Platforms</legend>
+                    <legend className="t-card">Platform</legend>
+                    {severalPlatforms && (
+                        <Callout tone="warning" title="Choose one platform">
+                            This project was set up for {shape.platforms.map((x) => PLATFORM_WORDS[x]).join(", ")}. A project now tests one platform. Choose it below and save; tests of the others stay in the project.
+                        </Callout>
+                    )}
                     {(Object.keys(PLATFORM_WORDS) as Platform[]).map((pl) => (
                         <label key={pl} className="check">
-                            <input type="checkbox" disabled={!canEdit} checked={platforms.includes(pl)} onChange={() => toggle(platforms, pl, setPlatforms)} />
+                            <input type="radio" name="general-platform" value={pl} disabled={!canEdit} checked={platform === pl} onChange={() => setPlatform(pl)} />
                             <span>{PLATFORM_WORDS[pl]}</span>
                         </label>
                     ))}
                 </fieldset>
                 <fieldset className="choice-group stack-sm">
-                    <legend className="t-card">Testing modes</legend>
+                    <legend className="t-card">Testing mode</legend>
+                    {severalModes && (
+                        <Callout tone="warning" title="Choose one testing mode">
+                            This project uses both {shape.testingModes.map((x) => MODE_WORDS[x]).join(" and ")}. A project now has one mode. Choose it below and save; tests already made stay.
+                        </Callout>
+                    )}
                     {(Object.keys(MODE_WORDS) as TestingMode[]).map((m) => (
                         <label key={m} className="check">
-                            <input type="checkbox" disabled={!canEdit} checked={modes.includes(m)} onChange={() => toggle(modes, m, setModes)} />
+                            <input type="radio" name="general-mode" value={m} disabled={!canEdit} checked={mode === m} onChange={() => setMode(m)} />
                             <span>{MODE_WORDS[m]}</span>
                         </label>
                     ))}
                 </fieldset>
                 <p className="t-meta">
-                    Engines: {p.codeEngines ? [p.codeEngines.web && "Playwright for web", p.codeEngines.mobile && "Taqwright for phone apps"].filter(Boolean).join(", ") : "Playwright for web"}. Turning a platform or mode off only hides it; tests already made stay.
+                    Engine: {platform === "web" ? "Playwright for web" : platform ? "Taqwright for phone apps" : p.codeEngines ? [p.codeEngines.web && "Playwright for web", p.codeEngines.mobile && "Taqwright for phone apps"].filter(Boolean).join(", ") : "Playwright for web"}. Changing the platform or mode hides what the other needs; tests already made stay.
                 </p>
                 {note && <Callout tone={note.tone}>{note.text}</Callout>}
                 {canEdit ? (
@@ -113,9 +129,69 @@ export function ProjectGeneral({ id }: { id: string }) {
                     <p className="t-meta">Changing these needs “Change project settings”. Ask your Crowd4Test administrator.</p>
                 )}
             </section>
+            <AppSection id={id} platforms={shape.platforms} canEdit={canEdit} />
+            {/* The testing agents of an AI-agent project (features/testing-agents); read again when the platform or mode changes. */}
+            <ProjectAgentsPanel key={`${projectShape(p).platforms.join()}/${projectShape(p).testingModes.join()}`} id={id} canEdit={canEdit} />
             <C4tLink id={id} project={p} canEdit={canEdit} onSaved={project.reload} />
             <ArchiveOrDelete id={id} project={p} onChanged={project.reload} />
         </div>
+    );
+}
+
+/**
+ * The app the project tests (round 37): the address for web, the .apk or Google Play link for Android, the .ipa or App Store link
+ * for iOS. An older project with several platforms shows each of them.
+ */
+function AppSection({ id, platforms, canEdit }: { id: string; platforms: Platform[]; canEdit: boolean }) {
+    const details = useFetch<AppDetails>(`/projects/${id}/app-details`);
+    const [draft, setDraft] = useState<AppDraft>(EMPTY_APP_DRAFT);
+    const [busy, setBusy] = useState(false);
+    const [note, setNote] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
+    const dirty = JSON.stringify(draft) !== JSON.stringify(EMPTY_APP_DRAFT) && (Boolean(draft.webUrl.trim()) || Boolean(draft.apk) || Boolean(draft.ipa) || (draft.androidHow === "link" && Boolean(draft.playStoreUrl.trim())) || (draft.iosHow === "link" && Boolean(draft.appStoreUrl.trim())));
+    const save = async () => {
+        for (const pl of platforms) {
+            const problem = appDraftProblem(pl, draft, { required: false });
+            if (problem) return setNote({ tone: "danger", text: problem });
+        }
+        setBusy(true);
+        setNote(null);
+        try {
+            for (const pl of platforms) await saveAppDraft(id, pl, draft);
+            setDraft(EMPTY_APP_DRAFT);
+            await details.reload();
+            announceProjectChanged(id);
+            setNote({ tone: "success", text: "Saved." });
+        } catch (e) {
+            setNote({ tone: "danger", text: appErrorText(e, "The app was not saved. Try again.") });
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <section className="card card-pad stack" aria-labelledby="app-title" data-testid="project-app">
+            <h2 className="t-section" id="app-title">
+                Application
+            </h2>
+            {details.loading ? (
+                <Skeleton h={80} />
+            ) : details.error ? (
+                <Callout tone="warning">{details.error instanceof ApiError && details.error.status === 404 ? "This server does not keep app details yet." : details.error.message}</Callout>
+            ) : (
+                <>
+                    {platforms.map((pl) => (
+                        <AppDetailsFields key={pl} platform={pl} draft={draft} onChange={setDraft} current={details.data} disabled={!canEdit || busy} />
+                    ))}
+                    {note && <Callout tone={note.tone}>{note.text}</Callout>}
+                    {canEdit && (
+                        <div>
+                            <Button variant="primary" icon={Save} loading={busy} disabled={busy || !dirty} onClick={() => void save()}>
+                                Save the app
+                            </Button>
+                        </div>
+                    )}
+                </>
+            )}
+        </section>
     );
 }
 

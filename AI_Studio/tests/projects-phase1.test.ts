@@ -119,17 +119,17 @@ afterAll(async () => {
 });
 
 describe("platforms, testing modes and engines (US-010)", () => {
-    it("defaults to web with both modes, and adds the camelCase fields beside every existing one", async () => {
+    it("defaults to web with agent mode (round 37: one mode), and adds the camelCase fields beside every existing one", async () => {
         const made = await asKey(off.app, "POST", "/api/projects", { name: "Plain", description: "Old client" });
         expect(made.status).toBe(201);
-        expect(made.body).toMatchObject({ name: "Plain", description: "Old client", platforms: ["web"], testingModes: ["agent", "code"], codeEngines: { web: "playwright" } });
+        expect(made.body).toMatchObject({ name: "Plain", description: "Old client", platforms: ["web"], testingModes: ["agent"], codeEngines: { web: "playwright" } });
         expect(made.body).toHaveProperty("created_at");
         expect(made.body).toHaveProperty("test_count", 0);
         const one = (await asKey(off.app, "GET", `/api/projects/${made.body.id}`)).body;
-        expect(one).toMatchObject({ description: "Old client", platforms: ["web"], testingModes: ["agent", "code"], codeEngines: { web: "playwright" }, c4tProject: null });
+        expect(one).toMatchObject({ description: "Old client", platforms: ["web"], testingModes: ["agent"], codeEngines: { web: "playwright" }, c4tProject: null });
         expect(one).toHaveProperty("suites");
         const listed = (await asKey(off.app, "GET", "/api/projects")).body.find((p: { id: string }) => p.id === made.body.id);
-        expect(listed).toMatchObject({ platforms: ["web"], testingModes: ["agent", "code"], codeEngines: { web: "playwright" }, test_count: 0 });
+        expect(listed).toMatchObject({ platforms: ["web"], testingModes: ["agent"], codeEngines: { web: "playwright" }, test_count: 0 });
     });
 
     it("backfills existing projects: web, both modes, and Android or iOS with Taqwright when a mobile app is set", () => {
@@ -164,8 +164,9 @@ describe("platforms, testing modes and engines (US-010)", () => {
         expect(await asKey(off.app, "POST", "/api/projects", { name: "X", platforms: [] })).toMatchObject({ status: 400, body: { error: "Choose at least one platform." } });
         expect(await asKey(off.app, "POST", "/api/projects", { name: "X", testingModes: [] })).toMatchObject({ status: 400, body: { error: "Choose at least one testing mode." } });
         expect(await asKey(off.app, "POST", "/api/projects", { name: "X", testingModes: ["live"] })).toMatchObject({ status: 400, body: { error: '"live" is not a testing mode. Choose agent or code.' } });
-        const mobile = await asKey(off.app, "POST", "/api/projects", { name: "Phones", platforms: ["ios", "android", "android"], testingModes: ["code"] });
-        expect(mobile.body).toMatchObject({ platforms: ["android", "ios"], testingModes: ["code"], codeEngines: { mobile: "taqwright" } });
+        // Round 37: one platform (a repeat counts once); more than one is refused (tests/project-basics.test.ts).
+        const mobile = await asKey(off.app, "POST", "/api/projects", { name: "Phones", platforms: ["ios", "ios"], testingModes: ["code"] });
+        expect(mobile.body).toMatchObject({ platforms: ["ios"], testingModes: ["code"], codeEngines: { mobile: "taqwright" } });
     });
 
     it("PATCH changes what is given, recomputes the engines, and narrowing keeps every test", async () => {
@@ -185,7 +186,9 @@ describe("platforms, testing modes and engines (US-010)", () => {
     });
 
     it("a backup keeps the platforms and testing modes, and an older backup without them restores as the defaults", async () => {
-        const id = (await asKey(off.app, "POST", "/api/projects", { name: "Kept in backup", platforms: ["web", "ios"], testingModes: ["code"] })).body.id as string;
+        // An older project with two platforms (as production has them): the backup keeps both.
+        const id = (await asKey(off.app, "POST", "/api/projects", { name: "Kept in backup", platforms: ["ios"], testingModes: ["code"] })).body.id as string;
+        off.platform.repo.updateProject(id, { platforms: ["web", "ios"] });
         const { bytes } = await buildBackup(off.platform, id, { evidence: false, maxEvidenceMB: 0 });
         const restored = await restoreBackup(off.platform, bytes, { name: "Kept in backup (restored)" });
         expect((await asKey(off.app, "GET", `/api/projects/${restored.project.id}`)).body).toMatchObject({ platforms: ["web", "ios"], testingModes: ["code"], codeEngines: { web: "playwright", mobile: "taqwright" } });
@@ -203,7 +206,9 @@ describe("platforms, testing modes and engines (US-010)", () => {
 
 describe("the setup check", () => {
     it("lists one item per need of the chosen platforms and modes, ok or not", async () => {
-        const id = (await asKey(off.app, "POST", "/api/projects", { name: "Everything", platforms: ["web", "android", "ios"] })).body.id as string;
+        // An older project with every platform and both modes (round 37 no longer makes these, but keeps them).
+        const id = (await asKey(off.app, "POST", "/api/projects", { name: "Everything" })).body.id as string;
+        off.platform.repo.updateProject(id, { platforms: ["web", "android", "ios"], testingModes: ["agent", "code"] });
         const items = (await asKey(off.app, "GET", `/api/projects/${id}/setup-check`)).body.items as Array<{ key: string; ok: boolean; text: string }>;
         expect(items.map((i) => i.key)).toEqual(["web-address", "android-app", "ios-app", "ios-runner", "ai-model", "runner"]);
         const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
@@ -289,7 +294,7 @@ describe("Crowd4Test's service", () => {
 describe("organisations of new projects", () => {
     it("keeps customers in their own; staff choose one that exists and is active", async () => {
         expect((await as("t-cust", "POST", "/api/projects", { name: "Elsewhere", organizationId: "org-b" })).status).toBe(403);
-        expect((await as("t-cust", "POST", "/api/projects", { name: "Mine", platforms: ["web", "android"] })).body).toMatchObject({ organization_id: "org-a", platforms: ["web", "android"] });
+        expect((await as("t-cust", "POST", "/api/projects", { name: "Mine", platforms: ["android"] })).body).toMatchObject({ organization_id: "org-a", platforms: ["android"] });
         expect(await as("t-admin", "POST", "/api/projects", { name: "Sleepy", organizationId: "org-s" })).toMatchObject({ status: 409, body: { error: "That organisation is suspended on Crowd4Test, so projects cannot be created in it." } });
         expect(await as("t-admin", "POST", "/api/projects", { name: "Ghost", organizationId: "org-zzz" })).toMatchObject({ status: 404, body: { error: "Crowd4Test has no organisation with that id." } });
         expect((await as("t-admin", "POST", "/api/projects", { name: "For Bravo", organizationId: "org-b" })).body.organization_id).toBe("org-b");

@@ -32,6 +32,7 @@ import {
     type KitKind,
     type KitPlatform,
 } from "./kit";
+import { UnsignedNotice } from "../runners/UnsignedNotice";
 import "./add-runner.css";
 
 const STEP_TITLES = ["Choose the computer", "Download and unzip", "Start it"] as const;
@@ -441,6 +442,9 @@ function DownloadStep({
                     It also creates the access the runner uses to connect, so you will not see or copy a token.
                 </p>
             )}
+
+            {/* The downloads are unsigned: what SmartScreen and Gatekeeper show, before and after the download. */}
+            <UnsignedNotice platform={platform} />
 
             {error && (
                 <Callout

@@ -148,24 +148,8 @@ function PreferencesCard() {
                             </span>
                         </label>
                     </fieldset>
-                    <fieldset className="choice-group stack-sm">
-                        <legend className="t-card">Projects page</legend>
-                        <p className="t-meta">How the Projects page opens when you have two or more projects.</p>
-                        <label className="check">
-                            <input type="radio" name="projects-view" disabled={!saved} checked={prefs.projectsView === "dashboard"} onChange={() => setPrefs({ ...prefs, projectsView: "dashboard" })} />
-                            <span>
-                                <span className="title">Dashboard</span>
-                                <span className="hint t-meta">How ready each project is, with filters.</span>
-                            </span>
-                        </label>
-                        <label className="check">
-                            <input type="radio" name="projects-view" disabled={!saved} checked={prefs.projectsView === "list"} onChange={() => setPrefs({ ...prefs, projectsView: "list" })} />
-                            <span>
-                                <span className="title">List</span>
-                                <span className="hint t-meta">A plain list you can group or filter by folder.</span>
-                            </span>
-                        </label>
-                    </fieldset>
+                    {/* Round 37: the Projects page is always the list (with pages); the readiness view is on the Dashboard. The stored
+                        `projectsView` preference is kept for older clients but no longer offered. */}
                     {note && <Callout tone={note.tone}>{note.text}</Callout>}
                     {saved ? (
                         <div>

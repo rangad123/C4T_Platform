@@ -88,6 +88,7 @@ describe("UI journey", () => {
         await page.getByRole("button", { name: "Choose what to test first" }).click();
         await page.locator("summary", { hasText: "Advanced options" }).click();
         await page.getByRole("checkbox", { name: /Web application/ }).uncheck(); // API-only: no AI model needed
+        await page.getByLabel("Project name").fill("Smoke shop"); // round 37: typed, never made from the address
         await page.getByRole("button", { name: "Start exploring" }).click();
 
         await pwExpect(page.getByRole("heading", { name: /Exploring your application/ })).toBeVisible({ timeout: 15_000 });

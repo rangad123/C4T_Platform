@@ -1,0 +1,25 @@
+/* Testing agents: the avatars, the agent cards and the picker. Design tokens only; shared classes do the rest. */
+.ta-avatar { display: inline-grid; place-items: center; flex: none; border-radius: var(--radius-card); background: var(--surface-brand-subtle); color: var(--text-brand); border: 1px solid var(--accent-100); }
+.ta-avatar.ta-sm { width: 32px; height: 32px; border-radius: var(--radius-sm); }
+.ta-avatar.ta-md { width: 44px; height: 44px; }
+.ta-avatar.ta-lg { width: 64px; height: 64px; border-radius: var(--radius-panel); }
+.ta-avatar.is-off { background: var(--surface-sunken); color: var(--text-muted); border-color: var(--border-default); }
+
+.ta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; margin: 0; padding: 0; list-style: none; }
+.ta-card { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; padding: var(--space-card-padding); color: inherit; text-decoration: none; height: 100%; transition: var(--transition-control); }
+a.ta-card:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+a.ta-card:focus-visible { outline: 2px solid var(--ink-950); outline-offset: 2px; }
+.ta-card.is-off { background: var(--surface-sunken); }
+.ta-card-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ta-card-head .t-card { overflow-wrap: anywhere; }
+.ta-card-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.ta-detail-head { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.ta-detail-head .main { flex: 1 1 280px; min-width: 0; display: grid; gap: 6px; }
+.ta-list { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-secondary); }
+
+.ta-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.ta-check { align-items: center; }
+.ta-check input { margin-top: 0; }
+.ta-check.is-off { cursor: default; background: var(--surface-sunken); }
+.ta-check.is-off .title { color: var(--text-secondary); }

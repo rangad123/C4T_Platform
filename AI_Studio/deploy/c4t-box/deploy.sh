@@ -35,6 +35,10 @@ BACKUP_DIR="$AI_STUDIO_HOME/backups"
 LOCK_STAMP="$AI_STUDIO_HOME/installed-lock.sha256"
 SITE_STAMP="$AI_STUDIO_HOME/installed-site.sha256"
 SITE_FILE="$NGINX_DIR/sites-available/$SITE_NAME"
+# The runner downloads, built by the workflow and copied into INCOMING_DIR (see
+# install_runner_downloads). Outside the checkout, like the data folder.
+RUNNER_DOWNLOADS="$AI_STUDIO_HOME/runner-downloads"
+INCOMING_DIR="$AI_STUDIO_HOME/incoming"
 HEALTH_URL="http://127.0.0.1:$APP_PORT/api/health"
 SECRET_NAMES=(AI_STUDIO_SECRET_KEY AI_STUDIO_API_KEY AI_STUDIO_SERVICE_TOKEN)
 
@@ -79,7 +83,7 @@ check_secrets() {
 
 prepare_dirs() {
   umask 077
-  mkdir -p "$AI_STUDIO_HOME" "$BACKUP_DIR" "$BACKUP_DIR/data" "$AI_STUDIO_HOME/logs"
+  mkdir -p "$AI_STUDIO_HOME" "$BACKUP_DIR" "$BACKUP_DIR/data" "$AI_STUDIO_HOME/logs" "$INCOMING_DIR"
   # Outside the checkout: deploy-pull.sh hard-resets that. Created once, never deleted.
   mkdir -p "$DATA_DIR"
   umask 022
@@ -135,6 +139,10 @@ write_env() {
     # Copying them off this disk needs BACKUP_UPLOAD_COMMAND in env.local.
     printf 'RETENTION_DEFAULT_DAYS=14\n'
     printf 'BACKUP_DIR=%s/data\n' "$BACKUP_DIR"
+    # Built by the deploy workflow, never on this box (install_runner_downloads).
+    printf 'RUNNER_KIT_DIR=%s/runner\n' "$RUNNER_DOWNLOADS"
+    printf 'RUNNER_COMPLETE_DIR=%s/runner-complete\n' "$RUNNER_DOWNLOADS"
+    printf 'RUNNER_INSTALLER_DIR=%s/installer\n' "$RUNNER_DOWNLOADS"
   } >"$tmp"
   chmod 600 "$tmp"
   mv -f "$tmp" "$ENV_FILE"
@@ -189,6 +197,72 @@ build_app() {
   gentle npm run build:web
   # Chromium only, and no --with-deps: its libraries came with Puppeteer's Chrome.
   gentle npx playwright install chromium
+}
+
+# The runner program, the complete downloads (their own Node.js and packages
+# for each system and processor) and the installers are built by the deploy
+# workflow and copied into INCOMING_DIR as one tar with its SHA-256. Building
+# them here would need about 1 GB more memory and the internet on a box shared
+# with crowd4test.com. A missing, damaged or too-large upload changes nothing:
+# the downloads from the last deploy stay, and this deploy still succeeds.
+install_runner_downloads() {
+  local tarball="$INCOMING_DIR/runner-downloads.tar" sums="$INCOMING_DIR/runner-downloads.tar.sha256"
+  local size_mb free_mb work built here
+  if [ ! -f "$tarball" ] || [ ! -f "$sums" ]; then
+    rm -f "$tarball" "$sums"
+    if [ -f "$RUNNER_DOWNLOADS/runner/manifest.json" ]; then
+      say "no new runner downloads came with this deploy; keeping the ones in $RUNNER_DOWNLOADS"
+    else
+      say "no runner downloads on this box yet: Runners offers no download until a deploy brings them"
+    fi
+    return 0
+  fi
+  if ! (cd "$INCOMING_DIR" && sha256sum -c --quiet runner-downloads.tar.sha256 >/dev/null 2>&1); then
+    rm -f "$tarball" "$sums"
+    say "the runner downloads did not match their SHA-256, so they were thrown away; keeping the previous ones"
+    return 0
+  fi
+  # Only the four names the workflow packs, only files and folders, and no path that climbs out.
+  local names kinds
+  if ! names="$(tar -tf "$tarball" 2>/dev/null)" || ! kinds="$(tar -tvf "$tarball" 2>/dev/null | cut -c1 | sort -u | tr -d '\n')"; then
+    rm -f "$tarball" "$sums"
+    say "the runner downloads could not be read, so they were thrown away; keeping the previous ones"
+    return 0
+  fi
+  if [ -n "$(grep -Ev '^(\./)?((runner|runner-complete|installer)(/.*)?|build-info\.json)$' <<<"$names" || true)" ] \
+    || grep -Eq '(^|/)\.\.(/|$)' <<<"$names" \
+    || [ -n "$(tr -d 'd-' <<<"$kinds")" ]; then
+    rm -f "$tarball" "$sums"
+    say "the runner downloads hold unexpected files or links, so they were thrown away; keeping the previous ones"
+    return 0
+  fi
+  size_mb=$(( $(stat -c %s "$tarball") / 1048576 + 1 ))
+  free_mb="$(df -Pm "$AI_STUDIO_HOME" | awk 'NR == 2 { print $4 }')"
+  if [ "$free_mb" -lt $(( size_mb + 300 )) ]; then
+    rm -f "$tarball" "$sums"
+    say "only $free_mb MB of disk are free and the runner downloads need $(( size_mb + 300 )) MB unpacked; keeping the previous ones"
+    return 0
+  fi
+  work="$(mktemp -d "$AI_STUDIO_HOME/runner-downloads.new.XXXXXX")"
+  if ! nice -n 15 tar -xf "$tarball" -C "$work" --no-same-owner || [ ! -f "$work/runner/manifest.json" ]; then
+    rm -rf "$work"
+    rm -f "$tarball" "$sums"
+    say "the runner downloads could not be unpacked; keeping the previous ones"
+    return 0
+  fi
+  chmod 755 "$work"
+  # A download being streamed right now keeps reading its open files after the swap.
+  rm -rf "$RUNNER_DOWNLOADS.old"
+  if [ -d "$RUNNER_DOWNLOADS" ]; then mv "$RUNNER_DOWNLOADS" "$RUNNER_DOWNLOADS.old"; fi
+  mv "$work" "$RUNNER_DOWNLOADS"
+  rm -rf "$RUNNER_DOWNLOADS.old"
+  rm -f "$tarball" "$sums"
+  built="$(sed -n 's/.*"commit": *"\([0-9a-f]*\)".*/\1/p' "$RUNNER_DOWNLOADS/build-info.json" 2>/dev/null | head -n 1 || true)"
+  here="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
+  say "runner downloads installed in $RUNNER_DOWNLOADS ($(du -sm "$RUNNER_DOWNLOADS" | cut -f1) MB; $(ls "$RUNNER_DOWNLOADS/runner-complete" 2>/dev/null | tr '\n' ' '))"
+  if [ -n "$built" ] && [ -n "$here" ] && [ "$built" != "$here" ]; then
+    say "the runner downloads were built from ${built:0:12}, and this checkout is ${here:0:12}: the next deploy brings matching ones"
+  fi
 }
 
 start_app() {
@@ -408,6 +482,7 @@ main() {
   write_env
   install_packages
   build_app
+  install_runner_downloads
   backup_before_start
   start_app
   check_tree
@@ -424,4 +499,7 @@ main() {
   enable_shared_sign_in
 }
 
-main
+# Sourcing the script (the tests do) defines the functions without running it.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main
+fi

@@ -12,7 +12,10 @@ import { SuitesPage } from "./features/workspace/SuitesPage";
 import { TestCasesPage } from "./features/workspace/TestCasesPage";
 import { CreateProjectPage } from "./features/workspace/CreateProjectPage";
 import { DashboardPage, FoldersPage, ProfilePage, RunnerPage, RunnersPage, TestDevelopmentPage } from "./features/workspace/GlobalPages";
+import { LibrariesPage } from "./features/libraries/LibrariesPage";
+import { IntegrationsPage } from "./features/integrations/IntegrationsPage";
 import { NewCodePage } from "./features/code/EditorPage";
+import { AgentDetailPage, AgentsPage } from "./features/testing-agents/AgentsPage";
 import { RecorderPage } from "./features/recorder/RecorderPage";
 import { ReleaseDetail } from "./features/manual/ReleaseDetail";
 import { GuidePage } from "./features/guide/GuidePage";
@@ -41,7 +44,11 @@ function Pages() {
     if (a === "create") return <CreateProjectPage />;
     if (a === "develop") return <TestDevelopmentPage />;
     if (a === "runners") return b ? <RunnerPage id={b} key={b} /> : <RunnersPage />;
-    if (a === "folders") return <FoldersPage />;
+    if (a === "integrations") return <IntegrationsPage />;
+    // Reusable libraries (round 37) took the Folders place; grouping projects into folders opens from the Projects page.
+    if (a === "libraries") return <LibrariesPage />;
+    if (a === "project-folders") return <FoldersPage />;
+    if (a === "agents") return b ? <AgentDetailPage id={b} key={b} /> : <AgentsPage />;
     if (a === "profile") return <ProfilePage />;
     if (a === "settings") return <Settings />;
     if (a === "security") return <SecurityHome />;

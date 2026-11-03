@@ -266,12 +266,16 @@ describe("the first screen", () => {
     it("Record a test makes a project and opens the recorder with the address ready", async () => {
         await visit("");
         await page.getByLabel("Address to start from").fill(`127.0.0.1:${SITE_PORT}`);
+        // Round 37: the project's name is typed, never made from the address.
+        await page.getByRole("button", { name: "Record a test", exact: true }).click();
+        await pwExpect(page.getByText("Give the project a name.")).toBeVisible();
+        await page.getByLabel("Project name").fill("Recorded shop");
         await page.getByRole("button", { name: "Record a test", exact: true }).click();
         await page.waitForURL((u) => /^#\/projects\/[^/]+\/record\?url=/.test(u.hash));
         await pwExpect(page.getByRole("heading", { name: "Record a test", level: 1 })).toBeVisible();
         await pwExpect(page.getByLabel("Address to start from")).toHaveValue(`${SITE}/`);
         const projects = (await api("GET", "/api/projects")).body as Array<{ name: string; test_count: number }>;
-        expect(projects.map((p) => p.name)).toEqual([`127.0.0.1:${SITE_PORT}`]);
+        expect(projects.map((p) => p.name)).toEqual(["Recorded shop"]);
         expect(projects[0]!.test_count).toBe(0);
     });
 
@@ -295,7 +299,7 @@ describe("the first screen", () => {
         await pwExpect(page.getByRole("heading", { name: "No tests yet" })).toBeVisible();
         await pwExpect(page.getByRole("button", { name: "New test", exact: true }).first()).toBeVisible();
         const names = ((await api("GET", "/api/projects")).body as Array<{ name: string }>).map((p) => p.name).sort();
-        expect(names).toEqual([`127.0.0.1:${SITE_PORT}`, "Existing suite", "Written by hand"].sort());
+        expect(names).toEqual(["Recorded shop", "Existing suite", "Written by hand"].sort());
     });
 
     it("the first screen: keyboard path, 375 px, 44 px targets, axe in both themes", async () => {
@@ -352,6 +356,7 @@ describe("explore, then a plan, then the tests (real jobs, scripted model)", () 
 
     it("Explore my app: progress in words with Stop, and no run phase listed", async () => {
         await visit("#/new");
+        await page.getByLabel("Project name").fill("Explored shop");
         await page.getByLabel("Application URL").fill(SITE);
         await page.getByRole("button", { name: "Explore my app", exact: true }).click();
         await page.waitForURL((u) => /^#\/projects\/[^/]+$/.test(u.hash));
@@ -727,8 +732,11 @@ describe("stopping at each stage says what is kept (the platform's answers for o
         }
     });
 
-    it("a project with a plan and no tests reads Plan ready in the project list (the list is answered by the test: the fleet view takes over with two projects)", async () => {
-        await page.route("**/api/projects", (route) => route.fulfill({ json: [{ id: "p1", name: "Atlas", created_at: NOW(), test_count: 0, validated_count: 0, url: SITE, last_job_status: "COMPLETED" }, { id: "p2", name: "Borealis", created_at: NOW(), test_count: 4, validated_count: 4, url: SITE, last_job_status: "COMPLETED" }] }));
+    it("a project with a plan and no tests reads Plan ready in the project list (the list is answered by the test)", async () => {
+        const PROJECT_LIST = /\/api\/projects(\?[^/]*)?$/;
+        // Round 37: the Projects page asks for a page (?limit=&offset=) and gets one; the plain list stays an array.
+        const list = [{ id: "p1", name: "Atlas", created_at: NOW(), test_count: 0, validated_count: 0, url: SITE, last_job_status: "COMPLETED" }, { id: "p2", name: "Borealis", created_at: NOW(), test_count: 4, validated_count: 4, url: SITE, last_job_status: "COMPLETED" }];
+        await page.route(PROJECT_LIST, (route) => route.fulfill({ json: new URL(route.request().url()).searchParams.has("limit") ? { projects: list, total: list.length, limit: 20, offset: 0 } : list }));
         await page.route("**/api/dashboard**", (route) => route.abort());
         try {
             await visit("");
@@ -736,7 +744,7 @@ describe("stopping at each stage says what is kept (the platform's answers for o
             await pwExpect(rows.filter({ hasText: "Atlas" }).getByText("Plan ready")).toBeVisible();
             await pwExpect(rows.filter({ hasText: "Borealis" }).getByText("Test suite ready")).toBeVisible();
         } finally {
-            await page.unroute("**/api/projects");
+            await page.unroute(PROJECT_LIST);
             await page.unroute("**/api/dashboard**");
         }
     });

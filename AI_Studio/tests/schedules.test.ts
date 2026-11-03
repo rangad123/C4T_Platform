@@ -650,7 +650,8 @@ describe("alerts", () => {
             const s = seedProject("Redirect");
             const ch = await call("POST", `/api/projects/${s.projectId}/alert-channels`, { kind: "webhook", url: "http://127.0.0.1:5251/hook" });
             const r = (await call("POST", `/api/projects/${s.projectId}/alert-channels/${ch.body.id}/test`)).body;
-            expect(r).toMatchObject({ ok: false, httpStatus: 302 });
+            // Not followed (nothing reached the receiver), and the person reads why in plain words.
+            expect(r).toMatchObject({ ok: false, httpStatus: 302, error: "The address redirects (HTTP 302); use the final URL" });
             expect(received).toHaveLength(0);
         } finally {
             redirector.close();

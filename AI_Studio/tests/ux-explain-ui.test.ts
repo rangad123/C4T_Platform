@@ -568,7 +568,8 @@ describe("a repair can be seen and undone", () => {
 
 describe("honest numbers on screen", () => {
     it("the projects dashboard states what its pass rate is made of", async () => {
-        await visit("#/");
+        // Round 37: the fleet view is on the Dashboard; the Projects page is the plain list.
+        await visit("#/dashboard");
         // The dashboard first shows "Checking every project…": wait for the sentence before reading the page text.
         await pwExpect(page.getByText(/Last run: 2 of 3 tests that ran passed/)).toBeVisible();
         const text = await contentText();

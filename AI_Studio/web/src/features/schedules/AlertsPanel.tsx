@@ -5,6 +5,7 @@ import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "..
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
+import { routes } from "../../lib/router";
 import { EVENT_LABEL, EVENT_ORDER, type AlertChannel, type AlertEvent, type AlertLogEntry, type AlertOptions, type ChannelKind } from "./schedules";
 import { BadgeKey } from "../../components/Tooltip";
 import "./schedules.css";
@@ -20,6 +21,9 @@ const KIND_NAME: Record<ChannelKind, string> = { slack: "Slack", webhook: "Webho
 /** Where to send alerts, and a log of what was sent. */
 export function AlertsPanel({ projectId, reloadKey }: { projectId: string; reloadKey: number }) {
     const channels = useFetch<AlertChannel[]>(`/projects/${projectId}/alert-channels`);
+    // Channels set up once in Integrations: their address is changed and they are removed there; what they hear about stays here.
+    const shared = useFetch<Array<{ targetId: string }>>(`/projects/${projectId}/shared-integrations`);
+    const sharedIds = new Set((shared.data ?? []).map((s) => s.targetId));
     const log = useFetch<AlertLogEntry[]>(`/projects/${projectId}/alert-log?limit=15`);
     const [adding, setAdding] = useState(false);
     useEffect(() => {
@@ -63,7 +67,7 @@ export function AlertsPanel({ projectId, reloadKey }: { projectId: string; reloa
                             <ul className="list divided">
                                 {channels.data.map((c) => (
                                     <li key={c.id}>
-                                        <ChannelRow c={c} projectId={projectId} onChanged={reloadAll} />
+                                        <ChannelRow c={c} projectId={projectId} shared={sharedIds.has(c.id)} onChanged={reloadAll} />
                                     </li>
                                 ))}
                             </ul>
@@ -118,7 +122,7 @@ export function AlertsPanel({ projectId, reloadKey }: { projectId: string; reloa
     );
 }
 
-function ChannelRow({ c, projectId, onChanged }: { c: AlertChannel; projectId: string; onChanged: () => Promise<void> }) {
+function ChannelRow({ c, projectId, shared, onChanged }: { c: AlertChannel; projectId: string; shared?: boolean; onChanged: () => Promise<void> }) {
     const [busy, setBusy] = useState<"test" | "toggle" | "delete" | null>(null);
     const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
     const [confirm, setConfirm] = useState(false);
@@ -154,6 +158,11 @@ function ChannelRow({ c, projectId, onChanged }: { c: AlertChannel; projectId: s
                 {c.kind === "email" && (c.smtp ? <span>Mail server: <b>{c.smtp.host}</b>{c.smtp.source === "server" ? " (set up on the server)" : c.smtp.hasLogin ? " (own sign-in saved)" : ""}</span> : <span className="error-text">No mail server is set up for this channel</span>)}
                 <span>When: <b>{EVENT_ORDER.filter((e) => c.events.includes(e)).map((e) => EVENT_LABEL[e].label.toLowerCase()).join(", ")}</b></span>
                 {c.minSeverity && <span>Problems of <b>{c.minSeverity}</b> severity or higher</span>}
+                {shared && (
+                    <span>
+                        Shared from <a href={routes.integrations}>Integrations</a>: its address is changed there, and this project stops using it there.
+                    </span>
+                )}
             </div>
             {result && <Callout tone={result.ok ? "success" : "danger"}>{result.text}</Callout>}
             <div className="acts">
@@ -163,7 +172,7 @@ function ChannelRow({ c, projectId, onChanged }: { c: AlertChannel; projectId: s
                 <Button size="sm" variant="ghost" loading={busy === "toggle"} onClick={() => act("toggle")} aria-label={`${c.enabled ? "Turn off" : "Turn on"} ${c.name}`} tip={c.enabled ? "Stops sending alerts to it. The channel and its settings are kept." : "Alerts are sent to it again from the next run."}>
                     {c.enabled ? "Turn off" : "Turn on"}
                 </Button>
-                {confirm ? (
+                {shared ? null : confirm ? (
                     <>
                         <span className="t-secondary">Remove this channel?</span>
                         <Button size="sm" variant="danger" loading={busy === "delete"} onClick={() => act("delete")}>Yes, remove</Button>

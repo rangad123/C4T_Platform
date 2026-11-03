@@ -428,7 +428,11 @@ describe("outbound address guard", () => {
             expect(local.status).toBe(400);
             expect(local.body.error).toMatch(/private|loopback/i);
             expect((await connect({ apiUrl: "http://169.254.169.254" })).status).toBe(400);
-            expect((await call("PATCH", `/api/integrations/${saved.body.id}`, { apiUrl: "http://localhost:5730" })).status).toBe(400);
+            // A new address needs the token again (the stored one is only sent where it was entered for); with it, the guard refuses the address.
+            expect((await call("PATCH", `/api/integrations/${saved.body.id}`, { apiUrl: "http://localhost:5730" })).body.error).toMatch(/Enter the token/);
+            const moved = await call("PATCH", `/api/integrations/${saved.body.id}`, { apiUrl: "http://localhost:5730", token: TOKEN });
+            expect(moved.status).toBe(400);
+            expect(moved.body.error).toMatch(/private|loopback/i);
             expect(calls.length).toBe(hits);
         } finally {
             delete process.env.BLOCK_PRIVATE_TARGETS;

@@ -1,19 +1,17 @@
-import { ChevronRight, FolderKanban, LayoutDashboard, List } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Folder, FolderKanban, LayoutDashboard, List, Search } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NewProjectLink } from "../components/NewProjectLink";
-import type { ProjectRow } from "../api";
-import { Badge, Button, ErrorState, JobBadge, ListSkeleton, PageHeader, Ribbon, jobKey, type Tick } from "../components/ui";
+import type { ProjectPage, ProjectRow } from "../api";
+import { Badge, Button, ErrorState, JobBadge, LinkButton, ListSkeleton, PageHeader, Ribbon, jobKey, type Tick } from "../components/ui";
 import { BadgeKey } from "../components/Tooltip";
 import { jobHelp } from "../lib/help";
 import { usePage } from "../components/Shell";
-import { FleetDashboard } from "../features/dashboard/FleetDashboard";
-import { hostOf, relativeTime } from "../lib/format";
+import { hostOf, plural, relativeTime } from "../lib/format";
 import { friendlyError, isActive } from "../lib/labels";
 import { useDocumentTitle, useFetch } from "../lib/hooks";
-import { routes } from "../lib/router";
+import { routes, useRoute } from "../lib/router";
 import { NewProject } from "./NewProject";
 import type { FoldersAnswer } from "../features/workspace/FoldersPage";
-import type { PreferencesAnswer } from "../features/workspace/ProfilePage";
 
 /** "all", "grouped", "none" (not in a folder) or a folder id. */
 type FolderFilter = string;
@@ -27,39 +25,67 @@ function projectTicks(validated: number, total: number): Tick[] {
     return Array.from({ length: n }, (_, i): Tick => (i < pass ? "pass" : "idle"));
 }
 
+/** Projects per page (round 37). The page number is in the address (`#/?page=2`, `#/?page=all`), so Back returns to it. */
+export const PROJECTS_PAGE_SIZE = 20;
+
+/** `#/` with the page in the query (page 1 has none). */
+export const projectsPageHref = (page: number | "all") => (page === "all" ? "#/?page=all" : page > 1 ? `#/?page=${page}` : "#/");
+
 export function Home() {
     useDocumentTitle("Projects");
     usePage({ crumbs: [{ label: "Projects" }], nav: "projects" });
+    const query = useRoute().query;
+    const rawPage = query.get("page");
+    const all = rawPage === "all";
+    const page = all ? 1 : Math.max(1, Math.floor(Number(rawPage) || 1));
     const [showArchived, setShowArchived] = useState(false);
-    const { data, error, loading, reload } = useFetch<ProjectRow[]>(showArchived ? "/projects?archived=include" : "/projects", (d) => (d?.some((p) => isActive(p.last_job_status)) ? 3000 : null));
-    // How the page opens (Profile → Preferences) and the folders to group or filter by; neither is needed to show the list.
-    const prefs = useFetch<PreferencesAnswer>("/me/preferences");
+    // The folders to group or filter by; not needed to show the list.
     const folders = useFetch<FoldersAnswer>("/folders");
-    const [view, setView] = useState<"dashboard" | "list" | null>(null);
     const [folder, setFolder] = useState<FolderFilter>("all");
-
-    if (loading) {
-        return (
-            <>
-                <PageHeader title="Projects" />
-                <ListSkeleton rows={3} />
-            </>
-        );
+    const [text, setText] = useState("");
+    const [q, setQ] = useState("");
+    // Typing searches after a short pause; the list is asked for again, on the server, page by page.
+    useEffect(() => {
+        const t = setTimeout(() => setQ(text.trim()), 300);
+        return () => clearTimeout(t);
+    }, [text]);
+    const params = new URLSearchParams();
+    if (showArchived) params.set("archived", "include");
+    if (q) params.set("q", q);
+    if (folder !== "all" && folder !== "grouped") params.set("folder", folder);
+    if (!all) {
+        params.set("limit", String(PROJECTS_PAGE_SIZE));
+        params.set("offset", String((page - 1) * PROJECTS_PAGE_SIZE));
     }
-    if (error) return <ErrorState error={friendlyError(error.message)} onRetry={reload} />;
+    const { data, error, loading, reload } = useFetch<ProjectPage | ProjectRow[]>(`/projects?${params.toString()}`, (d) => (rowsOf(d).some((p) => isActive(p.last_job_status)) ? 3000 : null));
+    // A filter or search changed: back to the first page (replacing, so Back does not step through every keystroke).
+    const filterKey = `${showArchived}|${q}|${folder}`;
+    const lastFilter = useRef(filterKey);
+    useEffect(() => {
+        if (lastFilter.current === filterKey) return;
+        lastFilter.current = filterKey;
+        if (page > 1) location.replace(`${location.pathname}${location.search}${projectsPageHref(1)}`);
+    }, [filterKey, page]);
+
+    const rows = rowsOf(data);
+    const total = Array.isArray(data) ? data.length : (data?.total ?? 0);
+    const filtering = showArchived || q !== "" || folder !== "all";
+    if (error && !data) return <ErrorState error={friendlyError(error.message)} onRetry={reload} />;
     // First visit: the whole page is the one thing to do.
-    if ((!data || data.length === 0) && !showArchived) return <NewProject welcome />;
-    const all = data ?? [];
+    if (!loading && data && total === 0 && !filtering && page === 1) return <NewProject welcome />;
     const folderList = folders.data?.folders ?? [];
-    const chosenView = view ?? (prefs.loading ? null : (prefs.data?.preferences.projectsView ?? "dashboard"));
-    const filtered = all.filter((p) => folder === "all" || folder === "grouped" || (folder === "none" ? !p.folder_id : p.folder_id === folder));
+    const pages = all ? 1 : Math.max(1, Math.ceil(total / PROJECTS_PAGE_SIZE));
     const row = (p: ProjectRow) => <ProjectItem key={p.id} p={p} />;
     const groups: Array<{ key: string; title: string; rows: ProjectRow[] }> =
         folder === "grouped"
-            ? [...folderList.map((f) => ({ key: f.id, title: f.name, rows: filtered.filter((p) => p.folder_id === f.id) })), { key: "none", title: "Not in a folder", rows: filtered.filter((p) => !p.folder_id || !folderList.some((f) => f.id === p.folder_id)) }].filter((g) => g.rows.length > 0)
-            : [{ key: "all", title: "", rows: filtered }];
+            ? [...folderList.map((f) => ({ key: f.id, title: f.name, rows: rows.filter((p) => p.folder_id === f.id) })), { key: "none", title: "Not in a folder", rows: rows.filter((p) => !p.folder_id || !folderList.some((f) => f.id === p.folder_id)) }].filter((g) => g.rows.length > 0)
+            : [{ key: "all", title: "", rows }];
     const tools = (
         <div className="row" style={{ gap: 12, flexWrap: "wrap", marginBottom: 16 }} data-testid="projects-tools">
+            <div className="input-wrap" style={{ flex: "1 1 240px", maxWidth: 360 }}>
+                <Search size={16} className="lead" aria-hidden />
+                <input className="input" type="search" aria-label="Search projects" placeholder="Search by name or address" value={text} onChange={(e) => setText(e.target.value)} />
+            </div>
             {folderList.length > 0 && (
                 <div className="row" style={{ gap: 8 }}>
                     <label htmlFor="projects-folder" className="t-meta">
@@ -81,16 +107,19 @@ export function Home() {
                 <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
                 Show archived projects
             </label>
-            <span className="spacer" />
-            {all.length >= 2 && (
-                <Button size="sm" variant="ghost" icon={LayoutDashboard} onClick={() => (setView("dashboard"), setFolder("all"), setShowArchived(false))}>
-                    Show the dashboard
-                </Button>
+            {(folderList.length > 0 || folders.data?.canCreate) && (
+                <LinkButton size="sm" variant="ghost" icon={Folder} href={routes.projectFolders} tip="Group your organisation's projects into folders, for example by client or product line.">
+                    Project folders
+                </LinkButton>
             )}
+            <span className="spacer" />
+            <LinkButton size="sm" variant="ghost" icon={LayoutDashboard} href={routes.dashboard} tip="How ready each project is, with the machines and the AI they use.">
+                Open the dashboard
+            </LinkButton>
         </div>
     );
 
-    const plain = (
+    return (
         <>
             <PageHeader
                 title="Projects"
@@ -99,7 +128,7 @@ export function Home() {
                         Each project is one application we generate and maintain tests for.{" "}
                         <BadgeKey
                             label="the project statuses"
-                            entries={all.map((p) =>
+                            entries={rows.map((p) =>
                                 p.last_job_status && p.test_count === 0 && (p.last_job_status === "COMPLETED" || p.last_job_status === "PARTIALLY_COMPLETED")
                                     ? { word: "Plan ready", text: jobHelp({ status: p.last_job_status, planOnly: true }) }
                                     : p.last_job_status
@@ -112,32 +141,44 @@ export function Home() {
                 actions={<NewProjectLink />}
             />
             {tools}
-            {filtered.length === 0 ? (
-                <p className="t-secondary card card-pad">No projects here.</p>
+            {loading && !data ? (
+                <ListSkeleton rows={3} />
+            ) : rows.length === 0 ? (
+                <p className="t-secondary card card-pad">{page > 1 && total > 0 ? <>There is no page {page}. <a href={projectsPageHref(1)}>Go to the first page</a>.</> : filtering ? "No projects match. Clear the search or the folder to see every project." : "No projects here."}</p>
             ) : (
                 groups.map((g) => (
                     <section key={g.key} className="stack-sm" style={{ marginBottom: 16 }} aria-label={g.title || undefined}>
                         {g.title && <h2 className="t-section">{g.title}</h2>}
-                        <ul className="card list divided">{g.rows.map(row)}</ul>
+                        <ul className="card list divided" aria-busy={loading || undefined}>{g.rows.map(row)}</ul>
                     </section>
                 ))
             )}
+            {total > 0 && (
+                <nav className="row" aria-label="Pages of projects" data-testid="projects-pager" style={{ gap: 12, flexWrap: "wrap" }}>
+                    <span className="t-meta" aria-live="polite">
+                        {all ? `All ${plural(total, "project")}` : `Page ${Math.min(page, pages)} of ${pages} · ${(page - 1) * PROJECTS_PAGE_SIZE + 1}–${Math.min(page * PROJECTS_PAGE_SIZE, total)} of ${plural(total, "project")}`}
+                    </span>
+                    <span className="spacer" />
+                    {!all && pages > 1 && (
+                        <>
+                            {page > 1 ? <LinkButton size="sm" icon={ChevronLeft} href={projectsPageHref(page - 1)}>Previous</LinkButton> : <Button size="sm" icon={ChevronLeft} disabled>Previous</Button>}
+                            {page < pages ? <LinkButton size="sm" icon={ChevronRight} href={projectsPageHref(page + 1)}>Next</LinkButton> : <Button size="sm" icon={ChevronRight} disabled>Next</Button>}
+                        </>
+                    )}
+                    {all ? (
+                        total > PROJECTS_PAGE_SIZE && <LinkButton size="sm" variant="ghost" href={projectsPageHref(1)}>Show {PROJECTS_PAGE_SIZE} per page</LinkButton>
+                    ) : (
+                        pages > 1 && <LinkButton size="sm" variant="ghost" icon={List} href={projectsPageHref("all")} tip="Every project on one page.">View all</LinkButton>
+                    )}
+                </nav>
+            )}
         </>
     );
-    // Two or more projects: the dashboard answers "which of them is healthy?", unless the person prefers the list (Profile) or is
-    // filtering by folder or looking at archived projects; one project keeps the plain list.
-    if (all.length >= 2 && chosenView === null) return <ListSkeleton rows={3} />;
-    if (all.length < 2 || chosenView === "list" || folder !== "all" || showArchived) return plain;
-    return (
-        <>
-            <FleetDashboard fallback={plain} />
-            <div className="row" style={{ marginTop: 16, flexWrap: "wrap" }}>
-                <Button size="sm" variant="ghost" icon={List} onClick={() => setView("list")} tip="A plain list you can group by folder, with archived projects on request.">
-                    Show as a list
-                </Button>
-            </div>
-        </>
-    );
+}
+
+/** The rows of either answer: a page, or the whole list (View all). */
+function rowsOf(d: ProjectPage | ProjectRow[] | undefined): ProjectRow[] {
+    return Array.isArray(d) ? d : (d?.projects ?? []);
 }
 
 function ProjectItem({ p }: { p: ProjectRow }): ReactNode {

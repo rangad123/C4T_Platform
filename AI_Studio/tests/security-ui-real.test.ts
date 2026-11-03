@@ -59,7 +59,9 @@ describe("Security Assessment through the screens, against the real platform and
     it("project, application, authorization, a real passive assessment, findings, a state change and the report", async () => {
         await page.goto(`${BASE}/#/new`);
         const sidebar = page.getByRole("complementary", { name: "Main navigation" });
-        await pwExpect(sidebar.getByRole("link", { name: "Security assessment", exact: true })).toBeVisible();
+        // Round 37: Security assessment is no longer in the left panel; the module is on, so a project can still include it.
+        await pwExpect(page.getByTestId("testing-type")).toBeVisible();
+        expect(await sidebar.getByRole("link", { name: "Security assessment", exact: true }).count()).toBe(0);
         await page.getByTestId("testing-type").getByRole("radio", { name: /Security assessment/ }).check();
         await page.getByLabel("Project name", { exact: true }).fill("Fixture client");
         await page.getByRole("button", { name: "Create project", exact: true }).click();

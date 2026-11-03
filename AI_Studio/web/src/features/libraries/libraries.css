@@ -1,0 +1,10 @@
+.lib-layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+@media (max-width: 760px) { .lib-layout { grid-template-columns: minmax(0, 1fr); } }
+.lib-tree { display: grid; padding: var(--space-2) 0; }
+.lib-tree-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); color: var(--text-primary); text-decoration: none; min-width: 0; }
+.lib-tree-row:hover { background: var(--surface-hover); }
+.lib-tree-row.active { background: var(--surface-accent-subtle); color: var(--text-accent); font-weight: var(--fw-medium); }
+.lib-tree-row .truncate { flex: 1 1 auto; min-width: 0; }
+.lib-head { display: grid; gap: var(--space-1); min-width: 0; }
+.lib-form { padding: var(--space-4); border: 1px solid var(--border-default); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.lib-steps { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); }

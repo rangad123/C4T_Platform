@@ -401,7 +401,8 @@ describe("Record a test: start", () => {
         await pwExpect(page.getByText("where you cannot click in it")).toBeVisible();
         await shot("start-remote-warning-light-1280");
         await page.getByRole("button", { name: "Add a runner on your computer" }).click();
-        await pwExpect(page).toHaveURL(/#\/projects\/[^/]+\/(setup|runners|settings\?section=runners)/);
+        // Round 37: runners are machine-level; the link opens the Runners page on this project.
+        await pwExpect(page).toHaveURL(/#\/runners\?project=[^&]+$/);
     });
 
     it("says what is wrong with the address in plain words and sends nothing", async () => {

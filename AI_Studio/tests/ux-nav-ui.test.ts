@@ -138,22 +138,25 @@ const hash = () => page.evaluate(() => location.hash);
 const P = () => shop.projectId;
 
 // The project's tab bar, in the order of the testing lifecycle (docs/product-restructure/INFORMATION_ARCHITECTURE.md, round 25).
-const TAB_NAMES = ["Dashboard", "Requirements", "Test cases", "Test suites", "Test scripts", "Agent runs", "Runs", "Settings"];
+// Round 37: Test scripts before Test suites.
+const TAB_NAMES = ["Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Agent runs", "Runs", "Settings"];
 
 // The places that hold several sections: [tab label, hash of the bare place, title, section names in order, hash of section i].
 const CASES = ["automated", "manual"] as const;
-const SCRIPTS = ["scripts", "steps", "elements", "helpers"] as const;
+// Round 37: Reusable libraries (the organisation's shared code) is the last section of Test scripts.
+const SCRIPTS = ["scripts", "steps", "elements", "helpers", "library"] as const;
 const RUNS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
-const SETTINGS = ["general", "members", "environments", "data", "accounts", "ai", "runners", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
+// Round 37: runners are machine-level, on the Runners page, not a project setting.
+const SETTINGS = ["general", "members", "environments", "data", "accounts", "ai", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 const PLACES: Array<{ tab: string; h: () => string; title: string; sections: string[]; at: (i: number) => string }> = [
     { tab: "Test cases", h: () => routes.cases(P()), title: "Test cases", sections: ["Automated", "Manual"], at: (i) => routes.cases(P(), CASES[i]) },
-    { tab: "Test scripts", h: () => routes.scripts(P()), title: "Test scripts", sections: ["Scripts", "Reusable steps", "Shared elements", "Helpers (code)"], at: (i) => routes.scripts(P(), SCRIPTS[i]) },
+    { tab: "Test scripts", h: () => routes.scripts(P()), title: "Test scripts", sections: ["Scripts", "Reusable steps", "Shared elements", "Helpers (code)", "Reusable libraries"], at: (i) => routes.scripts(P(), SCRIPTS[i]) },
     { tab: "Runs", h: () => routes.runs(P()), title: "Runs", sections: ["All runs", "Schedules", "After a deploy", "Trends", "Releases", "Compliance"], at: (i) => routes.runs(P(), RUNS[i]) },
     {
         tab: "Settings",
         h: () => routes.projectSettings(P()),
         title: "Settings",
-        sections: ["General", "Members", "Environments", "Test data", "Test accounts", "AI configuration", "Runners", "Frameworks", "Mobile app", "Alerts", "Issue tracker", "Storage and backup"],
+        sections: ["General", "Members", "Environments", "Test data", "Test accounts", "AI configuration", "Frameworks", "Mobile app", "Alerts", "Issue tracker", "Storage and backup"],
         at: (i) => routes.projectSettings(P(), SETTINGS[i]),
     },
 ];
@@ -171,7 +174,7 @@ const SECTION_NAME: Record<string, string> = { steps: "Reusable steps", elements
 // ── the project's places ────────────────────────────────────────────────────
 
 describe("the project's places, in the order of the testing lifecycle", () => {
-    it("the tab bar is a labelled navigation with Dashboard, Requirements, Test cases, Test suites, Test scripts, Agent runs, Runs, Settings in that order, on every place", async () => {
+    it("the tab bar is a labelled navigation with Dashboard, Requirements, Test cases, Test scripts, Test suites, Agent runs, Runs, Settings in that order, on every place", async () => {
         for (const h of [...SINGLE.map((p) => p.h()), ...PLACES.map((p) => p.h())]) {
             await visit(h);
             const names = (await tabs().locator("a.tab").allTextContents()).map((t) => t.replace(/\d+$/, "").trim());
@@ -269,8 +272,11 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         await visit(routes.projectSettings(P(), "general"));
         const general = page.getByTestId("project-general");
         await pwExpect(general.getByLabel("Name", { exact: true })).toBeVisible();
-        await pwExpect(general.getByRole("group", { name: "Platforms" }).getByRole("checkbox", { name: "Web" })).toBeChecked();
-        await pwExpect(general.getByRole("group", { name: "Testing modes" }).getByRole("checkbox", { name: "AI agent" })).toBeChecked();
+        // Round 37: one platform and one mode, as radio buttons. This project was made the older way, with both modes: none is
+        // chosen yet and General asks for one.
+        await pwExpect(general.getByRole("group", { name: "Platform" }).getByRole("radio", { name: "Web" })).toBeChecked();
+        await pwExpect(general.getByRole("group", { name: "Testing mode" }).getByRole("radio", { name: "AI agent" })).not.toBeChecked();
+        await pwExpect(general.getByText("Choose one testing mode")).toBeVisible();
         await pwExpect(general.getByTestId("project-c4t-link")).toBeVisible();
         await pwExpect(general.getByTestId("project-archive").getByRole("button", { name: "Archive project" })).toBeVisible();
         await visit(routes.projectSettings(P(), "ai"));
@@ -313,8 +319,10 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         }
     });
 
-    it("Settings > Runners: connected runners first, Add a runner is one click away, and the folder way is tucked under Advanced", async () => {
+    it("a project's runners (on the Runners page since round 37): connected runners first, Add a runner is one click away, and the folder way is tucked under Advanced", async () => {
         await visit(routes.runners(P()));
+        await pwExpect(page.getByRole("heading", { name: "Runners for Atlas shop" })).toBeVisible();
+        await pwExpect(page.getByRole("navigation", { name: "Project sections" })).toHaveCount(0);
         const order = await page.locator(".content h2, .content summary .t-section").allTextContents();
         expect(order.indexOf("Connected runners")).toBeGreaterThanOrEqual(0);
         expect(order.indexOf("Connected runners")).toBeLessThan(order.indexOf("Advanced: start a runner from the project folder"));
@@ -342,7 +350,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
 
     it("an empty project: every place still loads and says what to do, no error", async () => {
         const e = empty.projectId;
-        for (const h of [routes.project(e), routes.requirements(e), routes.cases(e), routes.cases(e, "manual"), routes.suites(e), routes.scripts(e), routes.scripts(e, "steps"), routes.agentRuns(e), routes.runs(e), routes.runs(e, "releases"), routes.projectSettings(e), routes.projectSettings(e, "runners")]) {
+        for (const h of [routes.project(e), routes.requirements(e), routes.cases(e), routes.cases(e, "manual"), routes.suites(e), routes.scripts(e), routes.scripts(e, "steps"), routes.agentRuns(e), routes.runs(e), routes.runs(e, "releases"), routes.projectSettings(e), routes.runners(e)]) {
             await visit(h);
             await page.waitForTimeout(400);
             await pwExpect(page.locator('.content [role="alert"]'), h).toHaveCount(0);
@@ -353,13 +361,13 @@ describe("the project's places, in the order of the testing lifecycle", () => {
 // ── sidebar ─────────────────────────────────────────────────────────────────
 
 describe("sidebar and the Projects page", () => {
-    it("the sidebar holds the global places in their groups (Security: the module is on by default, round 18); New project is an action on the Projects page", async () => {
+    it("the sidebar holds the global places in their groups (round 37: no Security assessment there, the module stays on); New project is an action on the Projects page", async () => {
         await visit("#/");
         const side = page.getByRole("complementary", { name: "Main navigation" });
-        await pwExpect(side.getByRole("link", { name: "Security assessment", exact: true })).toBeVisible();
-        expect(await side.locator(".nav-label").allTextContents()).toEqual(["Workspace", "Operations", "Security", "System"]);
-        expect(await side.locator("a.nav-item").allTextContents()).toEqual(["Dashboard", "Projects", "Test development", "Folders", "Runners", "Security assessment", "Settings"]);
-        expect(await side.locator("a.nav-item").evaluateAll((els) => els.map((e) => e.getAttribute("href")))).toEqual([routes.dashboard, routes.home, routes.develop, routes.folders, routes.allRunners, "#/security", routes.settings]);
+        await pwExpect(side.getByRole("link", { name: "Security assessment", exact: true })).toHaveCount(0);
+        expect(await side.locator(".nav-label").allTextContents()).toEqual(["Workspace", "Operations", "System"]);
+        expect(await side.locator("a.nav-item").allTextContents()).toEqual(["Dashboard", "Projects", "Agents", "Test development", "Reusable libraries", "Runners", "Integrations", "Settings"]);
+        expect(await side.locator("a.nav-item").evaluateAll((els) => els.map((e) => e.getAttribute("href")))).toEqual([routes.dashboard, routes.home, routes.agents, routes.develop, routes.libraries, routes.allRunners, routes.integrations, routes.settings]);
         await pwExpect(side.getByRole("button", { name: /Help/ })).toBeVisible();
         await pwExpect(side.getByRole("link", { name: /New project/ })).toHaveCount(0);
         const add = page.locator(".page-head").getByRole("link", { name: "New project", exact: true });
@@ -368,13 +376,16 @@ describe("sidebar and the Projects page", () => {
         // New project opens Create a project (US-010); exploring with AI is a step from the new project's dashboard.
         expect(await hash()).toBe("#/create");
         await pwExpect(page.getByTestId("create-project")).toBeVisible();
-        await pwExpect(page.getByRole("group", { name: "Platforms" }).getByRole("checkbox", { name: /Web/ })).toBeChecked();
-        await pwExpect(page.getByRole("group", { name: "Testing modes" }).getByRole("checkbox", { name: /AI agent/ })).toBeChecked();
+        // Round 37: a project has exactly one platform and one testing mode, so they are radio choices. Web is the starting
+        // platform; the testing mode is the person's own choice, so none is picked for them.
+        await pwExpect(page.getByRole("group", { name: "Platform" }).getByRole("radio", { name: /Web/ })).toBeChecked();
+        await pwExpect(page.getByRole("group", { name: "Testing mode" }).getByRole("radio")).toHaveCount(2);
+        for (const r of await page.getByRole("group", { name: "Testing mode" }).getByRole("radio").all()) await pwExpect(r).not.toBeChecked();
     });
 
     it("each global place opens with its own title, and the open one is marked in the sidebar", async () => {
         const side = page.getByRole("complementary", { name: "Main navigation" });
-        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.develop, "Test development", "Test development"], [routes.folders, "Folders", "Folders"], [routes.allRunners, "Runners", "Runners"], [routes.settings, "Settings", "Settings"]] as const) {
+        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.agents, "Agents", "Agents"], [routes.develop, "Test development", "Test development"], [routes.libraries, "Reusable libraries", "Reusable libraries"], [routes.projectFolders, "Project folders", "Projects"], [routes.allRunners, "Runners", "Runners"], [routes.settings, "Settings", "Settings"]] as const) {
             await visit(h);
             await pwExpect(page.locator("h1"), h).toHaveText(title);
             await pwExpect(side.locator('a.nav-item[aria-current="page"]'), h).toHaveText(nav);
@@ -529,7 +540,7 @@ describe("old links keep working", () => {
         // Single pages of the rounds before 16.
         ["schedule", at("schedule"), at("runs?section=schedules"), "Schedules"],
         ["schedule with a run", at("schedule?run=r1"), at("runs?section=schedules&run=r1"), "Schedules"],
-        ["runners", at("runners"), at("settings?section=runners"), "Runners"],
+        ["runners", at("runners"), () => `#/runners?project=${P()}`],
         ["objects", at("objects"), at("scripts?section=elements"), "Shared elements"],
         ["blocks", at("blocks"), at("scripts?section=steps"), "Reusable steps"],
         ["blocks to edit", at("blocks?edit=Sign%20in"), at("scripts?section=steps&edit=Sign+in"), "Reusable steps"],
@@ -539,9 +550,12 @@ describe("old links keep working", () => {
         ["manual cases", at("manual-cases"), at("tests?section=manual"), "Manual"],
         ["compliance", at("compliance"), at("runs?section=compliance"), "Compliance"],
         // The places of rounds 16 to 24: Setup became Settings, Library and Release were split up (round 25).
-        ["setup", at("setup"), at("settings?section=runners"), "Runners"],
-        ...(["runners", "environments", "frameworks", "mobile", "alerts", "issues", "storage"] as const).map((k): [string, () => string, () => string, string?] => [`setup > ${k}`, at(`setup?section=${k}`), at(`settings?section=${k}`), SECTION_NAME[k]]),
-        ["setup with an unknown section", at("setup?section=nothing"), at("settings?section=runners"), "Runners"],
+        // Round 37: the project's runners moved to the Runners page, so the bare Setup link opens Settings.
+        ["setup", at("setup"), at("settings"), "General"],
+        ["setup > runners", at("setup?section=runners"), () => `#/runners?project=${P()}`],
+        ["settings > runners", at("settings?section=runners"), () => `#/runners?project=${P()}`],
+        ...(["environments", "frameworks", "mobile", "alerts", "issues", "storage"] as const).map((k): [string, () => string, () => string, string?] => [`setup > ${k}`, at(`setup?section=${k}`), at(`settings?section=${k}`), SECTION_NAME[k]]),
+        ["setup with an unknown section", at("setup?section=nothing"), at("settings"), "General"],
         ["setup keeps another query (the welcome page's start=phone)", at("setup?section=mobile&start=phone"), at("settings?section=mobile&start=phone"), "Mobile app"],
         ["library", at("library"), at("scripts?section=steps"), "Reusable steps"],
         ...(["steps", "elements", "helpers"] as const).map((k): [string, () => string, () => string, string?] => [`library > ${k}`, at(`library?section=${k}`), at(`scripts?section=${k}`), SECTION_NAME[k]]),
@@ -564,8 +578,8 @@ describe("old links keep working", () => {
 
     it("the old route helpers return the new homes directly, not an old link that redirects again", () => {
         const p = "p1";
-        expect(routes.setup(p)).toBe("#/projects/p1/settings?section=runners");
-        for (const k of SETUP_SECTIONS) expect(routes.setup(p, k), k).toBe(`#/projects/p1/settings?section=${k}`);
+        expect(routes.setup(p)).toBe("#/projects/p1/settings");
+        for (const k of SETUP_SECTIONS) expect(routes.setup(p, k), k).toBe(k === "runners" ? "#/runners?project=p1" : `#/projects/p1/settings?section=${k}`);
         expect(routes.library(p)).toBe("#/projects/p1/scripts?section=steps");
         expect(routes.library(p, "elements")).toBe("#/projects/p1/scripts?section=elements");
         expect(routes.library(p, "helpers")).toBe("#/projects/p1/scripts?section=helpers");
@@ -578,10 +592,13 @@ describe("old links keep working", () => {
         expect(routes.releases(p)).toBe("#/projects/p1/runs?section=releases");
         expect(routes.compliance(p)).toBe("#/projects/p1/runs?section=compliance");
         expect(routes.manualCases(p)).toBe("#/projects/p1/tests?section=manual");
-        expect(routes.runners(p)).toBe("#/projects/p1/settings?section=runners");
+        expect(routes.runners(p)).toBe("#/runners?project=p1");
         // No helper of `routes` builds a link that the alias table would move again.
         const sample = (k: string, f: unknown): string[] => (typeof f === "string" ? [f] : k === "writeCode" ? [routes.writeCode(p, { title: "x", kind: "web" })] : k === "guideTopic" ? [routes.guideTopic("x")] : [(f as (a: string, b?: string) => string)(p), (f as (a: string, b: string) => string)(p, "x")]);
+        // Round 37: `routes.folders` is kept on purpose as the old link of the Folders place; it lands on Reusable libraries.
+        expect(resolveAlias(["folders"], new URLSearchParams())).toBe(routes.libraries);
         for (const [k, f] of Object.entries(routes)) {
+            if (k === "folders") continue;
             for (const h of sample(k, f)) {
                 const [path, qs] = h.replace(/^#\/?/, "").split("?");
                 expect(resolveAlias(path!.split("/").filter(Boolean), new URLSearchParams(qs ?? "")), `routes.${k} → ${h}`).toBeNull();
@@ -600,7 +617,8 @@ describe("old links keep working", () => {
         for (const [place, list] of [["setup", SETUP_SECTIONS], ["library", LIBRARY_SECTIONS], ["release", RELEASE_SECTIONS]] as const) {
             for (const k of [undefined, ...list]) {
                 const to = resolveAlias(["projects", "p1", place], new URLSearchParams(k ? { section: k } : {}));
-                expect(to, `${place} ${k}`).toMatch(/^#\/projects\/p1\/(tests|scripts|runs|settings)(\?|$)/);
+                // Round 37: the old Setup > Runners lands on the Runners page, open on the project.
+                expect(to, `${place} ${k}`).toMatch(place === "setup" && k === "runners" ? /^#\/runners\?project=p1$/ : /^#\/projects\/p1\/(tests|scripts|runs|settings)(\?|$)/);
                 const [path, qs] = to!.replace(/^#\//, "").split("?");
                 expect(resolveAlias(path!.split("/"), new URLSearchParams(qs ?? "")), `${place} ${k} must not redirect again`).toBeNull();
             }
@@ -665,6 +683,11 @@ describe("every route builder opens a page without an error", () => {
             allRunners: [routes.allRunners],
             runner: [routes.runner(runnerId)],
             folders: [routes.folders],
+            integrations: [routes.integrations],
+            libraries: [routes.libraries],
+            projectFolders: [routes.projectFolders],
+            agents: [routes.agents],
+            agent: [routes.agent("accessibility"), routes.agent("chatbot")],
             profile: [routes.profile],
             settings: [routes.settings],
             guide: [routes.guide],

@@ -179,6 +179,27 @@ export function blockSecretProblems(b: { params: ReadonlyArray<{ name: string; d
     return out;
 }
 
+/** A name in code that says its value is secret: password, adminPassword, ADMIN_PASSWORD, apiKey, authToken, clientSecret, … */
+const SECRET_NAME = /(pass(word|code|phrase)?|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|totp)$/i;
+/** `name: "literal"` or `name = "literal"` (quoted names too). Template literals with ${…} are lookups, not literals. */
+const NAMED_LITERAL = /(?:^|[^\w$])["']?([A-Za-z_$][\w$]*)["']?\s*(?::|=(?![=>]))\s*(["'`])((?:(?!\2)[^\\\n]|\\.){1,500})\2/g;
+
+/** Known key formats. Code may read the test account's TEST_* settings: that is how it signs in without holding the secret. */
+const CODE_TOKEN_PATTERNS = TOKEN_PATTERNS.filter((re) => !re.source.includes("TEST_"));
+
+/** Plain-language problems with secrets written into code (a helper): a known key format, or a literal given to a secret-named field. */
+export function codeSecretProblems(source: string): string[] {
+    const out: string[] = [];
+    if (CODE_TOKEN_PATTERNS.some((re) => re.test(source))) out.push("This looks like a real key, token or password. Do not write secrets into code: read them from the saved sign-in details or an environment setting instead.");
+    for (const m of source.matchAll(NAMED_LITERAL)) {
+        const [, name, quote, value] = m;
+        if (!SECRET_NAME.test(name!) || (quote === "`" && value!.includes("${")) || PLACEHOLDER_ONLY(value!)) continue;
+        out.push(`“${name!.slice(0, 40)}” is given a literal value in the code. Do not write secrets into code: read them from the saved sign-in details or an environment setting instead.`);
+        break;
+    }
+    return out;
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /** JSON with sorted keys, to compare two steps without caring about key order. */

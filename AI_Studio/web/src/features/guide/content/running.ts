@@ -168,7 +168,7 @@ export const running: Topic[] = [
         what: "A runner is a computer, other than the platform's, that runs your tests.",
         why: "Your app is reachable only from your network, or you need real browsers.",
         steps: [
-            step("Open Settings, then Runners.", "Settings", "Runners"),
+            step("Open Runners and pick your project.", "Runners"),
             step("Choose Add a runner, pick the computer and Installer (recommended), then Download runner.", "Add a runner", "Installer (recommended)", "Download runner"),
             step("Unzip the file there and open the setup program. It downloads only what is missing."),
             step("When the page says Connected, choose Done.", "Done"),

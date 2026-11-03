@@ -35,7 +35,11 @@ import { SECURITY_SIGNIN_MIGRATION } from "../security/extras.js";
 import { PROJECT_SETUP_MIGRATION } from "./project-setup.js";
 import { SHARED_STATE_MIGRATION } from "./shared-state.js";
 import { FOLDERS_MIGRATION } from "./project-folders.js";
+import { LIBRARY_MIGRATION } from "./library-store.js";
 import { REVIEW_MIGRATION } from "./review-store.js";
+import { TESTING_AGENTS_MIGRATION } from "./testing-agents.js";
+import { SHARED_INTEGRATIONS_MIGRATION } from "./shared-integrations.js";
+import { PROJECT_APP_MIGRATION } from "./project-app.js";
 import { sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { sqliteSql, type Sql } from "./sql.js";
 
@@ -276,6 +280,10 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 42: runners shared across projects, project access to runners, device reservations (schema lives in agent-store.ts; existing runners keep their tokens and get access to their project) */ RUNNER_SHARING_MIGRATION,
     /* 43: AI configuration per project and billing owner: configurations with their encrypted keys, which one a project uses, who pays on usage rows (schema lives in ai-config-store.ts) */ AI_CONFIG_MIGRATION,
     /* 44: agent runs toward an objective: the runs, every step, the approvals of high-impact actions (schema lives in agent-run-store.ts) */ AGENT_RUNS_MIGRATION,
+    /* 45: reusable libraries: nested folders of reusable steps, helpers and shared elements per organisation, their versions, the projects that copied them (schema lives in library-store.ts) */ LIBRARY_MIGRATION,
+    /* 46: testing agents chosen for a project, one row per agent; a project without rows shows the agents its latest exploration settings match (schema lives in testing-agents.ts) */ TESTING_AGENTS_MIGRATION,
+    /* 47: the app a project tests, by platform: store links and an uploaded iPhone app (schema lives in project-app.ts; the web address and the Android app stay where they were) */ PROJECT_APP_MIGRATION,
+    /* 48: integrations set up once for an organisation, and which projects use them (schema lives in shared-integrations.ts; each project keeps its own row in integrations or alert_channels) */ SHARED_INTEGRATIONS_MIGRATION,
 ];
 
 /** Slots that were reserved before their SQL existed: the slot number and a table only that slot creates. */
@@ -288,6 +296,10 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
     { slot: 42, table: "runner_access" },
     { slot: 44, table: "objective_runs" },
     { slot: 43, table: "ai_configurations" },
+    { slot: 47, table: "project_app_details" },
+    { slot: 45, table: "library_items" },
+    { slot: 46, table: "project_testing_agents" },
+    { slot: 48, table: "shared_integrations" },
 ];
 
 export type Row = Record<string, any>;

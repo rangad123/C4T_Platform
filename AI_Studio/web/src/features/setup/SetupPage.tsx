@@ -10,7 +10,6 @@ import { PhoneDeviceSection } from "../phonedevice/PhoneDevicePanel";
 import { hasAndroidApp } from "../phone/phone";
 import { appState } from "../phone/phone";
 import { usePolled } from "../agents/agents";
-import { ProjectRunners } from "../agents/ProjectRunners";
 import { EnvironmentsPanel } from "../environments/EnvironmentsPanel";
 import { FrameworksSection } from "../frameworks/FrameworksSection";
 import { settingsSentence, type FrameworkSettingsAnswer } from "../frameworks/frameworks";
@@ -87,13 +86,14 @@ function GeneralSetting({ id }: { id: string }) {
 
 /**
  * The project's Settings place (it used to be called Setup). General and members first, then what tests use (environments, test
- * data, accounts, AI), where they run (runners, frameworks, the mobile app), who is told (alerts, issue tracker) and storage.
+ * data, accounts, AI), how they run (frameworks, the mobile app), who is told (alerts, issue tracker) and storage. Runners are
+ * machine-level: a project's runners are on the Runners page (round 37).
  * Settings that rarely change sit behind a titled row with "Change".
  */
 export function SetupPage({ id }: { id: string }) {
     const section = (useRoute().query.get("section") as SettingsSection | null) ?? "general";
     const sections: HubSection[] = [
-        { key: "general", label: "General", hint: "The project, its platforms and testing modes", render: () => <GeneralSetting id={id} /> },
+        { key: "general", label: "General", hint: "The project, its platform, testing mode and app", render: () => <GeneralSetting id={id} /> },
         {
             key: "members",
             label: "Members",
@@ -132,12 +132,11 @@ export function SetupPage({ id }: { id: string }) {
             ),
         },
         { key: "ai", label: "AI configuration", hint: "Who pays, which key this project uses, and its budget", render: () => <ProjectAiSettings id={id} /> },
-        { key: "runners", label: "Runners", hint: "The computers that run this project's tests", render: () => <ProjectRunners id={id} /> },
         { key: "frameworks", label: "Frameworks", hint: "Which test technologies run and their limits", render: () => <FrameworksSetting id={id} /> },
         { key: "mobile", label: "Mobile app", hint: "The app your phone tests run against", render: () => <MobileSetting id={id} /> },
         { key: "alerts", label: "Alerts", hint: "Who is told when a run finds something", render: () => <AlertsPanel projectId={id} reloadKey={0} /> },
         { key: "issues", label: "Issue tracker", hint: "GitHub, Jira or Notion, to file problems from a test", render: () => <IssueTrackerPanel projectId={id} /> },
         { key: "storage", label: "Storage and backup", hint: "What the files use, how long they are kept, backups", render: () => <StorageSetting id={id} /> },
     ];
-    return <ProjectHub id={id} place="settings" title="Settings" subtitle="The project, who works on it, what tests use, where they run, and who is told." sections={sections} current={section} hrefOf={(k) => routes.projectSettings(id, k as SettingsSection)} />;
+    return <ProjectHub id={id} place="settings" title="Settings" subtitle="The project, who works on it, what tests use, how they run, and who is told." sections={sections} current={section} hrefOf={(k) => routes.projectSettings(id, k as SettingsSection)} />;
 }

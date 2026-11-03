@@ -29,6 +29,18 @@ import { whereToHref } from "../web/src/features/guide/where.js";
 import { stepsFor } from "../web/src/features/guide/tour-steps.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
+
+/**
+ * No projects at all. The Projects page asks for a page (`?limit=&offset=`, round 37) and gets a page; other callers ask for the
+ * plain list and get an empty one, as the server answers.
+ */
+const PROJECT_LIST = /\/api\/projects(\?[^/]*)?$/;
+const noProjects = (route: import("playwright").Route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const q = new URL(route.request().url()).searchParams;
+    return route.fulfill({ json: q.has("limit") || q.has("offset") ? { projects: [], total: 0, limit: Number(q.get("limit") ?? 20), offset: Number(q.get("offset") ?? 0) } : [] });
+};
+
 const PORT = 6510;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -171,13 +183,14 @@ function everyPlace(): Array<[string, PlaceId]> {
         [routes.blocks(P(), "Sign in"), "library-steps-edit"],
         [routes.scripts(P(), "elements"), "library-elements"],
         [routes.scripts(P(), "helpers"), "library-helpers"],
+        [routes.scripts(P(), "library"), "library-library"],
         [routes.projectSettings(P(), "data"), "library-data"],
         [routes.projectSettings(P(), "accounts"), "library-accounts"],
         [routes.runs(P(), "releases"), "release-releases"],
         [routes.cases(P(), "manual"), "release-manual"],
         [routes.runs(P(), "compliance"), "release-compliance"],
         [routes.release(P(), releaseId), "release-detail"],
-        [routes.projectSettings(P(), "runners"), "setup-runners"],
+        // Round 37: a project's runners are on the Runners page (routes.runners(P()) is that place, listed once below as allRunners).
         [routes.projectSettings(P(), "environments"), "setup-environments"],
         [routes.projectSettings(P(), "frameworks"), "setup-frameworks"],
         [routes.projectSettings(P(), "mobile"), "setup-mobile"],
@@ -194,7 +207,9 @@ function everyPlace(): Array<[string, PlaceId]> {
         [routes.dashboard, "dashboard"],
         [routes.develop, "develop"],
         [routes.allRunners, "runners-global"],
-        [routes.folders, "folders"],
+        [routes.integrations, "integrations"],
+        [routes.libraries, "libraries"],
+        [routes.projectFolders, "folders"],
         [routes.profile, "profile"],
         [routes.testTab(testId, "steps"), "test-steps"],
         [routes.testTab(testId, "text"), "test-text"],
@@ -228,14 +243,14 @@ describe("the Help button and panel", () => {
     }, 240_000);
 
     it("shows the first-run welcome page's own help, and the plan's, even though their address is the projects list's", async () => {
-        await page.route("**/api/projects", (route) => (route.request().method() === "GET" ? route.fulfill({ json: [] }) : route.continue()));
+        await page.route(PROJECT_LIST, noProjects);
         try {
             await visit(routes.home);
             await openHelp();
             expect(norm(await panel().innerText())).toContain(norm(PLACES.welcome.what));
             await shot("welcome-panel");
         } finally {
-            await page.unroute("**/api/projects");
+            await page.unroute(PROJECT_LIST);
         }
     });
 
@@ -514,13 +529,13 @@ describe("See how lines", () => {
     });
 
     it("the first-run welcome page has one too", async () => {
-        await page.route("**/api/projects", (route) => (route.request().method() === "GET" ? route.fulfill({ json: [] }) : route.continue()));
+        await page.route(PROJECT_LIST, noProjects);
         try {
             await visit(routes.home);
             await seeHow().click();
             await pwExpect(panel().getByRole("heading", { name: topic("first-steps").title, level: 3 })).toBeVisible();
         } finally {
-            await page.unroute("**/api/projects");
+            await page.unroute(PROJECT_LIST);
         }
     });
 
@@ -607,13 +622,13 @@ describe("the Guide page", () => {
     });
 
     it("with no project at all it says so instead of offering a dead button", async () => {
-        await page.route("**/api/projects", (route) => (route.request().method() === "GET" ? route.fulfill({ json: [] }) : route.continue()));
+        await page.route(PROJECT_LIST, noProjects);
         try {
             await visit(routes.guideTopic("schedules"));
             await pwExpect(page.getByText("you have none yet")).toBeVisible();
             await pwExpect(page.getByRole("link", { name: "Start a project" })).toBeVisible();
         } finally {
-            await page.unroute("**/api/projects");
+            await page.unroute(PROJECT_LIST);
         }
     });
 
@@ -848,15 +863,16 @@ describe("the guided tour", () => {
             await begin(p);
             const all = shopSteps();
             const card = tourCard(p);
-            const at = all.findIndex((s) => s.id === "tab-suites");
-            expect(all[at + 1]!.id).toBe("tab-scripts");
+            // Round 37 order: Test scripts, then Test suites.
+            const at = all.findIndex((s) => s.id === "tab-scripts");
+            expect(all[at + 1]!.id).toBe("tab-suites");
             for (let i = 0; i < at; i++) {
                 await pwExpect(counted(p)).toContainText(`Step ${i + 1} of ${all.length}`, { timeout: 8000 });
                 await card.getByRole("button", { name: "Next", exact: true }).click();
             }
             await pwExpect(card.getByRole("heading", { name: all[at]!.title, exact: true })).toBeVisible({ timeout: 8000 });
-            // The Test scripts tab goes away (as if the page had no such tab): the tour moves on without a word.
-            await p.evaluate(() => document.querySelector('[data-tour="tab-scripts"]')?.removeAttribute("data-tour"));
+            // The Test suites tab goes away (as if the page had no such tab): the tour moves on without a word.
+            await p.evaluate(() => document.querySelector('[data-tour="tab-suites"]')?.removeAttribute("data-tour"));
             await card.getByRole("button", { name: "Next", exact: true }).click();
             await pwExpect(card.getByRole("heading", { name: all[at + 2]!.title, exact: true })).toBeVisible({ timeout: 10_000 });
             await pwExpect(counted(p)).toContainText(`Step ${at + 2} of ${all.length - 1}`);
@@ -870,7 +886,7 @@ describe("the guided tour", () => {
     it("with no project explains that plainly instead of pointing at nothing", async () => {
         const { ctx, p } = await freshPage();
         try {
-            await p.route("**/api/projects", (route) => (route.request().method() === "GET" ? route.fulfill({ json: [] }) : route.continue()));
+            await p.route(PROJECT_LIST, noProjects);
             await p.goto(`${BASE}/?tour=1#/`);
             await pwExpect(offer(p)).toBeVisible({ timeout: 8000 });
             await p.getByRole("button", { name: "Start the tour", exact: true }).click();

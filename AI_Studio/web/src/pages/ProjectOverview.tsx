@@ -38,7 +38,7 @@ const SEV_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, lo
 const attentionRank = (t: TestSummary) => (t.severity ? SEV_RANK[t.severity.severity] : t.validationStatus === "NEEDS_REVIEW" ? 4 : 5);
 
 /** The six places of a project, one job each. */
-/** The project's places, in the order of the testing lifecycle (docs/product-restructure/INFORMATION_ARCHITECTURE.md). */
+/** The project's places (round 37 order): Dashboard, Requirements, Test cases, Test scripts, Test suites, Agent runs (AI-agent projects), Runs, Settings. */
 export type PlaceKey = "overview" | "requirements" | "tests" | "suites" | "scripts" | "agent" | "runs" | "settings";
 
 export function ProjectTabs({ id, active, count, modes }: { id: string; active: PlaceKey; count?: number; /** The project's testing modes, when the page already has them (else they are asked for). */ modes?: TestingMode[] }) {
@@ -65,8 +65,8 @@ export function ProjectTabs({ id, active, count, modes }: { id: string; active: 
             {tab(routes.project(id), "Dashboard", "overview", undefined, "tab-overview")}
             {tab(routes.requirements(id), "Requirements", "requirements", undefined, "tab-requirements")}
             {tab(routes.tests(id), "Test cases", "tests", count, "tab-tests")}
-            {tab(routes.suites(id), "Test suites", "suites", undefined, "tab-suites")}
             {tab(routes.scripts(id), "Test scripts", "scripts", undefined, "tab-scripts")}
+            {tab(routes.suites(id), "Test suites", "suites", undefined, "tab-suites")}
             {(agentOn || active === "agent") && tab(routes.agentRuns(id), "Agent runs", "agent", undefined, "tab-agent")}
             {tab(routes.runs(id), "Runs", "runs", undefined, "tab-runs")}
             <SecurityProjectTab id={id} />

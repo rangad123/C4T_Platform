@@ -43,6 +43,7 @@ import { assertAllowedTarget } from "./net-guard.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { isLoadSpec, LOAD_MAX_ENDPOINTS, LOAD_MAX_REQUESTS } from "../engine/performance/load.js";
 import { registerFeatureRoutes } from "./routes/index.js";
+import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
 import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
 import { dataDrivenSpecIssues, dataSetsFor, EnvironmentChoice, startEnvironmentRun, testEnvironmentInfo } from "./routes/environments.js";
 import { exportObjectsUsedBy, importObjectsFor, objectsFor } from "./routes/locators.js";
@@ -73,7 +74,8 @@ import { sortedPermissions } from "./auth/permissions.js";
 import { visibleProjectsOf } from "./auth/project-scope.js";
 import { exportPath, portableFiles, type ExportScript } from "./portable-export.js";
 import { c4tServiceOf, clientIpOf } from "./c4t-service.js";
-import { PlatformsSchema, TestingModesSchema } from "./project-setup.js";
+import { NEW_PROJECT_TESTING_MODES, PlatformsSchema, TestingModesSchema } from "./project-setup.js";
+import { AppDetailsBody, checkedAppDetails, registerProjectAppRoutes } from "./routes/project-app.js";
 import { linkedC4tProject, parsePlain, withSetup } from "./routes/project-settings.js";
 import { isProjectNameTaken, projectNameTaken } from "./project-folders.js";
 
@@ -298,18 +300,28 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
      * organisation id); a local install has none. A Crowd4Test account that creates a project becomes its first member and Project
      * Admin (people with access to all projects reach it anyway).
      */
+    const ProjectListQuery = z.object({
+        archived: z.string().max(20).optional(),
+        q: z.string().max(200, "Search for at most 200 characters.").optional(),
+        folder: z.string().max(64).optional(),
+        limit: z.coerce.number({ invalid_type_error: "limit is a number from 1 to 100." }).int().min(1, "limit is a number from 1 to 100.").max(100, "limit is a number from 1 to 100.").optional(),
+        offset: z.coerce.number({ invalid_type_error: "offset is a whole number, 0 or more." }).int().min(0, "offset is a whole number, 0 or more.").optional(),
+    });
     app.post("/api/projects", async (req, reply) => {
         const body = z
             .object({
-                name: z.string().min(1).max(120),
-                /** The name was made by the page, not typed: a name in use gets a number instead of a refusal. */
-                autoName: z.boolean().optional(),
+                // Round 37: the name is always typed by the person; it is never made from the application's address.
+                name: z.string().trim().min(1, "Give the project a name.").max(120, "A project name is at most 120 characters."),
                 description: z.string().max(1000).optional(),
                 organizationId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, "An organization id is letters, digits, - and _ (at most 64).").optional(),
             })
             .parse(req.body);
-        // Platforms and testing modes (US-010): left out, web and both modes, so older clients (CLI, MCP) keep working.
+        // Platforms and testing modes (US-010): one of each (round 37). Left out, web and agent mode, so older clients (CLI, MCP) keep working.
         const setup = parsePlain(z.object({ platforms: PlatformsSchema.optional(), testingModes: TestingModesSchema.optional() }), req.body);
+        // The app by platform (routes/project-app.ts): checked before anything is created, saved right after.
+        const appDetails = await checkedAppDetails(parsePlain(AppDetailsBody, req.body));
+        // The testing agents (routes/testing-agents.ts): checked before anything is created, saved right after. Left out: none saved.
+        const agentChoice = checkedAgentChoice(req.body, setup.platforms, setup.testingModes ?? NEW_PROJECT_TESTING_MODES);
         const actor = actorOf(req);
         let organizationId = body.organizationId ?? null;
         if (actor && sideOf(actor) === "customer") {
@@ -329,21 +341,32 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         }
         const scope = access.projects;
         // One name per organisation (archived projects count too), so people can tell their projects apart (project-folders.ts).
-        let name = body.name;
-        if (body.autoName) for (let n = 2; isProjectNameTaken(p.db, name, organizationId); n++) name = `${body.name.slice(0, 110)} ${n}`;
+        const name = body.name;
         if (isProjectNameTaken(p.db, name, organizationId)) throw new HttpError(409, projectNameTaken(name));
-        const made = repo.createProject({ name, description: body.description, ...setup });
+        const made = repo.createProject({ name, description: body.description, platforms: setup.platforms, testingModes: setup.testingModes ?? NEW_PROJECT_TESTING_MODES });
         const id = made.id as string;
         if (organizationId) scope.store.setProjectOrganization(id, organizationId);
         if (actor && isCrowd4TestActor(actor) && actor.id) scope.store.addMember(id, actor.id, { role: actor.role, projectAdmin: true, source: "creator", addedBy: actorLabel(actor) });
+        await projectApp.apply(id, appDetails);
+        if (agentChoice) await testingAgentsOf(p).set(id, agentChoice, actor ? actorLabel(actor) : null);
         return reply.code(201).send(withSetup(organizationId ? repo.getProject(id)! : made));
     });
     // A person limited to some projects sees only those (auth/project-scope.ts).
     // Archived projects are left out unless `?archived=include` asks for them (project-folders.ts).
+    // Round 37: `q` (name or address), `folder` (a folder id, or "none") and paging (`limit`, `offset`). With `limit` or `offset` the
+    // answer is { projects, total, limit, offset }; without either it is the plain list, as before.
     app.get("/api/projects", async (req) => {
         const visible = visibleProjectsOf(req, actorOf(req));
-        const withArchived = (req.query as { archived?: string } | undefined)?.archived === "include";
-        return (visible ? repo.listProjects().filter((r) => visible.has(r.id as string)) : repo.listProjects()).filter((r) => withArchived || !r.archived_at).map(withSetup);
+        const query = parsePlain(ProjectListQuery, req.query);
+        const needle = query.q?.trim().toLowerCase();
+        const rows = (visible ? repo.listProjects().filter((r) => visible.has(r.id as string)) : repo.listProjects())
+            .filter((r) => query.archived === "include" || !r.archived_at)
+            .filter((r) => !query.folder || (query.folder === "none" ? !r.folder_id : r.folder_id === query.folder))
+            .filter((r) => !needle || `${String(r.name ?? "")} ${String(r.url ?? "")}`.toLowerCase().includes(needle));
+        if (query.limit === undefined && query.offset === undefined) return rows.map(withSetup);
+        const limit = query.limit ?? 20;
+        const offset = query.offset ?? 0;
+        return { projects: rows.slice(offset, offset + limit).map(withSetup), total: rows.length, limit, offset };
     });
     app.get("/api/projects/:id", async (req) => {
         const { id } = req.params as { id: string };
@@ -402,11 +425,13 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         }
         await assertNoActiveJob(id);
 
-        const options: JobOptions = {
+        const asked: JobOptions = {
             ...DEFAULT_JOB_OPTIONS,
             ...(body.plan ? { planOnly: true } : {}),
             ...Object.fromEntries(Object.entries({ scope: body.scope, includePaths: body.includePaths, targets: body.targets, maxPages: body.maxPages, maxDepth: body.maxDepth, maxScenarios: body.maxScenarios, allowMutatingApiTests: body.allowMutatingApiTests, openApiUrl: body.openApiUrl, apiBaseUrl: body.apiBaseUrl, accessibility: body.accessibility, healthChecks: body.healthChecks, securityChecks: body.securityChecks, performanceChecks: body.performanceChecks, loadChecks: body.loadChecks, loadBudgets: body.loadBudgets, inputChecks: body.inputChecks, visionChecks: body.visionChecks,contractChecks: body.contractChecks, accessChecks: body.accessChecks, useMemory: body.useMemory, fullExploration: body.fullExploration, cleanupAfter: body.cleanupAfter, performanceBudgets: body.performanceBudgets, visual: body.visual, variants: body.variants?.length ? body.variants : undefined }).filter(([, v]) => v !== undefined)),
         } as JobOptions;
+        // The project's chosen testing agents decide which checks run (routes/testing-agents.ts); a project with none saved runs as asked.
+        const options = await withAgentChoice(p, project(id), asked, body);
         if (body.requirements) {
             // Convert at submit time so an unreadable document is rejected now, not mid-job.
             try {
@@ -720,6 +745,27 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const full = localPathOf(p.store, rel) ?? rel;
         const cur = latestMobile(id);
         return saveMobile(id, { appPackage: cur?.appPackage, avd: cur?.avd, apkPath: full, iosBundleId: cur?.iosBundleId, simulator: cur?.simulator, ...keptStartState(cur, {}), ...(cur?.startupBudgetMs !== undefined ? { startupBudgetMs: cur.startupBudgetMs } : {}), ...keptPhoneSettings(cur), ...(cur?.appActivity ? { appActivity: cur.appActivity } : {}) });
+    });
+
+    // The app by platform (round 37): store links and the iPhone app (routes/project-app.ts). Create project uses `apply` too.
+    const projectApp = registerProjectAppRoutes({
+        app,
+        p,
+        repo,
+        project,
+        assertNoActiveJob,
+        latestMobile,
+        saveMobile,
+        // A new application row with the new address; the earlier settings (mobile app, API address) stay, and sign-in details
+        // stay only when the address is on the same site, so they are never sent to another one.
+        setWebAddress: async (projectId, url) => {
+            const latest = repo.getLatestApplicationPublic(projectId);
+            if (latest?.url === url) return;
+            await assertRunTarget(projectId, url);
+            const full = latest ? repo.getApplication(latest.id as string) : undefined;
+            const sameSite = Boolean(full && !isAppUri(full.url) && /^https?:/i.test(full.url) && new URL(full.url).origin === new URL(url).origin);
+            repo.createApplication(projectId, url, { ...DEFAULT_JOB_OPTIONS, ...(full?.config ?? {}) }, sameSite ? full?.credentials : undefined);
+        },
     });
 
     app.get("/api/test-generation/:jobId", async (req) => {

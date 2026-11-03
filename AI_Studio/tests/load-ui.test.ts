@@ -55,9 +55,12 @@ afterAll(async () => {
 describe("the toggle on the new-project form", () => {
     it("is off by default, says what it sends, is sent only when ticked, and is stored with the job", async () => {
         const dead = "http://127.0.0.1:5555/";
+        let made = 0;
         const open = async () => {
             await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
             await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
+            // Round 37: a new project's name is always typed (a taken name is refused, so each form gets its own).
+            await page.getByLabel("Project name").fill(`Load project ${++made}`);
             await page.locator("summary", { hasText: "Advanced options" }).click();
         };
         await open();

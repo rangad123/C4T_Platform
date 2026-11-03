@@ -351,7 +351,10 @@ describe.skipIf(!BASH)("AI Testing Runner.app against a real platform (simulated
         try {
             await until("the runner to be online", async () => (await onlineAgents(p))[0], 90_000);
             expect(fs.existsSync(path.join(install, "runner.pid"))).toBe(true);
-            expect(fs.readFileSync(path.join(install, "logs", "runner.log"), "utf8")).toContain("Connected to the platform");
+            // The runner is online as soon as the platform answers its hello; its log line follows a moment later.
+            const runnerLog = () => fs.readFileSync(path.join(install, "logs", "runner.log"), "utf8");
+            await until("the runner to log that it connected", async () => runnerLog().includes("Connected to the platform"), 30_000).catch(() => undefined);
+            expect(runnerLog()).toContain("Connected to the platform");
             // The test-tools link is still inside the folder: removing the folder must remove the link and never what it points at.
             const un = launchSetup(kit, home, ["--uninstall", "--silent", "--install-dir", msys(install)]);
             const code = await Promise.race([un.exited, sleep(90_000).then(() => "timeout")]);

@@ -12,7 +12,9 @@ import { assertAllowedTarget } from "../net-guard.js";
 import { cachedTopIssue } from "../sentry/related.js";
 import { DEFAULT_JOB_OPTIONS } from "../repo.js";
 import { SecretBox } from "../secrets.js";
+import { sharedOrigin, sharedRowMessage } from "../shared-integrations.js";
 import { EnvironmentChoice, startEnvironmentRun } from "./environments.js";
+import { NEW_SECRET_NEEDED } from "./shared-integrations.js";
 import type { RouteCtx } from "./types.js";
 
 /**
@@ -34,6 +36,11 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
         const i = store.get(id);
         if (!i) throw new HttpError(404, "Issue tracker connection not found");
         return i;
+    };
+    /** A connection shared from Integrations is changed and removed there, never from one project. */
+    const notShared = (id: string) => {
+        const origin = sharedOrigin(p.db, id);
+        if (origin) throw new HttpError(409, sharedRowMessage(origin.name), { code: "shared_integration", integrationId: origin.integrationId });
     };
 
     /** Settings are checked against the outbound-URL guard when saved, and again on every call. */
@@ -84,10 +91,15 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
     app.patch("/api/integrations/:id", async (req) => {
         const { id } = req.params as { id: string };
         const cur = integration(id);
+        notShared(id);
         const b = UpdateSchema.parse(req.body);
         const pick = (keys: string[]) => Object.fromEntries(keys.filter((k) => (b as Record<string, unknown>)[k] !== undefined).map((k) => [k, (b as Record<string, unknown>)[k]]));
         const config = cur.kind === "github" ? pick(["owner", "repo", "apiUrl"]) : cur.kind === "notion" ? pick(["databaseId", "titleProperty", "apiUrl"]) : pick(["baseUrl", "projectKey", "email", "issueType"]);
         if (typeof config.projectKey === "string") config.projectKey = config.projectKey.toUpperCase();
+        // The stored token is only sent where it was entered for: a new address needs it again.
+        const was = { ...(cur.kind === "github" ? { apiUrl: "https://api.github.com" } : cur.kind === "notion" ? { apiUrl: "https://api.notion.com" } : {}), ...(cur.config as { apiUrl?: string; baseUrl?: string }) };
+        const moved = (["apiUrl", "baseUrl"] as const).some((k) => typeof config[k] === "string" && String(config[k]).replace(/\/+$/, "") !== String(was[k] ?? "").replace(/\/+$/, ""));
+        if (moved && !b.token) throw new HttpError(400, NEW_SECRET_NEEDED);
         await guardUrls({ kind: cur.kind, ...(config as { apiUrl?: string; baseUrl?: string }) });
         return store.update(id, { name: b.name, token: b.token, config })!;
     });
@@ -95,6 +107,7 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
     app.delete("/api/integrations/:id", async (req, reply) => {
         const { id } = req.params as { id: string };
         integration(id);
+        notShared(id);
         store.remove(id);
         return reply.code(204).send();
     });

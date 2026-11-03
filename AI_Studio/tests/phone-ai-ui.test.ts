@@ -271,7 +271,7 @@ describe("start: the panel", () => {
         await pwExpect(dialog()).toContainText("There is no Android emulator on this server.");
         await pwExpect(dialog()).toContainText("No phone or emulator is ready");
         await pwExpect(dialog()).toContainText("Connect a runner on a computer with an Android emulator or phone: Settings, Runners, Add a runner. For a real phone, turn on USB debugging first.");
-        await pwExpect(dialog().getByRole("link", { name: "Open Runners", exact: true })).toHaveAttribute("href", `#/projects/${p.id}/settings?section=runners`);
+        await pwExpect(dialog().getByRole("link", { name: "Open Runners", exact: true })).toHaveAttribute("href", `#/runners?project=${p.id}`); // round 37: runners are machine-level, on the Runners page
         await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeDisabled();
         await shot("start-no-device-light-1280");
     });
@@ -413,6 +413,8 @@ describe("start: the welcome page", () => {
         await pwExpect(card.getByLabel("Application URL")).toBeVisible();
         expect(await page.getByRole("group", { name: "Ways to start", exact: true }).getByRole("heading", { level: 2 }).allTextContents()).toEqual(["Explore my app", "Record a test", "Start from tests I have"]);
         await card.getByRole("radio", { name: "An Android app" }).check();
+        // Round 37: the project's name is typed (above the cards), never made from the app's package.
+        await page.getByLabel("Project name").fill("Shop app");
         await pwExpect(card.getByLabel("App package")).toBeVisible();
         expect(await card.getByLabel("Application URL").count()).toBe(0);
         await pwExpect(card.getByTestId("ai-note")).toContainText("Android only");
@@ -444,6 +446,7 @@ describe("start: the welcome page", () => {
         await card.getByRole("radio", { name: "An Android app" }).check();
         const apk = path.join(tmp, "shop.apk");
         fs.writeFileSync(apk, "not really an app");
+        await page.getByLabel("Project name").fill("Shop app");
         await card.getByLabel("App package").fill(APP);
         await page.locator("#w-apk").setInputFiles(apk);
         await pwExpect(card).toContainText("shop.apk");
