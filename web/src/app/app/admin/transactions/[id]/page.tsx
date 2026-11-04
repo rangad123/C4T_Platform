@@ -258,7 +258,7 @@ export default async function TransactionDetailPage({
             label: 'Payout request',
             value: tx.settledRequest
               ? `Settles the request made on ${formatDate(tx.settledRequest.createdAt)}`
-              : 'Settles no request',
+              : 'Settles no request — a direct transfer',
           },
         ]
       : []),

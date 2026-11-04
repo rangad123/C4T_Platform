@@ -14,10 +14,10 @@ import { recordTransferHref } from '@/lib/admin/payouts'
  * One row per tester and currency: everything credited to them minus everything
  * already paid out. It is not a filter over ledger rows, because an earning row
  * never says whether it has since been paid; the balance is the only honest
- * answer. A tester with an open payout request leads the list, and only their
- * row offers "Record bank transfer": the form opens with the tester, amount and
- * request filled in, and recording the transfer closes the request. A tester
- * who has not asked to be paid is not paid.
+ * answer. A tester with an open payout request leads the list. "Record bank
+ * transfer" opens the form with the tester and amount filled in: for a tester
+ * who asked, the request too, and recording the transfer closes it; for one
+ * who has not, the amount available, which goes straight to Paid out.
  */
 
 const BASE = '/app/admin/transactions'
@@ -118,14 +118,15 @@ export async function OwedPayments({
       key: 'action',
       header: '',
       align: 'right',
-      // A transfer is recorded only against the tester's request.
+      // Against the request when there is one; otherwise straight to Paid out.
       render: (row) =>
-        row.openRequest ? (
+        row.openRequest || row.owedMinor !== '0' ? (
           <Button
             href={recordTransferHref({
               testerId: row.testerId,
-              request: row.openRequest,
+              amountMinor: row.openRequest?.amountMinor ?? row.owedMinor,
               currency: row.currency,
+              requestId: row.openRequest?.id,
               paymentType: row.paymentAccount?.paymentType,
             })}
             variant="secondary"
@@ -134,11 +135,7 @@ export async function OwedPayments({
           >
             Record bank transfer
           </Button>
-        ) : (
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
-            Not requested yet
-          </span>
-        ),
+        ) : null,
     },
   ]
 
@@ -146,7 +143,7 @@ export async function OwedPayments({
     <AdminListPage
       eyebrow="Operations"
       title="Transactions"
-      description="What each tester is still owed — everything credited to them minus everything already paid out. Testers who have asked to be paid come first. Record a bank transfer once the money has been sent; that closes their request."
+      description="What each tester is still owed — everything credited to them minus everything already paid out. Testers who have asked to be paid come first. Record a bank transfer once the money has been sent; for a tester who asked, that closes their request."
       crumbs={[{ label: 'Transactions' }]}
       result={result}
       columns={columns}

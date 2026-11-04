@@ -508,12 +508,16 @@ transactionsRouter.post(
     }
 
     /**
-     * A payout is money sent to the tester's bank, and it is only ever sent
-     * because they asked: it always settles their open request. The request is
-     * found here when the form did not name it, so a payout recorded from the
-     * tester's page closes it exactly like one recorded from Pending payments.
-     * Before this, such a payout left the request open, the same money was
-     * taken out of the wallet twice, and the request was often paid again.
+     * A payout is money sent to the tester's bank. When they have asked for it,
+     * it always settles their open request: the request is found here when the
+     * form did not name it, so a payout recorded from the tester's page closes
+     * it exactly like one recorded from Pending payments. Before this, such a
+     * payout left the request open, the same money was taken out of the wallet
+     * twice, and the request was often paid again.
+     *
+     * When they have not asked, the money goes straight from available to paid
+     * out, so it may not be more than is available (checked under the lock
+     * below, against a request arriving at the same moment).
      */
     let settles: string | null = null
     if (input.type === TransactionType.TESTER_PAYOUT) {
@@ -532,18 +536,15 @@ transactionsRouter.post(
         where: { testerId: input.counterpartyId!, ...OPEN_REQUEST },
         select: { id: true, amountMinor: true, currency: true },
       })
-      if (!request) {
-        throw new BadRequestError(
-          'This tester has not requested a payout. Record a transfer only after they ask for one.',
-        )
+      if (request) {
+        if (input.amountMinor > request.amountMinor) {
+          throw new BadRequestError('That is more than the tester asked for')
+        }
+        if (input.currency !== request.currency) {
+          throw new BadRequestError(`The tester asked to be paid in ${request.currency}`)
+        }
+        settles = request.id
       }
-      if (input.amountMinor > request.amountMinor) {
-        throw new BadRequestError('That is more than the tester asked for')
-      }
-      if (input.currency !== request.currency) {
-        throw new BadRequestError(`The tester asked to be paid in ${request.currency}`)
-      }
-      settles = request.id
     }
 
     if (input.paymentAccountId) {
@@ -595,6 +596,20 @@ transactionsRouter.post(
     // payout that is recorded but leaves its request open would keep reserving
     // balance the tester has already been paid.
     const tx = await prisma.$transaction(async (db) => {
+      if (input.type === TransactionType.TESTER_PAYOUT && !settles) {
+        // The same lock POST /payouts/request takes, so a request cannot slip
+        // in between this check and the payout that spends the same balance.
+        await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`payout-request:${input.counterpartyId!}`}))`
+        const balance = await payoutBalance(input.counterpartyId!, db)
+        if (balance.requestedMinor > 0n) {
+          throw new BadRequestError(
+            'The tester has just requested a payout. Reload and record it against that request.',
+          )
+        }
+        if (input.amountMinor > balance.availableMinor) {
+          throw new BadRequestError('That is more than the tester has available to withdraw')
+        }
+      }
       const created = await db.transaction.create({
         data: { ...input, paidAmountMinor, reference, recordedById: req.user!.id },
         select: txSelect,

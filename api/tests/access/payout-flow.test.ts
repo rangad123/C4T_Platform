@@ -78,11 +78,24 @@ describe('credit, request, transfer', () => {
     })
   })
 
-  it('a transfer nobody asked for is refused', async () => {
-    const res = await transfer(100_000)
+  it('a transfer nobody asked for may not be more than is available', async () => {
+    const res = await transfer(100_001)
     expect(res.status).toBe(400)
-    expect(res.body.error.message).toMatch(/has not requested a payout/)
+    expect(res.body.error.message).toMatch(/more than the tester has available/)
     expect((await wallet()).paidOutMinor).toBe('0')
+  })
+
+  it('a transfer nobody asked for goes straight from Available to Paid out', async () => {
+    expect((await transfer(30_000)).status).toBe(201)
+    expect(await wallet()).toMatchObject({
+      availableMinor: '70000',
+      creditedMinor: '100000',
+      requestedMinor: '0',
+      paidOutMinor: '30000',
+      openRequest: null,
+    })
+    // Back to the starting point for the request flow below.
+    expect((await credit(30_000)).status).toBe(201)
   })
 
   it('a request moves the amount from Available to Already requested', async () => {
@@ -90,7 +103,7 @@ describe('credit, request, transfer', () => {
     expect(await wallet()).toMatchObject({
       availableMinor: '0',
       requestedMinor: '100000',
-      paidOutMinor: '0',
+      paidOutMinor: '30000',
     })
   })
 
@@ -104,9 +117,9 @@ describe('credit, request, transfer', () => {
     const w = await wallet()
     expect(w).toMatchObject({
       availableMinor: '0',
-      creditedMinor: '100000',
+      creditedMinor: '130000',
       requestedMinor: '0',
-      paidOutMinor: '100000',
+      paidOutMinor: '130000',
       openRequest: null,
     })
     const request = await prisma.payoutRequest.findFirstOrThrow({ where: { testerId } })
@@ -115,7 +128,7 @@ describe('credit, request, transfer', () => {
 
   it('the same transfer cannot be recorded twice', async () => {
     expect((await transfer(100_000)).status).toBe(400)
-    expect((await wallet()).paidOutMinor).toBe('100000')
+    expect((await wallet()).paidOutMinor).toBe('130000')
   })
 
   it('a transfer for less than was asked closes the request and the rest is available again', async () => {
@@ -126,7 +139,7 @@ describe('credit, request, transfer', () => {
     expect(await wallet()).toMatchObject({
       availableMinor: '20000',
       requestedMinor: '0',
-      paidOutMinor: '160000',
+      paidOutMinor: '190000',
     })
   })
 })
@@ -144,13 +157,13 @@ describe('removing a payout recorded in error', () => {
         occurredAt: new Date(),
       },
     })
-    expect((await wallet()).paidOutMinor).toBe('260000')
+    expect((await wallet()).paidOutMinor).toBe('290000')
 
     const res = await admin
       .delete(`/v1/transactions/${duplicate.id}`)
       .send({ reason: 'Recorded twice for one bank transfer' })
     expect(res.status).toBe(204)
-    expect(await wallet()).toMatchObject({ availableMinor: '20000', paidOutMinor: '160000' })
+    expect(await wallet()).toMatchObject({ availableMinor: '20000', paidOutMinor: '190000' })
 
     const audit = await prisma.auditLog.findFirstOrThrow({
       where: { action: 'transaction.payout_removed', entityId: duplicate.id },

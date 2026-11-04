@@ -1189,9 +1189,10 @@ export default async function TesterDetailPage({
             )}
             {walletBalance ? (
               /*
-               * The transfer is recorded here, against the request, and only
-               * when there is one: recording it settles the request, moving
-               * the amount from Already requested to Paid out.
+               * The transfer is recorded here. With an open request it is
+               * recorded against it and settles it, moving the amount from
+               * Already requested to Paid out; without one it moves what is
+               * available straight to Paid out.
                */
               <div
                 style={{
@@ -1219,8 +1220,9 @@ export default async function TesterDetailPage({
                         <Button
                           href={recordTransferHref({
                             testerId: tester.user.id,
-                            request: walletBalance.openRequest,
+                            amountMinor: walletBalance.openRequest.amountMinor,
                             currency: walletBalance.openRequest.currency,
+                            requestId: walletBalance.openRequest.id,
                             paymentType: walletBalance.paymentType,
                           })}
                           variant="primary"
@@ -1244,10 +1246,27 @@ export default async function TesterDetailPage({
                     ) : null}
                   </>
                 ) : (
-                  <Muted>
-                    No payout requested. A bank transfer can be recorded once the tester asks to be
-                    paid.
-                  </Muted>
+                  <>
+                    <Muted>
+                      No payout requested. A bank transfer recorded now goes straight from Available
+                      to withdraw to Paid out.
+                    </Muted>
+                    {canWriteTransactions && walletBalance.availableMinor !== '0' ? (
+                      <Button
+                        href={recordTransferHref({
+                          testerId: tester.user.id,
+                          amountMinor: walletBalance.availableMinor,
+                          currency: walletBalance.currency,
+                          paymentType: walletBalance.paymentType,
+                        })}
+                        variant="secondary"
+                        size="sm"
+                        iconLeft="banknote"
+                      >
+                        Record bank transfer
+                      </Button>
+                    ) : null}
+                  </>
                 )}
               </div>
             ) : null}
