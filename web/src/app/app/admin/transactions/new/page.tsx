@@ -57,7 +57,7 @@ const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP'] as const
  */
 const TYPE_LABELS: Record<(typeof TYPES)[number], string> = {
   TESTER_EARNING: 'Credit — add funds to the tester’s wallet',
-  TESTER_PAYOUT: 'Debit — send funds to their payment details',
+  TESTER_PAYOUT: 'Debit — record the bank transfer the tester asked for',
   ADJUSTMENT: 'Adjustment',
 }
 
@@ -387,8 +387,9 @@ export default async function NewTransactionPage({
             >
               <li>The entry gets a reference and appears in the ledger.</li>
               <li>
-                A credit adds to the tester’s wallet at once; a debit is recorded only after the
-                money has been sent, and takes it out.
+                A credit adds to the tester’s wallet at once. A debit is the bank transfer for the
+                tester’s payout request: record it after the money has been sent, and it settles
+                that request. A tester who has not asked to be paid cannot be debited.
               </li>
               <li>
                 The counterparty, if there is one, is notified that a transaction was recorded.

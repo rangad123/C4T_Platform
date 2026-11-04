@@ -133,3 +133,42 @@ export async function savePayoutDetails(formData: FormData): Promise<void> {
   revalidate(id)
   redirect(`${BASE}/${id}?notice=${notice}`)
 }
+
+/**
+ * Remove a payout recorded in error — a second copy of one bank transfer. The
+ * API refuses a payout that settled the tester's request, and anything that is
+ * not a payout, and keeps the removed row and the reason in the audit log.
+ *
+ * The row is gone afterwards, so this returns to the tester's Payment tab when
+ * there is one to return to, and to the ledger otherwise.
+ */
+export async function removePayoutAction(formData: FormData): Promise<void> {
+  await requirePermission('transaction.write')
+
+  const id = formTrimmed(formData, 'id')
+  const reason = formTrimmed(formData, 'reason').slice(0, 500)
+  const testerProfileId = formTrimmed(formData, 'testerProfileId')
+  if (!id) return
+  if (reason.length < 5) redirect(`${BASE}/${id}?notice=tx-remove-reason`)
+
+  try {
+    await actionFetch<unknown>(`transactions/${id}`, { method: 'DELETE', body: { reason } })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    const message = error instanceof ApiError ? error.message : ''
+    const notice =
+      code === 400 && message.includes('settled')
+        ? 'tx-remove-settled'
+        : code === 400 || code === 422
+          ? 'tx-remove-reason'
+          : saveFailure(error)
+    redirect(`${BASE}/${id}?notice=${notice}`)
+  }
+
+  revalidate(id)
+  if (/^[a-z0-9]+$/i.test(testerProfileId)) {
+    revalidatePath(`/app/admin/testers/${testerProfileId}`)
+    redirect(`/app/admin/testers/${testerProfileId}?section=payment&notice=payout-removed`)
+  }
+  redirect(BASE)
+}

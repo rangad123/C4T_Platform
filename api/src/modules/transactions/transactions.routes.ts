@@ -68,6 +68,8 @@ const txSelect = {
     },
   },
   recordedBy: { select: { id: true, firstName: true, lastName: true } },
+  /// The tester's request this payout settled, when it did.
+  settledRequest: { select: { id: true, createdAt: true } },
   // Masked — never `include`, never `secureDetails`. Same select used by
   // `payment-accounts.routes.ts`'s own masked reads; a transaction read must
   // never be able to carry the linked account's ciphertext.
@@ -485,18 +487,8 @@ transactionsRouter.post(
     if (input.tdsAmountMinor !== undefined && input.tdsAmountMinor > input.amountMinor) {
       throw new BadRequestError('TDS cannot be more than the amount')
     }
-    if (payoutRequestId) {
-      if (input.type !== TransactionType.TESTER_PAYOUT) {
-        throw new BadRequestError('Only a payout can settle a payout request')
-      }
-      const request = await prisma.payoutRequest.findFirst({
-        where: { id: payoutRequestId, fulfilledAt: null },
-        select: { testerId: true },
-      })
-      if (!request) throw new BadRequestError('That payout request is no longer open')
-      if (request.testerId !== input.counterpartyId) {
-        throw new BadRequestError('That payout request belongs to a different tester')
-      }
+    if (payoutRequestId && input.type !== TransactionType.TESTER_PAYOUT) {
+      throw new BadRequestError('Only a payout can settle a payout request')
     }
 
     // Keep the ledger coherent: a customer-side row needs an organisation, a
@@ -514,6 +506,46 @@ transactionsRouter.post(
       })
       if (!tester) throw new BadRequestError('The counterparty is not a tester account')
     }
+
+    /**
+     * A payout is money sent to the tester's bank, and it is only ever sent
+     * because they asked: it always settles their open request. The request is
+     * found here when the form did not name it, so a payout recorded from the
+     * tester's page closes it exactly like one recorded from Pending payments.
+     * Before this, such a payout left the request open, the same money was
+     * taken out of the wallet twice, and the request was often paid again.
+     */
+    let settles: string | null = null
+    if (input.type === TransactionType.TESTER_PAYOUT) {
+      if (payoutRequestId) {
+        const named = await prisma.payoutRequest.findFirst({
+          where: { id: payoutRequestId, ...OPEN_REQUEST },
+          select: { testerId: true },
+        })
+        if (!named) throw new BadRequestError('That payout request is no longer open')
+        if (named.testerId !== input.counterpartyId) {
+          throw new BadRequestError('That payout request belongs to a different tester')
+        }
+      }
+      // One open request per tester (POST /payouts/request), so this is it.
+      const request = await prisma.payoutRequest.findFirst({
+        where: { testerId: input.counterpartyId!, ...OPEN_REQUEST },
+        select: { id: true, amountMinor: true, currency: true },
+      })
+      if (!request) {
+        throw new BadRequestError(
+          'This tester has not requested a payout. Record a transfer only after they ask for one.',
+        )
+      }
+      if (input.amountMinor > request.amountMinor) {
+        throw new BadRequestError('That is more than the tester asked for')
+      }
+      if (input.currency !== request.currency) {
+        throw new BadRequestError(`The tester asked to be paid in ${request.currency}`)
+      }
+      settles = request.id
+    }
+
     if (input.paymentAccountId) {
       const account = await prisma.paymentAccount.findFirst({
         where: {
@@ -567,9 +599,9 @@ transactionsRouter.post(
         data: { ...input, paidAmountMinor, reference, recordedById: req.user!.id },
         select: txSelect,
       })
-      if (payoutRequestId) {
+      if (settles) {
         const closed = await db.payoutRequest.updateMany({
-          where: { id: payoutRequestId, fulfilledAt: null },
+          where: { id: settles, ...OPEN_REQUEST },
           data: { fulfilledAt: new Date(), fulfilledByTransactionId: created.id },
         })
         if (closed.count !== 1) throw new BadRequestError('That payout request is no longer open')
@@ -601,7 +633,7 @@ transactionsRouter.post(
         reference: tx.reference,
         type: tx.type,
         amountMinor: tx.amountMinor.toString(),
-        ...(payoutRequestId ? { payoutRequestId } : {}),
+        ...(settles ? { payoutRequestId: settles } : {}),
       },
     })
 
@@ -653,6 +685,71 @@ transactionsRouter.patch(
     })
 
     res.json({ data: maskCounterparty(req.user!, tx) })
+  },
+)
+
+const removePayoutSchema = z.object({
+  /** Why it goes — kept in the audit log beside the removed row. */
+  reason: z.string().trim().min(5, 'Say why this payout is being removed').max(500),
+})
+
+/**
+ * Remove a payout that was recorded in error — a second copy of a transfer
+ * that happened once. It is the one correction an ADJUSTMENT cannot make,
+ * because the wallet counts payouts and ignores adjustments.
+ *
+ * Only a payout that did not settle a request: that one is the record the
+ * request points to, so the copy to remove is the other one. The whole row,
+ * with the reason, goes to the audit log, so the removal is never silent.
+ */
+transactionsRouter.delete(
+  '/:id',
+  requirePermission(PERMISSIONS.TRANSACTION_WRITE),
+  validate({ params: z.object({ id: z.string().cuid() }), body: removePayoutSchema }),
+  async (req, res) => {
+    const { reason } = req.body as z.infer<typeof removePayoutSchema>
+    const existing = await prisma.transaction.findUnique({
+      where: { id: param(req, 'id') },
+      select: txSelect,
+    })
+    if (!existing) throw new NotFoundError('Transaction')
+    if (existing.type !== TransactionType.TESTER_PAYOUT) {
+      throw new BadRequestError('Only a payout recorded in error can be removed')
+    }
+    if (existing.settledRequest) {
+      throw new BadRequestError(
+        'This payout settled the tester’s payout request, so it stays. If it is a duplicate, remove the other copy.',
+      )
+    }
+
+    // Re-checked in the delete itself: a request settled by this row a moment ago keeps it.
+    const removed = await prisma.transaction.deleteMany({
+      where: { id: existing.id, type: TransactionType.TESTER_PAYOUT, settledRequest: null },
+    })
+    if (removed.count !== 1) throw new NotFoundError('Transaction')
+
+    await recordAudit({
+      req,
+      action: 'transaction.payout_removed',
+      entityType: 'Transaction',
+      entityId: existing.id,
+      before: {
+        reference: existing.reference,
+        type: existing.type,
+        amountMinor: existing.amountMinor.toString(),
+        tdsAmountMinor: existing.tdsAmountMinor?.toString() ?? null,
+        paidAmountMinor: existing.paidAmountMinor?.toString() ?? null,
+        currency: existing.currency,
+        occurredAt: existing.occurredAt.toISOString(),
+        counterpartyId: existing.counterparty?.id ?? null,
+        recordedById: existing.recordedBy?.id ?? null,
+        externalRef: existing.externalRef,
+        description: existing.description,
+      },
+      after: { reason },
+    })
+
+    res.status(204).end()
   },
 )
 
@@ -885,22 +982,32 @@ transactionsRouter.get(
     })
     if (!tester) throw new NotFoundError('Tester')
 
-    const [balance, account] = await Promise.all([
+    const [balance, account, openRequest] = await Promise.all([
       payoutBalance(testerId),
       prisma.paymentAccount.findFirst({
         where: { userId: testerId, status: 'ACTIVE' },
         select: { paymentType: true },
+      }),
+      // What a payout recorded from the tester's page settles.
+      prisma.payoutRequest.findFirst({
+        where: { testerId, ...OPEN_REQUEST },
+        select: { id: true, amountMinor: true, currency: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
       }),
     ])
 
     res.json({
       data: {
         currency: account ? currencyForPaymentType(account.paymentType) : 'INR',
+        paymentType: account?.paymentType ?? null,
         availableMinor: balance.availableMinor.toString(),
         creditedMinor: balance.creditedMinor.toString(),
         paidOutMinor: balance.paidOutMinor.toString(),
         tdsDeductedMinor: balance.tdsDeductedMinor.toString(),
         requestedMinor: balance.requestedMinor.toString(),
+        openRequest: openRequest
+          ? { ...openRequest, amountMinor: openRequest.amountMinor.toString() }
+          : null,
       },
     })
   },

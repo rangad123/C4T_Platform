@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import { loadList, parsePage, pageHrefBuilder } from '@/lib/admin/list'
 import { formatDate, formatMoney, hasFilter, personName, titleCase } from '@/lib/admin/format'
 import { PAYMENT_METHODS, isOneOf } from '@/lib/domain/enums'
+import { recordTransferHref } from '@/lib/admin/payouts'
 
 /**
  * The Pending payments tab — who is owed what.
@@ -13,9 +14,10 @@ import { PAYMENT_METHODS, isOneOf } from '@/lib/domain/enums'
  * One row per tester and currency: everything credited to them minus everything
  * already paid out. It is not a filter over ledger rows, because an earning row
  * never says whether it has since been paid; the balance is the only honest
- * answer. A tester with an open payout request leads the list, and the row's
- * button opens the payout form with the tester, amount and request filled in —
- * recording that payout closes the request.
+ * answer. A tester with an open payout request leads the list, and only their
+ * row offers "Record bank transfer": the form opens with the tester, amount and
+ * request filled in, and recording the transfer closes the request. A tester
+ * who has not asked to be paid is not paid.
  */
 
 const BASE = '/app/admin/transactions'
@@ -42,13 +44,6 @@ interface OwedRow {
   openRequest: { id: string; amountMinor: string; createdAt: string } | null
 }
 
-/** `150050` → `1500.50`, by string surgery — the payout form takes major units. */
-function toMajor(minor: string): string {
-  const negative = minor.startsWith('-')
-  const digits = (negative ? minor.slice(1) : minor).padStart(3, '0')
-  return `${negative ? '-' : ''}${digits.slice(0, -2)}.${digits.slice(-2)}`
-}
-
 function methodDetails(account: NonNullable<OwedRow['paymentAccount']>): string | undefined {
   return (
     account.bankName ??
@@ -56,19 +51,6 @@ function methodDetails(account: NonNullable<OwedRow['paymentAccount']>): string 
     (account.accountNumberLast4 ? `•••• ${account.accountNumberLast4}` : undefined) ??
     (account.paytmNumberLast4 ? `•••• ${account.paytmNumberLast4}` : undefined)
   )
-}
-
-function recordPaymentHref(row: OwedRow): string {
-  const amountMinor = row.openRequest?.amountMinor ?? row.owedMinor
-  const sp = new URLSearchParams({
-    type: 'TESTER_PAYOUT',
-    counterpartyId: row.testerId,
-    amount: toMajor(amountMinor),
-    currency: row.currency,
-  })
-  if (row.paymentAccount) sp.set('paymentMethod', row.paymentAccount.paymentType)
-  if (row.openRequest) sp.set('payoutRequestId', row.openRequest.id)
-  return `${BASE}/new?${sp.toString()}`
 }
 
 export async function OwedPayments({
@@ -136,11 +118,27 @@ export async function OwedPayments({
       key: 'action',
       header: '',
       align: 'right',
-      render: (row) => (
-        <Button href={recordPaymentHref(row)} variant="secondary" size="sm" iconLeft="plus">
-          Record payment
-        </Button>
-      ),
+      // A transfer is recorded only against the tester's request.
+      render: (row) =>
+        row.openRequest ? (
+          <Button
+            href={recordTransferHref({
+              testerId: row.testerId,
+              request: row.openRequest,
+              currency: row.currency,
+              paymentType: row.paymentAccount?.paymentType,
+            })}
+            variant="secondary"
+            size="sm"
+            iconLeft="banknote"
+          >
+            Record bank transfer
+          </Button>
+        ) : (
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--type-body-sm-size)' }}>
+            Not requested yet
+          </span>
+        ),
     },
   ]
 
@@ -148,7 +146,7 @@ export async function OwedPayments({
     <AdminListPage
       eyebrow="Operations"
       title="Transactions"
-      description="What each tester is still owed — everything credited to them minus everything already paid out. Newest credits first, and a tester who has asked to be paid before that. Recording the payout closes their request."
+      description="What each tester is still owed — everything credited to them minus everything already paid out. Testers who have asked to be paid come first. Record a bank transfer once the money has been sent; that closes their request."
       crumbs={[{ label: 'Transactions' }]}
       result={result}
       columns={columns}

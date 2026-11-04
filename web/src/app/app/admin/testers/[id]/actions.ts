@@ -242,3 +242,28 @@ export async function awardBadgeAction(formData: FormData): Promise<void> {
   revalidatePath(base)
   redirect(withNotice('badge-awarded'))
 }
+
+/**
+ * Cancel a tester's open payout request — for one nobody will pay, or one left
+ * open by a transfer recorded before transfers settled requests. The API keeps
+ * the gate (`transaction.write`) and refuses a request that has been paid.
+ */
+export async function cancelPayoutRequestAction(formData: FormData): Promise<void> {
+  await requirePermission('transaction.write')
+
+  const testerProfileId = formTrimmed(formData, 'testerProfileId')
+  const requestId = formTrimmed(formData, 'requestId')
+  if (!testerProfileId || !requestId) return
+
+  let notice = 'payout-request-cancelled'
+  try {
+    await actionFetch<unknown>(`transactions/payouts/requests/${requestId}`, { method: 'DELETE' })
+  } catch (error) {
+    const code = error instanceof ApiError ? error.status : 0
+    notice = code === 404 ? 'payout-request-gone' : 'payout-request-cancel-failed'
+  }
+
+  revalidatePath(`/app/admin/testers/${testerProfileId}`)
+  revalidatePath('/app/admin/transactions')
+  redirect(`/app/admin/testers/${testerProfileId}?section=payment&notice=${notice}`)
+}

@@ -27,7 +27,8 @@ import { Modal } from '@/components/admin/Modal'
 import { loadList, parsePage } from '@/lib/admin/list'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, stars, titleCase } from '@/lib/admin/format'
-import { setTesterStatus, rateTesterAction } from './actions'
+import { setTesterStatus, rateTesterAction, cancelPayoutRequestAction } from './actions'
+import { recordTransferHref } from '@/lib/admin/payouts'
 
 /**
  * Deliberately narrower than the full `TESTER_STATUSES` vocabulary — ARCHIVED
@@ -405,6 +406,26 @@ interface TesterEngagement {
   alreadyRated: boolean
 }
 
+/** What cancelling a payout request comes back with. */
+const PAYMENT_NOTICES: Record<string, { tone: 'success' | 'error'; message: string }> = {
+  'payout-request-cancelled': {
+    tone: 'success',
+    message: 'The payout request has been cancelled. Its amount is available to withdraw again.',
+  },
+  'payout-request-gone': {
+    tone: 'error',
+    message: 'That payout request is no longer open. It may have been paid or cancelled already.',
+  },
+  'payout-removed': {
+    tone: 'success',
+    message: 'The payout recorded in error has been removed, and the wallet below is up to date.',
+  },
+  'payout-request-cancel-failed': {
+    tone: 'error',
+    message: 'The payout request could not be cancelled. Try again in a moment.',
+  },
+}
+
 /** What each outcome of the rating form says. The page owns this copy. */
 const RATING_NOTICES: Record<string, { tone: 'success' | 'error'; message: string }> = {
   'rating-saved': { tone: 'success', message: 'Your rating has been saved.' },
@@ -458,6 +479,10 @@ interface PaymentAccountDetail {
 
 interface WalletBalance {
   currency: string
+  /** The tester's payout method, for the transfer form. */
+  paymentType: string | null
+  /** What the tester has asked to be paid and nobody has paid yet. */
+  openRequest: { id: string; amountMinor: string; currency: string; createdAt: string } | null
   availableMinor: string
   creditedMinor: string
   paidOutMinor: string
@@ -661,6 +686,7 @@ export default async function TesterDetailPage({
   const ratingTarget = rate ? engagements?.find((e) => e.project.id === rate) : undefined
 
   const ratingNotice = notice ? RATING_NOTICES[notice] : undefined
+  const paymentNotice = notice ? PAYMENT_NOTICES[notice] : undefined
 
   const engagementColumns: readonly TableColumn<TesterEngagement>[] = [
     {
@@ -1107,6 +1133,27 @@ export default async function TesterDetailPage({
             title="Wallet"
             description="This tester's current balance — the same numbers their own dashboard shows."
           >
+            {paymentNotice ? (
+              <p
+                role="status"
+                style={{
+                  margin: '0 0 var(--space-5)',
+                  padding: 'var(--space-4) var(--space-5)',
+                  borderRadius: 'var(--radius-card)',
+                  background:
+                    paymentNotice.tone === 'success'
+                      ? 'var(--status-success-bg)'
+                      : 'var(--status-error-bg)',
+                  color:
+                    paymentNotice.tone === 'success'
+                      ? 'var(--status-success-fg)'
+                      : 'var(--status-error-fg)',
+                  fontSize: 'var(--type-body-sm-size)',
+                }}
+              >
+                {paymentNotice.message}
+              </p>
+            ) : null}
             {!canReadTransactions ? (
               <Muted>
                 Ask an administrator to grant you the transaction.read permission to view wallet
@@ -1140,6 +1187,70 @@ export default async function TesterDetailPage({
                 ]}
               />
             )}
+            {walletBalance ? (
+              /*
+               * The transfer is recorded here, against the request, and only
+               * when there is one: recording it settles the request, moving
+               * the amount from Already requested to Paid out.
+               */
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 'var(--space-4)',
+                  marginTop: 'var(--space-5)',
+                  paddingTop: 'var(--space-5)',
+                  borderTop: '1px solid var(--border-subtle)',
+                }}
+              >
+                {walletBalance.openRequest ? (
+                  <>
+                    <span style={{ color: 'var(--text-primary)' }}>
+                      Payout requested on {formatDate(walletBalance.openRequest.createdAt)}:{' '}
+                      {formatMoney(
+                        walletBalance.openRequest.amountMinor,
+                        walletBalance.openRequest.currency,
+                      )}
+                    </span>
+                    {canWriteTransactions ? (
+                      <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                        <Button
+                          href={recordTransferHref({
+                            testerId: tester.user.id,
+                            request: walletBalance.openRequest,
+                            currency: walletBalance.openRequest.currency,
+                            paymentType: walletBalance.paymentType,
+                          })}
+                          variant="primary"
+                          size="sm"
+                          iconLeft="banknote"
+                        >
+                          Record bank transfer
+                        </Button>
+                        <form action={cancelPayoutRequestAction}>
+                          <input type="hidden" name="testerProfileId" value={id} />
+                          <input
+                            type="hidden"
+                            name="requestId"
+                            value={walletBalance.openRequest.id}
+                          />
+                          <SubmitButton variant="secondary" size="sm" pendingLabel="Cancelling…">
+                            Cancel request
+                          </SubmitButton>
+                        </form>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <Muted>
+                    No payout requested. A bank transfer can be recorded once the tester asks to be
+                    paid.
+                  </Muted>
+                )}
+              </div>
+            ) : null}
           </Panel>
 
           <Panel
@@ -1203,31 +1314,21 @@ export default async function TesterDetailPage({
                * a convenient place. The form already echoes these params.
                */
               /*
-               * The two directions money moves, in the ledger's own terms:
-               * a CREDIT adds to the tester's wallet (TESTER_EARNING), a
-               * DEBIT sends it to the payment option they registered
-               * (TESTER_PAYOUT). Only the debit half existed, so there was
-               * no way to put money IN from here.
+               * A CREDIT adds to the tester's wallet (TESTER_EARNING). The
+               * bank transfer is not offered here: it is recorded against the
+               * tester's request, from the Wallet panel above. A "Debit
+               * payout" button here once recorded transfers that left the
+               * request open, so the same money was paid out twice.
                */
               canWriteTransactions ? (
-                <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-                  <Button
-                    href={`/app/admin/transactions/new?type=TESTER_EARNING&counterpartyId=${tester.user.id}`}
-                    variant="primary"
-                    size="sm"
-                    iconLeft="plus"
-                  >
-                    Credit wallet
-                  </Button>
-                  <Button
-                    href={`/app/admin/transactions/new?type=TESTER_PAYOUT&counterpartyId=${tester.user.id}`}
-                    variant="secondary"
-                    size="sm"
-                    iconLeft="banknote"
-                  >
-                    Debit payout
-                  </Button>
-                </div>
+                <Button
+                  href={`/app/admin/transactions/new?type=TESTER_EARNING&counterpartyId=${tester.user.id}`}
+                  variant="primary"
+                  size="sm"
+                  iconLeft="plus"
+                >
+                  Credit wallet
+                </Button>
               ) : undefined
             }
           >

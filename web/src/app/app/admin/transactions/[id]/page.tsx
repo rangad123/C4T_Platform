@@ -17,7 +17,7 @@ import { serverFetch } from '@/lib/api/server'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatMoney, personName, titleCase } from '@/lib/admin/format'
 import { hasPermission, requirePermission } from '@/lib/auth/session'
-import { saveTransactionDetails, savePayoutDetails } from './actions'
+import { saveTransactionDetails, savePayoutDetails, removePayoutAction } from './actions'
 import { PAYMENT_METHOD_OPTIONS } from '@/lib/domain/enums'
 
 /**
@@ -74,6 +74,8 @@ interface TransactionDetail {
     testerProfile: { id: string } | null
   } | null
   recordedBy: { id: string; firstName: string | null; lastName: string | null } | null
+  /** The tester's payout request this payout settled, when it did. */
+  settledRequest: { id: string; createdAt: string } | null
 }
 
 const recordLink = {
@@ -102,6 +104,15 @@ const NOTICES: Record<string, NoticeCopy> = {
     message: 'Some values were not accepted. Check the amounts — TDS cannot exceed the amount.',
   },
   'tx-failed': { tone: 'error', message: 'That change could not be saved. Try again in a moment.' },
+  'tx-remove-reason': {
+    tone: 'error',
+    message: 'Say why this payout is being removed, in at least five characters.',
+  },
+  'tx-remove-settled': {
+    tone: 'error',
+    message:
+      'This payout settled the tester’s payout request, so it stays. If it is a duplicate, remove the other copy.',
+  },
 }
 
 export default async function TransactionDetailPage({
@@ -241,7 +252,20 @@ export default async function TransactionDetailPage({
         : null,
     },
     { label: 'Build / contest reference', value: tx.buildOrContestRef },
+    ...(tx.type === 'TESTER_PAYOUT'
+      ? [
+          {
+            label: 'Payout request',
+            value: tx.settledRequest
+              ? `Settles the request made on ${formatDate(tx.settledRequest.createdAt)}`
+              : 'Settles no request',
+          },
+        ]
+      : []),
   ]
+
+  /** A second copy of a bank transfer: a payout that settled no request. */
+  const removable = canWrite && tx.type === 'TESTER_PAYOUT' && !tx.settledRequest
 
   return (
     <DetailShell
@@ -277,8 +301,8 @@ export default async function TransactionDetailPage({
           >
             Payment gateway integration is out of scope, so this row is bookkeeping. The money moves
             through your bank or your accounting package. A credit sits in the tester’s wallet until
-            a payout is recorded against it, and a payout is recorded only once the money has been
-            sent.
+            they ask to be paid, and a payout is recorded against that request only once the money
+            has been sent.
           </p>
         </Panel>
       }
@@ -462,6 +486,47 @@ export default async function TransactionDetailPage({
             <div>
               <SubmitButton variant="secondary" pendingLabel="Saving…">
                 Save payout details
+              </SubmitButton>
+            </div>
+          </form>
+        </Panel>
+      ) : null}
+
+      {removable ? (
+        <Panel
+          title="Remove a payout recorded in error"
+          description="For a second copy of one bank transfer. The wallet counts every payout, so a duplicate takes the same money out twice. Removing it puts the amount back where it belongs. The removed entry and your reason stay in the audit log."
+        >
+          <form
+            action={removePayoutAction}
+            style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}
+          >
+            <input type="hidden" name="id" value={tx.id} />
+            {tx.counterparty?.testerProfile ? (
+              <input
+                type="hidden"
+                name="testerProfileId"
+                value={tx.counterparty.testerProfile.id}
+              />
+            ) : null}
+            <Field
+              label="Reason"
+              htmlFor="reason"
+              hint="Why this entry is wrong, for the audit log. At least five characters."
+            >
+              <Textarea
+                id="reason"
+                name="reason"
+                rows={3}
+                minLength={5}
+                maxLength={500}
+                required
+                placeholder="Recorded twice for one bank transfer"
+              />
+            </Field>
+            <div>
+              <SubmitButton variant="secondary" pendingLabel="Removing…">
+                Remove this payout
               </SubmitButton>
             </div>
           </form>
