@@ -4,8 +4,9 @@ The speed checks time one user at a time. The load check asks one more question 
 error-free when 10 people use it at the same time?** It is a small, safe check, **not a stress test and not capacity planning**: it will not
 tell you how many users your application can take, only whether a handful of simultaneous users is already a problem.
 
-**Off by default.** Tick **Load check (test environments only)** under *Advanced options* when you start an analysis. The option says what it
-does: *"Sends up to 300 requests to each of up to 3 pages of your application. Use a test environment."* Use a test environment.
+**Off by default.** It is allowed by the project's **Performance** testing agent (Settings → General → Testing agents) and asked for per
+exploration through the API or an AI assistant (`loadChecks: true`); the Explore page has no switch for it. It sends up to 300 requests to
+each of up to 3 pages of your application. Use a test environment.
 
 ## What it does
 For each of up to **3 endpoints** it picks, the test:

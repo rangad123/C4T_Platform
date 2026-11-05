@@ -44,6 +44,7 @@ import { loadTargetProblem } from "./load-guard.js";
 import { isLoadSpec, LOAD_MAX_ENDPOINTS, LOAD_MAX_REQUESTS } from "../engine/performance/load.js";
 import { registerFeatureRoutes } from "./routes/index.js";
 import { checkedAgentChoice, testingAgentsOf, withAgentChoice } from "./routes/testing-agents.js";
+import { missingForExploration, missingInputsMessage, projectRequirementsDocument, savedInputsForExploration } from "./routes/agent-inputs.js";
 import { JobVariantsSchema, projectCompat, testCompatibility, variantsConfig } from "./routes/variants.js";
 import { dataDrivenSpecIssues, dataSetsFor, EnvironmentChoice, startEnvironmentRun, testEnvironmentInfo } from "./routes/environments.js";
 import { exportObjectsUsedBy, importObjectsFor, objectsFor } from "./routes/locators.js";
@@ -61,6 +62,7 @@ import { localPathOf, putText } from "./object-store.js";
 import { prunedMessage } from "../engine/retention/format.js";
 import { redactTriggerUrl } from "./trigger-store.js";
 import { redactStreamUrl } from "./stream-core.js";
+import { EXPLORING_OFF_MESSAGE, IMPORTED_NOT_RUN, refuseUnlessRunsStart, runsCanStartHere } from "./suite-run.js";
 import { agentCanRunIos, agentCanRunMobile, assertRunTarget, IOS_NEEDS_AGENT_MESSAGE, jobRanOn } from "./agent-services.js";
 import { farmChosen } from "./device-farm-store.js";
 import { assertPhoneExploration } from "./phone-explore.js";
@@ -279,6 +281,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     app.get("/api/config", async () => ({
         llm: { provider: p.config.LLM_PROVIDER, model: p.llm.modelName, configured: p.llm.modelName !== "unavailable" },
         authRequired: Boolean(p.config.API_KEY),
+        // Whether a run or an exploration started now would start (suite-run.ts): false while tests are switched off on this server.
+        runsHere: runsCanStartHere(p).ok,
         frameworks: listAdapters().map((a) => ({ framework: a.id, kind: a.kinds[0]!, executable: a.executable })),
         adapters: listAdapters().map((a) => a.describe()),
         defaults: DEFAULT_JOB_OPTIONS,
@@ -407,13 +411,17 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const { id } = req.params as { id: string };
         project(id);
         const body0 = GenerateSchema.parse(req.body);
+        refuseUnlessRunsStart(p, EXPLORING_OFF_MESSAGE); // tests switched off on this server: said before anything is saved or queued
         // The AI explores the project's Android app on a phone or emulator: checked now, in plain words, before a job is queued.
         const wantsPhone = body0.targets?.includes("mobile") === true;
         if (wantsPhone) assertPhoneExploration(id, latestMobile(id));
         const phoneOnly = wantsPhone && body0.targets!.every((t) => t === "mobile");
         const phoneUrl = phoneOnly ? `android-app://${latestMobile(id)!.appPackage}` : undefined;
         if (!body0.url && !phoneUrl) throw new HttpError(400, "Give the address of the website or API to test");
-        const body = { ...body0, url: (body0.url ?? phoneUrl)! };
+        // What the request leaves out comes from the inputs saved on the Requirements tab (routes/agent-inputs.ts), on the same site only;
+        // saved credentials never go to an API address or OpenAPI document nobody saved them for (409). Exploring never changes them.
+        const saved = savedInputsForExploration(p, id, (body0.url ?? phoneUrl)!, body0);
+        const body = { ...body0, url: (body0.url ?? phoneUrl)!, credentials: body0.credentials ?? saved.credentials, openApiUrl: body0.openApiUrl ?? saved.openApiUrl, allowMutatingApiTests: body0.allowMutatingApiTests ?? saved.allowMutatingApiTests };
         if (!phoneOnly) await assertAllowedTarget(body.url);
         if (body.openApiUrl) await assertAllowedTarget(body.openApiUrl);
         if (body.apiBaseUrl) await assertAllowedTarget(body.apiBaseUrl);
@@ -432,6 +440,9 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         } as JobOptions;
         // The project's chosen testing agents decide which checks run (routes/testing-agents.ts); a project with none saved runs as asked.
         const options = await withAgentChoice(p, project(id), asked, body);
+        // The chosen agents' mandatory inputs (routes/agent-inputs.ts): refused in the words the Explore page's pop-up uses. No saved choice, no refusal.
+        const missing = await missingForExploration(p, project(id), { openApiUrl: body.openApiUrl }, options.targets);
+        if (missing.length) throw new HttpError(409, missingInputsMessage(missing));
         if (body.requirements) {
             // Convert at submit time so an unreadable document is rejected now, not mid-job.
             try {
@@ -440,6 +451,13 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
             } catch (e) {
                 if (e instanceof RequirementsDocumentError) throw new HttpError(400, e.message);
                 throw e;
+            }
+        } else {
+            // No document: the project's own active requirements, as the text a document gives.
+            const doc = await projectRequirementsDocument(p, id);
+            if (doc) {
+                options.requirementsText = doc.text;
+                options.requirementsName = doc.name;
             }
         }
         // The application keeps the generation settings, minus the (possibly large) requirements text.
@@ -486,8 +504,10 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     };
 
     let routeCtx: RouteCtx;
-    const startValidationJob = (projectId: string, applicationId: string, testIds: string[]) =>
-        repo.createJob(projectId, applicationId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds });
+    const startValidationJob = async (projectId: string, applicationId: string, testIds: string[]) => {
+        refuseUnlessRunsStart(p); // a run no worker would pick up is not queued (each caller says the run did not start, or refuses)
+        return repo.createJob(projectId, applicationId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds });
+    };
 
     app.post("/api/projects/:id/specs", async (req, reply) => {
         const { id } = req.params as { id: string };
@@ -579,7 +599,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         // the tests are stored and the answer says plainly why they were not run.
         let job: Awaited<ReturnType<typeof startValidationJob>> | null = null;
         let notRun: string | undefined;
-        if (body.validate && toRun.length) {
+        if (body.validate && toRun.length && !runsCanStartHere(p).ok) notRun = IMPORTED_NOT_RUN; // tests switched off here: kept, not run
+        else if (body.validate && toRun.length) {
             try {
                 job = await startValidationJob(id, application.id, toRun);
             } catch (e) {
@@ -611,6 +632,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         const t = repo.getTest((req.params as { id: string }).id);
         if (!t) throw new HttpError(404, "Test not found");
         if (!hasScreenshotStep(t.spec)) throw new HttpError(422, "This test has no screenshot assertion");
+        refuseUnlessRunsStart(p); // accepting means confirming by a run: nothing is accepted when no run can start
         await assertNoActiveJob(t.projectId);
         const latest = repo.listExecutions(t.id)[0] as { artifacts: Array<{ kind: string; path: string }> } | undefined;
         const actuals = (latest?.artifacts ?? []).filter((a) => a.kind === "visual-actual");
@@ -650,6 +672,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         }
         // "Run against <environment>": the result is stored for that environment and the test's own status is untouched.
         const choice = EnvironmentChoice.parse(req.body ?? {});
+        refuseUnlessRunsStart(p);
         if (choice.environment) {
             return reply.code(202).send(await startEnvironmentRun({ repo, p, applicationFor: (pid) => applicationFor(pid), assertNoActiveJob }, t.projectId, [t], choice.environment, choice.confirmProduction));
         }

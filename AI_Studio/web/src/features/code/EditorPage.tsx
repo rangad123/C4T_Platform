@@ -20,7 +20,7 @@ export function NewCodePage({ id }: { id: string }) {
     const kind = query.get("kind") === "api" ? "api" : "web";
     const category = query.get("category") ?? "";
     useDocumentTitle("Write code");
-    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: project.data?.name ?? "…", href: routes.project(id) }, { label: "Test cases", href: routes.tests(id) }, { label: "Write code" }], nav: "projects" });
+    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: project.data?.name ?? "…", href: routes.project(id) }, { label: "Test scripts", href: routes.tests(id) }, { label: "Write code" }], nav: "projects" });
 
     const save = useCallback(
         async (content: string): Promise<SaveResult> => {
@@ -39,7 +39,7 @@ export function NewCodePage({ id }: { id: string }) {
         return (
             <div className="card">
                 <EmptyState icon={Code2} title="Name the test first" actions={<LinkButton variant="primary" href={routes.tests(id)}>Back to the tests</LinkButton>}>
-                    Choose Write code on the Tests page and give the test a title.
+                    Choose New test script, then Write code, on Test scripts and give the test a title.
                 </EmptyState>
             </div>
         );

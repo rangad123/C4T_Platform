@@ -4,6 +4,7 @@ import { EXTRA_VARIANT_IDS, normalizeVariants } from "../../engine/validation/va
 import { HttpError } from "../http-error.js";
 import { DEFAULT_JOB_OPTIONS } from "../repo.js";
 import { buildRunDetail } from "../run-view.js";
+import { refuseUnlessRunsStart } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
 
 /**
@@ -31,6 +32,8 @@ export function registerRunRoutes(ctx: RouteCtx): void {
         const { id } = req.params as { id: string };
         ctx.project(id);
         const body = StartBody.parse(req.body ?? {});
+        // Said plainly before anything is queued: a run nothing will pick up is not a run.
+        refuseUnlessRunsStart(ctx.p);
         const all = repo.listTests(id);
         let chosen = all;
         if (body.testIds) {

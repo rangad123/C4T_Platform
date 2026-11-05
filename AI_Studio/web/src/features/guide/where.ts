@@ -1,4 +1,4 @@
-import { LIBRARY_SECTIONS, RELEASE_SECTIONS, RUNS_SECTIONS, SETUP_SECTIONS, routes } from "../../lib/router.js";
+import { CASES_SECTIONS, LIBRARY_SECTIONS, RELEASE_SECTIONS, RUNS_SECTIONS, SETUP_SECTIONS, routes } from "../../lib/router.js";
 import type { WhereTo } from "./types.js";
 
 /** Places that live inside one project. The others (projects, new project, settings) need no project. */
@@ -25,8 +25,11 @@ export function whereToHref(where: WhereTo, projectId: string | null | undefined
     switch (where.place) {
         case "overview":
             return routes.project(projectId);
+        // "tests" is the runnable tests: the Test scripts list. The written test cases are "cases".
         case "tests":
             return routes.tests(projectId);
+        case "cases":
+            return routes.cases(projectId, inList(CASES_SECTIONS, where.section));
         case "runs":
             return routes.runs(projectId, inList(RUNS_SECTIONS, where.section));
         case "library":
@@ -39,4 +42,4 @@ export function whereToHref(where: WhereTo, projectId: string | null | undefined
 }
 
 /** The sections a place has, for tests that check the content only names real ones. */
-export const SECTIONS_OF: Record<string, readonly string[]> = { runs: RUNS_SECTIONS, library: LIBRARY_SECTIONS, release: RELEASE_SECTIONS, setup: SETUP_SECTIONS };
+export const SECTIONS_OF: Record<string, readonly string[]> = { cases: CASES_SECTIONS, runs: RUNS_SECTIONS, library: LIBRARY_SECTIONS, release: RELEASE_SECTIONS, setup: SETUP_SECTIONS };

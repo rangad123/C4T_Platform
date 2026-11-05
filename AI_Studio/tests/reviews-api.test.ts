@@ -10,6 +10,8 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
+let stopBeat: (() => void) | undefined;
 import { loadConfig } from "../src/config.js";
 import { TestSpecSchema, type TestSpec } from "../src/engine/spec/schema.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
@@ -85,11 +87,14 @@ beforeAll(async () => {
     platform = bootstrap(
         loadConfig({ DATA_DIR: dataDir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: "reviews-test-secret-key-0123456789", C4T_API_ORIGIN: `http://127.0.0.1:${API_PORT}`, C4T_SITE_URL: "https://crowd4test.example" }),
     );
+    // A worker in another process says it is alive, so runs and explorations are queued (and nothing here runs them).
+    stopBeat = startHeartbeat(platform.db);
     app = await buildServer(platform);
     await app.ready();
 }, 60_000);
 
 afterAll(async () => {
+    stopBeat?.();
     await app?.close();
     platform?.db.close();
     await new Promise((r) => api?.close(r));

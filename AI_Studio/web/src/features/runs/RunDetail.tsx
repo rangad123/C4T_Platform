@@ -129,7 +129,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                         <ul className="run-changes">
                             {a.heldBack.map((t) => (
                                 <li key={t.id}>
-                                    <a href={t.version !== null ? versionHref(id, t.id, t.version) : routes.scripts(id)}>Review {t.testId}</a>
+                                    <a href={t.version !== null ? versionHref(id, t.id, t.version) : routes.scripts(id, "review")}>Review {t.testId}</a>
                                     <span className="t-meta"> {t.title}</span>
                                 </li>
                             ))}

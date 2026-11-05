@@ -300,9 +300,9 @@ describe("edit twice, compare, restore", () => {
     });
 
     it("links work after a restore without an unsaved-changes question", async () => {
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
         await pwExpect(page.getByRole("dialog")).toHaveCount(0);
-        expect(page.url()).toContain(`/projects/${projectId}/tests`);
+        expect(page.url()).toContain(`/projects/${projectId}/scripts`);
     });
 });
 

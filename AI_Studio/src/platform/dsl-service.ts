@@ -128,7 +128,8 @@ export class DslService {
     // ── a new test ──────────────────────────────────────────────────────────
 
     /** Creates a test from text through the platform's own import. `headers` carries the caller's API key to the inner call. */
-    async create(projectId: string, text: string, headers: Record<string, string>) {
+    /** `run: false` saves the test without running it (an AI draft: drafts never run until approved). */
+    async create(projectId: string, text: string, headers: Record<string, string>, opts: { run?: boolean } = {}) {
         this.ctx.project(projectId);
         const read = parseDsl(text);
         if (!read.spec) throw new DslRefusal(422, `The test was not created: line ${read.diagnostics[0]?.line ?? 1}, ${lowerFirst(read.diagnostics[0]?.message ?? "the text could not be read.")}`, read.diagnostics.map(asError));
@@ -152,12 +153,14 @@ export class DslService {
             throw new DslRefusal(422, `The test was not created: ${first ? lowerFirst(first.message) : "it is not valid."}`, mapped);
         }
 
-        let validate = true;
-        try {
-            await this.ctx.assertNoActiveJob(projectId);
-        } catch (e) {
-            if (!(e instanceof HttpError) || e.status !== 409) throw e;
-            validate = false;
+        let validate = opts.run !== false;
+        if (validate) {
+            try {
+                await this.ctx.assertNoActiveJob(projectId);
+            } catch (e) {
+                if (!(e instanceof HttpError) || e.status !== 409) throw e;
+                validate = false;
+            }
         }
         // testId is left out so the platform gives the next free one.
         const { testId: _ignored, ...rest } = checked.spec;
@@ -168,7 +171,7 @@ export class DslService {
             validate = false;
             res = await post(false);
         }
-        const answer = (res.body ? JSON.parse(res.body) : {}) as { jobId?: string | null; tests?: Array<{ id: string; testId: string }>; error?: string; details?: unknown };
+        const answer = (res.body ? JSON.parse(res.body) : {}) as { jobId?: string | null; tests?: Array<{ id: string; testId: string }>; error?: string; details?: unknown; notRun?: string };
         if (res.statusCode >= 400) throw this.refusal(res.statusCode, answer, read.stepLines);
         const made = answer.tests?.[0];
         if (!made) throw new HttpError(500, "The test could not be created.");
@@ -179,7 +182,7 @@ export class DslService {
             tests: answer.tests,
             jobId: answer.jobId ?? null,
             diagnostics: mapped,
-            ...(!validate ? { note: "Another run is in progress for this project, so the test was saved but not run. Run it when the current run has finished." } : {}),
+            ...(!validate && opts.run !== false ? { note: "Another run is in progress for this project, so the test was saved but not run. Run it when the current run has finished." } : answer.notRun ? { note: answer.notRun } : {}),
         };
     }
 

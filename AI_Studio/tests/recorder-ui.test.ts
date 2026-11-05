@@ -356,25 +356,27 @@ async function settle(scheme: "light" | "dark") {
 // ── journeys ────────────────────────────────────────────────────────────────
 
 describe("Record a test: start", () => {
-    it("is reached from the Record a test button on the Tests page, in the header and on the empty state", async () => {
+    it("is reached from Test development's Record, and is not a way of making a test script any more", async () => {
         resetFake();
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.reload();
-        await page.getByRole("button", { name: "New test", exact: true }).click();
-        const link = page.getByRole("menuitem", { name: "Record it in a browser", exact: true });
-        await pwExpect(link).toBeVisible();
-        await link.click();
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
+        await pwExpect(page.getByRole("menuitem", { name: "Build steps by hand", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("menuitem", { name: "Record it in a browser" })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await page.goto(`${BASE}/#/develop`);
+        await page.locator("li", { hasText: "Atlas shop" }).getByRole("link", { name: "Record", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "Record a test", exact: true })).toBeVisible();
         await pwExpect(page.getByText("We open a browser window on the computer that runs this platform.")).toBeVisible();
         expect(page.url()).toContain(`/#/projects/${projectId}/record`);
-        // the empty state of a project without tests offers it too
+        // the empty state of a project without tests offers New test script, without recording
         const empty = seedProject(platform, "Empty shop", APP);
-        await page.goto(`${BASE}/#/projects/${empty.projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${empty.projectId}/scripts`);
         await page.reload();
-        await pwExpect(page.getByRole("heading", { name: "No tests yet" })).toBeVisible();
-        // the New test menu (with Record it in a browser) is there too
-        await page.getByRole("button", { name: "New test", exact: true }).last().click();
-        await pwExpect(page.getByRole("menuitem", { name: "Record it in a browser", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "No test scripts yet" })).toBeVisible();
+        await page.getByRole("button", { name: "New test script", exact: true }).last().click();
+        await pwExpect(page.getByRole("menuitem", { name: "Write it as text", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("menuitem", { name: "Record it in a browser" })).toHaveCount(0);
     });
 
     it("explains the page, prefills the project address and warns about personal data", async () => {

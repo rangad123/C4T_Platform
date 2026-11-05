@@ -1,17 +1,29 @@
-import { ProjectHub, type HubSection } from "../../components/ProjectHub";
-import { routes, useRoute, type CasesSection } from "../../lib/router";
-import { ProjectTests } from "../../pages/ProjectTests";
-import { ManualCasesPage } from "../manual/ManualCasesPage";
+import { useEffect } from "react";
+import { CASES_SECTIONS, go, routes, useRoute, type CasesSection } from "../../lib/router";
+import { TestCaseList } from "../manual/ManualCasesPage";
+
+/** What links to the runnable tests' list carried when it was this place (`routes.newTest`, the dashboard's filters). */
+const SCRIPT_LIST_PARAMS = ["start", "status", "git", "quality", "quarantine"];
 
 /**
- * The Test cases place: one home for every test case, automated and manual (manual checks used to sit under Release). Review and
- * approval of AI drafts arrive with Phase 3 (docs/product-restructure/IMPLEMENTATION_ROADMAP.md).
+ * The Test cases place: the project's written test cases in one list, filtered by type (round 38). The runnable tests are test
+ * scripts and live on Test scripts. `?section=automated|manual` (the two sections of earlier versions) opens the list with that
+ * type chosen; `?case=` opens one case. A link meant for the runnable tests' list goes on to Test scripts.
  */
 export function TestCasesPage({ id }: { id: string }) {
-    const section = (useRoute().query.get("section") as CasesSection | null) ?? "automated";
-    const sections: HubSection[] = [
-        { key: "automated", label: "Automated", hint: "Tests the platform runs: written by the AI, recorded, built step by step or written as code", render: () => <ProjectTests id={id} /> },
-        { key: "manual", label: "Manual", hint: "Checks a person does by hand, kept next to the automated tests", render: () => <ManualCasesPage id={id} /> },
-    ];
-    return <ProjectHub id={id} place="tests" title="Test cases" subtitle="Every check of this project: the automated tests and the ones a person does by hand." sections={sections} current={section} hrefOf={(k) => routes.cases(id, k as CasesSection)} />;
+    const query = useRoute().query;
+    const asked = query.get("section");
+    const filter: CasesSection = asked && (CASES_SECTIONS as readonly string[]).includes(asked) ? (asked as CasesSection) : "all";
+    const forScripts = SCRIPT_LIST_PARAMS.some((k) => query.has(k));
+    const scripts = routes.tests(id);
+    const forward = forScripts && !scripts.startsWith(`#/projects/${id}/tests`);
+    const qs = query.toString();
+    useEffect(() => {
+        if (!forward) return;
+        const rest = new URLSearchParams(qs);
+        rest.delete("section");
+        go(`${scripts}${scripts.includes("?") ? "&" : "?"}${rest.toString()}`);
+    }, [forward, scripts, qs]);
+    if (forward) return null;
+    return <TestCaseList id={id} filter={filter} open={query.get("case")} />;
 }

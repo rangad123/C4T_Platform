@@ -202,11 +202,14 @@ describe.skipIf(missing.length > 0)("the screens on the real platform with a fak
         const tests = (await api("GET", `/api/projects/${projectId}/tests`)).body as Array<{ id: string; title: string; kind: string; validationStatus: string }>;
         expect(tests.length).toBeGreaterThan(2);
         expect(tests.every((t) => t.kind === "mobile")).toBe(true);
-        await page.goto(`${base}/#/projects/${projectId}/tests`);
+        // Round 38: the runnable tests are the Test scripts list (`/tests` is the written test cases now).
+        await page.goto(`${base}/#/projects/${projectId}/scripts`);
         const first = page.getByRole("link", { name: new RegExp(tests[0]!.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).first();
         await pwExpect(first).toBeVisible();
-        await pwExpect(first).toContainText(`Phone, ${PKG}`);
-        expect(await first.textContent()).not.toMatch(/Mobile/);
+        // The script's row says what it tests under its title link: a phone test of the app.
+        const row = page.locator(".script-row", { has: first }).first();
+        await pwExpect(row).toContainText(`Phone, ${PKG}`);
+        expect(await row.textContent()).not.toMatch(/Mobile/);
         await shot("real-tests-light-1280");
         // A test says where it came from, with the screens it goes through.
         await first.click();

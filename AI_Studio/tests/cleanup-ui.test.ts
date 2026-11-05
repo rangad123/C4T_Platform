@@ -155,8 +155,8 @@ describe("test data cleanup in the UI", () => {
     });
 
     it("switching cleanup off warns that records will stay, and a run then leaves them in place", async () => {
-        await page.goto(`${base}/#/projects/${projectId}/tests`);
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
+        await page.goto(`${base}/#/projects/${projectId}/scripts`);
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
         // Test data moved from the Library to the project's Settings (round 25).
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
         await page.getByRole("link", { name: "Test data", exact: true }).click();
@@ -191,10 +191,10 @@ describe("test data cleanup in the UI", () => {
         expect((await call("GET", `/api/projects/${projectId}/cleanup`)).body.enabled).toBe(true);
     });
 
-    it("the generation form offers the choice next to tests that change data, with a plain warning when it is off", async () => {
-        await page.goto(`${base}/#/new?url=${encodeURIComponent(FX)}`);
-        await page.locator("summary", { hasText: "Advanced options" }).click();
-        const change = page.getByRole("checkbox", { name: /Include API tests that change data/ });
+    it("the Requirements tab's inputs offer the choice next to tests that change data, with a plain warning when it is off", async () => {
+        // The card is collapsed to one line unless something is missing (round 38); its own link opens it.
+        await page.goto(`${base}/#/projects/${projectId}/requirements?inputs=open`);
+        const change = page.getByTestId("agent-inputs").getByRole("checkbox", { name: /Include API tests that change data/ });
         await change.check();
         const remove = page.getByRole("checkbox", { name: /Remove the records these tests create afterwards/ });
         await pwExpect(remove).toBeChecked();

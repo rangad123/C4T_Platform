@@ -52,24 +52,14 @@ afterAll(async () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe("the toggle on the new-project form", () => {
-    it("is off by default, says what it sends, is sent only when ticked, and is stored with the job", async () => {
+describe("the new-project form", () => {
+    it("has no load check toggle: an exploration never sends load unless asked for through the API, and the job stores it off", async () => {
         const dead = "http://127.0.0.1:5555/";
-        let made = 0;
-        const open = async () => {
-            await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
-            await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
-            // Round 37: a new project's name is always typed (a taken name is refused, so each form gets its own).
-            await page.getByLabel("Project name").fill(`Load project ${++made}`);
-            await page.locator("summary", { hasText: "Advanced options" }).click();
-        };
-        await open();
-        const toggle = page.getByRole("checkbox", { name: /Load check \(test environments only\)/ });
-        await pwExpect(toggle).not.toBeChecked();
-        await pwExpect(toggle).toBeEnabled();
-        await pwExpect(page.getByText("Sends up to 300 requests to each of up to 3 pages of your application. Use a test environment.", { exact: false })).toBeVisible();
-        await pwExpect(page.getByText(/We.ll test:/)).not.toContainText("load");
-
+        await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
+        await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
+        // Round 37: a new project's name is always typed.
+        await page.getByLabel("Project name").fill("Load project 1");
+        await pwExpect(page.getByRole("checkbox", { name: /Load check \(test environments only\)/ })).toHaveCount(0);
         const sent: Array<Record<string, unknown>> = [];
         await page.route("**/api/projects/*/test-generation", (route) => {
             sent.push(route.request().postDataJSON());
@@ -78,19 +68,10 @@ describe("the toggle on the new-project form", () => {
         await page.getByRole("button", { name: "Start exploring" }).click();
         await page.waitForURL((u) => u.hash.startsWith("#/projects/"));
         await pwExpect.poll(() => sent.length).toBe(1);
-        expect(sent[0]).not.toHaveProperty("loadChecks"); // not even sent when off
-
-        await open();
-        await toggle.check();
-        await pwExpect(page.getByText(/We.ll test:/)).toContainText("load");
-        await page.getByRole("button", { name: "Start exploring" }).click();
-        await pwExpect.poll(() => sent.length).toBe(2);
-        expect(sent[1]).toMatchObject({ loadChecks: true });
-
+        expect(sent[0]).not.toHaveProperty("loadChecks");
         const projects = (await (await fetch(`${BASE}/api/projects`)).json()) as Array<{ id: string }>;
         const options = projects.flatMap((p) => platform.repo.listJobs(p.id).map((j) => j.options as unknown as Record<string, unknown>));
-        expect(options.some((o) => o.loadChecks === true)).toBe(true);
-        expect(options.some((o) => o.loadChecks === false)).toBe(true); // the default stored with the first job
+        expect(options.some((o) => o.loadChecks === false)).toBe(true); // the default stored with the job
     }, 120_000);
 });
 

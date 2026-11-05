@@ -101,7 +101,7 @@ afterAll(async () => {
 
 const dialog = () => page.getByRole("dialog", { name: "Write a test", exact: true });
 /** The New test button (the focus goes back to it when the dialog closes) and the menu entry that opens the dialog. */
-const writeButton = () => page.getByRole("button", { name: "New test", exact: true });
+const writeButton = () => page.getByRole("button", { name: "New test script", exact: true });
 const openDescribe = async () => {
     await writeButton().click();
     await page.getByRole("menuitem", { name: "Describe it", exact: true }).click();
@@ -111,8 +111,8 @@ const SENTENCE = "Add the Blue Mug to the cart and check the total shows $12.00"
 
 describe("Write a test in the UI", () => {
     it("opens a dialog with the cursor in the text box, examples as hints, and a button that waits for words", async () => {
-        await page.goto(`${base}/#/projects/${projectId}/tests`);
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
+        await page.goto(`${base}/#/projects/${projectId}/scripts`);
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
         await openDescribe();
         await pwExpect(dialog()).toBeVisible();
         await pwExpect(box()).toBeFocused();
@@ -171,7 +171,7 @@ describe("Write a test in the UI", () => {
     }, 180_000);
 
     it("lists the new test on the Tests page and the run on the Runs page", async () => {
-        await page.goto(`${base}/#/projects/${projectId}/tests`);
+        await page.goto(`${base}/#/projects/${projectId}/scripts`);
         await pwExpect(page.getByRole("button", { name: "Plain English", exact: false }).first()).toBeVisible();
         await pwExpect(page.getByRole("link", { name: new RegExp(SENTENCE.replace(/[$.]/g, "\\$&")) })).toBeVisible();
         await page.goto(`${base}/#/projects/${projectId}/runs`);
@@ -200,7 +200,7 @@ describe("Write a test in the UI", () => {
     it("says so when no AI model is set up, and cannot be submitted", async () => {
         platform.llm = unavailableLlmClient("no key");
         try {
-            await page.goto(`${base}/#/projects/${projectId}/tests`);
+            await page.goto(`${base}/#/projects/${projectId}/scripts`);
             await page.reload(); // the server's capabilities are read once per page load
             await openDescribe();
             await pwExpect(dialog().getByText("The AI model isn’t set up yet", { exact: true })).toBeVisible();

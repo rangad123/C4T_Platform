@@ -121,7 +121,9 @@ describe("place help covers every place in the router", () => {
         [routes.newProject(), "new-project"],
         [routes.newProject({ project: "p1" }), "new-project"],
         [routes.project("p1"), "overview"],
-        [routes.tests("p1"), "tests"],
+        // Round 38: the runnable tests are the Test scripts list; Test cases holds the written cases.
+        [routes.tests("p1"), "scripts"],
+        [routes.cases("p1"), "tests"],
         [routes.runs("p1"), "runs-runs"],
         [routes.run("p1", "j1"), "run-detail"],
         [routes.schedule("p1"), "runs-schedules"],
@@ -367,7 +369,8 @@ describe("the tour", () => {
         const of = (c: string) => TOUR_STEPS.filter((s) => s.chapter === c).map((s) => s.target ?? s.id);
         expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-develop", "nav-libraries", "nav-runners", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-runs", "tab-settings"]));
         expect(of("making")).toEqual(expect.arrayContaining(["new-test", "wb-steps", "wb-text", "wb-code", "wb-history", "wb-edit", "scripts-steps", "scripts-elements", "settings-data"]));
-        expect(TOUR_STEPS.filter((s) => s.target === "new-test").length).toBeGreaterThanOrEqual(6);
+        // Round 38: the New test script menu no longer records, so its tour has one card fewer (the menu, describe, build, code, import).
+        expect(TOUR_STEPS.filter((s) => s.target === "new-test").length).toBeGreaterThanOrEqual(5);
         expect(of("running")).toEqual(expect.arrayContaining(["run", "run-strip", "runs-runs", "run-tests", "last-run", "runs-schedules", "runs-trends"]));
         expect(of("release")).toEqual(expect.arrayContaining(["runs-releases", "release-signoff", "tests-manual", "runs-compliance", "project-runners", "add-runner", "settings-environments", "settings-alerts", "settings-issues", "mobile-app", "settings-storage", "testing-type"]));
         expect(of("phones")).toEqual(expect.arrayContaining(["settings-mobile", "explore-phone", "explorer-view"]));

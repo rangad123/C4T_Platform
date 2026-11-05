@@ -14,3 +14,9 @@
 .req-bar .req-not_covered { background: var(--status-warning-fg); }
 .req-counts { list-style: none; padding: 0; margin: 0; }
 .req-links { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+
+/* "What the agents need": the heading opens and closes the card (one summary line while closed). */
+.inputs-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.inputs-toggle .chev { color: var(--text-muted); transition: rotate var(--duration-base) var(--ease-standard); }
+.inputs-toggle[aria-expanded="true"] .chev { rotate: 90deg; }
+.inputs-toggle:hover .chev { color: var(--text-primary); }

@@ -361,6 +361,47 @@ describe("results", () => {
     });
 });
 
+describe("what a release lists", () => {
+    const itemIds = (view: { manual: { items: Array<{ id: string }> } }) => view.manual.items.map((i) => i.id).sort();
+    it("lists the Manual cases and the Automated cases without a script; a release made before keeps every case", async () => {
+        const s = seedProject(platform, "Scripted cases", "https://scripted.example.test");
+        const script = addTest(platform, s, "a");
+        const byHand = await newCase(s, "By hand");
+        const scripted = await newCase(s, "Has a script", "medium", { automation: "automated", linkedTestIds: [script] });
+        const unscripted = await newCase(s, "No script yet", "medium", { automation: "automated" });
+
+        const fresh = await newRelease(s, "New");
+        expect(fresh.cases).toBe("manual-and-unscripted");
+        expect(itemIds(fresh)).toEqual([byHand, unscripted].sort());
+
+        // A release made before the rule has no rule in its stored snapshot: it keeps listing every case.
+        const old = await newRelease(s, "Made earlier");
+        const stored = JSON.parse((platform.db.get<{ snapshot_json: string }>("SELECT snapshot_json FROM releases WHERE id = ?", old.id))!.snapshot_json);
+        delete stored.cases;
+        platform.db.run("UPDATE releases SET snapshot_json = ? WHERE id = ?", JSON.stringify(stored), old.id);
+        const oldView = (await call("GET", `${releases(s)}/${old.id}`)).body;
+        expect(oldView.cases).toBe("every-case");
+        expect(itemIds(oldView)).toEqual([byHand, scripted, unscripted].sort());
+        // A refresh keeps each release's rule.
+        expect(itemIds((await call("POST", `${releases(s)}/${fresh.id}/refresh`)).body)).toEqual([byHand, unscripted].sort());
+        expect((await call("POST", `${releases(s)}/${old.id}/refresh`)).body.cases).toBe("every-case");
+
+        // A case with a result recorded in the release stays in it when its script appears later.
+        expect((await setResult(s, fresh.id, unscripted, { result: "passed", by: "Ann" })).status).toBe(200);
+        const later = addTest(platform, s, "b");
+        expect((await call("PUT", `${cases(s)}/${unscripted}`, { title: "No script yet", automation: "automated", linkedTestIds: [later] })).status).toBe(200);
+        expect(itemIds((await call("GET", `${releases(s)}/${fresh.id}`)).body)).toEqual([byHand, unscripted].sort());
+
+        // Signed and reopened, it still lists what its rule says.
+        expect((await sign(s, fresh.id, { decision: "rejected", by: "Ann" })).status).toBe(200);
+        expect(itemIds((await call("GET", `${releases(s)}/${fresh.id}`)).body)).toEqual([byHand, unscripted].sort());
+        expect((await call("POST", `${releases(s)}/${fresh.id}/reopen`, { by: "Ann", comment: "One more look" })).status).toBe(200);
+        const reopened = (await call("GET", `${releases(s)}/${fresh.id}`)).body;
+        expect(reopened.cases).toBe("manual-and-unscripted");
+        expect(itemIds(reopened)).toEqual([byHand, unscripted].sort());
+    });
+});
+
 describe("sign-off", () => {
     let s: Seed;
     let rid: string;

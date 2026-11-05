@@ -8,6 +8,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
+let stopBeat: (() => void) | undefined;
 
 vi.mock("../src/engine/discovery/browser.js", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../src/engine/discovery/browser.js")>()),
@@ -71,11 +73,14 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-agent-paths-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: "agent-choice-paths-secret-0123456789" } as never));
+    // A worker in another process says it is alive, so runs and explorations are queued (and nothing here runs them).
+    stopBeat = startHeartbeat(platform.db);
     app = await buildServer(platform);
     await app.ready();
 }, 60_000);
 
 afterAll(async () => {
+    stopBeat?.();
     await app?.close();
     platform?.db.close();
     fs.rmSync(dir, { recursive: true, force: true });

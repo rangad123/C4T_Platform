@@ -125,6 +125,23 @@ describe("Schedule tab", () => {
         await pwExpect(page.getByText(/Times are server time/)).toBeVisible();
     });
 
+    it("offers Explore again only to a project that explores", async () => {
+        const kind = page.getByRole("form", { name: "New schedule" }).getByLabel("What should run");
+        await page.getByRole("button", { name: "New schedule" }).click();
+        await pwExpect(kind.locator("option[value=generate]")).toHaveCount(1);
+        platform.repo.updateProject(projectId, { testingModes: ["code"] });
+        try {
+            await page.goto("about:blank");
+            await page.goto(`${BASE}/#/projects/${projectId}/runs?section=schedules`);
+            await page.getByRole("button", { name: "New schedule" }).click();
+            await pwExpect(kind.locator("option[value=validate]")).toHaveCount(1);
+            await pwExpect(kind.locator("option[value=generate]")).toHaveCount(0);
+        } finally {
+            platform.repo.updateProject(projectId, { testingModes: ["agent", "code"] });
+            await page.goto("about:blank");
+        }
+    });
+
     it("adds a webhook channel and sends a test message that really arrives", async () => {
         await page.goto(`${BASE}/#/projects/${projectId}/settings?section=alerts`);
         await page.getByRole("button", { name: "Add a channel" }).click();

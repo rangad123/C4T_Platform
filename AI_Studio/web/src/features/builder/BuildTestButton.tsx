@@ -72,7 +72,7 @@ export function BuildTestDialog({ projectId, onClose }: { projectId: string; onC
                     </select>
                 </div>
                 <div className="field">
-                    <FieldHelp htmlFor="bld-new-cat" label="Area (optional)" help="The Tests page groups tests by area. Tests with the same area are listed together." />
+                    <FieldHelp htmlFor="bld-new-cat" label="Area (optional)" help="Test scripts groups tests by area. Tests with the same area are listed together." />
                     <input id="bld-new-cat" className="input" value={category} maxLength={80} onChange={(e) => setCategory(e.target.value)} placeholder="Checkout" />
                 </div>
                 {error && <Callout tone="danger">{error}</Callout>}

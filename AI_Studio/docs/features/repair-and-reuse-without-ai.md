@@ -58,8 +58,8 @@ steps (privacy rule). Measured on the tests' tiny fixture site the prompt barely
 memory section that appears on every later exploration anyway); on real pages each snapshot is up to ~1,500 characters, all of which is saved
 for an unchanged page.
 
-**Force a full exploration**: "Send every page to the AI again" under Advanced options when starting an exploration (job option
-`fullExploration: true`; the log says `full_exploration`), or switch the saving off.
+**Force a full exploration**: start an exploration through the API with `fullExploration: true` (the log says `full_exploration`; the
+Explore page has no switch for it), or switch the saving off.
 
 ## Switches and usage
 

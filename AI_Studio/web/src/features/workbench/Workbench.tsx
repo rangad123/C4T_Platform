@@ -47,7 +47,7 @@ function RunEndWatcher({ projectId, onEnded }: { projectId: string; onEnded: () 
 }
 
 /**
- * One page per test: Steps, Text, Code and History are tabs of the same page (and routes), the header and the results stay put when
+ * One page per test: DSL, Code, Steps and History are tabs of the same page (and routes), the header and the results stay put when
  * the tab changes, and a run started from here shows its result here. Work that is not saved survives a change of tab.
  */
 /** What a saved bar says about the run a save queued; the note says when that run does not use the saved change (a draft never runs). */
@@ -63,7 +63,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
     useDocumentTitle(t ? t.title : "Test");
     usePage({
         crumbs: t
-            ? [{ label: "Projects", href: routes.home }, { label: project.data?.name ?? "…", href: routes.project(t.projectId) }, { label: "Test cases", href: routes.tests(t.projectId) }, { label: t.testId }]
+            ? [{ label: "Projects", href: routes.home }, { label: project.data?.name ?? "…", href: routes.project(t.projectId) }, { label: "Test scripts", href: routes.tests(t.projectId) }, { label: t.testId }]
             : [{ label: "Projects", href: routes.home }, { label: "Test" }],
         nav: "projects",
     });
@@ -348,14 +348,14 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
                             {t.custom && tab === "text" ? (
                                 <Callout
                                     tone="info"
-                                    title="A code test has no text form"
+                                    title="This script is code only: it has no DSL"
                                     actions={
                                         <LinkButton size="sm" variant="primary" href={testTabHref(id, "code")}>
                                             Open the Code tab
                                         </LinkButton>
                                     }
                                 >
-                                    The code is the test, so there is nothing to write as text. Read or change it in the Code tab{t.custom.canRestoreGenerated ? ", or go back to the generated version there to get the steps and the text back" : ""}.
+                                    It was written as code, so there are no DSL steps to show. The code is the script: read or change it in the Code tab{t.custom.canRestoreGenerated ? ", or go back to the generated version there to get the steps and the DSL back" : ""}.
                                 </Callout>
                             ) : (
                                 <StepsTab

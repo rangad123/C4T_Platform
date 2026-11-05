@@ -172,7 +172,7 @@ function everyPlace(): Array<[string, PlaceId]> {
         [routes.home, "projects"],
         [routes.newProject(), "new-project"],
         [routes.project(P()), "overview"],
-        [routes.tests(P()), "tests"],
+        [routes.cases(P()), "tests"],
         [routes.runs(P(), "runs"), "runs-runs"],
         [routes.runs(P(), "schedules"), "runs-schedules"],
         [routes.runs(P(), "deploys"), "runs-deploys"],
@@ -255,7 +255,7 @@ describe("the Help button and panel", () => {
     });
 
     it("follows the person from page to page while it stays open, and goes back to the page's help after a topic", async () => {
-        await visit(routes.tests(P()));
+        await visit(routes.cases(P()));
         await openHelp();
         expect(norm(await panel().innerText())).toContain(norm(PLACES.tests.what));
         // Click through the real tabs and sections.
@@ -277,7 +277,7 @@ describe("the Help button and panel", () => {
         await pwExpect(page.locator("h1").first()).toBeVisible();
         await openHelp();
         await pwExpect(panel()).toContainText(PLACES["test-steps"].what);
-        for (const [tab, id] of [["Text", "test-text"], ["Code", "test-code"], ["History", "test-history"]] as const) {
+        for (const [tab, id] of [["DSL", "test-text"], ["Code", "test-code"], ["History", "test-history"]] as const) {
             await page.getByRole("tab", { name: tab, exact: true }).click();
             await pwExpect(panel()).toContainText(PLACES[id as PlaceId].what);
         }
@@ -809,7 +809,7 @@ describe("the guided tour", () => {
             }
             // The next chapter starts on the Tests page.
             await pwExpect(counted(p)).toContainText(`Step ${steps.length + 1} of ${all.length} · Making tests`, { timeout: 8000 });
-            await pwExpect(p).toHaveURL(/#\/projects\/[^/]+\/tests$/);
+            await pwExpect(p).toHaveURL(/#\/projects\/[^/]+\/scripts$/);
             // Straight to the last chapter, and through it to the end.
             await card.locator("summary", { hasText: "Chapters" }).click();
             await card.locator(".tour-chapters").getByRole("button", { name: "Help", exact: true }).click();

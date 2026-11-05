@@ -44,7 +44,7 @@ export function IssueSection({ testId, projectId }: { testId: string; projectId:
         return (
             <p className="t-secondary row" data-testid="issue-empty" style={{ flexWrap: "wrap" }}>
                 No issue tracker is connected, so this can’t go to GitHub, Jira or Notion yet.
-                <LinkButton size="sm" href={routes.tests(projectId)}>Open Tests to connect one</LinkButton>
+                <LinkButton size="sm" href={routes.projectSettings(projectId, "issues")}>Open Settings, Issue tracker</LinkButton>
             </p>
         );
     }

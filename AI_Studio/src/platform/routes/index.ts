@@ -7,6 +7,7 @@ import { registerCleanupRoutes } from "./cleanup.js";
 import { registerContractRoutes } from "./contracts.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerDslRoutes } from "./dsl.js";
+import { registerGenerateScriptRoutes } from "./generate-scripts.js";
 import { registerDeviceFarmRoutes } from "./device-farms.js";
 import { registerCustomScriptRoutes } from "./custom-scripts.js";
 import { registerEnvironmentRoutes } from "./environments.js";
@@ -66,6 +67,7 @@ import { registerPhoneDeviceRoutes } from "./phone-device.js";
 import { registerPortableRoutes } from "./portable.js";
 import { registerReviewRoutes } from "./reviews.js";
 import { registerTestingAgentRoutes } from "./testing-agents.js";
+import { registerAgentInputRoutes } from "./agent-inputs.js";
 import { registerSecurityRoutes } from "../../security/routes/index.js";
 
 export type { RouteCtx } from "./types.js";
@@ -115,6 +117,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerSpecEditRoutes(ctx);
     registerBlockRoutes(ctx);
     registerDslRoutes(ctx);
+    // "Generate test scripts using AI": written cases into AI draft scripts (routes/generate-scripts.ts, round 38).
+    registerGenerateScriptRoutes(ctx);
     registerDeviceFarmRoutes(ctx);
     // Phone start state: the app's permissions for the "Grant these permissions" checklist (routes/phone-state.ts).
     registerPhoneStateRoutes(ctx);
@@ -139,6 +143,8 @@ export function registerFeatureRoutes(ctx: RouteCtx): void {
     registerProjectFolderRoutes(ctx);
     // Testing agents and the agents chosen for a project (routes/testing-agents.ts, round 37).
     registerTestingAgentRoutes(ctx);
+    // What a project's testing agents need, kept on its Requirements tab (routes/agent-inputs.ts, round 38).
+    registerAgentInputRoutes(ctx);
     // Reusable libraries of an organisation, and a project using and publishing their items (routes/libraries.ts, round 37).
     registerLibraryRoutes(ctx);
     registerLlmHealthRoutes(ctx);

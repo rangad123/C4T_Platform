@@ -398,7 +398,19 @@ describe("what failed", () => {
         const box = page.getByTestId("failure-summary");
         await pwExpect(box.getByTestId("failure-cause")).toContainText("No API token is saved for this project.");
         await pwExpect(box.getByTestId("failure-step")).toHaveCount(0);
-        await pwExpect(box.getByRole("link", { name: "Add an API token" })).toHaveAttribute("href", new RegExp(`#/new\\?project=${shop.projectId}`));
+        // Round 38: the API token is kept on the Requirements tab (What the agents need), not on the Explore page; the card opens on arrival.
+        await pwExpect(box.getByRole("link", { name: "Add an API token" })).toHaveAttribute("href", `#/projects/${shop.projectId}/requirements?inputs=open`);
+        await pwExpect(box.getByTestId("failure-cause")).toContainText("What the agents need, on the Requirements tab");
+        // A code project has no agents' inputs: its run sends the token of the environment it runs against.
+        platform.repo.updateProject(shop.projectId, { testingModes: ["code"] });
+        try {
+            await visit(testHash("token"));
+            await pwExpect(box.getByRole("link", { name: "Add an API token" })).toHaveAttribute("href", `#/projects/${shop.projectId}/settings?section=environments`);
+            await pwExpect(box.getByTestId("failure-cause")).toContainText("add the token to an environment under Settings, Environments");
+            await pwExpect(box.getByTestId("failure-cause")).not.toContainText("Requirements");
+        } finally {
+            platform.repo.updateProject(shop.projectId, { testingModes: ["agent", "code"] });
+        }
     });
 
     it("keeps a finding a finding: it needs a look, with its severity and one sentence of what that means", async () => {
@@ -516,6 +528,7 @@ describe("less noise", () => {
         const line = page.getByTestId("issue-empty");
         await pwExpect(line).toContainText("No issue tracker is connected");
         await pwExpect(line.getByRole("link")).toHaveCount(1);
+        await pwExpect(line.getByRole("link", { name: "Open Settings, Issue tracker" })).toHaveAttribute("href", `#/projects/${shop.projectId}/settings?section=issues`);
         await pwExpect(page.getByRole("heading", { name: "Issue tracker" })).toHaveCount(0);
         await pwExpect(page.getByText(/Want this in your issue tracker/)).toHaveCount(0);
     });

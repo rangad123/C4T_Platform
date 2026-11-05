@@ -8,6 +8,8 @@ import os from "node:os";
 import path from "node:path";
 import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
+let stopBeat: (() => void) | undefined;
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { renderScript } from "../src/engine/generators/index.js";
 import { convertMaestroFlow, convertMaestroFlows, MaestroSyntaxError, type FlowReport } from "../src/engine/import/maestro.js";
@@ -298,10 +300,13 @@ describe("POST /api/projects/:id/import/maestro", () => {
         for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
         dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-maestro-"));
         platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", WORKER_EMBEDDED: "false" }));
+        // A worker in another process says it is alive, so runs and explorations are queued (and nothing here runs them).
+        stopBeat = startHeartbeat(platform.db);
         server = await buildServer(platform);
         projectId = (await call("POST", "/api/projects", { name: "Maestro import" })).body.id;
     }, 30_000);
     afterAll(async () => {
+        stopBeat?.();
         delete process.env.BLOCK_PRIVATE_TARGETS;
         await server?.close();
         platform?.db.close();

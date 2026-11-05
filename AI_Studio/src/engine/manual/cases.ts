@@ -8,6 +8,9 @@ import { z } from "zod";
 
 export const PRIORITIES = ["critical", "high", "medium", "low"] as const;
 export type CasePriority = (typeof PRIORITIES)[number];
+/** Whether a written case can be checked by a tool (a test script can be made from it) or needs a person. */
+export const CASE_AUTOMATION = ["automated", "manual"] as const;
+export type CaseAutomation = (typeof CASE_AUTOMATION)[number];
 
 export const MAX_CASES = 500;
 export const MAX_STEPS = 30;
@@ -49,14 +52,27 @@ export const ManualCaseInputSchema = z.object({
     priority: z.enum(PRIORITIES).default("medium"),
     linkedTestIds: z.array(z.string().min(1).max(100)).max(MAX_LINKED, `A case can be linked to at most ${MAX_LINKED} tests`).default([]),
     requirement: optionalText(MAX_REQUIREMENT, "The requirement").default(""),
+    /** Absent: a new case is Manual, a changed case keeps its type. */
+    automation: z.enum(CASE_AUTOMATION, { errorMap: () => ({ message: "The type is automated or manual" }) }).optional(),
+    /** The requirement record the case comes from (Requirements place). Absent keeps it on a change; null clears it. */
+    requirementId: z.string().min(1).max(64).nullable().optional(),
 });
 export type ManualCaseInput = z.infer<typeof ManualCaseInputSchema>;
 
-export interface ManualCase extends ManualCaseInput {
+export interface ManualCase extends Omit<ManualCaseInput, "automation" | "requirementId"> {
     id: string;
+    /** The case's number in its project (1, 2, ...), shown as `ref`. */
+    number: number;
+    /** TC-001: the id people read. */
+    ref: string;
+    automation: CaseAutomation;
+    requirementId: string | null;
     createdAt: string;
     updatedAt: string;
 }
+
+/** The id people read for a case's number: TC-001, TC-002, ... TC-1000. */
+export const caseRef = (n: number): string => `TC-${String(n).padStart(3, "0")}`;
 
 export const RESULTS = ["not_run", "passed", "failed", "blocked", "skipped"] as const;
 export type ManualResult = (typeof RESULTS)[number];

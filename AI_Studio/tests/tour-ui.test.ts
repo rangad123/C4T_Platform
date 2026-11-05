@@ -215,7 +215,7 @@ describe("chapters", () => {
         const { ctx, p } = await freshPage();
         try {
             // In the full project: Running and results starts at its first step.
-            await p.goto(`${BASE}/#/projects/${full.projectId}/tests`);
+            await p.goto(`${BASE}/#/projects/${full.projectId}/scripts`);
             await pwExpect(p.locator("h1").first()).toBeVisible();
             await p.goto(`${BASE}/#/guide`);
             await pwExpect(p.getByRole("heading", { name: "The guided tour", level: 2 })).toBeVisible();
@@ -224,12 +224,12 @@ describe("chapters", () => {
             const first = steps.find((s) => s.chapter === "running")!;
             await current(p, first);
             expect(await count(p)).toBe(`Step ${steps.indexOf(first) + 1} of ${steps.length} · Running and results`);
-            expect(await hash(p)).toBe(`#/projects/${full.projectId}/tests`);
+            expect(await hash(p)).toBe(`#/projects/${full.projectId}/scripts`);
             await p.keyboard.press("Escape");
             await pwExpect(card(p)).toHaveCount(0);
 
             // In the plain project there is no phone app: the chapter list says Phones is left out.
-            await p.goto(`${BASE}/#/projects/${plain.projectId}/tests`);
+            await p.goto(`${BASE}/#/projects/${plain.projectId}/scripts`);
             await pwExpect(p.locator("h1").first()).toBeVisible();
             await p.goto(`${BASE}/#/guide`);
             await p.locator(".guide-tour-chapters").getByRole("button", { name: "Phones", exact: true }).click();

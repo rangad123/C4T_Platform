@@ -129,14 +129,14 @@ describe("visual change review in the UI", () => {
         const spec = { title: "Home looks unchanged", kind: "web", category: "Visual", type: "visual", steps: [{ action: "navigate", url: "/" }, { action: "assert", check: "screenshot", expected: 100 }] };
         // start from an empty project: create it via the API, then import through the UI
         const project = (await (await fetch(`${base}/api/projects`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Visual UI" }) })).json()) as { id: string };
-        await page.goto(`${base}/?x=1#/projects/${project.id}/tests`);
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
+        await page.goto(`${base}/?x=1#/projects/${project.id}/scripts`);
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
         const res = await fetch(`${base}/api/projects/${project.id}/specs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ specs: [spec], baseUrl: `http://127.0.0.1:${FIXTURE_PORT}` }) });
         expect(res.status).toBe(202);
         await page.reload();
-        const row = page.locator("a.list-row", { hasText: "Home looks unchanged" });
+        const row = page.locator(".script-row", { hasText: "Home looks unchanged" });
         await pwExpect(row.getByText("Passing", { exact: true })).toBeVisible({ timeout: 60_000 }); // baseline captured + stability check
-        await row.click();
+        await row.locator("a.sr-title").click();
 
         variant = "b"; // the page changes
         await runAgain(project.id);
@@ -165,20 +165,20 @@ describe("large suites", () => {
         expect(res.status).toBe(202);
 
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        await page.goto(`${base}/#/projects/${project.id}/tests`);
+        await page.goto(`${base}/#/projects/${project.id}/scripts`);
         await pwExpect(page.getByText("120 tests", { exact: false }).first()).toBeVisible();
-        await pwExpect(page.locator("a.list-row")).toHaveCount(50);
+        await pwExpect(page.locator(".script-row")).toHaveCount(50);
         await pwExpect(page.getByText("Showing 50 of 120")).toBeVisible();
         await page.getByRole("button", { name: "Show 50 more" }).click();
-        await pwExpect(page.locator("a.list-row")).toHaveCount(100);
+        await pwExpect(page.locator(".script-row")).toHaveCount(100);
         await page.getByRole("button", { name: "Show 20 more" }).click();
-        await pwExpect(page.locator("a.list-row")).toHaveCount(120);
+        await pwExpect(page.locator(".script-row")).toHaveCount(120);
         await pwExpect(page.getByRole("button", { name: /Show \d+ more/ })).toHaveCount(0);
         // the area header still reports the full count
         await pwExpect(page.getByText("120 tests · 0 passing").first()).toBeVisible();
         // searching narrows within all 120, not just the visible page
-        await page.getByPlaceholder("Search tests").fill("Endpoint 119");
-        await pwExpect(page.locator("a.list-row")).toHaveCount(1);
+        await page.getByPlaceholder("Search scripts").fill("Endpoint 119");
+        await pwExpect(page.locator(".script-row")).toHaveCount(1);
         await page.close();
     }, 60_000);
 });
@@ -266,8 +266,8 @@ describe("mobile testing", () => {
             await pwExpect(panel.getByText("doesn't look like an Android app")).toBeVisible();
 
             // The mobile test page can be run and says what it needs
-            await page.goto(`${base}/#/projects/${project.id}/tests`);
-            await page.locator("a.list-row", { hasText: "Network settings are listed" }).click();
+            await page.goto(`${base}/#/projects/${project.id}/scripts`);
+            await page.locator("a.sr-title", { hasText: "Network settings are listed" }).click();
             await pwExpect(page.getByText("This mobile test hasn’t been run yet.")).toBeVisible();
             await pwExpect(page.getByRole("button", { name: "Run again" })).toBeVisible();
             await page.getByRole("button", { name: "Run again" }).click();
@@ -297,20 +297,22 @@ describe("weak tests", () => {
         expect(res.status).toBe(202);
 
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        await page.goto(`${base}/#/projects/${project.id}/tests`);
-        await pwExpect(page.locator("a.list-row")).toHaveCount(2);
-        await pwExpect(page.locator("a.list-row", { hasText: "Opens the shop page" }).getByText("Weak checks", { exact: true })).toBeVisible();
-        await pwExpect(page.locator("a.list-row", { hasText: "Cart count updates" }).getByText("Weak checks", { exact: true })).toHaveCount(0);
+        await page.goto(`${base}/#/projects/${project.id}/scripts`);
+        await pwExpect(page.locator(".script-row")).toHaveCount(2);
+        await pwExpect(page.locator(".script-row", { hasText: "Opens the shop page" }).getByText("Weak checks", { exact: true })).toBeVisible();
+        await pwExpect(page.locator(".script-row", { hasText: "Cart count updates" }).getByText("Weak checks", { exact: true })).toHaveCount(0);
 
         await page.getByRole("button", { name: /Weak checks/ }).click();
-        await pwExpect(page.locator("a.list-row")).toHaveCount(1);
-        await page.locator("a.list-row").click();
+        await pwExpect(page.locator(".script-row")).toHaveCount(1);
+        await page.locator("a.sr-title").click();
+        // Round 38: the title opens the DSL tab; the note about weak checks is on the Steps tab.
+        await page.getByRole("tab", { name: "Steps", exact: true }).click();
         await pwExpect(page.getByText("This test checks very little")).toBeVisible();
         await pwExpect(page.getByTestId("quality-reasons")).toContainText("never checks anything");
 
         // the same filter opens straight from a link
-        await page.goto(`${base}/#/projects/${project.id}/tests?quality=weak`);
-        await pwExpect(page.locator("a.list-row")).toHaveCount(1);
+        await page.goto(`${base}/#/projects/${project.id}/scripts?quality=weak`);
+        await pwExpect(page.locator(".script-row")).toHaveCount(1);
         await page.close();
     }, 60_000);
 });
@@ -337,12 +339,12 @@ describe("page speed", () => {
         expect(res.status).toBe(202);
 
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        await page.goto(`${base}/#/projects/${project.id}/tests`);
-        const slowRow = page.locator("a.list-row", { hasText: "Slow page loads quickly" });
+        await page.goto(`${base}/#/projects/${project.id}/scripts`);
+        const slowRow = page.locator(".script-row", { hasText: "Slow page loads quickly" });
         await pwExpect(slowRow.getByText("Needs a look", { exact: true })).toBeVisible({ timeout: 120_000 });
-        await pwExpect(page.locator("a.list-row", { hasText: "Fast page loads quickly" }).getByText("Passing", { exact: true })).toBeVisible();
+        await pwExpect(page.locator(".script-row", { hasText: "Fast page loads quickly" }).getByText("Passing", { exact: true })).toBeVisible();
 
-        await slowRow.click();
+        await slowRow.locator("a.sr-title").click();
         const card = page.getByTestId("page-speed");
         await pwExpect(card.getByText("Page speed", { exact: true })).toBeVisible();
         const ttfb = card.locator('[data-metric="ttfb"]');
@@ -367,8 +369,8 @@ describe("project report download", () => {
         await fetch(`${base}/api/projects/${project.id}/specs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ specs: [spec], baseUrl: "http://127.0.0.1:9", validate: false }) });
 
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        await page.goto(`${base}/#/projects/${project.id}/tests`);
-        await pwExpect(page.locator("a.list-row")).toHaveCount(1);
+        await page.goto(`${base}/#/projects/${project.id}/scripts`);
+        await pwExpect(page.locator(".script-row")).toHaveCount(1);
 
         // Every download is in one place now: More actions > Export…
         const open = async () => {
@@ -389,19 +391,15 @@ describe("project report download", () => {
 });
 
 describe("input handling option", () => {
-    it("is offered, on by default, explains its safety, and is named in the summary line", async () => {
+    it("is no longer a switch on the form: the exploration keeps it on by default (the Test Case Generation Agent runs it)", async () => {
         const { base } = await start(4200, {}, false);
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         await page.goto(`${base}/#/new?url=http://example.com`);
         await pwExpect(page.getByRole("heading", { name: "Create a test project" })).toBeVisible();
-        // The warning about a missing AI model also says "Advanced options", so click the disclosure itself.
-        await page.locator("summary", { hasText: "Advanced options" }).click();
-        const box = page.getByRole("checkbox", { name: /Check how forms handle unusual input/ });
-        await pwExpect(box).toBeChecked();
-        await pwExpect(page.getByText("login and payment forms never are")).toBeVisible();
-        await pwExpect(page.getByText(/We.ll test:.*form input/)).toBeVisible();
-        await box.uncheck();
-        await pwExpect(page.getByText(/We.ll test:/)).not.toContainText("form input");
+        await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
+        await pwExpect(page.getByRole("checkbox", { name: /Check how forms handle unusual input/ })).toHaveCount(0);
+        await pwExpect(page.locator("summary", { hasText: "Advanced options" })).toHaveCount(0);
+        expect(DEFAULT_JOB_OPTIONS.inputChecks).toBe(true);
         await page.close();
     }, 60_000);
 });
@@ -448,7 +446,7 @@ describe("test accounts", () => {
         const { base } = await start(4203, {}, false);
         const project = (await (await fetch(`${base}/api/projects`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Accounts UI" }) })).json()) as { id: string };
         const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-        await page.goto(`${base}/#/projects/${project.id}/tests`);
+        await page.goto(`${base}/#/projects/${project.id}/scripts`);
         const open = async () => {
             await page.goto(`${base}/#/projects/${project.id}/settings?section=accounts`);
             return page.getByRole("region", { name: "Test accounts" });

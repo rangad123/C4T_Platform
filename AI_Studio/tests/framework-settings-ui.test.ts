@@ -33,7 +33,7 @@ const shot = async (name: string) => {
 };
 // Frameworks are in Settings, a titled row with "Change": the form opens on request.
 const runnersUrl = () => `${BASE}/#/projects/${shop.projectId}/settings?section=frameworks`;
-const testsUrl = () => `${BASE}/#/projects/${shop.projectId}/tests`;
+const testsUrl = () => `${BASE}/#/projects/${shop.projectId}/scripts`;
 const open = async (url: string, ready: () => Promise<void>) => {
     await page.goto("about:blank");
     await page.goto(url);

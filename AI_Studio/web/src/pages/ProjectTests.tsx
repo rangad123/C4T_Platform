@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleAlert, CircleCheck, CircleX, Clock, Download, FileJson, FileText, FileUp, FileX, ListChecks, MonitorSmartphone, MoreHorizontal, Search, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, Download, FileJson, FileText, FileUp, FileX, MonitorSmartphone, MoreHorizontal, Search, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { RunsOnLine } from "../features/agents/RunsOnLine";
 import { FrameworksLine } from "../features/frameworks/FrameworksLine";
@@ -11,7 +11,7 @@ import { EXPORT_ICONS, ExportDialog, ImportDialog, type ExportItem } from "../fe
 import { GitImportDialog } from "../features/code/GitImportDialog";
 import { HandWrittenBadge } from "../features/code/TakeOver";
 import { CompatBadge } from "../features/variants/CompatBadge";
-import { api, getKey, type ProjectDetail, type TestSummary, type ValidationStatus } from "../api";
+import { api, getKey, projectKind, type ProjectDetail, type TestSummary, type ValidationStatus } from "../api";
 import { usePage } from "../components/Shell";
 import { Button, Callout, EmptyState, ErrorState, ListSkeleton, Menu, MenuItem, PageHeader, SeverityBadge, StatusBadge, Badge, severityKey, statusKey } from "../components/ui";
 import { BadgeKey, Tooltip } from "../components/Tooltip";
@@ -19,11 +19,14 @@ import { help } from "../lib/help";
 import { downloadBlob, plural } from "../lib/format";
 import { useDocumentTitle, useFetch, useOnFinish } from "../lib/hooks";
 import { KIND_LABEL, PRIORITY_LABEL, cleanReason, describeApiError, friendlyError, isActive, typeLabel } from "../lib/labels";
-import { routes, useRoute } from "../lib/router";
+import { go, routes, useRoute } from "../lib/router";
 import { ProjectTabs } from "./ProjectOverview";
 import { RunMenu } from "../features/runs/RunMenu";
 import { RunStrip } from "../features/runs/RunStrip";
-import { SelectableRow, SelectToggle, SelectionBar, useTestSelection } from "../features/runs/Selection";
+import { SelectToggle, SelectionBar, useTestSelection, type TestSelection } from "../features/runs/Selection";
+import { EXPLORING_OFF_HERE, useRunsHere } from "../features/runs/runs-here";
+import { versionHref, type ScriptRow } from "../features/review/review";
+import "../features/authoring/authoring.css";
 
 /** Tests rendered per area before "Show more": keeps big suites fast and scannable. */
 const PAGE_SIZE = 50;
@@ -47,17 +50,30 @@ const FILTER_TIP: Record<Filter, string | undefined> = {
     notrun: "Tests that have no result yet, including any that are running right now.",
 };
 
-const STATUS_ICON ={ VALIDATED: CircleCheck, NEEDS_REVIEW: TriangleAlert, FAILED_VALIDATION: CircleX, PENDING: Clock, VALIDATING: Clock } as const;
+/** The requirements a script covers (GET /projects/:id/requirements/links), as chips. */
+interface RequirementLink {
+    requirementId: string;
+    ref: string;
+    title: string;
+    kind: "automated" | "manual";
+    testId: string;
+}
 const authHeaders = (): Record<string, string> => (getKey() ? { "x-api-key": getKey() } : {});
 
 export function ProjectTests({ id }: { id: string }) {
     const route = useRoute();
     const project = useFetch<ProjectDetail>(`/projects/${id}`, (d) => (isActive(d?.latestJob?.status) ? 3000 : null));
     const tests = useFetch<TestSummary[]>(`/projects/${id}/tests`, () => (isActive(project.data?.latestJob?.status) ? 3000 : null));
+    // The Requirement column, and the Status column's word about drafts waiting for review (features/review).
+    const reqLinks = useFetch<{ links: RequirementLink[] }>(`/projects/${id}/requirements/links`);
+    const reviews = useFetch<{ scripts: ScriptRow[] }>(`/projects/${id}/scripts`);
     const name = project.data?.name;
-    useOnFinish(isActive(project.data?.latestJob?.status), () => void tests.reload());
-    useDocumentTitle(name ? `Tests · ${name}` : "Tests");
-    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Test cases" }], nav: "projects" });
+    useOnFinish(isActive(project.data?.latestJob?.status), () => {
+        void tests.reload();
+        void reviews.reload();
+    });
+    useDocumentTitle(name ? `Test scripts · ${name}` : "Test scripts");
+    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Test scripts" }], nav: "projects" });
 
     const initial = (route.query.get("status") as Filter | null) ?? "all";
     const [filter, setFilter] = useState<Filter>(FILTERS.some((f) => f.key === initial) ? initial : "all");
@@ -106,6 +122,17 @@ export function ProjectTests({ id }: { id: string }) {
     const heldCount = all.filter((t) => t.quarantine).length;
     const weakCount = all.filter((t) => t.quality?.level === "weak").length;
     const differCount = all.filter((t) => (t.compat?.failing.length ?? 0) > 0).length;
+    const reqsOf = useMemo(() => {
+        const m = new Map<string, RequirementLink[]>();
+        for (const l of reqLinks.data?.links ?? []) if (l.kind === "automated") m.set(l.testId, [...(m.get(l.testId) ?? []), l]);
+        for (const list of m.values()) list.sort((a, b) => a.ref.localeCompare(b.ref, undefined, { numeric: true }));
+        return m;
+    }, [reqLinks.data]);
+    const reviewOf = useMemo(() => new Map((reviews.data?.scripts ?? []).map((r) => [r.testId, r])), [reviews.data]);
+    // Exploring makes tests only for agent projects (and mixed ones, made before round 37); a code project never offers it.
+    const explores = projectKind(project.data) !== "code";
+    const runsHere = useRunsHere();
+    const reloadAll = () => void Promise.all([tests.reload(), project.reload(), reviews.reload()]);
 
     async function fetchFile(path: string, filename: string, type?: string) {
         try {
@@ -132,8 +159,8 @@ export function ProjectTests({ id }: { id: string }) {
             const specs = Array.isArray(json) ? json : json.specs;
             if (!Array.isArray(specs)) throw new Error("The file should contain a list of test specs, or an object with a “specs” list.");
             const res = await api(`/projects/${id}/specs`, { method: "POST", body: { specs } });
-            setNotice({ tone: "success", text: `Imported ${res.tests.length} test${res.tests.length === 1 ? "" : "s"}${res.jobId ? ". We’re running them now." : "."}` });
-            await Promise.all([tests.reload(), project.reload()]);
+            setNotice({ tone: "success", text: `Imported ${res.tests.length} test${res.tests.length === 1 ? "" : "s"}${res.jobId ? ". We’re running them now." : res.notRun ? `. ${res.notRun}` : "."}` });
+            reloadAll();
         } catch (e) {
             const details = (e as { details?: Array<{ index: number }> }).details;
             setNotice({ tone: "danger", text: `Import failed: ${e instanceof SyntaxError ? "that file isn’t valid JSON." : describeApiError(e)}${details?.length ? ` (test ${details[0]!.index + 1} is invalid)` : ""}` });
@@ -143,19 +170,19 @@ export function ProjectTests({ id }: { id: string }) {
     return (
         <>
             <PageHeader
-                title="Automated tests"
-                subtitle={all.length ? `${plural(all.length, "test")}, ${counts.validated} passing${counts.review + counts.failed ? `, ${counts.review + counts.failed} not passing` : ""}` : name}
+                title="Scripts"
+                subtitle={all.length ? `${plural(all.length, "test script")}, ${counts.validated} passing${counts.review + counts.failed ? `, ${counts.review + counts.failed} not passing` : ""}` : name}
                 actions={
                     <>
-                        {/* Choosing where tests run and which ones is one control (UX-A); making a test is another. */}
+                        <Button icon={FileUp} disabled={isActive(job?.status)} tip={isActive(job?.status) ? "Wait until the job that is running has finished." : "Bring scripts from a JSON file, Maestro flows or a Git repository."} onClick={() => setShowImport(true)}>
+                            Import
+                        </Button>
+                        {/* Choosing where tests run and which ones is one control (UX-A); making a script is another. */}
                         <RunMenu projectId={id} tests={all} selectedIds={[...selection.picked]} />
                         <NewTestMenu projectId={id} onDescribe={() => setShowWrite(true)} onImport={() => setShowImport(true)} />
                         <Menu label="More actions" icon={MoreHorizontal} iconOnly>
                             {(close) => (
                                 <>
-                                    <MenuItem icon={FileUp} disabled={isActive(job?.status)} tip={isActive(job?.status) ? "Wait until the job that is running has finished." : undefined} onClick={() => { close(); setShowImport(true); }}>
-                                        Import tests…
-                                    </MenuItem>
                                     <MenuItem icon={Download} onClick={() => { close(); setShowExport(true); }}>
                                         Export…
                                     </MenuItem>
@@ -168,16 +195,16 @@ export function ProjectTests({ id }: { id: string }) {
                     </>
                 }
             />
-            <ProjectTabs id={id} active="tests" count={all.length} />
+            <ProjectTabs id={id} active="scripts" count={all.length} />
 
             <div className="stack">
                 <RunsOnLine projectId={id} />
                 <FrameworksLine projectId={id} />
                 {notice && <Callout tone={notice.tone}>{notice.text}</Callout>}
-                {showWrite && <WriteTestDialog projectId={id} busy={isActive(job?.status)} onClose={() => setShowWrite(false)} onStarted={() => void project.reload()} onDone={() => void Promise.all([tests.reload(), project.reload()])} />}
+                {showWrite && <WriteTestDialog projectId={id} busy={isActive(job?.status)} onClose={() => setShowWrite(false)} onStarted={() => void project.reload()} onDone={reloadAll} />}
                 {showBuild && <BuildTestDialog projectId={id} onClose={() => setShowBuild(false)} />}
-                {showMaestro && <MaestroImportPanel projectId={id} busy={isActive(job?.status)} onClose={() => setShowMaestro(false)} onImported={() => void Promise.all([tests.reload(), project.reload()])} />}
-                {showGit && <GitImportDialog projectId={id} onClose={() => setShowGit(false)} onImported={() => void Promise.all([tests.reload(), project.reload()])} />}
+                {showMaestro && <MaestroImportPanel projectId={id} busy={isActive(job?.status)} onClose={() => setShowMaestro(false)} onImported={reloadAll} />}
+                {showGit && <GitImportDialog projectId={id} onClose={() => setShowGit(false)} onImported={reloadAll} />}
                 {showImport && <ImportDialog onClose={() => setShowImport(false)} disabled={isActive(job?.status)} onJsonFile={(file) => void importSpecs(file)} onMaestro={() => setShowMaestro(true)} onGit={() => setShowGit(true)} />}
                 {showVariants && <CheckVariantsPanel projectId={id} onStarted={() => void project.reload()} onClose={() => setShowVariants(false)} />}
                 {showExport && <ExportDialog onClose={() => setShowExport(false)} items={exportItems} />}
@@ -195,10 +222,23 @@ export function ProjectTests({ id }: { id: string }) {
                 ) : all.length === 0 ? (
                     <div className="card">
                         {isActive(job?.status) ? (
-                            <EmptyState icon={Clock} title="Your tests are on their way">We’re still exploring the application. They’ll show up here as they’re created.</EmptyState>
+                            <EmptyState icon={Clock} title="Your test scripts are on their way">We’re still exploring the application. They’ll show up here as they’re created.</EmptyState>
                         ) : (
-                            <EmptyState icon={FileX} title="No tests yet" seeHow={{ topic: "first-steps", query: "start in 10 minutes" }} actions={<><a className="btn btn-primary" href={routes.newProject({ project: id })}>Start exploring</a><NewTestMenu projectId={id} variant="secondary" onDescribe={() => setShowWrite(true)} onImport={() => setShowImport(true)} /></>}>
-                                Explore the application and we’ll create your first test suite — or import tests you already have.
+                            <EmptyState
+                                icon={FileX}
+                                title="No test scripts yet"
+                                seeHow={{ topic: "first-steps", query: "start in 10 minutes" }}
+                                actions={
+                                    // New test script and Import are in the header above: the empty list does not repeat them.
+                                    explores ? (
+                                        <a className="btn" href={routes.newProject({ project: id })}>
+                                            Start exploring
+                                        </a>
+                                    ) : undefined
+                                }
+                            >
+                                {explores ? "Make your first test script with New test script, bring scripts you already have with Import, or explore the application and the AI writes tests for it." : "Make your first test script with New test script, generate them from your test cases, or bring scripts you already have with Import."}
+                                {explores && !runsHere ? ` ${EXPLORING_OFF_HERE}` : ""}
                             </EmptyState>
                         )}
                     </div>
@@ -208,7 +248,7 @@ export function ProjectTests({ id }: { id: string }) {
                             <div className="row">
                                 <div className="input-wrap" style={{ flex: "1 1 240px", maxWidth: 360 }}>
                                     <Search size={16} className="lead" aria-hidden />
-                                    <input className="input" type="search" placeholder="Search tests" aria-label="Search tests" value={q} onChange={(e) => setQ(e.target.value)} />
+                                    <input className="input" type="search" placeholder="Search scripts" aria-label="Search scripts" value={q} onChange={(e) => setQ(e.target.value)} />
                                 </div>
                                 <Button variant="ghost" icon={SlidersHorizontal} aria-expanded={showMore} onClick={() => setShowMore((s) => !s)}>
                                     Filters
@@ -295,16 +335,11 @@ export function ProjectTests({ id }: { id: string }) {
                                             </button>
                                             {open && (
                                                 <>
-                                                    <ul className="list divided">
+                                                    <ScriptHead suite={suite} ids={items.slice(0, limits[suite] ?? PAGE_SIZE).map((t) => t.id)} selection={selection} />
+                                                    <ul className="list divided" aria-label={`Test scripts in ${suite}`}>
                                                         {items.slice(0, limits[suite] ?? PAGE_SIZE).map((t) => (
                                                             <li key={t.id}>
-                                                                {selection.selecting ? (
-                                                                    <SelectableRow id={t.id} title={t.title} selection={selection}>
-                                                                        <TestRow t={t} app={project.data?.mobile?.appPackage ?? undefined} />
-                                                                    </SelectableRow>
-                                                                ) : (
-                                                                    <TestRow t={t} app={project.data?.mobile?.appPackage ?? undefined} />
-                                                                )}
+                                                                <ScriptRowView t={t} projectId={id} app={project.data?.mobile?.appPackage ?? undefined} reqs={reqsOf.get(t.id) ?? []} review={reviewOf.get(t.id)} selection={selection} />
                                                             </li>
                                                         ))}
                                                     </ul>
@@ -323,7 +358,7 @@ export function ProjectTests({ id }: { id: string }) {
                                         </section>
                                     );
                                 })}
-                                {filtersActive && <p className="t-meta" style={{ marginTop: 12 }}>Showing {shown.length} of {all.length} tests.</p>}
+                                {filtersActive && <p className="t-meta" style={{ marginTop: 12 }}>Showing {shown.length} of {all.length} test scripts.</p>}
                             </div>
                         )}
                     </>
@@ -333,19 +368,78 @@ export function ProjectTests({ id }: { id: string }) {
     );
 }
 
-function TestRow({ t, app }: { t: TestSummary; /** The project’s Android app: shown after Phone on a phone test. */ app?: string }) {
-    const Icon = STATUS_ICON[t.validationStatus] ?? CircleAlert;
-    const tone = { VALIDATED: "var(--status-success-fg)", NEEDS_REVIEW: "var(--status-warning-fg)", FAILED_VALIDATION: "var(--status-error-fg)", PENDING: "var(--text-muted)", VALIDATING: "var(--status-info-fg)" }[t.validationStatus];
+/** The column names above a group's rows, with a box that chooses every row shown in the group. */
+function ScriptHead({ suite, ids, selection }: { suite: string; ids: string[]; selection: TestSelection }) {
+    const all = ids.length > 0 && ids.every((x) => selection.picked.has(x));
     return (
-        <a className="list-row" href={routes.test(t.id)}>
-            <span className="lead" style={{ color: tone }}>
-                <Icon size={17} aria-hidden />
-            </span>
+        <div className="script-head">
+            <label className="run-pick sr-check">
+                <input
+                    type="checkbox"
+                    checked={all}
+                    aria-label={`Select every script in ${suite}`}
+                    onChange={() => {
+                        if (!selection.selecting) selection.setSelecting(true);
+                        selection.set(all ? [...selection.picked].filter((x) => !ids.includes(x)) : [...new Set([...selection.picked, ...ids])]);
+                    }}
+                />
+            </label>
+            <span>ID</span>
+            <span>Test script</span>
+            <span>Script</span>
+            <span>Requirement</span>
+            <span>Status</span>
+            <span />
+        </div>
+    );
+}
+
+/** Where a script's row opens it: its DSL tab, or the Code tab for a script that is code only (a hand-written one has no DSL). */
+const scriptHref = (t: TestSummary) => routes.testTab(t.id, t.custom ? "code" : "text");
+
+/** The review word of a script whose latest version waits for a decision (drafts never run until approved, D-18). */
+function reviewWord(projectId: string, r: ScriptRow | undefined): { text: string; href: string } | null {
+    if (!r?.latest || (r.latest.state !== "draft" && r.latest.state !== "in_review")) return null;
+    const inReview = r.latest.state === "in_review";
+    // `waiting`: no version of it is approved, so it does not run at all yet.
+    const text = r.waiting ? (inReview ? "In review, not run yet" : "Draft, waiting for review") : inReview ? "New version in review" : "New version, waiting for review";
+    return { text, href: versionHref(projectId, r.testId, r.latest.version) };
+}
+
+/**
+ * One script: ID, title (the link to its workbench), the DSL | Code pair that opens it on that tab, the requirements it covers, its
+ * status. A click anywhere else on the row opens the script too.
+ */
+function ScriptRowView({ t, projectId, app, reqs, review, selection }: { t: TestSummary; projectId: string; /** The project’s Android app: shown after Phone on a phone test. */ app?: string; reqs: RequirementLink[]; review: ScriptRow | undefined; selection: TestSelection }) {
+    const tone = { VALIDATED: "var(--status-success-fg)", NEEDS_REVIEW: "var(--status-warning-fg)", FAILED_VALIDATION: "var(--status-error-fg)", PENDING: "var(--text-muted)", VALIDATING: "var(--status-info-fg)" }[t.validationStatus];
+    const word = reviewWord(projectId, review);
+    const shownReqs = reqs.slice(0, 2);
+    return (
+        <div
+            className="list-row script-row"
+            data-testid="script-row"
+            onClick={(e) => {
+                if ((e.target as HTMLElement).closest("a, button, input, label")) return;
+                go(scriptHref(t));
+            }}
+        >
+            <label className="run-pick sr-check">
+                <input
+                    type="checkbox"
+                    checked={selection.picked.has(t.id)}
+                    aria-label={`Select ${t.title}`}
+                    onChange={() => {
+                        if (!selection.selecting) selection.setSelecting(true);
+                        selection.toggle(t.id);
+                    }}
+                />
+            </label>
+            <span className="sr-id mono">{t.testId}</span>
             <span className="main">
-                <span className="title">{t.title}</span>
+                <a className="title sr-title" href={scriptHref(t)}>
+                    {t.title}
+                </a>
                 <span className="meta">
-                    {t.testId}
-                    <span className="dot-sep" />
                     {typeLabel(t.type)}
                     <span className="dot-sep" />
                     {PRIORITY_LABEL[t.priority]}
@@ -355,16 +449,42 @@ function TestRow({ t, app }: { t: TestSummary; /** The project’s Android app: 
                 </span>
                 {t.validationStatus !== "VALIDATED" && t.validationReason && <span className="meta truncate" style={{ color: tone }}>{cleanReason(t.validationReason)}</span>}
                 {t.quarantine && <span className="meta truncate" data-testid="quarantine-reason">In quarantine, not counted: {t.quarantine.reason}</span>}
+                {(t.custom || t.quarantine || t.quality?.level === "weak" || t.compat || t.severity) && (
+                    <span className="sr-badges">
+                        {t.custom && <HandWrittenBadge />}
+                        {t.quarantine && <Badge tone="info" title={`In quarantine: ${t.quarantine.reason}`}>Quarantined</Badge>}
+                        {t.quality?.level === "weak" && <Badge tone="neutral" title={t.quality.reasons.join(" ")}>Weak checks</Badge>}
+                        <CompatBadge compat={t.compat} />
+                        {t.severity && <SeverityBadge severity={t.severity.severity} basis={t.severity.basis} />}
+                    </span>
+                )}
             </span>
-            <span className="tail">
-                {t.custom && <HandWrittenBadge />}
-                {t.quarantine && <Badge tone="info" title={`In quarantine: ${t.quarantine.reason}`}>Quarantined</Badge>}
-                {t.quality?.level === "weak" && <Badge tone="neutral" title={t.quality.reasons.join(" ")}>Weak checks</Badge>}
-                <CompatBadge compat={t.compat} />
-                {t.severity && <SeverityBadge severity={t.severity.severity} basis={t.severity.basis} />}
+            <span className="sr-views" role="group" aria-label="Open the script as">
+                <a href={routes.testTab(t.id, "text")} aria-label={`DSL of ${t.testId}`} title={t.custom ? "This script is code only: the DSL tab says so" : "The plain steps of this script"}>
+                    DSL
+                </a>
+                <a href={routes.testTab(t.id, "code")} aria-label={`Code of ${t.testId}`} title="The code of this script">
+                    Code
+                </a>
+            </span>
+            <span className="sr-reqs">
+                {shownReqs.map((r) => (
+                    <a key={r.requirementId} className="req-chip" href={routes.requirement(projectId, r.requirementId)} title={r.title}>
+                        {r.ref}
+                    </a>
+                ))}
+                {reqs.length > shownReqs.length && <span className="t-meta" title={reqs.slice(2).map((r) => r.ref).join(", ")}>+{reqs.length - shownReqs.length}</span>}
+                {reqs.length === 0 && <span className="t-meta">None</span>}
+            </span>
+            <span className="sr-status">
                 <StatusBadge status={t.validationStatus} />
+                {word && (
+                    <a className="sr-review" href={word.href} data-testid="script-review-link">
+                        {word.text}
+                    </a>
+                )}
             </span>
             <ChevronRight size={18} className="chev" aria-hidden />
-        </a>
+        </div>
     );
 }

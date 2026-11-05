@@ -11,6 +11,7 @@ import type { Platform } from "./bootstrap.js";
 import { noteCustomSkipped } from "./custom-policy.js";
 import { assertEnvironmentTargets } from "./environment-run.js";
 import { findEnvironment } from "./environments-store.js";
+import { HttpError } from "./http-error.js";
 import { assertAllowedTarget } from "./net-guard.js";
 import { readHeartbeat } from "./ops/heartbeat.js";
 import { notePluginSkipped } from "./plugin-policy.js";
@@ -31,6 +32,23 @@ export function runsCanStartHere(p: Pick<Platform, "config" | "db">, nowMs: numb
     const beat = readHeartbeat(p.db);
     if (beat !== undefined && nowMs - beat <= WORKER_GONE_MS) return { ok: true };
     return { ok: false, reason: NO_WORKER_MESSAGE };
+}
+
+/** What a refused run or exploration says while tests are switched off on this server (no worker picks up a job). */
+export const RUNS_OFF_MESSAGE = "Tests are switched off on this server: nothing here picks up a run, so a run started now would wait in the queue and never start. Run your tests where tests run (your own installation), or once tests are switched on here.";
+/** "Describe it": the AI writes the test inside a job, and opens the site to check it, so it needs a worker as a run does. */
+export const PLAIN_OFF_MESSAGE = "Tests are switched off on this server: the AI writes a described test inside a run, and nothing here picks up a run. Build the steps by hand or write the test as text instead.";
+/** An import asked to run what it imports while tests are switched off: the tests are kept and the answer says this. */
+export const IMPORTED_NOT_RUN = "Saved but not run: tests are switched off on this server, so nothing here would pick up the run.";
+export const EXPLORING_OFF_MESSAGE = "Tests are switched off on this server: nothing here picks up an exploration, so it would wait in the queue and never start. Explore where tests run (your own installation), or once tests are switched on here.";
+
+/**
+ * The refusal of every route that queues a job a worker must pick up: 409 with `cannotRunHere`, before anything is queued (the
+ * suite run route says the same in its own words). A route that saves something first and only then runs it keeps what it saved
+ * and says the run did not start instead.
+ */
+export function refuseUnlessRunsStart(p: Pick<Platform, "config" | "db">, message: string = RUNS_OFF_MESSAGE): void {
+    if (!runsCanStartHere(p).ok) throw new HttpError(409, message, { cannotRunHere: true });
 }
 
 export interface HeldTest {

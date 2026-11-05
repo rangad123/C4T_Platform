@@ -184,7 +184,7 @@ const visit = async (hash: string) => {
     await page.goto("about:blank");
     await page.goto(`${BASE}/${hash}`);
 };
-const testsPage = () => visit(`#/projects/${projectId}/tests`);
+const testsPage = () => visit(`#/projects/${projectId}/scripts`);
 const strip = () => page.getByTestId("run-strip");
 const panel = () => page.getByRole("group", { name: "Run settings" });
 async function shot(name: string) {
@@ -233,7 +233,7 @@ describe("the Run panel", () => {
         // A choice with no tests is there but cannot be picked, and says why.
         await pwExpect(panel().getByRole("radio", { name: "Not run yet (0)" })).toBeDisabled();
         await pwExpect(panel().getByRole("radio", { name: "Selected tests (0)" })).toBeDisabled();
-        await pwExpect(panel().getByText("Choose Select tests in the list")).toBeVisible();
+        await pwExpect(panel().getByText("Choose Select scripts in the list")).toBeVisible();
         await panel().getByRole("radio", { name: /^This group/ }).check();
         await panel().getByLabel("Group", { exact: true }).selectOption({ label: "API (6)" });
         await pwExpect(panel().getByTestId("run-sentence")).toContainText("Runs 6 tests");
@@ -508,17 +508,17 @@ describe("stopping a run honestly", () => {
 });
 
 describe("choosing tests in the list", () => {
-    it("Select tests adds a checkbox to every row and a bar that counts; the Run panel runs exactly those", async () => {
+    it("every row has a checkbox; Select scripts opens a bar that counts; the Run panel runs exactly those", async () => {
         await testsPage();
-        const toggle = page.getByRole("button", { name: "Select tests" });
+        const toggle = page.getByRole("button", { name: "Select scripts" });
         await pwExpect(toggle).toHaveAttribute("aria-pressed", "false");
         await toggle.click();
         await pwExpect(toggle).toHaveAttribute("aria-pressed", "true");
-        const bar = page.getByRole("region", { name: "Selected tests" });
-        await pwExpect(bar).toContainText("No tests selected");
+        const bar = page.getByRole("region", { name: "Selected scripts" });
+        await pwExpect(bar).toContainText("No scripts selected");
         await page.getByRole("checkbox", { name: "Select Fast one" }).check();
         await page.getByRole("checkbox", { name: "Select Fast two" }).check();
-        await pwExpect(bar).toContainText("2 tests selected");
+        await pwExpect(bar).toContainText("2 scripts selected");
         await shot("selection-light-1280");
 
         await bar.getByRole("button", { name: "Run selected" }).click();
@@ -533,20 +533,21 @@ describe("choosing tests in the list", () => {
 
     it("selects everything shown, clears it again, and leaves the mode", async () => {
         await page.getByRole("button", { name: /^Select the 6 shown$/ }).click();
-        await pwExpect(page.getByRole("region", { name: "Selected tests" })).toContainText("6 tests selected");
-        await page.getByRole("button", { name: "Clear the shown tests" }).click();
-        await pwExpect(page.getByRole("region", { name: "Selected tests" })).toContainText("No tests selected");
+        await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toContainText("6 scripts selected");
+        await page.getByRole("button", { name: "Clear the shown scripts" }).click();
+        await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toContainText("No scripts selected");
         await page.getByRole("button", { name: "Done" }).click();
-        await pwExpect(page.getByRole("checkbox", { name: "Select Fast one" })).toHaveCount(0);
-        await pwExpect(page.getByRole("button", { name: "Select tests" })).toHaveAttribute("aria-pressed", "false");
+        await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toHaveCount(0);
+        await pwExpect(page.getByRole("checkbox", { name: "Select Fast one" })).not.toBeChecked();
+        await pwExpect(page.getByRole("button", { name: "Select scripts" })).toHaveAttribute("aria-pressed", "false");
     });
 
     it("every checkbox has a 44 px target, the bar is audited in both schemes and nothing scrolls sideways on a phone", async () => {
-        await page.getByRole("button", { name: "Select tests" }).click();
+        await page.getByRole("button", { name: "Select scripts" }).click();
         await page.getByRole("checkbox", { name: "Select Fast one" }).check();
         for (const label of await page.locator("label.run-pick").all()) await tallEnough(label, "a selection checkbox");
         await axeBoth("selection", async () => {
-            await pwExpect(page.getByRole("region", { name: "Selected tests" })).toBeVisible();
+            await pwExpect(page.getByRole("region", { name: "Selected scripts" })).toBeVisible();
         });
         await page.setViewportSize({ width: 390, height: 844 });
         await noSidewaysScroll();

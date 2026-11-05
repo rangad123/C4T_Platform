@@ -265,7 +265,7 @@ describe("editing with the mouse", () => {
 
 describe("saving", () => {
     it("protects unsaved changes: a link asks first, closing the tab shows the browser warning", async () => {
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
         const dialog = page.getByRole("dialog", { name: "Leave without saving?" });
         await pwExpect(dialog).toBeVisible();
         await dialog.getByRole("button", { name: "Stay and keep editing", exact: true }).click();
@@ -305,9 +305,9 @@ describe("saving", () => {
         expect(s.validationStatus).toBe("VALIDATED");
         await shot("saved");
         // links work again without a question
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
         await pwExpect(page.getByRole("dialog")).toHaveCount(0);
-        expect(page.url()).toContain(`/projects/${projectId}/tests`);
+        expect(page.url()).toContain(`/projects/${projectId}/scripts`);
     }, 120_000);
 });
 
@@ -343,8 +343,8 @@ describe("read-only states", () => {
 
 describe("building a test from the Tests page", () => {
     it("asks for a title and opens the editor with the first step, then the empty list invites one action", async () => {
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
         await page.getByRole("menuitem", { name: "Build steps by hand", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Build a test" });
         await dialog.getByRole("button", { name: "Start building", exact: true }).click();
@@ -378,7 +378,7 @@ describe("looks and works everywhere", () => {
         await page.getByLabel("How to find it", { exact: true }).selectOption("role");
         await axeBoth(async () => undefined, "builder-form");
         // an API test's form: request with rows, JSON and map fields
-        await visit(`#/projects/${projectId}/tests`);
+        await visit(`#/projects/${projectId}/scripts`);
         const made = await api("POST", `/api/projects/${projectId}/built-tests`, { title: "Products list answers", kind: "api" });
         await visit(builderHash(made.body.testId));
         await heads().first().click();

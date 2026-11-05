@@ -25,6 +25,7 @@ import { TestSpecSchema, type TestSpec } from "../engine/spec/schema.js";
 import { checkElement } from "../engine/locators/model.js";
 import { blockGraphProblems, checkBlockInput, indexBlocks, MAX_BLOCKS, tryExpandBlocks, type CheckedBlock } from "../engine/blocks/index.js";
 import { blockSecretProblems } from "../engine/builder/index.js";
+import { AgentInputsStore } from "./agent-inputs-store.js";
 import { BlockStore } from "./block-store.js";
 import { LocatorStore } from "./locator-store.js";
 import { CustomScriptStore } from "./custom-script-store.js";
@@ -41,7 +42,7 @@ import { DataSetStore, scheduleEnvironment, setScheduleEnvironment } from "./env
 import { HttpError } from "./http-error.js";
 import { IdentityStore } from "./identity-store.js";
 import { ManualCaseStore } from "./manual-case-store.js";
-import { backupRequirements, MAX_REQUIREMENTS, RequirementBackupSchema, restoreRequirements } from "./requirement-store.js";
+import { backupRequirements, MAX_REQUIREMENTS, refKey, RequirementBackupSchema, restoreRequirements } from "./requirement-store.js";
 import { retentionStore } from "./retention-runner.js";
 import { RunbookStore } from "./runbook-store.js";
 import { CadenceSchema, ScheduleStore } from "./schedule-store.js";
@@ -164,6 +165,7 @@ export async function buildBackup(p: Platform, projectId: string, opts: BackupOp
     // ── manual cases and releases ──
     const manual = new ManualCaseStore(db);
     const cases = manual.listCases(projectId);
+    const refOfRequirement = new Map(db.all<{ id: string; ref: string }>("SELECT id, ref FROM requirements WHERE project_id = ?", projectId).map((r) => [r.id, r.ref]));
     const caseDocs = cases.map((c) => ({
         ref: c.id,
         title: c.title,
@@ -172,6 +174,9 @@ export async function buildBackup(p: Platform, projectId: string, opts: BackupOp
         requirement: c.requirement,
         steps: c.steps,
         linkedTests: c.linkedTestIds.map((id) => keyOfId.get(id) ?? id),
+        automation: c.automation,
+        number: c.number,
+        ...(c.requirementId && refOfRequirement.has(c.requirementId) ? { requirementRef: refOfRequirement.get(c.requirementId) } : {}),
     }));
     const requirementDocs = backupRequirements(db, projectId, keyOfId);
     const releaseDocs = manual.listReleases(projectId).map((r) => ({
@@ -584,7 +589,13 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
         db.run("INSERT INTO projects (id, owner_id, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)", pid, repo.ensureDefaultUser(), name, projectDoc.description, stamp, stamp);
         // A backup from round 26 on carries what the project tests and how; an older one keeps the defaults.
         if (projectDoc.platforms || projectDoc.testingModes) repo.updateProject(pid, { ...(projectDoc.platforms ? { platforms: projectDoc.platforms } : {}), ...(projectDoc.testingModes ? { testingModes: projectDoc.testingModes } : {}) });
-        if (projectDoc.application) repo.createApplication(pid, projectDoc.application.url, { ...projectDoc.application.config });
+        if (projectDoc.application) {
+            repo.createApplication(pid, projectDoc.application.url, { ...projectDoc.application.config });
+            // What the agents need (agent-inputs-store.ts): the OpenAPI address and the data-changing choice come back with the application;
+            // the sign-in and API access are never in a backup and are typed again (the restore says so).
+            const c = projectDoc.application.config as { openApiUrl?: unknown; allowMutatingApiTests?: unknown };
+            new AgentInputsStore(db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY)).save(pid, { site: projectDoc.application.url, ...(typeof c.openApiUrl === "string" && c.openApiUrl ? { openApiUrl: c.openApiUrl } : {}), ...(typeof c.allowMutatingApiTests === "boolean" ? { allowMutatingApiTests: c.allowMutatingApiTests } : {}) });
+        }
 
         // Shared elements first: the restored tests refer to them by name.
         const locatorStore = new LocatorStore(db);
@@ -640,18 +651,29 @@ export async function restoreBackup(p: Platform, data: Uint8Array, opts: { name?
             counts.baselines!++;
         }
 
-        // manual cases (ids remapped; links point at the new tests)
+        // manual cases (ids remapped; links point at the new tests). A case keeps its number unless the document has none for it or gives
+        // it twice (case numbers are unique in a project): then it takes the next free one.
         const caseIds = new Map<string, string>();
+        const takenNumbers = new Set<number>();
         for (const c of caseDocs) {
             const id = randomUUID();
             caseIds.set(c.ref, id);
+            const number = typeof c.number === "number" && !takenNumbers.has(c.number) ? c.number : null;
+            if (number !== null) takenNumbers.add(number);
             db.run(
-                "INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                id, pid, c.title, c.area, c.priority, c.requirement, JSON.stringify(c.steps), JSON.stringify(c.linkedTests.map((k) => idOfKey.get(k)).filter(Boolean)), stamp, stamp,
+                `INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, automation, number, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,COALESCE(?, (SELECT COALESCE(MAX(number), 0) + 1 FROM manual_cases WHERE project_id = ?)),?,?)`,
+                id, pid, c.title, c.area, c.priority, c.requirement, JSON.stringify(c.steps), JSON.stringify(c.linkedTests.map((k) => idOfKey.get(k)).filter(Boolean)), c.automation, number, pid, stamp, stamp,
             );
+            takenNumbers.add(db.get<{ n: number }>("SELECT number AS n FROM manual_cases WHERE id = ?", id)!.n);
             counts.manualCases!++;
         }
         if (requirementDocs.length) counts.requirements = restoreRequirements(db, pid, requirementDocs, idOfKey, caseIds);
+        // The requirement each case comes from, by its reference (the requirements have new ids now).
+        for (const c of caseDocs) {
+            if (!c.requirementRef) continue;
+            db.run("UPDATE manual_cases SET requirement_id = (SELECT id FROM requirements WHERE project_id = ? AND ref_key = ?) WHERE id = ?", pid, refKey(c.requirementRef), caseIds.get(c.ref)!);
+        }
         for (const r of releaseDocs) {
             const rid = randomUUID();
             const frozen = remapFrozen(r.frozen, caseIds);

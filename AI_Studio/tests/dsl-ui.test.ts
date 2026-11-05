@@ -141,7 +141,7 @@ async function writeText(text: string) {
 }
 async function openText(id = webId) {
     await visit(builderHash(id));
-    await page.getByRole("tab", { name: "Text", exact: true }).click();
+    await page.getByRole("tab", { name: "DSL", exact: true }).click();
     await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
 }
 async function noOverflow() {
@@ -174,9 +174,9 @@ describe("the Text view of a generated test", () => {
         await pwExpect(page.locator(".bld-head").first()).toBeVisible();
         const tabs = page.getByRole("tablist", { name: "Views of this test", exact: true });
         await pwExpect(tabs.getByRole("tab", { name: "Steps", exact: true })).toHaveAttribute("aria-selected", "true");
-        await tabs.getByRole("tab", { name: "Text", exact: true }).click();
+        await tabs.getByRole("tab", { name: "DSL", exact: true }).click();
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
-        await pwExpect(tabs.getByRole("tab", { name: "Text", exact: true })).toHaveAttribute("aria-selected", "true");
+        await pwExpect(tabs.getByRole("tab", { name: "DSL", exact: true })).toHaveAttribute("aria-selected", "true");
         await pwExpect(page).toHaveURL(new RegExp(`#/tests/${webId}/text$`));
         const text = await textNow();
         expect(text).toContain("Test: Search finds products");
@@ -267,7 +267,7 @@ describe("carrying changes between the two views", () => {
         await page.locator(".bld-head").nth(1).click();
         await page.getByLabel("Text to type", { exact: true }).fill("alpenglow");
         await pwExpect(unsaved()).toContainText("unsaved change");
-        await page.getByRole("tab", { name: "Text", exact: true }).click();
+        await page.getByRole("tab", { name: "DSL", exact: true }).click();
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
         expect(await textNow()).toContain('Type "alpenglow" into the "Search products" field');
         // saving from the text view saves those steps too (the button is on because the steps carry unsaved changes)
@@ -287,7 +287,7 @@ describe("carrying changes between the two views", () => {
         expect(heads[4]).toContain("Check that the page title contains “Products”");
         await pwExpect(unsaved()).toContainText("unsaved change");
         // the priority that only the text carries rides along: back in the text it is still there
-        await page.getByRole("tab", { name: "Text", exact: true }).click();
+        await page.getByRole("tab", { name: "DSL", exact: true }).click();
         await pwExpect(editor()).toBeVisible();
         expect(await textNow()).toContain("Priority: low");
     });
@@ -306,10 +306,10 @@ describe("carrying changes between the two views", () => {
     });
 
     it("leaving with unsaved text asks first", async () => {
-        await page.getByRole("tab", { name: "Text", exact: true }).click();
+        await page.getByRole("tab", { name: "DSL", exact: true }).click();
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
         await writeText((await textNow()) + "\nWait 100 ms\n");
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
         const dialog = page.getByRole("dialog", { name: "Leave without saving?" });
         await pwExpect(dialog).toBeVisible();
         await dialog.getByRole("button", { name: "Stay and keep editing", exact: true }).click();
@@ -336,9 +336,9 @@ describe("saving from the text", () => {
         expect(String((await api("GET", `/api/tests/${webId}/script`)).body)).toContain("tent");
         await shot("text-saved");
         // links work again without a question
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
         await pwExpect(page.getByRole("dialog")).toHaveCount(0);
-        expect(page.url()).toContain(`/projects/${projectId}/tests`);
+        expect(page.url()).toContain(`/projects/${projectId}/scripts`);
     }, 120_000);
 
     it("the platform's own refusal comes back on the line, and the text is still there", async () => {
@@ -373,12 +373,12 @@ describe("a test that has no text form", () => {
         await axeBoth("text-readonly");
     });
 
-    it("a hand-written test has no text: the Text tab says so and points to the Code tab", async () => {
+    it("a hand-written test has no DSL: the DSL tab says it is code only and points to the Code tab", async () => {
         const imp = await api("POST", `/api/projects/${projectId}/specs`, { specs: [{ title: "Taken over", kind: "api", steps: [{ action: "request", method: "GET", path: "/api/products" }] }], validate: false });
         const id = imp.body.tests[0].id as string;
         expect((await api("POST", `/api/tests/${id}/take-over`, { confirm: true })).status).toBe(200);
         await visit(`#/tests/${id}/text`);
-        await pwExpect(page.getByText("A code test has no text form")).toBeVisible();
+        await pwExpect(page.getByText("This script is code only: it has no DSL")).toBeVisible();
         await pwExpect(page.getByRole("link", { name: "Open the Code tab", exact: true })).toHaveAttribute("href", `#/tests/${id}/code`);
         expect(await editor().count()).toBe(0);
     });
@@ -386,8 +386,8 @@ describe("a test that has no text form", () => {
 
 describe("writing a test as text from the Tests page", () => {
     it("starts from an example, shows problems, and creates the test", async () => {
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
         await page.getByRole("menuitem", { name: "Write it as text", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Write a test as text" });
         await pwExpect(dialog).toBeVisible();
@@ -419,8 +419,8 @@ describe("writing a test as text from the Tests page", () => {
 
     it("the platform's refusal is shown on the line and nothing is created", async () => {
         const before = platform.repo.listTests(projectId).length;
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
         await page.getByRole("menuitem", { name: "Write it as text", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Write a test as text" });
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
@@ -464,8 +464,8 @@ describe("looks and works everywhere", () => {
         await axe();
         await page.emulateMedia({ colorScheme: null });
         // the dialog on a phone
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
         await page.getByRole("menuitem", { name: "Write it as text", exact: true }).click();
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
         await noOverflow();

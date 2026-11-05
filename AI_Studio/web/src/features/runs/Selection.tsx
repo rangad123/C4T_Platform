@@ -27,7 +27,7 @@ export type TestSelection = ReturnType<typeof useTestSelection>;
 export function SelectToggle({ selection }: { selection: TestSelection }) {
     return (
         <Button variant="ghost" icon={ListChecks} aria-pressed={selection.selecting} onClick={() => (selection.selecting ? selection.stop() : selection.setSelecting(true))}>
-            Select tests
+            Select scripts
         </Button>
     );
 }
@@ -49,12 +49,12 @@ export function SelectionBar({ selection, shownIds, run }: { selection: TestSele
     const n = selection.picked.size;
     const allShown = shownIds.length > 0 && shownIds.every((id) => selection.picked.has(id));
     return (
-        <div className="run-selbar" role="region" aria-label="Selected tests">
+        <div className="run-selbar" role="region" aria-label="Selected scripts">
             <p className="t-card" role="status">
-                {n === 0 ? "No tests selected" : `${plural(n, "test")} selected`}
+                {n === 0 ? "No scripts selected" : `${plural(n, "script")} selected`}
             </p>
             <Button variant="ghost" disabled={shownIds.length === 0} onClick={() => selection.set(allShown ? [...selection.picked].filter((id) => !shownIds.includes(id)) : [...new Set([...selection.picked, ...shownIds])])}>
-                {allShown ? "Clear the shown tests" : `Select the ${shownIds.length} shown`}
+                {allShown ? "Clear the shown scripts" : `Select the ${shownIds.length} shown`}
             </Button>
             <span className="spacer" />
             {run}

@@ -31,8 +31,9 @@ export const go = (href: string) => {
  * testing lifecycle (docs/product-restructure/INFORMATION_ARCHITECTURE.md; round 37 order): Dashboard, Requirements, Test cases,
  * Test scripts, Test suites, Agent runs, Runs, Settings. The older places (Library, Release, Setup) are gone; their sections live on in these.
  */
-export const CASES_SECTIONS = ["automated", "manual"] as const;
-export const SCRIPTS_SECTIONS = ["scripts", "steps", "elements", "helpers", "library"] as const;
+/** Test cases is one list (round 38); its "sections" are the type filters, so the old `?section=automated|manual` links still filter it. */
+export const CASES_SECTIONS = ["all", "automated", "manual"] as const;
+export const SCRIPTS_SECTIONS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 export const RUNS_SECTIONS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
 // Round 37: runners are machine-level, so they are not a project setting: a project's runners are on the Runners page (`projectRunners`).
 export const SETTINGS_SECTIONS = ["general", "members", "environments", "data", "accounts", "ai", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
@@ -53,7 +54,7 @@ export type ReleaseSection = (typeof RELEASE_SECTIONS)[number];
 const libraryHome = (id: string, section: LibrarySection = "steps", extra?: Record<string, string | undefined>) =>
     section === "data" || section === "accounts" ? place(id, "settings", "general", section) : place(id, "scripts", "scripts", section, extra);
 /** Where an old Release section lives now: manual checks with the test cases, releases and compliance with the runs. */
-const releaseHome = (id: string, section: ReleaseSection = "releases") => (section === "manual" ? place(id, "tests", "automated", "manual") : place(id, "runs", "runs", section));
+const releaseHome = (id: string, section: ReleaseSection = "releases") => (section === "manual" ? place(id, "tests", "all", "manual") : place(id, "runs", "runs", section));
 
 /** `#/projects/:id/<place>` with `?section=` only when it is not the place's first section. */
 function place(id: string, name: string, first: string, section?: string, extra?: Record<string, string | undefined>): string {
@@ -76,9 +77,10 @@ export const routes = {
     /** Create a project: details, platforms and testing modes (US-010). Exploring with AI is a step from the new project's dashboard. */
     createProject: "#/create",
     project: (id: string) => `#/projects/${id}`,
-    tests: (id: string) => `#/projects/${id}/tests`,
-    /** The test cases page with one way of making a test already open: described in words, or step by step. */
-    newTest: (id: string, how: "describe" | "build") => `#/projects/${id}/tests?start=${how}`,
+    /** The runnable tests: the Test scripts list (round 38; the Test cases place holds the written cases, `cases`). No query, so `?status=` etc. can follow. */
+    tests: (id: string) => `#/projects/${id}/scripts`,
+    /** The Test scripts list with one way of making a script already open: described in words, or step by step. */
+    newTest: (id: string, how: "describe" | "build") => `#/projects/${id}/scripts?start=${how}`,
     /** What happened: the run list, Schedules, After a deploy, Trends. */
     runs: (id: string, section?: RunsSection) => place(id, "runs", "runs", section),
     /** One run opened: its tests, what changed, ways to run again. */
@@ -89,8 +91,10 @@ export const routes = {
     requirements: (id: string) => `#/projects/${id}/requirements`,
     /** One requirement: what it says and the test cases that cover it. */
     requirement: (id: string, rid: string) => `#/projects/${id}/requirements/${rid}`,
-    /** Test cases: automated and manual, one section open. */
-    cases: (id: string, section?: CasesSection) => place(id, "tests", "automated", section),
+    /** Test cases: the written cases, all of them or one type (automated, manual). */
+    cases: (id: string, section?: CasesSection) => place(id, "tests", "all", section),
+    /** One written test case opened on the Test cases list. */
+    testCase: (id: string, caseId: string) => place(id, "tests", "all", undefined, { case: caseId }),
     /** Test suites: ordered groups of test cases with how they run. */
     suites: (id: string) => `#/projects/${id}/suites`,
     /** One suite a person built: its ordered tests, how it runs, its runs. */
@@ -121,7 +125,7 @@ export const routes = {
     manualCases: (id: string) => releaseHome(id, "manual"),
     /** A test's workbench: the bare route opens Steps. */
     test: (id: string) => `#/tests/${id}`,
-    /** One tab of a test's workbench (Steps, Text, Code, History). */
+    /** One tab of a test's workbench (DSL, Code, Steps, History; the DSL tab's route is `text`, and `dsl` is an alias of it). */
     testTab: (id: string, tab: "steps" | "text" | "code" | "history") => `#/tests/${id}/${tab}`,
     /** The script editor of a test (hand-written tests). `history` opens the version history, `job` shows the run a save started. */
     code: (id: string, opts?: { history?: boolean; job?: string | null; note?: string; version?: number; saved?: boolean }) => {

@@ -1,6 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import type { ProjectDetail } from "../api";
+import { projectKind, type ProjectDetail } from "../api";
 import { usePage } from "../components/Shell";
 import { Badge, Callout, EmptyState, ErrorState, ListSkeleton, Metric, PageHeader } from "../components/ui";
 import { useDocumentTitle, useFetch } from "../lib/hooks";
@@ -55,7 +55,21 @@ export function ProjectCompliance({ id }: { id: string }) {
                     <ErrorState error={friendlyError(report.error.message)} onRetry={report.reload} />
                 ) : !report.data || report.data.testCount === 0 ? (
                     <div className="card">
-                        <EmptyState icon={ShieldCheck} title="No tests to map yet" actions={<a className="btn btn-primary" href={routes.newProject({ project: id })}>Start exploring</a>}>
+                        <EmptyState
+                            icon={ShieldCheck}
+                            title="No tests to map yet"
+                            actions={
+                                !project.data ? undefined : projectKind(project.data) === "code" ? (
+                                    <a className="btn btn-primary" href={routes.tests(id)}>
+                                        Open Test scripts
+                                    </a>
+                                ) : (
+                                    <a className="btn btn-primary" href={routes.newProject({ project: id })}>
+                                        Start exploring
+                                    </a>
+                                )
+                            }
+                        >
                             Once this project has tests, they’re matched to NIST, HIPAA and ISO 27001 controls here.
                         </EmptyState>
                     </div>

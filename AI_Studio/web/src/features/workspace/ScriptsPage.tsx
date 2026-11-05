@@ -1,5 +1,6 @@
 import { ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { routes, useRoute, type ScriptsSection } from "../../lib/router";
+import { ProjectTests } from "../../pages/ProjectTests";
 import { BlocksPage } from "../blocks/BlocksPage";
 import { HelpersPage } from "../code/HelpersPage";
 import { LibrarySearch } from "../library/LibraryPage";
@@ -7,18 +8,23 @@ import { ProjectLibrary } from "../libraries/ProjectLibrary";
 import { ProjectObjects } from "../objects/ProjectObjects";
 import { ScriptList, VersionPage } from "../review/ScriptReview";
 
-/** The Test scripts place: the scripts, and the building blocks scripts share (they used to be the Library place). */
+/**
+ * The Test scripts place: the runnable scripts (round 38: running, New test script and importing live here, not in Test cases),
+ * the review of their versions, and the building blocks scripts share.
+ */
 export function ScriptsPage({ id }: { id: string }) {
     const q = useRoute().query;
-    const section = (q.get("section") as ScriptsSection | null) ?? "scripts";
-    const edit = q.get("edit") ?? undefined;
     const reviewTest = q.get("test");
     const reviewVersion = Number(q.get("version")) || 0;
+    // A version's own link (`?test=&version=`, features/review/review.ts versionHref) opens it in Review.
+    const section = (q.get("section") as ScriptsSection | null) ?? (reviewTest && reviewVersion ? "review" : "scripts");
+    const edit = q.get("edit") ?? undefined;
     const sections: HubSection[] = [
+        { key: "scripts", label: "Scripts", hint: "Every test script: run them, make new ones, import and export", render: () => <ProjectTests id={id} /> },
         {
-            key: "scripts",
-            label: "Scripts",
-            hint: "The executable script of every test case, its versions and their review",
+            key: "review",
+            label: "Review",
+            hint: "Each script's versions and their review: drafts wait here until they are approved",
             // One version of a test (`?test=&version=`), or the list (features/review/ScriptReview.tsx).
             render: () => (reviewTest && reviewVersion ? <VersionPage projectId={id} testId={reviewTest} version={reviewVersion} key={`${reviewTest}:${reviewVersion}`} /> : <ScriptList id={id} />),
         },
@@ -32,11 +38,11 @@ export function ScriptsPage({ id }: { id: string }) {
             id={id}
             place="scripts"
             title="Test scripts"
-            subtitle="What actually runs: each test case’s script, in plain English and as code, and the pieces scripts share."
+            subtitle="Manage and create test scripts for automated testing of your application. Each script has two views, DSL and Code."
             sections={sections}
             current={section}
             hrefOf={(k) => routes.scripts(id, k as ScriptsSection)}
-            below={section === "scripts" || section === "library" ? undefined : <LibrarySearch id={id} />}
+            below={section === "scripts" || section === "review" || section === "library" ? undefined : <LibrarySearch id={id} />}
         />
     );
 }

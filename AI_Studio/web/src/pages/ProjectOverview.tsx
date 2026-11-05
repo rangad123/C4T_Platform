@@ -96,7 +96,7 @@ export function ProjectTabs({
                 <>
                     {tab(routes.project(id), "Dashboard", "overview", undefined, "tab-overview")}
                     {tab(routes.requirements(id), "Requirements", "requirements", undefined, "tab-requirements")}
-                    {tab(routes.tests(id), "Test cases", "tests", cases, "tab-tests")}
+                    {tab(routes.cases(id), "Test cases", "tests", cases, "tab-tests")}
                     {tab(routes.scripts(id), "Test scripts", "scripts", scripts, "tab-scripts")}
                     {tab(routes.suites(id), "Test suites", "suites", undefined, "tab-suites")}
                     {tab(routes.runs(id), "Runs", "runs", undefined, "tab-runs")}

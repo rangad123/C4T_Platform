@@ -30,6 +30,33 @@ export function automatedSnapshot(db: Db, projectId: string, nowMs = Date.now())
     };
 }
 
+/**
+ * Which written cases a release lists. A release made now lists the Manual cases and the Automated cases that have no test script
+ * yet: an Automated case whose script exists in the project is covered by that script's run (the automated half of the release).
+ * Releases made before this rule list every case, as they always did. The rule is kept with the release's stored snapshot (it
+ * needs no column), carried through a refresh, a sign-off and a reopen, and a case with a result recorded in the release always stays.
+ */
+export type ReleaseCases = "every-case" | "manual-and-unscripted";
+type StoredSnapshot = AutomatedSnapshot & { cases?: ReleaseCases };
+export const casesOf = (release: Pick<ReleaseRow, "snapshot">): ReleaseCases => ((release.snapshot as StoredSnapshot | null)?.cases === "manual-and-unscripted" ? "manual-and-unscripted" : "every-case");
+
+/** The snapshot a new release is made with: the automated state now, and the rule above. */
+export function newReleaseSnapshot(db: Db, projectId: string, nowMs = Date.now()): AutomatedSnapshot {
+    return { ...automatedSnapshot(db, projectId, nowMs), cases: "manual-and-unscripted" } as StoredSnapshot;
+}
+/** A fresh automated snapshot for a release that already exists: it keeps the release's rule. */
+export function keptSnapshot(db: Db, release: Pick<ReleaseRow, "snapshot" | "projectId">, nowMs = Date.now()): AutomatedSnapshot {
+    const fresh = automatedSnapshot(db, release.projectId, nowMs);
+    return casesOf(release) === "manual-and-unscripted" ? ({ ...fresh, cases: "manual-and-unscripted" } as StoredSnapshot) : fresh;
+}
+
+/** The cases a release lists under its rule (see ReleaseCases). */
+function casesInRelease(db: Db, release: Pick<ReleaseRow, "snapshot" | "projectId">, cases: ManualCase[], results: Map<string, ResultRow>): ManualCase[] {
+    if (casesOf(release) === "every-case") return cases;
+    const scripts = new Set(db.all<{ id: string }>("SELECT id FROM test_cases WHERE project_id = ?", release.projectId).map((r) => r.id));
+    return cases.filter((c) => c.automation !== "automated" || !c.linkedTestIds.some((t) => scripts.has(t)) || results.has(c.id));
+}
+
 export interface ViewItem extends FrozenItem {
     issue: ResultRow["issue"];
     linkedTestIds: string[];
@@ -73,6 +100,8 @@ export interface ReleaseView {
     signedBy: string | null;
     /** True for a signed release: nothing in it changes any more. */
     frozen: boolean;
+    /** Which written cases it lists (see ReleaseCases). */
+    cases: ReleaseCases;
     sentence: string;
     automated: AutomatedSnapshot;
     manual: { rollup: Rollup; items: ViewItem[] };
@@ -96,18 +125,18 @@ export interface ReleaseSummary {
 
 const decisionOf = (r: ReleaseRow): "approved" | "rejected" | null => (r.status === "open" ? null : r.status);
 
-function itemsOf(store: ManualCaseStore, release: ReleaseRow, cases: ManualCase[]): { items: ViewItem[]; frozen: boolean } {
+function itemsOf(store: ManualCaseStore, db: Db, release: ReleaseRow, cases: ManualCase[]): { items: ViewItem[]; frozen: boolean } {
     const results = store.results(release.id);
     if (release.frozen) {
         // The decision and the checks are frozen; an issue filed afterwards is only a link and is read live.
         return { items: release.frozen.items.map((i) => ({ ...i, issue: results.get(i.id)?.issue ?? null, linkedTestIds: cases.find((c) => c.id === i.id)?.linkedTestIds ?? [] })), frozen: true };
     }
-    return { items: liveItems(cases, results), frozen: false };
+    return { items: liveItems(casesInRelease(db, release, cases, results), results), frozen: false };
 }
 
 export function releaseView(store: ManualCaseStore, db: Db, release: ReleaseRow, nowMs = Date.now()): ReleaseView {
     const cases = store.listCases(release.projectId);
-    const { items, frozen } = itemsOf(store, release, cases);
+    const { items, frozen } = itemsOf(store, db, release, cases);
     const automated = release.frozen ? release.frozen.automated : automatedSnapshot(db, release.projectId, nowMs);
     const r = rollup(items);
     return {
@@ -122,6 +151,7 @@ export function releaseView(store: ManualCaseStore, db: Db, release: ReleaseRow,
         signedAt: release.signedAt,
         signedBy: release.signedBy,
         frozen,
+        cases: casesOf(release),
         sentence: releaseSentence(release.name, r, automated.readiness.state),
         automated,
         manual: { rollup: r, items },
@@ -137,7 +167,7 @@ export function releaseSummaries(store: ManualCaseStore, db: Db, projectId: stri
     const cases = store.listCases(projectId);
     let live: AutomatedSnapshot | undefined;
     return releases.map((rel) => {
-        const { items } = itemsOf(store, rel, cases);
+        const { items } = itemsOf(store, db, rel, cases);
         const automated = rel.frozen ? rel.frozen.automated : (live ??= automatedSnapshot(db, projectId, nowMs));
         const r = rollup(items);
         return {
@@ -181,8 +211,10 @@ export interface SignoffRequest {
 export function signRelease(store: ManualCaseStore, db: Db, release: ReleaseRow, req: SignoffRequest, nowMs = Date.now()): void {
     requireOpen(release);
     const cases = store.listCases(release.projectId);
-    const items = liveItems(cases, store.results(release.id));
-    const automated = automatedSnapshot(db, release.projectId, nowMs);
+    const results = store.results(release.id);
+    const items = liveItems(casesInRelease(db, release, cases, results), results);
+    // Kept with the frozen state, so a reopened release still lists what its rule says.
+    const automated = keptSnapshot(db, release, nowMs);
     const ev = evaluateSignoff({ automated: automated.readiness, items, quarantined: automated.quarantine?.count });
 
     let overridden = false;

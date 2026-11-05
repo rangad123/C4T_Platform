@@ -18,7 +18,7 @@ export function RecorderPage({ id }: { id: string }) {
     // A first-run link brings the address (?url=...); the form shows it and the person still presses Start.
     const [lastUrl, setLastUrl] = useState<string | undefined>(route.query.get("url") ?? undefined);
     useDocumentTitle(name ? `Record a test · ${name}` : "Record a test");
-    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Test cases", href: routes.tests(id) }, { label: "Record a test" }], nav: "projects" });
+    usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Test scripts", href: routes.tests(id) }, { label: "Record a test" }], nav: "projects" });
 
     return (
         <>

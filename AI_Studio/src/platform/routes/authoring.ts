@@ -6,6 +6,7 @@ import { HttpError } from "../http-error.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import { environmentFor } from "../plain-run.js";
 import { DEFAULT_JOB_OPTIONS } from "../repo.js";
+import { PLAIN_OFF_MESSAGE, refuseUnlessRunsStart } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
 
 /**
@@ -62,6 +63,7 @@ export function registerAuthoringRoutes(ctx: RouteCtx): void {
         const { id } = req.params as { id: string };
         ctx.project(id);
         const body = CreateBody.parse(req.body);
+        refuseUnlessRunsStart(ctx.p, PLAIN_OFF_MESSAGE); // tests switched off on this server: nothing is queued
         const { application, kind, allowChanges } = await prepare(id, body);
         // Right before creating the job, with no await in between (one active job per project).
         await ctx.assertNoActiveJob(id);
@@ -83,6 +85,7 @@ export function registerAuthoringRoutes(ctx: RouteCtx): void {
         if (new CustomScriptStore(repo.db).isCustom(t.id)) throw new HttpError(409, "This is a code test, so it cannot be rebuilt from a description. Restore the generated version first, or edit the code.");
         if (t.spec.source.origin !== PLAIN_ORIGIN) throw new HttpError(422, "Only tests that were written in plain English can be rebuilt from a new description.");
         const body = RewriteBody.parse(req.body);
+        refuseUnlessRunsStart(ctx.p, PLAIN_OFF_MESSAGE);
         const { application, kind, allowChanges } = await prepare(t.projectId, body, t.kind === "api" ? "api" : "web");
         await ctx.assertNoActiveJob(t.projectId);
         const job = await repo.createJob(t.projectId, application.id, {

@@ -121,9 +121,12 @@ describe("AI judgement results in the UI", () => {
     }, 240_000);
 
     it("shows a finding in plain words with its severity, the steps and the screenshot the AI looked at", async () => {
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
-        await page.locator("a.list-row", { hasText: "Cart looks right on the overlapped page" }).click();
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await page.locator("a.sr-title", { hasText: "Cart looks right on the overlapped page" }).click();
+        // Round 38: a script's title opens its DSL tab; the steps with their marks are on the Steps tab.
+        await pwExpect(page.getByRole("tab", { name: "DSL", exact: true })).toHaveAttribute("aria-selected", "true");
+        await page.getByRole("tab", { name: "Steps", exact: true }).click();
         await pwExpect(page.getByText("This test found something that needs a look")).toBeVisible();
         const callout = page.locator(".callout", { hasText: "This test found something that needs a look" });
         await pwExpect(callout).toContainText("AI judgement — please look:");
@@ -146,8 +149,8 @@ describe("AI judgement results in the UI", () => {
     });
 
     it("shows a low-confidence doubt as a plain note on a passing test", async () => {
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
-        await page.locator("a.list-row", { hasText: "Footer spacing" }).click();
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
+        await page.locator("a.sr-title", { hasText: "Footer spacing" }).click();
         const callout = page.locator(".callout", { hasText: "This test is passing" });
         await pwExpect(callout).toBeVisible();
         await pwExpect(callout).toContainText("AI judgement note (not sure)");
@@ -155,8 +158,8 @@ describe("AI judgement results in the UI", () => {
     });
 
     it("says plainly when the model cannot look at images", async () => {
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
-        await page.locator("a.list-row", { hasText: "Model without images" }).click();
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
+        await page.locator("a.sr-title", { hasText: "Model without images" }).click();
         const callout = page.locator(".callout", { hasText: "This test is failing" });
         await pwExpect(callout).toContainText("AI judgement could not run: the configured AI model does not accept images");
         await pwExpect(callout).toContainText("neither passed nor flagged");
@@ -164,24 +167,14 @@ describe("AI judgement results in the UI", () => {
 });
 
 describe("New project form", () => {
-    let made = 0;
-    async function openAdvanced(url: string) {
-        await page.goto(`${BASE}/#/new?url=${encodeURIComponent(url)}`);
-        await pwExpect(page.getByLabel("Application URL")).toHaveValue(url);
-        // Round 37: a new project's name is always typed (a taken name is refused, so each form gets its own).
-        await page.getByLabel("Project name").fill(`Vision project ${++made}`);
-        await page.getByText("Advanced options", { exact: true }).click();
-    }
-
-    it("offers the AI screen review switch, off by default, with plain wording, and sends what was chosen", async () => {
+    it("has no AI screen review switch: an exploration leaves it off unless the UX agent's run asks for it", async () => {
         // A port nothing listens on: the job is accepted (and its options stored) but ends at once.
         const dead = "http://127.0.0.1:5479/";
-        await openAdvanced(dead);
-        const box = page.getByRole("checkbox", { name: /AI screen review/ });
-        await pwExpect(box).not.toBeChecked();
-        await pwExpect(page.getByText("An AI model looks at screenshots of key pages and says whether the screen looks right", { exact: false })).toBeVisible();
-        await pwExpect(page.getByText("Screenshots are sent to your AI provider.", { exact: false })).toBeVisible();
-
+        await page.goto(`${BASE}/#/new?url=${encodeURIComponent(dead)}`);
+        await pwExpect(page.getByLabel("Application URL")).toHaveValue(dead);
+        // Round 37: a new project's name is always typed.
+        await page.getByLabel("Project name").fill("Vision project 1");
+        await pwExpect(page.getByRole("checkbox", { name: /AI screen review/ })).toHaveCount(0);
         const sent: Array<Record<string, unknown>> = [];
         await page.route("**/api/projects/*/test-generation", (route) => {
             sent.push(route.request().postDataJSON());
@@ -191,24 +184,11 @@ describe("New project form", () => {
         await page.waitForURL((u) => u.hash.startsWith("#/projects/"));
         await pwExpect.poll(() => sent.length).toBe(1);
         expect(sent[0]!.visionChecks).toBeUndefined();
-
-        await openAdvanced(dead);
-        await box.check();
-        await pwExpect(page.getByText("We’ll test:", { exact: false })).toContainText("AI screen review");
-        await page.getByRole("button", { name: "Start exploring" }).click();
-        await pwExpect.poll(() => sent.length).toBe(2);
-        expect(sent[1]).toMatchObject({ visionChecks: true });
-
         const projects = (await api("GET", "/projects")).body as Array<{ id: string }>;
         const options: Array<Record<string, unknown>> = [];
         for (const p of projects) for (const j of platform.repo.listJobs(p.id)) options.push(j.options as unknown as Record<string, unknown>);
-        expect(options.some((o) => o.visionChecks === true)).toBe(true);
+        expect(options.length).toBeGreaterThan(0);
+        expect(options.every((o) => o.visionChecks !== true)).toBe(true);
         for (const p of projects) await waitIdle(p.id).catch(() => undefined);
     }, 120_000);
-
-    it("is switched off and unavailable for an API-only analysis", async () => {
-        await openAdvanced(FIX + "/");
-        await page.getByRole("checkbox", { name: /Web application/ }).uncheck();
-        await pwExpect(page.getByRole("checkbox", { name: /AI screen review/ })).toBeDisabled();
-    });
 });

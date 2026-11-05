@@ -304,6 +304,9 @@ export class PhoneFake {
             // Cards of the project's Dashboard (round 34), as a project with nothing to report answers them.
             if (method === "GET" && rest === "setup-check") return { body: { items: [] } };
             if (method === "GET" && rest === "requirements/coverage") return { body: { total: 0, notCovered: 0, covered: 0, passing: 0, failing: 0, retired: 0 } };
+            // The Test scripts list (round 38): the requirements each script covers, and each script's review state; none here.
+            if (method === "GET" && rest === "requirements/links") return { body: { links: [] } };
+            if (method === "GET" && rest === "scripts") return { body: { scripts: [], policy: { aiGenerated: true, edits: true, healing: true, soleAdminSelfApprove: true }, canApprove: false } };
             if (method === "GET" && rest === "agent-tokens") return { body: [] };
             if (method === "GET" && rest === "agents") return { body: this.agents };
             // Round 24 (Settings, Mobile app): the ready check and the phone test settings, as a platform with no phone connected answers them.

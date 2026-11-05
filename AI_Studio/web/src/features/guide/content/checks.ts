@@ -10,7 +10,7 @@ export const checks: Topic[] = [
         what: "The platform remembers what a page looks like and tells you when it changes.",
         why: "You catch layout accidents no click test sees.",
         steps: [
-            step("Switch on Visual change detection when you explore.", "Visual change detection"),
+            step("Open Settings, then General, and choose Responsive UI under Testing agents.", "Settings", "General", "Testing agents"),
             step("Run the tests once. The platform saves a baseline, the reference picture."),
             step("Run again. A difference shows as Needs a look, with the changes in red."),
             step("If the change is intended, choose Accept new screenshot.", "Accept new screenshot"),
@@ -30,7 +30,7 @@ export const checks: Topic[] = [
         what: "Checks that people with disabilities can use your pages.",
         why: "You find pages that keyboard and screen-reader users cannot use.",
         steps: [
-            step("Leave the accessibility check on when you explore. It is on by default."),
+            step("Keep Accessibility chosen under Testing agents, in Settings, then General. New projects start with it.", "Settings", "General", "Testing agents"),
             step("Open a test that reads Needs a look. It names the rule, how serious it is and the affected elements."),
             step("Fix the page, then run again."),
         ],
@@ -49,7 +49,7 @@ export const checks: Topic[] = [
         what: "Loads a page like a visitor and looks for broken things.",
         why: "You find script errors and broken links before your users do.",
         steps: [
-            step("Leave the page health check on when you explore. It is on by default."),
+            step("Keep UX chosen under Testing agents, in Settings, then General. New projects start with it.", "Settings", "General", "Testing agents"),
             step("Open the page health test to see every problem on the page."),
             step("Fix them, then run again."),
         ],
@@ -90,7 +90,7 @@ export const checks: Topic[] = [
         what: "Times key pages and API calls against limits for speed and size.",
         why: "You notice when the app gets slower.",
         steps: [
-            step("Tick Speed checks (takes longer) when you explore.", "Speed checks (takes longer)"),
+            step("Open Settings, then General, and choose Performance under Testing agents.", "Settings", "General", "Testing agents"),
             step("Run the tests, then open the project's Dashboard and look at Slowest pages.", "Slowest pages"),
             step("Open a finding to see the numbers and a hint."),
         ],
@@ -111,8 +111,8 @@ export const checks: Topic[] = [
         what: "Asks whether an API call stays fast with 10 people at once.",
         why: "It is a quick sign that a call struggles under a little pressure.",
         steps: [
-            step("Switch on Load check (test environments only) when you explore.", "Load check (test environments only)"),
-            step("Run the tests."),
+            step("Open Settings, then General, and choose Performance under Testing agents.", "Settings", "General", "Testing agents"),
+            step("Ask for the load check when you start an exploration from your AI assistant or the API. The Explore page does not offer it."),
             step("Open any finding to see the numbers."),
         ],
         goodToKnow: [
@@ -132,7 +132,7 @@ export const checks: Topic[] = [
         what: "Tries harmless odd text in search forms and checks a form's own limits.",
         why: "You find forms that break on emoji, quotes or very long text.",
         steps: [
-            step("Leave it on when you explore. It is on by default."),
+            step("Keep Test Case Generation chosen under Testing agents, in Settings, then General. New projects start with it.", "Settings", "General", "Testing agents"),
             step("Open a finding to see which input broke the form, and how."),
         ],
         goodToKnow: [
@@ -151,7 +151,7 @@ export const checks: Topic[] = [
         what: "A read-only look at your site from the outside.",
         why: "You catch common hygiene problems quickly.",
         steps: [
-            step("Leave the security check on when you explore. It is on by default."),
+            step("Keep Security chosen under Testing agents, in Settings, then General. New projects start with it.", "Settings", "General", "Testing agents"),
             step("Open a finding. It says what is wrong and how to fix it."),
             step("Fix it, then run again."),
         ],
@@ -171,9 +171,9 @@ export const checks: Topic[] = [
         what: "Tests of your API, built from its description or from what the platform saw the app send.",
         why: "You cover the API without writing any request.",
         steps: [
-            step("Give the address of your API description, or an API token, when you explore."),
+            step("Add the OpenAPI document URL or an API token under What the agents need, on the Requirements tab.", "OpenAPI document URL", "What the agents need", "Requirements"),
             step("Run the tests, then read the findings: server errors, and access that should have been refused."),
-            step("To include tests that create or delete records, switch on Include API tests that change data.", "Include API tests that change data"),
+            step("To include tests that create or delete records, switch on Include API tests that change data there.", "Include API tests that change data"),
         ],
         goodToKnow: [
             "Tests that change data are off by default, because they create and delete real records.",
@@ -209,10 +209,10 @@ export const checks: Topic[] = [
         what: "Compares each documented API call's real answer with its description.",
         why: "The documentation and the real API often disagree.",
         steps: [
-            step("Give the address of your API description when you explore."),
-            step("Run the tests."),
+            step("Add the OpenAPI document URL under What the agents need, on the Requirements tab.", "OpenAPI document URL", "What the agents need", "Requirements"),
+            step("Explore the application, then run the tests."),
             step("Read the findings. A missing required field or wrong type is rated high."),
-            step("To turn it off, clear Check API responses against the documentation.", "Check API responses against the documentation"),
+            step("Keep API chosen under Testing agents, in Settings, then General: the contract checks come with it.", "Settings", "General", "Testing agents"),
         ],
         goodToKnow: ["Parts of the description that allow several shapes are skipped to avoid false alarms."],
         words: ["contract", "openapi", "finding"],
@@ -244,13 +244,12 @@ export const checks: Topic[] = [
         what: "An AI that can read images judges screenshots for overlapping or cut-off elements and broken pictures.",
         why: "You catch visual faults no fixed rule can describe.",
         steps: [
-            step("Tick AI screen review (needs a vision-capable AI model) when you explore.", "AI screen review (needs a vision-capable AI model)"),
-            step("Run the tests."),
-            step("Open a finding to see the screenshot and the AI's note."),
+            step("Choose UX under Testing agents in Settings, then General.", "Settings", "General", "Testing agents"),
+            step("Ask for it through the API when you start an exploration; the Explore page has no switch for it."),
+            step("Run the tests, then open a finding to see the screenshot and the AI's note."),
         ],
         goodToKnow: [
-            "It is off by default and uses your configured AI.",
-            "A finding appears only when the AI is confident, and it is labelled as an AI judgement.",
+            "It is off by default and uses your configured AI. A finding appears only when the AI is confident.",
             "If the AI cannot read images, the test fails with a clear reason instead of passing.",
         ],
         words: ["ai-screen-review", "finding"],
@@ -266,11 +265,12 @@ export const checks: Topic[] = [
         why: "You show that nothing on the list was forgotten.",
         steps: [
             step("Open Requirements and add your requirements, or import them from a requirements document."),
+            step("In a code project, choose Generate test cases using AI to have them written for you.", "Generate test cases using AI"),
             step("Open a requirement and link the test cases that check it."),
             step("Read its coverage: passing, failing, covered or not covered. The project dashboard adds them up."),
         ],
         goodToKnow: [
-            "When you explore with the same document, each test the AI writes is linked to the requirements it names.",
+            "Each test the AI writes while exploring is linked to the requirements it names.",
             "A requirement with no matching screen is listed as uncovered in the activity log, never faked.",
         ],
         words: ["exploration", "test"],

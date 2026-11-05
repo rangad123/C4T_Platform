@@ -256,6 +256,8 @@ Export your project's tests once (**Tests → More actions → Export… → Exp
 - **Outputs:** JUnit, JSON, SARIF (for GitHub code scanning), a self-contained HTML report and Markdown. On GitHub it can keep one pull-request comment up to date (`--github-comment`).
 - **Secrets** are passed as environment-variable names (`--username-env`, `--password-env`, `--token-env`), never as values on the command line.
 - **Other modes:** `--analyze` runs a full exploration and test creation (needs an AI key). `--server <url>` drives a platform that is already running (use `--api-key-env NAME` when it has an `API_KEY`).
+- **Saved agent inputs:** a project's sign-in details, API access and OpenAPI document are saved only on its **Requirements** tab (**What the agents need**); an exploration uses them and never changes them. An exploration through the API, the command line or MCP that names another API address (`apiBaseUrl`) or OpenAPI document (`openApiUrl`) while credentials are saved is refused with 409 and the reason, so saved credentials never go to another site.
+- **Tests switched off:** when no worker can pick a job up (for example `WORKER_EMBEDDED=false` and no `npm run worker`), runs, explorations, validations and deploy triggers answer 409 with `cannotRunHere: true` instead of queueing, and `/api/config` reports `runsHere: false`; the web disables **Run**, **Explore** and **Describe it** with that reason.
 - **Environments:** `ai-test run --env staging`. For production add `--confirm-production`.
 - **Compare two versions of an API description** (it lists what would break existing clients and what is harmless):
 
@@ -286,6 +288,7 @@ The tools can list projects, start an exploration, wait for it, read failures, r
 
 - Only the tools that start work (explore, run, write a test) are marked as changing things, so the AI tool can ask you first.
 - Data-changing API tests and load checks stay off unless asked for.
+- An exploration uses the inputs saved on the project's Requirements tab; naming another API address or OpenAPI document while credentials are saved is refused (409).
 - A production run still needs a confirmation.
 - The tools take no passwords or tokens. In the live browser, only the sign-in placeholders are accepted, and only on the project's own site.
 - Stdio only. It needs a running platform and the repository.

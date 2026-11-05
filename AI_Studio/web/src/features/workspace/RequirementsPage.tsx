@@ -1,17 +1,19 @@
 import { useMemo, useState } from "react";
-import { ChevronRight, FileText, ListChecks, Plus, Search, Upload } from "lucide-react";
-import type { Job } from "../../api";
+import { ChevronRight, ListChecks, Plus, Search, Upload } from "lucide-react";
+import { projectKind, type ProjectDetail } from "../../api";
 import { ProjectPlace } from "../../components/ProjectHub";
-import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
+import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { Tooltip } from "../../components/Tooltip";
 import { useCan } from "../auth/permissions";
-import { plural, relativeTime } from "../../lib/format";
-import { useFetch } from "../../lib/hooks";
+import { plural } from "../../lib/format";
+import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
-import { go, routes } from "../../lib/router";
+import { go, routes, useRoute } from "../../lib/router";
+import { GenerateCasesCard, GenerateOutcome, useGenerateCases } from "../requirements/GenerateCases";
 import { ImportPanel } from "../requirements/ImportPanel";
 import { RequirementDetail } from "../requirements/RequirementDetail";
 import { RequirementForm } from "../requirements/RequirementForm";
+import { AgentInputs } from "../requirements/AgentInputs";
 import { COVERAGE_HINT, COVERAGE_TONE, COVERAGE_WORDS, COVERAGES, PRIORITY_WORDS, STATUS_WORDS, STATUSES, type Coverage, type RequirementList, type RequirementStatus } from "../requirements/requirements";
 import "../requirements/requirements.css";
 
@@ -26,9 +28,19 @@ export function RequirementsPage({ id, rid }: { id: string; rid?: string }) {
 
 function RequirementList({ id }: { id: string }) {
     const list = useFetch<RequirementList>(`/projects/${id}/requirements`);
-    const jobs = useFetch<Job[]>(`/projects/${id}/jobs`);
+    const project = useFetch<ProjectDetail>(`/projects/${id}`);
     const can = useCan();
     const canWrite = can("ai_studio.tests.write");
+    // Code-based (and mixed) projects write test cases from their requirements with the AI; AI agent projects do not.
+    const kind = project.data ? projectKind(project.data) : null;
+    // The AI writes and saves the cases: adding tests and using the AI to write them, as the server asks.
+    const canGenerate = canWrite && can("ai_studio.tests.generate") && (kind === "code" || kind === "mixed");
+    // New cases change the Test cases tab's count: every part showing the project asks again.
+    const gen = useGenerateCases(id, useRoute().query.get("generate") === "1", async () => {
+        announceProjectChanged(id);
+        await list.reload();
+    });
+    const choosing = canGenerate && gen.choosing;
     const [open, setOpen] = useState<"add" | "import" | null>(null);
     const [notice, setNotice] = useState<{ tone: "success" | "warning"; text: string } | null>(null);
     const [q, setQ] = useState("");
@@ -45,7 +57,7 @@ function RequirementList({ id }: { id: string }) {
             (!needle || `${r.ref}\n${r.title}\n${r.description}\n${r.acceptanceCriteria}`.toLowerCase().includes(needle)),
     );
     const s = list.data?.summary;
-    const latestDoc = (jobs.data ?? []).find((j) => (j.counters.requirementsTotal ?? 0) > 0);
+    const allShownChosen = shown.length > 0 && shown.every((r) => gen.chosen.has(r.id));
 
     return (
         <ProjectPlace
@@ -89,6 +101,7 @@ function RequirementList({ id }: { id: string }) {
                 />
             )}
 
+            <AgentInputs projectId={id} />
             <h2 className="t-section">Your requirements</h2>
             {list.loading ? (
                 <ListSkeleton rows={4} />
@@ -153,12 +166,39 @@ function RequirementList({ id }: { id: string }) {
                             ))}
                         </div>
                     </div>
+                    {choosing && shown.length > 0 && (
+                        <div className="req-choose" role="group" aria-label="Choose requirements">
+                            <label className="row" style={{ gap: 8 }}>
+                                <input type="checkbox" checked={allShownChosen} onChange={(e) => gen.setAll(shown.map((r) => r.id), e.target.checked)} />
+                                <span>Choose all {shown.length === all.length ? "" : "shown "}({shown.length})</span>
+                            </label>
+                            <span className="t-meta" data-testid="requirements-chosen">
+                                {plural(gen.chosen.size, "requirement")} chosen
+                            </span>
+                        </div>
+                    )}
                     {shown.length === 0 ? (
                         <div className="card">
                             <EmptyState icon={Search} title="Nothing matches">
                                 No requirement matches this search and these filters.
                             </EmptyState>
                         </div>
+                    ) : choosing ? (
+                        <ul className="card list divided" aria-label="Requirements to choose from">
+                            {shown.map((r) => (
+                                <li key={r.id}>
+                                    <label className="req-pick">
+                                        <input type="checkbox" checked={gen.chosen.has(r.id)} onChange={(e) => gen.toggle(r.id, e.target.checked)} aria-label={`Choose ${r.ref} ${r.title}`} />
+                                        <span className="main">
+                                            <span className="title">
+                                                <span className="req-ref mono">{r.ref}</span> {r.title}
+                                            </span>
+                                            <span className="meta">{(r.caseCount ?? 0) > 0 ? `Has ${plural(r.caseCount!, "test case")} already` : "No test cases yet"}</span>
+                                        </span>
+                                    </label>
+                                </li>
+                            ))}
+                        </ul>
                     ) : (
                         <ul className="card list divided" aria-label="Requirements">
                             {shown.map((r) => (
@@ -190,25 +230,19 @@ function RequirementList({ id }: { id: string }) {
                 </>
             )}
 
-            <section className="card card-pad stack-sm" data-testid="requirements-generate">
-                <h2 className="t-section">Tests from a requirements document</h2>
-                <p className="t-secondary">
-                    Add a requirements document when you explore (Advanced options) and the AI plans tests from it. A test it writes is linked to each requirement here whose reference it names, so import the same document first to see them linked.
-                    {latestDoc && (
-                        <>
-                            {" "}
-                            The latest exploration with a document ({relativeTime(latestDoc.createdAt)}) found {latestDoc.counters.requirementsTotal} requirements in it; its plan covers {latestDoc.counters.requirementsCovered ?? 0} of them. <a href={routes.run(id, latestDoc.jobId)}>Open that exploration</a>
-                        </>
-                    )}
-                </p>
-                {can("ai_studio.tests.generate") && (
-                    <div>
-                        <LinkButton icon={FileText} href={routes.newProject({ project: id })}>
-                            Explore with a document
-                        </LinkButton>
-                    </div>
-                )}
-            </section>
+            {canGenerate && (
+                <GenerateCasesCard
+                    projectId={id}
+                    outcome={<GenerateOutcome projectId={id} state={gen.state} onClose={gen.dismiss} />}
+                    state={gen.state}
+                    choosing={gen.choosing}
+                    chosenCount={gen.chosen.size}
+                    hasRequirements={all.length > 0}
+                    onStart={gen.start}
+                    onGenerate={() => void gen.generate()}
+                    onCancel={gen.cancel}
+                />
+            )}
         </ProjectPlace>
     );
 }

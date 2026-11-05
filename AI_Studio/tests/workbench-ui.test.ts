@@ -215,30 +215,33 @@ describe("one page per test", () => {
         await pwExpect(tab("Code")).toHaveAttribute("aria-selected", "true");
     });
 
-    it("has a real tablist that arrow keys, Home and End move through", async () => {
+    it("has a real tablist that arrow keys, Home and End move through (DSL and Code first)", async () => {
         await visit(`#/tests/${webId}/steps`);
         await pwExpect(page.getByRole("tablist", { name: "Views of this test" })).toBeVisible();
+        await pwExpect(page.getByRole("tablist", { name: "Views of this test" }).getByRole("tab")).toHaveText(["DSL", "Code", "Steps", "History"]);
         await pwExpect(tab("Steps")).toHaveAttribute("tabindex", "0");
-        await pwExpect(tab("Text")).toHaveAttribute("tabindex", "-1");
+        await pwExpect(tab("DSL")).toHaveAttribute("tabindex", "-1");
         await tab("Steps").focus();
-        await page.keyboard.press("ArrowRight");
-        await pwExpect(tab("Text")).toHaveAttribute("aria-selected", "true");
-        await pwExpect(tab("Text")).toBeFocused();
-        await pwExpect(page).toHaveURL(new RegExp(`#/tests/${webId}/text$`));
+        await page.keyboard.press("ArrowLeft");
+        await pwExpect(tab("Code")).toHaveAttribute("aria-selected", "true");
+        await pwExpect(tab("Code")).toBeFocused();
+        await pwExpect(page).toHaveURL(new RegExp(`#/tests/${webId}/code$`));
         await page.keyboard.press("End");
         await pwExpect(tab("History")).toHaveAttribute("aria-selected", "true");
         await pwExpect(tab("History")).toBeFocused();
         await pwExpect(page).toHaveURL(new RegExp(`#/tests/${webId}/history$`));
         // arrow keys wrap around
         await page.keyboard.press("ArrowRight");
-        await pwExpect(tab("Steps")).toHaveAttribute("aria-selected", "true");
-        await pwExpect(tab("Steps")).toBeFocused();
+        await pwExpect(tab("DSL")).toHaveAttribute("aria-selected", "true");
+        await pwExpect(tab("DSL")).toBeFocused();
+        await pwExpect(page).toHaveURL(new RegExp(`#/tests/${webId}/text$`));
         await page.keyboard.press("ArrowLeft");
         await pwExpect(tab("History")).toHaveAttribute("aria-selected", "true");
         await pwExpect(tab("History")).toBeFocused();
         await page.keyboard.press("Home");
-        await pwExpect(tab("Steps")).toHaveAttribute("aria-selected", "true");
-        await pwExpect(tab("Steps")).toBeFocused();
+        await pwExpect(tab("DSL")).toHaveAttribute("aria-selected", "true");
+        await pwExpect(tab("DSL")).toBeFocused();
+        await tab("Steps").click();
         // the panel is named by its tab
         await pwExpect(page.getByRole("tabpanel", { name: "Steps" })).toBeVisible();
     });
@@ -283,7 +286,7 @@ describe("unsaved changes, Save and Save and run", () => {
         await tab("Steps").click();
         await pwExpect(page.getByLabel("Text to type", { exact: true })).toHaveValue("alpenglow");
         // a link to another page asks first
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
         const dialog = page.getByRole("dialog", { name: "Leave without saving?" });
         await pwExpect(dialog).toBeVisible();
         await dialog.getByRole("button", { name: "Stay and keep editing", exact: true }).click();
@@ -313,8 +316,8 @@ describe("the Text tab", () => {
         await visit(`#/tests/${webId}/steps`);
         await heads().nth(1).click();
         await page.getByLabel("Text to type", { exact: true }).fill("alpenglow");
-        await tab("Text").click();
-        await pwExpect(tab("Text")).toHaveAttribute("aria-selected", "true");
+        await tab("DSL").click();
+        await pwExpect(tab("DSL")).toHaveAttribute("aria-selected", "true");
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
         expect(await textNow()).toContain('Type "alpenglow" into the "Search products" field');
         await pwExpect(bar()).toContainText("unsaved change");
@@ -325,12 +328,12 @@ describe("the Text tab", () => {
         await pwExpect(tab("Steps")).toHaveAttribute("aria-selected", "true");
         expect(await headTexts()).toHaveLength(5);
         // text that does not read stays where it is, names the line, and the route does not move
-        await tab("Text").click();
+        await tab("DSL").click();
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
         await writeText((await textNow()).replace('Click the "Search" button', 'Frobnicate the "Search" button'));
         await tab("Steps").click();
         await pwExpect(page.getByText("The text does not read yet", { exact: true })).toBeVisible();
-        await pwExpect(tab("Text")).toHaveAttribute("aria-selected", "true");
+        await pwExpect(tab("DSL")).toHaveAttribute("aria-selected", "true");
         await pwExpect(page).toHaveURL(new RegExp(`#/tests/${webId}/text$`));
         await shot("text-blocked");
         await page.getByRole("button", { name: "Discard the text and show the steps", exact: true }).click();
@@ -355,7 +358,7 @@ describe("the Text tab", () => {
         await page.getByRole("button", { name: "Edit the steps", exact: true }).click();
         await pwExpect(tab("Steps")).toHaveAttribute("aria-selected", "true");
         await pwExpect(page.locator(".bld-head").first()).toBeVisible();
-        await tab("Text").click();
+        await tab("DSL").click();
         await page.getByRole("button", { name: "Switch to code", exact: true }).click();
         await pwExpect(page.getByRole("dialog", { name: "Switch this test to code?" })).toBeVisible();
         await page.keyboard.press("Escape");
@@ -466,9 +469,9 @@ describe("the Code tab and the way to code and back", () => {
         await tab("Steps").click();
         await pwExpect(page.getByText("This is a code test, so it has no steps to edit")).toBeVisible();
         await pwExpect(page.getByRole("link", { name: "Edit the code", exact: true }).first()).toHaveAttribute("href", `#/tests/${plainId}/code`);
-        // and the text says it has no text form, with a way to the code
-        await tab("Text").click();
-        await pwExpect(page.getByText("A code test has no text form")).toBeVisible();
+        // and the DSL tab says the script is code only, with a way to the code
+        await tab("DSL").click();
+        await pwExpect(page.getByText("This script is code only: it has no DSL")).toBeVisible();
         // History shows what happened: the switch and the edit
         await tab("History").click();
         const history = page.getByTestId("history");
@@ -605,7 +608,7 @@ describe("looks and works everywhere", () => {
         await axeBoth("steps-failing-unsaved");
         await bar().getByRole("button", { name: "Preview changes", exact: true }).click();
         await axeBoth("steps-preview");
-        await tab("Text").click();
+        await tab("DSL").click();
         await pwExpect(editor()).toBeVisible({ timeout: 15_000 });
         await axeBoth("text");
         await tab("Code").click();

@@ -1,7 +1,7 @@
 # Form input checks
 
 Tries harmless but awkward input in the forms it finds and tells you if the application mishandles it. **On by default** for
-search-type forms (it can be switched off under *Advanced options → Check how forms handle unusual input*).
+search-type forms, with the project's **Test Case Generation** testing agent (to leave it out of one exploration, send `inputChecks: false` in the API).
 
 ## What it does
 For each of up to four pages with a form that is safe to probe, one test loads the page and, for up to two of its forms, submits a

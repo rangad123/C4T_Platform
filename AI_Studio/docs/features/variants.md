@@ -30,8 +30,8 @@ Which tests are repeated: web tests that are `VALIDATED`, except accessibility a
 
 ### Where to find it
 
-- **New analysis → Advanced options → Other browsers and screen sizes → "Also check on: …"**: collapsed and off by default. After the main validation, the tests that validated are repeated on what you tick.
-- **Tests tab → ⋯ More actions → Check other browsers & screen sizes**: pick variants and run them for the whole project.
+- **When exploring, through the API** (`variants`, allowed by the project's **Responsive UI** testing agent): after the main validation, the tests that validated are repeated on the browsers and screen sizes asked for. The Explore page has no switch for it.
+- **Test scripts → ⋯ More actions → Check other browsers & screen sizes**: pick variants and run them for the whole project.
 - **A test's page → Other browsers & screen sizes**: the matrix (✓ passed, ✗ fails here, – couldn't run / not repeated), the failing step, evidence links, and "Check again" for that one test.
 - **Tests list**: a badge such as "Fails on Safari" and a "Differs by browser" filter chip.
 - A browser that is not installed on the server is shown with a note and cannot be ticked.

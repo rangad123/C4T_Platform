@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { convertMaestroFlows, MAESTRO_MAX_BYTES, MAESTRO_MAX_FLOWS, type FlowReport } from "../../engine/import/maestro.js";
+import { callerCredentials } from "../auth/access.js";
 import { HttpError } from "../http-error.js";
 import type { RouteCtx } from "./types.js";
 
@@ -48,12 +49,12 @@ export function registerImportRoutes(ctx: RouteCtx): void {
             ...(first.kind === "mobile" ? { mobile: { appPackage: first.appId } } : { baseUrl: body.baseUrl ?? new URL(first.url!).origin }),
         };
         // The platform's own spec import does the storing; its answer (including its refusals) is passed on as it is.
-        const key = req.headers["x-api-key"];
-        const res = await app.inject({ method: "POST", url: `/api/projects/${id}/specs`, payload, headers: typeof key === "string" ? { "x-api-key": key } : {} });
-        const answer = res.body ? (JSON.parse(res.body) as { jobId?: string | null; tests?: Array<{ id: string; testId: string }>; error?: string; details?: unknown }) : {};
+        const res = await app.inject({ method: "POST", url: `/api/projects/${id}/specs`, payload, headers: callerCredentials(req) });
+        const answer = res.body ? (JSON.parse(res.body) as { jobId?: string | null; tests?: Array<{ id: string; testId: string }>; error?: string; details?: unknown; notRun?: string }) : {};
         if (res.statusCode >= 400) throw new HttpError(res.statusCode, answer.error ?? "The tests could not be stored", answer.details);
 
         const imported = converted.map((r, i) => ({ file: r.file, id: answer.tests?.[i]?.id, testId: answer.tests?.[i]?.testId, title: r.title, kind: r.kind, steps: r.spec!.steps.length, checks: r.checks }));
-        return reply.code(answer.jobId ? 202 : 201).send({ dryRun: false, jobId: answer.jobId ?? null, imported, ...summary });
+        // Asked to run them while tests are switched off on this server: kept, and the answer says they were not run.
+        return reply.code(answer.jobId ? 202 : 201).send({ dryRun: false, jobId: answer.jobId ?? null, ...(answer.notRun ? { notRun: answer.notRun } : {}), imported, ...summary });
     });
 }

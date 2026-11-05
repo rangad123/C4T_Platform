@@ -155,7 +155,7 @@ const addStep = async (group: string, name: string) => {
 
 describe("the Blocks page", () => {
     it("is two clicks away from the Test cases page: Test scripts, then Reusable steps", async () => {
-        await visit(`#/projects/${projectId}/tests`);
+        await visit(`#/projects/${projectId}/scripts`);
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: /^Test scripts/ }).click();
         await page.getByRole("navigation", { name: "Test scripts sections", exact: true }).getByRole("link", { name: "Reusable steps", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "Reusable steps", exact: true })).toBeVisible();

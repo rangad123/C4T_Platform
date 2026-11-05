@@ -2,7 +2,7 @@
 
 ## Two-step sign-in (authenticator codes)
 If the test account's login asks for a one-time code from an authenticator app, give the platform the account's **setup key** (the letters and
-digits shown next to the QR code when the account was enrolled). Enter it under *Advanced options → Sign in → Authenticator secret*, or pass
+digits shown next to the QR code when the account was enrolled). Enter it on the project's Requirements tab, under *What the agents need → Sign in → Authenticator secret* (a phone app's exploration panel keeps it under *Advanced options*), or pass
 `totpSecret` in the API (`--totp-secret-env NAME` in the `ai-test` CLI). The platform then:
 
 - fills the current code when the login shows a code step (an input with `autocomplete="one-time-code"`, or a name, id or placeholder such as *otp*, *2fa*, *mfa*, *verification*, *code*) and continues;

@@ -15,6 +15,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { REPO_ROOT, loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { eventBus } from "../src/platform/event-bus.js";
+import { Db } from "../src/platform/db.js";
+import { writeHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { getStreamHub } from "../src/platform/routes/stream.js";
 import { buildServer } from "../src/platform/server.js";
@@ -587,6 +589,11 @@ describe("a worker in a separate process, and the API's request log", () => {
         const child = (method: string, url: string, body?: unknown) => call(CHILD_PORT, method, url, body);
         const projectId = (await child("POST", "/api/projects", { name: "Separate worker" })).body.id as string;
         const [t1] = await importTests(child, projectId, [["Health answers", "/health", 200]]);
+        // A run is refused while no worker beats (round 38: tests switched off). The worker process starts below, after the job is
+        // queued, so its heartbeat is written ahead, the way a worker that is up but busy elsewhere would have written it.
+        const sharedDb = new Db(path.join(dir, "platform.db"));
+        writeHeartbeat(sharedDb);
+        sharedDb.close();
         const started = await child("POST", `/api/tests/${t1}/validate`);
         expect(started.status, started.text).toBe(202);
         const jobId = started.body.jobId as string;

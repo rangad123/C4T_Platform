@@ -1,5 +1,5 @@
 import { Code2, Image, ListPlus, RefreshCw, Video, Wrench } from "lucide-react";
-import { artifactUrl } from "../../api";
+import { artifactUrl, projectKind, type ProjectDetail } from "../../api";
 import { Button, LinkButton, Term } from "../../components/ui";
 import { Tooltip } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
@@ -8,6 +8,7 @@ import { routes } from "../../lib/router";
 import { EditScriptButton } from "../code/TakeOver";
 import type { CustomInfo } from "../code/code";
 import type { TestQuarantine } from "../quarantine/quarantine";
+import { agentInputsHref } from "../requirements/AgentInputs";
 import "./evidence.css";
 
 /** The fields of the test answer this block reads (the platform adds `failure` and each failed step's `expected` / `actual`). */
@@ -44,6 +45,10 @@ export function FailureSummary({ test, last, onRun, running }: { test: FailureIn
     const canQuarantine = !!quarantine.data && !quarantine.data.entry && quarantine.data.eligible;
 
     const missingToken = test.failure?.kind === "missing-api-token";
+    // Where the token goes depends on the project: agent and mixed projects keep it with what the agents need (Requirements); a code
+    // project's run sends the token of the environment it runs against (Settings, Environments). Asked only when it matters.
+    const project = useFetch<ProjectDetail>(missingToken ? `/projects/${test.projectId}` : null);
+    const tokenPlace = project.data ? (projectKind(project.data) === "code" ? "environment" : "requirements") : null;
     const failed = last?.steps.find((s) => s.status === "failed");
     // The visible step (a use of reusable steps is one step of the test; the one that failed is inside it).
     const run = failed ? test.runSteps?.find((r) => r.index === failed.index) : undefined;
@@ -77,7 +82,12 @@ export function FailureSummary({ test, last, onRun, running }: { test: FailureIn
 
             {missingToken ? (
                 <p data-testid="failure-cause">
-                    <strong>No API token is saved for this project.</strong> The test sends the project’s API token and the application answered that it was not signed in, so the test is probably fine. Add the token under “API access” in the advanced options of Explore again, then run the test again.
+                    <strong>No API token is saved for this project.</strong> The test sends the project’s API token and the application answered that it was not signed in, so the test is probably fine.{" "}
+                    {tokenPlace === "environment"
+                        ? "A run sends the API token of the environment it runs against: add the token to an environment under Settings, Environments, then run the test against that environment."
+                        : tokenPlace === "requirements"
+                          ? "Add the token under “API access” in What the agents need, on the Requirements tab, then run the test again."
+                          : "Add the token where this project keeps it, then run the test again."}
                 </p>
             ) : (
                 <>
@@ -143,8 +153,8 @@ export function FailureSummary({ test, last, onRun, running }: { test: FailureIn
             <div>
                 <h3 className="t-card" style={{ margin: "4px 0 8px" }}>What you can do</h3>
                 <div className="fail-acts">
-                    {missingToken && (
-                        <LinkButton size="sm" variant="primary" href={routes.newProject({ project: test.projectId })}>
+                    {missingToken && tokenPlace && (
+                        <LinkButton size="sm" variant="primary" href={tokenPlace === "environment" ? routes.projectSettings(test.projectId, "environments") : agentInputsHref(test.projectId)}>
                             Add an API token
                         </LinkButton>
                     )}

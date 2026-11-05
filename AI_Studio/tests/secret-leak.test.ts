@@ -163,6 +163,11 @@ describe("secrets never leave the encrypted store", () => {
         // the audit is only meaningful if the job really produced the things that could leak
         expect(tests.length).toBeGreaterThan(5);
         expect(tests.some((t) => t.suite === "Access control")).toBe(true);
+        // What the agents need (routes/agent-inputs.ts): an exploration never saves its sign-in there; saving it there is answered as
+        // saved flags only, and saving again (a secret left empty keeps the saved one) keeps every secret encrypted.
+        expect((await call("GET", `/api/projects/${projectId}/agent-inputs`)).body.signIn).toEqual({ username: null, hasPassword: false, hasTotpSecret: false });
+        expect((await call("PUT", `/api/projects/${projectId}/agent-inputs`, { username: "demo@example.com", password: SECRETS.password, totpSecret: SECRETS.totp })).body.signIn).toEqual({ username: "demo@example.com", hasPassword: true, hasTotpSecret: true });
+        expect((await call("PUT", `/api/projects/${projectId}/agent-inputs`, { username: "demo@example.com", password: "", apiToken: SECRETS.apiToken })).body.apiAccess.hasToken).toBe(true);
 
         // A named environment with every kind of secret, and a real run against it: the secrets reach the scripts
         // (as environment variables of the run) and must leave no trace anywhere else.

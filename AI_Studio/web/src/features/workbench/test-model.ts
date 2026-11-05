@@ -8,9 +8,10 @@ import type { CompatDetail } from "../variants/variants.js";
 import type { StepDiff } from "../builder/stepdiff.js";
 import type { OriginInput } from "../provenance/provenance.js";
 
-export const TABS = ["steps", "text", "code", "history"] as const;
+/** Every script has two views first, DSL (plain steps, the route `text`) and Code; then the step editor and the history. */
+export const TABS = ["text", "code", "steps", "history"] as const;
 export type Tab = (typeof TABS)[number];
-export const TAB_LABEL: Record<Tab, string> = { steps: "Steps", text: "Text", code: "Code", history: "History" };
+export const TAB_LABEL: Record<Tab, string> = { text: "DSL", code: "Code", steps: "Steps", history: "History" };
 
 /** The tab a path segment names (`#/tests/:id/<segment>`), or null when it names none. */
 export const tabOf = (segment: string | undefined): Tab | null => (TABS as readonly string[]).includes(segment ?? "") ? (segment as Tab) : null;

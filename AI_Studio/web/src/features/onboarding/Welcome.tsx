@@ -240,7 +240,7 @@ export function Welcome({ aiConfigured, explore, name }: { aiConfigured: boolean
                         <Button type="submit" variant="primary" icon={Sparkles} loading={explore.busy}>
                             {explore.busy ? "Starting…" : "Explore my app"}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={explore.onOptions} disabled={explore.busy} tip="Shows every option before exploring: kinds of check, sign-in details, API access and a requirements document.">
+                        <Button type="button" variant="ghost" onClick={explore.onOptions} disabled={explore.busy} tip="Opens the Explore page first, where you can give the AI a focus. Sign-in details, API access and requirements are kept on the project’s Requirements tab.">
                             Choose what to test first
                         </Button>
                     </div>
@@ -300,7 +300,7 @@ export function Welcome({ aiConfigured, explore, name }: { aiConfigured: boolean
                     <Button type="button" icon={FolderInput} loading={busy === "import"} disabled={busy !== "" && busy !== "import"} onClick={() => void own("import")} tip="Makes the project, then asks where the tests come from: a JSON file, Maestro flows or a Git repository.">
                         {busy === "import" ? "Opening…" : "Import tests"}
                     </Button>
-                    <Button type="button" variant="ghost" loading={busy === "hand"} disabled={busy !== "" && busy !== "hand"} onClick={() => void own("hand")} tip="Makes the project and opens its Tests page. New test there lets you build steps, write text or write code.">
+                    <Button type="button" variant="ghost" loading={busy === "hand"} disabled={busy !== "" && busy !== "hand"} onClick={() => void own("hand")} tip="Makes the project and opens its Test scripts. New test script there lets you build steps, write text or write code.">
                         Write a test by hand
                     </Button>
                 </div>

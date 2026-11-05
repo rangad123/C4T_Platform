@@ -12,8 +12,22 @@ export interface Step {
     expected: string;
 }
 
+/** Whether a written case can be checked by a tool (a test script can be made from it) or needs a person. */
+export type Automation = "automated" | "manual";
+export const AUTOMATION_WORDS: Record<Automation, string> = { automated: "Automated", manual: "Manual" };
+export const AUTOMATION_HINT: Record<Automation, string> = {
+    automated: "A tool can do its steps and check its results, so a test script can be made from it.",
+    manual: "A person does it by hand: how something looks, a printout, a device, a judgement call.",
+};
+
 export interface ManualCase {
     id: string;
+    /** TC-001: the id people read, from the case's number in its project. */
+    ref: string;
+    number: number;
+    automation: Automation;
+    /** The requirement record the case comes from (Requirements place). */
+    requirementId: string | null;
     title: string;
     area: string;
     priority: Priority;
@@ -38,6 +52,8 @@ export interface CaseInput {
     requirement: string;
     steps: Step[];
     linkedTestIds: string[];
+    automation: Automation;
+    requirementId: string | null;
 }
 
 export interface ImportResult {
@@ -109,6 +125,8 @@ export interface ReleaseView {
     signedAt: string | null;
     signedBy: string | null;
     frozen: boolean;
+    /** Which written cases the release lists: the Manual ones and the Automated ones without a script (releases made now), or every case (made before). */
+    cases?: "every-case" | "manual-and-unscripted";
     sentence: string;
     automated: Automated;
     manual: { rollup: Rollup; items: ViewItem[] };

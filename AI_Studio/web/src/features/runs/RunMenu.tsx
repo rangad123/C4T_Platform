@@ -9,6 +9,7 @@ import { describeApiError } from "../../lib/labels";
 import type { Agent, RunnerChoice } from "../agents/agents";
 import { PRODUCTION_WARNING, type Environment } from "../environments/environments";
 import { announceRunsChanged, planSentence, useActiveRun } from "./runs";
+import { RUNS_OFF_HERE, RUNS_OFF_TIP } from "./runs-here";
 import { resetSentence, type ResetAnswer } from "../webpages/webpages";
 import "./runs.css";
 
@@ -74,6 +75,8 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     // The test data reset that runs first, if one is switched on (said in the sentence below).
     const resets = useFetch<ResetAnswer>(open ? `/projects/${projectId}/test-data-reset` : null);
     const config = useConfig();
+    // Tests switched off on this server: said on the button and in the panel, and nothing is started (the server refuses too).
+    const off = config?.runsHere === false;
 
     const [what, setWhat] = useState<What>(scope === "test" ? "test" : scope === "fixed" ? "fixed" : "failing");
     const [group, setGroup] = useState("");
@@ -237,7 +240,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     return (
         <div className={`run-menu${split ? " is-split" : ""}`} ref={root} data-tour="run">
             {split && (
-                <Button variant={variant} size={size} disabled={busyRun || starting} loading={starting && !open} onClick={() => void start(true)} tip={busyRun ? BUSY : "Runs it now where this project runs its tests."} className="run-main">
+                <Button variant={variant} size={size} disabled={busyRun || starting || off} loading={starting && !open} onClick={() => void start(true)} tip={off ? RUNS_OFF_TIP : busyRun ? BUSY : "Runs it now where this project runs its tests."} className="run-main">
                     {main}
                 </Button>
             )}
@@ -250,7 +253,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                 aria-controls={open ? panelId : undefined}
                 aria-label={split ? "More ways to run" : undefined}
                 disabled={busyRun && !open}
-                tip={busyRun && !open ? BUSY : split ? "Choose which tests, where they run and how." : undefined}
+                tip={off && !open ? RUNS_OFF_TIP : busyRun && !open ? BUSY : split ? "Choose which tests, where they run and how." : undefined}
                 onClick={() => setOpen((o) => !o)}
             >
                 {split ? null : main}
@@ -258,6 +261,11 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
             </Button>
             {open && (
                 <div className={`run-pop${flip ? " is-flipped" : ""}`} id={panelId} role="group" aria-label="Run settings">
+                    {off && (
+                        <Callout tone="warning" title="Tests do not run here">
+                            <span data-testid="runs-off">{RUNS_OFF_HERE} Run them where tests run, or once tests are switched on here.</span>
+                        </Callout>
+                    )}
                     <fieldset className="run-sec">
                         <legend>What</legend>
                         {scope === "test" && <p className="t-secondary">This test.</p>}
@@ -284,7 +292,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                                         ))}
                                     </select>
                                 </label>
-                                {radio("selected", "Selected tests", choice.picked.length, choice.picked.length === 0 ? <span className="t-meta">Choose Select tests in the list</span> : undefined, choice.picked.length === 0)}
+                                {radio("selected", "Selected tests", choice.picked.length, choice.picked.length === 0 ? <span className="t-meta">Choose Select scripts in the list</span> : undefined, choice.picked.length === 0)}
                                 {radio("all", "All tests", tests.length, undefined, tests.length === 0)}
                                 {radio("notrun", "Not run yet", choice.notrun.length, undefined, choice.notrun.length === 0)}
                             </>
@@ -320,7 +328,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                                         <span className={`run-online ${a.online ? "is-on" : ""}`}>{a.online ? "online" : "offline"}</span>
                                     </label>
                                 ))}
-                                {agents.data.length === 0 && <p className="t-meta">No runner is connected. Tests run on this server.</p>}
+                                {agents.data.length === 0 && <p className="t-meta">{off ? "No runner is connected." : "No runner is connected. Tests run on this server."}</p>}
                                 {place && place !== current && <p className="t-meta">This also becomes where this project runs its tests, until you change it.</p>}
                             </>
                         )}
@@ -375,7 +383,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                     {error && <Callout tone="danger">{error}</Callout>}
                     <div className="run-foot">
                         <Button onClick={() => setOpen(false)}>Close</Button>
-                        <Button variant="primary" icon={Play} loading={starting} disabled={count === 0 || (needsConfirm && !confirmProduction) || busyRun || envsPending} onClick={() => void start()}>
+                        <Button variant="primary" icon={Play} loading={starting} disabled={off || count === 0 || (needsConfirm && !confirmProduction) || busyRun || envsPending} onClick={() => void start()}>
                             Start run
                         </Button>
                     </div>

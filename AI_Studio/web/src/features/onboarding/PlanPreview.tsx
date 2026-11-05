@@ -165,7 +165,7 @@ export function PlanPreview({ projectId, job, onChanged }: { projectId: string; 
             )}
             {loginPage && (
                 <p className="t-meta" data-testid="plan-login-hint">
-                    {onPhone ? "The app asks for a sign-in. Screens behind it are not part of this plan. Add a test account under Advanced options when you explore again." : "We found a sign-in page. Pages behind it are not part of this plan. You can add sign-in details when you explore again."}
+                    {onPhone ? "The app asks for a sign-in. Screens behind it are not part of this plan. Add a test account under Advanced options when you explore again." : "We found a sign-in page. Pages behind it are not part of this plan. Add the sign-in details on the Requirements tab, under What the agents need, then explore again."}
                 </p>
             )}
             {problem && (

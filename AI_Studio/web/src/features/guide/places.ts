@@ -89,6 +89,7 @@ export type PlaceId =
     | "suites"
     | "suite-detail"
     | "scripts"
+    | "scripts-review"
     | "script-version"
     | "agent-runs"
     | "settings-general"
@@ -107,7 +108,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Look at the Guide when you are not sure where to begin.", button: "Read the start in 10 minutes", to: { topic: "first-steps" } },
         ],
         words: ["test", "run", "passing"],
-        next: [{ text: "Open a project, then look at its Tests tab.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Tests"] }],
+        next: [{ text: "Open a project, then look at its Dashboard.", button: "Read how a project is laid out", to: { topic: "places" }, ui: ["Dashboard"] }],
         topic: "places",
     },
     welcome: {
@@ -127,8 +128,9 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "Tell us the address of your application and the AI explores it. You will see a plan before anything is made.",
         canDo: [
             { text: "Type the address of your application, then choose Start exploring.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Start exploring"] },
-            { text: "Open Advanced options to choose what to check, such as accessibility or speed.", button: "Read about the checks", to: { search: "checks besides clicks" }, ui: ["Advanced options"] },
-            { text: "Add sign-in details if your application needs a login.", button: "Read about test accounts", to: { topic: "test-accounts", search: "test accounts login" } },
+            { text: "Fill in Focus (optional) to tell the AI what matters most. The whole application is still explored.", button: "Read how exploring works", to: { topic: "explore-my-app", search: "get tests for my app" }, ui: ["Focus (optional)"] },
+            { text: "Which checks run is set by the project's Testing agents in Settings, then General.", button: "Read about the checks", to: { search: "checks besides clicks" }, ui: ["Testing agents", "Settings", "General"] },
+            { text: "Keep the sign-in details on the Requirements tab, under What the agents need, if your application needs a login.", button: "Read about test accounts", to: { topic: "test-accounts", search: "test accounts login" }, ui: ["Requirements", "What the agents need"] },
             { text: "Go back to your list of projects.", button: "Back to projects", to: here("projects") },
         ],
         words: ["exploration", "plan", "test-account"],
@@ -144,14 +146,14 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Choose Explore again to start over with different options.", button: "Read about exploring again", to: { topic: "explore-my-app", search: "explore again" }, ui: ["Explore again"] },
         ],
         words: ["plan", "exploration", "test"],
-        next: [{ text: "After the tests are created, open the Tests tab to see them.", button: "Open Tests", to: here("tests"), ui: ["Tests"] }],
+        next: [{ text: "After the tests are created, choose View tests on the Dashboard to see them.", button: "Open Test scripts", to: here("tests"), ui: ["View tests", "Dashboard"] }],
         topic: "explore-my-app",
     },
     overview: {
         title: "Project dashboard",
         what: "The summary of one project: what the last exploration or run found, which tests need your attention, and what to do next.",
         canDo: [
-            { text: "See which tests are failing or need a look.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
+            { text: "See which tests are failing or need a look.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
             { text: "In an AI agent project, choose Explore again to look at the application once more and find new things to test.", button: "Read about exploring again", to: { topic: "explore-my-app", search: "explore again" }, ui: ["Explore again"] },
             { text: "In a code project, choose Add test scripts to start: code projects are not explored.", button: "Read about writing code", to: { topic: "write-code" }, ui: ["Add test scripts"] },
             { text: "While it explores, turn on Watch live to see the browser the AI is using.", button: "Read how to watch the AI", to: { topic: "watch-the-ai" }, ui: ["Watch live"] },
@@ -163,26 +165,25 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         topic: "places",
     },
     tests: {
-        title: "Tests",
-        what: "Every test in this project, grouped by area. A test is a short list of steps that checks one thing about your app.",
+        title: "Test cases",
+        what: "The written checks of a code project: a title, steps, what should happen and a requirement. Each is Automated (a tool can do it) or Manual (a person does it).",
         canDo: [
-            { text: "Choose Run to run one test, a group or everything, and pick where it runs.", button: "Read how to run tests", to: { topic: "run-panel", search: "run tests now" }, ui: ["Run"] },
-            { text: "Choose New test to describe, record, build, write or import a test.", button: "Read about making tests", to: { search: "make a new test" }, ui: ["New test"] },
-            { text: "Choose New test, then Explore the phone app (AI), to have the AI plan tests for your Android app.", button: "Read about phone exploration", to: { topic: "explore-phone-app" }, ui: ["New test", "Explore the phone app (AI)"] },
-            { text: "Choose Select tests to tick the tests you want, then run only those.", button: "Read how to run only some", to: { topic: "run-panel", search: "run only some tests" }, ui: ["Select tests"] },
-            { text: "Use Search tests and Filters to find one test or the ones that fail.", button: "Read about finding tests", to: { topic: "run-panel", search: "find a test" }, ui: ["Search tests", "Filters"] },
-            { text: "Open a test to see its steps, text, code and history in one place.", button: "Read about a single test", to: { topic: "test-page", search: "open a test steps text code history" } },
+            { text: "Choose Add test case (manual), then Write one by hand, to add one yourself.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["Add test case (manual)", "Write one by hand"] },
+            { text: "Choose Generate from requirements to let the AI write test cases for the requirements you pick.", button: "Read about requirements", to: { topic: "requirements-coverage" }, ui: ["Generate from requirements"] },
+            { text: "Choose Import to bring in test cases from a CSV or JSON file.", button: "Read about sharing checks", to: { topic: "release-signoff", search: "manual checks" }, ui: ["Import"] },
+            { text: "Use All, Automated and Manual to see one type at a time.", button: "Read about test cases", to: { topic: "requirements-coverage" }, ui: ["All", "Automated", "Manual"] },
+            { text: "Use Generate test scripts to have the AI write a runnable test script for each automated test case. It needs both Write tests and Generate tests with AI.", button: "Open Test scripts", to: here("tests"), ui: ["Generate test scripts", "Test scripts", "Write tests", "Generate tests with AI"] },
         ],
-        words: ["test", "run", "passing", "failing", "needs-a-look", "not-run-yet"],
-        next: [{ text: "After a run, look at the results in Runs.", button: "Open Runs", to: here("runs"), ui: ["Runs"] }],
-        topic: "run-panel",
+        words: ["test", "manual-check"],
+        next: [{ text: "Run the test scripts made from your cases on Test scripts.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] }],
+        topic: "requirements-coverage",
     },
     "runs-runs": {
         title: "All runs",
         what: "Every exploration and every run of tests, newest first. Open one to see what ran, what passed and what did not.",
         canDo: [
             { text: "Open a run to see its tests and what changed.", button: "Read how to read a run", to: { topic: "runs-page", search: "see why a test failed" } },
-            { text: "Start a run from the Tests tab; it shows up here at once.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
+            { text: "Start a run from Test scripts; it shows up here at once.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
             { text: "Choose Stop run in the strip at the top of the page to stop a run that is going.", button: "Read how to stop a run", to: { topic: "stop-a-run", search: "stop a run" }, ui: ["Stop run"] },
         ],
         words: ["run", "exploration", "passing", "failing"],
@@ -222,7 +223,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Hold an unreliable test back so it stops raising alarms.", button: "Read about quarantine", to: { topic: "quarantine", search: "stop a flaky test" } },
         ],
         words: ["flaky", "quarantine", "passing"],
-        next: [{ text: "Open a test that is unreliable and look at its History tab.", button: "Open Tests", to: here("tests"), ui: ["Tests", "History"] }],
+        next: [{ text: "Open a test that is unreliable and look at its History tab.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "History"] }],
         topic: "trends",
     },
     "run-detail": {
@@ -259,7 +260,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Go back to the list of reusable steps.", button: "Open Reusable steps", to: here("library", "steps"), ui: ["Reusable steps"] },
         ],
         words: ["reusable-steps", "test"],
-        next: [{ text: "Run a test that uses this group to check the change.", button: "Open Tests", to: here("tests"), ui: ["Tests"] }],
+        next: [{ text: "Run a test that uses this group to check the change.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] }],
         topic: "reusable-steps",
     },
     "library-elements": {
@@ -280,10 +281,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Add a helper when two code tests need the same code.", button: "Read about helpers", to: { topic: "write-code", search: "shared helpers code" } },
             { text: "Learn what a code test is and when to use one.", button: "Read about code tests", to: { topic: "write-code", search: "code test" } },
-            { text: "Go back to the tests.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
+            { text: "Go back to the tests.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
         ],
         words: ["helper", "code-test"],
-        next: [{ text: "Open a test and look at its Code tab.", button: "Open Tests", to: here("tests"), ui: ["Tests", "Code"] }],
+        next: [{ text: "Open a test and look at its Code tab.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "Code"] }],
         topic: "write-code",
     },
     "library-data": {
@@ -307,7 +308,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Check that secrets stay hidden.", button: "Read about staying in control", to: { topic: "control", search: "secrets stay hidden" } },
         ],
         words: ["test-account", "test"],
-        next: [{ text: "Use the account in a test from its Steps tab.", button: "Open Tests", to: here("tests"), ui: ["Tests", "Steps"] }],
+        next: [{ text: "Use the account in a test from its Steps tab.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "Steps"] }],
         topic: "test-accounts",
     },
     "release-releases": {
@@ -340,7 +341,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Read which topics your tests cover and which they do not.", button: "Read about the compliance map", to: { topic: "compliance", search: "compliance map" } },
             { text: "Learn what the map can and cannot say.", button: "Read the limits", to: { topic: "compliance", search: "compliance limits" } },
-            { text: "Go to Tests to add something that covers a gap.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
+            { text: "Go to Test scripts to add something that covers a gap.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
         ],
         words: ["compliance", "test"],
         next: [{ text: "Use the map when you sign off a release.", button: "Open Releases", to: here("release", "releases"), ui: ["Releases"] }],
@@ -364,7 +365,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Use a computer of your own so tests can reach your private pages.", button: "Read about runners", to: { topic: "runners", search: "runner" } },
             { text: "See which runner is online and ready.", button: "Read how runners are chosen", to: { topic: "runners", search: "which computer runs my tests" } },
-            { text: "Pick where a run goes with the Run button on Tests.", button: "Open Tests", to: here("tests"), ui: ["Tests", "Run"] },
+            { text: "Pick where a run goes with the Run button on Test scripts.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "Run"] },
         ],
         words: ["runner", "run"],
         next: [{ text: "Add an environment such as staging, if you test more than one address.", button: "Open Environments", to: here("setup", "environments"), ui: ["Environments"] }],
@@ -376,7 +377,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Save the address of staging or another copy of your application.", button: "Read about environments", to: { topic: "environments", search: "environments staging" } },
             { text: "Use Make default to choose which one is used when you do not pick.", button: "Read about the default", to: { topic: "environments", search: "default environment" }, ui: ["Make default"] },
-            { text: "Run a test against an environment from Run.", button: "Open Tests", to: here("tests"), ui: ["Tests", "Run"] },
+            { text: "Run a test against an environment from Run.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "Run"] },
         ],
         words: ["environment", "production"],
         next: [{ text: "Run on a timetable against one of them.", button: "Open Schedules", to: here("runs", "schedules"), ui: ["Schedules"] }],
@@ -401,10 +402,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Tell the platform which app to test.", button: "Read about phone tests", to: { topic: "phones-and-emulators", search: "test on a phone" } },
             { text: "Choose Explore with AI to let the AI tap through the app and plan tests.", button: "Read how the AI explores a phone app", to: { topic: "explore-phone-app", search: "explore a phone app" }, ui: ["Explore with AI"] },
             { text: "Learn what a phone emulator is.", button: "Read about emulators", to: { topic: "phones-and-emulators", search: "emulator" } },
-            { text: "Skip this page if you test only websites.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
+            { text: "Skip this page if you test only websites.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
         ],
         words: ["emulator", "runner"],
-        next: [{ text: "Make a phone test from an existing test.", button: "Open Tests", to: here("tests"), ui: ["Tests"] }],
+        next: [{ text: "Make a phone test from an existing test.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] }],
         topic: "phones-and-emulators",
     },
     "setup-alerts": {
@@ -428,7 +429,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Learn where the key is kept.", button: "Read about staying in control", to: { topic: "control", search: "secrets stay hidden" } },
         ],
         words: ["finding", "access-key"],
-        next: [{ text: "Open a failing test and file it as a ticket.", button: "Open Tests", to: here("tests"), ui: ["Tests"] }],
+        next: [{ text: "Open a failing test and file it as a ticket.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] }],
         topic: "issue-trackers",
     },
     "setup-storage": {
@@ -448,7 +449,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "The steps of one test, one by one, in order. You can change them here and the script follows.",
         canDo: [
             { text: "Add, move or remove a step with the step editor.", button: "Read about the Steps tab", to: { topic: "test-page", search: "edit steps of a test" } },
-            { text: "Look at the same test written as plain text.", button: "Show the Text tab", to: { testTab: "text" }, ui: ["Text"] },
+            { text: "Look at the same test in the DSL, one line per step.", button: "Show the DSL tab", to: { testTab: "text" }, ui: ["DSL"] },
             { text: "Read the script the platform made from the steps.", button: "Show the Code tab", to: { testTab: "code" }, ui: ["Code"] },
             { text: "Choose Run again at the top of the page to run this test once more.", button: "Read how to run one test", to: { topic: "run-panel", search: "run one test" }, ui: ["Run again"] },
             { text: "See earlier versions and what changed.", button: "Show the History tab", to: { testTab: "history" }, ui: ["History"] },
@@ -458,10 +459,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         topic: "test-page",
     },
     "test-text": {
-        title: "A test: Text",
+        title: "A test: DSL",
         what: "The same test written as one line per step, in fixed words. It is another way to read and change the Steps tab.",
         canDo: [
-            { text: "Change a line, and the steps follow.", button: "Read about the Text tab", to: { topic: "write-test-as-text", search: "write a test as text" } },
+            { text: "Change a line, and the steps follow.", button: "Read about the DSL tab", to: { topic: "write-test-as-text", search: "write a test as text" } },
             { text: "Go back to the steps.", button: "Show the Steps tab", to: { testTab: "steps" }, ui: ["Steps"] },
             { text: "See the script that results.", button: "Show the Code tab", to: { testTab: "code" }, ui: ["Code"] },
         ],
@@ -502,10 +503,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Type the address, then choose Start recording.", button: "Read how recording works", to: { topic: "record-a-test", search: "record a test" }, ui: ["Start recording"] },
             { text: "Check each step as it appears and remove a mistake.", button: "Read about checking steps", to: { topic: "record-a-test", search: "recorded steps" } },
             { text: "Save the recording as a test when you are done.", button: "Read what saving does", to: { topic: "record-a-test", search: "save a recording" } },
-            { text: "Go back to the tests without saving.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
+            { text: "Go back to the tests without saving.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
         ],
         words: ["test", "runner"],
-        next: [{ text: "After saving, run the new test to see that it passes.", button: "Open Tests", to: here("tests"), ui: ["Tests"] }],
+        next: [{ text: "After saving, run the new test to see that it passes.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] }],
         topic: "record-a-test",
     },
     "write-code": {
@@ -514,7 +515,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Write the script and save it.", button: "Read about code tests", to: { topic: "write-code", search: "code test" } },
             { text: "Learn where a code test is allowed to run.", button: "Read about the limits", to: { topic: "write-code", search: "where code tests run" } },
-            { text: "Go back to the tests without saving.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
+            { text: "Go back to the tests without saving.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] },
         ],
         words: ["code-test", "helper"],
         next: [{ text: "Share code between tests with Helpers (code).", button: "Open Helpers (code)", to: here("library", "helpers"), ui: ["Helpers (code)"] }],
@@ -666,7 +667,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Choose Publish to library to offer this project's own item to the other projects, as a new version.", button: "Read about reusable steps", to: { topic: "reusable-steps" }, ui: ["Publish to library"] },
         ],
         words: ["test"],
-        next: [{ text: "Use the steps you added in a test's Steps tab.", button: "Open Tests", to: here("tests"), ui: ["Tests"] }],
+        next: [{ text: "Use the steps you added in a test's Steps tab.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts"] }],
         topic: "reusable-steps",
     },
     folders: {
@@ -710,11 +711,12 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "What the application must do, one requirement at a time, and which test cases check each one. Coverage says which requirements pass, fail or have nothing checking them.",
         canDo: [
             { text: "Add a requirement, or import them from a requirements document (pasted, or a .txt, .md, .docx or .pdf file). You see what was found before it is saved.", button: "Read about requirements coverage", to: { topic: "requirements-coverage" } },
-            { text: "Open a requirement and link the automated tests and manual cases that check it.", button: "Open test cases", to: here("tests") },
-            { text: "Explore with the same document so the AI plans tests from it; each test it writes is linked to the requirements it names.", button: "Read how exploring works", to: { topic: "explore-my-app" } },
+            { text: "In a code project, choose Generate test cases using AI to have the AI write test cases for the requirements you pick. It needs both Write tests and Generate tests with AI.", button: "Open test cases", to: here("cases"), ui: ["Generate test cases using AI", "Write tests", "Generate tests with AI"] },
+            { text: "Open a requirement and link the test cases that check it.", button: "Open test cases", to: here("cases") },
+            { text: "In an AI agent project, keep the sign-in details, API access and OpenAPI document under What the agents need. They are saved only here: exploring uses them, never changes them, and plans tests from the requirements.", button: "Read how exploring works", to: { topic: "explore-my-app" }, ui: ["AI agent", "What the agents need"] },
         ],
         words: ["test", "exploration", "plan"],
-        next: [{ text: "Link a test case to every requirement marked Not covered.", button: "Open test cases", to: here("tests") }],
+        next: [{ text: "Link a test case to every requirement marked Not covered.", button: "Open test cases", to: here("cases") }],
         topic: "requirements-coverage",
     },
     suites: {
@@ -744,14 +746,28 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     scripts: {
         title: "Test scripts",
-        what: "What actually runs: the script of every test case, in plain English and as code, and the pieces scripts share.",
+        what: "What actually runs: every test script of this project, each with a DSL view and a Code view, grouped by area.",
         canDo: [
-            { text: "Open a script to see its plain-English text, its code and its history.", button: "Read about the test page", to: { topic: "test-page" } },
-            { text: "See which versions are drafts and which are approved: only approved versions run.", button: "Read about the test page", to: { topic: "test-page" } },
-            { text: "Write a test as code.", button: "Read about writing code", to: { topic: "write-code" } },
-            { text: "Share steps between tests.", button: "Read about reusable steps", to: { topic: "reusable-steps" } },
+            { text: "Choose Run to run one test, a group or everything, and pick where it runs.", button: "Read how to run tests", to: { topic: "run-panel", search: "run tests now" }, ui: ["Run"] },
+            { text: "Choose New test script to describe a test, build its steps, write it as text or code, or import scripts.", button: "Read about making tests", to: { search: "make a new test" }, ui: ["New test script"] },
+            { text: "Choose Import to bring scripts from a JSON file, Maestro flows or a Git repository.", button: "Read how to bring tests", to: { topic: "import-tests", search: "import tests" }, ui: ["Import"] },
+            { text: "Choose Select scripts to tick the scripts you want, then run only those.", button: "Read how to run only some", to: { topic: "run-panel", search: "run only some tests" }, ui: ["Select scripts"] },
+            { text: "Use Search scripts and Filters to find one script or the ones that fail.", button: "Read about finding tests", to: { topic: "run-panel", search: "find a test" }, ui: ["Search scripts", "Filters"] },
+            { text: "Open a test to see its DSL, code, steps and history in one place.", button: "Read about a single test", to: { topic: "test-page", search: "open a test steps text code history" } },
         ],
-        words: ["test", "run"],
+        words: ["test", "run", "passing", "failing", "needs-a-look", "not-run-yet"],
+        next: [{ text: "After a run, look at the results in Runs.", button: "Open Runs", to: here("runs"), ui: ["Runs"] }],
+        topic: "run-panel",
+    },
+    "scripts-review": {
+        title: "Review",
+        what: "Each test script's versions and their review. A draft waits here until it is approved; only approved versions run.",
+        canDo: [
+            { text: "Open a version to compare its steps and code with the approved version.", button: "Read about the test page", to: { topic: "test-page" } },
+            { text: "Choose Send for review on a draft to ask the Project Admins.", button: "Read about history", to: { topic: "history-and-undo" }, ui: ["Send for review"] },
+            { text: "Choose Approve, Ask for changes or Reject. Deciding needs Project Admin on this project.", button: "Read about the test page", to: { topic: "test-page" }, ui: ["Approve", "Ask for changes", "Reject"] },
+        ],
+        words: ["test", "version"],
         next: [{ text: "See what changed in a script over time.", button: "Read about history", to: { topic: "history-and-undo" } }],
         topic: "test-page",
     },
@@ -856,7 +872,9 @@ export function placeOf(route: RouteLike): PlaceId {
         if (c === "agent") return "agent-runs";
         if (c === "scripts") {
             const s = pick(SCRIPTS_SECTIONS, q.get("section"));
-            if (s === "scripts") return q.get("test") && q.get("version") ? "script-version" : "scripts";
+            if ((s === "scripts" || s === "review") && q.get("test") && q.get("version")) return "script-version";
+            if (s === "scripts") return "scripts";
+            if (s === "review") return "scripts-review";
             return s === "steps" && q.get("edit") ? "library-steps-edit" : (`library-${s}` as PlaceId);
         }
         if (c === "settings") {

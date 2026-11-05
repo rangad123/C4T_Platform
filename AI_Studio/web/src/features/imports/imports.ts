@@ -14,6 +14,8 @@ export interface MaestroFlowReport {
 export interface ImportAnswer {
     dryRun: boolean;
     jobId: string | null;
+    /** Asked to run them, but they were not run (tests are switched off on this server). */
+    notRun?: string;
     imported: Array<{ file: string; id?: string; testId?: string; title?: string; kind?: string }>;
     skipped: Array<{ file: string; reason: string }>;
     reports: MaestroFlowReport[];

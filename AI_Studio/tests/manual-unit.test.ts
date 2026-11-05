@@ -190,10 +190,10 @@ describe("exporting CSV", () => {
     });
 
     it("writes the JSON export that the JSON import reads back", () => {
-        const c = { id: "i", createdAt: "x", updatedAt: "x", title: "T", area: "A", priority: "low" as const, steps: [{ action: "a", expected: "b" }], linkedTestIds: ["t1"], requirement: "R-1" };
+        const c = { id: "i", number: 1, ref: "TC-001", automation: "automated" as const, requirementId: null, createdAt: "x", updatedAt: "x", title: "T", area: "A", priority: "low" as const, steps: [{ action: "a", expected: "b" }], linkedTestIds: ["t1"], requirement: "R-1" };
         const text = casesToJson([c], new Date("2026-10-08T00:00:00Z"));
         expect(JSON.parse(text).exportedAt).toBe("2026-10-08T00:00:00.000Z");
-        expect(parseJsonCases(text).cases).toEqual([{ title: "T", area: "A", priority: "low", steps: [{ action: "a", expected: "b" }], linkedTestIds: ["t1"], requirement: "R-1" }]);
+        expect(parseJsonCases(text).cases).toEqual([{ title: "T", area: "A", priority: "low", automation: "automated", steps: [{ action: "a", expected: "b" }], linkedTestIds: ["t1"], requirement: "R-1" }]);
     });
 });
 

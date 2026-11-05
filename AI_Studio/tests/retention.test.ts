@@ -759,6 +759,8 @@ describe("backup and restore", () => {
         expect(pay.requirement).toBe("REQ-7");
         expect(pay.linkedTestIds).toEqual([newTests.find((t) => t.testId === tests[1]!.key)!.id]);
         expect(manual.some((c) => manualCaseIds.includes(c.id))).toBe(false);
+        // Each case keeps its number (TC-001...) and its type.
+        expect((manual as unknown as Array<{ ref: string; automation: string }>).map((c) => `${c.ref}:${c.automation}`).sort()).toEqual(["TC-001:manual", "TC-002:manual"]);
 
         const releases = (await call("GET", `/api/projects/${id}/releases`)).body.releases as Array<{ id: string; name: string; status: string; signedBy: string | null }>;
         expect(releases.map((r) => `${r.name}:${r.status}`).sort()).toEqual(["1.0:rejected", "1.1:open"]);

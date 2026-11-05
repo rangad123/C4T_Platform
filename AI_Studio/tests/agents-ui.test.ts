@@ -477,7 +477,7 @@ describe("Runners tab", () => {
         fake.runner = { runOn: "agent", agentId: "ag-maya" };
         fake.ranOn = { kind: "agent", agentId: "ag-maya", name: "Maya’s laptop" };
 
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.reload();
         await pwExpect(page.getByTestId("runs-on")).toContainText("Runs on Maya’s laptop (online).");
         await page.getByTestId("runs-on").getByRole("link", { name: "Change" }).click();
@@ -496,7 +496,7 @@ describe("Runners tab", () => {
         // a server that never heard of runner agents shows no line at all
         fake.runner = { runOn: "platform", agentId: null };
         fake.ranOn = null;
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.reload();
         await pwExpect(page.getByTestId("runs-on")).toContainText("Runs on this server.");
     });
@@ -647,7 +647,7 @@ describe("Runners tab", () => {
             await where.getByRole("button", { name: "Save", exact: true }).click();
             await pwExpect(where.getByTestId("runner-status")).toContainText("Real laptop agent");
             await pwExpect(where.getByText("Web and API tests can run")).toBeVisible();
-            await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+            await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
             await page.reload();
             await pwExpect(page.getByTestId("runs-on")).toContainText("Real laptop agent");
 

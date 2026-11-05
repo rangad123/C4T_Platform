@@ -1,6 +1,6 @@
 import { FolderKanban, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
-import type { ProjectRow } from "../../api";
+import { projectKind, type ProjectRow } from "../../api";
 import { usePage } from "../../components/Shell";
 import { Badge, EmptyState, ErrorState, LinkButton, ListSkeleton, PageHeader, Skeleton } from "../../components/ui";
 import { EmbeddedContext } from "../../lib/embedded";
@@ -86,7 +86,8 @@ export function TestDevelopmentPage() {
                                 <span className="meta">{p.test_count === 1 ? "1 test" : `${p.test_count} tests`}</span>
                             </span>
                             <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                                {can("ai_studio.tests.generate") && (
+                                {/* Exploring is for agent and mixed projects only (a code project never offers it). */}
+                                {can("ai_studio.tests.generate") && projectKind(p) !== "code" && (
                                     <LinkButton size="sm" icon={Sparkles} href={routes.newProject({ project: p.id })} tip="The AI explores the application and writes tests for it.">
                                         Explore with AI
                                     </LinkButton>
@@ -106,8 +107,8 @@ export function TestDevelopmentPage() {
                                         Build steps
                                     </LinkButton>
                                 )}
-                                <LinkButton size="sm" variant="ghost" href={routes.tests(p.id)} tip="The project's test cases, with every way to add one (New test).">
-                                    Test cases
+                                <LinkButton size="sm" variant="ghost" href={routes.tests(p.id)} tip="The project's test scripts, with every way to add one (New test script).">
+                                    Test scripts
                                 </LinkButton>
                             </span>
                         </li>

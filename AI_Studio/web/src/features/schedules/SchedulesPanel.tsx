@@ -1,6 +1,6 @@
 import { CalendarClock, ListOrdered, Pause, Play, Plus, Trash2, Workflow, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api } from "../../api";
+import { api, projectKind, type ProjectDetail } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { BadgeKey } from "../../components/Tooltip";
 import { SCHEDULE_HELP } from "../../lib/help";
@@ -168,6 +168,9 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
     const [kind, setKind] = useState<ScheduleKind>("validate");
     // The suites people built in this project: a schedule can run one of them (its tests, order and settings) instead of every test.
     const suites = useFetch<{ suites: Array<{ id: string; name: string; testCount: number }> }>(`/projects/${projectId}/test-suites`);
+    // Exploring is for agent and mixed projects only: a code project is never offered it (its schedules made earlier stay listed).
+    const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
+    const explores = project.data ? projectKind(project.data) !== "code" : false;
     const [suiteId, setSuiteId] = useState("");
     const suite = suites.data?.suites.find((x) => x.id === suiteId);
     const [freq, setFreq] = useState<Frequency>("daily");
@@ -219,7 +222,7 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
                     }}
                 >
                     <option value="validate">Re-run all tests</option>
-                    <option value="generate">Explore again (looks for new things to test; needs the AI model)</option>
+                    {explores && <option value="generate">Explore again (looks for new things to test; needs the AI model)</option>}
                     {(suites.data?.suites ?? []).map((x) => (
                         <option key={x.id} value={`suite:${x.id}`} disabled={x.testCount === 0}>
                             Run the suite “{x.name}”{x.testCount === 0 ? " (no tests yet)" : ""}

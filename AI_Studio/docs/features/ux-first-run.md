@@ -4,7 +4,7 @@ What changed for the tester (UX-E, round 15).
 
 ## For the tester
 
-- **Welcome.** A new project (first visit, or New project) starts at three equal cards: **Explore my app** (a URL; says it uses the AI model and that nothing is created or run until you say so), **Record a test** (opens the recorder for a new project with the address filled in) and **Start from tests I have** (import chooser, or an empty Tests page to write a test by hand). Without an AI model the first card says so and links to Settings; the other two work. **Choose what to test first** opens the full options form (the 13-checkbox list under Advanced options) with a Back button.
+- **Welcome.** A new project (first visit, or New project) starts at three equal cards: **Explore my app** (a URL; says it uses the AI model and that nothing is created or run until you say so), **Record a test** (opens the recorder for a new project with the address filled in) and **Start from tests I have** (import chooser, or an empty Test scripts list to write a test by hand). Without an AI model the first card says so and links to Settings; the other two work. **Choose what to test first** opens the Explore page (the address and one optional **Focus**) with a Back button. Which checks run is set by the project's testing agents, and sign-in details, API access and the OpenAPI document are kept on the project's Requirements tab.
 - **Plan before creation.** Exploring now stops after planning. The project's Overview shows "We found 4 pages and 2 API endpoints, with 1 form. We will create about 18 tests: ..." with **Create the tests**, **Discard the plan** and an **Edit the plan** section (a checkbox per kind of test, and per test idea under Journeys). The numbers change as you edit; Create sends exactly the choice shown. Nothing is generated or run before Create.
 - **During creation.** "Creating your tests": phase list in words, elapsed time, a live list of the tests ("Passing", "Failing", "Waiting", the same per-test list as the Runs page) and **Stop exploring** with UX-A's honest wording (created tests are kept).
 - **Ready.** A **Next steps** list on the Overview: open a test that is not passing, run the tests again, set a schedule, add sign-in details (only when the application has a sign-in page), connect a runner. Each step ticks itself from real data (a validate run exists, a schedule exists, saved sign-in details, a connected runner); nothing is stored for the list. It disappears when everything that applies is done.
@@ -20,8 +20,8 @@ What changed for the tester (UX-E, round 15).
 
 ## Decisions and limits
 
-- The form's first submit now always makes a plan (the one-click path stays two clicks to a plan plus one to create). Links with a project or an address (`#/new?project=` / `?url=`, Explore again) go straight to the options form.
-- A plan is not a promise: pages behind a sign-in are not in it unless sign-in details were given when exploring; the plan says so when it found a sign-in page.
+- The form's first submit now always makes a plan (the one-click path stays two clicks to a plan plus one to create). Links with a project or an address (`#/new?project=` / `?url=`, Explore again) go straight to the Explore page.
+- A plan is not a promise: pages behind a sign-in are not in it unless sign-in details are saved on the Requirements tab; the plan says so when it found a sign-in page.
 - A plan is kept until used, discarded, or removed by the storage policy (then the page says it is gone and offers Explore again). There is no automatic expiry.
 - Changing sign-in details, test accounts or data-changing tests means exploring again; the plan editor only chooses among what was found.
 - Not verified: a very large site's plan page (page list is capped at 50, shown with a note).

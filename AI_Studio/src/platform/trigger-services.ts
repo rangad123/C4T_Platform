@@ -17,6 +17,7 @@ import { passRate } from "../engine/summary/pass-rate.js";
 import { gateJob } from "./quarantine-service.js";
 import { DEFAULT_JOB_OPTIONS, TERMINAL_STATES, type JobOptions, type JobRow } from "./repo.js";
 import { activeJobOf, runnableTestIds } from "./scheduler.js";
+import { refuseUnlessRunsStart } from "./suite-run.js";
 import { SecretBox } from "./secrets.js";
 import { TriggerStore, type TriggerToken } from "./trigger-store.js";
 
@@ -174,6 +175,7 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
             if (!isAppUri(appUrl)) await assertRunTarget(token.projectId, appUrl);
             if (input.callbackUrl) await assertAllowedTarget(input.callbackUrl);
 
+            refuseUnlessRunsStart(p); // tests switched off on this server: the pipeline is told, nothing is queued
             // From here to the insert nothing is awaited: no other job can slip in between the checks and the create.
             const testIds = await runnableTestIds(repo, token.projectId);
             if (testIds.length === 0) throw new HttpError(409, "This project has no tests that can be run yet.");

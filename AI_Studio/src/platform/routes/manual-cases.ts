@@ -5,14 +5,15 @@ import { HttpError } from "../http-error.js";
 import { buildManualIssueDraft } from "../issues/manual.js";
 import { TrackerError } from "../issues/http.js";
 import { IntegrationStore } from "../issues/store.js";
-import { automatedSnapshot, releaseSummaries, releaseView, reopenRelease, requireOpen, signRelease } from "../manual-releases.js";
+import { keptSnapshot, newReleaseSnapshot, releaseSummaries, releaseView, reopenRelease, requireOpen, signRelease } from "../manual-releases.js";
 import { ManualCaseStore, MAX_RELEASES } from "../manual-case-store.js";
+import { RequirementStore } from "../requirement-store.js";
 import { releaseReportName, renderReleaseHtml } from "../reports/release-report.js";
 import { SecretBox } from "../secrets.js";
 import type { RouteCtx } from "./types.js";
 
 /**
- * Manual test cases and release sign-off.
+ * Written test cases (automated or manual by type; the "manual cases" of earlier versions) and release sign-off.
  *
  *   GET/POST        /api/projects/:id/manual-cases                      list, add
  *   GET/PUT/DELETE  /api/projects/:id/manual-cases/:cid                 one case
@@ -66,7 +67,7 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
     };
     const getCase = (pid: string, cid: string) => {
         const c = store.getCase(pid, cid);
-        if (!c) throw new HttpError(404, "Manual case not found");
+        if (!c) throw new HttpError(404, "Test case not found");
         return c;
     };
     const getRelease = (pid: string, rid: string) => {
@@ -82,6 +83,15 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
     const checkLinked = (pid: string, ids: string[]) => {
         for (const id of ids) if (repo.getTest(id)?.projectId !== pid) throw new HttpError(400, "A linked test does not belong to this project.");
     };
+    const requirements = new RequirementStore(p.sql);
+    /** The requirement a case comes from must be one of this project's records. */
+    const checkRequirement = async (pid: string, rid: string | null | undefined) => {
+        if (rid && !(await requirements.get(pid, rid))) throw new HttpError(400, "The requirement does not belong to this project.");
+    };
+    /** A case that comes from a requirement also covers it (the requirement's coverage counts it). */
+    const linkRequirement = async (pid: string, c: { id: string; requirementId: string | null }) => {
+        if (c.requirementId) await requirements.link(pid, c.requirementId, { automated: [], manual: [c.id] });
+    };
 
     // ── manual cases ───────────────────────────────────────────────────────────
     app.get("/api/projects/:id/manual-cases", async (req) => {
@@ -94,11 +104,15 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         const pid = projectId(req);
         const input = ManualCaseInputSchema.parse(req.body);
         checkLinked(pid, input.linkedTestIds);
+        await checkRequirement(pid, input.requirementId);
+        let made;
         try {
-            return reply.code(201).send(store.createCase(pid, input));
+            made = store.createCase(pid, input);
         } catch (e) {
             return limit(e);
         }
+        await linkRequirement(pid, made);
+        return reply.code(201).send(made);
     });
 
     app.post("/api/projects/:id/manual-cases/import", async (req, reply) => {
@@ -113,7 +127,8 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         }
         for (const c of parsed.cases) checkLinked(pid, c.linkedTestIds);
         try {
-            const r = store.importCases(pid, parsed.cases);
+            // A file names no requirement record of this project (their ids are not portable): its cases come in without one.
+            const r = store.importCases(pid, parsed.cases.map((c) => ({ ...c, requirementId: undefined })));
             return reply.code(r.created.length ? 201 : 200).send({ created: r.created.length, duplicates: r.duplicates, skipped: parsed.skipped, total: store.countCases(pid) });
         } catch (e) {
             if (e instanceof Error && e.message === "limit") throw new HttpError(409, `Importing these would pass the ${MAX_CASES} manual cases a project can have. Nothing was imported.`);
@@ -141,7 +156,10 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         getCase(pid, cid);
         const input = ManualCaseInputSchema.parse(req.body);
         checkLinked(pid, input.linkedTestIds);
-        return store.updateCase(pid, cid, input)!;
+        await checkRequirement(pid, input.requirementId);
+        const saved = store.updateCase(pid, cid, input)!;
+        await linkRequirement(pid, saved);
+        return saved;
     });
 
     app.delete("/api/projects/:id/manual-cases/:cid", async (req, reply) => {
@@ -162,7 +180,7 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         const pid = projectId(req);
         const body = NewRelease.parse(req.body);
         if (store.countReleases(pid) >= MAX_RELEASES) throw new HttpError(409, `A project can have at most ${MAX_RELEASES} releases.`);
-        const release = store.createRelease(pid, { name: body.name, notes: body.notes, snapshot: automatedSnapshot(p.db, pid) });
+        const release = store.createRelease(pid, { name: body.name, notes: body.notes, snapshot: newReleaseSnapshot(p.db, pid) });
         return reply.code(201).send(releaseView(store, p.db, release));
     });
 
@@ -176,7 +194,7 @@ export function registerManualCaseRoutes(ctx: RouteCtx): void {
         const release = getRelease(pid, (req.params as { rid: string }).rid);
         // A signed release stays as it was signed; reopen it first.
         requireOpen(release);
-        store.saveSnapshot(release.id, automatedSnapshot(p.db, pid));
+        store.saveSnapshot(release.id, keptSnapshot(p.db, release));
         return releaseView(store, p.db, getRelease(pid, release.id));
     });
 

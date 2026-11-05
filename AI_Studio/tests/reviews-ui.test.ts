@@ -17,6 +17,7 @@ import { accessControlOf } from "../src/platform/auth/access.js";
 import { hashPassword } from "../src/platform/auth/password.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { runJob } from "../src/platform/job-runner.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { ReviewStore } from "../src/platform/review-store.js";
 import { buildServer } from "../src/platform/server.js";
@@ -29,6 +30,7 @@ let page: Page;
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
 let dataDir = "";
+let stopBeat: (() => void) | undefined;
 let projectId = "";
 const tests: Record<string, string> = {};
 
@@ -39,6 +41,8 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-reviews-ui-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY: KEY, HOST: "127.0.0.1", PORT: String(PORT), SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false" }));
+    // Runs start only where a worker beats (round 38); the runs here are queued and run by the test itself (runJob).
+    stopBeat = startHeartbeat(platform.db);
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     const { repo } = platform;
@@ -65,6 +69,7 @@ beforeAll(async () => {
     await pwExpect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 }, 90_000);
 afterAll(async () => {
+    stopBeat?.();
     await browser?.close();
     await server?.close();
     platform?.db.close();
@@ -90,7 +95,7 @@ describe("review and approval in the web app", () => {
     });
 
     it("shows every script with its state, sync status and what runs", async () => {
-        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts?section=review`);
         const list = page.getByRole("list", { name: "Test scripts" });
         await pwExpect(list.getByRole("link", { name: /Home/ })).toContainText("Waiting for approval");
         await pwExpect(list.getByRole("link", { name: /Cart/ })).toContainText("version 1 runs");

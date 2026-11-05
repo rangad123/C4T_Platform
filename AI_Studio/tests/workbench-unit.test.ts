@@ -15,7 +15,7 @@ const ver = (version: number, min: number, note: string | null = null): SpecVers
 
 describe("tab routes", () => {
     it("knows the four tabs and nothing else", () => {
-        expect(TABS).toEqual(["steps", "text", "code", "history"]);
+        expect(TABS).toEqual(["text", "code", "steps", "history"]);
         expect(tabOf("text")).toBe("text");
         expect(tabOf("builder")).toBeNull();
         expect(tabOf(undefined)).toBeNull();
@@ -23,6 +23,12 @@ describe("tab routes", () => {
         // the old step editor route is an alias of the Steps tab; the old code route is the Code tab itself
         expect(routes.builder("t1")).toBe("#/tests/t1/steps");
         expect(resolveAlias(["tests", "t1", "builder"], new URLSearchParams())).toBe("#/tests/t1/steps");
+        // The DSL tab's route is `text`; `dsl` is its alias. An old Test cases link with a query about running opens Test scripts.
+        expect(resolveAlias(["tests", "t1", "dsl"], new URLSearchParams())).toBe("#/tests/t1/text");
+        expect(resolveAlias(["projects", "p1", "tests"], new URLSearchParams("status=failed"))).toBe("#/projects/p1/scripts?status=failed");
+        expect(resolveAlias(["projects", "p1", "tests"], new URLSearchParams("quality=weak&x=1"))).toBe("#/projects/p1/scripts?quality=weak&x=1");
+        expect(resolveAlias(["projects", "p1", "tests"], new URLSearchParams())).toBeNull();
+        expect(resolveAlias(["projects", "p1", "tests"], new URLSearchParams("section=manual"))).toBeNull();
         expect(resolveAlias(["tests", "t1", "code"], new URLSearchParams())).toBeNull();
         expect(resolveAlias(["tests", "t1"], new URLSearchParams())).toBeNull();
         expect(routes.code("t1", { history: true })).toBe("#/tests/t1/code?history=1");

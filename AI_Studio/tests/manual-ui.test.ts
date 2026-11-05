@@ -88,42 +88,48 @@ describe("Releases tab", () => {
         await shot("releases-empty");
     });
 
-    it("adds manual cases with the form and imports a CSV file, naming the row that could not be imported", async () => {
-        await page.getByRole("link", { name: "Add manual cases" }).click();
-        await pwExpect(page.getByRole("heading", { name: "No manual cases yet" })).toBeVisible();
+    it("adds test cases with the form and imports a CSV file, naming the row that could not be imported", async () => {
+        await page.getByRole("link", { name: "Add test cases" }).click();
+        await pwExpect(page.getByRole("heading", { name: "No test cases yet" })).toBeVisible();
+        const row = (title: string) => page.getByRole("table").getByRole("row").filter({ hasText: title });
 
-        const add = async (title: string, area: string, priority: string, action: string, expected: string) => {
-            await page.getByRole("button", { name: "Add case" }).first().click();
-            const form = page.getByRole("form", { name: "New manual case" });
+        const openForm = async () => {
+            await page.getByRole("button", { name: "Add test case (manual)" }).first().click();
+            await page.getByRole("menuitem", { name: /Write one by hand/ }).click();
+            return page.getByRole("form", { name: "New test case" });
+        };
+        const add = async (ref: string, title: string, area: string, priority: string, action: string, expected: string) => {
+            const form = await openForm();
             await form.getByLabel("Title", { exact: true }).fill(title);
+            await form.getByText("More: area, source, linked test scripts").click();
             await form.getByLabel("Area", { exact: true }).fill(area);
             await form.getByLabel("Priority", { exact: true }).selectOption(priority);
             await form.getByLabel("Step 1, what to do").fill(action);
             await form.getByLabel("Step 1, what should happen").fill(expected);
-            await form.getByRole("button", { name: "Add case" }).click();
-            await pwExpect(page.getByText(`Saved “${title}”.`)).toBeVisible();
+            await form.getByRole("button", { name: "Add test case" }).click();
+            await pwExpect(page.getByText(`Added ${ref} “${title}”.`)).toBeVisible();
         };
-        await add("Pay by card", "Checkout", "critical", "Pay with a test card", "The order is confirmed");
-        await add("Export the orders", "Reports", "high", "Export last month", "The file has a date column");
-        await pwExpect(page.getByRole("region", { name: "Area Checkout" })).toContainText("Pay by card");
+        await add("TC-001", "Pay by card", "Checkout", "critical", "Pay with a test card", "The order is confirmed");
+        await add("TC-002", "Export the orders", "Reports", "high", "Export last month", "The file has a date column");
+        await pwExpect(row("Pay by card")).toContainText("Critical priority");
 
         // an empty title is explained, not sent
-        await page.getByRole("button", { name: "Add case" }).first().click();
-        await page.getByRole("form", { name: "New manual case" }).getByRole("button", { name: "Add case" }).click();
-        await pwExpect(page.getByText("Give the case a title")).toBeVisible();
+        const form = await openForm();
+        await form.getByRole("button", { name: "Add test case" }).click();
+        await pwExpect(page.getByText("Give the test case a title")).toBeVisible();
         await page.getByRole("button", { name: "Close the form" }).click();
 
         const csv = 'title,area,priority,steps\nPrint the invoice,Billing,low,"Print => One page comes out"\n,Billing,low,\n';
         await page.locator('input[type="file"]').setInputFiles({ name: "cases.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
-        await pwExpect(page.getByText("Imported 1 case. 1 row could not be imported.")).toBeVisible();
+        await pwExpect(page.getByText("Imported 1 test case. 1 row could not be imported.")).toBeVisible();
         await pwExpect(page.getByRole("list", { name: "Rows that were not imported" })).toContainText("Row 3: The title is required");
-        await pwExpect(page.getByRole("region", { name: "Area Billing" })).toContainText("Print the invoice");
+        await pwExpect(row("Print the invoice")).toContainText("TC-003");
 
         // two more through the API: a medium check and one whose title is markup
         expect((await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: "Dark mode", area: "Display", priority: "medium" })).status).toBe(201);
         expect((await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: XSS_TITLE, area: "Display", priority: "low", steps: [{ action: XSS_TITLE, expected: "<script>window.__pwned=1</script>" }] })).status).toBe(201);
         await page.reload();
-        await pwExpect(page.getByText("5 cases of 500 allowed", { exact: false })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Test cases (5)" })).toBeVisible();
         // markup is shown as text and never runs
         await pwExpect(page.getByText(XSS_TITLE, { exact: true }).first()).toBeVisible();
         expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
@@ -132,17 +138,18 @@ describe("Releases tab", () => {
     });
 
     it("edits and deletes a case", async () => {
-        await page.getByRole("button", { name: "Edit Dark mode" }).click();
-        const form = page.getByRole("form", { name: "Edit manual case" });
+        await page.getByRole("link", { name: "Dark mode", exact: true }).click();
+        const form = page.getByRole("form", { name: "Edit test case" });
         await form.getByLabel("Title", { exact: true }).fill("Dark mode on the dashboard");
         await form.getByRole("button", { name: "Save changes" }).click();
-        await pwExpect(page.getByText("Saved “Dark mode on the dashboard”.")).toBeVisible();
-        await page.getByRole("button", { name: "Delete Dark mode on the dashboard" }).click();
+        await pwExpect(page.getByText("Saved TC-004 “Dark mode on the dashboard”.")).toBeVisible();
+        await page.getByRole("link", { name: "Open TC-004" }).click();
+        await page.getByRole("button", { name: "Delete", exact: true }).click();
         await page.getByRole("button", { name: "Keep" }).click();
-        await pwExpect(page.getByRole("region", { name: "Area Display" })).toContainText("Dark mode on the dashboard");
-        await page.getByRole("button", { name: "Delete Dark mode on the dashboard" }).click();
-        await page.getByRole("button", { name: "Delete “Dark mode on the dashboard”" }).click();
-        await pwExpect(page.getByText("Deleted “Dark mode on the dashboard”.")).toBeVisible();
+        await pwExpect(page.getByRole("table")).toContainText("Dark mode on the dashboard");
+        await page.getByRole("button", { name: "Delete", exact: true }).click();
+        await page.getByRole("button", { name: "Delete TC-004" }).click();
+        await pwExpect(page.getByText("Deleted TC-004 “Dark mode on the dashboard”.")).toBeVisible();
         await pwExpect(page.getByText("Dark mode on the dashboard", { exact: true })).toHaveCount(0);
         expect((await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: "Dark mode", area: "Display", priority: "medium" })).status).toBe(201);
     });
@@ -150,7 +157,7 @@ describe("Releases tab", () => {
     it("exports the cases as CSV", async () => {
         await page.goto("about:blank");
         await page.goto(`${BASE}/#/projects/${shop.projectId}/manual-cases`);
-        await pwExpect(page.getByRole("heading", { name: "Manual cases", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Export", exact: true }).click();
         const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: /Export as CSV/ }).click()]);
         const text = fs.readFileSync((await download.path())!, "utf8");
@@ -161,7 +168,7 @@ describe("Releases tab", () => {
 
     it("opens a release from the tab and sums it up in one sentence", async () => {
         await open(releasesUrl(), async () => pwExpect(page.getByRole("heading", { name: "No releases yet" })).toBeVisible());
-        await pwExpect(page.getByRole("link", { name: /Manual cases \(5\)/ })).toBeVisible();
+        await pwExpect(page.getByRole("link", { name: /Test cases \(5\)/ })).toBeVisible();
         await page.getByRole("button", { name: "New release" }).first().click();
         await page.getByRole("form", { name: "New release" }).getByRole("button", { name: "Open release" }).click();
         await pwExpect(page.getByText("Give the release a name")).toBeVisible();
@@ -175,6 +182,8 @@ describe("Releases tab", () => {
         // the automated ribbon: four passing tests
         await pwExpect(page.getByRole("img", { name: /4 automated tests: 4 passing/ })).toBeVisible();
         await pwExpect(page.getByRole("img", { name: /5 manual checks: 0 passed, 0 failed, 0 blocked, 0 skipped, 5 not run/ })).toBeVisible();
+        // What a new release lists, in the page's words.
+        await pwExpect(page.getByTestId("rel-includes")).toHaveText("This release lists the Manual test cases, and the Automated test cases that have no test script yet. An Automated case with a test script is covered by that script’s run, under Automated tests.");
         await shot("release-open");
     });
 
@@ -341,11 +350,11 @@ describe("Releases tab", () => {
             await pwExpect(page.getByRole("dialog", { name: "Reopen this release" })).toBeVisible();
             await check("dialog");
             await page.keyboard.press("Escape");
-            await open(`${BASE}/#/projects/${shop.projectId}/manual-cases`, async () => pwExpect(page.getByRole("heading", { name: "Manual cases", exact: true })).toBeVisible());
-            await pwExpect(page.getByRole("region", { name: "Area Checkout" })).toBeVisible();
+            await open(`${BASE}/#/projects/${shop.projectId}/manual-cases`, async () => pwExpect(page.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible());
+            await pwExpect(page.getByRole("table").getByRole("row").filter({ hasText: "Pay by card" })).toBeVisible();
             await check("cases");
-            await page.getByRole("button", { name: "Edit Pay by card" }).click();
-            await pwExpect(page.getByRole("form", { name: "Edit manual case" })).toBeVisible();
+            await page.getByRole("link", { name: "Pay by card", exact: true }).click();
+            await pwExpect(page.getByRole("form", { name: "Edit test case" })).toBeVisible();
             await shot(`manual-cases-form-${scheme}`);
             await check("case form");
         }
@@ -357,7 +366,7 @@ describe("Releases tab", () => {
         for (const [name, url, ready] of [
             ["list", releasesUrl(), async () => pwExpect(page.getByRole("list", { name: "Releases" })).toBeVisible()],
             ["release", releaseUrl(), async () => pwExpect(sentence()).toBeVisible()],
-            ["cases", `${BASE}/#/projects/${shop.projectId}/manual-cases`, async () => pwExpect(page.getByRole("region", { name: "Area Checkout" })).toBeVisible()],
+            ["cases", `${BASE}/#/projects/${shop.projectId}/manual-cases`, async () => pwExpect(page.getByRole("table").getByRole("row").filter({ hasText: "Pay by card" })).toBeVisible()],
         ] as const) {
             await open(url, ready);
             await page.waitForTimeout(700);

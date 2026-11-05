@@ -9,9 +9,9 @@ is wrong and how to fix it.
 - **Basic security checks** take a read-only look at your site from the outside: security headers, cookies,
   cross-origin (CORS) settings, files that should never be public, version banners and the HTTPS certificate.
 
-Both are **on by default**. Under **Advanced options** when you start an analysis you can switch each one off
-(**Page health checks**, **Basic security checks**). Page health checks belong to web testing, so that switch is
-greyed out when "Web application" is off; the security checks also run for an API-only analysis.
+Both are **on by default**: page health checks come with the project's **UX** testing agent and the security checks with its
+**Security** testing agent (Settings → General → Testing agents). Page health checks belong to web testing; the security checks
+also run for an API-only exploration.
 
 Findings appear in the **Tests** tab in two areas, **Health checks** and **Security checks**. Open a test to
 see the problem, its severity and how to fix it. A test that passes simply means nothing was found.

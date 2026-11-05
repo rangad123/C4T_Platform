@@ -1,6 +1,6 @@
 import { CircleCheck, CircleX, Download, ExternalLink, ListChecks, RefreshCw, TriangleAlert, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, getKey, type ProjectDetail } from "../../api";
+import { api, getKey, projectKind, type ProjectDetail, type ProjectKind } from "../../api";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, Disclosure, ErrorState, LinkButton, Metric, PageHeader, Ribbon, RibbonLegend, Skeleton } from "../../components/ui";
 import { downloadBlob, plural, relativeTime } from "../../lib/format";
@@ -107,8 +107,8 @@ export function ReleaseDetail({ id, releaseId }: { id: string; releaseId: string
                 }
                 actions={
                     <>
-                        <LinkButton href={routes.manualCases(id)} icon={ListChecks}>
-                            Manual cases
+                        <LinkButton href={routes.cases(id)} icon={ListChecks}>
+                            Test cases
                         </LinkButton>
                         {!signed && (
                             <Button icon={RefreshCw} loading={busy} onClick={() => void refresh()} tip="Reads the automated results again now. Nothing is run.">
@@ -141,7 +141,7 @@ export function ReleaseDetail({ id, releaseId }: { id: string; releaseId: string
                     </Callout>
                 )}
 
-                <Automated v={v} />
+                <Automated v={v} kind={project.data ? projectKind(project.data) : null} />
 
                 <Checklist v={v} projectId={id} name={name} setName={setName} setView={setView} trackers={trackers.data ?? []} />
 
@@ -167,7 +167,8 @@ export function ReleaseDetail({ id, releaseId }: { id: string; releaseId: string
     );
 }
 
-function Automated({ v }: { v: ReleaseView }) {
+/** `kind`: the project's kind once known. Exploring is offered to agent and mixed projects only; a code project makes test scripts. */
+function Automated({ v, kind }: { v: ReleaseView; kind: ProjectKind | null }) {
     const a = v.automated;
     const ticks = ticksFor(a.tests);
     const reasons = a.readiness.reasons;
@@ -191,7 +192,18 @@ function Automated({ v }: { v: ReleaseView }) {
                         <RibbonLegend pass={a.tests.validated} attention={a.tests.needsAttention} fail={a.tests.couldNotValidate} idle={a.tests.waiting} />
                     </div>
                 ) : (
-                    <p className="section t-secondary">This project has no automated tests yet, so there is nothing to show here. <a href={routes.newProject({ project: v.projectId })}>Explore the application</a> to create some.</p>
+                    <p className="section t-secondary" data-testid="rel-no-automated">
+                        This project has no automated tests yet, so there is nothing to show here.{" "}
+                        {kind === "code" ? (
+                            <>
+                                <a href={routes.tests(v.projectId)}>Make test scripts</a> to add some.
+                            </>
+                        ) : kind ? (
+                            <>
+                                <a href={routes.newProject({ project: v.projectId })}>Explore the application</a> to create some.
+                            </>
+                        ) : null}
+                    </p>
                 )}
                 <div className="metrics">
                     <Metric value={rate === null || rate === undefined ? "No run" : `${Math.round(rate)}%`} label="Of the tests that ran, passed" tip={`From the newest run. ${help("metric", "passRate")}`} tone={rate === 100 && !a.tests.couldNotValidate && !a.tests.needsAttention ? "ok" : undefined} />
@@ -258,12 +270,17 @@ function Checklist({ v, projectId, name, setName, setView, trackers }: { v: Rele
                     </Tooltip>
                 )}
             </div>
+            <p className="t-secondary" data-testid="rel-includes">
+                {v.cases === "manual-and-unscripted"
+                    ? "This release lists the Manual test cases, and the Automated test cases that have no test script yet. An Automated case with a test script is covered by that script’s run, under Automated tests."
+                    : "This release lists every test case of the project: it was made before releases left out the cases a test script covers."}
+            </p>
             {r.total === 0 ? (
                 <div className="card card-pad stack-sm">
-                    <p>This project has no manual cases, so there is nothing to check by hand. Add the checks a person has to do, like looking at a printout or asking another team, and every release will list them.</p>
+                    <p>{v.cases === "manual-and-unscripted" ? "Nothing to check by hand: there are no Manual test cases, and every Automated one has a test script." : "This project has no test cases, so there is nothing to check by hand."} Add the checks a person has to do, like looking at a printout or asking another team, and every release will list them.</p>
                     <div>
-                        <LinkButton href={routes.manualCases(projectId)} icon={ListChecks}>
-                            Add manual cases
+                        <LinkButton href={routes.cases(projectId)} icon={ListChecks}>
+                            Add test cases
                         </LinkButton>
                     </div>
                 </div>

@@ -45,6 +45,36 @@ export const C4T_UNREACHABLE = "Crowd4Test sign-in could not be reached. Try aga
 export const C4T_REQUEST_HEADER = "x-requested-with";
 export const C4T_REQUEST_VALUE = "ai-studio";
 
+/**
+ * The caller's own credentials, for a route that saves through another route of this server (app.inject), so the inner call checks
+ * the same person: the key or token, the session with its CSRF token, the Crowd4Test cookie with the page's header, Origin and Host.
+ * Also who is asking, as the Crowd4Test check tells the API (auth/crowd4test.ts): the browser's user-agent, and the caller's address
+ * as `x-forwarded-for`. That address is `req.ip`, the one this server already believes for the outer request (a proxy's word only
+ * when the proxy is trusted, PUBLIC_URL), never the header as the caller sent it: an inner call comes from this server itself, which a
+ * trusted proxy setting would believe, so a forged header passed on would be believed where it was not before.
+ */
+export function callerCredentials(req: FastifyRequest): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const h of ["x-api-key", "authorization", "cookie", "x-csrf-token", "origin", "host", C4T_REQUEST_HEADER, "user-agent"]) {
+        const v = req.headers[h];
+        if (typeof v === "string" && v) out[h] = v;
+    }
+    if (req.ip) out["x-forwarded-for"] = req.ip;
+    return out;
+}
+
+/**
+ * For a route that needs a second permission beside its ROUTE_PERMISSIONS one (that table takes one per route): refuses with 403, in
+ * the words the access hook uses, when the caller does not hold `code` in this project.
+ */
+export function assertHoldsHere(app: FastifyInstance, req: FastifyRequest, projectId: string, code: Permission): void {
+    const actor = actorOf(req);
+    if (!actor) return;
+    if (accessControlOf(app).projects.permissionsIn(actor, projectId)?.has(code)) return;
+    noteRefusedPermission(req, code);
+    throw new HttpError(403, permissionRefusal(actor, code));
+}
+
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** The changes an archived project still accepts: restoring it and deleting it (routes/project-folders.ts). */
 const ARCHIVE_EXEMPT = new Set(["POST /api/projects/:id/archive", "POST /api/projects/:id/unarchive", "DELETE /api/projects/:id"]);

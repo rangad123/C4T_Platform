@@ -122,7 +122,7 @@ describe("Run it on your own computer", () => {
     }, 60_000);
 
     it("the project's Export dialog says what the tests zip holds", async () => {
-        await open(`#/projects/${projectId}/tests`);
+        await open(`#/projects/${projectId}/scripts`);
         await page.getByRole("button", { name: "More actions", exact: true }).click();
         await page.getByRole("menuitem", { name: "Export…", exact: true }).click();
         await page.getByText("The tests that pass, as a folder that runs anywhere: exact package versions, a lockfile and a README with three steps.", { exact: true }).waitFor();

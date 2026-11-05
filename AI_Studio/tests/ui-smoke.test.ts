@@ -84,10 +84,12 @@ describe("UI journey", () => {
     });
 
     it("starts an analysis from one field and shows live progress, then the result", async () => {
-        await page.getByLabel("Application URL").fill(`localhost:${APP_PORT}`);
+        // An address without its scheme. The IP, not "localhost": Playwright's API requests look the name up for IPv6 as well, which
+        // takes ten seconds on a machine whose hosts file names only ip6-localhost, the whole timeout of an API step.
+        await page.getByLabel("Application URL").fill(`127.0.0.1:${APP_PORT}`);
         await page.getByRole("button", { name: "Choose what to test first" }).click();
-        await page.locator("summary", { hasText: "Advanced options" }).click();
-        await page.getByRole("checkbox", { name: /Web application/ }).uncheck(); // API-only: no AI model needed
+        // No AI model here: the page says so and explores only the API, which needs none.
+        await pwExpect(page.getByText("only the application’s API is explored here", { exact: false })).toBeVisible();
         await page.getByLabel("Project name").fill("Smoke shop"); // round 37: typed, never made from the address
         await page.getByRole("button", { name: "Start exploring" }).click();
 
@@ -103,17 +105,21 @@ describe("UI journey", () => {
 
     it("lists tests grouped by area with human status wording, and opens one", async () => {
         await page.getByRole("link", { name: "View tests" }).click();
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
         await pwExpect(page.getByText("Passing", { exact: true }).first()).toBeVisible();
-        await page.getByPlaceholder("Search tests").fill("products/{id}");
-        await pwExpect(page.locator("a.list-row").first()).toBeVisible();
-        await page.locator("a.list-row").first().click();
+        await page.getByPlaceholder("Search scripts").fill("products/{id}");
+        await pwExpect(page.locator(".script-row").first()).toBeVisible();
+        await page.locator("a.sr-title").first().click();
+        // Round 38: a script's title opens its DSL tab; what the test checks is read on its Steps tab.
+        await pwExpect(page.getByRole("tab", { name: "DSL", exact: true })).toHaveAttribute("aria-selected", "true");
+        await page.getByRole("tab", { name: "Steps", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "What this test checks" })).toBeVisible();
         await pwExpect(page.getByText("This test is passing")).toBeVisible();
     });
 
     it("shows the generated code beside the steps, and re-runs a test", async () => {
         // the script sits beside the steps in the workbench (the test first), and the Code tab shows it on its own
+        await page.getByRole("tab", { name: "Steps", exact: true }).click();
         await pwExpect(page.getByRole("tab", { name: "Steps", exact: true })).toHaveAttribute("aria-selected", "true");
         // the test comes first; the platform's setup code (which holds API_BASE_URL) is folded behind one line
         await pwExpect(page.locator("pre.code:visible")).toContainText("test(");
@@ -126,19 +132,19 @@ describe("UI journey", () => {
         await pwExpect(page.getByText("This test is passing")).toBeVisible();
     }, 90_000);
 
-    it("imports a test through the More actions menu and validates it", async () => {
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
+    it("imports a script with the Import button and validates it", async () => {
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "More actions" }).click();
-        await pwExpect(page.getByRole("menuitem", { name: "Import tests…", exact: true })).toBeVisible();
         await pwExpect(page.getByRole("menuitem", { name: "Export…", exact: true })).toBeVisible();
-        await page.getByRole("menuitem", { name: "Import tests…", exact: true }).click();
+        await page.keyboard.press("Escape");
+        await page.getByRole("button", { name: "Import", exact: true }).click();
         const spec = { title: "Product list returns an array", kind: "api", category: "API · Imported", steps: [{ action: "request", method: "GET", path: "/api/products" }, { action: "assertResponse", check: "jsonType", expected: "array" }] };
         await page.locator('input[type="file"]').setInputFiles({ name: "specs.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ specs: [spec] })) });
         await pwExpect(page.getByText(/Imported 1 test/)).toBeVisible({ timeout: 15_000 });
         await pwExpect(page.getByText("Product list returns an array")).toBeVisible();
         // the imported test is validated by a real run and ends up passing
-        await pwExpect(page.locator("a.list-row", { hasText: "Product list returns an array" }).getByText("Passing", { exact: true })).toBeVisible({ timeout: 60_000 });
+        await pwExpect(page.locator(".script-row", { hasText: "Product list returns an array" }).getByText("Passing", { exact: true })).toBeVisible({ timeout: 60_000 });
     }, 90_000);
 
     it("never logged a browser error", () => {

@@ -41,8 +41,8 @@ export function ReleasesPage({ id }: { id: string }) {
                 }
                 actions={
                     <>
-                        <LinkButton href={routes.manualCases(id)} icon={ListChecks}>
-                            Manual cases{list.data ? ` (${cases})` : ""}
+                        <LinkButton href={routes.cases(id)} icon={ListChecks}>
+                            Test cases{list.data ? ` (${cases})` : ""}
                         </LinkButton>
                         <Button variant="primary" icon={Plus} onClick={() => setCreating(true)} disabled={creating}>
                             New release
@@ -70,7 +70,7 @@ export function ReleasesPage({ id }: { id: string }) {
                                         <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>
                                             New release
                                         </Button>
-                                        <LinkButton href={routes.manualCases(id)}>Add manual cases</LinkButton>
+                                        <LinkButton href={routes.cases(id)}>Add test cases</LinkButton>
                                     </>
                                 )
                             }

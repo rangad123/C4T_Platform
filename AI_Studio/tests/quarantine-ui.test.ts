@@ -33,7 +33,7 @@ const shot = async (name: string) => {
     if (process.env.QUARANTINE_SHOTS) await page.screenshot({ path: path.join(process.env.QUARANTINE_SHOTS, `${name}.png`), fullPage: true });
 };
 const testUrl = (key: string) => `${BASE}/#/tests/${shop.tests.get(key)}`;
-const testsUrl = () => `${BASE}/#/projects/${shop.projectId}/tests`;
+const testsUrl = () => `${BASE}/#/projects/${shop.projectId}/scripts`;
 const scheduleUrl = () => `${BASE}/#/projects/${shop.projectId}/runs?section=trends`;
 const overviewUrl = () => `${BASE}/#/projects/${shop.projectId}`;
 
@@ -116,7 +116,7 @@ describe("quarantine in the UI", () => {
 
     it("shows the badge, the reason and a Quarantined filter on the Tests page", async () => {
         await open(testsUrl(), async () => pwExpect(page.getByRole("link", { name: /Check wobbly/ })).toBeVisible());
-        const wobbly = page.getByRole("link", { name: /Check wobbly/ });
+        const wobbly = page.getByTestId("script-row").filter({ hasText: /Check wobbly/ });
         await pwExpect(wobbly).toContainText("Quarantined");
         await pwExpect(wobbly.getByTestId("quarantine-reason")).toContainText("In quarantine, not counted: Waits on the carousel");
         // markup in a reason is text, never page content
@@ -128,7 +128,7 @@ describe("quarantine in the UI", () => {
         await chip.click();
         await pwExpect(page.getByRole("link", { name: /Check steady/ })).toHaveCount(0);
         await pwExpect(page.getByRole("link", { name: /Check wobbly/ })).toBeVisible();
-        await pwExpect(page.getByText("Showing 1 of 2 tests.")).toBeVisible();
+        await pwExpect(page.getByText("Showing 1 of 2 test scripts.")).toBeVisible();
         await shot("tests-filter");
     });
 

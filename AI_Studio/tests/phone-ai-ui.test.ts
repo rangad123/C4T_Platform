@@ -5,7 +5,7 @@
  * use from state each test sets. The screens, their requests and their words are real; what a phone exploration really does is MX-A and MX-B's work and is
  * exercised by tests/phone-ai-real.test.ts (which says why it is skipped while their routes are missing). Nothing here touches an emulator, adb, a model or ./data.
  *
- *   start: New test menu, Setup > Mobile app, the welcome page; no app, iPhone only, no phone or runner, runner offline or out of date, no AI model, refused starts
+ *   start: Settings, Mobile app (not New test script), the welcome page; no app, iPhone only, no phone or runner, runner offline or out of date, no AI model, refused starts
  *   watch: phone-shaped picture, activity line, counters, calm list of what was skipped, Stop exploring, the last picture kept
  *   plan: found sentence, per kind and per idea edits, screens found, create, discard; then the tests as they appear and the Tests page
  *   the bar: keyboard only, 375 px without sideways scroll, 44 px targets, axe in light and dark, no retired word; screenshots in .scratch/phone-ai/shots
@@ -192,28 +192,21 @@ beforeEach(() => {
 
 // ── start ─────────────────────────────────────────────────────────────────────
 
-describe("start: the New test menu", () => {
-    it("has the phone entry; without an app it says so and opens Settings, Mobile app", async () => {
+describe("start: Settings, Mobile app (round 38: not a way of making a test script)", () => {
+    it("is not an entry of New test script", async () => {
         const p = fake.addProject("No app yet", null);
-        await visit(`#/projects/${p.id}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).first().click();
-        const item = page.getByRole("menuitem", { name: "Explore the phone app (AI)", exact: true });
-        await pwExpect(item).toBeVisible();
-        const desc = async () => item.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
-        await pwExpect.poll(desc).toContain("Add a phone app first");
-        await item.click();
-        await pwExpect(page).toHaveURL(/#\/projects\/[^/]+\/settings\?section=mobile/);
-        await pwExpect(page.getByRole("heading", { name: "Mobile app", exact: true })).toBeVisible();
+        await visit(`#/projects/${p.id}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).first().click();
+        await pwExpect(page.getByRole("menuitem", { name: "Build steps by hand", exact: true })).toBeVisible();
+        await pwExpect(page.getByRole("menuitem", { name: "Explore the phone app (AI)", exact: true })).toHaveCount(0);
+        await page.keyboard.press("Escape");
         expect(await dialog().count()).toBe(0);
     });
 
-    it("with an app it opens the start panel", async () => {
+    it("with an app, Explore with AI in Settings, Mobile app opens the start panel", async () => {
         const p = fake.addProject("Shop");
-        await visit(`#/projects/${p.id}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).first().click();
-        const item = page.getByRole("menuitem", { name: "Explore the phone app (AI)", exact: true });
-        await pwExpect.poll(() => item.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "")).toContain("taps through it");
-        await item.click();
+        await visit(`#/projects/${p.id}/settings?section=mobile`);
+        await page.getByRole("button", { name: "Explore with AI", exact: true }).first().click();
         await pwExpect(dialog()).toBeVisible();
         await pwExpect(dialog()).toContainText(`The AI will open ${APP} on a phone or emulator, tap through it like a careful user, and plan tests.`);
         expect(fake.unhandled).toEqual([]);
@@ -321,12 +314,6 @@ describe("start: the panel", () => {
         await pwExpect(dialog()).toContainText("The app’s package name is missing");
         await pwExpect(dialog()).toContainText("Phone exploration needs the app’s package name, for example com.example.shop. Add it under Settings, Mobile app.");
         expect(await dialog().getByRole("button", { name: "Start exploring", exact: true }).count()).toBe(0);
-        await visit(`#/projects/${p.id}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).first().click();
-        const item = page.getByRole("menuitem", { name: "Explore the phone app (AI)", exact: true });
-        await pwExpect.poll(() => item.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "")).toBe("Add the app’s package name first. Opens Settings, Mobile app.");
-        await item.click();
-        await pwExpect(page).toHaveURL(/section=mobile/);
     });
 
     it("for an iPhone app only: Android only, import tests, no way to start", async () => {
@@ -336,10 +323,6 @@ describe("start: the panel", () => {
         await pwExpect(dialog()).toContainText("Phone exploration works on Android only. For iPhone apps, import tests.");
         expect(await dialog().getByRole("button", { name: "Start exploring", exact: true }).count()).toBe(0);
         await pwExpect(dialog().getByRole("link", { name: "Open Mobile app", exact: true })).toBeVisible();
-        await visit(`#/projects/${p.id}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).first().click();
-        const item = page.getByRole("menuitem", { name: "Explore the phone app (AI)", exact: true });
-        await pwExpect.poll(() => item.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "")).toBe("Android only. For iPhone apps, import tests.");
     });
 
     it("shows the platform's refusal in plain words, keeps the panel open and lets the person try again", async () => {
@@ -737,10 +720,10 @@ describe("the tests", () => {
         fake.update(c.jobId, { status: "PARTIALLY_COMPLETED", finishedAt: new Date().toISOString(), progress: { generation: "done", validation: "done" }, counters: { testsGenerated: 2, testsValidated: 1, testsFailedValidation: 1 } });
         await pwExpect(page.getByRole("heading", { name: "Needs your attention", exact: true })).toBeVisible({ timeout: 15_000 });
         await pwExpect(page.getByRole("link", { name: /Open the cart from Home/ }).first()).toContainText("Expected the Cart screen to be visible");
-        await visit(`#/projects/${p.id}/tests`);
+        await visit(`#/projects/${p.id}/scripts`);
         await pwExpect(page.getByRole("link", { name: /Sign in with a test account/ })).toBeVisible();
         // Phone tests are called Phone, with the app they belong to.
-        const row = page.getByRole("link", { name: /Sign in with a test account/ });
+        const row = page.getByTestId("script-row").filter({ hasText: /Sign in with a test account/ });
         await pwExpect(row).toContainText(`Phone, ${APP}`);
         expect(await row.textContent()).not.toMatch(/Mobile/);
         await shot("tests-phone-light-1280");
@@ -753,19 +736,11 @@ describe("the tests", () => {
 const RETIRED = /(?<!could not be )\bvalidated\b|\bvalidation failed\b|\bneeds review\b|\bnot yet validated\b|\bre-validation\b|\banaly[sz](is|e|ed)\b|\bhand-written\b|\btake over\b|\brunner agents?\b|\brunbooks?\b|\bmake shared\b|\bshared locators?\b|\bscenarios?\b|\bspecification\b|\bmobile tests?\b|!/i;
 
 describe("the bar", () => {
-    it("the whole path is on the keyboard: open the menu, choose the phone entry, pick where, start; Escape gives the focus back", async () => {
+    it("the whole path is on the keyboard: open the panel from Settings, Mobile app, pick where, start; Escape gives the focus back", async () => {
         const p = fake.addProject("Shop");
-        await visit(`#/projects/${p.id}/tests`);
-        const menu = page.getByRole("button", { name: "New test", exact: true }).first();
+        await visit(`#/projects/${p.id}/settings?section=mobile`);
+        const menu = page.getByRole("button", { name: "Explore with AI", exact: true }).first();
         await menu.focus();
-        await page.keyboard.press("Enter");
-        const item = page.getByRole("menuitem", { name: "Explore the phone app (AI)", exact: true });
-        await pwExpect(item).toBeVisible();
-        // Tab moves through the entries in order: Describe it, Record it in a browser, then the phone entry.
-        await page.keyboard.press("Tab");
-        await page.keyboard.press("Tab");
-        await page.keyboard.press("Tab");
-        await pwExpect(item).toBeFocused();
         await page.keyboard.press("Enter");
         await pwExpect(dialog()).toBeVisible();
         // Everything in the panel is reachable by Tab, in reading order, and the focus can be seen.
@@ -789,8 +764,6 @@ describe("the bar", () => {
         await pwExpect(menu).toBeFocused();
         // And Enter on Start exploring starts it.
         await menu.focus();
-        await page.keyboard.press("Enter");
-        await item.focus();
         await page.keyboard.press("Enter");
         await dialog().getByRole("button", { name: "Start exploring", exact: true }).focus();
         await page.keyboard.press("Enter");
@@ -864,7 +837,7 @@ describe("the bar", () => {
         fake.addTest(t.id, { title: "Sign in with a test account" });
         fake.addTest(t.id, { title: "Open the cart", validationStatus: "FAILED_VALIDATION", validationReason: "Expected the Cart screen to be visible." });
         await axeBoth(async () => {
-            await visit(`#/projects/${t.id}/tests`);
+            await visit(`#/projects/${t.id}/scripts`);
             await pwExpect(page.getByRole("link", { name: /Sign in with a test account/ })).toBeVisible();
         });
     });
@@ -898,7 +871,7 @@ describe("the bar", () => {
             await settle(null);
             const t = fake.addProject("Tests");
             fake.addTest(t.id, { title: "Sign in with a test account that has a rather long title to see it wrap" });
-            await visit(`#/projects/${t.id}/tests`);
+            await visit(`#/projects/${t.id}/scripts`);
             await pwExpect(page.getByRole("link", { name: /Sign in with a test account/ })).toBeVisible();
             await noOverflow();
         });

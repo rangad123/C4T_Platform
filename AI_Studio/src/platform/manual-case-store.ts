@@ -6,8 +6,9 @@
  * the database refuses to change a row once written (deleting a project still removes its trail).
  */
 import { randomUUID } from "node:crypto";
-import { caseKey, type CasePriority, type ManualCase, type ManualCaseInput, type ManualResult, MAX_CASES } from "../engine/manual/cases.js";
+import { caseKey, caseRef, type CaseAutomation, type CasePriority, type ManualCase, type ManualCaseInput, type ManualResult, MAX_CASES } from "../engine/manual/cases.js";
 import type { Db, Row } from "./db.js";
+import { retryOnUniqueViolation, sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { actorLabel } from "./auth/actor.js";
 
 /** Migration slot 15. */
@@ -65,6 +66,22 @@ CREATE TABLE release_audit (
 );
 CREATE INDEX idx_release_audit ON release_audit(release_id, id);
 CREATE TRIGGER release_audit_no_update BEFORE UPDATE ON release_audit BEGIN SELECT RAISE(ABORT, 'audit entries cannot be changed'); END;
+`;
+
+/**
+ * Migration slot 49: what a written test case says about itself. `automation` is whether a tool can check it (automated) or a
+ * person must (manual); every case written before it is manual. `number` is the case's place in its project (TC-001), given to the
+ * existing cases in the order they were added, which is the order the list showed them in; no two cases of a project share one (the
+ * unique index makes a concurrent writer that took the same number try again). `requirement_id` is the requirement record the case
+ * comes from; the free-text `requirement` stays as it was.
+ */
+export const caseTypesMigration = (d: Dialect = sqliteDialect): string => `
+ALTER TABLE manual_cases ADD COLUMN automation TEXT NOT NULL DEFAULT 'manual';
+ALTER TABLE manual_cases ADD COLUMN number INTEGER;
+ALTER TABLE manual_cases ADD COLUMN requirement_id TEXT REFERENCES requirements(id) ON DELETE SET NULL;
+UPDATE manual_cases SET number = (SELECT COUNT(*) FROM manual_cases m2 WHERE m2.project_id = manual_cases.project_id AND ${d.insertionOrder("m2")} <= ${d.insertionOrder("manual_cases")});
+CREATE INDEX idx_manual_cases_requirement ON manual_cases(requirement_id);
+CREATE UNIQUE INDEX idx_manual_cases_number ON manual_cases(project_id, number);
 `;
 
 export const MAX_RELEASES = 200;
@@ -152,6 +169,10 @@ const toCase = (r: Row): ManualCase => ({
     requirement: r.requirement,
     steps: JSON.parse(r.steps_json),
     linkedTestIds: JSON.parse(r.linked_json),
+    number: Number(r.number ?? 0),
+    ref: caseRef(Number(r.number ?? 0)),
+    automation: r.automation === "automated" ? "automated" : "manual",
+    requirementId: r.requirement_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
 });
@@ -201,15 +222,25 @@ export class ManualCaseStore {
 
     /** Throws `Error("limit")` when the project already has the most cases allowed. */
     createCase(projectId: string, input: ManualCaseInput): ManualCase {
-        if (this.countCases(projectId) >= MAX_CASES) throw new Error("limit");
-        return this.insert(projectId, input);
+        return retryOnUniqueViolation(this.db.dialect, () =>
+            this.db.tx(() => {
+                if (this.countCases(projectId) >= MAX_CASES) throw new Error("limit");
+                return this.insert(projectId, input);
+            }),
+        );
     }
 
+    /**
+     * A new case takes the next number of its project (one more than the highest), in the same statement. A deleted case's number is
+     * not kept back: deleting the highest lets the next case take it again, as test ids (WEB-001) are given. Two writers taking the same
+     * number at once meet the unique index; callers run this inside `retryOnUniqueViolation`, which tries the whole transaction again.
+     */
     private insert(projectId: string, input: ManualCaseInput): ManualCase {
         const id = randomUUID();
         const t = now();
         this.db.run(
-            "INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            `INSERT INTO manual_cases (id, project_id, title, area, priority, requirement, steps_json, linked_json, automation, requirement_id, number, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(number), 0) + 1 FROM manual_cases WHERE project_id = ?),?,?)`,
             id,
             projectId,
             input.title,
@@ -218,26 +249,45 @@ export class ManualCaseStore {
             input.requirement,
             JSON.stringify(input.steps),
             JSON.stringify(input.linkedTestIds),
+            input.automation ?? "manual",
+            input.requirementId ?? null,
+            projectId,
             t,
             t,
         );
         return this.getCase(projectId, id)!;
     }
 
+    /** `automation` and `requirementId` absent keep what the case has. */
     updateCase(projectId: string, id: string, input: ManualCaseInput): ManualCase | undefined {
-        const changed = this.db.run(
-            "UPDATE manual_cases SET title = ?, area = ?, priority = ?, requirement = ?, steps_json = ?, linked_json = ?, updated_at = ? WHERE id = ? AND project_id = ?",
+        const before = this.getCase(projectId, id);
+        if (!before) return undefined;
+        const automation: CaseAutomation = input.automation ?? before.automation;
+        const requirementId = input.requirementId === undefined ? before.requirementId : input.requirementId;
+        this.db.run(
+            "UPDATE manual_cases SET title = ?, area = ?, priority = ?, requirement = ?, steps_json = ?, linked_json = ?, automation = ?, requirement_id = ?, updated_at = ? WHERE id = ? AND project_id = ?",
             input.title,
             input.area,
             input.priority,
             input.requirement,
             JSON.stringify(input.steps),
             JSON.stringify(input.linkedTestIds),
+            automation,
+            requirementId,
             now(),
             id,
             projectId,
         );
-        return Number(changed.changes) > 0 ? this.getCase(projectId, id) : undefined;
+        return this.getCase(projectId, id);
+    }
+
+    /** How many written cases each requirement record has (by the requirement the case comes from). */
+    countByRequirement(projectId: string): Map<string, number> {
+        return new Map(
+            this.db
+                .all<{ requirement_id: string; c: number }>("SELECT requirement_id, COUNT(*) AS c FROM manual_cases WHERE project_id = ? AND requirement_id IS NOT NULL GROUP BY requirement_id", projectId)
+                .map((r) => [r.requirement_id, Number(r.c)]),
+        );
     }
 
     deleteCase(projectId: string, id: string): boolean {
@@ -249,18 +299,50 @@ export class ManualCaseStore {
      * (importing the same file twice adds nothing). Returns what was added and what was left out.
      */
     importCases(projectId: string, inputs: ManualCaseInput[]): { created: ManualCase[]; duplicates: number } {
-        return this.db.tx(() => {
-            const seen = new Set(this.listCases(projectId).map(caseKey));
-            const fresh: ManualCaseInput[] = [];
-            let duplicates = 0;
-            for (const c of inputs) {
-                const k = caseKey(c);
-                if (seen.has(k)) duplicates++;
-                else (seen.add(k), fresh.push(c));
-            }
-            if (this.countCases(projectId) + fresh.length > MAX_CASES) throw new Error("limit");
-            return { created: fresh.map((c) => this.insert(projectId, c)), duplicates };
-        });
+        return retryOnUniqueViolation(this.db.dialect, () =>
+            this.db.tx(() => {
+                const { fresh, duplicates } = this.withoutDuplicates(projectId, inputs);
+                if (this.countCases(projectId) + fresh.length > MAX_CASES) throw new Error("limit");
+                return { created: fresh.map((c) => this.insert(projectId, c)), duplicates };
+            }),
+        );
+    }
+
+    /**
+     * Cases the AI wrote, saved as far as they fit, in one transaction (so nothing changes between the count and the save): first those
+     * already there (same title and area) are left out, then those of a requirement deleted meanwhile, then the room the project has
+     * left decides how many of the rest are kept. Never throws for the limit: `limited` says how many did not fit, `gone` names the
+     * requirements whose cases were left out because the requirement no longer exists.
+     */
+    addGenerated(projectId: string, inputs: ManualCaseInput[]): { created: ManualCase[]; duplicates: number; limited: number; gone: string[] } {
+        return retryOnUniqueViolation(this.db.dialect, () =>
+            this.db.tx(() => {
+                const { fresh, duplicates } = this.withoutDuplicates(projectId, inputs);
+                const exists = new Map<string, boolean>();
+                const stillThere = (rid: string) => {
+                    if (!exists.has(rid)) exists.set(rid, Boolean(this.db.get("SELECT 1 AS x FROM requirements WHERE id = ? AND project_id = ?", rid, projectId)));
+                    return exists.get(rid)!;
+                };
+                const live = fresh.filter((c) => !c.requirementId || stillThere(c.requirementId));
+                const room = Math.max(0, MAX_CASES - this.countCases(projectId));
+                const kept = live.slice(0, room);
+                const gone = [...exists].filter(([, there]) => !there).map(([rid]) => rid);
+                return { created: kept.map((c) => this.insert(projectId, c)), duplicates, limited: live.length - kept.length, gone };
+            }),
+        );
+    }
+
+    /** Those of `inputs` whose title and area match no case of the project nor an earlier input, and how many were left out. */
+    private withoutDuplicates(projectId: string, inputs: ManualCaseInput[]): { fresh: ManualCaseInput[]; duplicates: number } {
+        const seen = new Set(this.listCases(projectId).map(caseKey));
+        const fresh: ManualCaseInput[] = [];
+        let duplicates = 0;
+        for (const c of inputs) {
+            const k = caseKey(c);
+            if (seen.has(k)) duplicates++;
+            else (seen.add(k), fresh.push(c));
+        }
+        return { fresh, duplicates };
     }
 
     // ── releases ────────────────────────────────────────────────────────────

@@ -186,7 +186,7 @@ export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
                             <ul className="card list divided" aria-label="Linked test cases">
                                 {d.tests.map((t) => (
                                     <li key={t.id} className="req-test">
-                                        <a className="list-row" href={t.kind === "automated" ? routes.test(t.id) : routes.cases(id, "manual")}>
+                                        <a className="list-row" href={t.kind === "automated" ? routes.test(t.id) : routes.testCase(id, t.id)}>
                                             <span className="main">
                                                 <span className="title">
                                                     {t.key && <span className="req-ref mono">{t.key}</span>} {t.title}

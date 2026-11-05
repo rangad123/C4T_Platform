@@ -115,7 +115,7 @@ function SuiteIndex({ id }: { id: string }) {
                 ) : !data ? null : data.automatic.length === 0 ? (
                     <div className="card">
                         <EmptyState icon={Layers} title="No groups yet">
-                            Groups appear when the project has test cases.
+                            Groups appear when the project has test scripts.
                         </EmptyState>
                     </div>
                 ) : (

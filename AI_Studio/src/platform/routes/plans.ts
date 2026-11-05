@@ -8,6 +8,7 @@ import { HttpError } from "../http-error.js";
 import { loadTargetProblem } from "../load-guard.js";
 import { discardStoredPlan, loadStoredPlan, planOptionsOf, PLAN_GONE } from "../plan-store.js";
 import { ACTIVE_STATES, type JobOptions, type JobRow } from "../repo.js";
+import { EXPLORING_OFF_MESSAGE, refuseUnlessRunsStart } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
 import { droppedChecksNote, narrowedByChoice, type AskedSwitches } from "../testing-agents.js";
 import { testingAgentsOf } from "./testing-agents.js";
@@ -180,6 +181,7 @@ export function registerPlanRoutes(ctx: RouteCtx): void {
         if (!options.targets.length || planTotal(families, options.targets) === 0)
             throw new HttpError(400, narrowed.dropped.length ? `Nothing is left to create. ${droppedChecksNote(narrowed.dropped)}` : "Nothing is selected to create. Choose at least one kind of test.");
 
+        refuseUnlessRunsStart(ctx.p, EXPLORING_OFF_MESSAGE); // tests switched off on this server: nothing is queued
         await ctx.assertNoActiveJob(id);
         // The application keeps the generation settings and the sign-in details of the plan, minus the one-off plan fields.
         const { fromPlan: _a, excludeIdeas: _b, ...config } = options;

@@ -39,6 +39,7 @@ let shop: Seed;
 let empty: Seed;
 let jobId = "";
 let releaseId = "";
+let caseId = "";
 let requirementId = "";
 let agentRunId = "";
 let suiteId = "";
@@ -69,6 +70,8 @@ beforeAll(async () => {
     await api("POST", `/api/projects/${shop.projectId}/objects`, { name: "Checkout / Pay button", kind: "web", locator: { by: "role", role: "button", value: "Pay" } });
     releaseId = (await api("POST", `/api/projects/${shop.projectId}/releases`, { name: "Release 1.0" })).body.id;
     requirementId = (await api("POST", `/api/projects/${shop.projectId}/requirements`, { title: "A shopper can pay by card" })).body.id;
+    // One written test case, so the link that opens one case has something to open (round 38).
+    caseId = (await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: "Check the printed receipt", steps: [{ action: "Print the receipt", expected: "It shows the order number" }] })).body.id;
     const agentRuns = new AgentRunStore(platform.sql);
     const agentRun = await agentRuns.create({ projectId: shop.projectId, objective: "A shopper can open the shop", startAddress: "http://127.0.0.1:6459/", limits: { maxSteps: 5, maxMinutes: 1, maxTokens: 1_000, approvalSeconds: 60 }, startedBy: { id: null, name: "Test" } });
     await agentRuns.finish(agentRun.id, { state: "finished", verdict: "inconclusive", reasoning: "Nothing was checked." });
@@ -110,6 +113,11 @@ async function noOverflow() {
     const wide = await page.evaluate(() =>
         Array.from(document.querySelectorAll(".content *"))
             .filter((el) => el.getBoundingClientRect().right > document.documentElement.clientWidth + 1 && !el.closest(".tabs, .subtabs") && !el.closest("pre"))
+            // A wide table may scroll sideways inside its own labelled, focusable region (Test cases' list, round 38): the page does not.
+            .filter((el) => {
+                const region = el.closest<HTMLElement>('[role="region"][tabindex="0"]');
+                return !region || !["auto", "scroll"].includes(getComputedStyle(region).overflowX);
+            })
             // The innermost ones are the cause; their ancestors only follow.
             .filter((el) => !Array.from(el.children).some((c) => c.getBoundingClientRect().right > document.documentElement.clientWidth + 1))
             .slice(0, 5)
@@ -143,15 +151,15 @@ const P = () => shop.projectId;
 const TAB_NAMES = ["Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Runs", "Settings"];
 
 // The places that hold several sections: [tab label, hash of the bare place, title, section names in order, hash of section i].
-const CASES = ["automated", "manual"] as const;
-// Round 37: Reusable libraries (the organisation's shared code) is the last section of Test scripts.
-const SCRIPTS = ["scripts", "steps", "elements", "helpers", "library"] as const;
+// Round 38: Test cases is one list, filtered by type (All, Automated, Manual), not a place with sections.
+const CASES = ["all", "automated", "manual"] as const;
+// Round 37: Reusable libraries (the organisation's shared code) is the last section of Test scripts. Round 38: Review follows Scripts.
+const SCRIPTS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 const RUNS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
 // Round 37: runners are machine-level, on the Runners page, not a project setting.
 const SETTINGS = ["general", "members", "environments", "data", "accounts", "ai", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 const PLACES: Array<{ tab: string; h: () => string; title: string; sections: string[]; at: (i: number) => string }> = [
-    { tab: "Test cases", h: () => routes.cases(P()), title: "Test cases", sections: ["Automated", "Manual"], at: (i) => routes.cases(P(), CASES[i]) },
-    { tab: "Test scripts", h: () => routes.scripts(P()), title: "Test scripts", sections: ["Scripts", "Reusable steps", "Shared elements", "Helpers (code)", "Reusable libraries"], at: (i) => routes.scripts(P(), SCRIPTS[i]) },
+    { tab: "Test scripts", h: () => routes.scripts(P()), title: "Test scripts", sections: ["Scripts", "Review", "Reusable steps", "Shared elements", "Helpers (code)", "Reusable libraries"], at: (i) => routes.scripts(P(), SCRIPTS[i]) },
     { tab: "Runs", h: () => routes.runs(P()), title: "Runs", sections: ["All runs", "Schedules", "After a deploy", "Trends", "Releases", "Compliance"], at: (i) => routes.runs(P(), RUNS[i]) },
     {
         tab: "Settings",
@@ -165,6 +173,7 @@ const PLACES: Array<{ tab: string; h: () => string; title: string; sections: str
 const SINGLE: Array<{ tab: string; h: () => string; title: string }> = [
     { tab: "Dashboard", h: () => routes.project(P()), title: "Atlas shop" },
     { tab: "Requirements", h: () => routes.requirements(P()), title: "Requirements" },
+    { tab: "Test cases", h: () => routes.cases(P()), title: "Test cases" },
     { tab: "Test suites", h: () => routes.suites(P()), title: "Test suites" },
 ];
 
@@ -248,25 +257,34 @@ describe("the project's places, in the order of the testing lifecycle", () => {
     }
 
     it("each section link carries its tour name (data-tour=\"<place>-<section>\")", async () => {
-        for (const [p, keys] of [[PLACES[0]!, CASES], [PLACES[1]!, SCRIPTS], [PLACES[2]!, RUNS], [PLACES[3]!, SETTINGS]] as const) {
+        for (const [p, keys] of [[PLACES[0]!, SCRIPTS], [PLACES[1]!, RUNS], [PLACES[2]!, SETTINGS]] as const) {
             await visit(p.h());
             const place = new URL(`http://x/${p.h().replace(/^#\//, "")}`).pathname.split("/").pop();
             const tours = await page.getByRole("navigation", { name: `${p.title} sections`, exact: true }).locator("a.subtab").evaluateAll((els) => els.map((e) => e.getAttribute("data-tour")));
             expect(tours, p.tab).toEqual(keys.map((k) => `${place}-${k}`));
         }
+        // Test cases has no section row: its type filter carries the tour names (the tour's Manual step points at "tests-manual").
+        await visit(routes.cases(P()));
+        const pills = await page.getByRole("group", { name: "Filter by type" }).getByRole("button").evaluateAll((els) => els.map((e) => e.getAttribute("data-tour")));
+        expect(pills).toEqual(CASES.map((k) => `tests-${k}`));
     });
 
-    it("Test cases > Automated is the old Tests page under the heading Automated tests; Manual holds the manual checks", async () => {
+    it("Test cases is one list of the written cases, filtered All, Automated or Manual; running and New test script are on Test scripts", async () => {
         await visit(routes.cases(P()));
-        await pwExpect(page.locator(".sec-head h2")).toHaveText("Automated tests");
-        await pwExpect(page.getByRole("button", { name: "New test", exact: true })).toBeVisible();
+        const filter = page.getByRole("group", { name: "Filter by type" });
+        expect((await filter.getByRole("button").allTextContents()).map((t) => t.replace(/\s*\d+$/, ""))).toEqual(["All", "Automated", "Manual"]);
+        await pwExpect(filter.getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true");
+        await pwExpect(page.getByTestId("place-head").getByRole("button", { name: "Add test case (manual)", exact: true })).toBeVisible();
+        for (const gone of ["New test", "New test script", "Run"]) await pwExpect(page.getByRole("button", { name: gone, exact: true }), gone).toHaveCount(0);
         await visit(routes.cases(P(), "manual"));
-        await pwExpect(page.locator(".hub-body")).toHaveAttribute("data-section", "manual");
+        await pwExpect(page.getByRole("group", { name: "Filter by type" }).getByRole("button", { name: /^Manual/ })).toHaveAttribute("aria-pressed", "true");
+        await pwExpect(page.locator(".subtabs")).toHaveCount(0);
         await pwExpect(page.locator('.content [role="alert"]')).toHaveCount(0);
     });
 
-    it("Test scripts > Scripts lists every test's script with its review state and opens its latest version (round 34)", async () => {
-        await visit(routes.scripts(P()));
+    it("Test scripts > Review lists every test's script with its review state and opens its latest version (round 34)", async () => {
+        // Round 38: the Scripts section is the runnable list; each script's versions and their review are the Review section.
+        await visit(routes.scripts(P(), "review"));
         const list = page.getByRole("list", { name: "Test scripts", exact: true });
         await pwExpect(list.getByRole("link")).toHaveCount(3);
         const testId = [...shop.tests.values()][0]!;
@@ -422,38 +440,38 @@ describe("sidebar and the Projects page", () => {
 
 // ── Tests page ──────────────────────────────────────────────────────────────
 
-describe("Test cases > Automated (the old Tests page)", () => {
-    it("has a calm header: the count, Run, New test and a small More menu; the five creation buttons and the long menu are gone", async () => {
+describe("Test scripts > Scripts (the old Tests page)", () => {
+    it("has a calm header: the count, Import, Run, New test script and a small More menu; the five creation buttons and the long menu are gone", async () => {
         await visit(routes.tests(P()));
         // The place has its title under the tab bar (round 38); the section's own header row holds the count and the actions.
-        await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Test cases");
+        await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Test scripts");
         const head = page.locator(".sec-head");
-        await pwExpect(head.locator("h2")).toHaveText("Automated tests");
-        await pwExpect(head.locator(".sub")).toHaveText("3 tests, 2 passing, 1 not passing");
+        await pwExpect(head.locator("h2")).toHaveText("Scripts");
+        await pwExpect(head.locator(".sub")).toHaveText("3 test scripts, 2 passing, 1 not passing");
         await pwExpect(head.getByRole("button", { name: "Run", exact: true })).toBeVisible();
-        await pwExpect(head.getByRole("button", { name: "New test", exact: true })).toBeVisible();
+        await pwExpect(head.getByRole("button", { name: "New test script", exact: true })).toBeVisible();
+        // Round 38: Import is a header button of its own, not an entry of More actions.
+        await pwExpect(head.getByRole("button", { name: "Import", exact: true })).toBeVisible();
         for (const gone of ["Write a test", "Build a test", "Write as text", "Write code", "Download tests"]) await pwExpect(head.getByRole("button", { name: gone, exact: true }), gone).toHaveCount(0);
         await pwExpect(head.getByRole("link", { name: "Record a test", exact: true })).toHaveCount(0);
         await head.getByRole("button", { name: "More actions", exact: true }).click();
-        expect(await page.getByRole("menuitem").allTextContents()).toEqual(["Import tests…", "Export…", "Check other browsers & screen sizes"]);
+        expect(await page.getByRole("menuitem").allTextContents()).toEqual(["Export…", "Check other browsers & screen sizes"]);
         await shot("tests-light-1280");
     });
 
-    it("the New test menu groups its entries and says in a line what each one is", async () => {
+    it("the New test script menu groups its entries and says in a line what each one is", async () => {
         await visit(routes.tests(P()));
-        await page.getByRole("button", { name: "New test", exact: true }).click();
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
         const items = page.getByRole("menuitem");
-        expect(await items.evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? e.textContent))).toEqual(["Describe it", "Record it in a browser", "Explore the phone app (AI)", "Build steps by hand", "Write it as text", "Write code", "Import tests…"]);
+        expect(await items.evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? e.textContent))).toEqual(["Describe it", "Build steps by hand", "Write it as text", "Write code", "Import scripts…"]);
         // Each entry's name is its title; the explanation is its description.
         for (const [name, words] of [
+            // Round 38: recording and exploring a phone app are no longer entries of this menu.
             ["Describe it", /AI writes the steps/],
-            ["Record it in a browser", /Click through your application/],
-            // This project has no phone app, so the line says what to do first (with an app it says what the AI does: tests/phone-ai-ui.test.ts).
-            ["Explore the phone app (AI)", /Add a phone app first/],
             ["Build steps by hand", /one by one/],
-            ["Write it as text", /No AI needed/],
+            ["Write it as text", /^The DSL: one line per step.*No AI needed/],
             ["Write code", /Runs only where code tests are allowed/],
-            ["Import tests…", /JSON file, Maestro flows or a Git repository/],
+            ["Import scripts…", /JSON file, Maestro flows or a Git repository/],
         ] as const) {
             const item = page.getByRole("menuitem", { name, exact: true });
             await pwExpect(item).toBeVisible();
@@ -464,10 +482,10 @@ describe("Test cases > Automated (the old Tests page)", () => {
         await shot("tests-new-test-menu-light-1280");
     });
 
-    it("each New test entry opens the dialog or page that already existed", async () => {
+    it("each New test script entry opens the dialog or page that already existed", async () => {
         const choose = async (name: string) => {
             await visit(routes.tests(P()));
-            await page.getByRole("button", { name: "New test", exact: true }).click();
+            await page.getByRole("button", { name: "New test script", exact: true }).click();
             await page.getByRole("menuitem", { name, exact: true }).click();
         };
         await choose("Describe it");
@@ -478,29 +496,24 @@ describe("Test cases > Automated (the old Tests page)", () => {
         await pwExpect(page.getByRole("dialog", { name: "Write a test as text", exact: true })).toBeVisible();
         await choose("Write code");
         await pwExpect(page.getByRole("dialog", { name: "Write a test in code", exact: true })).toBeVisible();
-        await choose("Record it in a browser");
-        await pwExpect(page.getByRole("heading", { name: "Record a test", exact: true })).toBeVisible();
-        expect(await hash()).toBe(routes.record(P()));
     });
 
-    it("Import tests… offers JSON, Maestro and Git; Maestro and Git open their own panels; a JSON file really imports", async () => {
+    it("Import scripts… offers JSON, Maestro and Git; Maestro and Git open their own panels; a JSON file really imports", async () => {
         await visit(routes.tests(P()));
-        await page.getByRole("button", { name: "New test", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import tests…", exact: true }).click();
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Import tests", exact: true });
         await pwExpect(dialog.getByRole("button", { name: "Choose a JSON file", exact: true })).toBeVisible();
         await dialog.getByRole("button", { name: "Import Maestro flows", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "Import Maestro flows", exact: true })).toBeVisible();
 
         await visit(routes.tests(P()));
-        await page.getByRole("button", { name: "More actions", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import tests…", exact: true }).click();
+        await page.locator(".sec-head").getByRole("button", { name: "Import", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import from Git", exact: true }).click();
         await pwExpect(page.getByRole("dialog", { name: "Import from Git", exact: true })).toBeVisible();
 
         await visit(routes.tests(P()));
-        await page.getByRole("button", { name: "More actions", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import tests…", exact: true }).click();
+        await page.locator(".sec-head").getByRole("button", { name: "Import", exact: true }).click();
         const specs = [{ testId: "API-900", title: "Imported through the dialog", kind: "api", category: "API", priority: "low", steps: [{ action: "request", method: "GET", path: "/api/x" }, { action: "assertResponse", check: "status", expected: 200 }] }];
         await page.locator('input[type="file"][aria-label="Test file in JSON"]').setInputFiles({ name: "tests.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(specs)) });
         await pwExpect(page.getByText(/Imported 1 test/)).toBeVisible();
@@ -579,7 +592,9 @@ describe("old links keep working", () => {
             await page.goto(`${BASE}/${from()}`);
             await pwExpect(page.locator("h1").first()).toBeVisible();
             expect(await hash()).toBe(to());
-            if (section) await pwExpect(page.locator('.subtabs [aria-current="page"]')).toHaveText(section);
+            // Test cases has no section row (round 38): its type filter shows the section that is open.
+            if (section && to().includes("/tests")) await pwExpect(page.getByRole("group", { name: "Filter by type" }).getByRole("button", { name: new RegExp(`^${section}`) })).toHaveAttribute("aria-pressed", "true");
+            else if (section) await pwExpect(page.locator('.subtabs [aria-current="page"]')).toHaveText(section);
             await pwExpect(page.locator('.content [role="alert"]')).toHaveCount(0);
         });
     }
@@ -663,6 +678,7 @@ describe("every route builder opens a page without an error", () => {
             requirements: [routes.requirements(P())],
             requirement: [routes.requirement(P(), requirementId)],
             cases: CASES.map((k) => routes.cases(P(), k)),
+            testCase: [routes.testCase(P(), caseId)],
             suites: [routes.suites(P())],
             suite: [routes.suite(P(), suiteId)],
             scripts: [...SCRIPTS.map((k) => routes.scripts(P(), k)), routes.scripts(P(), "steps", "Sign in")],
@@ -721,16 +737,16 @@ describe("every route builder opens a page without an error", () => {
 // ── keyboard, phone, touch, axe, words ──────────────────────────────────────
 
 describe("keyboard", () => {
-    it("Tab reaches the New test menu, Enter opens it, Tab moves through its entries, Escape closes it and returns to the button", async () => {
+    it("Tab reaches the New test script menu, Enter opens it, Tab moves through its entries, Escape closes it and returns to the button", async () => {
         await visit(routes.tests(P()));
-        const button = page.getByRole("button", { name: "New test", exact: true });
+        const button = page.getByRole("button", { name: "New test script", exact: true });
         await button.focus();
         await page.keyboard.press("Enter");
         await pwExpect(page.getByRole("menu")).toBeVisible();
         await page.keyboard.press("Tab");
         await pwExpect(page.getByRole("menuitem", { name: "Describe it", exact: true })).toBeFocused();
         await page.keyboard.press("Tab");
-        await pwExpect(page.getByRole("menuitem", { name: "Record it in a browser", exact: true })).toBeFocused();
+        await pwExpect(page.getByRole("menuitem", { name: "Build steps by hand", exact: true })).toBeFocused();
         await page.keyboard.press("Escape");
         await pwExpect(page.getByRole("menu")).toHaveCount(0);
         await pwExpect(button).toBeFocused();
@@ -738,7 +754,7 @@ describe("keyboard", () => {
 
     it("an entry chosen with Enter opens its dialog; Escape closes the dialog", async () => {
         await visit(routes.tests(P()));
-        await page.getByRole("button", { name: "New test", exact: true }).focus();
+        await page.getByRole("button", { name: "New test script", exact: true }).focus();
         await page.keyboard.press("Enter");
         await page.getByRole("menuitem", { name: "Write it as text", exact: true }).focus();
         await page.keyboard.press("Enter");
@@ -766,7 +782,7 @@ describe("keyboard", () => {
 });
 
 describe("phone and touch targets", () => {
-    it("375 px: every place (Test cases with the New test menu open) and its sections have no sideways scroll", async () => {
+    it("375 px: every place (Test scripts with the New test script menu open) and its sections have no sideways scroll", async () => {
         await page.setViewportSize({ width: 375, height: 800 });
         try {
             for (const h of [...SINGLE.map((p) => p.h()), ...PLACES.map((p) => p.h()), routes.cases(P(), "manual"), routes.scripts(P(), "steps"), routes.runs(P(), "releases"), routes.projectSettings(P(), "data"), routes.projectSettings(P(), "alerts"), routes.projectSettings(P(), "storage")]) {
@@ -775,7 +791,7 @@ describe("phone and touch targets", () => {
                 await noOverflow();
             }
             await visit(routes.tests(P()));
-            await page.getByRole("button", { name: "New test", exact: true }).click();
+            await page.getByRole("button", { name: "New test script", exact: true }).click();
             await pwExpect(page.getByRole("menuitem", { name: "Describe it", exact: true })).toBeVisible();
             const pop = await page.locator(".menu-pop").boundingBox();
             expect(pop!.x).toBeGreaterThanOrEqual(0);
@@ -799,7 +815,7 @@ describe("phone and touch targets", () => {
             expect(await small(), h).toEqual([]);
         }
         await visit(routes.tests(P()));
-        await page.getByRole("button", { name: "New test", exact: true }).click();
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
         expect(await small()).toEqual([]);
     });
 });
@@ -810,7 +826,7 @@ describe("accessibility and words", () => {
         for (const p of PLACES) await axeBoth(p.h());
         await axeBoth(routes.tests(P()));
         await axeBoth(routes.tests(P()), async () => {
-            await page.getByRole("button", { name: "New test", exact: true }).click();
+            await page.getByRole("button", { name: "New test script", exact: true }).click();
             await pwExpect(page.getByRole("menu")).toBeVisible();
         });
         await axeBoth(routes.projectSettings(P(), "storage"), async () => {
@@ -853,7 +869,7 @@ describe("accessibility and words", () => {
                     await shot(`${name}-${scheme}-${w}`);
                 }
                 await visit(routes.tests(P()));
-                await page.getByRole("button", { name: "New test", exact: true }).click();
+                await page.getByRole("button", { name: "New test script", exact: true }).click();
                 await page.waitForTimeout(400);
                 await shot(`tests-menu-${scheme}-${w}`);
             }

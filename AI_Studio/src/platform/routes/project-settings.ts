@@ -23,6 +23,7 @@ import type { Row } from "../db.js";
 import { HttpError } from "../http-error.js";
 import { PlatformsSchema, projectSetupOf, setupItems, TestingModesSchema } from "../project-setup.js";
 import { isProjectNameTaken, projectNameTaken } from "../project-folders.js";
+import { runsCanStartHere } from "../suite-run.js";
 import type { RouteCtx } from "./types.js";
 
 export const NO_ORGANIZATION_TO_LINK = "This project is not part of an organisation, so it cannot be linked to a Crowd4Test project.";
@@ -133,6 +134,7 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
                 canRunIos: runner.canRunIos,
                 aiConfigured: (await projectAiGate(p, id)).ok,
                 runner: runner.runOn === "platform" ? { runOn: "platform" } : { runOn: "agent", online: agents.eligibleAgents(id).length },
+                runsHere: runsCanStartHere(p).ok,
             }),
         };
     });

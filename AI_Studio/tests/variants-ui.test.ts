@@ -95,9 +95,9 @@ describe("the UI's browser names match the server's", () => {
 
 describe("cross-browser check in the UI", () => {
     it("runs a check from the Tests tab and flags the test that breaks on Firefox", async () => {
-        await page.goto(`${base}/#/projects/${projectId}/tests`);
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
-        await pwExpect(page.locator("a.list-row", { hasText: "A special offer can be claimed" }).getByText("Passing", { exact: true })).toBeVisible();
+        await page.goto(`${base}/#/projects/${projectId}/scripts`);
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
+        await pwExpect(page.locator(".script-row", { hasText: "A special offer can be claimed" }).getByText("Passing", { exact: true })).toBeVisible();
         // Nothing has been checked yet: no badge, no filter chip.
         await pwExpect(page.getByText(/^Fails on/)).toHaveCount(0);
         await pwExpect(page.getByRole("button", { name: /Differs by browser/ })).toHaveCount(0);
@@ -115,19 +115,19 @@ describe("cross-browser check in the UI", () => {
         await pwExpect(panel.getByText(/2 tests will be checked on Firefox, Phone/)).toBeVisible();
 
         // The list refreshes when the job finishes: the broken test is badged, the healthy one is not.
-        const broken = page.locator("a.list-row", { hasText: "A special offer can be claimed" });
+        const broken = page.locator(".script-row", { hasText: "A special offer can be claimed" });
         await pwExpect(broken.getByText("Fails on Firefox")).toBeVisible({ timeout: 150_000 });
-        await pwExpect(page.locator("a.list-row", { hasText: "Add to cart updates the cart" }).getByText(/^Fails on/)).toHaveCount(0);
+        await pwExpect(page.locator(".script-row", { hasText: "Add to cart updates the cart" }).getByText(/^Fails on/)).toHaveCount(0);
         await pwExpect(broken.getByText("Passing", { exact: true })).toBeVisible(); // its own status never changed
 
         // "Differs by browser" narrows the list to the tests that break somewhere.
         await page.getByRole("button", { name: /Differs by browser/ }).click();
-        await pwExpect(page.locator("a.list-row")).toHaveCount(1);
-        await pwExpect(page.locator("a.list-row")).toContainText("A special offer can be claimed");
+        await pwExpect(page.locator(".script-row")).toHaveCount(1);
+        await pwExpect(page.locator(".script-row")).toContainText("A special offer can be claimed");
     }, 240_000);
 
     it("shows where and why on the test page, then checks again on Safari from there", async () => {
-        await page.locator("a.list-row", { hasText: "A special offer can be claimed" }).click();
+        await page.locator("a.sr-title", { hasText: "A special offer can be claimed" }).click();
         await pwExpect(page.getByRole("heading", { name: "Other browsers & screen sizes" })).toBeVisible();
         await pwExpect(page.getByText("This doesn’t behave the same everywhere")).toBeVisible();
         await pwExpect(page.getByText("Medium severity").first()).toBeVisible();
@@ -158,20 +158,8 @@ describe("cross-browser check in the UI", () => {
 
     it("explains a browser that is not installed instead of offering it", async () => {
         process.env.INSTALLED_BROWSERS_OVERRIDE = "chromium"; // a machine like the Docker image: Chromium only
-        await page.goto(`${base}/?x=2#/new`); // a fresh page load fetches the server's capabilities again
-        await page.getByRole("button", { name: "Choose what to test first" }).click(); // the first-run welcome opens the options form from here
-        await page.locator("summary", { hasText: "Advanced options" }).click();
-        await pwExpect(page.getByText("Also check on: Firefox · Safari · Phone · Tablet")).toBeVisible(); // collapsed, off by default
-        await page.getByText("Also check on:").click();
-        const firefox = page.getByRole("checkbox", { name: /^Firefox/ });
-        await pwExpect(firefox).toBeDisabled();
-        await pwExpect(page.getByText(/Not available here\. Firefox isn't installed/)).toBeVisible();
-        await pwExpect(page.getByRole("checkbox", { name: /^Phone/ })).toBeEnabled(); // phone and tablet only need Chromium
-        await page.getByRole("checkbox", { name: /^Tablet/ }).check();
-        await pwExpect(page.getByText("Also check on: Tablet")).toBeVisible();
-
-        // On the Tests tab the same note appears in the panel.
-        await page.goto(`${base}/?x=3#/projects/${projectId}/tests`);
+        // The Explore page no longer offers other browsers (the project's agents decide the checks); the Tests tab's panel says it.
+        await page.goto(`${base}/?x=3#/projects/${projectId}/scripts`); // a fresh page load fetches the server's capabilities again
         await page.getByRole("button", { name: "More actions" }).click();
         await page.getByRole("menuitem", { name: /Check other browsers & screen sizes/ }).click();
         await pwExpect(page.getByRole("checkbox", { name: /^Safari/ })).toBeDisabled();

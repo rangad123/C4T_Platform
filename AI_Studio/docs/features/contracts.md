@@ -5,7 +5,7 @@ Two tools around the same idea — the API's own description is a promise to its
 ## 1. Responses are checked against the documentation (automatic)
 When an API has an OpenAPI/Swagger description, the "succeeds with a valid request" test of each documented endpoint compares the **real
 response** with the documented success schema. A difference is a finding ("Needs review"), because clients written from the documentation break.
-On by default; turn it off under *Advanced options → Check API responses against the documentation* (`contractChecks: false` in the API).
+On with the project's **API** testing agent (Settings → General → Testing agents). The OpenAPI document's address is kept on the Requirements tab, under **What the agents need**. To leave it out of one exploration, send `contractChecks: false` in the API; the Explore page has no switch for it.
 
 | Difference | Severity |
 |---|---|

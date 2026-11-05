@@ -309,6 +309,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/projects/:id/manual-cases": "read",
     "POST /api/projects/:id/manual-cases": "ai_studio.tests.write",
     "POST /api/projects/:id/manual-cases/import": "ai_studio.tests.write",
+    // The AI writes a test script for each chosen written case (routes/generate-scripts.ts): using the AI to write tests, like every AI
+    // route; it saves them too, so the handler also asks for ai_studio.tests.write (this table takes one permission).
+    "POST /api/projects/:id/manual-cases/generate-scripts": "ai_studio.tests.generate",
     "GET /api/projects/:id/manual-cases/export": "ai_studio.reports.export",
     "GET /api/projects/:id/manual-cases/:cid": "read",
     "PUT /api/projects/:id/manual-cases/:cid": "ai_studio.tests.write",
@@ -321,6 +324,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/projects/:id/requirements/import/preview": "ai_studio.tests.write",
     "POST /api/projects/:id/requirements/import/refine": "ai_studio.tests.generate",
     "POST /api/projects/:id/requirements/import": "ai_studio.tests.write",
+    // Written test cases from chosen requirements, by the AI model (routes/requirements.ts): the AI's permission, as import/refine; the
+    // handler also asks for ai_studio.tests.write, since the cases are saved.
+    "POST /api/projects/:id/requirements/generate-cases": "ai_studio.tests.generate",
     "GET /api/projects/:id/requirements/:rid": "read",
     "PATCH /api/projects/:id/requirements/:rid": "ai_studio.tests.write",
     "DELETE /api/projects/:id/requirements/:rid": "ai_studio.tests.write",
@@ -553,6 +559,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/testing-agents/:agentId": "read",
     "GET /api/projects/:id/testing-agents": "read",
     "PUT /api/projects/:id/testing-agents": "ai_studio.project.settings",
+    // What the agents need (routes/agent-inputs.ts, round 38): reading the sign-in name is like reading the test accounts; saving is a setting.
+    "GET /api/projects/:id/agent-inputs": "read",
+    "PUT /api/projects/:id/agent-inputs": "ai_studio.project.settings",
     "GET /api/projects/:id/setup-check": "read",
     // Crowd4Test projects of the project's organisation: only for choosing the reference link (US-011).
     "GET /api/projects/:id/c4t-projects": "ai_studio.project.settings",

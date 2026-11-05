@@ -149,8 +149,11 @@ describe("environments in the UI", () => {
     }, 120_000);
 
     it("runs a test on staging, then on production, and keeps one result per environment", async () => {
-        await page.goto(`${base}/#/projects/${projectId}/tests`);
-        await page.locator("a.list-row", { hasText: "The offer banner shows the free-shipping threshold" }).click();
+        await page.goto(`${base}/#/projects/${projectId}/scripts`);
+        // A row opens its script on the DSL tab; this checks the test's own page (the bare route).
+        const href = await page.locator("a.sr-title", { hasText: "The offer banner shows the free-shipping threshold" }).getAttribute("href");
+        expect(href).toMatch(/\/text$/);
+        await page.goto(`${base}/${href!.replace(/\/text$/, "")}`);
         await pwExpect(page.getByText("Passing", { exact: true }).first()).toBeVisible();
         // "Run again" runs at once; the arrow next to it opens the choices, which now carry the environments (UX-A run control).
         await page.getByRole("button", { name: "More ways to run" }).click();
@@ -191,8 +194,11 @@ describe("environments in the UI", () => {
     }, 300_000);
 
     it("refuses to run a data-changing test on production and says why, while staging runs it", async () => {
-        await page.goto(`${base}/#/projects/${projectId}/tests`);
-        await page.locator("a.list-row", { hasText: "An item can be created" }).click();
+        await page.goto(`${base}/#/projects/${projectId}/scripts`);
+        // A row opens its script on the DSL tab; this checks the test's own page (the bare route).
+        const href = await page.locator("a.sr-title", { hasText: "An item can be created" }).getAttribute("href");
+        expect(href).toMatch(/\/text$/);
+        await page.goto(`${base}/${href!.replace(/\/text$/, "")}`);
         await page.getByRole("button", { name: "More ways to run" }).click();
         const panel = page.getByRole("group", { name: "Run settings" });
         await panel.getByRole("radio", { name: "production (production)", exact: true }).check();

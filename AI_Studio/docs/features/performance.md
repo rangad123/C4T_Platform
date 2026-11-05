@@ -1,8 +1,8 @@
 # Speed checks: pages and API endpoints
 
 Loads your key pages the way a first-time visitor would and tells you which ones are slow, with the numbers. **Off by default**
-(timings depend on the machine and network, and each page is loaded four times), so tick **Page speed checks** under
-*Advanced options* when you start an analysis. A test can also be imported by hand (see below).
+(timings depend on the machine and network, and each page is loaded four times): choose the project's **Performance** testing agent
+(Settings → General → Testing agents) and the next exploration adds them. A test can also be imported by hand (see below).
 
 ## What is measured
 For each of up to five key pages that anyone can open, one test loads the page **three times from scratch** (a fresh browser
@@ -25,7 +25,7 @@ review") that says what it measured and what to aim for, e.g. *"Main content app
 page size and request count → always *low*. With a custom budget, "poor" is 1.6× that budget.
 
 ## API response times
-The same option (**Speed checks**) also times up to **8 safe GET endpoints** of the API: endpoints that can be called with what the description
+The same agent also times up to **8 safe GET endpoints** of the API: endpoints that can be called with what the description
 or the observed traffic provides (no path parameter without an example; never POST, PUT, PATCH or DELETE). For each one the test sends
 **one warm-up request (not counted) and then 10 measured requests, strictly one after another**, and compares the 95th percentile with a budget
 (default **1 s**). This is a latency check, **not load testing**: an endpoint never receives two requests at once from a test, and the check

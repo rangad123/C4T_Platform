@@ -1,8 +1,8 @@
 /**
  * Testing agents in a real browser against a real platform (port 7621): the Agents place in the left panel, the eight agent cards
  * with Chatbot shown as not available, an agent's detail with the projects that use it, choosing agents in Create project (at least
- * one, only those that work on the platform), changing them in project Settings, and the explore form locking the checks of agents
- * the project does not use. Light-mode accessibility of the pages. Requires `web/dist` (vite build).
+ * one, only those that work on the platform), changing them in project Settings, and the Explore page naming the agents that
+ * decide the checks. Light-mode accessibility of the pages. Requires `web/dist` (vite build).
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -133,11 +133,10 @@ describe("testing agents in the web app", () => {
         await pwExpect(panel.getByText("Saved. The next exploration runs the checks of these agents.")).toBeVisible();
         await pwExpect(panel.getByText("No agents saved yet")).toHaveCount(0);
         expect(await axeClean(page)).toEqual([]);
-        // The explore form: the accessibility check is on; the checks of agents the project does not use are off and locked.
+        // The Explore page has no check list of its own: it names the agents that decide the checks.
         await page.goto(`${BASE}/#/new?project=${alpha}`);
-        await page.getByText("Advanced options", { exact: true }).click();
-        await pwExpect(page.getByTestId("agent-switch-note")).toBeVisible();
-        await pwExpect(page.getByRole("checkbox", { name: /Basic security checks/ })).not.toBeChecked();
-        await pwExpect(page.getByRole("checkbox", { name: /Basic security checks/ })).toBeDisabled();
+        await pwExpect(page.getByTestId("explore-agents")).toHaveText("Checked by this project’s testing agents: Accessibility Testing Agent.");
+        await pwExpect(page.getByText("Advanced options")).toHaveCount(0);
+        await pwExpect(page.getByRole("checkbox", { name: /Basic security checks/ })).toHaveCount(0);
     });
 });

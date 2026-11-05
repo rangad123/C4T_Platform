@@ -6,7 +6,7 @@
 
 /** The places a link in the guide can open. The screens resolve these with the router builders in `web/src/lib/router.ts`. */
 export type WhereTo = {
-    place: "projects" | "new-project" | "settings" | "overview" | "tests" | "runs" | "library" | "release" | "setup";
+    place: "projects" | "new-project" | "settings" | "overview" | "tests" | "cases" | "runs" | "library" | "release" | "setup";
     /** The section inside a place (for example "schedules" in runs), exactly as the page's `?section=` value. */
     section?: string;
 };

@@ -136,16 +136,14 @@ describe("site memory card", () => {
         expect(latestMemory(platform.db, projectId)).toBeNull();
     }, 60_000);
 
-    it("the 'Explore again' form offers the memory switch (on by default) and sends the choice", async () => {
+    it("the 'Explore again' page has no memory switch: an exploration starts from what was learned (the default)", async () => {
         await page.goto(`${base}/#/new?project=${projectId}`);
-        await page.getByText("Advanced options", { exact: true }).click();
-        const box = page.getByRole("checkbox", { name: /Start from what we learned last time/ });
-        await pwExpect(box).toBeChecked();
-        await box.uncheck();
+        await pwExpect(page.getByLabel("Application URL")).toBeVisible();
+        await pwExpect(page.getByRole("checkbox", { name: /Start from what we learned last time/ })).toHaveCount(0);
         await page.getByLabel("Application URL").fill(base);
         await page.getByRole("button", { name: "Explore again" }).click();
         await pwExpect(page.getByRole("heading", { name: "Memory UI" })).toBeVisible();
         const jobs = platform.repo.listJobs(projectId);
-        expect(jobs[0]!.options.useMemory).toBe(false);
+        expect(jobs[0]!.options.useMemory).toBe(true);
     }, 60_000);
 });

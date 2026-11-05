@@ -20,8 +20,8 @@ The idea of a per-site knowledge base that later runs build on comes from QAAgen
     then clears the notes. **Keep it** changes nothing.
   * Empty, loading and error states: "Nothing has been learned about this application yet", a skeleton while loading, and
     "Could not load what we remember" with **Try again** (this never affects your tests).
-* **"Start from what we learned last time"** checkbox under **Advanced options** when starting an analysis (on by default; web target).
-  Switching it off makes that one analysis neither read nor update the notes.
+* **`useMemory`** when an exploration is started through the API (on by default; web target). Sending `useMemory: false` makes that one
+  exploration neither read nor update the notes. The Explore page has no switch for it.
 * **Job events** in the technical details: `memory_used` ("Using what was learned on 2026-10-01: ..."), `memory_changes` (the change
   line), `memory_saved` (first analysis), and `memory_warning` (a plain-language warning, see below).
 

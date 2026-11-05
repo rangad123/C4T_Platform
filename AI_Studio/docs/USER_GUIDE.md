@@ -44,13 +44,13 @@ If you can, test a staging copy of your application (a spare copy used for testi
 
 1. Open the platform in your browser. On your own computer the address is usually `http://127.0.0.1:4000`. On a shared server, your admin gives you the address.
 2. On your first visit, or when you choose **New project** on the Projects page, you see three cards under **Ways to start**. Use the first one, **Explore my app**.
-3. Type the **Application URL**, the address of the site you want to test. If the site has a sign-in page, choose **Choose what to test first** instead, open **Advanced options** and fill in **Sign in** with a test account. The platform can then see what is behind the sign-in page.
-4. Choose **Explore my app** (or **Start exploring** if you used the options form). The AI looks around your application. Nothing is created or run yet. **Stop exploring** is always visible.
+3. Type the **Application URL**, the address of the site you want to test. If the site has a sign-in page, add a test account afterwards on the project's **Requirements** tab, under **What the agents need**, and explore again. The platform can then see what is behind the sign-in page.
+4. Choose **Explore my app** (or **Start exploring** if you chose **Choose what to test first**, which also lets you give the AI a **Focus**). The AI looks around your application. Nothing is created or run yet. **Stop exploring** is always visible.
 5. Read the plan on the project's Overview. It says what was found and what the platform will create, for example "We found 4 pages and 2 API endpoints. We will create about 18 tests." (An API endpoint is a place where programs, not people, talk to your app.) Open **Edit the plan** to switch kinds of test on or off, or to leave out single ideas. The numbers change as you edit.
 6. Choose **Create the tests**. Or choose **Discard the plan** to forget it.
 7. Watch **Creating your tests**. Each test appears with its status. This takes a few minutes, and you can leave the page and come back.
 8. Read the result on the **Overview**. Each test is **Passing**, **Failing**, **Needs a look** or **Not run yet**. Expect a few **Needs a look** on a first run. Real sites nearly always have small problems, such as a missing security setting. That shows the checks work.
-9. Open **Tests**, then open one test that is not passing. The page says which step failed, what was expected and what came back.
+9. Choose **View tests** on the Dashboard, then open one test that is not passing. The page says which step failed, what was expected and what came back.
 10. Choose **Run** to run the tests again. The **Next steps** list on the Overview then suggests what to do: set a schedule, add sign-in details, connect a runner.
 
 ---
@@ -59,20 +59,24 @@ If you can, test a staging copy of your application (a spare copy used for testi
 
 The left sidebar has **Projects** (your applications), **Settings** (the platform itself) and **Help**. When the security assessment module is switched on, the projects are listed under **Functional testing** and a separate **Security assessment** entry appears under **Security** (see [Security assessment](#security-assessment)). At the bottom the sidebar shows whether the AI is connected and, once people have accounts, who is signed in and their role.
 
-Inside a project, six places appear as tabs under the project's name (a seventh, **Security assessment**, when the project includes it):
+Inside a project, its places appear as tabs under the project's name. Which tabs a project has depends on how it is tested (a **Security assessment** tab is added when the project includes it):
+
+- A project tested by the **AI agent** has **Dashboard**, **Runs**, **Requirements** and **Settings**.
+- A **code** project has **Dashboard**, **Requirements**, **Test cases**, **Test scripts**, **Test suites**, **Runs** and **Settings**. A project made with both ways of testing, before a project had one, has the same tabs as a code project.
 
 | Place | The question it answers |
 |---|---|
-| **Overview** | Is everything healthy, and what needs me? |
-| **Tests** | What do we check? Every test, with search and filters. |
-| **Runs** | What happened and when? Past runs, schedules, runs after a deploy, trends. |
-| **Library** | What do my tests share? Reusable steps, shared elements, helpers, test data, test accounts. |
-| **Release** | Can we ship? Releases, manual checks, compliance. |
-| **Setup** | Where and how do tests run? Runners, environments, frameworks, mobile app and device farm, testing type, alerts, issue tracker, storage and backup. |
+| **Dashboard** | Is everything healthy, and what needs me? |
+| **Requirements** | What must the application do? For an AI agent project, also what the agents need: sign-in details, API access and the OpenAPI document. |
+| **Test cases** | What do we check, in writing? Each test case has a title, steps, what should happen and a requirement, and is **Automated** (a tool can do it) or **Manual** (a person does it). |
+| **Test scripts** | What runs? Every runnable test, with search and filters, its review, and the reusable steps, shared elements and helpers scripts share. |
+| **Test suites** | Which tests run together, in which order? |
+| **Runs** | What happened and when? Past runs, schedules, runs after a deploy, trends, releases. |
+| **Settings** | How is the project set up? Members, testing agents, environments, test data and accounts, alerts, the issue tracker, storage. |
 
-A place with several parts shows a row of sections under its title. In **Library**, one search box at the top finds reusable steps, shared elements and helpers by name.
+A place with several parts shows a row of sections under its title. In **Test scripts**, one search box finds reusable steps, shared elements and helpers by name.
 
-The Tests page has three buttons you will use all the time: **Run** (choose what to run and where), **New test** (the one menu for starting a test) and **More actions** (import, export, check other browsers). The Projects page also has **New project**. Old bookmarks to earlier pages open the place and section that now holds them.
+Test scripts has the buttons you will use all the time: **Run** (choose what to run and where), **New test script** (the one menu for making a script), **Import** (scripts from a file, Maestro flows or Git) and **More actions** (export, check other browsers). An AI agent project's tests open with **View tests** on its Dashboard. The Projects page also has **New project**. Old bookmarks to earlier pages open the place and section that now holds them.
 
 Words you may not know are underlined with dots. Press one for a one-sentence explanation. Press Escape to close it.
 
@@ -84,7 +88,7 @@ You never need to leave the platform to find out how something works.
 - **Search.** The box at the top of the panel searches the whole guide. Type a question the way you would ask a colleague, such as “run tests every night”. Small typos and plurals do not matter.
 - **The Guide.** **Open the full guide** (or the address `#/guide`) starts with **I want to…**, a list of plain goals. Each opens a topic: what it is, why you would use it, numbered steps with the names of the buttons in bold, things to know, and an **Open it in the app** button that goes to the right place. With several projects and none open, it first asks which project. **Words** lists every word the platform uses, in alphabetical order, and also finds the older names.
 - **The tour.** **Take the tour** in the Help panel (or on the Guide page) walks you through the platform in up to 63 short cards, each pinned to a real button or tab, in seven chapters: **Getting around**, **Making tests**, **Running and results**, **Release and Setup**, **Phones**, **Security assessment** and **Help**. You first see the list of chapters and can start at any of them. Each card says "Step N of M" and its chapter, and has **Back**, **Next**, **Skip chapter** and **End tour**; **Chapters** jumps to another chapter, and the arrow keys and Escape work too. Cards that do not apply to you are left out before the tour starts (for example the security chapter when that module is off, or the project tabs when you have no project yet). The tour only opens pages; it never starts a run or changes anything. If you stop half-way, the next **Take the tour** offers to carry on where you stopped. The first time you open the platform it offers the tour once, in a small card you can close with **Not now**.
-- **See how.** On a page with nothing in it yet, such as a new project's Tests page, a line says “Not sure how this works? See how”. It opens the matching topic in the Help panel.
+- **See how.** On a page with nothing in it yet, such as a new project's Test scripts, a line says “Not sure how this works? See how”. It opens the matching topic in the Help panel.
 - **Explanations in place.** Rest the mouse on a button, status or number for a moment, or reach it with the Tab key, and a small panel says what it does or what it means, for example what **Needs a look** means or how the pass rate is counted. Buttons that show only an icon say their name. A small **?** next to a field, setting or number explains it: hover it, Tab to it, or tap it on a phone (tap again or anywhere else to close it). Escape closes the explanation and nothing else. What you must know to fill in a form, such as limits and warnings, is always written on the page, never only in these panels. In a list or table the status badges are not Tab stops (there would be one per row): the **?** beside the list's heading lists the statuses that list shows, each with what it means. A button that is greyed out with a reason can still be reached with Tab, so you can read why; pressing it does nothing.
 
 ---
@@ -95,11 +99,11 @@ You never need to leave the platform to find out how something works.
 |---|---|---|
 | Get tests for my app without writing any | Explore my app | [Explore my app](#explore-my-app) |
 | Add one test by describing it | Describe it | [Describe a test in plain English](#describe-a-test-in-plain-english) |
-| Make a test by clicking through my app | Record it in a browser | [Record a test](#record-a-test) |
+| Make a test by clicking through my app | Record (Test development) | [Record a test](#record-a-test) |
 | Build a test step by step | Build steps by hand | [Build steps by hand](#build-steps-by-hand) |
 | Write a test as lines of text | Write it as text | [Write a test as text](#write-a-test-as-text) |
 | Write code for a test | Write code | [Write code and switch to code](#write-code-and-switch-to-code) |
-| Bring in tests I already have | Import tests… | [Import tests](#import-tests) |
+| Bring in tests I already have | Import scripts… | [Import tests](#import-tests) |
 | Reuse the same steps in many tests | Reusable steps | [Reusable steps](#reusable-steps) |
 | Fix one renamed button for all tests | Shared elements | [Shared elements](#shared-elements) |
 | Run a test many times with different values | Test data | [Test data and test accounts](#test-data-and-test-accounts) |
@@ -148,10 +152,10 @@ You never need to leave the platform to find out how something works.
 *The AI looks around your application and builds tests for it.*
 
 - **Why you'd use it:** It is the fastest way to a first set of tests.
-- **How:** Choose **Explore my app** on the welcome page, or **Explore again** on a project's Overview. Enter the address. Read the plan, then choose **Create the tests**. Choose **Choose what to test first** to see every option before exploring.
-- **Options:** Open **Advanced options** to see every check you can switch on or off. The defaults are sensible. Speed checks, load check, visual change detection, AI screen review and extra browsers are off until you tick them. Each is explained in [What the platform checks besides clicks](#what-the-platform-checks-besides-clicks).
-- **You can also add:** a test account under **Sign in**, so the platform can see pages behind a sign-in. For an API that needs a sign-in, add a **Bearer token** (a secret code that lets a program use your API) or OAuth2 details (another way for programs to sign in). You can also add a requirements document, a **Focus** such as "search and checkout only", and the address of your API's description document.
-- **Include API tests that change data:** this is off, because those tests create and delete real records. Turn it on only for a test environment.
+- **How:** Choose **Explore my app** on the welcome page, or **Explore again** on an AI agent project's Dashboard. Enter the address. Read the plan, then choose **Create the tests**. Choose **Choose what to test first** to give the AI a **Focus** before exploring.
+- **Which checks run:** the project's **Testing agents** decide, in **Settings**, then **General**. A new project starts with the API, Accessibility, Security, UX and Test Case Generation agents. Visual changes come with Responsive UI, speed checks with Performance. The load check and the AI screen review are asked for per exploration through the API or an AI assistant; the Explore page has no switch for them. Each check is explained in [What the platform checks besides clicks](#what-the-platform-checks-besides-clicks).
+- **What the agents need:** on the project's **Requirements** tab, keep a test account under **Sign in**, so the platform can see pages behind a sign-in. For an API that needs a sign-in, add a **Bearer token** (a secret code that lets a program use your API) or OAuth2 details (another way for programs to sign in), and the **OpenAPI document URL** (your API's description document). They are saved only there: exploring uses them and never changes them. The requirements on the same tab are what the AI plans tests from. When an agent needs something that is missing, Explore asks for it first. An exploration started through the API, the command line or an AI assistant that names another API address or OpenAPI document while sign-in details or API credentials are saved is refused (409) with the reason, so saved credentials never go to another site. The Explore page itself has one optional field, a **Focus** such as "search and checkout only".
+- **Include API tests that change data:** this is off, because those tests create and delete real records. Turn it on (under **What the agents need**) only for a test environment.
 - **Good to know:** Pages behind a sign-in are in the plan only if you gave sign-in details. After you create the tests, the platform runs each one, tries to fix failures by itself and keeps what it could not fix as **Failing**. Web tests need the AI. **Stop exploring** keeps the tests already created.
 
 #### Watch the AI explore
@@ -167,7 +171,7 @@ You never need to leave the platform to find out how something works.
 *You write one sentence and the AI builds the test.*
 
 - **Why you'd use it:** You add one specific test without learning anything.
-- **How:** On the Tests page choose **New test**, then **Describe it**. Write a sentence such as "add a product to the cart and check the total is shown". The platform opens your app, builds the test and runs it for real.
+- **How:** On Test scripts choose **New test script**, then **Describe it**. Write a sentence such as "add a product to the cart and check the total is shown". The platform opens your app, builds the test and runs it for real.
 - **Good to know:** If the platform cannot make a meaningful check, it keeps the attempt as **Needs a look** with the reason, never as a pass. It refuses unsafe requests (such as payment details) and never builds on a production environment. The test page shows your sentence, and **Change the description** rebuilds the test. More: [plain-english-tests.md](features/plain-english-tests.md).
 
 #### Record a test
@@ -175,7 +179,7 @@ You never need to leave the platform to find out how something works.
 *You click through your app and the platform turns what you do into steps.*
 
 - **Why you'd use it:** You know the journey but want the steps written for you. No AI is needed.
-- **How:** Choose **New test**, then **Record it in a browser**. A browser window opens. Click through your application and each step appears on the page. **Pick an element** shows how the platform would find something, without clicking it. **Add a check** turns a click into a check, such as "this text is visible". Choose **Save as a test**.
+- **How:** Open **Test development** in the sidebar and choose **Record** beside the project (or **Record a test** on the welcome page). A browser window opens. Click through your application and each step appears on the page. **Pick an element** shows how the platform would find something, without clicking it. **Add a check** turns a click into a check, such as "this text is visible". Choose **Save as a test**.
 - **Good to know:** Password and one-time-code fields are never recorded. The step uses a stand-in instead. A **Live view** panel shows the page. If a runner that can record is connected, **Record on** lets you record on that computer, which is useful when your app is reachable only from there. A recording that does not replay stays **Needs a look**. Clicks and typing inside frames (also frames from other sites, up to 3 deep), file uploads (the file's name only: add a file of that name under **Test files**), drag and drop, and what you do in a pop-up window the page opens are recorded too; see [Upload files, drag and drop, frames and popups](#upload-files-drag-and-drop-frames-and-popups). Canvas drawing, hover menus, right-clicks and touch gestures are not recorded. More: [recorder.md](features/recorder.md).
 
 #### Build steps by hand
@@ -183,7 +187,7 @@ You never need to leave the platform to find out how something works.
 *Add the steps one by one in a form. The script is made for you.*
 
 - **Why you'd use it:** You get full control with no code and no AI.
-- **How:** Choose **New test**, then **Build steps by hand**. You start with one valid step. On the **Steps** tab add steps from the list. Each step is a form in plain words. To say which button or field a step acts on, pick it by what it is called on screen (its role, label, text or placeholder), or choose a shared element. Reorder steps by dragging, with the buttons, or with Alt and the arrow keys. You can also duplicate or delete a step.
+- **How:** Choose **New test script**, then **Build steps by hand**. You start with one valid step. On the **Steps** tab add steps from the list. Each step is a form in plain words. To say which button or field a step acts on, pick it by what it is called on screen (its role, label, text or placeholder), or choose a shared element. Reorder steps by dragging, with the buttons, or with Alt and the arrow keys. You can also duplicate or delete a step.
 - **Good to know:** A preview of the script updates as you type. Problems point at the step. **Save** stores a version without running. **Save and run** also runs it. More: [visual-builder.md](features/visual-builder.md).
 
 #### Write a test as text
@@ -191,8 +195,8 @@ You never need to leave the platform to find out how something works.
 *One readable line per step, such as `Click the "Sign in" button`.*
 
 - **Why you'd use it:** Writing lines is quicker than filling forms, and you can paste them in.
-- **How:** Choose **New test**, then **Write it as text**. Or open any test and use the **Text** tab. Mistakes are reported with the line and the nearest phrase ("did you mean").
-- **Good to know:** No AI is involved. A fixed set of phrases turns each line into a step. If part of a test has no text form, the Text tab shows it read-only and offers **Edit the steps** and **Switch to code**, so a save never loses anything. Comments are not kept. Phone and Windows tests have no text form. More: [text-tests.md](features/text-tests.md).
+- **How:** Choose **New test script**, then **Write it as text** (the DSL). Or open any test and use the **DSL** tab. Mistakes are reported with the line and the nearest phrase ("did you mean").
+- **Good to know:** No AI is involved. A fixed set of phrases turns each line into a step. If part of a test has no text form, the DSL tab shows it read-only and offers **Edit the steps** and **Switch to code**, so a save never loses anything. Comments are not kept. Phone and Windows tests have no text form. More: [text-tests.md](features/text-tests.md).
 
 #### Upload files, drag and drop, frames and popups
 
@@ -208,7 +212,7 @@ You never need to leave the platform to find out how something works.
 *A code test is a script you write or edit yourself.*
 
 - **Why you'd use it:** You need something the steps cannot say.
-- **How:** Choose **New test**, then **Write code**. It starts from a short working example. For a test the platform made, open the **Code** tab and choose **Switch to code**. A dialog lists what you give up: repair suggestions, shared-element updates, and the steps no longer driving the test. You can return with **Go back to the generated version**.
+- **How:** Choose **New test script**, then **Write code**. It starts from a short working example. For a test the platform made, open the **Code** tab and choose **Switch to code**. A dialog lists what you give up: repair suggestions, shared-element updates, and the steps no longer driving the test. You can return with **Go back to the generated version**.
 - **Good to know:** The editor has line numbers, colours, search and a problems list that checks as you type. Every save is a version you can compare and restore. **Helpers (code)** in the Library keeps small shared code files. A code test is a program, so it runs only where the platform's owner allowed it (see [Honest limits](#honest-limits)). More: [custom-scripts.md](features/custom-scripts.md).
 
 #### Import tests
@@ -216,7 +220,7 @@ You never need to leave the platform to find out how something works.
 *Bring in tests you already have.*
 
 - **Why you'd use it:** You can move tests from another project, from Maestro (a phone testing tool) or from a Git repository (the folder where developers keep their code).
-- **How:** Choose **New test**, then **Import tests…** (or **More actions**, then **Import tests…**). Pick a JSON file (the platform's own test file format), Maestro flows, or a Git repository. A preview shows what will be created and what is left out and why, before anything is stored.
+- **How:** On Test scripts choose **Import** (or **New test script**, then **Import scripts…**). Pick a JSON file (the platform's own test file format), Maestro flows, or a Git repository. A preview shows what will be created and what is left out and why, before anything is stored.
 - **Good to know:** **Export…** gives you the JSON file back, so you can copy tests between projects. Imported phone tests run on an emulator. The file format is in the [admin guide](ADMIN_GUIDE.md#14-test-file-format-json-import). More: [notifications-and-import.md](features/notifications-and-import.md).
 
 #### Import from Git
@@ -224,7 +228,7 @@ You never need to leave the platform to find out how something works.
 *Read Playwright test files (a popular web testing tool) from a Git repository and make one code test for each.*
 
 - **Why you'd use it:** Your developers already wrote tests, and you want them kept in step with the repository.
-- **How:** Choose **Import tests…**, pick the Git option and enter the repository address (https). Check the preview, then confirm. Later, **Check for updates** and **Refresh** add a new version only for files that changed.
+- **How:** Choose **Import** on Test scripts, pick the Git option and enter the repository address (https). Check the preview, then confirm. Later, **Check for updates** and **Refresh** add a new version only for files that changed.
 - **Good to know:** The repository is read without running anything from it. If it is private, you give an access token (a secret code for the repository), used for that one request and never stored. Imported tests are code tests. More: [git-import.md](features/git-import.md).
 
 #### Reusable steps
@@ -314,8 +318,8 @@ You never need to leave the platform to find out how something works.
 
 *One panel for choosing what to run and where.*
 
-- **Why you'd use it:** It is the same choice everywhere: on the Tests page, on a test's page and on the Runs page.
-- **How:** Choose **Run**. Under **What**, pick *Failing now*, *This group*, *Selected tests* (choose **Select tests** in the list and tick rows), *All tests* or *Not run yet*, each with its count. Under **Where**, pick this server, a runner, or an environment. Under **How** you can also check other browsers and screen sizes, or run failing tests once more straight away. One sentence says what will happen, for example "Runs 7 tests on Maya's laptop."
+- **Why you'd use it:** It is the same choice everywhere: on Test scripts, on a test's page and on the Runs page.
+- **How:** Choose **Run**. Under **What**, pick *Failing now*, *This group*, *Selected tests* (choose **Select scripts** in the list and tick rows), *All tests* or *Not run yet*, each with its count. Under **Where**, pick this server, a runner, or an environment. Under **How** you can also check other browsers and screen sizes, or run failing tests once more straight away. One sentence says what will happen, for example "Runs 7 tests on Maya's laptop."
 - **Good to know:** No time is promised. Results replace the last results of the tests that run. A production environment asks for confirmation. More: [ux-run-control.md](features/ux-run-control.md).
 
 #### Stopping a run
@@ -426,9 +430,9 @@ You never need to leave the platform to find out how something works.
 *Test an Android app on an emulator (a phone imitation on a computer) or on a real phone through a runner.*
 
 - **Why you'd use it:** You check a phone app, not only a website.
-- **How, the AI way (start here):** The admin sets up the Android tools once (**Settings**, then **Mobile testing**, shows **Ready**), or a runner on a computer with an emulator or a phone is connected (**Setup**, **Runners**). In a project open **Setup**, then **Mobile app**, choose **Change**, and enter the app's package name (its unique name on Android; an `.apk` file, the Android app file, can be added to be installed first). Then start the AI in any of three ways: **Explore with AI** next to **Change**; **New test**, then **Explore the phone app (AI)**; or, on the welcome page, **Explore my app** with **An Android app** chosen. A panel says what will happen and where it will run (**This server** or a runner, with the reason when a place cannot be used), and has **Advanced options** for a test account. Choose **Start exploring**. The AI opens the app, taps through it like a careful user and plans tests; nothing is created until you read the plan and choose **Create the tests**. The plan says "We found 9 screens. We will create about 12 phone tests: ..." with **Edit the plan** (each kind of test and each test idea, with the screens it goes through), **What we found**, **What the AI left alone** and **Discard the plan**.
+- **How, the AI way (start here):** The admin sets up the Android tools once (**Settings**, then **Mobile testing**, shows **Ready**), or a runner on a computer with an emulator or a phone is connected (**Setup**, **Runners**). In a project open **Setup**, then **Mobile app**, choose **Change**, and enter the app's package name (its unique name on Android; an `.apk` file, the Android app file, can be added to be installed first). Then start the AI in either of two ways: **Explore with AI** next to **Change**, or, on the welcome page, **Explore my app** with **An Android app** chosen. A panel says what will happen and where it will run (**This server** or a runner, with the reason when a place cannot be used), and has **Advanced options** for a test account. Choose **Start exploring**. The AI opens the app, taps through it like a careful user and plans tests; nothing is created until you read the plan and choose **Create the tests**. The plan says "We found 9 screens. We will create about 12 phone tests: ..." with **Edit the plan** (each kind of test and each test idea, with the screens it goes through), **What we found**, **What the AI left alone** and **Discard the plan**.
 - **Watching it:** Under the steps, turn on **Watch live** to see the phone screen in a phone-shaped picture, what the AI just did, the screens, activities, actions and AI calls so far (and at the end why it stopped, for example "no new screens after 80 actions: the app looks fully explored"), and a list of what it left alone ("Skipped “Delete account” because it looks destructive"). **Stop exploring** stops it at any time. The AI never taps buttons that look like paying, deleting or sending; passwords are hidden; it signs in with the test account but never answers a one-time code or captcha itself (it pauses and asks you, see below), never uses a fingerprint check, and does not explore games. How far it goes is the project's **How thorough** setting.
-- **How, the other way:** Import phone tests (**New test**, **Import tests…**). A project can be phone-only.
+- **How, the other way:** Import phone tests (**Import** on Test scripts). A project can be phone-only.
 - **Good to know:** Phone exploration works on Android only; for an iPhone app, import tests. It needs the AI model and the app's package name. Each test starts from the app's first screen. The first emulator start takes a few minutes, and the emulator needs 2 to 3 GB of free memory. A failed test shows the failing step, a screenshot, a video and a trace. More: [ux-phone-ai.md](features/ux-phone-ai.md), [phone-ai-tests.md](features/phone-ai-tests.md).
 
 #### Phones on a runner
@@ -489,14 +493,14 @@ You never need to leave the platform to find out how something works.
 
 ### What the platform checks besides clicks
 
-On a first exploration most of these checks are on by default. Each finding says what is wrong and how to fix it. You switch checks on or off under **Advanced options** when you explore.
+On a first exploration most of these checks are on by default. Each finding says what is wrong and how to fix it. Which checks run is decided by the project's **Testing agents** (**Settings**, then **General**); each check below names the agent it comes with.
 
 #### Visual changes
 
 *The platform remembers what a page looks like and tells you when it changes.*
 
 - **Why you'd use it:** You catch layout accidents no click test sees.
-- **How:** Switch on **Visual change detection**. The first run saves a baseline (a reference picture of the page) and checks that the page looks the same twice. Later runs compare against it. A difference shows as **Needs a look** with the new picture and the difference in red. If the change is intended, choose **Accept new screenshot**.
+- **How:** Choose the **Responsive UI** testing agent. The first run saves a baseline (a reference picture of the page) and checks that the page looks the same twice. Later runs compare against it. A difference shows as **Needs a look** with the new picture and the difference in red. If the change is intended, choose **Accept new screenshot**.
 - **Good to know:** Pages that change on every load (clocks, ads) cannot be compared and are marked **Failing**. Save and compare on the same kind of computer, because fonts look different on different systems.
 
 #### Accessibility
@@ -504,7 +508,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Checks that people with disabilities can use your pages.*
 
 - **Why you'd use it:** You find pages that people who use a keyboard or a screen reader cannot use.
-- **How:** On by default. Key pages are audited against the WCAG guidelines (the standard rules for accessible websites, levels A and AA). Serious problems become findings that name the rule, how bad it is and the affected elements.
+- **How:** On by default, with the **Accessibility** testing agent. Key pages are audited against the WCAG guidelines (the standard rules for accessible websites, levels A and AA). Serious problems become findings that name the rule, how bad it is and the affected elements.
 - **Good to know:** Automatic checks find many problems but not all. They do not replace a person using a screen reader.
 
 #### Page health
@@ -512,7 +516,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Loads a page like a visitor and looks for broken things.*
 
 - **Why you'd use it:** You find script errors and broken links before your users do.
-- **How:** On by default. For up to six key pages that anyone can open, one test looks for script errors, failed requests to your own site, broken links, insecure (http) content on secure pages and page basics (title, language, a setting that makes the page fit phone screens, one main heading). One run reports every problem on the page.
+- **How:** On by default, with the **UX** testing agent. For up to six key pages that anyone can open, one test looks for script errors, failed requests to your own site, broken links, insecure (http) content on secure pages and page basics (title, language, a setting that makes the page fit phone screens, one main heading). One run reports every problem on the page.
 - **Good to know:** A server error or network failure is rated high. A script error, missing page (404), broken link or insecure content is medium. Page basics are low. Known noise such as favicons, analytics and browser extensions is ignored. More: [checks.md](features/checks.md).
 
 #### Speed checks
@@ -520,7 +524,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Times key pages and API calls against budgets.*
 
 - **Why you'd use it:** You notice when the app gets slower.
-- **How:** Tick **Speed checks (takes longer)**. Up to five key pages are each loaded three times from scratch, and the middle result is compared with budgets for how soon content appears, how much the layout jumps, page size and number of requests. Up to eight safe API reads are timed.
+- **How:** Choose the **Performance** testing agent. Up to five key pages are each loaded three times from scratch, and the middle result is compared with budgets for how soon content appears, how much the layout jumps, page size and number of requests. Up to eight safe API reads are timed.
 - **Good to know:** A page over budget is a finding with the numbers and a hint. The Overview lists **Slowest pages**. Timings reflect the computer and network they ran on. This is not a load test. Custom budgets are in [performance.md](features/performance.md).
 
 #### Load check
@@ -528,7 +532,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Asks "does this stay fast with 10 people at once?"*
 
 - **Why you'd use it:** It is a quick sign that an API call struggles under a little pressure.
-- **How:** Switch on **Load check (test environments only)**. It uses up to 3 read-only API calls for about 10 seconds, with at most 300 requests each.
+- **How:** With the **Performance** testing agent chosen, ask for it when you start an exploration through the API or an AI assistant (`loadChecks`); the Explore page has no switch for it. It uses up to 3 read-only API calls for about 10 seconds, with at most 300 requests each.
 - **Good to know:** It stops early if the app starts failing and never runs on a production environment. A finding appears only if the call also struggled at half the users. It is not a capacity test. More: [load-testing.md](features/load-testing.md).
 
 #### Form input checks
@@ -536,7 +540,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Tries harmless odd text in search forms and checks a form's own limits.*
 
 - **Why you'd use it:** You find forms that break on emoji, quotes or very long text.
-- **How:** On by default. For search forms only, the platform tries seven harmless inputs, such as nothing, only spaces, 5,000 characters and emoji. It reports a finding if the text shows up as real page content, the server fails, the page goes blank or a script errors. It also checks that a field with a length limit stops at the limit, that empty required fields are reported, and that email, web address and number fields reject clearly wrong values.
+- **How:** On by default, with the **Test Case Generation** testing agent. For search forms only, the platform tries seven harmless inputs, such as nothing, only spaces, 5,000 characters and emoji. It reports a finding if the text shows up as real page content, the server fails, the page goes blank or a script errors. It also checks that a field with a length limit stops at the limit, that empty required fields are reported, and that email, web address and number fields reject clearly wrong values.
 - **Good to know:** Sign-in, sign-up, payment and checkout forms, and any form with a password, card or one-time-code field, are never touched. The limit checks submit nothing. More: [input-checks.md](features/input-checks.md).
 
 #### Basic security checks
@@ -544,7 +548,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *A read-only look at your site from the outside.*
 
 - **Why you'd use it:** You catch common hygiene problems quickly.
-- **How:** On by default. It reads your site and checks the security settings your server sends, cookies, files that should never be public (such as backups and configuration files), version banners, directory listings and the HTTPS certificate.
+- **How:** On by default, with the **Security** testing agent. It reads your site and checks the security settings your server sends, cookies, files that should never be public (such as backups and configuration files), version banners, directory listings and the HTTPS certificate.
 - **Good to know:** It changes nothing, signs in nowhere and sends no attack text. Exposed secrets are rated critical, permissive sharing with credentials high, a missing content policy or insecure session cookie medium, the rest low. A file is reported only when its real contents are confirmed, so sites that answer "found" for every address do not cause false alarms. This is a hygiene check, not a penetration test (a hired attack on your site).
 
 #### API tests
@@ -568,7 +572,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Compares each documented API call's real answer with its description.*
 
 - **Why you'd use it:** The documentation and the real API disagree more often than you think.
-- **How:** On by default when your API has an OpenAPI (Swagger) description, which is the document that lists the API's calls. A missing required field or wrong type is rated high, a value outside the allowed values medium, and a wrong format or extra field low. Turn it off with **Check API responses against the documentation**.
+- **How:** On with the **API** testing agent when your API has an OpenAPI (Swagger) description, which is the document that lists the API's calls (its address goes under **What the agents need** on the Requirements tab). A missing required field or wrong type is rated high, a value outside the allowed values medium, and a wrong format or extra field low.
 - **Good to know:** Parts of the description that allow several shapes are skipped to avoid false alarms. To compare two versions of a description, ask your admin to use the command in the [admin guide](ADMIN_GUIDE.md#7-pipelines-and-the-command-line-ai-test). More: [contracts.md](features/contracts.md).
 
 #### Access-control checks
@@ -585,7 +589,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *An AI that can read images judges screenshots for overlapping or cut-off elements and broken pictures.*
 
 - **Why you'd use it:** You catch visual faults no fixed rule can describe.
-- **How:** Tick **AI screen review (needs a vision-capable AI model)**. It is off by default and uses your configured AI.
+- **How:** With the **UX** testing agent chosen, ask for it when you start an exploration through the API (`visionChecks`); the Explore page has no switch for it. It is off by default and uses your configured AI, which must be able to read images.
 - **Good to know:** A verdict becomes a finding only when the AI is confident, and it is labelled as an AI judgement with the screenshot. If the AI cannot read images, the test fails with a clear reason instead of passing. More: [vision-judgement.md](features/vision-judgement.md).
 
 #### Requirements coverage
@@ -593,8 +597,16 @@ On a first exploration most of these checks are on by default. Each finding says
 *Checks that every requirement you supplied has a test.*
 
 - **Why you'd use it:** You show that nothing on the list was forgotten.
-- **How:** Add a requirements document when exploring. Each test lists the requirements it covers. The job shows "X of Y requirements covered".
+- **How:** Add your requirements on the project's **Requirements** tab, or import them from a requirements document. In an AI agent project, exploring plans tests from them; each test lists the requirements it covers and the job shows "X of Y requirements covered".
 - **Good to know:** A requirement with no matching screen is listed as uncovered in the activity log, never faked.
+
+#### Test cases from requirements, test scripts from test cases
+
+*In a code project the AI can write the test cases for your requirements, and a runnable test script for each automated test case.*
+
+- **Why you'd use it:** You go from what the application must do to written checks, and from the checks a tool can do to scripts that run, without typing each one.
+- **How:** On **Requirements**, choose **Generate test cases using AI**, pick the requirements (or all of them) and confirm. Each new test case has its steps, what should happen, its requirement and a type: **Automated** (a tool can do it) or **Manual** (a person does it). They are listed on **Test cases**, where **All**, **Automated** and **Manual** show one type at a time and **Add test case (manual)** adds one by hand. Under the list, **Generate test scripts** writes a test script for each automated test case that has none yet; the scripts are on **Test scripts**, each with a **DSL** view and a **Code** view.
+- **Good to know:** Both need an AI model, and the page says so before you click when none is set up. Both also need two permissions on the project: **Write tests** (create and edit tests) and **Generate tests with AI** (use the AI to write tests); without either, the card is not offered and the server refuses. Test scripts are made for web and API projects only. A test case keeps its requirement, so coverage shows on both.
 
 #### Compliance
 
@@ -620,7 +632,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Every test in the project, with search and filters.*
 
 - **Why you'd use it:** You find a test, or all the tests in one state.
-- **How:** Open **Tests**. Tests are grouped by feature area, 50 at a time per area (**Show more** loads the rest). Use **Search tests**, the status buttons (**Passing**, **Failing**, **Needs a look**, **Not run yet**) and, under **Filters**, the type and priority. When some tests qualify, extra buttons appear: **Weak checks**, **Quarantined** and **Differs by browser**. **Select tests** adds a tick box to each row so you can choose **Run selected**.
+- **How:** Open **Test scripts**. Tests are grouped by feature area, 50 at a time per area (**Show more** loads the rest). Use **Search scripts**, the status buttons (**Passing**, **Failing**, **Needs a look**, **Not run yet**) and, under **Filters**, the type and priority. When some tests qualify, extra buttons appear: **Weak checks**, **Quarantined** and **Differs by browser**. **Select tests** adds a tick box to each row so you can choose **Run selected**.
 - **Weak checks:** a test that opens a page or clicks without checking the result passes even when the feature is broken. Such tests carry a **Weak checks** badge (hover for the reason) and a filter lists them. This is advice only: status and runs do not change. More: [test-quality.md](features/test-quality.md).
 - **Good to know:** Each test has a reference number (like `API-007`) in grey small print after its type and priority. The status words are the same on every screen.
 
@@ -645,7 +657,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *A report for people who will never open the platform.*
 
 - **Why you'd use it:** You send results to a manager, a client or an auditor.
-- **How:** Open **Tests**, then **More actions**, then **Export…**. The dialog offers **Download PDF**, a web page version, **Download tests** (the passing tests as a zip you can run in your own pipeline), **Export as JSON** (every test, in the format **Import tests…** understands) and **Download results** (a results file in the standard JUnit format that other tools read).
+- **How:** Open **Test scripts**, then **More actions**, then **Export…**. The dialog offers **Download PDF**, a web page version, **Download tests** (the passing tests as a zip you can run in your own pipeline), **Export as JSON** (every test, in the format **Import scripts…** understands) and **Download results** (a results file in the standard JUnit format that other tools read).
 - **Good to know:** The report has a plain headline, the most serious findings with screenshots, coverage by area, security-control coverage, browser differences, slowest pages, weak tests and the full test list. Text from your application is made safe, and credentials are never included. More: [reports.md](features/reports.md).
 
 #### Run downloaded tests on your own computer
@@ -661,7 +673,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Decide whether a version can ship, using tests and people's checks together.*
 
 - **Why you'd use it:** You keep a record of who approved what and why.
-- **How:** Open **Release**. In **Manual checks**, add checks a person does by hand (or import and export them as CSV or JSON files). In **Releases**, create a release, mark each manual check passed, failed, blocked or skipped, then approve or reject the release. A signed release downloads as a report.
+- **How:** Add the checks a person does by hand on **Test cases**, as test cases of type **Manual** (or import and export them as CSV or JSON files). In **Runs**, then **Releases**, create a release, mark each listed test case passed, failed, blocked or skipped, then approve or reject the release. A release made from now on lists the **Manual** test cases and the **Automated** ones that have no test script yet; an automated case with a script is covered by that script's run. Releases made before keep the list they had. A signed release downloads as a report.
 - **Good to know:** Approval is refused, with reasons, while the automatic result is blocked, a manual check failed, or a critical or high check was not run. You can override this in writing. Every decision goes into a record with the name typed in the decision dialog; **Activity** (Settings) also records which account made it. More: [manual-cases-and-signoff.md](features/manual-cases-and-signoff.md).
 
 ### Connecting other tools
@@ -790,7 +802,7 @@ On a first exploration most of these checks are on by default. Each finding says
 *Simple repairs and unchanged pages do not go to the AI.*
 
 - **Why you'd use it:** AI work costs less. A button renamed from "Sign In" to "Sign in", or a button that became a link with the same text, does not need the AI to be fixed; a page that did not change since the last exploration does not need to be read again.
-- **How:** Nothing to do: both are on by default. When a test being created cannot find an element, the platform first tries plain fixes (another way to find a shared element, the same role and name, the same text, the element's own attributes) and keeps one only if the test then passes; the AI is asked only when none does. When you explore a site again, pages that have not changed are not sent to the AI again. **Settings**, **AI model** has a switch for each. To have every page looked at afresh once, tick **Send every page to the AI again** under **Advanced options** when you start the exploration.
+- **How:** Nothing to do: both are on by default. When a test being created cannot find an element, the platform first tries plain fixes (another way to find a shared element, the same role and name, the same text, the element's own attributes) and keeps one only if the test then passes; the AI is asked only when none does. When you explore a site again, pages that have not changed are not sent to the AI again. **Settings**, **AI model** has a switch for each. To have every page looked at afresh once, ask for a full exploration through the API (`fullExploration`) when you start it.
 - **Good to know:** The job's activity says which fixes were made without AI and which pages were reused, and its technical details count them under **Done without AI**. To check these savings and the others do not cost quality, run `node scripts/eval.mjs --compare` (see the next section). More: [repair-and-reuse-without-ai.md](features/repair-and-reuse-without-ai.md).
 
 #### Quality of the AI tester
@@ -1017,6 +1029,7 @@ These ideas run through the whole product.
 - **Device farms were tried only against a stand-in**, not a real BrowserStack, Sauce Labs or LambdaTest account.
 - **The AI savings were measured with stand-in AI models.** How much they save, and that tests stay as good, is checked on your own apps with `node scripts/eval.mjs --compare --warm`, which uses your AI model and costs money.
 - **Timings depend on the computer and network.** Speed and load checks are quick signals, not capacity tests.
+- **A server can have tests switched off.** When nothing on a server can run tests (no worker), **Run**, **Explore again**, **Start exploring** and **Describe it** say so and are disabled, the setup checklist does not tick "Tests run on this server", and the API refuses such requests (409) instead of queueing work that never starts. Writing, importing and reviewing tests still work; imported tests are saved and marked as not run.
 - **Pipeline files and the GitHub and Jira connections were tested against stand-ins**, not live services.
 - **Names in a release sign-off are typed.** The decision dialog asks for a name; **Activity** records which account made the decision.
 - **The platform sends no email to people.** Invite and password reset links are made by an owner and passed on by hand. (Alerts can go to email when your admin set up a mail server.)

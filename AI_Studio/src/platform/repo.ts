@@ -352,7 +352,8 @@ export class Repo {
         return this.db.get(
             `SELECT p.*,
                 (SELECT COUNT(*) FROM test_cases t WHERE t.project_id = p.id) AS test_count,
-                (SELECT COUNT(*) FROM test_cases t WHERE t.project_id = p.id AND t.validation_status = 'VALIDATED') AS validated_count
+                (SELECT COUNT(*) FROM test_cases t WHERE t.project_id = p.id AND t.validation_status = 'VALIDATED') AS validated_count,
+                (SELECT COUNT(*) FROM manual_cases m WHERE m.project_id = p.id) AS case_count
              FROM projects p WHERE p.id = ?`,
             id,
         );
@@ -363,6 +364,7 @@ export class Repo {
             `SELECT p.*,
                 (SELECT COUNT(*) FROM test_cases t WHERE t.project_id = p.id) AS test_count,
                 (SELECT COUNT(*) FROM test_cases t WHERE t.project_id = p.id AND t.validation_status = 'VALIDATED') AS validated_count,
+                (SELECT COUNT(*) FROM manual_cases m WHERE m.project_id = p.id) AS case_count,
                 (SELECT url FROM applications a WHERE a.project_id = p.id ORDER BY created_at DESC, ${this.db.dialect.insertionOrder("a")} DESC LIMIT 1) AS url,
                 (SELECT status FROM generation_jobs g WHERE g.project_id = p.id ORDER BY created_at DESC LIMIT 1) AS last_job_status
              FROM projects p ORDER BY p.created_at DESC`,

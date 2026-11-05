@@ -256,7 +256,9 @@ describe("the first screen", () => {
         await page.getByRole("button", { name: "Choose what to test first" }).click();
         await pwExpect(page.getByLabel("Application URL")).toHaveValue(SITE);
         await pwExpect(page.getByRole("button", { name: "Start exploring", exact: true })).toBeVisible();
-        await pwExpect(page.locator("summary", { hasText: "Advanced options" })).toBeVisible();
+        // Round 38: no Advanced options; Focus is the one optional field, and the agents' inputs are kept on the Requirements tab.
+        await pwExpect(page.locator("summary", { hasText: "Advanced options" })).toHaveCount(0);
+        await pwExpect(page.getByLabel(/^Focus/)).toBeVisible();
         await pwExpect(page.getByRole("group", { name: "Ways to start" })).toHaveCount(0);
         await page.getByRole("button", { name: "Back", exact: true }).click();
         await pwExpect(page.getByRole("group", { name: "Ways to start" })).toBeVisible();
@@ -287,7 +289,7 @@ describe("the first screen", () => {
 
         await page.getByLabel("Project name").fill("Existing suite");
         await page.getByRole("button", { name: "Import tests", exact: true }).click();
-        await page.waitForURL((u) => /^#\/projects\/[^/]+\/tests\?start=import$/.test(u.hash));
+        await page.waitForURL((u) => /^#\/projects\/[^/]+\/scripts\?start=import$/.test(u.hash));
         await pwExpect(page.getByRole("dialog", { name: "Import tests" })).toBeVisible();
         await pwExpect(page.getByRole("button", { name: "Choose a JSON file" })).toBeVisible();
         await page.keyboard.press("Escape");
@@ -295,9 +297,9 @@ describe("the first screen", () => {
         await visit("#/new");
         await page.getByLabel("Project name").fill("Written by hand");
         await page.getByRole("button", { name: "Write a test by hand", exact: true }).click();
-        await page.waitForURL((u) => /^#\/projects\/[^/]+\/tests$/.test(u.hash));
-        await pwExpect(page.getByRole("heading", { name: "No tests yet" })).toBeVisible();
-        await pwExpect(page.getByRole("button", { name: "New test", exact: true }).first()).toBeVisible();
+        await page.waitForURL((u) => /^#\/projects\/[^/]+\/scripts$/.test(u.hash));
+        await pwExpect(page.getByRole("heading", { name: "No test scripts yet" })).toBeVisible();
+        await pwExpect(page.getByRole("button", { name: "New test script", exact: true }).first()).toBeVisible();
         const names = ((await api("GET", "/api/projects")).body as Array<{ name: string }>).map((p) => p.name).sort();
         expect(names).toEqual(["Recorded shop", "Existing suite", "Written by hand"].sort());
     });

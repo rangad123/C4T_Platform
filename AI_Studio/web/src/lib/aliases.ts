@@ -26,6 +26,15 @@ export const ROUTE_ALIASES: Alias[] = [
     { old: "compliance", to: (id) => routes.compliance(id) },
 ];
 
+/** The queries only the runnable tests' list reads (pages/ProjectTests.tsx): an old Test cases link with one of them meant that list. */
+export const RUNNABLE_QUERY = ["status", "quality", "quarantine", "start", "git"] as const;
+
+/** `href` with the link's whole query after it. */
+const withQuery = (href: string, query: URLSearchParams): string => {
+    const q = query.toString();
+    return q ? `${href}${href.includes("?") ? "&" : "?"}${q}` : href;
+};
+
 /** The `?section=` of an old place's link, when it names one of that place's sections. */
 const sectionOf = <T extends string>(q: URLSearchParams, list: readonly T[]): T | undefined => {
     const s = q.get("section");
@@ -39,7 +48,12 @@ export function resolveAlias(parts: string[], query: URLSearchParams): string | 
     if (a === "folders") return routes.libraries;
     // The step editor was its own page; it is the Steps tab of the test's workbench now.
     if (a === "tests" && id && c === "builder") return routes.testTab(id, "steps");
+    // Round 38: the Text tab is the DSL tab; its route stays `text` and `dsl` opens it too.
+    if (a === "tests" && id && c === "dsl") return withQuery(routes.testTab(id, "text"), query);
     if (a !== "projects" || !id || !c) return null;
+    // Round 38: the runnable tests are the Test scripts list; the Test cases place holds the written cases. An old link to the tests
+    // with a query about running (a status, weak checks, quarantine, a way of starting a test, Git) opens the scripts list with it.
+    if (c === "tests" && !d && RUNNABLE_QUERY.some((k) => query.has(k))) return withQuery(routes.tests(id), query);
     // Round 37: a project's runners moved out of its Settings to the Runners page.
     if (c === "settings" && query.get("section") === "runners") {
         const rest = new URLSearchParams(query);

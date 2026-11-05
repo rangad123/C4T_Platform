@@ -3,6 +3,7 @@ import { Badge } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { ranOnSentence, type RanOn, type RunnerChoice } from "./agents";
+import { RUNS_OFF_HERE, useRunsHere } from "../runs/runs-here";
 import "./agents.css";
 
 /**
@@ -12,14 +13,17 @@ import "./agents.css";
  */
 export function RunsOnLine({ projectId, ranOn }: { projectId: string; ranOn?: RanOn | null }) {
     const runner = useFetch<RunnerChoice>(`/projects/${projectId}/runner`);
+    // Tests switched off on this server: no run starts here or on a runner (the server hands runs out), so the line says that instead.
+    const runsHere = useRunsHere();
     const cur = runner.data;
     if (!cur) return null;
-    const text = ranOn ? ranOnSentence(ranOn) : cur.runOn === "agent" ? cur.status.replace(/\.$/, "") : "Runs on this server";
+    const off = !ranOn && !runsHere;
+    const text = ranOn ? ranOnSentence(ranOn) : off ? RUNS_OFF_HERE.replace(/\.$/, "") : cur.runOn === "agent" ? cur.status.replace(/\.$/, "") : "Runs on this server";
     return (
         <p className="ag-runs-on t-secondary" data-testid="runs-on">
             <Cable size={16} aria-hidden />
             <span>{text}.</span>
-            <a href={routes.runners(projectId)}>{cur.runOn === "agent" ? "Change" : "Use a runner"}</a>
+            {!off && <a href={routes.runners(projectId)}>{cur.runOn === "agent" ? "Change" : "Use a runner"}</a>}
         </p>
     );
 }

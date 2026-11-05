@@ -507,10 +507,10 @@ describe("A hand-written test", () => {
     it("marks hand-written tests in the Tests list", async () => {
         resetFake();
         fake.custom = makeCustom("taken-over");
-        await visit(`#/projects/${projectId}/tests`);
-        const row = page.getByRole("link", { name: /Check home page/ });
+        await visit(`#/projects/${projectId}/scripts`);
+        const row = page.getByTestId("script-row").filter({ hasText: /Check home page/ });
         await pwExpect(row).toContainText("Code test");
-        await pwExpect(page.getByRole("link", { name: /Check pricing page/ })).not.toContainText("Code test");
+        await pwExpect(page.getByTestId("script-row").filter({ hasText: /Check pricing page/ })).not.toContainText("Code test");
     });
 });
 
@@ -669,7 +669,7 @@ describe("The editor", () => {
         await editorReady();
         await focusEditorEnd();
         await page.keyboard.type("\n// unsaved", { delay: 5 });
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
         const dialog = page.getByRole("dialog", { name: "Leave without saving?" });
         await pwExpect(dialog).toBeVisible();
         await shot("leave-dialog-light-1280");
@@ -695,8 +695,8 @@ describe("The editor", () => {
         expect(await editorText()).not.toContain("// unsaved");
 
         // clean again: leaving needs no question
-        await page.getByRole("link", { name: "Test cases", exact: true }).first().click();
-        await pwExpect(page).toHaveURL(new RegExp(`#/projects/${projectId}/tests$`));
+        await page.getByRole("link", { name: "Test scripts", exact: true }).first().click();
+        await pwExpect(page).toHaveURL(new RegExp(`#/projects/${projectId}/scripts$`));
     });
 
     it("works from the keyboard: Tab indents, Escape then Tab leaves the editor", async () => {
@@ -793,8 +793,8 @@ describe("Version history", () => {
 describe("Write a test from scratch", () => {
     it("validates the form, opens the editor with a starter script and creates the test", async () => {
         resetFake();
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
         await page.getByRole("menuitem", { name: "Write code", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Write a test in code" });
         await pwExpect(dialog).toBeVisible();
@@ -803,8 +803,8 @@ describe("Write a test from scratch", () => {
         await pwExpect(dialog.getByText("Give the test a title of at least 3 characters.")).toBeVisible();
         await shot("write-form-light-1280");
         await axeBoth(async () => {
-            await visit(`#/projects/${projectId}/tests`);
-            await page.getByRole("button", { name: "New test", exact: true }).click();
+            await visit(`#/projects/${projectId}/scripts`);
+            await page.getByRole("button", { name: "New test script", exact: true }).click();
         await page.getByRole("menuitem", { name: "Write code", exact: true }).click();
             await pwExpect(page.getByRole("dialog", { name: "Write a test in code" })).toBeVisible();
         }, "write-form");
@@ -847,7 +847,7 @@ describe("Write a test from scratch", () => {
 describe("Shared helpers", () => {
     it("lists helpers, adds one with a checked name, edits it, and refuses to delete one that tests use", async () => {
         resetFake();
-        await visit(`#/projects/${projectId}/tests`);
+        await visit(`#/projects/${projectId}/scripts`);
         // Helpers moved from the Library to Test scripts (round 25).
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: /^Test scripts/ }).click();
         await page.getByRole("link", { name: "Helpers (code)", exact: true }).click();
@@ -916,9 +916,9 @@ describe("Shared helpers", () => {
 
 describe("Import from Git", () => {
     const openDialog = async () => {
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import tests…", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import from Git", exact: true }).click();
         await pwExpect(page.getByRole("dialog", { name: "Import from Git" })).toBeVisible();
         return page.getByRole("dialog", { name: "Import from Git" });
@@ -1043,9 +1043,9 @@ describe("Import from Git: files edited here (AZ2, L1)", () => {
     it("says before and after a refresh that an edited script is kept", async () => {
         resetFake();
         fake.editedHere = true;
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import tests…", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import from Git", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Import from Git" });
         const repo = dialog.getByTestId("repos").locator('[data-repo="gr-1"]');
@@ -1080,8 +1080,8 @@ describe("Loading and layout", () => {
         requested.length = 0;
         await visit(`#/tests/${testId}/steps`);
         await pwExpect(page.getByText("A code test has no list of steps")).toBeVisible();
-        await visit(`#/projects/${projectId}/tests`);
-        await pwExpect(page.getByRole("heading", { name: "Automated tests", exact: true })).toBeVisible();
+        await visit(`#/projects/${projectId}/scripts`);
+        await pwExpect(page.getByRole("heading", { name: "Scripts", exact: true })).toBeVisible();
         await visit(`#/projects/${projectId}/helpers`);
         await pwExpect(page.getByRole("heading", { name: "Shared helpers", exact: true })).toBeVisible();
         expect(requested.filter((p) => p.includes("CodeEditor-"))).toEqual([]);
@@ -1119,9 +1119,9 @@ describe("Loading and layout", () => {
             await page.waitForTimeout(300);
             await noOverflow();
         }
-        await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("button", { name: "New test", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Import tests…", exact: true }).click();
+        await visit(`#/projects/${projectId}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Import scripts…", exact: true }).click();
         await page.getByRole("dialog", { name: "Import tests", exact: true }).getByRole("button", { name: "Import from Git", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Import from Git" });
         await dialog.getByLabel("Repository address").fill("https://github.com/your-team/your-tests");

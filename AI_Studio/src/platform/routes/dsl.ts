@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { phraseReference } from "../../engine/dsl/index.js";
 import { RateLimiter } from "../agent-routing.js";
+import { callerCredentials } from "../auth/access.js";
 import { DslRefusal, DslService } from "../dsl-service.js";
 import type { RouteCtx } from "./types.js";
 
@@ -43,9 +44,8 @@ export function registerDslRoutes(ctx: RouteCtx): void {
         const { id } = req.params as { id: string };
         ctx.project(id);
         const body = z.object({ text: Text }).parse(req.body);
-        const key = req.headers["x-api-key"];
         try {
-            const made = await svc.create(id, body.text, typeof key === "string" ? { "x-api-key": key } : {});
+            const made = await svc.create(id, body.text, callerCredentials(req));
             return reply.code(201).send(made);
         } catch (e) {
             return refuse(reply, e);

@@ -200,6 +200,15 @@ function needsApproval(policy: ReviewPolicy, source: VersionSource): boolean {
 /** What a change written without a stated source is: a repair when a run's background work wrote it, else a person's (or the platform's own) edit. */
 const inferredSource = (actor: Actor): VersionSource => (actor.kind === "runner" || actor.kind === "schedule" || actor.kind === "trigger" ? "healing" : "person");
 
+/**
+ * The source of what is written inside `fn`, for a route that saves the model's work through the ordinary path a person uses (an AI
+ * script saved like "Write it as text"): the new test's first version is the AI's, so it is reviewed as AI work.
+ */
+const sourceOverride = new AsyncLocalStorage<VersionSource>();
+export function withVersionSource<T>(source: VersionSource, fn: () => T): T {
+    return sourceOverride.run(source, fn);
+}
+
 export class ReviewStore {
     constructor(readonly db: Db) {}
 
@@ -272,7 +281,7 @@ export class ReviewStore {
         const latest = this.latest(testId);
         const latestRow = latest ? this.db.get<{ spec_json: string; code: string | null }>("SELECT spec_json, code FROM test_versions WHERE id = ?", latest.id) : undefined;
         if (latestRow && (latestRow.code ?? null) === cur.code && (cur.code !== null || canonicalJson(latestRow.spec_json) === canonicalJson(cur.specJson))) return latest;
-        const src = source ?? inferredSource(actor);
+        const src = source ?? sourceOverride.getStore() ?? inferredSource(actor);
         const author = authorOf(src, actor);
         const t = now();
         const carry = src === "shared" || src === "takeover" || src === "upgrade";

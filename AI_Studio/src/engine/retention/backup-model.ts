@@ -125,6 +125,12 @@ export const ManualCaseEntrySchema = z.object({
     steps: z.array(Step).max(50),
     /** Test keys (WEB-001...) of the tests the case is linked to. */
     linkedTests: z.array(z.string().max(100)).max(100).default([]),
+    /** Backups made before cases had a type hold manual cases only. */
+    automation: z.enum(["automated", "manual"]).default("manual"),
+    /** The case's number in its project (TC-001); absent in older backups, which number the cases in their order. */
+    number: z.number().int().positive().max(1_000_000).optional(),
+    /** The reference (REQ-12) of the requirement record the case comes from. */
+    requirementRef: z.string().min(1).max(100).optional(),
 });
 export type ManualCaseEntry = z.infer<typeof ManualCaseEntrySchema>;
 

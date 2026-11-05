@@ -105,7 +105,7 @@ export function MaestroImportPanel({ projectId, busy, onClose, onImported }: { p
             {done && (
                 <Callout tone={done.imported.length ? "success" : "info"}>
                     {done.imported.length
-                        ? `Imported ${plural(done.imported.length, "test")}${done.skipped.length ? `; ${done.skipped.length} left out` : ""}.${done.jobId ? " We’re running them now." : ""}`
+                        ? `Imported ${plural(done.imported.length, "test")}${done.skipped.length ? `; ${done.skipped.length} left out` : ""}.${done.jobId ? " We’re running them now." : done.notRun ? ` ${done.notRun}` : ""}`
                         : "Nothing was imported. None of the files could be converted."}
                 </Callout>
             )}

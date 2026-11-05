@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-48 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 48;
+-- Equal to SQLite migration slots 1-50 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 50;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -577,6 +577,24 @@ CREATE TABLE runbook_token_links (
     runbook_id TEXT NOT NULL
 );
 
+CREATE TABLE requirements (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    ref TEXT NOT NULL,
+    ref_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    acceptance_criteria TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX idx_requirements_ref ON requirements (project_id, ref_key);
+
 CREATE TABLE manual_cases (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -588,9 +606,14 @@ CREATE TABLE manual_cases (
     linked_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    automation TEXT NOT NULL DEFAULT 'manual',
+    number BIGINT,
+    requirement_id TEXT REFERENCES requirements(id) ON DELETE SET NULL,
     seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
+CREATE UNIQUE INDEX idx_manual_cases_number ON manual_cases (project_id, number);
 CREATE INDEX idx_manual_cases_project ON manual_cases (project_id);
+CREATE INDEX idx_manual_cases_requirement ON manual_cases (requirement_id);
 
 CREATE TABLE releases (
     id TEXT PRIMARY KEY,
@@ -1294,24 +1317,6 @@ CREATE TABLE runner_update_settings (
     updated_at TEXT NOT NULL
 );
 
-CREATE TABLE requirements (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    ref TEXT NOT NULL,
-    ref_key TEXT NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    acceptance_criteria TEXT NOT NULL DEFAULT '',
-    priority TEXT NOT NULL,
-    status TEXT NOT NULL,
-    source TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    created_by TEXT NOT NULL DEFAULT '',
-    updated_by TEXT NOT NULL DEFAULT ''
-);
-CREATE UNIQUE INDEX idx_requirements_ref ON requirements (project_id, ref_key);
-
 CREATE TABLE requirement_links (
     id TEXT PRIMARY KEY,
     requirement_id TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
@@ -1650,6 +1655,14 @@ CREATE TABLE shared_integration_links (
 );
 CREATE INDEX idx_shared_integration_links_project ON shared_integration_links (project_id);
 CREATE INDEX idx_shared_integration_links_target ON shared_integration_links (target_id);
+
+CREATE TABLE project_agent_inputs (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    site TEXT NOT NULL,
+    credentials_enc TEXT,
+    settings_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 
 CREATE TABLE security_scan_runs (
     id TEXT PRIMARY KEY,

@@ -13,7 +13,7 @@ export const platform: Topic[] = [
             step("Choose Projects in the sidebar to see your applications.", "Projects"),
             step("Open an AI agent project: its tabs are Dashboard, Runs, Requirements and Settings.", "AI agent", "Dashboard", "Runs", "Requirements", "Settings"),
             step("A code project also has Test cases, Test scripts and Test suites.", "Test cases", "Test scripts", "Test suites"),
-            step("On Test cases, use Run, New test and More actions.", "Test cases", "Run", "New test", "More actions"),
+            step("Test cases holds the written checks. Test scripts holds what runs.", "Test cases", "Test scripts"),
             step("Press a word with a dotted underline for a one-sentence explanation."),
         ],
         goodToKnow: ["The tabs follow testing: what must work, the checks, what runs, how they group, and what happened. Settings holds the project's setup."],

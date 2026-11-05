@@ -50,7 +50,7 @@ export function ScriptList({ id }: { id: string }) {
         return (
             <div className="card">
                 <EmptyState icon={FileCode2} title="No scripts yet">
-                    A script is made for every test case. Add test cases first, in Test cases.
+                    Every test script and its versions are listed here for review. Make one with New test script in Scripts, or generate them from your test cases.
                 </EmptyState>
             </div>
         );
@@ -165,7 +165,7 @@ export function VersionPage({ projectId, testId, version }: { projectId: string;
 
     if (detail.loading) return <ListSkeleton rows={4} />;
     if (detail.error || !d) return <ErrorState error={friendlyError(detail.error?.message ?? "Not found")} onRetry={detail.reload} />;
-    const back = routes.scripts(projectId);
+    const back = routes.scripts(projectId, "review");
     return (
         <div className="stack" data-testid="script-version">
             <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>

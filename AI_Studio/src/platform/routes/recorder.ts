@@ -7,6 +7,7 @@ import { assertMayRun, environmentStore } from "../environment-run.js";
 import { HttpError } from "../http-error.js";
 import { LocatorStore, NameTakenError } from "../locator-store.js";
 import { assertAgentTarget, chooseRecorder } from "../agent-record.js";
+import { callerCredentials } from "../auth/access.js";
 import { getAgentServices } from "../agent-services.js";
 import { liveOpenWarnings } from "../live-warnings.js";
 import { browserInstalled, DEFAULT_CAPS, hasDisplay, RecorderService, type RecorderOptions } from "../recorder-service.js";
@@ -201,11 +202,10 @@ export function registerRecorderRoutes(ctx: RouteCtx): void {
             validate = false;
             note = `${e.message}. The test is saved and shows "Not validated"; run it when the other job has finished.`;
         }
-        const key = req.headers["x-api-key"];
         const res = await app.inject({
             method: "POST",
             url: `/api/projects/${r.projectId}/specs`,
-            ...(typeof key === "string" ? { headers: { "x-api-key": key } } : {}),
+            headers: callerCredentials(req),
             payload: { specs: [built.spec], validate, ...(newApplication ? { baseUrl: origin } : {}) },
         });
         const out = (res.body ? JSON.parse(res.body) : {}) as { error?: string; details?: Array<{ issues?: Array<{ message?: string }> }>; jobId?: string | null; tests?: Array<{ id: string; testId: string }>; notRun?: string };

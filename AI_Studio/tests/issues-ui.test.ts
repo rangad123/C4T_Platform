@@ -94,7 +94,7 @@ afterAll(async () => {
 
 describe("issue tracker journey", () => {
     it("connects GitHub, tests the connection, creates an issue from a finding, and shows the link", async () => {
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
         await page.getByRole("link", { name: "Issue tracker", exact: true }).click();
 
@@ -127,7 +127,7 @@ describe("issue tracker journey", () => {
         expect(await page.content()).not.toContain(TOKEN);
 
         // The finding's page: create the issue
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("link", { name: /Cart loads for a signed-in shopper/ }).click();
         const section = page.getByRole("region", { name: "Issue tracker" });
         await pwExpect(section).toBeVisible();
@@ -152,7 +152,7 @@ describe("issue tracker journey", () => {
     }, 120_000);
 
     it("removes the connection but keeps the record of issues already created", async () => {
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
         await page.getByRole("link", { name: "Issue tracker", exact: true }).click();
         const panel = page.getByRole("region", { name: "Issue tracker" });
@@ -169,7 +169,7 @@ describe("issue tracker journey", () => {
 
     it("works on a phone-sized screen without sideways scrolling", async () => {
         await page.setViewportSize({ width: 390, height: 800 });
-        await page.goto(`${BASE}/#/projects/${projectId}/tests`);
+        await page.goto(`${BASE}/#/projects/${projectId}/scripts`);
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Settings", exact: true }).click();
         await page.getByRole("link", { name: "Issue tracker", exact: true }).click();
         await pwExpect(page.getByRole("region", { name: "Issue tracker" })).toBeVisible();

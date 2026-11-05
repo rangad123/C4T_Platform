@@ -176,6 +176,8 @@ export function progressPercent(job: Pick<Job, "progress" | "status">): number {
 export function cleanReason(r: string | null | undefined): string {
     return (r ?? "")
         .replace(/^The application did not behave as expected:\s*/i, "")
+        // A missing API token: the advice stored with it (older runs named a place that is gone) is said by the failure summary instead.
+        .replace(/^(The test needs the project's API token, and none is saved\.).*$/s, "$1")
         // Health / security findings: one "• problem" per line, in plain words.
         .replace(/^Page health check failed:\s*/i, "Page health check: ")
         .replace(/^Security check failed:\s*/i, "Security check: ")

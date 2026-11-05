@@ -195,7 +195,7 @@ export function casesToJson(cases: ManualCase[], now = new Date()): string {
         {
             version: 1,
             exportedAt: now.toISOString(),
-            cases: cases.map((c) => ({ title: c.title, area: c.area, priority: c.priority, steps: c.steps, requirement: c.requirement, linkedTestIds: c.linkedTestIds })),
+            cases: cases.map((c) => ({ title: c.title, area: c.area, priority: c.priority, automation: c.automation, steps: c.steps, requirement: c.requirement, linkedTestIds: c.linkedTestIds })),
         },
         null,
         2,

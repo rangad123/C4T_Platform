@@ -31,6 +31,20 @@ export interface CoverageCounts {
 export interface RequirementRow extends Requirement {
     coverage: Coverage;
     tests: CoverageCounts;
+    /** Written test cases that come from this requirement (absent from older servers). */
+    caseCount?: number;
+}
+
+/** What POST /requirements/generate-cases answers. */
+export interface GenerateCasesResult {
+    created: number;
+    cases: Array<{ id: string; ref: string; title: string }>;
+    perRequirement: Array<{ id: string; ref: string; created: number; failed: boolean }>;
+    duplicates: number;
+    limited: boolean;
+    failed: string[];
+    note: string | null;
+    total: number;
 }
 
 export interface CoverageSummary {

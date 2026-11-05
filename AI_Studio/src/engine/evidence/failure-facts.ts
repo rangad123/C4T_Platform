@@ -61,7 +61,7 @@ export function failureFacts(message: string | null | undefined, step?: Step): F
 }
 
 /** The sentence that names a missing API token as the reason (the platform's wording; the UI shows it as it is). */
-export const MISSING_API_TOKEN_REASON = "The test needs the project's API token, and none is saved. Add one under API access (Analyze again, Advanced options), then run the test again.";
+export const MISSING_API_TOKEN_REASON = "The test needs the project's API token, and none is saved. Add it where the project keeps it (API access in What the agents need, on the Requirements tab, or the environment the test runs against, under Settings), then run the test again.";
 
 /** True for a stored reason that is the missing-token sentence. */
 export const isMissingApiToken = (reason: string | null | undefined): boolean => !!reason && reason.startsWith("The test needs the project's API token, and none is saved.");

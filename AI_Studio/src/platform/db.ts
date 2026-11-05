@@ -17,7 +17,7 @@ import { HEALING_MIGRATION } from "./healing-store.js";
 import { IDENTITY_MIGRATION } from "./identity-store.js";
 import { LIVE_SESSION_MIGRATION } from "./live-session-store.js";
 import { LOCATORS_MIGRATION } from "./locator-store.js";
-import { MANUAL_MIGRATION } from "./manual-case-store.js";
+import { caseTypesMigration, MANUAL_MIGRATION } from "./manual-case-store.js";
 import { MEMORY_MIGRATION } from "./memory-store.js";
 import { PERFORMANCE_MIGRATION } from "./perf-store.js";
 import { QUARANTINE_MIGRATION } from "./quarantine-store.js";
@@ -40,6 +40,7 @@ import { REVIEW_MIGRATION } from "./review-store.js";
 import { TESTING_AGENTS_MIGRATION } from "./testing-agents.js";
 import { SHARED_INTEGRATIONS_MIGRATION } from "./shared-integrations.js";
 import { PROJECT_APP_MIGRATION } from "./project-app.js";
+import { agentInputsMigration } from "./agent-inputs-store.js";
 import { sqliteDialect, type Dialect } from "./sql-dialect.js";
 import { sqliteSql, type Sql } from "./sql.js";
 
@@ -284,6 +285,8 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 46: testing agents chosen for a project, one row per agent; a project without rows shows the agents its latest exploration settings match (schema lives in testing-agents.ts) */ TESTING_AGENTS_MIGRATION,
     /* 47: the app a project tests, by platform: store links and an uploaded iPhone app (schema lives in project-app.ts; the web address and the Android app stay where they were) */ PROJECT_APP_MIGRATION,
     /* 48: integrations set up once for an organisation, and which projects use them (schema lives in shared-integrations.ts; each project keeps its own row in integrations or alert_channels) */ SHARED_INTEGRATIONS_MIGRATION,
+    /* 49: written test cases say whether they can be automated, carry a number per project (TC-001; existing cases numbered in the order they were added) and the requirement record they come from (schema lives in manual-case-store.ts; existing cases become manual) */ caseTypesMigration(sqliteDialect),
+    /* 50: what a project's testing agents need, saved once on its Requirements tab and changed only there (schema lives in agent-inputs-store.ts; each existing project starts with what its latest application holds) */ agentInputsMigration(sqliteDialect),
 ];
 
 /** Slots that were reserved before their SQL existed: the slot number and a table only that slot creates. */

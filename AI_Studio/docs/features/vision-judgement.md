@@ -2,7 +2,7 @@
 
 A vision-capable AI model looks at a screenshot and says whether the screen looks right: elements overlapping or cut off, missing
 or broken images, unreadable text, error banners that do not belong. It catches what text and accessibility snapshots cannot.
-**Off by default**; switch it on under *Advanced options → AI screen review*. It needs an AI model that accepts images.
+**Off by default**; it is allowed by the project's **UX** testing agent and asked for per exploration through the API (`visionChecks: true`); the Explore page has no switch for it. It needs an AI model that accepts images.
 
 The idea comes from [autospec](https://github.com/zachblume/autospec) (MIT): look at the screen after an interaction. autospec
 saves screenshots but only sends accessibility text to its model, so sending the picture to a vision model is new here. See

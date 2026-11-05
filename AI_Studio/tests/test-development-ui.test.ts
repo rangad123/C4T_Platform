@@ -72,7 +72,7 @@ const open = async () => {
 describe("Test development", () => {
     it("lists the project with every authoring tool, and the review queue below", async () => {
         await open();
-        for (const tool of ["Explore with AI", "Describe in words", "Record", "Build steps", "Test cases"]) await pwExpect(row().getByRole("link", { name: tool, exact: true })).toBeVisible();
+        for (const tool of ["Explore with AI", "Describe in words", "Record", "Build steps", "Test scripts"]) await pwExpect(row().getByRole("link", { name: tool, exact: true })).toBeVisible();
         await pwExpect(page.getByRole("region", { name: "Drafts waiting for review" }).getByRole("link", { name: /WEB-001 A draft to review/ })).toBeVisible();
         expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
     });
@@ -84,12 +84,12 @@ describe("Test development", () => {
         await pwExpect(page.getByRole("heading", { level: 1 })).toBeVisible();
     });
 
-    it("opens the description dialog on that project's test cases", async () => {
+    it("opens the description dialog on that project's test scripts", async () => {
         await open();
         await row().getByRole("link", { name: "Describe in words", exact: true }).click();
         await pwExpect(page.getByRole("dialog")).toBeVisible();
         await pwExpect(page.getByRole("dialog").getByRole("heading", { level: 2 }).first()).toContainText(/describe|write/i);
-        expect(page.url()).toContain(`#/projects/${projectId}/tests`);
+        expect(page.url()).toContain(`#/projects/${projectId}/scripts`);
     });
 
     it("opens the recorder", async () => {
@@ -109,13 +109,22 @@ describe("Test development", () => {
         await pwExpect(page).toHaveURL(/#\/tests\/[^/]+\/steps/);
     });
 
-    it("offers a person who may only read no tool they cannot use, and keeps the way to the test cases", async () => {
+    it("offers a person who may only read no tool they cannot use, and keeps the way to the test scripts", async () => {
         const viewer = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
         await signIn(viewer, "vera@example.com", "Vera Viewer's long password");
         await viewer.goto(`${BASE}/#/develop`);
         const list = viewer.getByRole("list", { name: "Your projects" });
-        await pwExpect(list.getByRole("link", { name: "Test cases", exact: true })).toBeVisible();
+        await pwExpect(list.getByRole("link", { name: "Test scripts", exact: true })).toBeVisible();
         for (const tool of ["Explore with AI", "Describe in words", "Record", "Build steps"]) await pwExpect(list.getByRole("link", { name: tool, exact: true })).toHaveCount(0);
         await viewer.close();
+    });
+
+    it("never offers exploring for a code project", async () => {
+        platform.repo.createProject({ name: "Code only shop", testingModes: ["code"] });
+        await open();
+        const code = page.getByRole("list", { name: "Your projects" }).getByRole("listitem").filter({ hasText: "Code only shop" });
+        await pwExpect(code.getByRole("link", { name: "Build steps", exact: true })).toBeVisible();
+        await pwExpect(code.getByRole("link", { name: "Explore with AI", exact: true })).toHaveCount(0);
+        await pwExpect(row().getByRole("link", { name: "Explore with AI", exact: true })).toBeVisible();
     });
 });

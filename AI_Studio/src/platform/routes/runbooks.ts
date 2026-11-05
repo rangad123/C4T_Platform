@@ -8,6 +8,7 @@ import { getRunbookServices, RunbookOverlapError } from "../runbook-runner.js";
 import type { Runbook } from "../runbook-store.js";
 import { getScheduleServices } from "../schedule-services.js";
 import { OverlapError } from "../scheduler.js";
+import { refuseUnlessRunsStart } from "../suite-run.js";
 import { getTriggerServices } from "../trigger-services.js";
 import type { RouteCtx } from "./types.js";
 
@@ -136,7 +137,8 @@ export function registerRunbookRoutes(ctx: RouteCtx): void {
     app.post("/api/projects/:id/runbooks/:rid/run", async (req, reply) => {
         const { id, rid } = req.params as { id: string; rid: string };
         project(id);
-        runbook(id, rid);
+        // A step that runs tests or explores queues a job: refused before anything starts while tests are switched off here.
+        if (runbook(id, rid).definition.steps.some((s) => s.type === "run" || s.type === "analyze")) refuseUnlessRunsStart(p);
         try {
             const run = await svc.start(rid, { kind: "manual" });
             return reply.code(202).send({ runId: run.id, status: run.status });

@@ -4,6 +4,7 @@ import path from "node:path";
 import { loadConfig } from "../config.js";
 import { bootstrap } from "../platform/bootstrap.js";
 import { buildServer } from "../platform/server.js";
+import { startHeartbeat } from "../platform/ops/heartbeat.js";
 import { Worker } from "../platform/worker.js";
 import { localClient, type ApiClient } from "./client.js";
 
@@ -36,9 +37,13 @@ export async function startLocalPlatform(opts: { replay: boolean }): Promise<Loc
     const app = await buildServer(platform);
     const worker = new Worker(platform, 200);
     worker.start();
+    // This process's worker picks up the jobs, so it says it is alive, as a worker process does: a run is refused (409, tests
+    // switched off) only where no worker beats.
+    const stopBeat = startHeartbeat(platform.db);
     return {
         client: localClient(app),
         async close() {
+            stopBeat();
             await worker.stop();
             await app.close();
             platform.db.close();

@@ -125,6 +125,8 @@ export interface SetupFacts {
     aiConfigured: boolean;
     /** Where the tests run: this server, or runners (and whether one is online for the project). */
     runner: { runOn: "platform" } | { runOn: "agent"; online: number };
+    /** Whether a run started now would start at all (suite-run.ts `runsCanStartHere`): false while tests are switched off on this server. */
+    runsHere: boolean;
 }
 
 /**
@@ -146,7 +148,9 @@ export function setupItems(f: SetupFacts): SetupItem[] {
         items.push({ key: "ai-model", ok: f.aiConfigured, text: f.aiConfigured ? "An AI model is set up." : "Agent mode needs an AI model. Set one up in Settings." });
     const r = f.runner;
     items.push(
-        r.runOn === "platform"
+        !f.runsHere
+            ? { key: "runner", ok: false, text: "Tests are switched off on this server, so no run starts here. Tests you make are kept." }
+            : r.runOn === "platform"
             ? { key: "runner", ok: true, text: "Tests run on this server." }
             : { key: "runner", ok: r.online > 0, text: r.online > 0 ? `Tests run on a runner (${r.online} online).` : "No runner is online for this project. Start one, or choose another." },
     );
