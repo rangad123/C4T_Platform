@@ -104,6 +104,11 @@ export interface ProjectRow {
     folder_id?: string | null;
     archived_at?: string | null;
     organization_id?: string | null;
+    /** What the project tests and how (the server sends them with every row); read through `projectKind`. */
+    platforms?: Platform[];
+    testingModes?: TestingMode[];
+    /** How many written test cases the project has (absent from older servers). */
+    case_count?: number;
 }
 
 export interface ProjectDetail {
@@ -112,6 +117,8 @@ export interface ProjectDetail {
     created_at: string;
     test_count: number;
     validated_count: number;
+    /** How many written test cases the project has (absent from older servers). */
+    case_count?: number;
     application: { id: string; url: string; config: Record<string, unknown> } | null;
     latestJob: Job | null;
     suites: Array<{ id: string; name: string; slug: string; total: number; validated: number }>;
@@ -137,6 +144,12 @@ export const MODE_WORDS: Record<TestingMode, string> = { agent: "AI agent", code
 /** A project's platforms and modes, with the defaults an older server or an older project implies. */
 export function projectShape(p: Pick<ProjectDetail, "platforms" | "testingModes"> | null | undefined): { platforms: Platform[]; testingModes: TestingMode[] } {
     return { platforms: p?.platforms?.length ? p.platforms : ["web"], testingModes: p?.testingModes?.length ? p.testingModes : ["agent", "code"] };
+}
+/** The kind of project, which decides its tabs and dashboard: "agent" (tested by the AI agent only), "code" (code only), or "mixed" (both modes, made before a project had one). */
+export type ProjectKind = "agent" | "code" | "mixed";
+export function projectKind(p: Pick<ProjectDetail, "platforms" | "testingModes"> | null | undefined): ProjectKind {
+    const m = projectShape(p).testingModes;
+    return m.includes("agent") && m.includes("code") ? "mixed" : m.includes("code") ? "code" : "agent";
 }
 
 export interface EventRow {

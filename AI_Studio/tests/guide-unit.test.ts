@@ -365,7 +365,7 @@ describe("the tour", () => {
 
     it("covers what the brief asks for in each chapter", () => {
         const of = (c: string) => TOUR_STEPS.filter((s) => s.chapter === c).map((s) => s.target ?? s.id);
-        expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-develop", "nav-libraries", "nav-runners", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-agent", "tab-runs", "tab-settings"]));
+        expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-develop", "nav-libraries", "nav-runners", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-runs", "tab-settings"]));
         expect(of("making")).toEqual(expect.arrayContaining(["new-test", "wb-steps", "wb-text", "wb-code", "wb-history", "wb-edit", "scripts-steps", "scripts-elements", "settings-data"]));
         expect(TOUR_STEPS.filter((s) => s.target === "new-test").length).toBeGreaterThanOrEqual(6);
         expect(of("running")).toEqual(expect.arrayContaining(["run", "run-strip", "runs-runs", "run-tests", "last-run", "runs-schedules", "runs-trends"]));

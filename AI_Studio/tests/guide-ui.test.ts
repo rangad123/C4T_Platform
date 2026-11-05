@@ -347,7 +347,7 @@ describe("the Help button and panel", () => {
         await noOverflow("tests, panel docked");
         // Not modal: a click on the page goes through to the page.
         await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: /^Test scripts/ }).click();
-        await pwExpect(page.getByRole("heading", { name: "Test scripts", level: 1 })).toBeVisible();
+        await pwExpect(page.getByTestId("place-head").getByRole("heading", { name: "Test scripts", level: 2 })).toBeVisible();
         await pwExpect(panel()).toBeVisible();
         await noOverflow("test scripts, panel docked");
         await visit(routes.guide);
@@ -601,7 +601,7 @@ describe("the Guide page", () => {
             await page.waitForFunction((h) => location.hash === h, whereToHref(t.open!.to, P()));
             // Setup is the project's Settings since round 25.
             const place = t.open!.to.place === "runs" ? "Runs" : "Settings";
-            await pwExpect(page.getByRole("heading", { name: place, level: 1 })).toBeVisible();
+            await pwExpect(page.getByTestId("place-head").getByRole("heading", { name: place, level: 2 })).toBeVisible();
             if (t.open!.to.section) await pwExpect(page.getByRole("navigation", { name: `${place} sections`, exact: true }).locator('[aria-current="page"]')).toBeVisible();
         }
     });
@@ -617,7 +617,7 @@ describe("the Guide page", () => {
         await pwExpect(page.getByRole("heading", { name: t.title, level: 1 })).toBeVisible();
         await pwExpect(page.locator("#guide-project")).toHaveCount(0);
         await page.getByRole("link", { name: t.open!.label, exact: true }).click();
-        await pwExpect(page.getByRole("heading", { name: "Runs", level: 1 })).toBeVisible();
+        await pwExpect(page.getByTestId("place-head").getByRole("heading", { name: "Runs", level: 2 })).toBeVisible();
         expect(await hash()).toBe(routes.runs(P(), "schedules"));
     });
 

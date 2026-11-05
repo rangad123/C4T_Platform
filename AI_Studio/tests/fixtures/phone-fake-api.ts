@@ -281,6 +281,8 @@ export class PhoneFake {
         // The Projects page (round 34): open access saves no preferences, and these screens use no folders.
         if (method === "GET" && p === "/me/preferences") return { body: { preferences: {}, saved: false } };
         if (method === "GET" && p === "/folders") return { body: { folders: [], canCreate: true, organizations: [] } };
+        // The Projects page (round 38) asks for the testing agents once, for the rows' agent tiles and the legend; these screens use none.
+        if (method === "GET" && p === "/testing-agents") return { body: { agents: [], canRun: { ok: true }, ai: { configured: true } } };
         if (method === "POST" && p === "/projects") {
             const proj = this.addProject(String(body?.name ?? "Untitled"), null);
             return { status: 201, body: { id: proj.id, name: proj.name } };

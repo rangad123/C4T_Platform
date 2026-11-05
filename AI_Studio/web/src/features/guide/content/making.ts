@@ -31,7 +31,7 @@ export const making: Topic[] = [
         what: "The AI looks around your application, shows a plan, and builds tests when you agree.",
         why: "It is the fastest way to a first set of tests.",
         steps: [
-            step("Choose Explore my app on the welcome page, or Explore again on a project's Dashboard.", "Explore my app", "Explore again"),
+            step("Choose Explore my app on the welcome page, or Explore again on an AI agent project's Dashboard.", "Explore my app", "Explore again", "AI agent"),
             step("Type the address of your application."),
             step("Read the plan. Choose Create the tests, or Discard the plan.", "Create the tests", "Discard the plan"),
             step("To see every option first, choose Choose what to test first and open Advanced options.", "Choose what to test first", "Advanced options"),

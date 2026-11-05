@@ -574,7 +574,7 @@ describe("the bar: keyboard, phone width, targets, contrast", () => {
         ]) {
             await axeBoth(async () => {
                 await visit(hash);
-                await pwExpect(page.locator(".page-head")).toBeVisible();
+                await pwExpect(page.locator(".page-head").first()).toBeVisible();
                 if (hash.endsWith("settings?section=general")) await page.getByRole("button", { name: "Change testing type", exact: true }).click();
             });
         }

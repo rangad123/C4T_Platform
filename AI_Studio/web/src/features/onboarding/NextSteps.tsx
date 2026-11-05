@@ -29,6 +29,7 @@ export function NextSteps({
     hasSignIn,
     firstNotPassing,
     notPassing,
+    explores = true,
 }: {
     projectId: string;
     tests: TestSummary[];
@@ -36,6 +37,8 @@ export function NextSteps({
     hasSignIn: boolean;
     firstNotPassing: TestSummary | undefined;
     notPassing: number;
+    /** False for a code project: it is never explored, so the step that adds sign-in details by exploring again is left out. */
+    explores?: boolean;
 }) {
     const jobs = useFetch<Job[]>(`/projects/${projectId}/jobs`);
     const agents = useFetch<Agent[]>(`/projects/${projectId}/agents`);
@@ -45,7 +48,7 @@ export function NextSteps({
     if (jobs.loading || agents.loading || model.loading || scheduleCount === undefined) return null;
 
     const ranAgain = (jobs.data ?? []).some((j) => j.mode === "validate" && ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status));
-    const needsSignIn = model.data?.authentication?.required === true;
+    const needsSignIn = explores && model.data?.authentication?.required === true;
     const steps: Step[] = [];
 
     if (notPassing > 0 && firstNotPassing) {

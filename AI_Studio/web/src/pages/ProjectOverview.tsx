@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
-import { ArrowRight, ChevronRight, ExternalLink, ListChecks, RefreshCw, Sparkles } from "lucide-react";
-import { projectShape, type ProjectDetail, type Severity, type TestSummary, type TestingMode } from "../api";
+import { ArrowRight, ChevronRight, Code2, ExternalLink, ListChecks, Play, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { projectKind, projectShape, type ProjectDetail, type Severity, type TestSummary, type TestingMode } from "../api";
 import { JobProgress } from "../components/JobProgress";
 import { ArchivedNote } from "../components/ProjectHub";
+import { ProjectHead } from "../components/ProjectKind";
 import { ExplorerWatch } from "../features/explorer/ExplorerView";
 import { NextSteps } from "../features/onboarding/NextSteps";
 import { PlanPreview } from "../features/onboarding/PlanPreview";
@@ -21,7 +22,7 @@ import { SetupChecklist } from "../features/workspace/SetupChecklist";
 import { RequirementsCoverageCard } from "../features/requirements/CoverageCard";
 import { usePage } from "../components/Shell";
 import { TechnicalDetails } from "../components/TechnicalDetails";
-import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton, Metric, PageHeader, Ribbon, RibbonLegend, SeverityBadge, Skeleton, StatusBadge, severityKey, statusKey, type Tick } from "../components/ui";
+import { Badge, Callout, EmptyState, ErrorState, JobBadge, LinkButton, ListSkeleton, Metric, Ribbon, RibbonLegend, SeverityBadge, Skeleton, StatusBadge, severityKey, statusKey, type Tick } from "../components/ui";
 import { BadgeKey } from "../components/Tooltip";
 import { useEmbedded } from "../lib/embedded";
 import type { ScheduleList } from "../features/schedules/schedules";
@@ -37,22 +38,44 @@ import "../features/quarantine/quarantine.css";
 const SEV_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const attentionRank = (t: TestSummary) => (t.severity ? SEV_RANK[t.severity.severity] : t.validationStatus === "NEEDS_REVIEW" ? 4 : 5);
 
-/** The six places of a project, one job each. */
-/** The project's places (round 37 order): Dashboard, Requirements, Test cases, Test scripts, Test suites, Agent runs (AI-agent projects), Runs, Settings. */
+/**
+ * The project's places. Which of them a project has as tabs depends on its kind (`projectKind`):
+ * an AI agent project has Dashboard, Runs, Requirements, Settings; a code project (and a mixed one, made with both modes) has
+ * Dashboard, Requirements, Test cases, Test scripts, Test suites, Runs, Settings. Agent runs has no tab; its pages still open from
+ * a link, and so does any place whose tab a project's kind does not show (no tab is the open one then).
+ */
 export type PlaceKey = "overview" | "requirements" | "tests" | "suites" | "scripts" | "agent" | "runs" | "settings";
 
-export function ProjectTabs({ id, active, count, modes }: { id: string; active: PlaceKey; count?: number; /** The project's testing modes, when the page already has them (else they are asked for). */ modes?: TestingMode[] }) {
+export function ProjectTabs({
+    id,
+    active,
+    count,
+    modes,
+    caseCount,
+}: {
+    id: string;
+    active: PlaceKey;
+    /** The project's runnable tests, shown on Test scripts. */
+    count?: number;
+    /** The project's testing modes, when the page already has them (else they are asked for). */
+    modes?: TestingMode[];
+    /** The project's written test cases, shown on Test cases when the server says how many. */
+    caseCount?: number;
+}) {
     const nav = useRef<HTMLElement>(null);
     // A section shown inside a hub is under the hub's own tab bar.
     const embedded = useEmbedded();
-    // Agent runs only for a project with agent mode on (US-010); the place itself says so if opened anyway.
     const fetched = useFetch<ProjectDetail>(modes || embedded ? null : `/projects/${id}`);
     useProjectChanged(id, fetched.reload);
-    const agentOn = (modes ?? projectShape(fetched.data).testingModes).includes("agent");
+    // Until the project is known no tab is drawn (a wrong row would flicker); if it cannot be read, every tab shows.
+    const known = modes ?? (fetched.data ? projectShape(fetched.data).testingModes : fetched.error ? (["agent", "code"] as TestingMode[]) : undefined);
+    const kind = known ? projectKind({ testingModes: known }) : null;
+    const scripts = count ?? fetched.data?.test_count;
+    const cases = caseCount ?? fetched.data?.case_count;
     // On a narrow screen the tab row scrolls sideways: bring the current tab into view so it is never clipped.
     useEffect(() => {
         nav.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ inline: "center", block: "nearest" });
-    }, [active, count]);
+    }, [active, count, kind]);
     if (embedded) return null;
     const tab = (href: string, label: string, key: string, n?: number, tour?: string) => (
         <a className="tab" href={href} aria-current={active === key ? "page" : undefined} data-tour={tour}>
@@ -61,17 +84,30 @@ export function ProjectTabs({ id, active, count, modes }: { id: string; active: 
         </a>
     );
     return (
-        <nav className="tabs" aria-label="Project sections" ref={nav} data-tour="project-tabs">
-            {tab(routes.project(id), "Dashboard", "overview", undefined, "tab-overview")}
-            {tab(routes.requirements(id), "Requirements", "requirements", undefined, "tab-requirements")}
-            {tab(routes.tests(id), "Test cases", "tests", count, "tab-tests")}
-            {tab(routes.scripts(id), "Test scripts", "scripts", undefined, "tab-scripts")}
-            {tab(routes.suites(id), "Test suites", "suites", undefined, "tab-suites")}
-            {(agentOn || active === "agent") && tab(routes.agentRuns(id), "Agent runs", "agent", undefined, "tab-agent")}
-            {tab(routes.runs(id), "Runs", "runs", undefined, "tab-runs")}
-            <SecurityProjectTab id={id} />
-            {tab(routes.projectSettings(id), "Settings", "settings", undefined, "tab-settings")}
-
+        <nav className="tabs" aria-label="Project sections" ref={nav} data-tour="project-tabs" data-kind={kind ?? undefined} aria-busy={kind ? undefined : true}>
+            {kind === "agent" && (
+                <>
+                    {tab(routes.project(id), "Dashboard", "overview", undefined, "tab-overview")}
+                    {tab(routes.runs(id), "Runs", "runs", undefined, "tab-runs")}
+                    {tab(routes.requirements(id), "Requirements", "requirements", undefined, "tab-requirements")}
+                </>
+            )}
+            {(kind === "code" || kind === "mixed") && (
+                <>
+                    {tab(routes.project(id), "Dashboard", "overview", undefined, "tab-overview")}
+                    {tab(routes.requirements(id), "Requirements", "requirements", undefined, "tab-requirements")}
+                    {tab(routes.tests(id), "Test cases", "tests", cases, "tab-tests")}
+                    {tab(routes.scripts(id), "Test scripts", "scripts", scripts, "tab-scripts")}
+                    {tab(routes.suites(id), "Test suites", "suites", undefined, "tab-suites")}
+                    {tab(routes.runs(id), "Runs", "runs", undefined, "tab-runs")}
+                </>
+            )}
+            {kind && (
+                <>
+                    <SecurityProjectTab id={id} />
+                    {tab(routes.projectSettings(id), "Settings", "settings", undefined, "tab-settings")}
+                </>
+            )}
         </nav>
     );
 }
@@ -105,26 +141,33 @@ export function ProjectOverview({ id }: { id: string }) {
     const url = p.application?.url;
     // The soonest enabled schedule; nothing is shown when there is none (an empty line would only say "nothing yet").
     const nextRun = (schedules.data?.schedules ?? []).filter((s) => s.enabled && s.nextRunAt).sort((a, b) => a.nextRunAt!.localeCompare(b.nextRunAt!))[0];
+    // A code project is tested by its scripts: it is never explored, so nothing here offers exploring.
+    const code = projectKind(p) === "code";
+    const hasTests = list.length > 0 || p.test_count > 0;
 
     return (
         <>
-            <PageHeader
-                title={p.name}
+            <ProjectHead
+                project={p}
                 subtitle={
                     <>
-                        {url && (
+                        {url ? (
                             <a href={url} target="_blank" rel="noreferrer" className="row" style={{ gap: 4 }}>
                                 {hostOf(url)} <ExternalLink size={13} aria-hidden />
                             </a>
+                        ) : (
+                            !p.mobile && <span>No application yet</span>
                         )}
                         {job && <JobBadge job={job} tipFocusable />}
                     </>
                 }
                 actions={
                     <>
-                        <LinkButton href={exploreAgainHref(job, id)} icon={RefreshCw}>
-                            Explore again
-                        </LinkButton>
+                        {!code && (
+                            <LinkButton href={exploreAgainHref(job, id)} icon={RefreshCw}>
+                                Explore again
+                            </LinkButton>
+                        )}
                         {list.length > 0 && (
                             <LinkButton href={routes.tests(id)} variant="primary" icon={ListChecks}>
                                 View tests
@@ -133,16 +176,30 @@ export function ProjectOverview({ id }: { id: string }) {
                     </>
                 }
             />
-            <ProjectTabs id={id} active="overview" count={tests.data?.length} modes={projectShape(p).testingModes} />
+            <ProjectTabs id={id} active="overview" count={tests.data?.length} caseCount={p.case_count} modes={projectShape(p).testingModes} />
             {p.archived_at && <ArchivedNote id={id} />}
 
             <div className="stack">
                 {/* What the project's platforms and modes still need (US-010); hidden when all is set. */}
                 <SetupChecklist id={id} />
-                {!job && (
+                {!job && !code && (
                     <div className="card">
                         <EmptyState icon={Sparkles} title="Not explored yet" actions={<LinkButton href={routes.newProject({ project: id })} variant="primary" icon={Sparkles}>Start exploring</LinkButton>}>
                             Start with the application’s URL. We’ll explore it, create tests and run them.
+                        </EmptyState>
+                    </div>
+                )}
+                {code && !hasTests && !tests.loading && (
+                    <div className="card" data-testid="code-empty">
+                        <EmptyState icon={Code2} title="Set up your code-based tests" actions={<LinkButton href={routes.scripts(id)} variant="primary" icon={Upload}>Add test scripts</LinkButton>}>
+                            Add your test scripts, configure the runner and start a test run.
+                        </EmptyState>
+                    </div>
+                )}
+                {code && hasTests && !job && (
+                    <div className="card" data-testid="code-not-run">
+                        <EmptyState icon={Play} title="Not run yet" actions={<LinkButton href={routes.scripts(id)} variant="primary" icon={Play}>Open test scripts</LinkButton>}>
+                            {plural(list.length || p.test_count, "test script")} {(list.length || p.test_count) === 1 ? "is" : "are"} ready. Run them from Test scripts; the results show here.
                         </EmptyState>
                     </div>
                 )}
@@ -163,9 +220,9 @@ export function ProjectOverview({ id }: { id: string }) {
                 {/* The last picture of the Explorer view stays on screen after the exploration (only when this tab was watching). */}
                 {job && !active && <ExplorerWatch job={job} />}
 
-                {job && !active && planStage && (job.status === "FAILED" ? <Result job={job} total={list.length} validated={validated} attention={attention.length} projectId={id} /> : <><HelpPlace place="plan-preview" /><PlanPreview key={job.jobId} projectId={id} job={job} onChanged={project.reload} /></>)}
+                {job && !active && planStage && (job.status === "FAILED" ? <Result job={job} total={list.length} validated={validated} attention={attention.length} projectId={id} code={code} /> : <><HelpPlace place="plan-preview" /><PlanPreview key={job.jobId} projectId={id} job={job} onChanged={project.reload} /></>)}
 
-                {job && settled && <Result job={job} total={list.length} validated={validated} attention={attention.length} projectId={id} />}
+                {job && settled && <Result job={job} total={list.length} validated={validated} attention={attention.length} projectId={id} code={code} />}
 
                 {job && settled && (list.length > 0 || job.status !== "FAILED") && (
                     <div className="card divided" style={{ overflow: "hidden" }}>
@@ -175,7 +232,11 @@ export function ProjectOverview({ id }: { id: string }) {
                             <Metric value={validated || p.validated_count} label="Passing" tone="ok" tip={help("metric", "passing")} />
                             <Metric value={attention.length} label="Not passing" tone={attention.length ? "warn" : undefined} tip={attention.length ? `${help("metric", "notPassing")} They are listed below, most serious first.` : help("metric", "notPassing")} />
                             {/* The project's latest job, which can be a run as well as an exploration: the tip says so. */}
-                            <Metric value={relativeTime(job.finishedAt ?? job.createdAt)} label="Last explored" tip="When the project's latest job ended. That job can be a run of the tests as well as an exploration." />
+                            {code ? (
+                                <Metric value={relativeTime(job.finishedAt ?? job.createdAt)} label="Last run" tip="When the project's latest run of its tests ended." />
+                            ) : (
+                                <Metric value={relativeTime(job.finishedAt ?? job.createdAt)} label="Last explored" tip="When the project's latest job ended. That job can be a run of the tests as well as an exploration." />
+                            )}
                         </div>
                         {heldCount > 0 && (
                             <p className="section t-secondary" data-testid="quarantine-line">
@@ -196,7 +257,7 @@ export function ProjectOverview({ id }: { id: string }) {
                 )}
 
                 {job && settled && list.length > 0 && (
-                    <NextSteps projectId={id} tests={list} scheduleCount={schedules.data ? schedules.data.schedules.length : schedules.error ? 0 : undefined} hasSignIn={hasSignIn} firstNotPassing={attention[0]} notPassing={attention.length} />
+                    <NextSteps projectId={id} explores={!code} tests={list} scheduleCount={schedules.data ? schedules.data.schedules.length : schedules.error ? 0 : undefined} hasSignIn={hasSignIn} firstNotPassing={attention[0]} notPassing={attention.length} />
                 )}
 
                 {job && settled && <ApiChangesCard projectId={id} />}
@@ -248,7 +309,7 @@ export function ProjectOverview({ id }: { id: string }) {
     );
 }
 
-function Result({ job, total, validated, attention, projectId }: { job: NonNullable<ProjectDetail["latestJob"]>; total: number; validated: number; attention: number; projectId: string }) {
+function Result({ job, total, validated, attention, projectId, code }: { job: NonNullable<ProjectDetail["latestJob"]>; total: number; validated: number; attention: number; projectId: string; /** A code project: nothing offers exploring. */ code: boolean }) {
     if (job.mode === "variants") return <VariantsResult job={job} projectId={projectId} />;
     if (job.mode === "environment") return <EnvironmentResult job={job} projectId={projectId} />;
     if (job.mode === "plain") return <PlainResult job={job} projectId={projectId} />;
@@ -261,7 +322,7 @@ function Result({ job, total, validated, attention, projectId }: { job: NonNulla
             </div>
         );
     }
-    if (job.status === "FAILED" && job.planOnly && job.error === "Cancelled") {
+    if (job.status === "FAILED" && job.planOnly && job.error === "Cancelled" && !code) {
         return (
             <div className="card card-pad">
                 <Callout tone="neutral" title="Exploring was stopped" actions={<LinkButton size="sm" variant="primary" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>Explore again</LinkButton>}>
@@ -290,7 +351,7 @@ function Result({ job, total, validated, attention, projectId }: { job: NonNulla
                     actions={
                         <>
                             {job.cancelled && <LinkButton size="sm" href={routes.run(projectId, job.jobId)}>See each test</LinkButton>}
-                            {(!job.cancelled || job.mode === "generate" || job.mode === undefined) && (
+                            {!code && (!job.cancelled || job.mode === "generate" || job.mode === undefined) && (
                                 <LinkButton size="sm" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>
                                     Try again
                                 </LinkButton>
@@ -328,7 +389,7 @@ function Result({ job, total, validated, attention, projectId }: { job: NonNulla
                     key={e.title + e.body}
                     tone="warning"
                     title={e.title}
-                    actions={e.fix ? <LinkButton size="sm" href={e.fix.href}>{e.fix.label}</LinkButton> : <LinkButton size="sm" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>Explore again</LinkButton>}
+                    actions={e.fix ? <LinkButton size="sm" href={e.fix.href}>{e.fix.label}</LinkButton> : code ? undefined : <LinkButton size="sm" href={exploreAgainHref(job, projectId)} icon={RefreshCw}>Explore again</LinkButton>}
                 >
                     {e.body}
                 </Callout>

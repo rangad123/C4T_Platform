@@ -95,7 +95,7 @@ const openPanel = async (item: RegExp, region: string) => {
     // Environments and test data are both sections of the project's Settings (round 25; test data was in the Library).
     const environments = item.test("Environments");
     await page.goto(`${base}/#/projects/${projectId}/settings?section=${environments ? "environments" : "data"}`);
-    await pwExpect(page.getByRole("heading", { name: "Settings", exact: true, level: 1 })).toBeVisible();
+    await pwExpect(page.getByRole("heading", { name: "Settings", exact: true, level: 2 })).toBeVisible();
     const panel = page.getByRole("region", { name: region, exact: true });
     await pwExpect(panel).toBeVisible();
     return panel;

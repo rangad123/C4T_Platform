@@ -141,8 +141,10 @@ describe("one platform and one mode in Settings", () => {
         await pwExpect(general.getByText("Saved.")).toBeVisible();
         expect((await api("GET", `/api/projects/${id}`)).body).toMatchObject({ platforms: ["android"], testingModes: ["code"] });
         await pwExpect(general.getByText("Choose one platform")).toHaveCount(0);
-        // A code-mode project has no Agent runs tab.
+        // A code-mode project has no Agent runs tab (round 38: no project has one), and its header says Code.
+        await pwExpect(page.getByRole("navigation", { name: "Project sections" }).getByRole("link", { name: "Test scripts" })).toBeVisible();
         await pwExpect(page.getByRole("navigation", { name: "Project sections" }).getByRole("link", { name: "Agent runs" })).toHaveCount(0);
+        await pwExpect(page.getByTestId("project-head").getByTestId("kind-chips")).toHaveText("Code");
     });
 
     it("saves the web address from Settings, General", async () => {
@@ -157,11 +159,13 @@ describe("one platform and one mode in Settings", () => {
 });
 
 describe("the project menu and runners", () => {
-    it("orders the tabs Dashboard, Requirements, Test cases, Test scripts, Test suites, Agent runs, Runs, Settings, with no Runners in Settings", async () => {
+    it("orders an AI agent project's tabs Dashboard, Runs, Requirements, Settings, with no Runners in Settings", async () => {
+        // Round 38: Gift shop was made with the AI agent mode, so it has an agent project's four tabs (a code project's are in project-kinds-ui).
         const id = byName("Gift shop")!.id as string;
         await visit(`#/projects/${id}`);
         const tabs = page.getByRole("navigation", { name: "Project sections" }).locator("a.tab");
-        expect((await tabs.allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(["Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Agent runs", "Runs", "Settings"]);
+        await pwExpect(tabs.first()).toBeVisible();
+        expect((await tabs.allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(["Dashboard", "Runs", "Requirements", "Settings"]);
         await visit(`#/projects/${id}/settings`);
         expect(await page.locator(".subtabs a").allTextContents()).not.toContain("Runners");
     });

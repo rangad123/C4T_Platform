@@ -75,7 +75,8 @@ beforeAll(async () => {
     worker = new Worker(platform, 200);
     worker.start();
 
-    projectId = (await api("POST", "/api/projects", { name: "Notes app" })).body.id;
+    // A code project (round 38): reusable steps belong to its Test scripts, a tab an AI agent project does not have.
+    projectId = (await api("POST", "/api/projects", { name: "Notes app", testingModes: ["code"] })).body.id;
     const imp = await api("POST", `/api/projects/${projectId}/specs`, { specs: [plainSpec, linusSpec], baseUrl: APP, validate: false });
     expect(imp.status, JSON.stringify(imp.body)).toBe(202);
     plainId = imp.body.tests[0].id;
@@ -155,7 +156,7 @@ const addStep = async (group: string, name: string) => {
 describe("the Blocks page", () => {
     it("is two clicks away from the Test cases page: Test scripts, then Reusable steps", async () => {
         await visit(`#/projects/${projectId}/tests`);
-        await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Test scripts", exact: true }).click();
+        await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: /^Test scripts/ }).click();
         await page.getByRole("navigation", { name: "Test scripts sections", exact: true }).getByRole("link", { name: "Reusable steps", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "Reusable steps", exact: true })).toBeVisible();
         expect(page.url()).toContain(`#/projects/${projectId}/scripts?section=steps`);

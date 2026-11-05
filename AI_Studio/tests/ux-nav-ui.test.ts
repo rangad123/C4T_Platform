@@ -138,8 +138,9 @@ const hash = () => page.evaluate(() => location.hash);
 const P = () => shop.projectId;
 
 // The project's tab bar, in the order of the testing lifecycle (docs/product-restructure/INFORMATION_ARCHITECTURE.md, round 25).
-// Round 37: Test scripts before Test suites.
-const TAB_NAMES = ["Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Agent runs", "Runs", "Settings"];
+// Round 37: Test scripts before Test suites. Round 38: no Agent runs tab, and the tabs follow the project's kind; this project was
+// made with both testing modes, so it has a code project's tabs (an agent project's are in project-kinds-ui).
+const TAB_NAMES = ["Dashboard", "Requirements", "Test cases", "Test scripts", "Test suites", "Runs", "Settings"];
 
 // The places that hold several sections: [tab label, hash of the bare place, title, section names in order, hash of section i].
 const CASES = ["automated", "manual"] as const;
@@ -165,7 +166,6 @@ const SINGLE: Array<{ tab: string; h: () => string; title: string }> = [
     { tab: "Dashboard", h: () => routes.project(P()), title: "Atlas shop" },
     { tab: "Requirements", h: () => routes.requirements(P()), title: "Requirements" },
     { tab: "Test suites", h: () => routes.suites(P()), title: "Test suites" },
-    { tab: "Agent runs", h: () => routes.agentRuns(P()), title: "Agent runs" },
 ];
 
 // The name of each section in its row (old section keys kept their names when they moved).
@@ -174,13 +174,18 @@ const SECTION_NAME: Record<string, string> = { steps: "Reusable steps", elements
 // ── the project's places ────────────────────────────────────────────────────
 
 describe("the project's places, in the order of the testing lifecycle", () => {
-    it("the tab bar is a labelled navigation with Dashboard, Requirements, Test cases, Test scripts, Test suites, Agent runs, Runs, Settings in that order, on every place", async () => {
+    it("the tab bar is a labelled navigation with Dashboard, Requirements, Test cases, Test scripts, Test suites, Runs, Settings in that order, on every place", async () => {
         for (const h of [...SINGLE.map((p) => p.h()), ...PLACES.map((p) => p.h())]) {
             await visit(h);
             const names = (await tabs().locator("a.tab").allTextContents()).map((t) => t.replace(/\d+$/, "").trim());
             expect(names, h).toEqual(TAB_NAMES);
             await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(1);
         }
+        // Agent runs has no tab; an old link still opens it, under the same tab bar with no tab open.
+        await visit(routes.agentRuns(P()));
+        await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Agent runs");
+        expect((await tabs().locator("a.tab").allTextContents()).map((t) => t.replace(/\d+$/, "").trim())).toEqual(TAB_NAMES);
+        await pwExpect(tabs().locator('[aria-current="page"]')).toHaveCount(0);
     });
 
     it("the open tab is the one for the place (and stays visible on a phone)", async () => {
@@ -209,10 +214,12 @@ describe("the project's places, in the order of the testing lifecycle", () => {
     });
 
     for (const p of SINGLE.slice(1)) {
-        it(`${p.tab}: one page titled with the place, no section row, no error`, async () => {
+        it(`${p.tab}: one page titled with the place under the project's header, no section row, no error`, async () => {
             await visit(p.h());
+            // Round 38: the one h1 is the project's name, in the header above the tabs; the place's title is an h2 under them.
             await pwExpect(page.locator("h1")).toHaveCount(1);
-            await pwExpect(page.locator("h1")).toHaveText(p.title);
+            await pwExpect(page.locator("h1")).toHaveText("Atlas shop");
+            await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText(p.title);
             await pwExpect(page.locator(".subtabs")).toHaveCount(0);
             await page.waitForTimeout(250);
             await pwExpect(page.locator('.content [role="alert"]'), p.tab).toHaveCount(0);
@@ -229,9 +236,10 @@ describe("the project's places, in the order of the testing lifecycle", () => {
                 await row.getByRole("link", { name, exact: true }).click();
                 await pwExpect(row.locator('[aria-current="page"]')).toHaveText(name);
                 expect(await hash(), name).toBe(p.at(i));
-                // The section is drawn inside the place: one h1 (the place), the section's own heading is an h2.
+                // The section is drawn inside the place: one h1 (the project, round 38), the place's title and the section's own heading are h2s.
                 await pwExpect(page.locator("h1")).toHaveCount(1);
-                await pwExpect(page.locator("h1")).toHaveText(p.title);
+                await pwExpect(page.locator("h1")).toHaveText("Atlas shop");
+                await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText(p.title);
                 await page.waitForTimeout(250);
                 await pwExpect(page.locator('.content [role="alert"]'), `${p.tab} > ${name}`).toHaveCount(0);
                 await pwExpect(page.locator(".skeleton")).toHaveCount(0, { timeout: 10_000 });
@@ -417,8 +425,8 @@ describe("sidebar and the Projects page", () => {
 describe("Test cases > Automated (the old Tests page)", () => {
     it("has a calm header: the count, Run, New test and a small More menu; the five creation buttons and the long menu are gone", async () => {
         await visit(routes.tests(P()));
-        // The place has the page title; the section's own header row holds the count and the actions.
-        await pwExpect(page.locator(".page-head h1")).toHaveText("Test cases");
+        // The place has its title under the tab bar (round 38); the section's own header row holds the count and the actions.
+        await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText("Test cases");
         const head = page.locator(".sec-head");
         await pwExpect(head.locator("h2")).toHaveText("Automated tests");
         await pwExpect(head.locator(".sub")).toHaveText("3 tests, 2 passing, 1 not passing");

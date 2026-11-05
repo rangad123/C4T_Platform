@@ -152,10 +152,11 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "The summary of one project: what the last exploration or run found, which tests need your attention, and what to do next.",
         canDo: [
             { text: "See which tests are failing or need a look.", button: "Open Tests", to: here("tests"), ui: ["Tests"] },
-            { text: "Choose Explore again to look at the application once more and find new things to test.", button: "Read about exploring again", to: { topic: "explore-my-app", search: "explore again" }, ui: ["Explore again"] },
+            { text: "In an AI agent project, choose Explore again to look at the application once more and find new things to test.", button: "Read about exploring again", to: { topic: "explore-my-app", search: "explore again" }, ui: ["Explore again"] },
+            { text: "In a code project, choose Add test scripts to start: code projects are not explored.", button: "Read about writing code", to: { topic: "write-code" }, ui: ["Add test scripts"] },
             { text: "While it explores, turn on Watch live to see the browser the AI is using.", button: "Read how to watch the AI", to: { topic: "watch-the-ai" }, ui: ["Watch live"] },
             { text: "Look at past results in Runs.", button: "Open Runs", to: here("runs"), ui: ["Runs"] },
-            { text: "Learn what the six tabs at the top are for.", button: "Read about the six places", to: { topic: "places" } },
+            { text: "Learn what the tabs at the top are for.", button: "Read about the places", to: { topic: "places" } },
         ],
         words: ["passing", "failing", "needs-a-look", "not-run-yet"],
         next: [{ text: "If tests are failing, open one to see what went wrong.", button: "Read how to see why a test failed", to: { topic: "what-the-page-did", search: "why did a test fail" } }],
@@ -586,7 +587,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         canDo: [
             { text: "Search for a word, including the older names it used to have.", button: "Read about the Guide", to: { topic: "help", search: "help inside the app" } },
             { text: "Go back to the topics.", button: "Read the start in 10 minutes", to: { topic: "first-steps" } },
-            { text: "Learn the six places of a project.", button: "Read about the six places", to: { topic: "places" } },
+            { text: "Learn the places of a project.", button: "Read about the places", to: { topic: "places" } },
         ],
         words: ["test", "run"],
         next: [{ text: "Back to the Guide.", button: "Read the start in 10 minutes", to: { topic: "first-steps" } }],

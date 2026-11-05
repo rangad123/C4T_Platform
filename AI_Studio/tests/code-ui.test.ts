@@ -849,7 +849,7 @@ describe("Shared helpers", () => {
         resetFake();
         await visit(`#/projects/${projectId}/tests`);
         // Helpers moved from the Library to Test scripts (round 25).
-        await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: "Test scripts", exact: true }).click();
+        await page.getByRole("navigation", { name: "Project sections", exact: true }).getByRole("link", { name: /^Test scripts/ }).click();
         await page.getByRole("link", { name: "Helpers (code)", exact: true }).click();
         await pwExpect(page.getByRole("heading", { name: "Shared helpers", exact: true })).toBeVisible();
         const rows = page.getByTestId("helpers").getByRole("listitem");

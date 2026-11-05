@@ -5,7 +5,8 @@ import { EmbeddedContext } from "../lib/embedded";
 import { useDocumentTitle, useFetch, useProjectChanged } from "../lib/hooks";
 import { routes } from "../lib/router";
 import { usePage } from "./Shell";
-import { Callout, PageHeader } from "./ui";
+import { Callout } from "./ui";
+import { PlaceHead, ProjectHead } from "./ProjectKind";
 import { Tooltip } from "./Tooltip";
 
 export interface HubSection {
@@ -17,8 +18,9 @@ export interface HubSection {
 }
 
 /**
- * One of the project's places that holds several sections (Runs, Library, Release, Setup): the place's title and tab bar
- * on top, a labelled row of its sections, and the chosen section below. Each section is a page that used to stand alone;
+ * One of the project's places that holds several sections (Test cases, Test scripts, Runs, Settings): the project's header (its
+ * kind, its name as the page's h1) and tab bar on top, then the place's title (an h2) and actions, a labelled row of its sections,
+ * and the chosen section below. Each section is a page that used to stand alone;
  * it is shown "embedded", so it drops its own title, tab bar and breadcrumbs and the hub owns them.
  * Only the chosen section is mounted, so a section that polls or fetches costs nothing until it is opened.
  */
@@ -36,9 +38,10 @@ export function ProjectHub({ id, place, title, subtitle, sections, current, href
     }, [active.key]);
     return (
         <>
-            <PageHeader title={title} subtitle={subtitle} actions={actions} />
-            <ProjectTabs id={id} active={place} count={project.data?.test_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
+            <ProjectHead project={project.data} failed={project.error ? title : undefined} />
+            <ProjectTabs id={id} active={place} count={project.data?.test_count} caseCount={project.data?.case_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
             {project.data?.archived_at && <ArchivedNote id={id} />}
+            <PlaceHead title={title} subtitle={subtitle} actions={actions} />
             {below}
             <nav className="subtabs" aria-label={`${title} sections`} ref={nav}>
                 {sections.map((s) => (
@@ -58,7 +61,7 @@ export function ProjectHub({ id, place, title, subtitle, sections, current, href
     );
 }
 
-/** A project place that is one page, not a hub of sections (Requirements, Test suites, Agent runs): its title, the tab bar, the page. */
+/** A project place that is one page, not a hub of sections (Requirements, Test suites, Agent runs): the project's header, the tab bar, the place's title, the page. */
 export function ProjectPlace({ id, place, title, subtitle, actions, children }: { id: string; place: PlaceKey; title: string; subtitle: ReactNode; actions?: ReactNode; children: ReactNode }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     useProjectChanged(id, project.reload);
@@ -67,9 +70,10 @@ export function ProjectPlace({ id, place, title, subtitle, actions, children }: 
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: title }], nav: "projects" });
     return (
         <>
-            <PageHeader title={title} subtitle={subtitle} actions={actions} />
-            <ProjectTabs id={id} active={place} count={project.data?.test_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
+            <ProjectHead project={project.data} failed={project.error ? title : undefined} />
+            <ProjectTabs id={id} active={place} count={project.data?.test_count} caseCount={project.data?.case_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
             {project.data?.archived_at && <ArchivedNote id={id} />}
+            <PlaceHead title={title} subtitle={subtitle} actions={actions} />
             <div className="stack">{children}</div>
         </>
     );
