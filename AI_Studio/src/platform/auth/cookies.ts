@@ -12,7 +12,10 @@ export const CSRF_COOKIE = "aitp_csrf";
 
 export function readCookie(req: FastifyRequest, name: string): string | undefined {
     const header = req.headers.cookie;
-    if (!header || header.length > 8192) return undefined;
+    // No size cap of its own: Node refuses requests whose headers pass its limit (16 KB) before they get here, and a cap below it
+    // dropped every cookie of a browser whose crowd4test.com cookies add up to more than 8 KB (they arrive in pieces over HTTP/2),
+    // so that person was sent to crowd4test.com to sign in, and back, without end.
+    if (!header) return undefined;
     for (const part of header.split(";")) {
         const i = part.indexOf("=");
         if (i < 0) continue;

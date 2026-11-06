@@ -141,6 +141,20 @@ describe("signing in with Crowd4Test", () => {
         expect((await shared("t-unknown", "/api/projects")).json().details.crowd4test).toBe("renew");
     });
 
+    it("finds the access cookie among more than 8 KB of crowd4test.com's other cookies", async () => {
+        // A browser with many cookies on the parent domain (they arrive in pieces over HTTP/2, so nginx lets them through): reading none
+        // of them sent the person to crowd4test.com to sign in, which sent them straight back, without end.
+        accounts.set("t-many-cookies", user("mona", "ADMIN"));
+        const others = Array.from({ length: 12 }, (_, i) => `other_${i}=${"x".repeat(900)}`);
+        const cookie = [...others.slice(0, 6), "c4t_access=t-many-cookies", ...others.slice(6)].join("; ");
+        expect(cookie.length).toBeGreaterThan(10_000);
+        const state = (await app.inject({ method: "GET", url: "/api/auth/state", headers: { cookie } })).json();
+        expect(state.me).toMatchObject({ kind: "user", name: "Mona Tester", via: "crowd4test" });
+        // The marker alone, with as many cookies around it, still says "renew" rather than "sign in".
+        const marker = (await app.inject({ method: "GET", url: "/api/auth/state", headers: { cookie: [...others, "c4t_shared=2"].join("; ") } })).json();
+        expect(marker.crowd4test.status).toBe("expired");
+    });
+
     it("refuses suspended and unfinished accounts with the reason, and says when Crowd4Test cannot be reached", async () => {
         accounts.set("t-suspended", { status: 403, body: { error: { message: "This account is suspended" } } });
         const s = await as("t-suspended", { url: "/api/projects" });

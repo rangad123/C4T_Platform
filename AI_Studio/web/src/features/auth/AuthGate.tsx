@@ -1,6 +1,6 @@
 import { KeyRound, LogIn } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ApiError, api, crowd4testSignIn, getKey, renewCrowd4Test, setKey } from "../../api";
+import { ApiError, api, crowd4testSignIn, crowd4testSignInStuck, forgetCrowd4TestTrips, getKey, renewCrowd4Test, setKey } from "../../api";
 import { Button, Callout, Disclosure, EmptyState, LinkButton } from "../../components/ui";
 import { useRoute } from "../../lib/router";
 import { AuthContext, getAuthState, type AuthState } from "./auth";
@@ -25,6 +25,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 s = await getAuthState();
             }
             setProblem(null);
+            if (s.me) forgetCrowd4TestTrips();
             setState(s);
             // A key was entered but the server did not take it (a public route ignores a wrong key, so "me" stays empty).
             setKeyRefused(fromKeyForm && !s.me);
@@ -245,15 +246,39 @@ function InvitePage({ token, onDone }: { token: string; onDone: () => void }) {
 
 /** Signing in happens on crowd4test.com: go there (and come back to this page), or say why this account cannot come in. */
 function Crowd4TestGate({ links, onRetry }: { links: NonNullable<AuthState["crowd4test"]>; onRetry: () => void }) {
-    const leave = links.status === "none" || links.status === "expired";
+    const signedOut = links.status === "none" || links.status === "expired";
+    // Back from crowd4test.com twice within a minute and still not signed in here: say so, rather than bounce between the two sites.
+    const [stuck, setStuck] = useState(() => signedOut && crowd4testSignInStuck());
+    const leave = signedOut && !stuck;
     useEffect(() => {
-        if (leave) crowd4testSignIn(links.signInUrl);
+        if (leave && !crowd4testSignIn(links.signInUrl)) setStuck(true);
     }, [leave, links.signInUrl]);
     if (leave) return null;
     return (
         <main className="content" style={{ maxWidth: 560, paddingTop: 64 }}>
             <div className="card">
-                {links.status === "unreachable" ? (
+                {stuck ? (
+                    <EmptyState
+                        icon={KeyRound}
+                        title="Your Crowd4Test sign-in didn’t reach AI Studio"
+                        actions={
+                            <>
+                                <Button
+                                    variant="primary"
+                                    onClick={() => {
+                                        forgetCrowd4TestTrips();
+                                        crowd4testSignIn(links.signInUrl);
+                                    }}
+                                >
+                                    Try again
+                                </Button>
+                                <LinkButton href={links.portalUrl}>Go to your Crowd4Test portal</LinkButton>
+                            </>
+                        }
+                    >
+                        Crowd4Test says you are signed in, but this browser did not bring that sign-in here. Sign out on crowd4test.com and sign in again, or clear this browser’s cookies for crowd4test.com, then try again.
+                    </EmptyState>
+                ) : links.status === "unreachable" ? (
                     <EmptyState icon={KeyRound} title="We can’t reach Crowd4Test sign-in" actions={<Button variant="primary" onClick={onRetry}>Try again</Button>}>
                         AI Studio uses your Crowd4Test sign-in, and it is not answering right now.
                     </EmptyState>

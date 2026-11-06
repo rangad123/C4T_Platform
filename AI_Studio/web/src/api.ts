@@ -242,10 +242,49 @@ export interface Crowd4TestLinks {
 export const crowd4testOf = (details: unknown): Crowd4TestLinks | undefined =>
     details && typeof details === "object" && typeof (details as Crowd4TestLinks).crowd4test === "string" ? (details as Crowd4TestLinks) : undefined;
 
-/** crowd4test.com's hand-off, back to the page open now once the person has signed in there. */
-export function crowd4testSignIn(signInUrl: string): void {
+/**
+ * When this tab was last sent to crowd4test.com to sign in (sessionStorage, so it lasts through the round trip). crowd4test.com sends
+ * a signed-in person straight back; if their sign-in still does not arrive here, going again would bounce between the two sites
+ * until the browser gives up with "too many redirects".
+ */
+const SIGN_IN_TRIPS = "aitp_c4t_sign_in_trips";
+const TRIP_WINDOW_MS = 60_000;
+const TRIPS_BEFORE_STOPPING = 2;
+
+function recentSignInTrips(now = Date.now()): number[] {
+    try {
+        const list = JSON.parse(sessionStorage.getItem(SIGN_IN_TRIPS) ?? "[]") as unknown;
+        return Array.isArray(list) ? list.filter((t): t is number => typeof t === "number" && now - t < TRIP_WINDOW_MS) : [];
+    } catch {
+        return [];
+    }
+}
+
+/** This tab came back from crowd4test.com twice within a minute and is still not signed in here: sending it again would loop. */
+export function crowd4testSignInStuck(): boolean {
+    return recentSignInTrips().length >= TRIPS_BEFORE_STOPPING;
+}
+
+/** Signed in, or the person asked to try again: the next trip to crowd4test.com starts a fresh count. */
+export function forgetCrowd4TestTrips(): void {
+    try {
+        sessionStorage.removeItem(SIGN_IN_TRIPS);
+    } catch {
+        // storage not available: nothing was counted
+    }
+}
+
+/** crowd4test.com's hand-off, back to the page open now once the person has signed in there. False when that would loop. */
+export function crowd4testSignIn(signInUrl: string): boolean {
+    if (crowd4testSignInStuck()) return false;
+    try {
+        sessionStorage.setItem(SIGN_IN_TRIPS, JSON.stringify([...recentSignInTrips(), Date.now()]));
+    } catch {
+        // storage not available: the trip is not counted
+    }
     const page = location.hash.replace(/^#/, "") || "/";
     location.assign(`${signInUrl}?to=${encodeURIComponent(page)}`);
+    return true;
 }
 
 let renewing: Promise<void> | null = null;
