@@ -7,7 +7,8 @@ import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
 import type { Agent, RunnerChoice } from "../agents/agents";
-import { ACCOUNT_REMINDER, AI_MISSING, IPHONE_NOTE, NEED_APP, NEED_PACKAGE, NO_WHERE_BODY, NO_WHERE_TITLE, PHONE_TITLE, WONT_DO, appLabel, appState, defaultWhere, startBody, whereOptions, willDo } from "./phone";
+import { executionModeOf } from "../runs/runs-here";
+import { ACCOUNT_REMINDER, AI_MISSING, EXPLORE_ON_RUNNERS, EXPLORE_ON_RUNNERS_TITLE, IPHONE_NOTE, NEED_APP, NEED_PACKAGE, NO_WHERE_BODY, NO_WHERE_TITLE, PHONE_TITLE, WONT_DO, appLabel, appState, defaultWhere, startBody, whereOptions, willDo } from "./phone";
 import "./phone.css";
 
 /**
@@ -56,6 +57,8 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     const picked = options.find((o) => o.id === chosen);
     const anyWhere = options.some((o) => o.can);
     const aiMissing = config ? !aiReady : false;
+    // The hosted platform (runners mode) refuses an exploration when it is made: said here before the click, and Start stays off.
+    const runnersOnly = executionModeOf(config) === "runners";
     const current = runner.data ? (runner.data.runOn === "agent" ? runner.data.agentId : "platform") : "platform";
     const changesRunner = Boolean(picked?.can) && chosen !== current;
 
@@ -124,12 +127,19 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
                         </span>
                     </label>
                 ))}
-                {changesRunner && <p className="t-meta" data-testid="phone-runner-change">Phone tests for this project will run there from now on. You can change it in Settings, Runners.</p>}
+                {changesRunner && <p className="t-meta" data-testid="phone-runner-change">Phone tests for this project will run there from now on. You can change it on the Runners page.</p>}
             </fieldset>
             {!anyWhere && (
                 <div id="ph-nowhere">
                     <Callout tone="warning" title={NO_WHERE_TITLE} actions={<LinkButton href={routes.runners(projectId)}>Open Runners</LinkButton>}>
                         {NO_WHERE_BODY}
+                    </Callout>
+                </div>
+            )}
+            {runnersOnly && (
+                <div data-testid="phone-runners-only">
+                    <Callout tone="info" title={EXPLORE_ON_RUNNERS_TITLE}>
+                        {EXPLORE_ON_RUNNERS}
                     </Callout>
                 </div>
             )}
@@ -158,7 +168,7 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
             {error && <Callout tone="danger" title="We couldn’t start the exploration">{error}</Callout>}
             <div className="foot">
                 <Button type="button" onClick={onClose} disabled={busy}>Cancel</Button>
-                <Button type="submit" variant="primary" icon={Sparkles} loading={busy} disabled={busy || aiMissing || !picked?.can}>
+                <Button type="submit" variant="primary" icon={Sparkles} loading={busy} disabled={busy || aiMissing || runnersOnly || !picked?.can}>
                     {busy ? "Starting…" : "Start exploring"}
                 </Button>
             </div>

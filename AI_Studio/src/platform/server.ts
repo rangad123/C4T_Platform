@@ -71,6 +71,7 @@ import { watchState } from "./frame-hub.js";
 import { FrameworkSettingsStore, turnedOffForSpecs } from "./framework-settings-store.js";
 import { PROTOCOL_VERSION } from "../agent-protocol/schema.js";
 import { actorOf, installAccessControl } from "./auth/access.js";
+import { installRunnerChoice } from "./run-request.js";
 import { actorLabel, isCrowd4TestActor, sideOf } from "./auth/actor.js";
 import { sortedPermissions } from "./auth/permissions.js";
 import { visibleProjectsOf } from "./auth/project-scope.js";
@@ -268,6 +269,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     // Registered before any route, so it also sees every route as it is added (the route-to-role table test reads that list).
     // Trigger, runner, stream-ticket and health routes keep their own credentials exactly as before.
     const access = installAccessControl(app, p);
+    // The runner a person chose for one run (`runnerId` in a run-start body), read before any route checks its body (run-request.ts).
+    installRunnerChoice(app);
 
     const repo = p.repo;
     const project = (id: string) => {
@@ -283,6 +286,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         authRequired: Boolean(p.config.API_KEY),
         // Whether a run or an exploration started now would start (suite-run.ts): false while tests are switched off on this server.
         runsHere: runsCanStartHere(p).ok,
+        // "local": tests run here or on a runner, per project; "runners": only on runners, and nothing runs on this server (runner-only.ts).
+        executionMode: p.config.EXECUTION_MODE,
         frameworks: listAdapters().map((a) => ({ framework: a.id, kind: a.kinds[0]!, executable: a.executable })),
         adapters: listAdapters().map((a) => a.describe()),
         defaults: DEFAULT_JOB_OPTIONS,

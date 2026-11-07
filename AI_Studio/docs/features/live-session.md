@@ -59,3 +59,7 @@ REST routes (behind the API key like every route under `/api`):
 - The MCP tools return text only; the picture is for the live view.
 - On an agent a step takes about one to three seconds (the heartbeat is every second).
 - The classification of a secret field is the page script's rule, repeated in `act.ts`; a test keeps the two in step.
+
+## On people's own computers
+
+A personal runner hosts this only for its owner; see [runner-sessions-personal.md](runner-sessions-personal.md).

@@ -158,16 +158,16 @@ describe("the Windows installer zip", () => {
         expect(r.headers["x-runner-kit-kind"]).toBe("installer");
         expect(r.headers["x-runner-kit-note"]).toBeUndefined();
         expect(r.headers["cache-control"]).toBe("no-store");
-        expect(r.headers["x-runner-token-id"]).toMatch(/\S/);
+        expect(r.headers["x-runner-enrollment-id"]).toMatch(/\S/);
         const z = unzipSync(new Uint8Array(r.buf));
         const dir = "runner-maya-s-shop-windows-setup";
-        expect(Object.keys(z).sort()).toEqual(
-            // check-computer.*: "Check this computer" in every download (docs/features/runner-check.md).
-            ["AITestingRunnerSetup.exe", "LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package.json", "record-child.mjs", "runner.json", "runner.mjs", "runner.token", "task-child.mjs"].map((n) => `${dir}/${n}`),
+        expect(Object.keys(z).filter((n) => !n.endsWith("/package-lock.json")).sort()).toEqual(
+            // check-computer.* (package-lock.json comes with newer bundles): "Check this computer" in every download (docs/features/runner-check.md).
+            ["AITestingRunnerSetup.exe", "LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package.json", "record-child.mjs", "runner.enroll", "runner.json", "runner.mjs", "task-child.mjs"].map((n) => `${dir}/${n}`),
         );
         const m = modes(new Uint8Array(r.buf));
         expect(m[`${dir}/AITestingRunnerSetup.exe`]).toBe(0o755);
-        expect(m[`${dir}/runner.token`]).toBe(0o600);
+        expect(m[`${dir}/runner.enroll`]).toBe(0o600);
         expect(m[`${dir}/runner.mjs`]).toBe(0o644);
         expect(Buffer.from(z[`${dir}/AITestingRunnerSetup.exe`]!).toString()).toBe("MZ stand-in program\n");
         const cfg = JSON.parse(Buffer.from(z[`${dir}/runner.json`]!).toString());
@@ -191,15 +191,18 @@ describe("the Windows installer zip", () => {
         expect(readme).not.toMatch(/seamless|leverage|unlock|empower/i);
     });
 
-    it("makes a real access: it is listed under the runner's name and the token is in runner.token only", async () => {
+    it("carries a single-use code in runner.enroll only (round 39: no download carries a runner credential)", async () => {
         const p = await newProject("Token shop");
         const r = await download(p, "Token PC", "windows");
         const z = unzipSync(new Uint8Array(r.buf));
-        const token = Buffer.from(z["runner-token-shop-windows-setup/runner.token"]!).toString("utf8").trim();
-        expect(token).toMatch(/^aitg_/);
-        const tokens = (await call("GET", `/api/projects/${p}/agent-tokens`)).body as Array<{ id: string; label: string }>;
-        expect(tokens.find((t) => t.id === r.headers["x-runner-token-id"])?.label).toBe("Token PC");
-        for (const [name, bytes] of Object.entries(z)) if (!name.endsWith("runner.token")) expect(Buffer.from(bytes).includes(token), name).toBe(false);
+        const token = Buffer.from(z["runner-token-shop-windows-setup/runner.enroll"]!).toString("utf8").trim();
+        expect(token).toMatch(/^aite_/);
+        // No runner exists until the code is traded.
+        expect((await call("GET", `/api/projects/${p}/agent-tokens`)).body).toEqual([]);
+        for (const [name, bytes] of Object.entries(z)) {
+            if (!name.endsWith("runner.enroll")) expect(Buffer.from(bytes).includes(token), name).toBe(false);
+            expect(/aitg_[A-Za-z0-9_-]{20,}/.test(Buffer.from(bytes).toString("latin1")), name).toBe(false);
+        }
         expect(logged.join("\n").includes(token)).toBe(false);
         // The download is recorded without the token, and says it was the installer.
         const audit = new CustomScriptStore(platform.db).auditTrail(p).filter((r) => r.action === "runner-kit-downloaded");
@@ -219,12 +222,12 @@ describe("the Mac installer zip", () => {
         expect(r.headers["x-runner-kit-kind"]).toBe("installer");
         const z = unzipSync(new Uint8Array(r.buf));
         const dir = "runner-mac-shop-mac-setup";
-        for (const n of [`${APP}/Contents/Info.plist`, `${APP}/Contents/MacOS/AITestingRunner`, `${APP}/Contents/Resources/runner-setup.sh`, "runner.mjs", "runner.json", "runner.token", "README.txt"]) expect(z[`${dir}/${n}`], n).toBeDefined();
+        for (const n of [`${APP}/Contents/Info.plist`, `${APP}/Contents/MacOS/AITestingRunner`, `${APP}/Contents/Resources/runner-setup.sh`, "runner.mjs", "runner.json", "runner.enroll", "README.txt"]) expect(z[`${dir}/${n}`], n).toBeDefined();
         const m = modes(new Uint8Array(r.buf));
         expect(m[`${dir}/${APP}/Contents/MacOS/AITestingRunner`]).toBe(0o755);
         expect(m[`${dir}/${APP}/Contents/Resources/runner-setup.sh`]).toBe(0o755);
         expect(m[`${dir}/${APP}/Contents/Info.plist`]).toBe(0o644);
-        expect(m[`${dir}/runner.token`]).toBe(0o600);
+        expect(m[`${dir}/runner.enroll`]).toBe(0o600);
         const readme = Buffer.from(z[`${dir}/README.txt`]!).toString("utf8");
         expect(readme).not.toContain("\r");
         for (const needle of ["could not verify the app", "Open Anyway", "xattr -dr com.apple.quarantine", "AI Testing Runner"]) expect(readme, needle).toContain(needle);
@@ -254,7 +257,7 @@ describe("kind", () => {
         expect((await call("GET", `/api/projects/${p}/agent-tokens`)).body).toEqual([]);
     });
 
-    it("falls back to the plain files kit when the installer is not built, and says so (each download still makes its own access)", async () => {
+    it("falls back to the plain files kit when the installer is not built, and says so (each download still makes its own code)", async () => {
         const p = await newProject("Fallback shop");
         const saved = process.env.RUNNER_INSTALLER_DIR;
         try {
@@ -274,8 +277,8 @@ describe("kind", () => {
         } finally {
             process.env.RUNNER_INSTALLER_DIR = saved;
         }
-        const tokens = (await call("GET", `/api/projects/${p}/agent-tokens`)).body as unknown[];
-        expect(tokens.length).toBe(3);
+        // Each download made its own single-use code (round 39); no runner exists until one is traded.
+        expect(Number(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments WHERE project_id = ?", p)?.n)).toBe(3);
     });
 });
 
@@ -296,7 +299,7 @@ describe("secrets", () => {
             const r = await download(p, `Leak ${platformName} ${kind}`, platformName, kind);
             expect(r.status).toBe(200);
             for (const [name, bytes] of Object.entries(unzipSync(new Uint8Array(r.buf)))) {
-                if (name.endsWith("runner.token")) continue;
+                if (name.endsWith("runner.enroll")) continue;
                 const body = Buffer.from(bytes).toString("latin1");
                 for (const s of forbidden) expect(body.includes(s), `${s.slice(0, 8)}... in ${name}`).toBe(false);
             }

@@ -445,7 +445,7 @@ describe("the download route", () => {
         expect(Number(r.headers["content-length"])).toBe(r.buf.length);
         const z = unzipSync(new Uint8Array(r.buf));
         const dir = "runner-maya-s-shop-win-x64";
-        for (const n of ["node/node.exe", "node/LICENSE", "node_modules/.aitp-complete", "node_modules/@playwright/test/package.json", "complete-kit.json", "runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt", "runner.json", "runner.token", "start-runner.cmd", "start-runner.sh", "start-runner.command", "README.txt"]) {
+        for (const n of ["node/node.exe", "node/LICENSE", "node_modules/.aitp-complete", "node_modules/@playwright/test/package.json", "complete-kit.json", "runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt", "runner.json", "runner.enroll", "start-runner.cmd", "start-runner.sh", "start-runner.command", "README.txt"]) {
             expect(z[`${dir}/${n}`], n).toBeDefined();
         }
         expect(Object.keys(z).every((k) => k.startsWith(`${dir}/`))).toBe(true);
@@ -453,7 +453,7 @@ describe("the download route", () => {
         expect(Buffer.from(z[`${dir}/node/node.exe`]!).toString()).toBe("stand-in node.exe, not a real program");
         const m = modes(new Uint8Array(r.buf));
         expect(m[`${dir}/node/node.exe`]).toEqual({ mode: 0o755, unix: true });
-        expect(m[`${dir}/runner.token`]!.mode).toBe(0o600);
+        expect(m[`${dir}/runner.enroll`]!.mode).toBe(0o600);
         expect(m[`${dir}/start-runner.sh`]!.mode).toBe(0o755);
         expect(m[`${dir}/start-runner.cmd`]!.mode).toBe(0o755);
         expect(m[`${dir}/runner.mjs`]!.mode).toBe(0o644);
@@ -532,16 +532,17 @@ describe("the download route", () => {
         expect((await ask({ platform: "unix", complete: "yes", arch: "x64", os: "linux" })).status).toBe(400);
     });
 
-    it("never puts the server's secrets, paths or data in a complete zip; the token is in runner.token only", async () => {
+    it("never puts the server's secrets, paths or data in a complete zip; the single-use code is in runner.enroll only", async () => {
         const p = await newProject("Secrets complete");
         const r = await complete(p, "Secret PC", "windows", "x64");
         const z = unzipSync(new Uint8Array(r.buf));
-        const token = Buffer.from(z["runner-secrets-complete-win-x64/runner.token"]!).toString().trim();
-        expect(token).toMatch(/^aitg_/);
+        const token = Buffer.from(z["runner-secrets-complete-win-x64/runner.enroll"]!).toString().trim();
+        expect(token).toMatch(/^aite_/);
         const forbidden = [...Object.values(SENTINELS), API_KEY, "platform.db", tmp, fwd(tmp), ROOT, fwd(ROOT)];
         for (const [name, bytes] of Object.entries(z)) {
             const b = Buffer.from(bytes);
-            if (!name.endsWith("runner.token")) expect(b.includes(token), name).toBe(false);
+            if (!name.endsWith("runner.enroll")) expect(b.includes(token), name).toBe(false);
+            expect(/aitg_[A-Za-z0-9_-]{20,}/.test(b.toString("latin1")), name).toBe(false);
             for (const f of forbidden) expect(b.includes(f), `${name} holds ${f.slice(0, 12)}`).toBe(false);
         }
     });

@@ -11,7 +11,7 @@ import type { TestKind, TestSpec } from "../spec/schema.js";
 import type { RenderContext, RenderedScript } from "../generators/types.js";
 import type { MobileRunEnv } from "../validation/mobile-runner.js";
 import type { IosRunEnv } from "../mobile/ios-runner.js";
-import type { RunEnv, RunnerProject, ScriptInput, ScriptRun } from "../validation/runner.js";
+import type { LiveRunEvent, RunEnv, RunnerProject, ScriptInput, ScriptRun } from "../validation/runner.js";
 import type { MailSource } from "../auth/mail.js";
 import type { BrowserLaunch } from "../browsers/choice.js";
 
@@ -71,6 +71,11 @@ export interface ExecutionOptions {
     testTimeoutMs?: number;
     /** Called as each test finishes (Playwright frameworks only). Asking for it changes nothing about the run. */
     onProgress?: (p: { done: number; total: number; status: "passed" | "failed" | "skipped"; title: string }) => void;
+    /**
+     * Called as each test and each numbered step starts and ends, and when a failure screenshot is ready (Playwright web and API frameworks
+     * only; a runner agent sends these to the platform as they happen). Asking for it changes nothing about the run or its result.
+     */
+    onLive?: (e: LiveRunEvent) => void;
     /** Windows desktop only: how long an application may take to show its window, when the project changes it. Unset: the usual 15 s. */
     startTimeoutMs?: number;
     /** The machine running the scripts agreed to run hand-written ones (set by the run policy only). Without it a script marked custom is refused. */

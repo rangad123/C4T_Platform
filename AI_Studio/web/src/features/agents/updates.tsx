@@ -1,11 +1,11 @@
 /** A runner's updates on its row (docs/features/runner-updates.md): its version, what it is doing about an update, the switch and the button. */
 import { RefreshCw } from "lucide-react";
 import { useState } from "react";
-import { api } from "../../api";
+import { ApiError, api } from "../../api";
 import { Button, Callout } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { describeApiError } from "../../lib/labels";
-import type { Agent, RunnerUpdateView } from "./agents";
+import { NEEDS_MANUAL_UPDATE, type Agent, type RunnerUpdateView } from "./agents";
 
 /** "1.4.0 (3f2a9c81d0)" from a kit version "1.4.0+3f2a9c81d0". */
 export function versionWords(v: string | undefined): string {
@@ -26,6 +26,7 @@ export function inWords(iso: string, now = Date.now()): string {
 /** One sentence about the runner's update state, or nothing when there is nothing to say. Also used by the tests. */
 export function updateSentence(u: RunnerUpdateView, current: string | undefined, online: boolean): { tone: "info" | "warning" | "success"; text: string } | undefined {
     const now = versionWords(current);
+    if (u.state === "needs-manual") return { tone: "warning", text: NEEDS_MANUAL_UPDATE };
     if (u.state === "failed" && u.outOfDate) return { tone: "warning", text: `Could not update: ${u.error ?? "no reason given."} Still on version ${now}.${u.retryAt ? ` It tries again ${inWords(u.retryAt)}.` : ""}` };
     if (u.state === "rolled-back" && u.outOfDate) return { tone: "warning", text: `Went back to version ${now}${u.to ? ` from ${versionWords(u.to)}` : ""}: ${u.error ?? "no reason given."} It does not install that version again by itself; use Update this runner to try again.` };
     if (!u.outOfDate) {
@@ -54,7 +55,8 @@ export function RunnerUpdates({ projectId, a, onChanged }: { projectId: string; 
             await api(path, { method, ...(body !== undefined ? { body } : {}) });
             onChanged();
         } catch (e) {
-            setError(describeApiError(e));
+            // A 409 (for example: this platform's runner download is not signed, so no update is offered) is the server's own sentence.
+            setError(e instanceof ApiError && e.status === 409 ? e.message : describeApiError(e));
         } finally {
             setBusy("");
         }
@@ -66,6 +68,11 @@ export function RunnerUpdates({ projectId, a, onChanged }: { projectId: string; 
             {sentence && (
                 <p className={`t-secondary ag-update-line is-${sentence.tone}`} data-testid="agent-update-status">
                     {sentence.text}
+                </p>
+            )}
+            {u.published === false && u.unpublished && (
+                <p className="t-secondary" data-testid="agent-update-unpublished">
+                    This platform offers no automatic update: {u.unpublished}
                 </p>
             )}
             {u.can && (

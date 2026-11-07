@@ -7,7 +7,7 @@
  */
 import { spawn, fork, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import type { ScriptRun } from "../engine/validation/runner.js";
+import type { LiveRunEvent, ScriptRun } from "../engine/validation/runner.js";
 import { CHILD_ENV_ALLOW } from "../engine/validation/runner.js";
 import type { ChildRun, FromChild } from "./child-protocol.js";
 
@@ -50,6 +50,8 @@ export class TaskProcess {
     private outcome?: TaskOutcome;
     private tail = "";
     readonly done: Promise<TaskOutcome>;
+    /** Protocol 2: the child's live events (set before `start`). */
+    onLive?: (e: LiveRunEvent) => void;
 
     constructor(source: NodeJS.ProcessEnv, private readonly onLog: (line: string) => void, entry: string = ENTRY) {
         this.child = fork(entry, [], {
@@ -69,6 +71,7 @@ export class TaskProcess {
         this.child.on("message", (raw) => {
             const m = raw as FromChild;
             if (m?.type === "log" && typeof m.line === "string") this.onLog(m.line);
+            else if (m?.type === "live" && m.event && typeof m.event === "object") this.onLive?.(m.event);
             else if (m?.type === "result" && Array.isArray(m.runs)) this.finish({ kind: "result", runs: m.runs });
             else if (m?.type === "error") this.finish({ kind: "error", message: String(m.message).slice(0, 500) });
         });

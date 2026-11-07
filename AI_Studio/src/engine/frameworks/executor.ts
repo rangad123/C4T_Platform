@@ -1,10 +1,19 @@
 import { getAdapter } from "./registry.js";
 import type { ExecutionBatch, ExecutionEnv, ExecutionOptions, ExecutorScope, ScriptExecutor, ScriptRun } from "./types.js";
 
+/** Set while this process may not run test code itself (EXECUTION_MODE=runners, platform/runner-only.ts): makes the error every local run is refused with. */
+let localRefusal: (() => Error) | undefined;
+
+/** Refuse (with the error `refusal` makes) or, with undefined, allow again every script run on this machine. The last line behind the routing: a path that was missed fails loudly. */
+export function refuseLocalExecution(refusal: (() => Error) | undefined): void {
+    localRefusal = refusal;
+}
+
 /** Runs scripts on this machine: resolves the adapter and calls its `execute`, passing everything through untouched. */
 export class LocalExecutor implements ScriptExecutor {
     readonly name = "local";
     async execute(adapterId: string, batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions): Promise<ScriptRun[]> {
+        if (localRefusal) throw localRefusal();
         return getAdapter(adapterId).execute(batch, env, opts);
     }
 }

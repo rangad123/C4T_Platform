@@ -130,6 +130,11 @@ export const EXPLICIT_SCOPES: Record<string, Scope["kind"]> = {
     "DELETE /api/shared-integrations/:sid": "none",
     "POST /api/shared-integrations/:sid/test": "none",
     "POST /api/runners": "none",
+    // Round 39: enrollment codes and kits from the Runners page; the handlers decide by kind and check every project named (routes/runners.ts).
+    "POST /api/runners/enroll": "none",
+    "POST /api/runners/kits": "none",
+    "GET /api/runners/kits/info": "none",
+    "GET /api/runners/enrollments/:enrollmentId": "none",
     "PATCH /api/runners/:runnerId": "none",
     "POST /api/runners/:runnerId/retire": "none",
     // ── lists narrowed to the allowed projects by their handlers ──

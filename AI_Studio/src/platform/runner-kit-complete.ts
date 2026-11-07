@@ -19,7 +19,7 @@ import zlib from "node:zlib";
 import { z } from "zod";
 import { REPO_ROOT } from "../config.js";
 import type { InstallerPart } from "./runner-installer.js";
-import type { Bundle } from "./runner-kit.js";
+import { kitCredentialFile, type Bundle } from "./runner-kit.js";
 import { readme, START_CMD, START_COMMAND, START_SH, withLineEnding } from "./runner-kit-scripts.js";
 import { CHECK_FILES } from "./runner-check-scripts.js";
 
@@ -239,8 +239,12 @@ export interface BuildCompleteInput {
     projectName: string;
     projectSlug: string;
     platformUrl: string;
-    /** The new project token (aitg_...). The only copy there will ever be. */
-    token: string;
+    /** The single-use enrollment code (aite_...), written as runner.enroll; every download carries one (round 39). See runner-kit.ts kitCredentialFile. */
+    enrollCode?: string;
+    /** The signed-update sequence of this server's runner files (runner-update.ts downloadSequence): a fresh download refuses older signed updates. */
+    updateSequence?: number;
+    /** @deprecated Test seam only (runner.token); the platform's routes never pass one. */
+    token?: string;
 }
 
 /**
@@ -277,8 +281,9 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     // The runner programs: exactly the prebuilt bytes.
     for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) small(name, i.bundle.files.get(name)!);
     // What belongs to this download.
-    small("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.runnerName, kitVersion }, null, 2)}\n`));
-    small("runner.token", text(`${i.token}\n`), 0o600);
+    small("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.runnerName, kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
+    const credential = kitCredentialFile(i);
+    small(credential.name, text(credential.text), 0o600);
     small("start-runner.cmd", text(withLineEnding(START_CMD, "\r\n")), 0o755);
     small("start-runner.sh", text(withLineEnding(START_SH, "\n")), 0o755);
     small("start-runner.command", text(withLineEnding(START_COMMAND, "\n")), 0o755);

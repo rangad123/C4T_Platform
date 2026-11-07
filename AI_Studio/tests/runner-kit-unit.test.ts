@@ -72,7 +72,8 @@ function modes(zip: Uint8Array): Record<string, { mode: number; unix: boolean }>
 
 describe("the prebuilt bundle", () => {
     it("is a manifest plus the files it lists, with checksums that check out", () => {
-        expect(bundle.manifest.files.map((f) => f.name).sort()).toEqual(["LICENSES.txt", "package.json", "record-child.mjs", "runner.mjs", "task-child.mjs"]);
+        // package-lock.json from round 39: the kit installs its test tools with npm ci from it.
+        expect(bundle.manifest.files.map((f) => f.name).sort()).toEqual(["LICENSES.txt", "package-lock.json", "package.json", "record-child.mjs", "runner.mjs", "task-child.mjs"]);
         expect(bundle.manifest.kitVersion).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{10}$/);
         expect(bundle.manifest.nodeMin).toBe(24);
     });
@@ -130,7 +131,7 @@ describe("the zip a download produces", () => {
     it("holds the program, this download's files and the right start script, in one folder", () => {
         // All three start scripts are in both variants: the chosen system only decides the folder's name and what the README leads with.
         // check-computer.*: "Check this computer" in every download (docs/features/runner-check.md).
-        const files = ["LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package.json", "record-child.mjs", "runner.json", "runner.mjs", "runner.token", "start-runner.cmd", "start-runner.command", "start-runner.sh", "task-child.mjs"];
+        const files = ["LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package-lock.json", "package.json", "record-child.mjs", "runner.json", "runner.mjs", "runner.token", "start-runner.cmd", "start-runner.command", "start-runner.sh", "task-child.mjs"];
         const win = entries(makeZip("windows"));
         expect(Object.keys(win).sort()).toEqual(files.map((n) => `runner-shop-checkout-windows/${n}`).sort());
         const unix = entries(makeZip("unix"));
@@ -179,7 +180,7 @@ describe("the zip a download produces", () => {
 
     it("explains itself in the README without printing the token", () => {
         const readme = text(entries(makeZip("windows", { name: "Maya's laptop", projectName: "Shop Checkout" }))["runner-shop-checkout-windows/README.txt"]!);
-        for (const needle of ["Maya's laptop", "Shop Checkout", "https://tests.example.com", "start-runner.cmd", "Connected to the platform", "Delete the zip", "runner.token", "secret", "Node.js 24", "revoke", "Ctrl+C", bundle.manifest.kitVersion]) expect(readme, needle).toContain(needle);
+        for (const needle of ["Maya's laptop", "Shop Checkout", "https://tests.example.com", "start-runner.cmd", "Connected to the platform", "runner.enroll", "one-time code", "30 minutes", "Node.js 24", "remove it", "--forget-credential", "Ctrl+C", bundle.manifest.kitVersion]) expect(readme, needle).toContain(needle);
         expect(readme).not.toContain(TOKEN);
         // Each README leads with its own system's way and still mentions the other, because both scripts are in the folder.
         const unixReadme = text(entries(makeZip("unix"))["runner-shop-checkout-unix/README.txt"]!);

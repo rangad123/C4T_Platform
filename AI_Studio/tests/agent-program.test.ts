@@ -517,7 +517,8 @@ describe("connection loop", () => {
             { reject: 401, code: 3, message: /not valid or was revoked/ },
             { reject: 404, code: 3, message: /not valid or was revoked/ },
             { reject: 409, code: 5, message: /refused this agent.*Another agent with this name/ },
-            { protocol: 2, code: 4, message: /speaks protocol 1 but the platform speaks protocol 2/ },
+            // The agent speaks 1 and 2 (it offers both and falls back to 1); a platform answering a version it does not know stops it.
+            { protocol: 3, code: 4, message: /speaks protocol 1 and 2 but the platform speaks protocol 3/ },
         ];
         for (const c of cases) {
             const fake = new FakePlatform(5879, { token: TOKEN, ...(c.protocol ? { protocol: c.protocol } : {}) });

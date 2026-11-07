@@ -41,7 +41,7 @@ class GeneratorAdapter implements FrameworkAdapter {
 
 /** Playwright (web and API) scripts run in one `playwright test` process. */
 const runPlaywright = (batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions): Promise<ScriptRun[]> =>
-    runScripts(batch.scratchDir, batch.scripts, env.run, { workers: opts.workers, ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}), signal: opts.signal, ...(opts.projects ? { projects: opts.projects } : {}), ...(opts.testTimeoutMs !== undefined ? { testTimeoutMs: opts.testTimeoutMs } : {}), ...(opts.onProgress ? { onProgress: opts.onProgress } : {}), ...(opts.allowCustom ? { allowCustom: true } : {}), ...(batch.helpers?.length ? { helpers: batch.helpers } : {}), ...(opts.mail ? { mail: opts.mail } : {}), ...(opts.browser ? { browser: opts.browser } : {}) });
+    runScripts(batch.scratchDir, batch.scripts, env.run, { workers: opts.workers, ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}), signal: opts.signal, ...(opts.projects ? { projects: opts.projects } : {}), ...(opts.testTimeoutMs !== undefined ? { testTimeoutMs: opts.testTimeoutMs } : {}), ...(opts.onProgress ? { onProgress: opts.onProgress } : {}), ...(opts.onLive ? { onLive: opts.onLive } : {}), ...(opts.allowCustom ? { allowCustom: true } : {}), ...(batch.helpers?.length ? { helpers: batch.helpers } : {}), ...(opts.mail ? { mail: opts.mail } : {}), ...(opts.browser ? { browser: opts.browser } : {}) });
 
 /** Taqwright (Appium) scripts run one after another on a single device. Without a device they report an error instead of running. */
 const runTaqwright = async (batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions): Promise<ScriptRun[]> =>

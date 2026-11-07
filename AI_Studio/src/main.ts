@@ -8,6 +8,8 @@ import { installProcessLogging, startProcessOps } from "./platform/ops/process.j
 import { applyServerNetwork } from "./platform/outbound-network.js";
 import { buildServer } from "./platform/server.js";
 import { Worker } from "./platform/worker.js";
+import { getAgentServices } from "./platform/agent-services.js";
+import { runnersOnly } from "./platform/runner-only.js";
 
 installCrashGuard();
 // LOG_FORMAT=json and the error-line count for /metrics: before anything writes a line (platform/ops/process.ts).
@@ -42,7 +44,20 @@ if (platform.llm.modelName === "unavailable") {
 }
 
 let worker: Worker | undefined;
-if (platform.config.WORKER_EMBEDDED) {
+if (runnersOnly(platform.config)) {
+    // EXECUTION_MODE=runners (the hosted platform): this process never runs test code or opens a browser for a run. The dispatch worker
+    // hands every run to a runner and looks after several at once; it runs here even with WORKER_EMBEDDED=false (runner-only.ts).
+    worker = Worker.dispatch({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS);
+    worker.start();
+    console.log(`[worker] dispatch worker started: tests run only on runners, up to ${platform.config.DISPATCH_CONCURRENCY} runs at once`);
+    if (platform.config.SCHEDULER_ENABLED) {
+        schedules.scheduler.start();
+        console.log(`[scheduler] started (checks every ${platform.config.SCHEDULER_TICK_MS / 1000}s)`);
+    } else {
+        // Runner housekeeping rides on the scheduler's tick; without it, it still runs (leases, stale tasks, old task files).
+        setInterval(() => void getAgentServices(platform).maintain().catch((err) => console.error("[agents] housekeeping failed:", err)), platform.config.SCHEDULER_TICK_MS).unref();
+    }
+} else if (platform.config.WORKER_EMBEDDED) {
     worker = new Worker({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS);
     worker.start();
     console.log("[worker] embedded worker started");

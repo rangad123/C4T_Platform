@@ -46,7 +46,8 @@ describe("command line", () => {
             return r.message;
         };
         expect(msg([])).toMatch(/--url/);
-        expect(msg(["--url", URL_OK])).toMatch(/AITP_AGENT_TOKEN/);
+        // Round 39: no token given means the credential this runner keeps (or an enrollment code); main() says so when there is none.
+        expect(parseAgentArgs(["--url", URL_OK], {})).toMatchObject({ kind: "run", config: { token: "", tokenSource: "store" } });
         expect(msg(["--url", URL_OK, "--token", "not-a-token"])).toMatch(/not an agent token/);
         expect(msg(["--url", URL_OK, "--token", TOKEN, "--concurrency", "0"])).toMatch(/--concurrency must be between 1 and 8/);
         expect(msg(["--url", URL_OK, "--token", TOKEN, "--concurrency", "9"])).toMatch(/between 1 and 8/);

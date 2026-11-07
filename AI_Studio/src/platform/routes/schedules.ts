@@ -11,7 +11,8 @@ import { getScheduleServices } from "../schedule-services.js";
 import { sharedOrigin, sharedRowMessage } from "../shared-integrations.js";
 import { CadenceSchema, describeCadence, SCHEDULE_KINDS, type Schedule } from "../schedule-store.js";
 import { RunbookOverlapError, getRunbookServices } from "../runbook-runner.js";
-import { suiteStoreFor } from "../suite-run.js";
+import { runsCanStartHere, suiteStoreFor } from "../suite-run.js";
+import { currentActor } from "../auth/actor.js";
 import { isRunbookStart, OverlapError, runnableTestIds } from "../scheduler.js";
 import { detectFlaky, getRunSummary, trendsFor } from "../trends.js";
 import type { RouteCtx } from "./types.js";
@@ -150,7 +151,12 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
     app.get("/api/projects/:id/schedules", async (req) => {
         const { id } = req.params as { id: string };
         project(id);
-        return { serverTime: new Date().toISOString(), timezone: timezone(), schedulerEnabled: p.config.SCHEDULER_ENABLED, schedules: await Promise.all(svc.store.list(id).map(pub)) };
+        // Whether schedules really fire here: the scheduler is switched on AND something picks up their runs (a worker, or the dispatch worker
+        // of EXECUTION_MODE=runners). `schedulesNote` says why not, in a sentence (null when they fire).
+        const can = runsCanStartHere(p);
+        const fire = p.config.SCHEDULER_ENABLED && can.ok;
+        const schedulesNote = fire ? null : !p.config.SCHEDULER_ENABLED ? "Schedules are switched off on this server (SCHEDULER_ENABLED=false), so they do not start runs by themselves." : `Schedules do not start runs here right now. ${can.ok ? "" : can.reason}`.trim();
+        return { serverTime: new Date().toISOString(), timezone: timezone(), schedulerEnabled: fire, schedulesFire: fire, schedulesNote, executionMode: p.config.EXECUTION_MODE, schedules: await Promise.all(svc.store.list(id).map(pub)) };
     });
 
     app.post("/api/projects/:id/schedules", async (req, reply) => {
@@ -162,7 +168,9 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         else await assertRunnable(id, body.kind);
         if (body.environment) checkScheduleEnvironment(id, body.kind, body.environment, body.confirmProduction);
         if (body.runbookId) checkRunbook(id, body.runbookId);
-        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures });
+        // Who made it: a person's own runner may take the runs of that person's schedules (COMMON contract, scheduler.ts startedBy).
+        const actor = currentActor();
+        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures, createdBy: actor.kind === "user" ? (actor.id ?? null) : null });
         if (body.environment) setScheduleEnvironment(repo.db, created.id, { environment: body.environment, confirmProduction: Boolean(body.confirmProduction) });
         if (body.runbookId) runbooks.setScheduleLink(created.id, body.runbookId);
         if (body.suiteId) await suites.setScheduleLink(created.id, body.suiteId);
@@ -189,7 +197,9 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         const nextEnv = environment === undefined ? target.environment : environment;
         const nextConfirm = nextEnv === target.environment && confirmProduction === undefined ? target.confirmProduction : Boolean(confirmProduction);
         if (nextEnv) checkScheduleEnvironment(id, patch.kind ?? cur.kind, nextEnv, nextConfirm);
-        const updated = svc.store.update(sid, { ...own, name: renamed })!;
+        // The editor now owns its runs: from here on they may go to the editor's own computer (or team runners), never to the previous maker's.
+        const editor = currentActor();
+        const updated = svc.store.update(sid, { ...own, name: renamed, createdBy: editor.kind === "user" ? (editor.id ?? null) : null })!;
         if (environment !== undefined || confirmProduction !== undefined) setScheduleEnvironment(repo.db, sid, { environment: nextEnv, confirmProduction: nextConfirm });
         if (runbookId !== undefined) runbooks.setScheduleLink(sid, runbookId);
         if (suiteId !== undefined) await suites.setScheduleLink(sid, suiteId);
@@ -209,7 +219,9 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         project(id);
         schedule(id, sid);
         try {
-            const job = await svc.runNow(sid);
+            // "Run now" belongs to the person who clicks: only their own computer (or a team runner) may take it, never the schedule maker's.
+            const clicker = currentActor();
+            const job = await svc.runNow(sid, clicker.kind === "user" ? (clicker.id ?? null) : null);
             if (isRunbookStart(job)) return reply.code(202).send({ runbookRunId: job.runbookRunId, runbook: job.runbookName });
             return reply.code(202).send({ jobId: job.id, status: job.status, job: ctx.publicJob(job) });
         } catch (e) {

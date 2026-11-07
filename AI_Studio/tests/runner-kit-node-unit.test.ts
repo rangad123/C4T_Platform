@@ -483,7 +483,7 @@ describe.skipIf(!BASH)("start-runner.sh really runs", () => {
         fs.writeFileSync(path.join(dir, "runner.mjs"), "process.exit(3);\n");
         const r = runSh(dir, home);
         expect(r.status).toBe(3);
-        expect(r.out).toContain("The platform no longer accepts this runner's token.");
+        expect(r.out).toContain("The platform no longer accepts this runner.");
     });
 });
 
@@ -673,6 +673,6 @@ describe.skipIf(!WIN)("start-runner.cmd really runs", () => {
         const r = runCmd(dir, env);
         expect(dir).toMatch(/Maya Singh.runner \(1\)$/);
         expect(r.status).toBe(1);
-        expect(r.out).toContain("The platform no longer accepts this runner's token.");
+        expect(r.out).toContain("The platform no longer accepts this runner.");
     });
 });

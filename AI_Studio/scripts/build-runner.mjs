@@ -50,8 +50,68 @@ export function installedVersion(name, root = ROOT) {
     }
 }
 
-/** `platformVersion` replaces package.json's version and is stamped into the programs (tests build two versions; docs/features/runner-updates.md). */
-export async function buildRunner({ root = ROOT, outDir = path.join(root, "dist", "runner"), log = () => {}, platformVersion: versionOverride } = {}) {
+/**
+ * The kit's package-lock.json, cut from this checkout's own lock file: the entries the kit's dependencies reach (Node's lookup rules,
+ * nested folders first), so `npm ci` in the kit installs exactly the versions and checksums the platform was built and tested with.
+ * Undefined when this checkout has no lock file (then the kit falls back to npm install). Throws when the lock file misses one of them.
+ */
+export function kitLockfile(kitPackage, root = ROOT) {
+    const file = path.join(root, "package-lock.json");
+    if (!fs.existsSync(file)) return undefined;
+    const lock = readJson(file);
+    const all = lock.packages;
+    if (lock.lockfileVersion < 2 || !all || typeof all !== "object") return undefined;
+    const resolve = (from, name) => {
+        for (let base = from; ; ) {
+            const at = `${base ? `${base}/` : ""}node_modules/${name}`;
+            if (all[at]) return at;
+            if (!base) return undefined;
+            const i = base.lastIndexOf("/node_modules/");
+            base = i < 0 ? "" : base.slice(0, i);
+        }
+    };
+    // Every entry the kit reaches, and which of them it reaches without an optional dependency on the way (the rest are optional for the
+    // kit, as npm marks them: Taqwright is an optional dependency of the kit, but a regular one of the platform).
+    const reached = new Set();
+    const required = new Set();
+    const walk = (at, viaRequired) => {
+        if (viaRequired ? required.has(at) : reached.has(at)) return;
+        reached.add(at);
+        if (viaRequired) required.add(at);
+        const e = all[at];
+        const optional = e.optionalDependencies ?? {};
+        for (const dep of Object.keys({ ...e.dependencies, ...optional })) {
+            const to = resolve(at, dep);
+            if (to) walk(to, viaRequired && !(dep in optional));
+            else if (!(dep in optional)) throw new Error(`package-lock.json has no entry for ${dep} (needed by ${at}). Run npm install, then build again.`);
+        }
+    };
+    const roots = [...Object.entries(kitPackage.dependencies ?? {}).map(([n, v]) => [n, v, true]), ...Object.entries(kitPackage.optionalDependencies ?? {}).map(([n, v]) => [n, v, false])];
+    for (const [name, want, isRequired] of roots) {
+        const at = resolve("", name);
+        if (!at) throw new Error(`package-lock.json has no entry for ${name}. Run npm install, then build again.`);
+        if (all[at].version !== want) throw new Error(`package-lock.json has ${name} ${all[at].version}, but node_modules has ${want}. Run npm ci, then build again.`);
+        walk(at, isRequired);
+    }
+    const kept = new Map();
+    for (const at of [...reached].sort()) {
+        // The flags of the platform's own tree (dev, devOptional, peer, optional) do not describe the kit's.
+        const entry = { ...all[at] };
+        for (const flag of ["dev", "devOptional", "peer", "optional"]) delete entry[flag];
+        if (!required.has(at)) entry.optional = true;
+        kept.set(at, entry);
+    }
+    const rootEntry = { name: kitPackage.name, version: kitPackage.version, dependencies: kitPackage.dependencies, optionalDependencies: kitPackage.optionalDependencies, engines: kitPackage.engines };
+    const packages = { "": rootEntry, ...Object.fromEntries(kept) };
+    return { name: kitPackage.name, version: kitPackage.version, lockfileVersion: 3, requires: true, packages };
+}
+
+/**
+ * `platformVersion` replaces package.json's version and is stamped into the programs (tests build two versions; docs/features/runner-updates.md).
+ * `updateKeys` replaces the update keys built into the runner (src/agent/update-keys.ts): tests only, to trust a test key. Never set it for a
+ * download people use.
+ */
+export async function buildRunner({ root = ROOT, outDir = path.join(root, "dist", "runner"), log = () => {}, platformVersion: versionOverride, updateKeys } = {}) {
     let esbuild;
     try {
         esbuild = await import("esbuild");
@@ -78,6 +138,7 @@ export async function buildRunner({ root = ROOT, outDir = path.join(root, "dist"
         banner: { js: 'import { createRequire as __aitpCreateRequire } from "node:module"; if (typeof globalThis.require === "undefined") globalThis.require = __aitpCreateRequire(import.meta.url);' + (versionOverride ? `\n// runner version ${String(versionOverride).replace(/[^A-Za-z0-9.+-]/g, "")}` : "") },
         logLevel: "warning",
         sourcemap: false,
+        ...(updateKeys ? { define: { __AITP_UPDATE_KEYS__: JSON.stringify(updateKeys.map(String)) } } : {}),
     });
 
     const dependencies = Object.fromEntries(KIT_DEPENDENCIES.map((n) => [n, installedVersion(n, root)]));
@@ -94,6 +155,10 @@ export async function buildRunner({ root = ROOT, outDir = path.join(root, "dist"
         overrides: Object.fromEntries(KIT_SINGLE_COPY.map((n) => [n, installedVersion(n, root)])),
     };
     fs.writeFileSync(path.join(outDir, "package.json"), `${JSON.stringify(kitPackage, null, 2)}\n`);
+    // The lock file the start scripts, the Windows installer, the Mac setup and the updater install from (npm ci --ignore-scripts).
+    const lock = kitLockfile(kitPackage, root);
+    if (lock) fs.writeFileSync(path.join(outDir, "package-lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
+    else log("No package-lock.json in this checkout: the kit installs its test tools with npm install (no lock file).");
 
     // The bundle holds copies of these packages, whose licences ask for their notice to travel with them. (axe-core, Playwright and the rest are
     // installed from npm by the kit's own package.json and bring their own.)
@@ -101,7 +166,7 @@ export async function buildRunner({ root = ROOT, outDir = path.join(root, "dist"
     const notices = BUNDLED_LICENCES.map((n) => ["=== " + n + " ===", fs.readFileSync(path.join(root, "node_modules", ...n.split("/"), "LICENSE"), "utf8").trim(), ""].join(NL));
     fs.writeFileSync(path.join(outDir, "LICENSES.txt"), ["This runner contains code from these open source packages.", "", ...notices].join(NL) + NL);
 
-    const names = [...Object.keys(ENTRIES).map((e) => `${e}.mjs`), "package.json", "LICENSES.txt"].sort();
+    const names = [...Object.keys(ENTRIES).map((e) => `${e}.mjs`), "package.json", "LICENSES.txt", ...(lock ? ["package-lock.json"] : [])].sort();
     const files = names.map((name) => {
         const bytes = fs.readFileSync(path.join(outDir, name));
         return { name, bytes: bytes.length, sha256: sha256(bytes) };
@@ -110,7 +175,7 @@ export async function buildRunner({ root = ROOT, outDir = path.join(root, "dist"
     // The bundle must not carry this machine's folder names (a source map or an absolute path would). Relative "// src/..." comments are fine.
     const home = [root, root.replaceAll("\\", "/"), process.env.USERPROFILE, process.env.HOME].filter((s) => s && s.length > 6);
     for (const f of files) {
-        if (f.name === "package.json") continue;
+        if (f.name === "package.json" || f.name === "package-lock.json") continue;
         const text = fs.readFileSync(path.join(outDir, f.name), "utf8");
         const hit = home.find((h) => text.includes(h));
         if (hit) throw new Error(`${f.name} contains a path of this machine (${hit.slice(0, 3)}...). The kit must not carry local paths.`);

@@ -12,6 +12,8 @@ import path from "node:path";
 
 export const KIT_CONFIG_FILE = "runner.json";
 export const KIT_TOKEN_FILE = "runner.token";
+/** The single-use enrollment code a download carries (round 39); deleted by the runner once traded for its credential. */
+export const KIT_ENROLL_FILE = "runner.enroll";
 const MAX_CONFIG_BYTES = 8 * 1024;
 
 export interface KitFile {
@@ -73,6 +75,9 @@ export function applyKitDefaults(env: NodeJS.ProcessEnv, dir: string): KitResult
     // Runs and the file cache live inside the kit folder, so deleting the folder removes everything the runner left behind.
     if (unset("AITP_AGENT_WORK_DIR")) out.AITP_AGENT_WORK_DIR = path.join(dir, "work");
     if (unset("AITP_AGENT_TOKEN") && unset("AITP_AGENT_TOKEN_FILE") && fs.existsSync(path.join(dir, KIT_TOKEN_FILE))) out.AITP_AGENT_TOKEN_FILE = path.join(dir, KIT_TOKEN_FILE);
+    // Round 39: a download carries a single-use enrollment code (runner.enroll) instead; the credential it is traded for is kept for this folder.
+    if (unset("AITP_CREDENTIAL_DIR")) out.AITP_CREDENTIAL_DIR = dir;
+    if (unset("AITP_AGENT_TOKEN") && unset("AITP_AGENT_TOKEN_FILE") && unset("AITP_AGENT_ENROLL_FILE") && unset("AITP_ENROLL_CODE") && fs.existsSync(path.join(dir, KIT_ENROLL_FILE))) out.AITP_AGENT_ENROLL_FILE = path.join(dir, KIT_ENROLL_FILE);
     if (file.kitVersion) out.AITP_KIT_VERSION = file.kitVersion;
     if (file.browser && unset("AITP_BROWSER")) out.AITP_BROWSER = file.browser;
     if (file.phoneTools && unset("AITP_PHONE_TOOLS")) out.AITP_PHONE_TOOLS = file.phoneTools;

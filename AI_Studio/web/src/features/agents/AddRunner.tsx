@@ -1,5 +1,5 @@
 import { Cable, Check, Download, LoaderCircle } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, Callout, ErrorState, Skeleton } from "../../components/ui";
 import { downloadBlob } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
@@ -7,6 +7,7 @@ import { friendlyError } from "../../lib/labels";
 import { routes, useRoute } from "../../lib/router";
 import { SeeHow } from "../guide/SeeHow";
 import { usePolled, type Agent } from "./agents";
+import { boldScripts } from "./bold";
 import { checkComputerHelp } from "./check";
 import {
     CONNECT_POLL_MS,
@@ -31,18 +32,29 @@ import {
     type KitInfo,
     type KitKind,
     type KitPlatform,
+    RUNNER_KITS_PATH,
 } from "./kit";
 import { UnsignedNotice } from "../runners/UnsignedNotice";
+import { EnrollDownloadStep, EnrollStartStep, TeamFields, type Made } from "../runners/AddComputerSteps";
 import "./add-runner.css";
 
 const STEP_TITLES = ["Choose the computer", "Download and unzip", "Start it"] as const;
 
+/** What the panel adds: a runner for one project (from the project's runners), the person's own computer, or a team runner (both from the Runners page). */
+export type AddMode = "project" | "personal" | "team";
+const TITLES: Record<AddMode, string> = { project: "Add a runner", personal: "Add this computer", team: "Add a team runner" };
+
 /**
  * "Add a runner" as three plain steps: choose the computer, download the kit, start it and watch it connect.
- * The kit holds a secret. This panel never sees inside it: the browser saves the zip as a file and only the id of the new access is kept.
+ * For a project the kit holds that project's access; from the Runners page ("Add this computer", "Add a team runner") it holds a one-time
+ * enrollment code instead (features/runners/AddComputerSteps.tsx). This panel never sees inside a download: the browser saves the zip as a file.
  */
-export function AddRunner({ projectId, agents, onClose, onChanged }: { projectId: string; agents: Agent[]; onClose: () => void; onChanged: () => void }) {
-    const info = useFetch<KitInfo>(`/projects/${projectId}/runner-kits/info`);
+export function AddRunner({ projectId, scope = "personal", owners = [], agents = [], onClose, onChanged }: { projectId?: string; scope?: "personal" | "team"; owners?: Array<{ id: string | null; label: string }>; agents?: Agent[]; onClose: () => void; onChanged: () => void }) {
+    const mode: AddMode = projectId ? "project" : scope;
+    const info = useFetch<KitInfo>(projectId ? `/projects/${projectId}/runner-kits/info` : `${RUNNER_KITS_PATH}/info`);
+    // A team runner: whose it is (an organisation, or Crowd4Test's shared runners) and the projects it may run straight away.
+    const [owner, setOwner] = useState<string | null>(owners[0]?.id ?? null);
+    const [projectIds, setProjectIds] = useState<string[]>([]);
     const [step, setStep] = useState<1 | 2 | 3>(1);
     const [platform, setPlatform] = useState<KitPlatform>(() => guessPlatform());
     // What the person picked; null means "the recommended one for this computer". An installer this server does not have is never used.
@@ -62,8 +74,10 @@ export function AddRunner({ projectId, agents, onClose, onChanged }: { projectId
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     const kind = effectiveKind(info.data, platform, chosenKind, target);
-    const [name, setName] = useState(DEFAULT_RUNNER_NAME);
+    const [name, setName] = useState(mode === "personal" ? "My computer" : DEFAULT_RUNNER_NAME);
     const [made, setMade] = useState<{ download: KitDownload; name: string; onlineBefore: Set<string> } | null>(null);
+    // From the Runners page: the enrollment code (in this state only) and the runners listed before it was made.
+    const [enrolled, setEnrolled] = useState<Made | null>(null);
     const panel = useRef<HTMLElement>(null);
     const heading = useRef<HTMLHeadingElement>(null);
 
@@ -89,7 +103,7 @@ export function AddRunner({ projectId, agents, onClose, onChanged }: { projectId
         >
             <div className="card-head wrap">
                 <Cable size={18} aria-hidden />
-                <h2 className="t-section" id={titleId}>Add a runner</h2>
+                <h2 className="t-section" id={titleId}>{TITLES[mode]}</h2>
                 <span className="spacer" />
                 <Button size="sm" variant="ghost" onClick={onClose}>
                     Close
@@ -111,6 +125,8 @@ export function AddRunner({ projectId, agents, onClose, onChanged }: { projectId
                 {step === 1 && (
                     <ChooseStep
                         projectId={projectId}
+                        mode={mode}
+                        team={mode === "team" ? <TeamFields owners={owners} owner={owner} projectIds={projectIds} onOwner={(o) => (setOwner(o), setProjectIds([]))} onProjects={setProjectIds} /> : null}
                         info={info}
                         platform={platform}
                         kind={kind}
@@ -136,7 +152,27 @@ export function AddRunner({ projectId, agents, onClose, onChanged }: { projectId
                         onNext={() => setStep(2)}
                     />
                 )}
-                {step === 2 && info.data && (
+                {step === 2 && mode !== "project" && (
+                    <EnrollDownloadStep
+                        scope={mode === "team" ? { kind: "team", organizationId: owner, projectIds } : { kind: "personal" }}
+                        info={info.data}
+                        platform={platform}
+                        kind={kind}
+                        target={target}
+                        name={name.trim()}
+                        made={enrolled}
+                        onMade={(m) => {
+                            setEnrolled(m);
+                            onChanged();
+                        }}
+                        onBack={() => setStep(1)}
+                        onNext={() => setStep(3)}
+                    />
+                )}
+                {step === 3 && mode !== "project" && enrolled && (
+                    <EnrollStartStep mode={mode} platform={platform} info={info.data} made={enrolled} onBack={() => setStep(2)} onRenew={() => (setEnrolled(null), setStep(2))} onDone={() => { onChanged(); onClose(); }} />
+                )}
+                {step === 2 && projectId && info.data && (
                     <DownloadStep
                         projectId={projectId}
                         platform={platform}
@@ -154,7 +190,7 @@ export function AddRunner({ projectId, agents, onClose, onChanged }: { projectId
                         onNext={() => setStep(3)}
                     />
                 )}
-                {step === 3 && info.data && made && (
+                {step === 3 && projectId && info.data && made && (
                     <StartStep projectId={projectId} platform={platform} info={info.data} made={made} onBack={() => setStep(2)} onDone={() => { onChanged(); onClose(); }} />
                 )}
             </div>
@@ -166,6 +202,8 @@ export function AddRunner({ projectId, agents, onClose, onChanged }: { projectId
 
 function ChooseStep({
     projectId,
+    mode,
+    team,
     info,
     platform,
     kind,
@@ -178,7 +216,9 @@ function ChooseStep({
     onName,
     onNext,
 }: {
-    projectId: string;
+    projectId?: string;
+    mode: AddMode;
+    team: ReactNode;
     info: ReturnType<typeof useFetch<KitInfo>>;
     platform: KitPlatform;
     kind: KitKind;
@@ -198,9 +238,17 @@ function ChooseStep({
     const anyComplete = Boolean(k?.complete && Object.values(k.complete.targets ?? {}).some((t) => t?.available));
     const completeHere = Boolean(k && targetsFor(platform).some((t) => completeAvailable(k, t)));
     const targetOk = completeAvailable(k, target);
-    const canContinue = Boolean(k?.available) && (kind !== "complete" || targetOk);
+    // From the Runners page the person can go on without a download: the next step also offers a command with the code.
+    const canContinue = (mode !== "project" && (!k || !k.available)) || (Boolean(k?.available) && (kind !== "complete" || targetOk));
     const sizeOf = (t: CompleteTarget) => sizeWords(k?.complete?.targets?.[t]?.bytes);
     const showKinds = Boolean(k && (k.installer || anyComplete));
+    const nameField = () => (
+        <div className="field">
+            <label htmlFor="ark-name">Name</label>
+            <input id="ark-name" className="input" value={name} maxLength={NAME_MAX} autoComplete="off" aria-invalid={touched && !nameOk} aria-describedby="ark-name-hint" onChange={(e) => onName(e.target.value)} />
+            <span className="hint" id="ark-name-hint">{touched && !nameOk ? `Give it a name of 1 to ${NAME_MAX} characters.` : "How this computer is listed here, for example “Maya’s laptop”."}</span>
+        </div>
+    );
 
     return (
         <form
@@ -213,14 +261,36 @@ function ChooseStep({
             }}
         >
             <p className="t-secondary">
-                A runner is a small program on a computer where your app can be reached. It connects out to this platform, so nobody opens a door into your network.
+                {mode === "personal"
+                    ? "This sets up the computer you are using now (or another one of yours) to run your tests. The runner is a small program that connects out to this platform, so nobody opens a door into your network."
+                    : "A runner is a small program on a computer where your app can be reached. It connects out to this platform, so nobody opens a door into your network."}
             </p>
+            {mode === "personal" && (
+                <Callout tone="info" title="What this computer will do">
+                    <span data-testid="personal-terms">
+                        It runs only the tests you start, and your own schedules, in projects that allow people’s own computers. For those runs the project’s test accounts (passwords, sign-in codes, API tokens and saved sessions) are sent to this computer, so use a computer only you use. Code scripts run on it too, and it does not test localhost or addresses on your own network; you can change both on its page.
+                    </span>
+                </Callout>
+            )}
 
             {info.loading ? (
                 <div className="stack-sm" aria-busy="true">
                     <Skeleton h={64} />
                     <Skeleton h={40} />
                 </div>
+            ) : mode !== "project" && (info.error || !k) ? (
+                <>
+                    <Callout tone="warning" title="This server cannot make a download yet">
+                        You can still add the computer with a command on the next step, if it has the runner’s files.
+                    </Callout>
+                    {nameField()}
+                    {team}
+                    <div className="row">
+                        <Button type="submit" variant="primary">
+                            Continue
+                        </Button>
+                    </div>
+                </>
             ) : info.error || !k ? (
                 <ErrorState error={friendlyError(info.error?.message)} onRetry={info.reload} />
             ) : (
@@ -325,24 +395,15 @@ function ChooseStep({
                         </div>
                     )}
 
-                    <div className="field">
-                        <label htmlFor="ark-name">Name</label>
-                        <input
-                            id="ark-name"
-                            className="input"
-                            value={name}
-                            maxLength={NAME_MAX}
-                            autoComplete="off"
-                            aria-invalid={touched && !nameOk}
-                            aria-describedby="ark-name-hint"
-                            onChange={(e) => onName(e.target.value)}
-                        />
-                        <span className="hint" id="ark-name-hint">{touched && !nameOk ? `Give it a name of 1 to ${NAME_MAX} characters.` : "How this computer is listed here, for example “Maya’s laptop”."}</span>
-                    </div>
+                    {!k.available && mode !== "project" && <p className="t-meta">You can still add the computer with a command on the next step.</p>}
+                    {nameField()}
+                    {team}
 
-                    <p className="t-meta">
-                        Phone testing and visible browser windows need a runner on a computer you can see; see <a href={routes.setup(projectId, "mobile")}>Settings, Mobile app</a>.
-                    </p>
+                    {projectId && (
+                        <p className="t-meta">
+                            Phone testing and visible browser windows need a runner on a computer you can see; see <a href={routes.setup(projectId, "mobile")}>Settings, Mobile app</a>.
+                        </p>
+                    )}
                     <div className="row">
                         <Button type="submit" variant="primary" disabled={!canContinue}>
                             Continue
@@ -417,7 +478,7 @@ function DownloadStep({
                         </span>
                     </p>
                     <p>
-                        Access created: <b>{made.name}</b> (remove it any time under Access for runners).
+                        It holds a one-time code for <b>{made.name}</b>: it works once, within 30 minutes. The runner shows under Access for runners once it connects.
                     </p>
                     {made.download.fellBack && (
                         <Callout tone="info" title="You got plain files, not the installer">
@@ -493,15 +554,6 @@ function DownloadStep({
 }
 
 // ── Step 3 ──────────────────────────────────────────────────────────────────
-
-/** The file to open is the thing to find in the folder, so it is set in bold; a word in `backticks` is something to type, set in a code face. */
-function boldScripts(text: string, boldFiles = true) {
-    return text.split(/(start-runner\.(?:command|cmd|sh)|check-computer\.(?:command|cmd)|AITestingRunnerSetup\.exe|“AI Testing Runner”|`[^`]+`)/).map((part, i) => {
-        if (i % 2 === 0) return part;
-        if (part.startsWith("`")) return <code key={i}>{part.slice(1, -1)}</code>;
-        return boldFiles ? <b key={i}>{part}</b> : part;
-    });
-}
 
 function StartStep({
     projectId,

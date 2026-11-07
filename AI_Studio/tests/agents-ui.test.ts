@@ -5,7 +5,7 @@
  * The platform underneath is real (a seeded project and tests, the real UI bundle). The admin API for tokens, agents and the
  * runner choice is a small in-memory stand-in that follows .scratch/briefs/AGENT-API-SHAPES.md, served by a front server
  * that forwards everything else to the platform. It exists so this file does not depend on the platform half landing.
- * Ports: 5890 front (the address the browser uses), 5891 platform.
+ * Ports: 8106 front (the address the browser uses), 8107 platform.
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
@@ -25,8 +25,8 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
-const FRONT_PORT = 5890;
-const PLATFORM_PORT = 5891;
+const FRONT_PORT = 8106;
+const PLATFORM_PORT = 8107;
 const BASE = `http://127.0.0.1:${FRONT_PORT}`;
 
 // ── the stand-in admin API ──────────────────────────────────────────────────

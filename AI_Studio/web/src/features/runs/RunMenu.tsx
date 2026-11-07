@@ -1,32 +1,37 @@
 import { ChevronDown, Play } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type TestSummary } from "../../api";
-import { Button, Callout, Disclosure } from "../../components/ui";
+import { Button, Callout, Disclosure, LinkButton } from "../../components/ui";
 import { HelpTip } from "../../components/Tooltip";
 import { help } from "../../lib/help";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
-import type { Agent, RunnerChoice } from "../agents/agents";
+import { routes } from "../../lib/router";
+import type { RunnerChoice } from "../agents/agents";
 import { PRODUCTION_WARNING, type Environment } from "../environments/environments";
 import { announceRunsChanged, planSentence, useActiveRun } from "./runs";
-import { RUNS_OFF_HERE, RUNS_OFF_TIP } from "./runs-here";
+import { ADD_THIS_COMPUTER_HREF, DISPATCH_OFF, NO_NEEDS, NO_RUNNER_ONLINE, NO_RUNNER_PERSONAL_HINT, NO_RUNNER_TEAM_HINT, NO_RUNNER_TIP, NO_RUNNER_TITLE, PROJECT_ON_SERVER, RUNS_OFF_HERE, RUNS_OFF_TIP, defaultChoice, executionModeOf, codeScriptsNotice, kindWord, sortChoices, useRunnerChoices, whyNotRunner, type RunNeeds } from "./runs-here";
 import { resetSentence, type ResetAnswer } from "../webpages/webpages";
 import "./runs.css";
 
 type What = "failing" | "group" | "selected" | "all" | "notrun" | "test" | "fixed";
-/** "platform" = this server, "any" = whichever runner is online, otherwise a runner's id. */
+/**
+ * "platform" = this server (local mode only), "any" = whichever runner may take it, "project" = wherever the project's setting says
+ * (when the runners cannot be listed), otherwise a runner's id, sent as `runnerId` for this run only.
+ */
 type Place = string;
+const NOT_A_RUNNER = new Set(["platform", "any", "project"]);
 
 export interface RunMenuProps {
     projectId: string;
     /** "project": choose among the project's tests. "test": this one test. "fixed": exactly the tests given (for example the failing ones of a run). */
     scope?: "project" | "test" | "fixed";
     /** scope "project": the tests the choices count. */
-    tests?: Array<Pick<TestSummary, "id" | "suite" | "validationStatus" | "kind">>;
+    tests?: Array<Pick<TestSummary, "id" | "suite" | "validationStatus" | "kind"> & { custom?: unknown }>;
     /** scope "project": the tests ticked in the list. */
     selectedIds?: string[];
     /** scope "test". */
-    test?: { id: string; kind: string };
+    test?: { id: string; kind: string; custom?: unknown };
     /** scope "fixed": what is run, said in words ("the 4 failing tests of this run"), and which tests. */
     fixed?: { ids: string[]; description: string; environment?: string };
     label?: string;
@@ -68,15 +73,24 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     const active = useActiveRun(projectId);
     const busyRun = Boolean(active.job);
 
+    const config = useConfig();
+    // Runners mode (the hosted platform): every run goes to a runner, so "This server" is never offered, and Run waits for a runner
+    // this person may use here. The runners are read while the button is shown (slowly polled) so the button can say so before a click.
+    const runnersOnly = executionModeOf(config) === "runners";
     // The panel looks things up only while it is open, so a closed one costs nothing and an open one shows who is online now.
-    const agents = useFetch<Agent[]>(open ? `/projects/${projectId}/agents` : null);
+    const choicesF = useRunnerChoices(projectId, runnersOnly || open, runnersOnly ? 15_000 : 0);
     const runner = useFetch<RunnerChoice>(open ? `/projects/${projectId}/runner` : null);
     const envs = useFetch<{ environments: Environment[] }>(open ? `/projects/${projectId}/environments` : null);
     // The test data reset that runs first, if one is switched on (said in the sentence below).
     const resets = useFetch<ResetAnswer>(open ? `/projects/${projectId}/test-data-reset` : null);
-    const config = useConfig();
     // Tests switched off on this server: said on the button and in the panel, and nothing is started (the server refuses too).
+    // In runners mode the same answer means the platform's dispatch is not running, so no runner gets a run either.
     const off = config?.runsHere === false;
+    const offText = runnersOnly ? DISPATCH_OFF : RUNS_OFF_TIP;
+    useEffect(() => {
+        if (open && runnersOnly) void choicesF.reload();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     const [what, setWhat] = useState<What>(scope === "test" ? "test" : scope === "fixed" ? "fixed" : "failing");
     const [group, setGroup] = useState("");
@@ -107,9 +121,6 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
-    // Where it runs now: what the project already uses, until the person picks something else.
-    const current: Place = runner.data ? (runner.data.runOn === "agent" ? (runner.data.agentId ?? "any") : "platform") : "platform";
-    const chosenPlace = place ?? current;
     useEffect(() => {
         if (!open) setPlace(null);
     }, [open]);
@@ -154,8 +165,6 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
         if (open) root.current?.querySelector<HTMLElement>(".run-pop input:not(:disabled), .run-pop button")?.focus();
     }, [open]);
 
-    const onlineAgents = (agents.data ?? []).filter((a) => a.online);
-    const placeName = (p: Place): string | null => (p === "platform" ? null : p === "any" ? (onlineAgents.length === 1 ? onlineAgents[0]!.name : "a runner") : ((agents.data ?? []).find((a) => a.id === p)?.name ?? "a runner"));
     const env = (envs.data?.environments ?? []).find((e) => e.name === environment);
     const hasEnvs = (envs.data?.environments ?? []).length > 0;
 
@@ -181,8 +190,50 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     const leftOut = environment && scope !== "fixed" ? ids.length - runnable.length : 0;
     const count = scope === "fixed" ? ids.length : runnable.length;
 
+    // What this run needs from the runner that takes it, from the tests it covers (a "fixed" run knows only ids: the server checks).
+    const needs: RunNeeds = useMemo(() => {
+        if (scope === "fixed") return NO_NEEDS;
+        const picked = scope === "test" ? (test ? [test] : []) : tests.filter((t) => runnable.includes(t.id));
+        return { web: picked.some((t) => t.kind === "web" || t.kind === "api"), mobile: picked.some((t) => t.kind === "mobile"), code: picked.some((t) => Boolean(t.custom)) };
+    }, [scope, test, tests, runnable]);
+
+    // Where it can run. The runners this person may use here (their own computers first), each with the reason it cannot take this
+    // run, if any; "This server" only on a platform that runs tests itself and only while the project runs there (a run cannot be
+    // sent to the server alone: choosing it would change the project's setting, which belongs on the Runners page).
+    const choices = choicesF.data;
+    const rows = choices ? sortChoices(choices.runners) : [];
+    const projectOnServer = !runnersOnly && runner.data?.runOn !== "agent";
+    const why = (id: string) => {
+        const r = rows.find((x) => x.id === id);
+        if (!r) return "Not available.";
+        return whyNotRunner(r, needs, choices?.allowPersonal) ?? (projectOnServer ? PROJECT_ON_SERVER : null);
+    };
+    const usable = rows.filter((r) => !why(r.id));
+    // "Any runner that is online": only while several can take it and the project has no default runner (the platform then gives it to whichever is free).
+    const offerAny = !!choices && !choices.defaultRunnerId && usable.length > 1;
+    const fallbackPlace: Place | null = choices ? (projectOnServer ? "platform" : defaultChoice(choices, needs)) : choicesF.error ? (projectOnServer ? "platform" : "project") : null;
+    const pickable = (p: Place) => (p === "platform" ? projectOnServer : p === "any" ? offerAny : p === "project" ? !choices : !why(p));
+    const chosenPlace: Place | null = place && pickable(place) ? place : fallbackPlace;
+    // Runners mode, none online that this person may use (whatever the tests): the main button waits, the panel says what to do.
+    const noRunner = runnersOnly && !!choices && !choices.runners.some((r) => !whyNotRunner(r, NO_NEEDS, choices.allowPersonal));
+    const choicesPending = (runnersOnly || open) && choicesF.loading && !choices;
+    const placeName = (p: Place | null): string | null => {
+        if (p === "platform") return null;
+        if (p === "any") return usable.length === 1 ? usable[0]!.name : "a runner that is online";
+        if (p === "project" || p === null) return runner.data?.runOn === "agent" || runnersOnly ? "the project’s runner" : null;
+        return rows.find((r) => r.id === p)?.name ?? "a runner";
+    };
+    const runnerId = chosenPlace && !NOT_A_RUNNER.has(chosenPlace) ? chosenPlace : undefined;
+    // Code scripts going to the person's own computer: said before Start, with who wrote them when the platform says so (a test's
+    // script versions carry who saved each; the list of tests does not, so a project run names nobody), and where to switch them off.
+    const ownRunner = runnerId ? rows.find((r) => r.id === runnerId && r.mine) : undefined;
+    const codeToOwn = Boolean(ownRunner) && needs.code;
+    const versions = useFetch<Array<{ by: string | null }>>(open && codeToOwn && scope === "test" && test ? `/tests/${test.id}/script-versions` : null);
+    const authors = [...new Set((versions.data ?? []).map((v) => v.by?.trim()).filter((b): b is string => Boolean(b)))];
+
     const variantList = (config?.variants ?? []).filter((v) => v.available);
-    const sentence = planSentence({
+    // Runners are listed, and none of them can take this run: each says why, and nothing claims where it would run.
+    const sentence = chosenPlace === null && choices ? (noRunner ? NO_RUNNER_ONLINE : "None of the runners you can use can take this run. Each one says why.") : planSentence({
         count,
         runner: placeName(chosenPlace),
         ...(environment ? { environment } : {}),
@@ -197,21 +248,20 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
         setStarting(true);
         setError("");
         try {
-            // A different place is the project's setting: it is changed first, and the sentence above says so.
-            if (!direct && place && place !== current) {
-                await api(`/projects/${projectId}/runner`, { method: "PUT", body: place === "platform" ? { runOn: "platform" } : { runOn: "agent", agentId: place === "any" ? null : place } });
-            }
+            // The runner picked here is for this run only (`runnerId`): the project's setting does not change. The main button of a
+            // split control sends none, so the platform uses the project's default runner, or any runner that may take it.
+            const where = !direct && runnerId ? { runnerId } : {};
             let out: Started;
             if (direct || (scope === "test" && !environment && !retry && variantsPicked.length === 0)) {
                 // One test, nothing special: the test's own run route (it also explains in words why a test cannot run here).
-                out = await api<Started>(`/tests/${test!.id}/validate`, { method: "POST" });
+                out = await api<Started>(`/tests/${test!.id}/validate`, { method: "POST", ...(where.runnerId ? { body: where } : {}) });
             } else if (scope === "test" && environment) {
-                out = await api<Started>(`/tests/${test!.id}/validate`, { method: "POST", body: { environment, ...(needsConfirm ? { confirmProduction: true } : {}) } });
+                out = await api<Started>(`/tests/${test!.id}/validate`, { method: "POST", body: { environment, ...(needsConfirm ? { confirmProduction: true } : {}), ...where } });
             } else if (environment) {
-                out = await api<Started>(`/projects/${projectId}/environments/${encodeURIComponent(environment)}/runs`, { method: "POST", body: { testIds: runnable, ...(needsConfirm ? { confirmProduction: true } : {}) } });
+                out = await api<Started>(`/projects/${projectId}/environments/${encodeURIComponent(environment)}/runs`, { method: "POST", body: { testIds: runnable, ...(needsConfirm ? { confirmProduction: true } : {}), ...where } });
             } else {
                 const all = scope === "project" && what === "all" && !variantsPicked.length && !retry;
-                out = await api<Started>(`/projects/${projectId}/runs`, { method: "POST", body: { ...(all ? {} : { testIds: ids }), ...(retry ? { retryFailures: 1 } : {}), ...(variantsPicked.length ? { variants: variantsPicked } : {}) } });
+                out = await api<Started>(`/projects/${projectId}/runs`, { method: "POST", body: { ...(all ? {} : { testIds: ids }), ...(retry ? { retryFailures: 1 } : {}), ...(variantsPicked.length ? { variants: variantsPicked } : {}), ...where } });
             }
             setOpen(false);
             announceRunsChanged();
@@ -240,7 +290,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     return (
         <div className={`run-menu${split ? " is-split" : ""}`} ref={root} data-tour="run">
             {split && (
-                <Button variant={variant} size={size} disabled={busyRun || starting || off} loading={starting && !open} onClick={() => void start(true)} tip={off ? RUNS_OFF_TIP : busyRun ? BUSY : "Runs it now where this project runs its tests."} className="run-main">
+                <Button variant={variant} size={size} disabled={busyRun || starting || off || noRunner || (runnersOnly && choicesPending)} loading={starting && !open} onClick={() => void start(true)} tip={off ? offText : busyRun ? BUSY : noRunner ? NO_RUNNER_TIP : runnersOnly ? "Runs it now on the project’s default runner, or on a runner of yours or the team’s that is online." : "Runs it now where this project runs its tests."} className="run-main">
                     {main}
                 </Button>
             )}
@@ -253,7 +303,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                 aria-controls={open ? panelId : undefined}
                 aria-label={split ? "More ways to run" : undefined}
                 disabled={busyRun && !open}
-                tip={off && !open ? RUNS_OFF_TIP : busyRun && !open ? BUSY : split ? "Choose which tests, where they run and how." : undefined}
+                tip={off && !open ? offText : busyRun && !open ? BUSY : noRunner && !open ? NO_RUNNER_TIP : split ? "Choose which tests, where they run and how." : undefined}
                 onClick={() => setOpen((o) => !o)}
             >
                 {split ? null : main}
@@ -261,10 +311,31 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
             </Button>
             {open && (
                 <div className={`run-pop${flip ? " is-flipped" : ""}`} id={panelId} role="group" aria-label="Run settings">
-                    {off && (
+                    {off && !runnersOnly && (
                         <Callout tone="warning" title="Tests do not run here">
                             <span data-testid="runs-off">{RUNS_OFF_HERE} Run them where tests run, or once tests are switched on here.</span>
                         </Callout>
+                    )}
+                    {off && runnersOnly && (
+                        <Callout tone="warning" title="Runs can’t start right now">
+                            <span data-testid="runs-off">{DISPATCH_OFF}</span>
+                        </Callout>
+                    )}
+                    {!off && noRunner && (
+                        <div data-testid="no-runner">
+                            <Callout
+                                tone="warning"
+                                title={NO_RUNNER_TITLE}
+                                actions={
+                                    <>
+                                        {choices?.allowPersonal && <LinkButton size="sm" variant="primary" href={ADD_THIS_COMPUTER_HREF}>Add this computer</LinkButton>}
+                                        <LinkButton size="sm" href={routes.runners(projectId)}>See this project’s runners</LinkButton>
+                                    </>
+                                }
+                            >
+                                {choices?.allowPersonal ? NO_RUNNER_PERSONAL_HINT : NO_RUNNER_TEAM_HINT}
+                            </Callout>
+                        </div>
                     )}
                     <fieldset className="run-sec">
                         <legend>What</legend>
@@ -303,33 +374,55 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                         <legend>
                             Where{" "}
                             {/* Only once runners are listed: the panel's first focus (set when it opens) stays where it was. */}
-                            {agents.data?.length ? <HelpTip label="online and offline runners" text={`Online: ${help("runner", "online")} Offline: nothing heard from it in the last 45 seconds, so it cannot be picked here.`} /> : null}
+                            {rows.length ? <HelpTip label="online and offline runners" text={`Online: ${help("runner", "online")} Offline: nothing heard from it in the last 45 seconds, so it cannot be picked here.`} /> : null}
                         </legend>
-                        {runner.error || agents.error ? (
-                            <p className="t-secondary">Runs on this server.</p>
-                        ) : !agents.data || !runner.data ? (
+                        {choicesPending || (!choices && !choicesF.error) || (!runnersOnly && runner.loading && !runner.data) ? (
                             <p className="t-meta" role="status">Looking for runners…</p>
+                        ) : !choices ? (
+                            // The runners cannot be listed (an older server, or no answer): the project's setting decides, as the platform says it.
+                            <p className="t-secondary">{runner.data?.status ?? (runnersOnly ? "Runs on a runner of this project." : "Runs on this server.")}</p>
                         ) : (
                             <>
-                                <label className="run-opt">
-                                    <input type="radio" name={`${panelId}-where`} checked={chosenPlace === "platform"} onChange={() => setPlace("platform")} />
-                                    <span className="text">This server</span>
-                                </label>
-                                {current === "any" && (
+                                {projectOnServer && (
                                     <label className="run-opt">
-                                        <input type="radio" name={`${panelId}-where`} checked={chosenPlace === "any"} onChange={() => setPlace("any")} />
-                                        <span className="text">Any runner that is online</span>
+                                        <input type="radio" name={`${panelId}-where`} checked={chosenPlace === "platform"} onChange={() => setPlace("platform")} />
+                                        <span className="text">This server</span>
                                     </label>
                                 )}
-                                {agents.data.map((a) => (
-                                    <label key={a.id} className={`run-opt${a.online ? "" : " is-off"}`}>
-                                        <input type="radio" name={`${panelId}-where`} checked={chosenPlace === a.id} disabled={!a.online} onChange={() => setPlace(a.id)} />
-                                        <span className="text">{a.name}</span>
-                                        <span className={`run-online ${a.online ? "is-on" : ""}`}>{a.online ? "online" : "offline"}</span>
+                                {offerAny && !projectOnServer && (
+                                    <label className="run-opt">
+                                        <input type="radio" name={`${panelId}-where`} checked={chosenPlace === "any"} onChange={() => setPlace("any")} />
+                                        <span className="text">
+                                            Any runner that is online
+                                            <span className="t-meta">Whichever of the {usable.length} below is free first.</span>
+                                        </span>
                                     </label>
-                                ))}
-                                {agents.data.length === 0 && <p className="t-meta">{off ? "No runner is connected." : "No runner is connected. Tests run on this server."}</p>}
-                                {place && place !== current && <p className="t-meta">This also becomes where this project runs its tests, until you change it.</p>}
+                                )}
+                                {rows.map((r) => {
+                                    const no = why(r.id);
+                                    return (
+                                        <label key={r.id} className={`run-opt${no ? " is-off" : ""}`} data-runner={r.id}>
+                                            <input type="radio" name={`${panelId}-where`} checked={chosenPlace === r.id} disabled={Boolean(no)} onChange={() => setPlace(r.id)} />
+                                            <span className="text">
+                                                {r.name}
+                                                {no && no !== PROJECT_ON_SERVER ? <span className="t-meta">{no}</span> : !no && r.busy ? <span className="t-meta">Busy with another run: this one waits until it is free.</span> : null}
+                                            </span>
+                                            <span className={`run-online ${r.online ? "is-on" : ""}`}>
+                                                {kindWord(r)} · {r.online ? (r.busy ? "busy" : "online") : "offline"}
+                                            </span>
+                                        </label>
+                                    );
+                                })}
+                                {rows.length === 0 && <p className="t-meta">{runnersOnly ? "No runner is connected." : "No runner is connected. Tests run on this server."}</p>}
+                                {projectOnServer && rows.length > 0 && <p className="t-meta" data-testid="project-on-server">{PROJECT_ON_SERVER}</p>}
+                                {runnerId && <p className="t-meta">Only this run goes there. Where the project runs its tests does not change.</p>}
+                                {codeToOwn && ownRunner && (
+                                    <div data-testid="code-on-own">
+                                        <Callout tone="warning" actions={<a href={routes.runner(ownRunner.id)}>Open {ownRunner.name}’s page to switch code scripts off</a>}>
+                                            {codeScriptsNotice(authors)}
+                                        </Callout>
+                                    </div>
+                                )}
                             </>
                         )}
                         {hasEnvs && scope !== "fixed" && (
@@ -383,7 +476,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                     {error && <Callout tone="danger">{error}</Callout>}
                     <div className="run-foot">
                         <Button onClick={() => setOpen(false)}>Close</Button>
-                        <Button variant="primary" icon={Play} loading={starting} disabled={off || count === 0 || (needsConfirm && !confirmProduction) || busyRun || envsPending} onClick={() => void start()}>
+                        <Button variant="primary" icon={Play} loading={starting} disabled={off || count === 0 || (needsConfirm && !confirmProduction) || busyRun || envsPending || choicesPending || chosenPlace === null} onClick={() => void start()}>
                             Start run
                         </Button>
                     </div>

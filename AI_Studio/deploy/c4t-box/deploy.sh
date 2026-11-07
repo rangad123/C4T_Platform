@@ -129,10 +129,12 @@ write_env() {
     # apps. env.local can raise CONCURRENCY.
     printf 'BLOCK_PRIVATE_TARGETS=true\n'
     printf 'CONCURRENCY=1\n'
-    # Tests stay off here. Without a worker no queued job, schedule or security
-    # assessment runs, because anything run on this box can read what the ubuntu
-    # user can, the C4T env files included. See "Tests are off" in README.md
-    # before changing this.
+    # Tests run only on runners (testers' and teams' own computers). This box
+    # never runs test code or opens a browser for a run: anything run here could
+    # read what the ubuntu user can, the C4T env files included. The API process
+    # hands every run to a runner through its dispatch worker, and the full
+    # worker stays off. See "Tests run only on runners" in README.md.
+    printf 'EXECUTION_MODE=runners\n'
     printf 'WORKER_EMBEDDED=false\n'
     # The disk is shared with crowd4test.com: evidence is kept 14 days, and the
     # database is backed up daily (7 kept) beside the deploy's own backups.
@@ -260,6 +262,12 @@ install_runner_downloads() {
   built="$(sed -n 's/.*"commit": *"\([0-9a-f]*\)".*/\1/p' "$RUNNER_DOWNLOADS/build-info.json" 2>/dev/null | head -n 1 || true)"
   here="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
   say "runner downloads installed in $RUNNER_DOWNLOADS ($(du -sm "$RUNNER_DOWNLOADS" | cut -f1) MB; $(ls "$RUNNER_DOWNLOADS/runner-complete" 2>/dev/null | tr '\n' ' '))"
+  # Signed runner updates (docs/features/runner-updates.md): the workflow signs them only when RUNNER_UPDATE_SIGNING_KEY is set.
+  if [ -s "$RUNNER_DOWNLOADS/runner/update-manifest.json" ] && [ -s "$RUNNER_DOWNLOADS/runner/update-manifest.sig" ]; then
+    say "runner update signed (version $(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$RUNNER_DOWNLOADS/runner/update-manifest.json" | head -n 1)): runners that update themselves are offered it"
+  else
+    say "runner update NOT signed (RUNNER_UPDATE_SIGNING_KEY is not set in the deploy workflow): no runner is offered an update; people download new versions from the Runners page"
+  fi
   if [ -n "$built" ] && [ -n "$here" ] && [ "$built" != "$here" ]; then
     say "the runner downloads were built from ${built:0:12}, and this checkout is ${here:0:12}: the next deploy brings matching ones"
   fi

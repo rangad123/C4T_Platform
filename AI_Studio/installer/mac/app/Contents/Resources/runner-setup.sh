@@ -1,15 +1,16 @@
 #!/bin/sh
 # AI Testing Runner for macOS: checks what this Mac already has, downloads only what is missing, and starts the runner.
 #
-#   runner-setup.sh [--check] [--silent] [--no-start] [--autostart | --no-autostart]
+#   runner-setup.sh [--check] [--silent | --yes] [--no-start] [--autostart | --no-autostart]
 #                   [--install-dir DIR] [--kit-dir DIR] [--log FILE] [--uninstall]
 #
 #   --check         Say what would be downloaded and change nothing. Exit 0: nothing to download. 10: something would be. 1: error.
-#   --silent        No dialogs and no questions (for administrators and scripts).
+#   --silent        No dialogs and no questions (for administrators and scripts); the default answers are used. --yes: the same.
 #   --no-start      Set everything up, do not start the runner.
-#   --autostart     Also start the runner every time you sign in (a LaunchAgent). --no-autostart: do not, and do not ask.
+#   --autostart     Run the runner in the background, also after every sign-in (a LaunchAgent). This is the default answer, and what
+#                   --silent does. --no-autostart: run it in this Terminal window instead, and do not ask.
 #   --install-dir   Where to install. Default: ~/Library/Application Support/AITestingRunner
-#   --kit-dir       The unzipped runner kit (runner.mjs, runner.json, runner.token, ...). Default: the folder that holds this app.
+#   --kit-dir       The unzipped runner kit (runner.mjs, runner.json, runner.enroll, ...). Default: the folder that holds this app.
 #   --log FILE      Also write what is printed to FILE.
 #   --uninstall     Stop the runner this installer started, remove its LaunchAgent and the install folder it created.
 #
@@ -35,7 +36,13 @@ NODE_MIN=24
 # the download says so plainly and the person installs Node.js from nodejs.org.
 NODE_FALLBACK="24.11.0"
 NODE_DIST_DEFAULT="https://nodejs.org/dist"
-KIT_FILES="runner.mjs task-child.mjs record-child.mjs package.json LICENSES.txt runner.json runner.token"
+# What every download holds. The credential is separate: runner.enroll (a one-time code, from round 39 on) or, in an older download,
+# runner.token. package-lock.json is in every download from round 39 on.
+KIT_FILES="runner.mjs task-child.mjs record-child.mjs package.json LICENSES.txt runner.json"
+KIT_OPTIONAL="package-lock.json"
+# Logs: rotated at this size while the runner runs, keeping this many older files (runner.log.1 ... and launchd.log.1 ...).
+LOG_MAX_BYTES=${AITP_INSTALLER_LOG_MAX_BYTES:-5000000}
+LOG_KEEP=3
 NL='
 '
 
@@ -75,7 +82,7 @@ while [ $# -gt 0 ]; do
         --check) MODE=check ;;
         --uninstall) MODE=uninstall ;;
         --run-loop) MODE=loop ;;
-        --silent) SILENT=1 ;;
+        --silent | --yes) SILENT=1 ;;
         --no-start) NO_START=1 ;;
         --autostart) AUTOSTART=yes ;;
         --no-autostart) AUTOSTART=no ;;
@@ -132,6 +139,10 @@ NODE_PATH_FILE="$INSTALL_DIR/node-path"
 INSTALLED_SCRIPT="$INSTALL_DIR/runner-setup.sh"
 AGENT_PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 RUNLOG="$LOG_DIR/runner.log"
+LAUNCHD_LOG="$LOG_DIR/launchd.log"
+# The sha256 of the last enrollment file copied from a download (never the code itself), so opening the app again from the same
+# unzipped folder does not copy an already used code over a runner that is working.
+ENROLL_SEEN="$INSTALL_DIR/enroll-copied"
 
 # Where this script lives: inside "AI Testing Runner.app/Contents/Resources", or (the copy the LaunchAgent runs) in the install folder.
 SELF_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
@@ -468,22 +479,26 @@ runner_pid() {
 
 # ---------------------------------------------------------------- the runner kit next to the app
 
+# kit_complete_in DIR: does DIR hold every file of a download, and its one-time code (or an older download's runner.token)?
+kit_complete_in() {
+    for kc_file in $KIT_FILES; do
+        [ -f "$1/$kc_file" ] || return 1
+    done
+    [ -f "$1/runner.enroll" ] || [ -f "$1/runner.token" ]
+}
+
 # find_kit: sets KIT_SRC to the folder that holds the runner files, or to "" when only an earlier install has them.
 find_kit() {
     KIT_SRC=""
     for fk_dir in "$KIT_DIR_ARG" "${AITP_KIT_DIR:-}" "$( [ -n "$APP_DIR" ] && dirname "$APP_DIR" )"; do
         [ -n "$fk_dir" ] || continue
-        fk_ok=1
-        for fk_file in $KIT_FILES; do
-            [ -f "$fk_dir/$fk_file" ] || fk_ok=0
-        done
-        if [ "$fk_ok" = "1" ]; then
+        if kit_complete_in "$fk_dir"; then
             KIT_SRC=$fk_dir
             return 0
         fi
     done
-    # No kit beside the app: an earlier install already holds the files.
-    if [ -f "$RUNNER_DIR/runner.mjs" ] && [ -f "$RUNNER_DIR/runner.json" ] && [ -f "$RUNNER_DIR/runner.token" ]; then
+    # No kit beside the app: an earlier install already holds the files (its credential is in the Keychain, or in runner.token).
+    if [ -f "$RUNNER_DIR/runner.mjs" ] && [ -f "$RUNNER_DIR/runner.json" ]; then
         return 0
     fi
     # Still nothing: with a dialog, let the person point at the unzipped folder.
@@ -493,15 +508,9 @@ set f to choose folder with prompt (item 1 of argv)
 return POSIX path of f
 end run' "Choose the folder you unzipped. It holds runner.mjs and runner.json.")
         fk_pick=${fk_pick%/}
-        if [ -n "$fk_pick" ]; then
-            fk_ok=1
-            for fk_file in $KIT_FILES; do
-                [ -f "$fk_pick/$fk_file" ] || fk_ok=0
-            done
-            if [ "$fk_ok" = "1" ]; then
-                KIT_SRC=$fk_pick
-                return 0
-            fi
+        if [ -n "$fk_pick" ] && kit_complete_in "$fk_pick"; then
+            KIT_SRC=$fk_pick
+            return 0
         fi
     fi
     return 1
@@ -514,7 +523,7 @@ kit_missing_message() {
             return 0
             ;;
     esac
-    printf '%s' "I could not find the runner files (runner.mjs, runner.json and runner.token) next to this app. Unzip the whole runner kit you downloaded from the platform and open the app from inside the unzipped folder."
+    printf '%s' "I could not find the runner files (runner.mjs, runner.json and runner.enroll) next to this app. Unzip the whole runner kit you downloaded from the platform and open the app from inside the unzipped folder."
 }
 
 # ---------------------------------------------------------------- step 1: Node.js
@@ -735,12 +744,28 @@ step_node() {
 install_files_differ() {
     # How many of the kit's files are missing or different in the install folder.
     idf_n=0
-    for idf_file in $KIT_FILES; do
+    for idf_file in $(kit_copy_list); do
         if [ ! -f "$RUNNER_DIR/$idf_file" ] || ! cmp -s "$KIT_SRC/$idf_file" "$RUNNER_DIR/$idf_file"; then
             idf_n=$((idf_n + 1))
         fi
     done
     printf '%s' "$idf_n"
+}
+
+# kit_copy_list: the files to copy from the unzipped download: every kit file, the lock file when there is one, and the credential.
+# A one-time code is copied only once: the runner deletes its copy after trading it, and the same code is never copied again.
+kit_copy_list() {
+    printf '%s' "$KIT_FILES"
+    for kl_file in $KIT_OPTIONAL; do
+        [ -f "$KIT_SRC/$kl_file" ] && printf ' %s' "$kl_file"
+    done
+    if [ -f "$KIT_SRC/runner.enroll" ]; then
+        if [ "$(sha256_of "$KIT_SRC/runner.enroll")" != "$(head -n 1 "$ENROLL_SEEN" 2>/dev/null)" ]; then
+            printf ' %s' runner.enroll
+        fi
+    elif [ -f "$KIT_SRC/runner.token" ]; then
+        printf ' %s' runner.token
+    fi
 }
 
 clear_quarantine() {
@@ -768,7 +793,8 @@ step_files() {
     fi
     mkdir -p "$RUNNER_DIR" || die "Setup stopped. I could not create $RUNNER_DIR."
     sf_copied=0
-    for sf_file in $KIT_FILES; do
+    sf_list=$(kit_copy_list)
+    for sf_file in $sf_list; do
         if [ ! -f "$RUNNER_DIR/$sf_file" ] || ! cmp -s "$KIT_SRC/$sf_file" "$RUNNER_DIR/$sf_file"; then
             # Written under a private name and moved into place, so a runner that is running never reads half a file. The token is private.
             (
@@ -781,7 +807,14 @@ step_files() {
             sf_copied=$((sf_copied + 1))
         fi
     done
-    chmod 600 "$RUNNER_DIR/runner.token" 2>/dev/null
+    chmod 600 "$RUNNER_DIR/runner.token" "$RUNNER_DIR/runner.enroll" 2>/dev/null
+    case " $sf_list " in
+        *" runner.enroll "*)
+            # A new one-time code replaces the credential of an older download; the runner trades it at its next start.
+            rm -f "$RUNNER_DIR/runner.token"
+            sha256_of "$KIT_SRC/runner.enroll" >"$ENROLL_SEEN" 2>/dev/null
+            ;;
+    esac
     # The script itself is copied too, so the sign-in start keeps working when the app is moved or deleted.
     if [ -f "$0" ] && { [ ! -f "$INSTALLED_SCRIPT" ] || ! cmp -s "$0" "$INSTALLED_SCRIPT"; }; then
         cp "$0" "$INSTALLED_SCRIPT.new" && mv -f "$INSTALLED_SCRIPT.new" "$INSTALLED_SCRIPT"
@@ -790,7 +823,7 @@ step_files() {
     if [ "$sf_copied" -eq 0 ]; then
         step 2 "Runner files" "found, up to date, skipped"
     else
-        step 2 "Runner files" "done ($sf_copied of 7 files copied to $RUNNER_DIR)"
+        step 2 "Runner files" "done ($sf_copied of $(printf '%s\n' $sf_list | wc -l | tr -d ' ') files copied to $RUNNER_DIR)"
     fi
 }
 
@@ -863,7 +896,13 @@ step_tools() {
     step 3 "Test tools" "installing with npm (needs the internet, can take a few minutes)"
     mkdir -p "$LOG_DIR"
     st_log="$LOG_DIR/npm-install.log"
-    (cd "$RUNNER_DIR" && PATH="$(dirname "$NODE_BIN"):$PATH" "$st_npm" install --no-audit --no-fund) >"$st_log" 2>&1
+    # With the download's lock file: exactly the locked versions and checksums, and no package's install script runs (Playwright needs
+    # none). An older download without one: npm install, as before.
+    if [ -f "$RUNNER_DIR/package-lock.json" ]; then
+        (cd "$RUNNER_DIR" && PATH="$(dirname "$NODE_BIN"):$PATH" "$st_npm" ci --ignore-scripts --no-audit --no-fund) >"$st_log" 2>&1
+    else
+        (cd "$RUNNER_DIR" && PATH="$(dirname "$NODE_BIN"):$PATH" "$st_npm" install --no-audit --no-fund) >"$st_log" 2>&1
+    fi
     st_code=$?
     if [ "$st_code" -ne 0 ]; then
         step 3 "Test tools" "failed: npm could not install them (code $st_code)"
@@ -1011,9 +1050,12 @@ write_launch_agent() {
         printf '        <string>%s</string>\n' "/bin/sh" "$(xml_escape "$wl_script")" "--run-loop" "--install-dir" "$(xml_escape "$INSTALL_DIR")"
         printf '%s\n' '    </array>'
         printf '    <key>WorkingDirectory</key>\n    <string>%s</string>\n' "$(xml_escape "$RUNNER_DIR")"
-        printf '%s\n' '    <key>RunAtLoad</key>' '    <true/>' '    <key>KeepAlive</key>' '    <true/>'
-        printf '    <key>StandardOutPath</key>\n    <string>%s</string>\n' "$(xml_escape "$LOG_DIR/launchd.log")"
-        printf '    <key>StandardErrorPath</key>\n    <string>%s</string>\n' "$(xml_escape "$LOG_DIR/launchd.log")"
+        # Started again only when the loop ends with an error: after a stop for good (the runner's access was removed) it stays stopped
+        # until the next sign-in.
+        printf '%s\n' '    <key>RunAtLoad</key>' '    <true/>' '    <key>KeepAlive</key>' '    <dict>' '        <key>SuccessfulExit</key>' '        <false/>' '    </dict>'
+        printf '%s\n' '    <key>ProcessType</key>' '    <string>Background</string>'
+        printf '    <key>StandardOutPath</key>\n    <string>%s</string>\n' "$(xml_escape "$LAUNCHD_LOG")"
+        printf '    <key>StandardErrorPath</key>\n    <string>%s</string>\n' "$(xml_escape "$LAUNCHD_LOG")"
         printf '%s\n' '    <key>EnvironmentVariables</key>' '    <dict>' '        <key>PATH</key>'
         printf '        <string>%s</string>\n' "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
         printf '%s\n' '    </dict>' '</dict>' '</plist>'
@@ -1053,10 +1095,48 @@ remove_launch_agent() {
 fatal_message() {
     case "$1" in
         2) printf '%s' "The runner could not read its settings. Check that you unzipped the whole kit, or download a new one from the platform." ;;
-        3) printf '%s' "The platform no longer accepts this runner's token. It was revoked, or the project was deleted. Download a new runner kit from the platform (Setup, Runners, Add a runner)." ;;
+        3) printf '%s' "The platform no longer accepts this runner. It was removed, its one-time code was already used or has expired, or the project was deleted. Make a new download on the Runners page of the platform." ;;
         4) printf '%s' "This runner and the platform are different versions. Download a new runner kit from the platform." ;;
         5) printf '%s' "The platform refused this runner. The message above says why." ;;
     esac
+}
+
+# rotate_log FILE: when FILE is larger than LOG_MAX_BYTES, keep a copy as FILE.1 (FILE.1 becomes FILE.2 ..., at most LOG_KEEP) and empty
+# FILE in place. Emptying in place (not moving) is what keeps it working while the runner and launchd still write to it: both append.
+rotate_log() {
+    [ -f "$1" ] || return 0
+    [ "$(file_size "$1")" -gt "$LOG_MAX_BYTES" ] 2>/dev/null || return 0
+    rlg_n=$LOG_KEEP
+    while [ "$rlg_n" -gt 1 ]; do
+        rlg_prev=$((rlg_n - 1))
+        if [ -f "$1.$rlg_prev" ]; then mv -f "$1.$rlg_prev" "$1.$rlg_n"; fi
+        rlg_n=$rlg_prev
+    done
+    cp "$1" "$1.1" 2>/dev/null && : >"$1"
+    return 0
+}
+
+# watch_logs: rotate runner.log and launchd.log once a minute while the loop runs (AITP_INSTALLER_LOG_CHECK_SECONDS, for tests). Started
+# with its output closed, so it never keeps the Terminal window's or a caller's output open after the loop has ended.
+watch_logs() {
+    while :; do
+        sleep "${AITP_INSTALLER_LOG_CHECK_SECONDS:-60}" </dev/null >/dev/null 2>&1
+        rotate_log "$RUNLOG"
+        rotate_log "$LAUNCHD_LOG"
+    done
+}
+
+# start_runner: start the runner in the background, telling it how to find its credential. A one-time code it trades and deletes (runner.enroll), an older
+# download's runner.token, or nothing: the runner then reads the credential it keeps in the login Keychain.
+start_runner() {
+    if [ -f runner.enroll ]; then
+        "$NODE_BIN" runner.mjs --enroll-file runner.enroll >>"$RUNLOG" 2>&1 </dev/null &
+    elif [ -f runner.token ]; then
+        "$NODE_BIN" runner.mjs --token-file runner.token >>"$RUNLOG" 2>&1 </dev/null &
+    else
+        "$NODE_BIN" runner.mjs >>"$RUNLOG" 2>&1 </dev/null &
+    fi
+    NODE_PID=$!
 }
 
 stop_children() {
@@ -1069,6 +1149,7 @@ stop_children() {
 loop_cleanup() {
     if [ -n "$TAIL_PID" ]; then kill "$TAIL_PID" 2>/dev/null; fi
     if [ -n "$WATCH_PID" ]; then kill "$WATCH_PID" 2>/dev/null; fi
+    if [ -n "$LOGS_PID" ]; then kill "$LOGS_PID" 2>/dev/null; fi
     if [ -f "$PIDFILE" ] && [ "$(head -n 1 "$PIDFILE" 2>/dev/null)" = "$$" ]; then
         rm -f "$PIDFILE"
     fi
@@ -1093,9 +1174,8 @@ watch_connection() {
 run_loop() {
     rl_kind=$1
     mkdir -p "$LOG_DIR"
-    if [ -f "$RUNLOG" ] && [ "$(file_size "$RUNLOG")" -gt 5000000 ] 2>/dev/null; then
-        mv -f "$RUNLOG" "$RUNLOG.1"
-    fi
+    rotate_log "$RUNLOG"
+    rotate_log "$LAUNCHD_LOG"
     : >>"$RUNLOG"
     cd "$RUNNER_DIR" || die "The runner folder $RUNNER_DIR is missing. Open the AI Testing Runner app to set it up again."
     # Use the Node.js that setup chose; look again if it has gone.
@@ -1113,10 +1193,13 @@ run_loop() {
     NODE_PID=""
     TAIL_PID=""
     WATCH_PID=""
+    LOGS_PID=""
     STOP=0
     trap 'STOP=1; stop_children' INT TERM HUP
     trap 'loop_cleanup' EXIT
     printf '%s\n' "$$" >"$PIDFILE"
+    watch_logs </dev/null >/dev/null 2>&1 &
+    LOGS_PID=$!
     if [ "$rl_kind" = "foreground" ]; then
         # Show what the runner writes in this window (and keep it in the log file).
         tail -n 0 -f "$RUNLOG" &
@@ -1128,8 +1211,7 @@ run_loop() {
             watch_connection "$rl_offset" &
             WATCH_PID=$!
         fi
-        "$NODE_BIN" runner.mjs --token-file runner.token >>"$RUNLOG" 2>&1 </dev/null &
-        NODE_PID=$!
+        start_runner
         wait "$NODE_PID"
         rl_code=$?
         # A trapped signal ends `wait` early while the runner is still stopping; wait for it to be gone.
@@ -1155,6 +1237,11 @@ run_loop() {
                 printf '%s\n' "$(date '+%Y-%m-%d %H:%M:%S') $(fatal_message "$rl_code")" >>"$RUNLOG"
                 if [ "$rl_kind" = "foreground" ]; then
                     FATAL_CODE=$rl_code
+                    STOP=1
+                elif [ "$rl_code" = "3" ]; then
+                    # The runner's access was removed: stop for good. The loop ends without an error, so launchd does not start it
+                    # again (KeepAlive only after a failure); the next sign-in tries once more.
+                    printf '%s\n' "$(date '+%Y-%m-%d %H:%M:%S') The runner stopped for good. Open the AI Testing Runner app with a new download to set it up again." >>"$RUNLOG"
                     STOP=1
                 else
                     # Started by launchd: ask again in an hour instead of every few seconds, so a revoked token does not hammer the platform.
@@ -1203,6 +1290,38 @@ stop_recorded_runner() {
     return 0
 }
 
+# forget_credential: the runner deletes the credential it keeps in the login Keychain (it knows the entry; this script never sees it),
+# and the files that could hold one go too: a one-time code not yet traded, and an older download's runner.token.
+forget_credential() {
+    [ -f "$RUNNER_DIR/runner.mjs" ] || return 0
+    fc_node=""
+    if [ -f "$NODE_PATH_FILE" ]; then
+        fc_node=$(head -n 1 "$NODE_PATH_FILE" 2>/dev/null)
+    fi
+    if [ -n "$fc_node" ] && [ -x "$fc_node" ]; then
+        # At most 30 seconds (AITP_INSTALLER_FORGET_SECONDS, for tests): an uninstall never hangs on the runner.
+        (cd "$RUNNER_DIR" && exec "$fc_node" runner.mjs --forget-credential) </dev/null >/dev/null 2>&1 &
+        fc_pid=$!
+        (
+            fc_i=0
+            while [ "$fc_i" -lt "${AITP_INSTALLER_FORGET_SECONDS:-30}" ] && kill -0 "$fc_pid" 2>/dev/null; do
+                sleep 1
+                fc_i=$((fc_i + 1))
+            done
+            kill -9 "$fc_pid" 2>/dev/null
+        ) </dev/null >/dev/null 2>&1 &
+        wait "$fc_pid"
+        fc_code=$?
+        if [ "$fc_code" -eq 0 ]; then
+            say "Removed the runner's saved access from this Mac."
+        else
+            say "The runner could not remove its saved access (an older runner, or it was never connected). Nothing else holds it."
+        fi
+    fi
+    rm -f "$RUNNER_DIR/runner.enroll" "$RUNNER_DIR/runner.token" "$ENROLL_SEEN"
+    return 0
+}
+
 do_uninstall() {
     say "$APP_TITLE: uninstall"
     cd "$HOME" || exit 1
@@ -1216,6 +1335,7 @@ do_uninstall() {
         du_found=1
     fi
     stop_recorded_runner && du_found=1
+    forget_credential
     if [ ! -d "$INSTALL_DIR" ]; then
         if [ "$du_found" = "0" ]; then
             say "Nothing to remove: no AI Testing Runner was installed by this app in $INSTALL_DIR."
@@ -1356,10 +1476,19 @@ do_setup() {
         exit 0
     fi
 
-    # Start at sign-in? Ask once, in a dialog.
-    if [ -z "$AUTOSTART" ] && [ ! -f "$AGENT_PLIST" ] && [ ! -f "$INSTALL_DIR/autostart-asked" ]; then
-        if [ "$SILENT" != "1" ]; then
-            if confirm "Start the runner automatically when you sign in? It then runs in the background without a Terminal window." "Not now" "Yes" no; then
+    # In the background, also after every sign-in? Yes is the default answer: asked once in a dialog with Yes preselected, and taken
+    # without asking with --silent / --yes. A LaunchAgent set up earlier is kept (and its file written again, in this version's form).
+    if [ -z "$AUTOSTART" ] && [ -f "$AGENT_PLIST" ]; then
+        AUTOSTART=yes
+    fi
+    if [ -z "$AUTOSTART" ] && [ -f "$INSTALL_DIR/autostart-asked" ]; then
+        AUTOSTART=$(head -n 1 "$INSTALL_DIR/autostart-asked" 2>/dev/null)
+    fi
+    if [ -z "$AUTOSTART" ]; then
+        if [ "$SILENT" = "1" ]; then
+            AUTOSTART=yes
+        else
+            if confirm "Run the runner in the background, and start it again whenever you sign in? It runs while you are signed in to this Mac, without a Terminal window. Choose Not now to run it in this window instead." "Not now" "Yes" yes; then
                 AUTOSTART=yes
             else
                 AUTOSTART=no
@@ -1369,7 +1498,7 @@ do_setup() {
     fi
     if [ "$AUTOSTART" = "yes" ]; then
         if install_launch_agent; then
-            say "The runner now starts when you sign in, and was started in the background."
+            say "The runner now runs in the background while you are signed in, and starts again when you sign in."
             say "Log: $RUNLOG"
             wait_s=${AITP_INSTALLER_WAIT_SECONDS:-20}
             ww=0

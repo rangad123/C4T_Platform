@@ -140,6 +140,10 @@ export interface OpenDeviceOptions {
     serial?: string;
     /** Explore on an emulator even when a real phone is connected (project setting runsOn=emulator): pick a running emulator, else start an AVD. */
     emulatorOnly?: boolean;
+    /** A person's own computer whose owner did not allow their connected phone (round 39): never a real phone, named or not; only an emulator. */
+    noRealPhone?: boolean;
+    /** On a real phone, uninstall the app when the session closes if this session installed it (it was not on the phone before). */
+    removeInstalledApp?: boolean;
     /** Hard caps for one session (defaults: 200 actions, 20 minutes). */
     maxActions?: number;
     maxMinutes?: number;

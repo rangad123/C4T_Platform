@@ -21,7 +21,11 @@ export interface RunnerUpdateView {
     latest?: string;
     outOfDate: boolean;
     requested: boolean;
-    state?: "idle" | "preparing" | "ready" | "updated" | "failed" | "rolled-back";
+    /** "needs-manual": an update exists but its signature could not be checked on that computer, so it must be downloaded by hand. */
+    state?: "idle" | "preparing" | "ready" | "updated" | "failed" | "rolled-back" | "needs-manual";
+    /** false when this platform offers no signed update (the reason in `unpublished`). */
+    published?: boolean;
+    unpublished?: string;
     from?: string;
     to?: string;
     error?: string;
@@ -165,6 +169,9 @@ export function phoneToolsSentence(p: NonNullable<Agent["capabilities"]["phoneTo
 export function agentCommand(origin: string, token?: string): string {
     return `node bin/ai-test-agent.mjs --url ${origin} --token ${token ?? "<your token>"}`;
 }
+
+/** What a runner whose update could not be checked shows, on its page, in the list and on its row. */
+export const NEEDS_MANUAL_UPDATE = "An update is available but couldn't be checked on this computer. Download the new version from Add this computer.";
 
 /** Sentence for the "where did it run" line. */
 export function ranOnSentence(r: RanOn): string {

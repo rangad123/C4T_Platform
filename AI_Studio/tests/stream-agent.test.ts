@@ -115,7 +115,8 @@ describe("a real agent run, watched live", () => {
         await c.untilClosed(120_000);
 
         const logs = c.logs();
-        const progress = logs.filter((l) => l.kind === "agent_progress");
+        // A protocol-2 agent sends its lines as live events (runner_log); a protocol-1 agent with its heartbeats (agent_progress). Same sentence either way.
+        const progress = logs.filter((l) => l.kind === "agent_progress" || l.kind === "runner_log");
         const messages = progress.map((l) => l.message);
         // plain sentences, named after the agent
         expect(messages.every((m) => m.startsWith("Maya's laptop: "))).toBe(true);
@@ -125,7 +126,7 @@ describe("a real agent run, watched live", () => {
         expect(finished[0]).toMatch(/Check (One|Two|Three) \(passed\)$/);
         // promptly: the first line reached the viewer within a few seconds of the agent starting, far before the 6 s heartbeat
         const started = c.frames.find((f) => f.event === "log" && f.data.kind === "agent_task_started")!;
-        const firstLine = c.frames.find((f) => f.event === "log" && f.data.kind === "agent_progress")!;
+        const firstLine = c.frames.find((f) => f.event === "log" && (f.data.kind === "agent_progress" || f.data.kind === "runner_log"))!;
         expect(firstLine.at - started.at).toBeLessThan(4000);
         // and they came in the order they happened, before the job ended
         const order = c.frames.map((f) => (f.event === "log" ? f.data.message : f.event));

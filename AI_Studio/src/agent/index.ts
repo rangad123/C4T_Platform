@@ -6,6 +6,7 @@ import { applyKitDefaults } from "./kit.js";
 import { main } from "./main.js";
 import { kitNetworkDefaults } from "./net.js";
 import { RUNNER_UPDATE_EXIT, rollbackByHand, RunnerUpdater } from "./updater.js";
+import { clearStopRequest, watchStopFile } from "./stop-file.js";
 
 // The token must not show up in the process list: replace the title (on Linux and macOS this overwrites the command line).
 process.title = "ai-test-agent";
@@ -63,6 +64,14 @@ const code = await main(argv, {
         };
         process.on("SIGINT", stop);
         process.on("SIGTERM", stop);
+        // The Windows host's Stop writes stop.request next to runner.mjs (stop-file.ts): the same graceful stop as SIGTERM.
+        const runnerDir = path.dirname(fileURLToPath(import.meta.url));
+        try {
+            clearStopRequest(runnerDir);
+        } catch {
+            /* nothing to clear */
+        }
+        watchStopFile(runnerDir, stop);
     },
 });
 // Like the other entry points: let the event loop drain rather than process.exit() (Windows can garble the exit code while

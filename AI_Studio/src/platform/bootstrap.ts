@@ -6,6 +6,7 @@ import { Repo } from "./repo.js";
 import { SecretBox, secretKeySource } from "./secrets.js";
 import { createObjectStore, type ObjectStore } from "./object-store.js";
 import { getAgentServices } from "./agent-services.js";
+import { installRunnerOnly } from "./runner-only.js";
 import { installFrameworkGate } from "./framework-settings-store.js";
 import { installCustomGate } from "./custom-policy.js";
 import { installPluginGate } from "./plugin-gate.js";
@@ -44,7 +45,9 @@ export function bootstrap(config: Config = loadConfig()): Platform {
     const llm = createLlmClientOrUnavailable(config);
     const platform: Platform = { config, db, sql: db.sql, repo, store: createObjectStore(config), llm };
     // Where a project's scripts run (here, or on a runner agent) and the check that a job can run there: needed by every process that creates or runs jobs.
-    getAgentServices(platform);
+    const agents = getAgentServices(platform);
+    // EXECUTION_MODE=runners: every run goes to a runner and nothing runs here; in every mode a re-queued job's old runner tasks are cancelled (runner-only.ts).
+    installRunnerOnly(platform, agents);
     // Frameworks a project switched off (Runners, Frameworks): checked when any job is created.
     installFrameworkGate(repo);
     // Hand-written tests only run where their owner allowed it (ALLOW_CUSTOM_SCRIPTS, or an agent started with --allow-custom-scripts).

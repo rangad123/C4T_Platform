@@ -10,10 +10,19 @@ import fs from "node:fs";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
+    AcceptResponse,
+    ATTEMPT_HEADER,
+    EventsResponse,
     HeartbeatResponse,
     HelloResponse,
+    EnrollResponse,
+    RotateResponse,
+    type EnrollRequest,
+    ResultResponse,
     TaskOffer,
     UploadResponse,
+    type EventsRequest,
+    type RejectRequest,
     type DevicePush,
     type FileRef,
     type HeartbeatRequest,
@@ -91,7 +100,37 @@ export class PlatformClient {
     /** Set by the updater (updater.ts): what this runner reports about its updates in hello and poll. */
     updateState?: () => RunnerUpdateState | undefined;
 
+    /** The runner credential sent with every request (empty before enrollment; replaced after a rotation). */
+    private token: string;
+
+    /** Use another credential from now on (after enrollment or a rotation). */
+    setToken(token: string): void {
+        this.token = token;
+    }
+
+    /**
+     * Trade a single-use enrollment code for this runner's credential (POST /api/agent/enroll, no Authorization header). A used, expired or
+     * unknown code is an "auth" error with the platform's sentence (make a new code); a refusal is "conflict"; network trouble is retried by the caller.
+     */
+    async enroll(req: EnrollRequest): Promise<EnrollResponse> {
+        const res = await this.send("POST", "/api/agent/enroll", { body: JSON.stringify(req), headers: { "content-type": "application/json" }, timeoutMs: 30_000, anonymous: true });
+        if (res.status === 404 || res.status === 410) {
+            const sentence = sentenceOf(await res.text().catch(() => ""));
+            return Promise.reject(new PlatformError("auth", sentence || "This enrollment code is not valid. Make a new one on the Runners page.", res.status));
+        }
+        if (!res.ok) throw await this.failure(res, "add this computer", true);
+        return this.json(res, EnrollResponse, "enroll");
+    }
+
+    /** A new credential (POST /api/agent/rotate). The current one keeps working until the new one is first used, at most 24 hours. */
+    async rotate(): Promise<RotateResponse> {
+        const res = await this.send("POST", "/api/agent/rotate", { body: "{}", headers: { "content-type": "application/json" }, timeoutMs: 20_000 });
+        if (!res.ok) throw await this.failure(res, "get a new credential");
+        return this.json(res, RotateResponse, "rotate");
+    }
+
     constructor(private readonly opts: ClientOptions) {
+        this.token = opts.token;
         this.fetchImpl = opts.fetchImpl ?? fetch;
         this.base = opts.baseUrl.replace(/\/+$/, "");
         this.pollSeconds = opts.pollSeconds ?? 30;
@@ -110,15 +149,16 @@ export class PlatformClient {
     }
 
     private headers(extra: Record<string, string> = {}): Record<string, string> {
-        return { authorization: `Bearer ${this.opts.token}`, "user-agent": `ai-test-agent/${AGENT_VERSION}`, accept: "application/json", ...extra };
+        return { ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), "user-agent": `ai-test-agent/${AGENT_VERSION}`, accept: "application/json", ...extra };
     }
 
-    private async send(method: string, route: string, init: { body?: BodyInit; headers?: Record<string, string>; timeoutMs: number; signal?: AbortSignal; duplex?: boolean }): Promise<Response> {
+    private async send(method: string, route: string, init: { body?: BodyInit; headers?: Record<string, string>; timeoutMs: number; signal?: AbortSignal; duplex?: boolean; anonymous?: boolean }): Promise<Response> {
         const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(init.timeoutMs)]) : AbortSignal.timeout(init.timeoutMs);
         try {
             return await this.fetchImpl(`${this.base}${route}`, {
                 method,
-                headers: this.headers(init.headers),
+                // Enrollment sends no credential: the single-use code in the body is the only one.
+                headers: init.anonymous ? Object.fromEntries(Object.entries(this.headers(init.headers)).filter(([k]) => k !== "authorization")) : this.headers(init.headers),
                 ...(init.body !== undefined ? { body: init.body } : {}),
                 ...(init.duplex ? ({ duplex: "half" } as object) : {}),
                 signal,
@@ -139,8 +179,9 @@ export class PlatformClient {
         const retry = Number(res.headers.get("retry-after"));
         const retryAfter = Number.isFinite(retry) && retry > 0 ? Math.min(retry, 120) : undefined;
         if (res.status === 401 || (res.status === 404 && entry)) return new PlatformError("auth", `The agent token is not valid or was revoked. Create a new one on the project's Agents page.${said}`, res.status);
+        // A protocol refusal comes first: the platform answers it with 409 on hello, and it must end with the protocol exit code (4), not 5.
+        if (res.status === 426 || ((res.status === 400 || res.status === 409) && /\bprotocol\b/i.test(sentence))) return new PlatformError("protocol", `The platform does not accept this agent's protocol version.${said} Update the agent (or the platform) so both speak the same version.`, res.status);
         if (res.status === 409 && entry) return new PlatformError("conflict", `The platform refused this agent.${said}`, res.status);
-        if (res.status === 426 || (res.status === 400 && /protocol/i.test(sentence))) return new PlatformError("protocol", `The platform does not accept this agent's protocol version.${said} Update the agent (or the platform) so both speak the same version.`, res.status);
         // Answers that come from something between this computer and the platform (a company proxy or web filter), not from the platform.
         if (res.status === 407) {
             const message = `Could not reach ${this.host}: a proxy asks for a user name and password (HTTP 407). Add them to the proxy address, for example --proxy http://user:password@host:port. The password is never shown or sent to the platform.`;
@@ -274,12 +315,12 @@ export class PlatformClient {
         return { size, sha256: hash.digest("hex") };
     }
 
-    /** Stream a local file up as an artifact. The platform's answer (size, sha256) is returned for the caller to compare. */
-    async upload(taskId: string, name: string, file: string, size: number, signal?: AbortSignal): Promise<UploadResponse> {
+    /** Stream a local file up as an artifact. The platform's answer (size, sha256) is returned for the caller to compare. Protocol 2: `attemptId` goes in the x-attempt-id header. */
+    async upload(taskId: string, name: string, file: string, size: number, signal?: AbortSignal, attemptId?: string): Promise<UploadResponse> {
         const body = Readable.toWeb(fs.createReadStream(file)) as unknown as BodyInit;
         const res = await this.send("PUT", `/api/agent/tasks/${encodeURIComponent(taskId)}/files/${encodeURIComponent(name)}`, {
             body,
-            headers: { "content-type": "application/octet-stream", "content-length": String(size) },
+            headers: { "content-type": "application/octet-stream", "content-length": String(size), ...(attemptId ? { [ATTEMPT_HEADER]: attemptId } : {}) },
             timeoutMs: 30 * 60_000,
             duplex: true,
             ...(signal ? { signal } : {}),
@@ -288,9 +329,34 @@ export class PlatformClient {
         return this.json(res, UploadResponse, "upload");
     }
 
-    async result(taskId: string, req: ResultRequest, signal?: AbortSignal): Promise<void> {
+    /** Post a task's result. Protocol 2: `alreadyReceived` is true when the platform had it already (an earlier try did arrive). */
+    async result(taskId: string, req: ResultRequest, signal?: AbortSignal): Promise<{ alreadyReceived: boolean }> {
         const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/result`, { body: JSON.stringify(req), headers: { "content-type": "application/json" }, timeoutMs: 60_000, ...(signal ? { signal } : {}) });
         if (!res.ok) throw await this.failure(res, "post the result");
+        const answer = ResultResponse.safeParse(await res.json().catch(() => undefined));
+        return { alreadyReceived: answer.success && answer.data.alreadyReceived === true };
+    }
+
+    // ── protocol 2 ──────────────────────────────────────────────────────────
+
+    /** Take the task this agent was handed (within the offer's acceptSeconds). */
+    async accept(taskId: string, attemptId: string, signal?: AbortSignal): Promise<AcceptResponse> {
+        const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/accept`, { body: JSON.stringify({ attemptId }), headers: { "content-type": "application/json" }, timeoutMs: 15_000, ...(signal ? { signal } : {}) });
+        if (!res.ok) throw await this.failure(res, "accept the task");
+        return this.json(res, AcceptResponse, "accept");
+    }
+
+    /** Turn the task down with a reason; the platform offers it to another runner. */
+    async reject(taskId: string, req: RejectRequest, signal?: AbortSignal): Promise<void> {
+        const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/reject`, { body: JSON.stringify(req), headers: { "content-type": "application/json" }, timeoutMs: 15_000, ...(signal ? { signal } : {}) });
+        if (!res.ok) throw await this.failure(res, "turn the task down");
         await res.body?.cancel().catch(() => undefined);
+    }
+
+    /** A batch of live events (the platform keeps each sequence number once, so a batch may be sent again). */
+    async events(taskId: string, req: EventsRequest, signal?: AbortSignal): Promise<EventsResponse> {
+        const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/events`, { body: JSON.stringify(req), headers: { "content-type": "application/json" }, timeoutMs: 15_000, ...(signal ? { signal } : {}) });
+        if (!res.ok) throw await this.failure(res, "send live events");
+        return this.json(res, EventsResponse, "events");
     }
 }

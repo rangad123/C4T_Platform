@@ -181,6 +181,8 @@ export interface PlatformConfig {
     llm: { provider: string; model: string; configured: boolean };
     /** Whether a run or an exploration started now would start: false while tests are switched off on this server (no worker). */
     runsHere?: boolean;
+    /** "runners" on the hosted platform: every run goes to a runner and this server runs no test itself. "local" (or absent): as before. */
+    executionMode?: "local" | "runners";
     /** Can this machine run mobile tests (Android toolchain + emulator)? */
     mobile?: { available: boolean; reason?: string; avds: string[]; toolchain: "managed" | "system" | "none" };
     authRequired: boolean;

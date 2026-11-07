@@ -3,8 +3,10 @@
  *
  * Secrets are kept out twice. By construction nothing logs a token or a credential. And as a second line of defence every
  * line passes through `redact`, which masks any registered secret (the token, the credentials of the tasks being run) if
- * one ever slipped into a message, for example inside the text of an error from another library.
+ * one ever slipped into a message, for example inside the text of an error from another library. Each secret is also masked in the
+ * forms text usually carries it in (URL-encoded, `+` for spaces, lower-case hex, JSON-escaped; agent-protocol/secret-variants.ts).
  */
+import { secretVariants } from "../agent-protocol/secret-variants.js";
 
 export interface LogSink {
     out(line: string): void;
@@ -27,10 +29,12 @@ export class Logger {
     /** Register a value that must never appear in a line. Returns a function that forgets it (counted: the same value can be added twice). */
     addSecrets(values: Iterable<string | undefined>): () => void {
         const added: string[] = [];
-        for (const v of values) {
-            if (!v || v.length < MIN_SECRET_LENGTH) continue;
-            this.secrets.set(v, (this.secrets.get(v) ?? 0) + 1);
-            added.push(v);
+        for (const value of values) {
+            if (!value || value.length < MIN_SECRET_LENGTH) continue;
+            for (const v of secretVariants(value)) {
+                this.secrets.set(v, (this.secrets.get(v) ?? 0) + 1);
+                added.push(v);
+            }
         }
         return () => {
             for (const v of added) {

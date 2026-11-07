@@ -179,8 +179,8 @@ describe("the task state machine", () => {
         const id = newTask();
         const a = agentFor("a");
         const b = agentFor("b");
-        expect(store.claim(id, a.agent.id, LEASE)?.status).toBe("running");
-        expect(store.claim(id, b.agent.id, LEASE)).toBeUndefined();
+        expect(store.claimFor(id, a.agent, LEASE)?.status).toBe("running");
+        expect(store.claimFor(id, b.agent, LEASE)).toBeUndefined();
         expect(store.getTask(id)!.agentId).toBe(a.agent.id);
         expect(store.heartbeat(id, b.agent.id, LEASE, { done: 1 })).toBe(false);
         expect(store.heartbeat(id, a.agent.id, LEASE, { done: 1, total: 3, log: ["booting"] })).toBe(true);
@@ -195,7 +195,7 @@ describe("the task state machine", () => {
     it("a task whose lease ran out is offered once more, then fails (and a lost agent can no longer answer)", () => {
         const id = newTask();
         const a = agentFor("lost");
-        store.claim(id, a.agent.id, LEASE);
+        store.claimFor(id, a.agent, LEASE);
         now += LEASE - 1;
         expect(store.sweep().requeued).toBe(0);
         now += 2;
@@ -206,7 +206,7 @@ describe("the task state machine", () => {
         expect(store.finish(id, a.agent.id, { status: "done", resultEnc: "late" })).toBe(false);
         // second offer (to another agent), lost again: now it fails with a plain message
         const b = agentFor("second");
-        expect(store.claim(id, b.agent.id, LEASE)?.offers).toBe(MAX_OFFERS);
+        expect(store.claimFor(id, b.agent, LEASE)?.offers).toBe(MAX_OFFERS);
         now += LEASE + 1;
         const swept = store.sweep();
         expect(swept.failed).toBeGreaterThanOrEqual(1);
@@ -217,7 +217,7 @@ describe("the task state machine", () => {
     it("a heartbeat keeps the lease alive", () => {
         const id = newTask();
         const a = agentFor("steady");
-        store.claim(id, a.agent.id, LEASE);
+        store.claimFor(id, a.agent, LEASE);
         for (let i = 0; i < 4; i++) {
             now += LEASE - 5_000;
             expect(store.heartbeat(id, a.agent.id, LEASE, {})).toBe(true);
@@ -232,7 +232,7 @@ describe("the task state machine", () => {
         expect(store.getTask(q)!.status).toBe("cancelled");
         const id = newTask();
         const a = agentFor("cancelled");
-        store.claim(id, a.agent.id, LEASE);
+        store.claimFor(id, a.agent, LEASE);
         store.requestCancel(id);
         expect(store.getTask(id)).toMatchObject({ status: "running", cancelRequested: true });
         // the agent answers ok=false: recorded as cancelled, never as a failure of the tests
@@ -241,7 +241,7 @@ describe("the task state machine", () => {
         // an agent that never answers: the lease ends it as cancelled instead of re-offering it
         const lost = newTask();
         const b = agentFor("silent");
-        store.claim(lost, b.agent.id, LEASE);
+        store.claimFor(lost, b.agent, LEASE);
         store.requestCancel(lost);
         now += LEASE + 1;
         store.sweep();
@@ -266,7 +266,7 @@ describe("the task state machine", () => {
     it("finished tasks are removed after 24 hours, with their files listed for removal; long-gone agents are forgotten", () => {
         const id = newTask();
         const a = agentFor("prune");
-        store.claim(id, a.agent.id, LEASE);
+        store.claimFor(id, a.agent, LEASE);
         store.addFile({ taskId: id, direction: "out", ref: "shot.png", path: "p/_agent/x/out/shot.png", size: 3, sha256: "0".repeat(64) });
         store.finish(id, a.agent.id, { status: "done", resultEnc: "r" });
         expect(store.pruneTasks().map((t) => t.id)).not.toContain(id);

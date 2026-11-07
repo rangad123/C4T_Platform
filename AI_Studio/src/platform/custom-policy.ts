@@ -21,7 +21,7 @@ import type { Platform } from "./bootstrap.js";
 import { CustomScriptStore } from "./custom-script-store.js";
 import { HttpError } from "./http-error.js";
 import type { JobOptions, Repo } from "./repo.js";
-import { getAgentServices } from "./agent-services.js";
+import { chosenRunnerOf, getAgentServices, ownerOfNewJob, type RunContext } from "./agent-services.js";
 
 export const CUSTOM_REFUSAL = "This project has code tests. Start your runner agent with --allow-custom-scripts, or set ALLOW_CUSTOM_SCRIPTS=true on the server.";
 const AGENT_REFUSAL = "This project has code tests, and none of its connected runner agents was started with --allow-custom-scripts. Start the agent with that option, or set ALLOW_CUSTOM_SCRIPTS=true on the server and run the project on the platform.";
@@ -51,7 +51,7 @@ export function customRunDecision(i: PolicyInput): PolicyDecision {
 }
 
 /** The decision for a project, from the live platform (config and runner agents). */
-export function customPolicyFor(p: Pick<Platform, "config" | "db" | "repo"> & Partial<Platform>, projectId: string): PolicyDecision {
+export function customPolicyFor(p: Pick<Platform, "config" | "db" | "repo"> & Partial<Platform>, projectId: string, who?: RunContext): PolicyDecision {
     const svc = getAgentServices(p as Platform);
     const runsOnAgent = svc.routesToAgent(projectId);
     return customRunDecision({
@@ -59,7 +59,8 @@ export function customPolicyFor(p: Pick<Platform, "config" | "db" | "repo"> & Pa
         hostAllowed: p.config?.ALLOW_CUSTOM_SCRIPTS === true,
         ...(p.config?.customScriptsReason ? { hostNote: p.config.customScriptsReason } : {}),
         runsOnAgent,
-        agents: runsOnAgent ? svc.eligibleAgents(projectId).map((a) => ({ customScripts: a.capabilities.customScripts })) : [],
+        // The same rule as offering (agent-services.ts mayRunCodeScripts): the runner's switch and its own flag, never a shared machine; a person's own computers count for their runs.
+        agents: runsOnAgent ? svc.eligibleAgents(projectId, undefined, who).map((a) => ({ customScripts: svc.mayRunCodeScripts(a) })) : [],
     });
 }
 
@@ -73,7 +74,7 @@ export function customIdsOfJob(repo: Repo, options: JobOptions): string[] {
 /** Checked by `Repo.createJob`: a plain 409 when the job includes code tests that may not run. */
 export function customGate(p: Platform, projectId: string, options: JobOptions): void {
     if (customIdsOfJob(p.repo, options).length === 0) return;
-    const d = customPolicyFor(p, projectId);
+    const d = customPolicyFor(p, projectId, { ownerId: ownerOfNewJob(options), runnerId: chosenRunnerOf(options) });
     if (!d.allowed) throw new HttpError(409, d.message);
 }
 

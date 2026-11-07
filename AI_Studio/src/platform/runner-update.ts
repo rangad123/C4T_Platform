@@ -7,6 +7,11 @@
  * Nothing here decides anything by trust in the runner: an offer only names files the platform itself checked (loadBundle and loadComplete
  * check every checksum), and the runner checks every byte it receives against the sha256 in the offer.
  *
+ * Signed updates (round 39): an offer is made only when the deploy signed this exact bundle (update-manifest.json and update-manifest.sig
+ * next to it, written by scripts/sign-runner-update.mjs with the RUNNER_UPDATE_SIGNING_KEY secret) with a key the runners trust
+ * (src/agent/update-keys.ts). The offer carries the manifest and its signature unchanged; the runner checks both before it downloads
+ * anything (src/agent-protocol/update-manifest.ts). Without a valid signature no runner is offered an update, and publicView says so.
+ *
  * The setting is a row per runner in `runner_update_settings` (shared-state.ts), so every API process sees the same one: `auto` (absent =
  * on), a pending request and the last report already written to Activity. Before round 26 it was a JSON file in the data folder
  * (runner-updates.json); that file is read once into the empty table and left where it is.
@@ -17,16 +22,20 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import type { AgentRecord } from "./agent-store.js";
 import type { Db } from "./db.js";
-import type { Capabilities, RunnerUpdateOffer, UpdatePart, UpdatePartList } from "../agent-protocol/schema.js";
+import type { Capabilities, RunnerUpdateOffer, UpdatePart } from "../agent-protocol/schema.js";
 import { kitDir, loadBundle, type Bundle } from "./runner-kit.js";
 import { completeDir, loadComplete, type CompleteBuild, type CompleteTarget, COMPLETE_TARGETS } from "./runner-kit-complete.js";
 import { redactCredentials } from "../engine/net/company-network.js";
+import { UPDATE_KEYS } from "../agent/update-keys.js";
+import { MAX_MANIFEST_BYTES, offerMismatch, partListBytes, UPDATE_MANIFEST_FILE, UPDATE_SIGNATURE_FILE, verifySignedManifest, type UpdateManifest } from "../agent-protocol/update-manifest.js";
 
 type OkBundle = Extract<Bundle, { ok: true }>;
 type OkBuild = Extract<CompleteBuild, { ok: true }>;
 
 /** The bundle files a runner replaces (the same five every download holds). */
 export const UPDATE_FILES = ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"] as const;
+/** Offered too when the bundle has them: the lock file that pins every test tool package (npm ci). Older runners ignore it. */
+export const OPTIONAL_UPDATE_FILES = ["package-lock.json"] as const;
 const PART_FOLDERS = ["node_modules", "node"] as const;
 type PartFolder = (typeof PART_FOLDERS)[number];
 
@@ -67,6 +76,10 @@ export interface PublicUpdate {
     auto: boolean;
     /** The platform's runner version, when the bundle is built. */
     latest?: string;
+    /** The platform offers that version to runners (the bundle is signed with a key the runners trust). False: download it by hand. */
+    published: boolean;
+    /** Why it is not offered, in one sentence (no signature, a key the runners do not have, files that changed since signing). */
+    unpublished?: string;
     outOfDate: boolean;
     requested: boolean;
     state?: string;
@@ -84,7 +97,14 @@ export interface RunnerUpdatesOptions {
     clock?: () => number;
     /** Where Activity rows go (the server passes the user store's writer). */
     activity?: (row: ActivityRow) => void;
+    /**
+     * The public keys an update must be signed with (default: the ones built into the runners, src/agent/update-keys.ts, plus any in
+     * RUNNER_UPDATE_PUBLIC_KEYS, comma separated, for a platform whose runners were built with another key). Tests pass a test key.
+     */
+    publicKeys?: readonly string[];
 }
+
+type Signed = { ok: true; manifestText: string; signatureText: string; manifest: UpdateManifest } | { ok: false; reason: string };
 
 export class RunnerUpdates {
     private readonly db: Db;
@@ -92,11 +112,16 @@ export class RunnerUpdates {
     private bundleKey = "";
     private bundleCache?: OkBundle;
     private readonly lists = new Map<string, { bytes: Buffer; files: Array<{ offset: number; csize: number }>; packSize: number }>();
+    private readonly keys: readonly string[];
+    private signedKey = "";
+    private signedCache?: Signed;
     activity?: (row: ActivityRow) => void;
 
     constructor(opts: RunnerUpdatesOptions) {
         this.db = opts.db;
         this.clock = opts.clock ?? Date.now;
+        const extra = (process.env.RUNNER_UPDATE_PUBLIC_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+        this.keys = opts.publicKeys ?? [...UPDATE_KEYS, ...extra];
         if (opts.activity) this.activity = opts.activity;
         if (opts.dataDir) this.importSettingsFile(path.join(opts.dataDir, "runner-updates.json"));
     }
@@ -174,12 +199,61 @@ export class RunnerUpdates {
         return this.bundle()?.manifest.kitVersion;
     }
 
+    /** The signed manifest of the bundle being served, checked; read again only when the bundle or the signature changes. */
+    signed(): Signed {
+        const bundle = this.bundle();
+        if (!bundle) return { ok: false, reason: "The runner files have not been built on this server." };
+        const dir = kitDir();
+        let key: string;
+        try {
+            const a = fs.statSync(path.join(dir, UPDATE_MANIFEST_FILE));
+            const b = fs.statSync(path.join(dir, UPDATE_SIGNATURE_FILE));
+            key = `${this.bundleKey}|${a.size}|${a.mtimeMs}|${b.size}|${b.mtimeMs}`;
+            if (a.size > MAX_MANIFEST_BYTES || b.size > 4096) return { ok: false, reason: "The runner update's signature files on this server are not the ones the deploy writes." };
+        } catch {
+            this.signedKey = "";
+            this.signedCache = undefined;
+            return { ok: false, reason: "This server's runner files are not signed (the deploy had no RUNNER_UPDATE_SIGNING_KEY), so runners are not offered updates. Download the new version by hand." };
+        }
+        if (key === this.signedKey && this.signedCache) return this.signedCache;
+        const manifestText = fs.readFileSync(path.join(dir, UPDATE_MANIFEST_FILE), "utf8");
+        const signatureText = fs.readFileSync(path.join(dir, UPDATE_SIGNATURE_FILE), "utf8");
+        const v = verifySignedManifest(manifestText, signatureText, this.keys);
+        let result: Signed;
+        if (!v.ok) result = { ok: false, reason: `${v.reason} Runners are not offered updates until the deploy signs them with the key built into the runners.` };
+        else {
+            const mismatch = offerMismatch({ version: bundle.manifest.kitVersion, files: this.offerFiles(bundle) }, v.manifest);
+            result = mismatch ? { ok: false, reason: `${mismatch} The runner files changed after they were signed, so runners are not offered updates.` } : { ok: true, manifestText, signatureText, manifest: v.manifest };
+        }
+        this.signedKey = key;
+        this.signedCache = result;
+        return result;
+    }
+
+    /**
+     * The signed sequence of the bundle a new download is made from, for its runner.json ("updateSequence"): the runner then refuses any
+     * signed update that is not newer, so an old one sent again cannot move a fresh download back. Undefined when the bundle is not signed.
+     */
+    downloadSequence(): number | undefined {
+        const s = this.signed();
+        return s.ok ? s.manifest.sequence : undefined;
+    }
+
+    private offerFiles(bundle: OkBundle): Array<{ name: string; size: number; sha256: string }> {
+        const names: string[] = [...UPDATE_FILES, ...OPTIONAL_UPDATE_FILES.filter((n) => bundle.files.has(n))];
+        return names.map((name) => {
+            const f = bundle.manifest.files.find((x) => x.name === name)!;
+            return { name, size: f.bytes, sha256: f.sha256 };
+        });
+    }
+
     /** Why the platform wants this runner on its version right now, or undefined. */
     wanted(agent: Pick<AgentRecord, "id" | "capabilities">): "auto" | "requested" | undefined {
         const c = agent.capabilities;
         if (!c.update?.can) return undefined;
         const latest = this.latest();
         if (!latest || c.kitVersion === latest) return undefined;
+        if (!this.signed().ok) return undefined;
         const s = this.setting(agent.id);
         if (s.requestedAt) return "requested";
         return s.auto === false ? undefined : "auto";
@@ -195,12 +269,9 @@ export class RunnerUpdates {
     offer(agent: Pick<AgentRecord, "id" | "capabilities" | "node">): RunnerUpdateOffer | undefined {
         const reason = this.wanted(agent);
         const bundle = this.bundle();
-        if (!reason || !bundle) return undefined;
-        const files = UPDATE_FILES.map((name) => {
-            const f = bundle.manifest.files.find((x) => x.name === name)!;
-            return { name, size: f.bytes, sha256: f.sha256 };
-        });
-        const offer: RunnerUpdateOffer = { version: bundle.manifest.kitVersion, reason, files };
+        const signed = this.signed();
+        if (!reason || !bundle || !signed.ok) return undefined;
+        const offer: RunnerUpdateOffer = { version: bundle.manifest.kitVersion, reason, files: this.offerFiles(bundle), signed: { manifest: signed.manifestText, signature: signed.signatureText } };
         const c = agent.capabilities;
         const target = c.update?.complete || c.update?.bundledNode ? targetOfAgent(c) : undefined;
         if (target) {
@@ -210,7 +281,9 @@ export class RunnerUpdates {
                 const pkgSha = sha256(bundle.files.get("package.json")!);
                 if (c.update?.complete && c.update.packageSha256 !== pkgSha) parts.push(this.part(build, "node_modules"));
                 if (c.update?.bundledNode && agent.node !== build.manifest.nodeVersion) parts.push(this.part(build, "node"));
-                if (parts.length) offer.complete = { target, nodeVersion: build.manifest.nodeVersion, parts };
+                // Only parts that were signed: a complete download built after the signature is left out (the runner then says plainly why).
+                const complete = { target, nodeVersion: build.manifest.nodeVersion, parts };
+                if (parts.length && !offerMismatch({ version: offer.version, files: [], complete }, signed.manifest)) offer.complete = complete;
             }
         }
         return offer;
@@ -222,8 +295,9 @@ export class RunnerUpdates {
         if (cached) return cached;
         const prefix = `${folder}/`;
         const entries = build.manifest.files.filter((f) => f.path.startsWith(prefix));
-        const list: UpdatePartList = { format: 1, folder, files: entries.map((f) => ({ path: f.path.slice(prefix.length), mode: f.mode, size: f.size, csize: f.csize, sha256: f.sha256 })) };
-        const made = { bytes: Buffer.from(`${JSON.stringify(list)}\n`, "utf8"), files: entries.map((f) => ({ offset: f.offset, csize: f.csize })), packSize: entries.reduce((n, f) => n + f.csize, 0) };
+        // The same bytes scripts/sign-runner-update.mjs signs (partListBytes); the UpdatePartList shape the runner reads.
+        const bytes: Buffer = partListBytes(build.manifest.files, folder);
+        const made = { bytes, files: entries.map((f) => ({ offset: f.offset, csize: f.csize })), packSize: entries.reduce((n, f) => n + f.csize, 0) };
         this.lists.set(key, made);
         return made;
     }
@@ -241,7 +315,7 @@ export class RunnerUpdates {
     file(name: string): { size: number; sha256?: string; body: Buffer | Readable } | undefined {
         const bundle = this.bundle();
         if (!bundle) return undefined;
-        if ((UPDATE_FILES as readonly string[]).includes(name)) {
+        if ((UPDATE_FILES as readonly string[]).includes(name) || (OPTIONAL_UPDATE_FILES as readonly string[]).includes(name)) {
             const bytes = bundle.files.get(name);
             const f = bundle.manifest.files.find((x) => x.name === name);
             return bytes && f ? { size: bytes.length, sha256: f.sha256, body: Buffer.from(bytes) } : undefined;
@@ -286,7 +360,7 @@ export class RunnerUpdates {
     /** Called with what a runner reports (hello and poll): writes the outcome of an update to Activity once, and settles a request. */
     observe(agent: Pick<AgentRecord, "id" | "name" | "projectId">, caps: Capabilities | undefined): void {
         const u = caps?.update;
-        if (!u || !u.at || !["updated", "failed", "rolled-back"].includes(u.state)) return;
+        if (!u || !u.at || !["updated", "failed", "rolled-back", "needs-manual"].includes(u.state)) return;
         const key = `${u.state}|${u.at}`;
         const s = this.setting(agent.id);
         if (s.reported === key) return;
@@ -299,6 +373,8 @@ export class RunnerUpdates {
                 ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-updated", detail: `Runner “${agent.name}” updated itself from ${u.from ?? "an earlier version"} to ${u.to ?? caps?.kitVersion ?? "the platform's version"}.` }
                 : u.state === "failed"
                   ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” could not update${u.to ? ` to ${u.to}` : ""}: ${error || "no reason given"} Still on version ${caps?.kitVersion ?? "unknown"}.` }
+                  : u.state === "needs-manual"
+                    ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” did not install version ${u.to ?? "the platform's version"} by itself: ${error || "its signature could not be checked."} It keeps running version ${caps?.kitVersion ?? "unknown"}. Download the new version from the Runners page.` }
                   : { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-rolled-back", detail: `Runner “${agent.name}” went back to version ${caps?.kitVersion ?? u.from ?? "unknown"}${u.to ? ` from ${u.to}` : ""}: ${error || "no reason given"}` };
         try {
             this.activity?.(row);
@@ -313,10 +389,13 @@ export class RunnerUpdates {
         const latest = this.latest();
         const s = this.setting(agent.id);
         const outOfDate = Boolean(latest && agent.capabilities.kitVersion && agent.capabilities.kitVersion !== latest);
+        const signed = latest ? this.signed() : undefined;
         return {
             can: u?.can === true,
             auto: s.auto !== false,
             ...(latest ? { latest } : {}),
+            published: signed?.ok === true,
+            ...(signed && !signed.ok ? { unpublished: signed.reason } : {}),
             outOfDate,
             requested: Boolean(s.requestedAt) && outOfDate,
             ...(u?.state ? { state: u.state } : {}),

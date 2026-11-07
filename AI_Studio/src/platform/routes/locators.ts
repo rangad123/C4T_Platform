@@ -31,6 +31,7 @@ import { dataSetsFor } from "./environments.js";
 import { HttpError } from "../http-error.js";
 import { CustomScriptStore } from "../custom-script-store.js";
 import { BlockStore, blocksFor, blockView } from "../block-store.js";
+import { ReviewStore } from "../review-store.js";
 import { LocatorStore, NameTakenError, type ElementUser, type StoredElement } from "../locator-store.js";
 import { storeScript } from "../repo-sink.js";
 import { putText } from "../object-store.js";
@@ -559,6 +560,8 @@ export function locatorServices(ctx: RouteCtx) {
         const tests = testIds.map((i) => repo.getTest(i)).filter((t): t is TestRow => t !== undefined && !handWritten.isCustom(t.id));
         const base = { appliesTo: tests.length, tests: tests.map((t) => ({ id: t.id, testId: t.testKey, title: t.title })) };
         if (!tests.length) return { ...base, revalidation: { status: "none", message: subject === "shared element" ? "No test uses this element yet." : "No test uses these steps yet." }, problems: [] };
+        // An approved test that uses it does something nobody approved now: it waits to be approved again, unless a change by this person would not (review-store.ts).
+        new ReviewStore(p.db).sharedPartChanged(tests.map((t) => t.id), `the ${subject} “${elementName}”`);
         const problems = await rerender(projectId, testIds);
         const reason = `The ${subject} “${elementName}” changed. Run this test again.`;
         let application: { id: string } | undefined;

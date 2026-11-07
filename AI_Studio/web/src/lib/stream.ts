@@ -67,10 +67,11 @@ export function openStream(path: string, h: Handlers): () => void {
         });
         source.addEventListener("log", (e) => {
             try {
-                const d = JSON.parse((e as MessageEvent).data) as { id: number; at: string; level: string; message: string; stage: string; kind: string; jobId: string };
+                const d = JSON.parse((e as MessageEvent).data) as { id: number; at: string; level: string; message: string; stage: string; kind: string; jobId: string; data?: unknown };
                 if (d.id <= lastId) return; // never twice
                 lastId = d.id;
-                h.onLog?.({ id: d.id, stage: d.stage, kind: d.kind, level: d.level, message: d.message, createdAt: d.at }, d.jobId);
+                // A runner's live event also carries its facts (the test, the step, the screenshot); every other frame has none.
+                h.onLog?.({ id: d.id, stage: d.stage, kind: d.kind, level: d.level, message: d.message, createdAt: d.at, ...(d.data !== undefined ? { data: d.data } : {}) }, d.jobId);
             } catch {
                 /* skipped */
             }

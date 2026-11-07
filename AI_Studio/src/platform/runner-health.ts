@@ -11,7 +11,7 @@ import { HttpError } from "./http-error.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ProjectScope } from "./auth/project-scope.js";
 import type { AgentRecord, AgentStore, AgentTokenRecord, DeviceReservation, HealthTask } from "./agent-store.js";
-import { ONLINE_MS } from "./agent-store.js";
+import { isSharedToken, MAX_PERSONAL_RUNNERS, MAX_RUNNERS_PER_ORGANIZATION, ONLINE_MS, runnerMayServe } from "./agent-store.js";
 import { isDeviceAdapter } from "./agent-device.js";
 import { isRecordAdapter } from "./agent-record.js";
 
@@ -20,8 +20,7 @@ export const RUNNER_NOT_FOUND = "Runner not found";
 export const OTHER_ORGANIZATION_RUNNER = "This runner belongs to another organisation, so it can't serve this project.";
 export const RUNNER_RETIRED = "This runner is retired. Register a new one.";
 
-/** At most this many working runners per organisation (and as many of Crowd4Test's own). */
-export const MAX_RUNNERS_PER_ORGANIZATION = 50;
+export { MAX_RUNNERS_PER_ORGANIZATION };
 export const RUNNER_CAP_REACHED = `This organisation has ${MAX_RUNNERS_PER_ORGANIZATION} runners already, the most it can have. Retire one first.`;
 
 /**
@@ -32,6 +31,37 @@ export function assertMayAddRunner(app: FastifyInstance, req: FastifyRequest, st
     const actor = actorOf(req) ?? currentActor();
     if (!canManageRunner(accessControlOf(app).projects, actor, organizationId)) throw new HttpError(403, CANNOT_MANAGE_RUNNER);
     if (store.countLiveRunnersOf(organizationId) >= MAX_RUNNERS_PER_ORGANIZATION) throw new HttpError(409, RUNNER_CAP_REACHED);
+}
+
+export const CANNOT_MANAGE_PERSONAL = "Only the person whose computer this is can change it.";
+export const PERSONAL_CAP_REACHED = `You have added ${MAX_PERSONAL_RUNNERS} computers already, the most one person can have. Retire one on the Runners page first.`;
+export const CANNOT_ADD_PERSONAL = "Adding your own computer needs permission to run tests in at least one project.";
+export const PERSONAL_NOT_GRANTED = "A person's own computer runs only the runs its owner starts. It is not given to projects.";
+
+/** Crowd4Test admins, and on a server without Crowd4Test sign-in its owners (people holding platform settings). */
+export function isPlatformAdmin(actor: Actor): boolean {
+    const side = sideOf(actor);
+    return side === "admin" || (side === "local" && permissionsOf(actor).has("ai_studio.platform.settings"));
+}
+
+/** A person's own computer is changed (renamed, switched, retired) by that person; platform admins may rename and retire it (its switches stay the owner's, routes/runners.ts). */
+export const canManagePersonal = (actor: Actor, t: Pick<AgentTokenRecord, "ownerId">): boolean => (actor.kind === "user" && Boolean(actor.id) && actor.id === t.ownerId) || isPlatformAdmin(actor);
+
+/** May this person change this runner? A personal runner: its owner (and platform admins); a team runner: canManageRunner. */
+export const canManage = (scope: Pick<ProjectScope, "allowed">, actor: Actor, t: Pick<AgentTokenRecord, "kind" | "ownerId" | "organizationId">): boolean =>
+    t.kind === "personal" ? canManagePersonal(actor, t) : canManageRunner(scope, actor, t.organizationId);
+
+/**
+ * May this person add their own computer? Anyone signed in as a person who may run tests in at least one project they can open, Crowd4Test
+ * testers included (decision of round 39). The access key and open access are no person, so they add team runners only.
+ */
+export function canAddPersonal(scope: Pick<ProjectScope, "allowed" | "permissionsIn">, actor: Actor): boolean {
+    if (actor.kind !== "user" || !actor.id) return false;
+    if (!permissionsOf(actor).has("ai_studio.tests.run")) return false;
+    const here = scope.allowed(actor);
+    if (here === null) return true;
+    for (const projectId of here.keys()) if (scope.permissionsIn(actor, projectId)?.has("ai_studio.tests.run")) return true;
+    return false;
 }
 
 /** Registering, renaming, retiring and giving access: a customer in their own organisation; Crowd4Test staff and people with every project anywhere. */
@@ -46,6 +76,8 @@ export function canManageRunner(scope: Pick<ProjectScope, "allowed">, actor: Act
 
 /** A runner may serve a project of its own organisation; Crowd4Test's shared machines may serve any. */
 export const mayServe = (runnerOrg: string | null, projectOrg: string | null): boolean => runnerOrg === null || runnerOrg === projectOrg;
+/** The same, knowing the runner: a person's own computer is never given to projects; a runner made from a project of no organisation serves only it. */
+export { runnerMayServe };
 
 export type RunnerStatus = "online" | "busy" | "offline" | "not-connected" | "retired";
 
@@ -56,12 +88,16 @@ export interface Reach {
     projects: Map<string, { name: string; organizationId: string | null }>;
     organizations: Map<string, string | null>;
     now: number;
+    /** A person's name by their id (who owns a personal runner); absent: not shown. */
+    personName?: (id: string) => string | null;
 }
 
 const reaches = (r: Reach, projectId: string) => (!r.visible || r.visible.has(projectId)) && r.projects.has(projectId);
 
 /** Everyone with every project sees every runner; a customer sees their organisation's; anyone sees a runner serving a project they can reach. */
 export function seesRunner(store: AgentStore, r: Reach, t: AgentTokenRecord): boolean {
+    // A person's own computer: its owner and platform admins, nobody else (another person's runner is "not found").
+    if (t.kind === "personal") return canManagePersonal(r.actor, t);
     if (sideOf(r.actor) === "customer" && r.actor.organizationId && t.organizationId === r.actor.organizationId) return true;
     if (sideOf(r.actor) !== "customer" && !r.visible) return true;
     return store.projectsOf(t.id).some((p) => reaches(r, p.projectId));
@@ -113,7 +149,7 @@ export function runnerView<A>(store: AgentStore, r: Reach, t: AgentTokenRecord, 
     const served = new Set(access.map((a) => a.projectId));
     // A shared runner (no organisation) serves many customers: someone who does not see every project sees only their own projects' queue and
     // waits there, and no device serials (a serial names a physical phone).
-    const limited = t.organizationId === null && r.visible !== null;
+    const limited = isSharedToken(t) && r.visible !== null;
     const mine = (projectId: string) => !limited || reaches(r, projectId);
     const queued = input.tasks.filter((x) => x.status === "queued" && served.has(x.projectId) && mine(x.projectId));
     const waits = input.tasks.filter((x) => x.agentId && ids.has(x.agentId) && x.claimedMs && mine(x.projectId)).map((x) => x.claimedMs! - x.createdMs);
@@ -127,9 +163,22 @@ export function runnerView<A>(store: AgentStore, r: Reach, t: AgentTokenRecord, 
         machineName: latest?.name ?? null,
         hint: `aitg_…${t.hint}`,
         organizationId: t.organizationId,
-        ownerName: t.organizationId ? (r.organizations.get(t.organizationId) ?? "Your organisation") : "Crowd4Test (shared)",
+        ownerName: t.kind === "personal" ? (t.ownerId && r.actor.id === t.ownerId ? "You" : ((t.ownerId && r.personName?.(t.ownerId)) ?? "A person")) : t.organizationId ? (r.organizations.get(t.organizationId) ?? "Your organisation") : t.projectId ? (projectName(t.projectId) ? `Project “${projectName(t.projectId)}”` : "One project") : "Crowd4Test (shared)",
         status,
-        canManage: canManageRunner(scope, r.actor, t.organizationId),
+        canManage: canManage(scope, r.actor, t),
+        // Migration 51: whose it is, and what its switches allow (a team runner's private addresses are always allowed, as before).
+        kind: t.kind,
+        mine: t.kind === "personal" && r.actor.kind === "user" && Boolean(r.actor.id) && r.actor.id === t.ownerId,
+        settings: {
+            // A Crowd4Test shared runner never runs code scripts, whatever its start command says.
+            codeScripts: t.kind === "personal" ? t.allowCodeScripts : !isSharedToken(t) && (t.allowCodeScripts || latest?.capabilities.customScripts === true),
+            codeScriptsSwitch: t.kind === "personal" || t.organizationId !== null || t.projectId !== null,
+            privateAddresses: t.allowPrivateTargets,
+            privateAddressesSwitch: t.kind === "personal",
+            realPhone: t.allowRealPhone,
+            realPhoneSwitch: t.kind === "personal",
+        },
+        machine: latest ? { os: latest.os, osVersion: latest.osVersion ?? latest.capabilities.osVersion ?? null, arch: latest.arch, memoryMb: latest.capabilities.memoryMb ?? null, cpus: latest.capabilities.cpus ?? null, playwrightVersion: latest.capabilities.playwrightVersion ?? null, agentVersion: latest.version, bound: Boolean(t.machineId) } : null,
         createdAt: t.createdAt,
         retiredAt: t.revokedAt,
         lastSeenAt: iso(latest?.lastSeenMs),
@@ -140,7 +189,7 @@ export function runnerView<A>(store: AgentStore, r: Reach, t: AgentTokenRecord, 
             const shown = limited && d.family === "android" && !d.key.startsWith("avd:") ? { ...d, key: `device-${i + 1}`, name: d.name === d.key ? "Android phone" : d.name } : d;
             return { ...shown, heldBy: lock ? { projectName: projectName(lock.projectId), sinceAt: iso(lock.reservedMs) } : null };
         }),
-        currentTasks: running.map((x) => ({ kind: kindOf(x.adapterId), projectId: reaches(r, x.projectId) ? x.projectId : null, projectName: projectName(x.projectId), startedAt: iso(x.claimedMs), done: x.done, total: x.total })),
+        currentTasks: running.map((x) => ({ kind: kindOf(x.adapterId), projectId: reaches(r, x.projectId) ? x.projectId : null, jobId: reaches(r, x.projectId) ? (x.jobId ?? null) : null, projectName: projectName(x.projectId), startedAt: iso(x.claimedMs), done: x.done, total: x.total })),
         queue: { waiting: queued.length, oldestWaitMs: queued.length ? Math.max(...queued.map((x) => r.now - x.createdMs)) : 0, averageWaitMs: waits.length ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length) : null },
         recentFailures: {
             count: failed.length,

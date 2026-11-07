@@ -32,7 +32,12 @@ namespace AITestingRunner
         public const string PinnedNode = "v24.11.0";
         public const string DefaultDist = "https://nodejs.org/dist";
         public static readonly string[] BundleFiles = { "runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt" };
-        public static readonly string[] KitFiles = { "runner.json", "runner.token" };
+        public static readonly string[] KitFiles = { "runner.json" };
+        /// <summary>Copied when the download has them: the test tools' lock file, and the credential (a one-time code, or an older download's token).</summary>
+        public static readonly string[] OptionalFiles = { "package-lock.json", "runner.enroll", "runner.token" };
+        /// <summary>The file that asks the runner to stop gracefully (src/agent/stop-file.ts), and how long to wait before ending it hard.</summary>
+        public const string StopFile = "stop.request";
+        public const int StopGraceMs = 25000;
     }
 
     static class Env
@@ -47,7 +52,7 @@ namespace AITestingRunner
 
     sealed class Options
     {
-        public bool Check, Silent, NoStart, Uninstall, Stop, Help, UiSmoke, Background, StartAtSignIn, StartMenu, AllBrowsers;
+        public bool Check, Silent, NoStart, Uninstall, Stop, Help, UiSmoke, Background, StartAtSignIn, NoStartAtSignIn, StartMenu, AllBrowsers;
         public string InstallDir = "", LogFile = "", Screenshot = "";
 
         public bool NoUi { get { return Silent || Env.On("AITP_INSTALLER_NO_UI"); } }
@@ -69,6 +74,7 @@ namespace AITestingRunner
                     case "--stop": o.Stop = true; break;
                     case "--background": o.Background = true; break;
                     case "--start-at-sign-in": o.StartAtSignIn = true; break;
+                    case "--no-start-at-sign-in": o.NoStartAtSignIn = true; break;
                     case "--start-menu": o.StartMenu = true; break;
                     case "--all-browsers": o.AllBrowsers = true; break;
                     case "--ui-smoke": o.UiSmoke = true; break;
@@ -102,7 +108,8 @@ namespace AITestingRunner
             "  --install-dir <path>  install here instead of %LOCALAPPDATA%\\AITestingRunner\r\n" +
             "  --log <file>          also write the output to this file\r\n" +
             "  --background          start with only the notification-area icon when nothing is missing\r\n" +
-            "  --start-at-sign-in    add a shortcut to the Startup folder (silent installs)\r\n" +
+            "  --start-at-sign-in    add a shortcut to the Startup folder (silent installs do by default)\r\n" +
+            "  --no-start-at-sign-in do not start the runner when you sign in (silent installs)\r\n" +
             "  --start-menu          add a Start menu shortcut (silent installs)\r\n" +
             "  --all-browsers        accepted for older shortcuts and ignored: the runner downloads Firefox and WebKit itself when a run needs them\r\n" +
             "Exit codes: 0 done, 1 failed, 10 (with --check) something would be downloaded, 2 to 5 the runner stopped for a reason a restart cannot fix.\r\n";

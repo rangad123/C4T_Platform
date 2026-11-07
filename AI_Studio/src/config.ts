@@ -38,6 +38,14 @@ const EnvSchema = z.object({
         .default("true")
         .transform((v) => v !== "false"),
     WORKER_POLL_MS: z.coerce.number().default(1500),
+    /**
+     * Where test code runs (docs/features/runner-only-mode.md). "local" (the default, for self-hosted installs and development): jobs run in
+     * this process or a worker next to it, and each project chooses this server or a runner, as before. "runners" (the hosted platform):
+     * the server never runs test code and never opens a browser for a run; a dispatch worker in the API process hands every run to a runner.
+     */
+    EXECUTION_MODE: z.enum(["local", "runners"]).default("local"),
+    /** EXECUTION_MODE=runners: how many runner jobs the dispatch worker looks after at once (each waits for its runner without holding the others). */
+    DISPATCH_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(8),
     /** A job that runs longer than this is stopped and recorded as failed, with the reason (platform/job-runner.ts). 0 = no limit. */
     JOB_MAX_MINUTES: z.coerce.number().min(0).max(10_080).default(120),
     /** Recordings with a browser on this server at once, in all projects (platform/recorder-service.ts). */

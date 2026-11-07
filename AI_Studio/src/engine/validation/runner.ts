@@ -122,6 +122,8 @@ export const CHILD_ENV_ALLOW = new Set([
     "NODE_EXTRA_CA_CERTS", "NODE_USE_SYSTEM_CA", "AITP_PROXY_TESTS",
     // The address check every generated script makes when a step runs (engine/spec/run-address.ts).
     "BLOCK_PRIVATE_TARGETS",
+    // A runner's own address guard (src/agent/address-guard.ts, engine/net/test-proxy.ts); the platform never sets it.
+    "AITP_ADDRESS_GUARD",
 ]);
 
 function playwrightCli(): string {
@@ -226,6 +228,117 @@ export default class PartialReporter {
 }
 `;
 
+/**
+ * A runner agent's live view of a run: each test and each top-level step as it starts and ends, and each failure screenshot once Playwright
+ * has written it. Only produced when a caller asks (`onLive`); the run and its result are the same either way.
+ */
+export type LiveRunEvent =
+    | { type: "test_started"; testId: string; variant?: string; title: string }
+    | { type: "test_finished"; testId: string; variant?: string; title: string; status: ScriptRun["status"]; durationMs: number; error?: string; stack?: string }
+    | { type: "step_started"; testId: string; variant?: string; index: number; title: string }
+    | { type: "step_finished"; testId: string; variant?: string; index: number; title: string; status: "passed" | "failed"; durationMs: number; error?: string }
+    | { type: "screenshot"; testId: string; variant?: string; path: string };
+
+/** The prefix of a live reporter line on Playwright's output (a control character no test title or list-reporter line starts with). */
+const LIVE_MARK = "\u001eAITP-LIVE ";
+const LIVE_REPORTER_FILE = "live-reporter.mjs";
+
+/**
+ * The live reporter (plain JavaScript, no dependencies): one line per test or top-level step start and end, written to Playwright's own
+ * output where the caller reads it. It works for every script as it is: generated scripts wrap each step in `test.step("N. ...")`, and a
+ * hand-written script's own steps are reported too. It never throws into the run and prints nothing a person reads.
+ */
+const LIVE_REPORTER = `import path from "node:path";
+const MARK = ${JSON.stringify("\u001eAITP-LIVE ")};
+const out = (o) => { try { process.stdout.write(MARK + JSON.stringify(o) + "\\n"); } catch { /* a line that cannot be written is simply not live */ } };
+const where = (test) => { const p = test.parent && test.parent.project ? test.parent.project() : undefined; return { file: path.basename(test.location.file), project: p ? p.name : "", title: test.title }; };
+const top = (step) => step && step.category === "test.step" && !step.parent;
+const msg = (e) => (e && typeof e.message === "string" ? e.message.slice(0, 2000) : undefined);
+export default class LiveReporter {
+    onTestBegin(test) { out({ t: "test_started", ...where(test) }); }
+    onStepBegin(test, _result, step) { if (top(step)) out({ t: "step_started", ...where(test), step: step.title }); }
+    onStepEnd(test, _result, step) { if (top(step)) out({ t: "step_finished", ...where(test), step: step.title, ok: !step.error, durationMs: step.duration, error: msg(step.error) }); }
+    onTestEnd(test, result) {
+        out({ t: "test_finished", ...where(test), status: result.status, durationMs: result.duration, error: msg(result.error), stack: result.error && typeof result.error.stack === "string" ? result.error.stack.slice(0, 4000) : undefined });
+        for (const a of result.attachments || []) if (a.name === "screenshot" && a.path && /^image\\//.test(a.contentType || "")) out({ t: "screenshot", ...where(test), path: a.path });
+    }
+    printsToStdio() { return false; }
+}
+`;
+
+/**
+ * Reads the live reporter's lines from chunks of Playwright's output and turns them into LiveRunEvents with the script's test id (the
+ * file name is the script's own) and step index ("3. ..." is step index 2; an unnumbered step counts on from the last one). Exported for
+ * the unit tests.
+ */
+export class LiveParser {
+    private buf = "";
+    private readonly steps = new Map<string, number>();
+    constructor(
+        private readonly scripts: ReadonlyArray<{ testId: string; filename: string }>,
+        private readonly variants: boolean,
+        private readonly emit: (e: LiveRunEvent) => void,
+    ) {}
+
+    push(chunk: string): void {
+        this.buf += chunk;
+        let at: number;
+        while ((at = this.buf.indexOf("\n")) >= 0) {
+            this.line(this.buf.slice(0, at).replace(/\r$/, ""));
+            this.buf = this.buf.slice(at + 1);
+        }
+        if (this.buf.length > 64_000) this.buf = "";
+    }
+
+    private line(text: string): void {
+        const i = text.indexOf(LIVE_MARK);
+        if (i < 0) return;
+        let o: Record<string, unknown>;
+        try {
+            o = JSON.parse(text.slice(i + LIVE_MARK.length)) as Record<string, unknown>;
+        } catch {
+            return;
+        }
+        const script = this.scripts.find((s) => s.filename === o.file);
+        if (!script) return;
+        const str = (v: unknown, n: number): string | undefined => (typeof v === "string" && v ? v.replace(ANSI, "").slice(0, n) : undefined);
+        const base = { testId: script.testId, ...(this.variants && typeof o.project === "string" && o.project ? { variant: o.project } : {}) };
+        const title = str(o.title, 300) ?? script.testId;
+        const key = `${script.testId}|${String(o.project ?? "")}|${title}`;
+        const ms = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+        const indexOf = (stepTitle: string, starting: boolean): number => {
+            const m = /^(\d+)\.\s/.exec(stepTitle);
+            const last = this.steps.get(key) ?? -1;
+            const index = m ? Number(m[1]) - 1 : starting ? last + 1 : Math.max(0, last);
+            if (starting) this.steps.set(key, index);
+            return index;
+        };
+        switch (o.t) {
+            case "test_started":
+                this.steps.delete(key);
+                return this.emit({ type: "test_started", ...base, title });
+            case "step_started": {
+                const step = str(o.step, 300) ?? "";
+                return this.emit({ type: "step_started", ...base, index: indexOf(step, true), title: step });
+            }
+            case "step_finished": {
+                const step = str(o.step, 300) ?? "";
+                const error = str(o.error, 800);
+                return this.emit({ type: "step_finished", ...base, index: indexOf(step, false), title: step, status: o.ok === true ? "passed" : "failed", durationMs: ms(o.durationMs), ...(error ? { error } : {}) });
+            }
+            case "test_finished": {
+                const status: ScriptRun["status"] = o.status === "passed" ? "passed" : o.status === "timedOut" ? "timedOut" : o.status === "skipped" ? "skipped" : o.status === "failed" ? "failed" : "error";
+                const error = str(o.error, 2000);
+                const stack = str(o.stack, 4000);
+                return this.emit({ type: "test_finished", ...base, title, status, durationMs: ms(o.durationMs), ...(error ? { error } : {}), ...(stack ? { stack } : {}) });
+            }
+            case "screenshot":
+                if (typeof o.path === "string" && o.path) this.emit({ type: "screenshot", ...base, path: o.path });
+                return;
+        }
+    }
+}
+
 /** The config plus the list reporter, whose output lines say which test just finished. Used only when progress is wanted. */
 function withProgressReporter(config: string): string {
     return withReporters(config, ['["list"]']);
@@ -292,11 +405,12 @@ export class ProgressParser {
             this.total = Number(run[1]);
             return;
         }
-        const m = /^\s*(ok|x|-)\s+(\d+)\s+(.+?)(?:\s+\(\d+(?:\.\d+)?(?:ms|s|m)\))?$/.exec(text);
+        // Playwright writes "ok"/"x" where the terminal has no Unicode and "✓"/"✘" where it has (Linux and macOS, also when piped).
+        const m = /^\s*(ok|x|-|\u2713|\u2718)\s+(\d+)\s+(.+?)(?:\s+\(\d+(?:\.\d+)?(?:ms|s|m)\))?$/.exec(text);
         if (!m || this.total === 0) return;
         const title = m[3]!.split(" › ").pop()!.trim().slice(0, 160);
         this.done = Math.min(this.total, this.done + 1);
-        this.emit({ done: this.done, total: this.total, status: m[1] === "ok" ? "passed" : m[1] === "x" ? "failed" : "skipped", title });
+        this.emit({ done: this.done, total: this.total, status: m[1] === "ok" || m[1] === "\u2713" ? "passed" : m[1] === "x" || m[1] === "\u2718" ? "failed" : "skipped", title });
     }
 }
 
@@ -321,7 +435,7 @@ export async function runScripts(
     scratchDir: string,
     scripts: ScriptInput[],
     env: RunEnv,
-    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch } = { workers: 2 },
+    opts: { workers: number; timeoutMs?: number; signal?: AbortSignal; /** Run every script once per project (cross-browser / responsive). */ projects?: RunnerProject[]; /** Per-test time limit in ms (project setting); unset = 60 s. */ testTimeoutMs?: number; /** Called as each test finishes. Leaves the run itself untouched. */ onProgress?: (p: RunProgress) => void; /** Called as each test and top-level step starts and ends, and when a failure screenshot is written (a runner agent's live view). Leaves the run itself untouched. */ onLive?: (e: LiveRunEvent) => void; /** This machine agreed to run code tests. Without it they are refused here, whoever asked. */ allowCustom?: boolean; /** Shared helper modules for code tests, written to ./helpers/<name>.ts in the run folder. */ helpers?: Array<{ name: string; content: string }>; /** Where email steps read their email (the project's test mailbox). Unset: email steps fail with a plain message. */ mail?: MailSource; /** A runner's installed Chrome or Edge for Chromium tests (in the config only). Unset: Playwright's own Chromium. */ browser?: BrowserLaunch } = { workers: 2 },
 ): Promise<ScriptRun[]> {
     if (scripts.length === 0) return [];
     if (opts.signal?.aborted) throw new Error("Job cancelled");
@@ -342,8 +456,9 @@ export async function runScripts(
     // A run that can be cancelled also keeps each finished test's result as it ends (a cancelled run is killed before Playwright writes its report).
     // --proxy-tests on a runner (AITP_PROXY_TESTS=1): the browser gets the proxy; otherwise the config is unchanged (engine/net/test-proxy.ts).
     const config = withTestProxy(configFor(projects, opts.testTimeoutMs, opts.browser), process.env);
-    await fs.writeFile(path.join(runDir, "playwright.config.ts"), withReporters(config, [...(opts.onProgress ? ['["list"]'] : []), ...(opts.signal ? ['["./partial-reporter.mjs"]'] : [])]));
+    await fs.writeFile(path.join(runDir, "playwright.config.ts"), withReporters(config, [...(opts.onProgress ? ['["list"]'] : []), ...(opts.signal ? ['["./partial-reporter.mjs"]'] : []), ...(opts.onLive ? [`["./${LIVE_REPORTER_FILE}"]`] : [])]));
     if (opts.signal) await fs.writeFile(path.join(runDir, "partial-reporter.mjs"), PARTIAL_REPORTER);
+    if (opts.onLive) await fs.writeFile(path.join(runDir, LIVE_REPORTER_FILE), LIVE_REPORTER);
     // Saved sign-in and email steps (see ../auth/run-session.ts): nothing changes for a run that uses neither.
     const extras = await prepareRunExtras(runDir, scripts, env.storageState, opts.mail);
     for (const s of scripts) await fs.writeFile(path.join(runDir, s.filename), extras.content(s));
@@ -401,7 +516,20 @@ export async function runScripts(
         let err = "";
         child.stderr.on("data", (d) => (err += d));
         const progress = opts.onProgress ? new ProgressParser(opts.onProgress) : undefined;
-        child.stdout.on("data", (d) => progress?.push(String(d)));
+        const onLive = opts.onLive;
+        const live = onLive
+            ? new LiveParser(scripts, projects.length > 0, (e) => {
+                  try {
+                      onLive(e);
+                  } catch {
+                      /* a live view that fails must not change the run */
+                  }
+              })
+            : undefined;
+        child.stdout.on("data", (d) => {
+            progress?.push(String(d));
+            live?.push(String(d));
+        });
         const limit = opts.timeoutMs ?? Math.max(120_000, scripts.length * Math.max(1, projects.length) * (opts.testTimeoutMs ?? 60_000));
         let killed = false;
         const timer = setTimeout(() => {

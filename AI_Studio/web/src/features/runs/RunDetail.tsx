@@ -13,6 +13,7 @@ import { versionHref } from "../review/review";
 import { RunMenu } from "./RunMenu";
 import { RunStrip } from "./RunStrip";
 import { RunTestList } from "./RunStrip";
+import { followsRunner, LiveRunPanel, useLiveRun } from "./LiveRun";
 import { StopRun } from "./StopDialog";
 import { RelTime } from "./RunTime";
 import { announceRunsChanged, ranSentence, runTitle, startedByText, STATE_WORD, stoppedLine, useRunAnswer, whereOf, type RunState } from "./runs";
@@ -28,6 +29,8 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
     const run = useRunAnswer(id, jobId, true);
     const name = project.data?.name;
     const a = run.data;
+    // A run on a runner: its phase, steps, screenshots and log, rebuilt from the run's stored events (so a refresh loses nothing).
+    const runner = useLiveRun(jobId, followsRunner(a?.job), Boolean(a?.active), run.stream);
     useDocumentTitle(a ? `${runTitle(a.job)} · ${name ?? "Runs"}` : "Run");
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Runs", href: routes.runs(id) }, { label: "Run" }], nav: "projects" });
 
@@ -114,6 +117,8 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                     )}
                 </section>
 
+                {followsRunner(job) && <LiveRunPanel projectId={id} job={job} active={active} live={runner.live} loaded={runner.loaded} planned={c.planned} answer={a} />}
+
                 {!job.cancelled && problems.map((e) => (
                     <Callout key={e.title + e.body} tone={nothingRan(job) ? "info" : job.status === "FAILED" ? "danger" : "warning"} title={e.title}>
                         {e.body}
@@ -131,6 +136,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                                 <li key={t.id}>
                                     <a href={t.version !== null ? versionHref(id, t.id, t.version) : routes.scripts(id, "review")}>Review {t.testId}</a>
                                     <span className="t-meta"> {t.title}</span>
+                                    {t.reason && <span className="t-meta run-held-why" data-testid="run-held-reason"> {t.reason}</span>}
                                 </li>
                             ))}
                         </ul>
@@ -185,7 +191,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                         </EmptyState>
                     ) : (
                         <div className="run-tests-wrap">
-                            <RunTestList tests={a.tests} />
+                            <RunTestList tests={a.tests} live={followsRunner(job) ? runner.live : undefined} />
                         </div>
                     )}
                 </section>

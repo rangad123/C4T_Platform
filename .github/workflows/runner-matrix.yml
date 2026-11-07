@@ -1,0 +1,142 @@
+# The runner on real machines: GitHub's hosted Windows, macOS and Linux computers each build the runner download, install it with the
+# real installer without questions, start it, check that it connects to a platform started in the same job, run a web test and an API
+# test on it end to end, stop it, start it again, take its access away, uninstall it and check that nothing is left
+# (AI_Studio/scripts/smoke-runner.mjs --kit installer --lifecycle). The plain files download and the complete download (no Node.js on the
+# PATH) are checked too. What this proves and what it cannot: AI_Studio/docs/features/real-machine-checks.md.
+#
+# GitHub's Windows machines run Windows Server 2022 and 2025, not Windows 10 or 11 desktop, and nobody is signed in at a screen: a manual
+# pass on a real Windows 11 PC and a real Mac is still needed (AI_Studio/docs/runner-implementation/MANUAL_VERIFICATION.md).
+# No secret is used and nothing is deployed.
+name: Runner on real machines
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "AI_Studio/src/agent/**"
+      - "AI_Studio/src/agent-protocol/**"
+      - "AI_Studio/installer/**"
+      - "AI_Studio/scripts/build-runner*"
+      - "AI_Studio/scripts/build-installer*"
+      - "AI_Studio/scripts/smoke-runner.mjs"
+      - ".github/workflows/runner-matrix.yml"
+  pull_request:
+    paths:
+      - "AI_Studio/src/agent/**"
+      - "AI_Studio/src/agent-protocol/**"
+      - "AI_Studio/installer/**"
+      - "AI_Studio/scripts/build-runner*"
+      - "AI_Studio/scripts/build-installer*"
+      - "AI_Studio/scripts/smoke-runner.mjs"
+      - ".github/workflows/runner-matrix.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Runner, ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            label: Windows Server 2022 x64
+            target: win-x64
+            installer: true
+          - os: windows-2025
+            label: Windows Server 2025 x64
+            target: win-x64
+            installer: true
+          - os: macos-14
+            label: macOS 14 Apple silicon
+            target: mac-arm64
+            installer: true
+          # macos-13 (Intel) was retired by GitHub; macos-15-intel is the Intel image that remains.
+          - os: macos-15-intel
+            label: macOS 15 Intel
+            target: mac-x64
+            installer: true
+          - os: ubuntu-latest
+            label: Linux x64
+            target: linux-x64
+            installer: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: AI_Studio
+    env:
+      # A path that does not exist, so no test can reach a phone.
+      TAQWRIGHT_HOME: /nonexistent-taqwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: AI_Studio/package-lock.json
+      - run: npm ci
+      - name: System libraries for the browser (Linux)
+        if: runner.os == 'Linux'
+        run: npx playwright install-deps chromium
+      - name: Build the web UI
+        run: npm run build:web
+      - name: Build the runner
+        run: npm run build:runner
+      # Not fatal on purpose: when the installer cannot be built, the installer check below fails with the reason instead.
+      - name: Build the installer (Windows program and Mac app)
+        if: matrix.installer && runner.os == 'Windows'
+        continue-on-error: true
+        run: npm run build:installer
+      - name: Build the installer (Mac app)
+        if: matrix.installer && runner.os == 'macOS'
+        continue-on-error: true
+        run: npm run build:installer -- --skip-windows
+      - name: Build the Mac package and disk image (unsigned)
+        if: matrix.installer && runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          sh scripts/build-runner-pkg.sh --out dist/installer-pkg
+          sh scripts/make-dmg.sh --out dist/installer-pkg
+      - name: Build the complete download for ${{ matrix.target }}
+        run: npm run build:runner -- --complete --targets ${{ matrix.target }}
+      - name: Installer, unattended, with stop, restart, uninstall
+        if: matrix.installer
+        run: node scripts/smoke-runner.mjs --kit installer --lifecycle --port 6952 --out smoke-report/installer
+      - name: Plain files
+        if: success() || failure()
+        run: node scripts/smoke-runner.mjs --kit files --port 6950 --out smoke-report/files
+      # The proof that the complete download needs nothing: the runner is started with a PATH that holds no Node.js and no npm.
+      - name: Complete download with no Node.js on the PATH
+        if: success() || failure()
+        run: node scripts/smoke-runner.mjs --kit complete --no-node-on-path --port 6954 --out smoke-report/complete
+      # The installer tests that need the real system (Windows: the C# compiler; macOS: the setup script under the Mac's own /bin/sh).
+      # Informative on macOS: those tests were written to simulate a Mac elsewhere, so a failure there is read, not trusted blindly.
+      - name: Installer tests on this system
+        if: (success() || failure()) && matrix.installer
+        continue-on-error: ${{ runner.os == 'macOS' }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            npx vitest run tests/installer-win-unit.test.ts tests/runner-stop-file-unit.test.ts
+          else
+            npx vitest run tests/installer-mac-unit.test.ts
+          fi
+      - name: Upload the report and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-smoke-${{ matrix.os }}
+          path: |
+            AI_Studio/smoke-report/
+            AI_Studio/dist/installer-pkg/
+          if-no-files-found: warn
+          retention-days: 14

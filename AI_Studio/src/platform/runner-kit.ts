@@ -178,8 +178,22 @@ export interface BuildKitInput {
     /** The project name as a folder-safe word (used in the file name and the folder inside the zip). */
     projectSlug: string;
     platformUrl: string;
-    /** The new project token (aitg_...). The only copy there will ever be. */
-    token: string;
+    /**
+     * The single-use enrollment code (aite_...) the runner trades for its own credential at first contact, written as runner.enroll (0600).
+     * Every download the platform makes carries one, never a runner credential (round 39).
+     */
+    enrollCode?: string;
+    /** The signed-update sequence of this server's runner files (runner-update.ts downloadSequence): a fresh download refuses older signed updates. */
+    updateSequence?: number;
+    /** @deprecated Test seam: a runner credential written as runner.token, for tests that start a kit against a stand-in platform. The platform's routes never pass one. */
+    token?: string;
+}
+
+/** The kit's credential file: runner.enroll with the code, or (tests only) runner.token. Exactly one of them. */
+export function kitCredentialFile(i: { enrollCode?: string; token?: string }): { name: "runner.enroll" | "runner.token"; text: string } {
+    if (i.enrollCode) return { name: "runner.enroll", text: `${i.enrollCode}\n` };
+    if (i.token) return { name: "runner.token", text: `${i.token}\n` };
+    throw new Error("A runner kit needs an enrollment code.");
 }
 
 /** `rwxr-xr-x`, `rw-r--r--` and `rw-------` as ZIP external attributes (the permission bits live in the high 16 bits; `*` avoids a negative 32-bit shift). */
@@ -200,9 +214,13 @@ export function buildKitZip(i: BuildKitInput): Uint8Array {
     };
     // The program: exactly the prebuilt bytes.
     for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) add(name, i.bundle.files.get(name)!);
+    // The test tools' lock file (from round 39 on): the start scripts and installers install from it with npm ci.
+    const lock = i.bundle.files.get("package-lock.json");
+    if (lock) add("package-lock.json", lock);
     // What belongs to this download.
-    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.request.name, kitVersion }, null, 2)}\n`));
-    add("runner.token", text(`${i.token}\n`), 0o600);
+    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.request.name, kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
+    const credential = kitCredentialFile(i);
+    add(credential.name, text(credential.text), 0o600);
     // All three start scripts are in every kit: someone who picked the wrong system (or downloaded on one computer and unzipped on another)
     // must not end up with nothing runnable. The chosen system only decides what the README leads with and the folder's name.
     add("start-runner.cmd", text(withLineEnding(START_CMD, "\r\n")), 0o755);

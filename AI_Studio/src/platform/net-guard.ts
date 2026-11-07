@@ -22,7 +22,8 @@ export function isPrivateHost(host: string): boolean {
         }
         const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
         if (dotted) return isPrivateHost(dotted[1]!);
-        return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80") || h.startsWith("ff");
+        // fc00::/7 unique local, fe80::/10 link-local and the old fec0::/10 site-local (fe8x-fefx), ff00::/8 multicast.
+        return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || /^fe[89a-f]/.test(h) || h.startsWith("ff");
     }
     return false;
 }

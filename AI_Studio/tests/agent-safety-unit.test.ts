@@ -173,7 +173,7 @@ describe("a shared runner seen by a customer", () => {
         const task = (id: string, projectId: string) => ({ id, projectId, status: "queued", adapterId: "playwright", agentId: null, createdMs: now - 1000, claimedMs: null, finishedMs: null, error: null, done: 0, total: 1 });
         const actor = { kind: "user", id: "u1", name: "Cat", role: "owner", side: "customer", organizationId: "org-a" } as never;
         const reach = { actor, visible: new Map([["mine", "owner"]]), projects: new Map([["mine", { name: "Mine", organizationId: "org-a" }], ["theirs", { name: "Theirs", organizationId: "org-b" }]]), organizations: new Map(), now };
-        const token = { id: "t1", projectId: null, organizationId: null, label: "Shared", hint: "abcd", createdAt: "", revokedAt: null } as never;
+        const token = { id: "t1", kind: "team", ownerId: null, projectId: null, organizationId: null, label: "Shared", hint: "abcd", createdAt: "", revokedAt: null } as never;
         const v = runnerView(store, reach as never, token, { tasks: [task("q1", "mine"), task("q2", "theirs"), task("q3", "theirs")] as never, reservations: [] }, { allowed: () => reach.visible } as never, (a) => ({ capabilities: a.capabilities }));
         expect(v.queue.waiting).toBe(1);
         expect(JSON.stringify(v)).not.toContain("SERIAL-123");

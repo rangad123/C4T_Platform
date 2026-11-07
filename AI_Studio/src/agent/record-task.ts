@@ -17,6 +17,8 @@ import type { BrowserLaunch } from "../engine/browsers/choice.js";
 import { PlatformError, type PlatformClient } from "./client.js";
 import type { Logger } from "./log.js";
 import { RecordProcess } from "./record-process.js";
+import { addressProblem, startAddressGuard } from "./address-guard.js";
+import type { GuardProxy } from "../engine/discovery/guard-proxy.js";
 
 /** Without a good answer from the platform for this long, the recording ends (a browser must not stay open on someone's desktop for nothing). */
 export const PLATFORM_SILENCE_MS = 90_000;
@@ -39,6 +41,8 @@ export interface RecordTaskDeps {
     silenceMs?: number;
     /** The installed Chrome or Edge to record in (the runner's browser setting). Absent: Playwright's own Chromium. */
     browser?: BrowserLaunch;
+    /** This runner refuses private and local addresses (address-guard.ts): the start page is checked here and the browser goes through the agent's address guard. */
+    refusePrivate?: boolean;
 }
 
 /** What a push carries: the state, made to fit the wire (a step that does not fit is left out and the person is told). */
@@ -129,6 +133,18 @@ export class RecordTask {
         } catch {
             return fail("The recording address is not valid.");
         }
+        // A runner that refuses private addresses: the start page is looked up on this computer, and every page the browser opens later goes
+        // through the agent's address guard (redirects, frames, a live session's "go to" included).
+        let guard: GuardProxy | undefined;
+        if (deps.refusePrivate) {
+            const why = await addressProblem(rec.startUrl);
+            if (why) return fail(`The recording was not started: ${why}`);
+            try {
+                guard = await startAddressGuard();
+            } catch {
+                return fail("The agent could not start its address guard, so the recording was not started.");
+            }
+        }
         // The platform's limits, never longer than this agent's own.
         const idleMs = Math.min(rec.idleMinutes * 60_000, DEFAULT_CAPS.idleMs);
         const totalMs = Math.min(rec.totalMinutes * 60_000, DEFAULT_CAPS.totalMs);
@@ -139,12 +155,13 @@ export class RecordTask {
             proc = new RecordProcess(deps.env, (m) => this.onChild(m, short));
         } catch (e) {
             log.warn(`Recording ${short} could not be started: ${e instanceof Error ? e.message.split("\n")[0] : "unknown problem"}`);
+            await guard?.close().catch(() => undefined);
             return fail("The agent could not start the recording process.");
         }
         this.proc = proc;
         deps.setPid(proc.pid);
         if (this.stopping) proc.send({ type: "stop" });
-        proc.send({ type: "record", startUrl: rec.startUrl, headed: rec.headed, idleMs, totalMs, maxSteps, ...(deps.browser && (deps.browser.channel || deps.browser.executablePath) ? { browser: deps.browser } : {}) });
+        proc.send({ type: "record", startUrl: rec.startUrl, headed: rec.headed, idleMs, totalMs, maxSteps, ...(deps.browser && (deps.browser.channel || deps.browser.executablePath) ? { browser: deps.browser } : {}), ...(guard ? { guardProxy: guard.address } : {}) });
         log.info(`Recording ${short} started: the browser window is ${rec.headed ? "shown on this computer" : "not shown (headless)"}.`);
 
         const beatMs = Math.min(deps.beatMs ?? BEAT_MS, BEAT_MS);
@@ -170,6 +187,7 @@ export class RecordTask {
         clearTimeout(this.killTimer);
         // Nothing the recording process started is left: its tree is ended (a no-op when it exited by itself).
         if (!proc.hasExited) proc.kill();
+        await guard?.close().catch(() => undefined);
         while (this.pushing) await sleep(25);
 
         // The last state is always sent: the steps are the person's work.

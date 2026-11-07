@@ -203,6 +203,8 @@ export interface StreamEvent {
     stage: string;
     kind: string;
     jobId: string;
+    /** The structured part, only for a runner's live events (kinds `runner_*`: test, step, screenshot, phase); other events never carry it. */
+    data?: unknown;
 }
 
 export interface SnapshotRead {
@@ -355,7 +357,7 @@ export class TailLoop {
                     // Never twice, never backwards; within the overlap window, a late id not sent yet is the exception.
                     if (e.id <= this.last && (overlap === 0 || e.id <= low || this.sent.has(e.id))) continue;
                     const position = Math.max(this.last, e.id);
-                    if (!(await this.send(sseFrame({ event: "log", id: position, data: { id: e.id, at: e.at, level: e.level, message: e.message, stage: e.stage, kind: e.kind, jobId: e.jobId } })))) return;
+                    if (!(await this.send(sseFrame({ event: "log", id: position, data: { id: e.id, at: e.at, level: e.level, message: e.message, stage: e.stage, kind: e.kind, jobId: e.jobId, ...(e.data !== undefined ? { data: e.data } : {}) } })))) return;
                     this.last = position;
                     if (overlap > 0) this.sent.add(e.id);
                     this.activity = true;

@@ -8,6 +8,19 @@ name: Deploy AI Studio
 # own Node.js and packages, and the installers) are built here, not on the box:
 # the box is small and shared with crowd4test.com. The finished files are copied
 # over with the same SSH secrets, and deploy.sh puts them in place.
+#
+# Signing (docs/features/runner-updates.md, runner-installer.md): each step runs
+# only when its secrets are set, and says so in the log when they are not.
+#   RUNNER_UPDATE_SIGNING_KEY  signs the runner update (Ed25519). Without it no
+#                              runner is offered an update; people download new
+#                              versions by hand. Signed in its own job, which
+#                              installs no npm package next to the key.
+#   WIN_CERT_PFX (base64), WIN_CERT_PASSWORD
+#                              Authenticode for AITestingRunnerSetup.exe.
+#   APPLE_CERT_P12 (base64), APPLE_CERT_PASSWORD, APPLE_DEVELOPER_ID_APPLICATION,
+#   APPLE_DEVELOPER_ID_INSTALLER, APPLE_TEAM_ID, APPLE_ID, APPLE_APP_PASSWORD
+#                              Developer ID signing and notarisation of the Mac
+#                              package (built here, not served yet).
 on:
   workflow_run:
     workflows: [AI Studio CI]
@@ -49,6 +62,24 @@ jobs:
       - name: Check that it was built
         shell: bash
         run: test -s dist/installer/win/AITestingRunnerSetup.exe
+      # Authenticode, only with a certificate. Without one the program goes out unsigned and Windows says "unknown publisher".
+      - name: Sign the Windows program (Authenticode)
+        shell: pwsh
+        env:
+          WIN_CERT_PFX: ${{ secrets.WIN_CERT_PFX }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: |
+          if (-not $env:WIN_CERT_PFX) { Write-Output "WIN_CERT_PFX is not set, so the Windows program goes out unsigned (Windows shows it as from an unknown publisher)."; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "runner-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WIN_CERT_PFX))
+          try {
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signtool) { throw "signtool.exe was not found on this machine." }
+            & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:WIN_CERT_PASSWORD dist/installer/win/AITestingRunnerSetup.exe
+            if ($LASTEXITCODE -ne 0) { throw "signtool could not sign the program." }
+            & $signtool.FullName verify /pa dist/installer/win/AITestingRunnerSetup.exe
+            if ($LASTEXITCODE -ne 0) { throw "The signature does not verify." }
+          } finally { Remove-Item $pfx -Force -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@v4
         with:
           name: runner-installer-windows
@@ -121,9 +152,124 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
+  # The update manifest is signed here, in a job that installs no npm package: no package's install script ever runs next to the key.
+  # The job hashes every file again (scripts/sign-runner-update.mjs, Node's own modules only) and replaces the downloads artifact with
+  # the signed copy. Without the secret it changes nothing and says so: the platform then offers no runner update.
+  sign-runner-update:
+    name: Sign the runner update
+    needs: runner-downloads
+    if: ${{ !cancelled() && needs.runner-downloads.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: AI_Studio/scripts/sign-runner-update.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: runner-downloads
+          path: incoming
+      - name: Sign the update manifest
+        id: sign
+        env:
+          RUNNER_UPDATE_SIGNING_KEY: ${{ secrets.RUNNER_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNER_UPDATE_SIGNING_KEY" ]; then
+            echo "::warning::RUNNER_UPDATE_SIGNING_KEY is not set, so this deploy publishes no runner update. Installed runners keep their version, and the Runners page tells people to download the new one."
+            exit 0
+          fi
+          (cd incoming && sha256sum -c --quiet runner-downloads.tar.sha256)
+          mkdir work
+          tar -xf incoming/runner-downloads.tar -C work
+          node AI_Studio/scripts/sign-runner-update.mjs --kit work/runner --complete work/runner-complete
+          tar -cf incoming/runner-downloads.tar -C work runner runner-complete installer build-info.json
+          (cd incoming && sha256sum runner-downloads.tar >runner-downloads.tar.sha256)
+          echo "signed=true" >>"$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.sign.outputs.signed == 'true' }}
+        with:
+          name: runner-downloads
+          overwrite: true
+          path: |
+            incoming/runner-downloads.tar
+            incoming/runner-downloads.tar.sha256
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  # The Mac package (.pkg) and disk image, signed with Developer ID and notarised when the Apple secrets are set. Built and kept as an
+  # artifact only: the platform keeps serving the zip until a pass on a real Mac is green.
+  installer-mac-package:
+    name: Build the Mac package
+    runs-on: macos-14
+    timeout-minutes: 30
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
+    defaults:
+      run:
+        working-directory: AI_Studio
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Only Node's own modules are needed: no npm ci here.
+      - name: Build the Mac app
+        run: node scripts/build-installer.mjs --skip-windows
+      - name: Build, sign and notarise the package
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+          APPLE_DEVELOPER_ID_INSTALLER: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          out=dist/installer-pkg
+          if [ -z "$APPLE_CERT_P12" ] || [ -z "$APPLE_DEVELOPER_ID_APPLICATION" ] || [ -z "$APPLE_DEVELOPER_ID_INSTALLER" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
+            echo "::notice::The Apple signing secrets are not set, so the Mac package is built unsigned (Gatekeeper will ask before it opens)."
+            sh scripts/build-runner-pkg.sh --out "$out"
+          else
+            keychain="$RUNNER_TEMP/runner-signing.keychain-db"
+            kpass="$(uuidgen)"
+            security create-keychain -p "$kpass" "$keychain"
+            security set-keychain-settings -lut 3600 "$keychain"
+            security unlock-keychain -p "$kpass" "$keychain"
+            printf '%s' "$APPLE_CERT_P12" | base64 --decode >"$RUNNER_TEMP/runner-signing.p12"
+            security import "$RUNNER_TEMP/runner-signing.p12" -k "$keychain" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign
+            rm -f "$RUNNER_TEMP/runner-signing.p12"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$kpass" "$keychain" >/dev/null
+            security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+            sh scripts/build-runner-pkg.sh --out "$out" --sign-app "$APPLE_DEVELOPER_ID_APPLICATION"
+            for pkg in "$out"/*.pkg; do
+              productsign --sign "$APPLE_DEVELOPER_ID_INSTALLER" --keychain "$keychain" "$pkg" "$pkg.signed" && mv -f "$pkg.signed" "$pkg"
+              xcrun notarytool submit "$pkg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+              xcrun stapler staple "$pkg"
+            done
+            security delete-keychain "$keychain"
+          fi
+          sh scripts/make-dmg.sh --out "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-installer-mac-pkg
+          path: AI_Studio/dist/installer-pkg/
+          retention-days: 7
+          if-no-files-found: error
+
   deploy:
     name: Deploy to EC2
-    needs: runner-downloads
+    needs: [runner-downloads, sign-runner-update]
     runs-on: ubuntu-latest
     # The first deploy downloads Node and Chromium on a small box at low priority.
     timeout-minutes: 45

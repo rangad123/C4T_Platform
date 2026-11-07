@@ -28,6 +28,7 @@ import { withJobStarter } from "./review-store.js";
 import { expandSecrets, totpCodesNear } from "./secret-variants.js";
 import type { ArtifactStore } from "./storage.js";
 import { runsCanStartHere } from "./suite-run.js";
+import { runnersOnly, serverWorkMessage } from "./runner-only.js";
 
 export const NO_RUNNER_YET = "Agent runs use the browser of this platform's worker. They cannot go to a runner yet.";
 export const AGENT_NO_WORKER = "Agent runs do not start on this server: nothing here picks up a run, so it would wait in the queue and never start. Start it where tests run (your own installation, or once tests are switched on here).";
@@ -46,6 +47,8 @@ export function agentRunStoreFor(p: Pick<Platform, "sql">): AgentRunStore {
 export async function agentRunsCanStart(p: Pick<Platform, "config" | "db" | "llm" | "sql">, projectId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
     // First, whatever the worker state: the explicit setting (decision: AI browsers run only on runners).
     if (!p.config.AGENT_RUNS_ON_SERVER) return { ok: false, reason: AGENT_RUNS_OFF };
+    // EXECUTION_MODE=runners: the server opens no browser, whatever AGENT_RUNS_ON_SERVER says (runner-only.ts).
+    if (runnersOnly(p.config)) return { ok: false, reason: serverWorkMessage("agent") };
     if (!runsCanStartHere(p).ok) return { ok: false, reason: AGENT_NO_WORKER };
     // The project's AI: its own key counts, and a key that cannot be used says why.
     const ai = await projectAiGate(p, projectId);

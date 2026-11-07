@@ -49,6 +49,32 @@ export function planEnvironmentRun(tests: Array<{ id: string; testKey: string; s
     return { willRun, skipped };
 }
 
+/** The site of an address: its host without the first labels, so staging.shop.example and shop.example share "shop.example". */
+function siteOf(raw: string): string | null {
+    let host: string;
+    try {
+        host = new URL(raw).hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+    } catch {
+        return null;
+    }
+    if (!host || /^[\d.]+$/.test(host) || host.includes(":")) return host || null;
+    const labels = host.split(".");
+    // Two labels (example.com), or three when the second-to-last is a short country suffix part (example.co.uk, example.com.au).
+    const keep = labels.length >= 3 && labels[labels.length - 2]!.length <= 3 && labels[labels.length - 1]!.length === 2 ? 3 : 2;
+    return labels.slice(-keep).join(".");
+}
+
+/**
+ * The project's accounts go only to an environment on the project's own site (the same host, or another host under the same
+ * site, like staging.shop.example for shop.example). An environment somewhere else would receive the project's passwords just
+ * because someone could edit its address, so it runs without them and gets its own accounts instead.
+ */
+export function projectAccountsReach(appUrl: string, env: Pick<Environment, "baseUrl" | "apiBaseUrl">): boolean {
+    const site = isAppUri(appUrl) ? null : siteOf(appUrl);
+    if (!site) return false;
+    return [env.baseUrl, env.apiBaseUrl].filter((u): u is string => !!u).every((u) => siteOf(u) === site);
+}
+
 /** Inputs of an environment job, resolved at the time it runs. Throws a plain Error when it must not run. */
 export async function prepareEnvironmentRun(
     repo: Repo,
@@ -56,7 +82,7 @@ export async function prepareEnvironmentRun(
     job: JobRow,
     app: { url: string; config: Record<string, any> },
     roles: Role[],
-): Promise<{ request: EnvironmentRunRequest; tests: EnvironmentTest[]; missing: string[] }> {
+): Promise<{ request: EnvironmentRunRequest; tests: EnvironmentTest[]; missing: string[]; notes: string[] }> {
     const name = job.options.environment;
     if (!name) throw new Error("This run names no environment.");
     const store = environmentStore(repo, config);
@@ -92,10 +118,16 @@ export async function prepareEnvironmentRun(
     // Shared elements (object repository): a test that refers to one is resolved when its script is rendered.
     const objects = new LocatorStore(repo.db).index(job.projectId);
     const blocks = blocksFor(repo.db, job.projectId);
+    const accounts = env.useProjectAccounts && projectAccountsReach(app.url, env);
+    const notes =
+        env.useProjectAccounts && !accounts && roles.length
+            ? [`The project's accounts were not sent to “${env.name}”: it is not on the project's own site. Add the accounts this environment needs to the environment itself.`]
+            : [];
     return {
+        notes,
         request: {
             target,
-            roles: env.useProjectAccounts ? roles : [],
+            roles: accounts ? roles : [],
             render: { baseUrl: isAppUri(app.url) ? env.baseUrl : new URL(app.url).origin, ...(app.config.apiBaseUrl ? { apiBaseUrl: app.config.apiBaseUrl } : {}), dataSets: new DataSetStore(repo.db).asMap(job.projectId), ...(objects ? { objects } : {}), ...(blocks ? { blocks } : {}) },
         },
         tests,

@@ -6,6 +6,8 @@ import type { MobileTarget } from "../engine/mobile/target.js";
 import { NO_PACKAGE } from "../engine/mobile/explore/pipeline.js";
 import { agentServiceOf } from "./agent-services.js";
 import { chooseDeviceHost, localDeviceProblem } from "./agent-device.js";
+import { callerIdOf, sessionHosts } from "./agent-record.js";
+import { currentActor } from "./auth/actor.js";
 import { HttpError } from "./http-error.js";
 
 /** Throws a plain HttpError when this project cannot have its Android app explored right now. */
@@ -19,5 +21,7 @@ export function assertPhoneExploration(projectId: string, mobile: MobileTarget |
         return;
     }
     // Where the phone is comes from the project's runner choice, exactly as it will when the job starts.
-    chooseDeviceHost({ runner: svc.store.getRunner(projectId), agents: svc.store.listAgents(projectId), ...(local ? { localProblem: local } : {}) });
+    // The person starting it: their own computer may host it, another person's never.
+    const caller = callerIdOf(currentActor());
+    chooseDeviceHost({ runner: svc.store.getRunner(projectId), agents: sessionHosts(svc.store, projectId, caller, svc.clock()), caller, ...(local ? { localProblem: local } : {}) });
 }

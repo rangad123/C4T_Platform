@@ -53,12 +53,12 @@ export function ProjectRunnersSection() {
             ) : current ? (
                 <>
                     <p className="t-meta">
-                        Add a runner for this project, choose which runners it may use and where its tests run. <a href={routes.project(current.id)}>Open the project</a>
+                        The runners this project may use, and where its tests run. <a href={routes.project(current.id)}>Open the project</a>
                     </p>
                     <ProjectRunners id={current.id} embedded key={current.id} />
                 </>
             ) : (
-                <p className="t-secondary">Choose a project to add a runner for it, or to change which runners it uses and where its tests run. Most projects need none: tests run on this server.</p>
+                <p className="t-secondary">Choose a project to see the runners that may run its tests, to add one for it, or to change where its tests run.</p>
             )}
         </section>
     );

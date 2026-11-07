@@ -13,7 +13,7 @@ import type { AccessTarget } from "./RemoveAccess";
 import "./agents.css";
 
 /** Connected runners: who is online, what each can run, and (on request) the devices it sees. */
-export function AgentsList({ agents, addOpen, atLimit = false, maxRunners = 1, onAdd, onRemove, projectId }: { agents: ReturnType<typeof usePolled<Agent[]>>; addOpen: boolean; atLimit?: boolean; maxRunners?: number; onAdd: () => void; onRemove: (t: AccessTarget) => void; projectId?: string }) {
+export function AgentsList({ agents, addOpen, atLimit = false, maxRunners = 1, canManage = true, onAdd, onRemove, projectId }: { agents: ReturnType<typeof usePolled<Agent[]>>; addOpen: boolean; atLimit?: boolean; maxRunners?: number; /** Add a runner and Remove access are shown only to someone the server lets manage this project's runners. */ canManage?: boolean; onAdd: () => void; onRemove: (t: AccessTarget) => void; projectId?: string }) {
     const list = agents.data;
     // One runner per project by default: once it exists, adding another is refused until it is removed, so the UI says so instead of offering it.
     const limitNote = maxRunners === 1 ? "This project already has a runner. Remove it to add another." : `This project already has ${maxRunners} runners. Remove one to add another.`;
@@ -24,7 +24,7 @@ export function AgentsList({ agents, addOpen, atLimit = false, maxRunners = 1, o
                 <h2 className="t-section" id="ag-agents-title">Connected runners</h2>
                 {list && list.length > 0 && <span className="t-meta">{list.filter((a) => a.online).length} of {list.length} online</span>}
                 <span className="spacer" />
-                {atLimit ? (
+                {!canManage ? null : atLimit ? (
                     <span className="t-meta" data-testid="runner-limit-note">{limitNote}</span>
                 ) : (
                     list && list.length > 0 && !addOpen && (
@@ -45,7 +45,7 @@ export function AgentsList({ agents, addOpen, atLimit = false, maxRunners = 1, o
                     icon={Laptop}
                     title="No runners yet"
                     actions={
-                        atLimit ? (
+                        !canManage ? undefined : atLimit ? (
                             <span className="t-meta" data-testid="runner-limit-note">{limitNote}</span>
                         ) : (
                             !addOpen && (
@@ -56,13 +56,17 @@ export function AgentsList({ agents, addOpen, atLimit = false, maxRunners = 1, o
                         )
                     }
                 >
-                    {atLimit ? "This project has its runner set up, but none is connected right now. Start it, or remove it below to set up a different one." : "Add one to run tests on a computer where your app can be reached. Once it connects it appears here with its browsers and devices."}
+                    {!canManage
+                        ? "None of this project’s runners is connected right now. Once one connects it appears here with its browsers and devices."
+                        : atLimit
+                          ? "This project has its runner set up, but none is connected right now. Start it, or remove it below to set up a different one."
+                          : "Add one to run tests on a computer where your app can be reached. Once it connects it appears here with its browsers and devices."}
                 </EmptyState>
             ) : (
                 <ul className="list divided" aria-label="Runners">
                     {list.map((a) => (
                         <li key={a.id}>
-                            <AgentRow a={a} onRemove={onRemove} projectId={projectId} onChanged={() => void agents.reload()} />
+                            <AgentRow a={a} canManage={canManage} onRemove={onRemove} projectId={projectId} onChanged={() => void agents.reload()} />
                         </li>
                     ))}
                 </ul>
@@ -71,14 +75,14 @@ export function AgentsList({ agents, addOpen, atLimit = false, maxRunners = 1, o
     );
 }
 
-function AgentRow({ a, onRemove, projectId, onChanged }: { a: Agent; onRemove: (t: AccessTarget) => void; projectId?: string; onChanged: () => void }) {
+function AgentRow({ a, canManage, onRemove, projectId, onChanged }: { a: Agent; canManage: boolean; onRemove: (t: AccessTarget) => void; projectId?: string; onChanged: () => void }) {
     const [open, setOpen] = useState(false);
     const panel = `ag-detail-${a.id}`;
     return (
         <div className="ag-agent" data-agent={a.id} data-online={a.online}>
             <div className="ag-agent-head">
                 <h3 className="t-card ag-name">{a.name}</h3>
-                <Tooltip content={a.online ? help("runner", "online") : "Nothing heard from the runner in the last 45 seconds. Start it again on its computer."}>
+                <Tooltip content={a.online ? help("runner", "online") : "Nothing heard from the runner in the last 45 seconds. Start it again on its computer: its page under Runners says how."}>
                     <span className={`ag-state ${a.online ? "on" : "off"}`} tabIndex={0}>
                         <i className="ag-dot" aria-hidden />
                         {a.online ? "Online" : "Offline"}
@@ -114,11 +118,13 @@ function AgentRow({ a, onRemove, projectId, onChanged }: { a: Agent; onRemove: (
             <RunnerCheckNote check={a.capabilities.check} name={a.name} />
             {a.update && projectId && <RunnerUpdates projectId={projectId} a={a} onChanged={onChanged} />}
             {open && <AgentDetails a={a} id={panel} />}
-            <div>
-                <Button size="sm" variant="danger" onClick={() => onRemove({ tokenId: a.tokenId, name: a.name })} aria-label={`Remove access for ${a.name}`}>
-                    Remove access
-                </Button>
-            </div>
+            {canManage && (
+                <div>
+                    <Button size="sm" variant="danger" onClick={() => onRemove({ tokenId: a.tokenId, name: a.name })} aria-label={`Remove access for ${a.name}`}>
+                        Remove access
+                    </Button>
+                </div>
+            )}
         </div>
     );
 }

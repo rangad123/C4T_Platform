@@ -13,7 +13,7 @@ import { SecretBox } from "./secrets.js";
 import { saveRunSummary, summarizeJob, type RunSummary } from "./trends.js";
 import { getAgentServices } from "./agent-services.js";
 import { getTriggerServices } from "./trigger-services.js";
-import { startSuiteForSchedule } from "./suite-run.js";
+import { refuseUnlessRunsStart, startSuiteForSchedule } from "./suite-run.js";
 
 export interface ScheduleServiceOptions {
     clock?: () => number;
@@ -29,8 +29,11 @@ export interface ScheduleServices {
     scheduler: Scheduler;
     /** Pass to the worker (RunnerDeps.onJobFinished): records the run summary and sends alerts. Never throws. */
     onJobFinished: (job: JobRow) => Promise<void>;
-    /** Start a schedule's job now, whether or not it is due. Throws OverlapError / Error with a plain message. */
-    runNow: (scheduleId: string) => Promise<JobRow | RunbookStart>;
+    /**
+     * Start a schedule's job now, whether or not it is due. Throws OverlapError / Error with a plain message. `startedBy` (a "Run now" from a
+     * request: the clicker's user id, or null for a key) becomes the run's owner instead of the schedule's maker.
+     */
+    runNow: (scheduleId: string, startedBy?: string | null) => Promise<JobRow | RunbookStart>;
     /** Wait for alert deliveries still in flight (shutdown, tests). */
     flush: () => Promise<void>;
 }
@@ -56,7 +59,11 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
     };
     // A schedule linked to a runbook starts a run of it (see runbook-runner.ts); one that points at a suite runs the suite (suite-run.ts);
     // every other schedule starts its plain job.
-    const startRun = async (s: Schedule): Promise<JobRow | RunbookStart> => (await getRunbookServices(p).startForSchedule(s)) ?? (await startSuiteForSchedule(p, s)) ?? plainStart(s);
+    // Nothing starts that nothing would pick up (a plain 409 for "Run now", a recorded error for the tick): in both modes, before a job is made.
+    const startRun = async (s: Schedule): Promise<JobRow | RunbookStart> => {
+        refuseUnlessRunsStart(p);
+        return (await getRunbookServices(p).startForSchedule(s)) ?? (await startSuiteForSchedule(p, s)) ?? plainStart(s);
+    };
     // The daily retention pass (old evidence files) rides on the scheduler's tick; it only acts on projects that switched retention on.
     const scheduler = new Scheduler({ store, repo: p.repo, startRun, clock: opts.clock, tickMs: p.config.SCHEDULER_TICK_MS, onTick: (now) => {
         void new QuarantineStore(p.db, () => now).sweep(now);
@@ -118,10 +125,10 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
                 console.error(`[job ${job.id.slice(0, 8)}] could not check the API for changes:`, err);
             }
         },
-        async runNow(scheduleId) {
+        async runNow(scheduleId, startedBy) {
             const s = store.get(scheduleId);
             if (!s) throw new Error("Schedule not found");
-            const job = await startRun(s);
+            const job = await startRun(startedBy === undefined ? s : { ...s, createdBy: startedBy });
             const at = new Date((opts.clock ?? Date.now)()).toISOString();
             if (isRunbookStart(job)) store.recordRun(scheduleId, { outcome: "started", note: `Started the runbook “${job.runbookName}”`, at });
             else store.recordRun(scheduleId, { outcome: "started", jobId: job.id, at });

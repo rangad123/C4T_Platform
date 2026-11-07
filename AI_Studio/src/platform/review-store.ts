@@ -9,6 +9,10 @@
  * approval before it. Approved versions are never changed. Runs, schedules and suites run each test's latest approved version
  * (`pinRunVersions`); a test with none is skipped and reported as waiting for approval, and the run records the version it ran.
  *
+ * An approved version also depends on parts the project shares between tests (reusable steps, shared elements, helpers): each approval
+ * records what those parts make it do (approval-deps.ts), and a run holds back a test whose shared parts changed since, until it is
+ * approved again (`toRun`). Versions approved before that record existed get theirs the first time a run checks them.
+ *
  * Sync status of a version: whether its plain-English steps and its code agree. Code made from the steps is made again at every
  * run, so a person's code is the only code that can drift; a change to the steps of such a test is never written over it.
  */
@@ -18,6 +22,7 @@ import type { CustomRunInputs } from "./custom-run.js";
 import type { Db, Row } from "./db.js";
 import { currentActor, SYSTEM_ACTOR, type Actor } from "./auth/actor.js";
 import { retryOnUniqueViolation } from "./sql-dialect.js";
+import { changedParts, dependencyChangedMessage, DepsReader, describeParts, readDeps, UNKNOWN_DEPS, writeDeps, type DepPart } from "./approval-deps.js";
 
 export const REVIEW_MIGRATION = `
 CREATE TABLE test_versions (
@@ -87,7 +92,8 @@ SELECT 'v1-' || t.id, t.id, t.project_id, 1, 'approved', 'upgrade', t.spec_json,
 `;
 
 export type VersionState = "draft" | "in_review" | "approved" | "rejected" | "superseded";
-export type VersionSource = "ai" | "person" | "healing" | "import" | "shared" | "takeover" | "upgrade";
+/** `dependency`: the same steps and code, made when a shared part the approved version uses changed (`toRun`). */
+export type VersionSource = "ai" | "person" | "healing" | "import" | "shared" | "takeover" | "upgrade" | "dependency";
 export type SyncStatus = "in_sync" | "text_changed" | "code_changed" | "needs_regeneration" | "code_only";
 
 export interface ReviewPolicy {
@@ -132,6 +138,8 @@ export interface VersionComment {
 }
 
 const now = () => new Date().toISOString();
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+const upperFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** JSON text with object keys sorted: two specs that differ only in key order are the same version. */
 export function canonicalJson(text: string): string {
@@ -191,6 +199,7 @@ function needsApproval(policy: ReviewPolicy, source: VersionSource): boolean {
             return policy.healing;
         case "person":
         case "import":
+        case "dependency": // reusable steps, shared elements and helpers are changed by people, on the project's own pages
             return policy.edits;
         default:
             return false;
@@ -291,7 +300,9 @@ export class ReviewStore {
         // skip review: scripts and local installs keep running what they write. Signed-in people's edits, AI work and the platform's
         // own background work never do, and neither does anything the run-time check finds.
         const unreviewable = !found && (src === "person" || src === "import") && (author.kind === "key" || author.kind === "open") && policy.soleAdminSelfApprove && this.projectAdmins(cur.projectId) === 0;
-        const approvedNow = !found && (carry ? !latest || latest.state === "approved" : unreviewable || !needsApproval(policy, src));
+        // A take-over's code was made from the shared parts as they are now, so it keeps the approval only when none of them changed since.
+        const carried = !latest || (latest.state === "approved" && !(src === "takeover" && this.partsChanged(latest)));
+        const approvedNow = !found && (carry ? carried : unreviewable || !needsApproval(policy, src));
 
         if (latest && !approvedNow && latest.state === "draft" && latest.source === src && latest.author.kind === author.kind && (latest.author.id ?? "") === (author.id ?? "") && !this.hasComments(latest.id)) {
             this.db.run("UPDATE test_versions SET spec_json = ?, code = ?, framework = ?, script_id = NULL, regen_note = NULL, updated_at = ? WHERE id = ? AND state = 'draft'", cur.specJson, cur.code, cur.framework, t, latest.id);
@@ -310,7 +321,11 @@ export class ReviewStore {
         );
         // A newer version replaces the drafts before it, and a newer approval the approval before it.
         this.db.run(`UPDATE test_versions SET state = 'superseded' WHERE test_case_id = ? AND id <> ? AND state IN ('draft', 'in_review'${approvedNow ? ", 'approved'" : ""})`, testId, id);
-        return toVersion(this.db.get("SELECT * FROM test_versions WHERE id = ?", id)!);
+        const made = toVersion(this.db.get("SELECT * FROM test_versions WHERE id = ?", id)!);
+        // A rename keeps the record of the approved version it replaces: what the test does is the same, and a shared part that changed
+        // before the rename still holds it back (reading the parts again in the middle of a rename would see half of it).
+        if (approvedNow) this.recordApproval(made, (src === "shared" || src === "upgrade") && latest ? latest : undefined);
+        return made;
     }
 
     /** A change to the steps of a test whose code a person owns was not applied : the latest version says so. */
@@ -347,8 +362,115 @@ export class ReviewStore {
             this.db.run("UPDATE test_versions SET state = 'approved', auto = 0, decided_by_id = ?, decided_by_name = ?, decided_at = ?, decision_note = ? WHERE id = ?", actor.id ?? null, actor.name.slice(0, 200), now(), note?.slice(0, 2000) ?? null, v.id);
             // The approval before it, and any older draft, are replaced by this one.
             this.db.run("UPDATE test_versions SET state = 'superseded' WHERE test_case_id = ? AND version < ? AND state IN ('approved', 'draft', 'in_review')", v.testId, v.version);
+            // What it was approved with: the shared parts as they are now.
+            this.recordApproval(v);
             this.addComment(v.id, "approved", note, actor);
         });
+    }
+
+    // ── shared parts (approval-deps.ts) ─────────────────────────────────────
+    /**
+     * Records what an approved version depends on: the shared parts as they are now, or the record of the version it replaced (`from`,
+     * a rename). With `from` and no record there (approved before records existed), there is none here either: the first run records it.
+     */
+    private recordApproval(v: TestVersion, from?: TestVersion): void {
+        try {
+            if (from) {
+                const before = from.state === "approved" ? readDeps(this.db, from.id) : undefined;
+                if (before) writeDeps(this.db, v.id, before, "carried");
+                return;
+            }
+            writeDeps(this.db, v.id, new DepsReader(this.db).of(v), "approval");
+        } catch (e) {
+            // Without a record the first run records the parts as they are then; say so, since that is weaker than recording them now.
+            console.warn(`[review] could not record what version ${v.version} of test ${v.testId} depends on: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+
+    /**
+     * The shared parts that changed since `v` was approved (empty when the change cannot be named), or undefined when none did. A
+     * version approved before records existed gets one now (`first_check`) and counts as unchanged: what it uses today is what it ran
+     * with before, and holding back every existing test at the upgrade would stop every project.
+     */
+    private partsChanged(v: TestVersion, reader: DepsReader = new DepsReader(this.db), knownChange = false): DepPart[] | undefined {
+        const now = reader.of(v);
+        const rec = readDeps(this.db, v.id);
+        if (!rec) {
+            // Told that a part it uses just changed: what it was approved with is unknown, so it counts as changed, and stays so for runs.
+            if (knownChange) {
+                writeDeps(this.db, v.id, { hash: UNKNOWN_DEPS, covers: [] }, "first_check", true);
+                return [];
+            }
+            writeDeps(this.db, v.id, now, "first_check", true);
+            return undefined;
+        }
+        return rec.hash === now.hash ? undefined : changedParts(rec.covers, now.covers);
+    }
+
+    /**
+     * The version a run uses for a test: its latest approved version, checked against the shared parts it uses (reusable steps,
+     * shared elements, helpers). When one changed after the approval the test does not run (`held` says why), and a version with the
+     * same steps and code waits for approval, so the change can be reviewed and approved where every change is. When the project's
+     * policy does not ask for approval of people's changes, the approved version is approved again at once instead, and says so.
+     * Undefined `version` and `held`: no approved version (waiting for approval).
+     *
+     * `change`: called by the page that changed the part (`sharedPartChanged`), with who changed it and what. The version to approve
+     * again is then theirs (they approve it only where they may approve their own change), and it is approved again at once where a
+     * change of theirs to the test itself would be (the access key or open access in a project with no Project Admin). Without it (a
+     * run's check), nobody is known: the version is the platform's, and only the policy decides.
+     */
+    toRun(testId: string, reader: DepsReader = new DepsReader(this.db), change?: { by: Actor; what: string }): { version?: TestVersion; held?: string } {
+        const v = this.approved(testId);
+        if (!v) return {};
+        const changed = this.partsChanged(v, reader, Boolean(change));
+        if (!changed) return { version: v };
+        const what = describeParts(changed) || change?.what || "A shared part it uses";
+        const policy = this.policy(v.projectId);
+        const by = change?.by ?? SYSTEM_ACTOR;
+        const unreviewable = (by.kind === "key" || by.kind === "open") && policy.soleAdminSelfApprove && this.projectAdmins(v.projectId) === 0;
+        if (!needsApproval(policy, "dependency") || unreviewable) {
+            writeDeps(this.db, v.id, reader.of(v), "policy");
+            const why = unreviewable ? "it was changed with the access key or open access, in a project with no Project Admin" : "the policy does not ask for approval of people's changes";
+            this.addComment(v.id, "comment", `Approved again by the project's review policy: ${lowerFirst(what)} changed after approval, and ${why}.`, SYSTEM_ACTOR);
+            return { version: v };
+        }
+        if (this.latest(testId)?.id === v.id) this.addDependencyDraft(v, what, by);
+        return { held: dependencyChangedMessage(changed) };
+    }
+
+    /**
+     * A reusable step, shared element or helper of the project changed (`what`, in words: the reusable steps “Log in”), by the person
+     * acting now: each test in `testIds` is checked at once (`toRun`), so the version to approve again is in the review queue before
+     * any run. Never throws: a run checks again before it starts.
+     */
+    sharedPartChanged(testIds: readonly string[], what: string, by: Actor = currentActor()): void {
+        const reader = new DepsReader(this.db);
+        for (const id of testIds) {
+            try {
+                this.toRun(id, reader, { by, what });
+            } catch (e) {
+                console.warn(`[review] could not check test ${id} after a shared part changed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+    }
+
+    /** A draft with the approved version's steps and code, made because a shared part it uses changed: approving it runs the test again. */
+    private addDependencyDraft(v: TestVersion, what: string, by: Actor): void {
+        const row = this.db.get<{ spec_json: string; code: string | null; framework: string }>("SELECT spec_json, code, framework FROM test_versions WHERE id = ?", v.id);
+        if (!row) return;
+        const author = authorOf("dependency", by);
+        const id = randomUUID();
+        const t = now();
+        retryOnUniqueViolation(this.db.dialect, () =>
+            this.db.run(
+                `INSERT INTO test_versions (id, test_case_id, project_id, version, state, source, spec_json, code, framework, author_kind, author_id, author_name, auto, created_at, updated_at)
+                 SELECT ?, ?, ?, COALESCE(MAX(version), 0) + 1, 'draft', 'dependency', ?, ?, ?, ?, ?, ?, 0, ?, ? FROM test_versions WHERE test_case_id = ?`,
+                id, v.testId, v.projectId, row.spec_json, row.code, row.framework, author.kind, author.id, author.name.slice(0, 200), t, t, v.testId,
+            ),
+        );
+        // Two runs that both found the change make one draft: the later one replaces the earlier.
+        this.db.run("UPDATE test_versions SET state = 'superseded' WHERE test_case_id = ? AND id <> ? AND state IN ('draft', 'in_review')", v.testId, id);
+        this.addComment(id, "comment", `${upperFirst(what)} changed after version ${v.version} was approved. These are the same steps and code as version ${v.version}; approve this version to run the test with the shared parts as they are now.`, SYSTEM_ACTOR);
     }
 
     reject(v: TestVersion, actor: Actor, reason: string): void {
@@ -385,19 +507,25 @@ export class ReviewStore {
      * left out and recorded as waiting. Content written since the latest version is tracked first, as a draft, so nothing escapes
      * review: this check never approves, and it acts as the platform whoever started the run.
      */
-    pinRun(jobId: string, testIds: readonly string[]): { run: Map<string, TestVersion>; waiting: string[] } {
+    pinRun(jobId: string, testIds: readonly string[]): { run: Map<string, TestVersion>; waiting: string[]; held: Map<string, string> } {
         const run = new Map<string, TestVersion>();
         const waiting: string[] = [];
+        const held = new Map<string, string>();
+        const reader = new DepsReader(this.db);
         for (const id of testIds) {
             if (!this.db.get("SELECT 1 AS x FROM test_cases WHERE id = ?", id)) continue; // the run itself reports a missing test
             this.track(id, undefined, SYSTEM_ACTOR, true);
-            const v = this.approved(id);
+            const pick = this.toRun(id, reader);
+            const v = pick.version;
             if (v) run.set(id, v);
-            else waiting.push(id);
+            else {
+                waiting.push(id);
+                if (pick.held) held.set(id, pick.held);
+            }
             this.db.run("DELETE FROM test_run_versions WHERE job_id = ? AND test_case_id = ?", jobId, id);
-            this.db.run("INSERT INTO test_run_versions (job_id, test_case_id, version_id, version, outcome) VALUES (?,?,?,?,?)", jobId, id, v?.id ?? null, v?.version ?? null, v ? "ran" : "waiting");
+            this.db.run("INSERT INTO test_run_versions (job_id, test_case_id, version_id, version, outcome) VALUES (?,?,?,?,?)", jobId, id, v?.id ?? null, v?.version ?? null, v ? "ran" : pick.held ? "changed" : "waiting");
         }
-        return { run, waiting };
+        return { run, waiting, held };
     }
 
     /**
@@ -412,8 +540,11 @@ export class ReviewStore {
         }
     }
 
-    /** What a run recorded: the version each test ran, and the tests it left out because they wait for approval. */
-    runVersions(jobId: string): Array<{ testId: string; version: number | null; outcome: "ran" | "waiting" }> {
+    /**
+     * What a run recorded: the version each test ran, and the tests it left out because they wait for approval (`waiting`), or
+     * because a shared part they use changed after their approval (`changed`).
+     */
+    runVersions(jobId: string): Array<{ testId: string; version: number | null; outcome: "ran" | "waiting" | "changed" }> {
         return this.db.all("SELECT test_case_id, version, outcome FROM test_run_versions WHERE job_id = ? ORDER BY test_case_id", jobId).map((r) => ({ testId: r.test_case_id, version: r.version === null || r.version === undefined ? null : Number(r.version), outcome: r.outcome }));
     }
 }
@@ -437,6 +568,8 @@ export function trackTestVersion(db: Db, testId: string, source?: VersionSource,
 export interface RunPins {
     /** The tests left out, waiting for approval. */
     waiting: string[];
+    /** Those of `waiting` held back because a shared part they use changed after their approval, with what the run says about each. */
+    held: Map<string, string>;
     /** Tests whose approved version is not what they hold now (a newer draft exists): the run must not write its steps back. */
     stale: Set<string>;
     /** The test as its approved version: its steps replaced. */
@@ -447,7 +580,7 @@ export interface RunPins {
 
 export function pinRunVersions(db: Db, jobId: string, testIds: readonly string[]): RunPins {
     const store = new ReviewStore(db);
-    const { run, waiting } = store.pinRun(jobId, testIds);
+    const { run, waiting, held } = store.pinRun(jobId, testIds);
     const stale = new Set<string>();
     for (const [id, v] of run) {
         const latest = store.latest(id);
@@ -455,6 +588,7 @@ export function pinRunVersions(db: Db, jobId: string, testIds: readonly string[]
     }
     return {
         waiting,
+        held,
         stale,
         test(t) {
             const v = run.get(t.id);

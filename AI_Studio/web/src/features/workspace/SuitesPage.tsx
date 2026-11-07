@@ -11,6 +11,7 @@ import { go, routes } from "../../lib/router";
 import { SuiteDetail } from "../suites/SuiteDetail";
 import { runResult, type Suite, type SuiteList } from "../suites/suites";
 import "../suites/suites.css";
+import { useExecutionMode } from "../runs/runs-here";
 
 /**
  * The Test suites place: suites people build (ordered tests and how they run), and the groups by area the platform makes for you.
@@ -28,6 +29,7 @@ function SuiteIndex({ id }: { id: string }) {
     const list = useFetch<SuiteList>(`/projects/${id}/test-suites`);
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     const canWrite = !project.data?.access || project.data.access.permissions.includes("ai_studio.tests.write");
+    const runnersOnly = useExecutionMode() === "runners";
     const [adding, setAdding] = useState(false);
     const data = list.data;
     const full = data ? data.suites.length >= data.limits.suitesPerProject : false;
@@ -35,7 +37,7 @@ function SuiteIndex({ id }: { id: string }) {
     return (
         <>
             {data && !data.canRun.ok && (
-                <Callout tone="warning" title="Tests do not run on this server">
+                <Callout tone="warning" title={runnersOnly ? "Runs can’t start right now" : "Tests do not run on this server"}>
                     {data.canRun.reason} You can still build suites and their settings here.
                 </Callout>
             )}

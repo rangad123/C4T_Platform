@@ -1,5 +1,5 @@
 /**
- * The wire contract between the platform and a runner agent (protocol version 1).
+ * The wire contract between the platform and a runner agent (protocol version 1, plus the additive protocol 2 near the end).
  *
  * One file, written once by the lead: the platform side (src/platform/agent-*.ts, routes/agents.ts) and the agent program
  * (src/agent/*) both import it, so they cannot drift apart. Change it only together with PROTOCOL_VERSION.
@@ -15,6 +15,7 @@
  *   POST /api/agent/tasks/:id/result         ResultRequest     -> { ok: true }
  *   POST /api/agent/tasks/:id/recording      RecordingPush     -> { ok: true }   (record tasks only, see "recording on an agent" below)
  *   POST /api/agent/tasks/:id/device         DevicePush        -> { ok: true }   (device tasks only, see "a phone session on an agent" below)
+ *   POST /api/agent/tasks/:id/accept|reject|events                              (protocol 2 only, see "protocol 2" below)
  *
  * Secrets: a TaskOffer carries the credentials the run needs (the same RunEnv the platform would give its own runner).
  * It is sent only over the agent's authenticated connection, never logged by either side, and never written to disk by
@@ -22,7 +23,14 @@
  */
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * The newest protocol this code speaks. Protocol 2 is additive (attempt ids, accept/reject, live events, durable results; see "protocol 2"
+ * below): a platform speaking 2 still serves an agent that speaks only 1 exactly as before, and an agent speaking 2 falls back to 1 when the
+ * platform answers 1.
+ */
+export const PROTOCOL_VERSION = 2;
+/** Every protocol version this code can speak, oldest first. */
+export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
 export const AGENT_TOKEN_PREFIX = "aitg_";
 
 /** A file name that is safe on every operating system and cannot climb out of a directory. */
@@ -155,6 +163,22 @@ export const Capabilities = z.object({
             allowedApps: z.array(z.string().max(300)).max(60).optional(),
         })
         .optional(),
+    /**
+     * Who the machine is (additive, optional; an older runner reports none of them). `osVersion`: the operating system's own version, e.g.
+     * "10.0.22631" or "14.5". `memoryMb` and `cpus`: total memory and logical processors. `playwrightVersion`: the test tool's version.
+     * `adapters`: the test frameworks this runner program can run (whether this computer has what each needs is the rest of the capabilities).
+     * Informational, except that a missing value is never read as "can".
+     */
+    osVersion: z.string().max(60).optional(),
+    memoryMb: z.number().int().min(0).max(16_777_216).optional(),
+    cpus: z.number().int().min(0).max(4096).optional(),
+    playwrightVersion: z.string().max(40).optional(),
+    adapters: z.array(z.string().max(40)).max(40).optional(),
+    /**
+     * The runner applies the platform's switches for it (additive, optional): code scripts and private addresses, as told in the hello answer's
+     * `runner` and in heartbeats. The platform turns a switch into offers only for a runner reporting this; an older runner keeps today's rules.
+     */
+    runnerSwitches: z.boolean().optional(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
@@ -176,20 +200,28 @@ export type RunnerCheckItem = z.infer<typeof RunnerCheckItem>;
 // ── hello ───────────────────────────────────────────────────────────────────
 
 export const HelloRequest = z.object({
+    /** The oldest protocol the agent speaks (1 for every agent so far, so a protocol-1 platform accepts it). */
     protocol: z.number().int(),
+    /** Protocol 2: every version the agent speaks (additive, optional). The platform answers the highest one both sides speak in `protocol`. */
+    protocols: z.array(z.number().int().min(1).max(99)).max(8).optional(),
     name: z.string().trim().min(1).max(64),
     /** The agent program's own version (informational). */
     version: z.string().max(40),
     capabilities: Capabilities,
     /** How many tasks the agent can run at once (1-8). */
     concurrency: z.number().int().min(1).max(8),
+    /**
+     * This installation's random id, made once and kept next to its settings (additive, optional). The platform binds a credential to the
+     * first one it sees and refuses that credential from another computer. An older agent sends none and keeps today's behaviour.
+     */
+    machineId: z.lazy(() => MachineId).optional(),
 });
 export type HelloRequest = z.infer<typeof HelloRequest>;
 
 export const HelloResponse = z.object({
     agentId: z.string(),
     projectId: z.string(),
-    /** Server's protocol version; the agent stops with a plain message when it cannot speak it. */
+    /** The protocol version both sides speak from now on (protocol 2: the highest of the agent's `protocols` the platform speaks); the agent stops with a plain message when it cannot speak it. */
     protocol: z.number().int(),
     pollSeconds: z.number().int(),
     heartbeatSeconds: z.number().int(),
@@ -197,8 +229,41 @@ export const HelloResponse = z.object({
     serverTime: z.string(),
     /** The platform's runner files, when this runner should update itself (additive, optional; only for a runner reporting `update.can`). */
     update: z.lazy(() => RunnerUpdateOffer).optional(),
+    /**
+     * What this runner is and what its switches allow (additive, optional). `customScripts`: the platform's switch for code scripts on it
+     * (a personal runner follows it alone; a team runner also takes them when started with --allow-custom-scripts). `privateTargets`: runs
+     * against localhost, LAN and link-local addresses may go to it (false: the runner blocks them in every test it runs, too).
+     */
+    runner: z.object({ id: z.string().max(64), kind: z.enum(["team", "personal"]), customScripts: z.boolean(), privateTargets: z.boolean() }).optional(),
+    /** The credential is due for a new one: a runner that keeps its credential in the computer's store asks POST /api/agent/rotate. */
+    rotate: z.boolean().optional(),
 });
 export type HelloResponse = z.infer<typeof HelloResponse>;
+
+// ── enrollment and credentials (additive; docs/features/runner-enrollment.md) ──
+//
+//   POST /api/agent/enroll   EnrollRequest  -> EnrollResponse   no Authorization header: the single-use code is the credential, once
+//   POST /api/agent/rotate   {}             -> RotateResponse   with the current credential; the old one works until the new one is used (24 h at most)
+//
+// A download carries an enrollment code (runner.enroll), never a runner credential. The agent trades it at its first contact, keeps the
+// credential in the computer's own store (credential-store.ts) and deletes the code file. A used, expired or unknown code is a 410 or 404
+// with a sentence that says to make a new one on the Runners page.
+
+export const ENROLLMENT_CODE_PREFIX = "aite_";
+export const EnrollmentCode = z.string().regex(/^aite_[A-Za-z0-9_-]{20,200}$/, "not an enrollment code");
+export const MachineId = z.string().regex(/^[A-Za-z0-9-]{16,64}$/, "not an install id");
+export const EnrollRequest = z.object({
+    code: EnrollmentCode,
+    name: z.string().trim().min(1).max(64),
+    machineId: MachineId,
+    version: z.string().max(40).optional(),
+    capabilities: Capabilities.optional(),
+});
+export type EnrollRequest = z.infer<typeof EnrollRequest>;
+export const EnrollResponse = z.object({ token: z.string().regex(/^aitg_[A-Za-z0-9_-]{20,200}$/), runnerId: z.string().max(64), kind: z.enum(["team", "personal"]) });
+export type EnrollResponse = z.infer<typeof EnrollResponse>;
+export const RotateResponse = z.object({ token: z.string().regex(/^aitg_[A-Za-z0-9_-]{20,200}$/), previousValidUntil: z.string().max(40) });
+export type RotateResponse = z.infer<typeof RotateResponse>;
 
 // ── runner updates (additive, optional; docs/features/runner-updates.md) ─────
 //
@@ -218,7 +283,8 @@ const Sha = z.string().regex(/^[0-9a-f]{64}$/);
 /** What a runner says about its updates. `state`: idle, preparing (downloading and checking), ready (waiting for its tasks to finish), updated, failed, rolled-back. */
 export const RunnerUpdateState = z.object({
     can: z.boolean(),
-    state: z.enum(["idle", "preparing", "ready", "updated", "failed", "rolled-back"]),
+    /** needs-manual: an update was offered but its signature did not check, so it was not installed; a person downloads it (round 39). */
+    state: z.enum(["idle", "preparing", "ready", "updated", "failed", "rolled-back", "needs-manual"]),
     /** The version it updated from / tried to update to. */
     from: z.string().max(80).optional(),
     to: z.string().max(80).optional(),
@@ -250,6 +316,8 @@ export const RunnerUpdateOffer = z.object({
     files: z.array(UpdateFile).min(1).max(20),
     /** For a runner from a complete download: the parts that changed (new test tools, a new pinned Node.js). */
     complete: z.object({ target: z.string().max(20), nodeVersion: z.string().max(40), parts: z.array(UpdatePart).max(2) }).optional(),
+    /** The deploy's signed update manifest and its signature, exactly as written (src/agent-protocol/update-manifest.ts). Older runners ignore it. */
+    signed: z.object({ manifest: z.string().min(2).max(65536), signature: z.string().min(2).max(1024) }).optional(),
 });
 export type RunnerUpdateOffer = z.infer<typeof RunnerUpdateOffer>;
 
@@ -603,6 +671,15 @@ export const DeviceTask = z.object({
     /** Limits the platform wants enforced (the agent may apply stricter ones). */
     maxActions: z.number().int().min(1).max(500).default(200),
     totalMinutes: z.number().int().min(1).max(120).default(20),
+    /** Additive (round 39): the project wants an emulator even when a real phone is connected. */
+    emulatorOnly: z.boolean().optional(),
+    /**
+     * Additive (round 39): false on a person's own computer whose owner did not turn on "Use my connected phone": a plugged-in phone is never
+     * used, only an emulator. Sent only to a runner that reports `runnerSwitches` (an older one could ignore it, so it gets no such task).
+     */
+    realPhone: z.boolean().optional(),
+    /** Additive (round 39): on a real phone, remove the app at the end if this session installed it (a person's own computer). */
+    removeInstalledApp: z.boolean().optional(),
 });
 export type DeviceTask = z.infer<typeof DeviceTask>;
 
@@ -649,6 +726,20 @@ export const TaskOffer = z.object({
     record: RecordTask.optional(),
     /** Present when kind is "device" (AI phone exploration; the agent must have reported `deviceSession: true`). */
     device: DeviceTask.optional(),
+    /**
+     * Protocol 2 only (absent for a protocol-1 agent): this hand-out of the task. Every claim mints a new id; the agent sends it with each
+     * accept, reject, heartbeat, event, upload and result, and a message for an attempt that is no longer the current one is refused with 409.
+     */
+    attemptId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).optional(),
+    /** Protocol 2 only: 1 for the first hand-out, 2 after a re-offer, ... */
+    attempt: z.number().int().min(1).optional(),
+    /** Protocol 2 only: seconds the agent has to accept (POST .../accept) before the task goes back to the queue. */
+    acceptSeconds: z.number().int().min(1).optional(),
+    /**
+     * Protocol 2 only: the runner's switches as they are when the task is handed out. A switch changed while the runner sat idle reaches it
+     * here (a heartbeat `config` only reaches a runner that is working), so the runner does not turn down a task its owner just allowed.
+     */
+    config: z.lazy(() => RunnerConfigPush).optional(),
 });
 export type TaskOffer = z.infer<typeof TaskOffer>;
 
@@ -666,13 +757,30 @@ export const CheckedTaskOffer = TaskOffer.superRefine((t, ctx) => {
 
 // ── heartbeat ───────────────────────────────────────────────────────────────
 
+/** What the agent says it is doing (protocol 2: heartbeats and `phase` events). */
+export const AgentPhase = z.enum(["preparing", "running", "uploading"]);
+export type AgentPhase = z.infer<typeof AgentPhase>;
+
 export const HeartbeatRequest = z.object({
     done: z.number().int().min(0).optional(),
     total: z.number().int().min(0).optional(),
     /** Progress lines (emulator start-up and the like), at most 20 per beat. */
     log: z.array(Line).max(20).optional(),
+    /** Protocol 2: the attempt this beat is for (see TaskOffer.attemptId). */
+    attemptId: z.string().max(64).optional(),
+    /** Protocol 2: what the agent is doing now. The platform only ever moves a task forward (preparing, running, uploading). */
+    phase: AgentPhase.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
+
+/** Protocol 2: what the runner's switches say now (only sent when they changed since the task was offered). */
+export const RunnerConfigPush = z.object({
+    /** The owner allows code scripts (hand-written, imported, Git) on this runner. */
+    customScripts: z.boolean().optional(),
+    /** The owner allows private and local addresses (localhost, LAN, 169.254.x) on this runner. */
+    privateTargets: z.boolean().optional(),
+});
+export type RunnerConfigPush = z.infer<typeof RunnerConfigPush>;
 
 export const HeartbeatResponse = z.object({
     /** True when the job was cancelled: the agent stops the child process and posts a result with ok=false. */
@@ -682,6 +790,12 @@ export const HeartbeatResponse = z.object({
     commands: z.array(RecordCommand).max(20).optional(),
     /** Device tasks only (additive, optional): what the explorer asked of the phone, oldest first. An agent that is not running a device task never receives any. */
     deviceCommands: z.array(DeviceCommand).max(5).optional(),
+    /** Protocol 2: the platform's time limit for this run passed. Stop now (cancel is true as well). */
+    timeout: z.boolean().optional(),
+    /** Protocol 2: this runner was retired. Finish what runs, take nothing new, then exit. */
+    shutdown: z.boolean().optional(),
+    /** Protocol 2: the runner's switches changed; they apply to the next task. */
+    config: RunnerConfigPush.optional(),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 
@@ -720,5 +834,88 @@ export const ResultRequest = z.object({
     runs: z.array(WireRun).max(500),
     /** The browser web tests of this run used (additive, optional; web runs only). The platform shows it in the run details. */
     browser: WebBrowserUsed.optional(),
+    /** Protocol 2: the attempt this result is for. A result for an attempt that is no longer current is refused with 409 (superseded). */
+    attemptId: z.string().max(64).optional(),
 });
 export type ResultRequest = z.infer<typeof ResultRequest>;
+
+// ── protocol 2 ──────────────────────────────────────────────────────────────
+//
+// Additive to protocol 1; only an agent that said `protocols: [.., 2]` in hello and was answered `protocol: 2` uses it.
+//
+//   POST /api/agent/tasks/:id/accept     AcceptRequest   -> AcceptResponse      within TaskOffer.acceptSeconds, or the task goes back to the queue
+//   POST /api/agent/tasks/:id/reject     RejectRequest   -> { ok: true }        the task is offered to another runner; it fails only when none is left
+//   POST /api/agent/tasks/:id/events     EventsRequest   -> EventsResponse      live progress, stored once per (task, attempt, seq)
+//
+// Uploads carry the attempt in the header `x-attempt-id`. A heartbeat, upload, event or result for an attempt that is no longer the
+// current one gets 409 with `{ error, details: { code: "superseded" } }`, and the agent stops that attempt. A result posted again for the same attempt
+// gets 200 `{ ok: true, alreadyReceived: true }`, so an agent may repeat it until it hears an answer.
+
+export const ATTEMPT_HEADER = "x-attempt-id";
+/** The `code` of a 409 answer for a message of an attempt that is no longer the current one. */
+export const SUPERSEDED = "superseded";
+
+/** Every phase of a runner task, written only by the platform. The last seven are final. */
+export const TASK_PHASES = ["queued", "assigned", "accepted", "preparing", "running", "uploading", "completed", "rejected", "failed", "cancelled", "timed_out", "lost_connection"] as const;
+export type TaskPhase = (typeof TASK_PHASES)[number];
+export const FINAL_TASK_PHASES: readonly TaskPhase[] = ["completed", "rejected", "failed", "cancelled", "timed_out", "lost_connection"];
+
+const AttemptId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
+
+export const AcceptRequest = z.object({ attemptId: AttemptId });
+export type AcceptRequest = z.infer<typeof AcceptRequest>;
+export const AcceptResponse = z.object({ ok: z.literal(true), leaseSeconds: z.number().int() });
+export type AcceptResponse = z.infer<typeof AcceptResponse>;
+
+/** Why a runner will not take a task (the sentence says it in plain words; it is shown in the run's events). */
+export const REJECT_REASONS = ["missing-browser", "missing-tools", "code-scripts-off", "private-target", "busy", "no-display", "unsupported", "other"] as const;
+export const RejectRequest = z.object({
+    attemptId: AttemptId,
+    reason: z.enum(REJECT_REASONS),
+    message: z.string().trim().min(1).max(300),
+});
+export type RejectRequest = z.infer<typeof RejectRequest>;
+
+const TestRef = { testId: z.string().min(1).max(80), variant: z.string().max(60).optional() };
+const Seq = { seq: z.number().int().min(0).max(10_000_000), at: z.string().max(40) };
+const StepStatus = z.enum(["passed", "failed"]);
+const RunStatus = z.enum(["passed", "failed", "timedOut", "skipped", "error"]);
+
+/** One live event of a run. `seq` counts from 0 per attempt; the platform keeps each (task, attempt, seq) once. */
+export const LiveEvent = z.discriminatedUnion("type", [
+    z.object({ type: z.literal("test_started"), ...Seq, ...TestRef, title: z.string().max(300).optional() }),
+    z.object({ type: z.literal("test_finished"), ...Seq, ...TestRef, title: z.string().max(300).optional(), status: RunStatus, durationMs: z.number().min(0), error: z.string().max(2000).optional(), stack: z.string().max(4000).optional() }),
+    z.object({ type: z.literal("step_started"), ...Seq, ...TestRef, index: z.number().int().min(0).max(10_000), title: z.string().max(300) }),
+    z.object({ type: z.literal("step_finished"), ...Seq, ...TestRef, index: z.number().int().min(0).max(10_000), title: z.string().max(300), status: StepStatus, durationMs: z.number().min(0), error: z.string().max(800).optional() }),
+    z.object({ type: z.literal("log"), ...Seq, line: z.string().max(300) }),
+    /** A file already uploaded for this attempt (PUT .../files/:name); `ref` is the name it was uploaded under. */
+    z.object({ type: z.literal("screenshot"), ...Seq, ...TestRef, ref: SafeName, step: z.number().int().min(0).max(10_000).optional(), kind: z.enum(["screenshot", "vision-shot", "visual-actual", "visual-diff"]).optional() }),
+    z.object({ type: z.literal("phase"), ...Seq, phase: AgentPhase }),
+]);
+export type LiveEvent = z.infer<typeof LiveEvent>;
+export type LiveEventType = LiveEvent["type"];
+
+export const MAX_EVENTS_PER_BATCH = 100;
+export const EventsRequest = z.object({ attemptId: AttemptId, events: z.array(LiveEvent).min(1).max(MAX_EVENTS_PER_BATCH) });
+export type EventsRequest = z.infer<typeof EventsRequest>;
+export const EventsResponse = z.object({ ok: z.literal(true), stored: z.number().int(), duplicates: z.number().int() });
+export type EventsResponse = z.infer<typeof EventsResponse>;
+
+/** A repeated result for the same attempt (additive answer field). */
+export const ResultResponse = z.object({ ok: z.literal(true), alreadyReceived: z.boolean().optional() });
+export type ResultResponse = z.infer<typeof ResultResponse>;
+
+/**
+ * The job event kinds live events become on the platform (`agent_events.kind`; the run's stream carries them with their `data`, and a
+ * refresh replays them). `runner_step` carries `state: "started" | "finished"`. `runner_phase` and `runner_attempt` are written by the
+ * platform itself (a phase change, a new hand-out, a rejection, a re-offer).
+ */
+export const LIVE_EVENT_KINDS: Record<LiveEventType, string> = {
+    test_started: "runner_test_started",
+    test_finished: "runner_test_finished",
+    step_started: "runner_step",
+    step_finished: "runner_step",
+    log: "runner_log",
+    screenshot: "runner_screenshot",
+    phase: "runner_phase",
+};

@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { HttpError } from "./http-error.js";
+import { allowServerBrowser } from "./runner-only.js";
 
 /** A browser takes hundreds of megabytes, and this server is shared: two PDFs at a time, in the whole process. */
 export const PDF_BROWSERS_MAX = 2;
@@ -21,7 +22,8 @@ export async function withPdfSlot<T>(work: () => Promise<T>): Promise<T> {
 /** HTML → PDF with the platform's own Chromium (A4, backgrounds on). The page is static: scripts are disabled. */
 export function toPdf(html: string, headless: boolean): Promise<Buffer> {
     return withPdfSlot(async () => {
-        const browser = await chromium.launch({ headless });
+        // The one browser a runners-only server opens (runner-only.ts): the platform's own static page, scripts off, no one's address.
+        const browser = await allowServerBrowser(() => chromium.launch({ headless }));
         try {
             const context = await browser.newContext({ javaScriptEnabled: false });
             const page = await context.newPage();

@@ -59,6 +59,8 @@ export interface AdbOptions {
     prepare?: boolean;
     /** Also allow the calls that start and stop the installed UiAutomator2 server to read the screen (allowedServerCommand). Set only by forServerSource(). */
     server?: boolean;
+    /** Also allow removing the app under test (allowedCleanupCommand). Set only by forCleanup(); the explorer's adb never has it. */
+    cleanup?: boolean;
     /** Also allow the read-only calls of "Is this phone ready?" (setup-commands.ts). Set only by forReadiness() / forPhoneSetup(). */
     ready?: boolean;
     /** Also allow the reversible setting changes a person asked for (animations, stay awake). Set only by forPhoneSetup(). */
@@ -116,6 +118,14 @@ const BASE64_ARG = /^[A-Za-z0-9+/]{4,6000}={0,2}$/;
 function adbKeyboardOk(rest: readonly string[]): boolean {
     // am broadcast -a ADB_INPUT_B64 --es msg <base64>
     return rest.length === 7 && rest[2] === "-a" && rest[3] === "ADB_INPUT_B64" && rest[4] === "--es" && rest[5] === "msg" && BASE64_ARG.test(rest[6] ?? "") && (rest[6] ?? "").length % 4 === 0;
+}
+
+/**
+ * `uninstall <package>`: removing the app a device session installed on a person's own phone, once the session is over (round 39). Only an
+ * `Adb` made with `forCleanup()` may run it, and the session calls it only for the app it installed itself.
+ */
+export function allowedCleanupCommand(a: readonly string[]): boolean {
+    return a.length === 2 && a[0] === "uninstall" && SAFE_PACKAGE.test(a[1] ?? "");
 }
 
 const SAFE_PERMISSION = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.permission\.[A-Z][A-Z0-9_]{1,80}$/;
@@ -205,7 +215,7 @@ export class Adb {
     }
 
     private run(args: string[], opt: { timeoutMs?: number } = {}): Promise<Buffer> {
-        if (!allowedCommand(args) && !(this.o.prepare && allowedPrepareCommand(args)) && !(this.o.ready && allowedReadCommand(args)) && !(this.o.setup && allowedChangeCommand(args)) && !(this.o.server && allowedServerCommand(args))) return Promise.reject(new AdbError("refused", "That is not something the explorer may ask the phone."));
+        if (!allowedCommand(args) && !(this.o.prepare && allowedPrepareCommand(args)) && !(this.o.ready && allowedReadCommand(args)) && !(this.o.setup && allowedChangeCommand(args)) && !(this.o.server && allowedServerCommand(args)) && !(this.o.cleanup && allowedCleanupCommand(args))) return Promise.reject(new AdbError("refused", "That is not something the explorer may ask the phone."));
         if (this.o.signal?.aborted) return Promise.reject(new AdbError("aborted", MESSAGES.aborted));
         const full = this.o.serial ? ["-s", this.o.serial, ...args] : args;
         const call = commandFor(this.file, full);
@@ -389,6 +399,16 @@ export class Adb {
         } catch {
             return undefined;
         }
+    }
+
+    /** The same adb, also allowed to remove the app under test (allowedCleanupCommand). Used only when a session closes. */
+    forCleanup(): Adb {
+        return new Adb(this.file, { ...this.o, cleanup: true });
+    }
+
+    /** Removes an app from the phone (only through forCleanup()). */
+    async uninstall(pkg: string): Promise<void> {
+        await this.text(["uninstall", pkg], { timeoutMs: 60_000 });
     }
 
     forPreparation(): Adb {

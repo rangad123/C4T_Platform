@@ -78,3 +78,7 @@ Everything here was exercised only against the fake adb. **It has never run on a
 versions and vendors, real `screencap` sizes, real keyboards (`input text` cannot type non-ASCII, which is refused by design), apps that block UI Automator
 (banking apps with secure windows show an empty screen), WebViews (their content is only as visible as the app makes it), and games. The settle rule is
 time-based, so a screen with a constant animation returns after 3 s as it is. The explorer does not handle iOS (Android only).
+
+## On people's own computers
+
+A personal runner hosts this only for its owner; see [runner-sessions-personal.md](runner-sessions-personal.md).

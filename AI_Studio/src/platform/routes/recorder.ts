@@ -6,8 +6,9 @@ import { buildRecordedSpec, foreignOrigins, toSpecLocator } from "../../engine/r
 import { assertMayRun, environmentStore } from "../environment-run.js";
 import { HttpError } from "../http-error.js";
 import { LocatorStore, NameTakenError } from "../locator-store.js";
-import { assertAgentTarget, chooseRecorder } from "../agent-record.js";
+import { assertAgentTarget, callerIdOf, chooseRecorder, maySeeSession, sessionHosts } from "../agent-record.js";
 import { callerCredentials } from "../auth/access.js";
+import { currentActor } from "../auth/actor.js";
 import { getAgentServices } from "../agent-services.js";
 import { liveOpenWarnings } from "../live-warnings.js";
 import { browserInstalled, DEFAULT_CAPS, hasDisplay, RecorderService, type RecorderOptions } from "../recorder-service.js";
@@ -57,6 +58,14 @@ export function registerRecorderRoutes(ctx: RouteCtx): void {
         if (!r) throw new HttpError(404, "Recording not found. It may have been discarded or the platform was restarted.");
         return r;
     };
+    // A recording or live session on a person's own computer is its starter's alone: for anyone else every route of it (read, drive, edit, save,
+    // stop, discard, the live session's act and snapshot) answers "not found", like an id that does not exist. Registered before those routes.
+    app.addHook("preHandler", async (req) => {
+        if (!req.routeOptions.url?.startsWith("/api/recordings/:rid")) return;
+        const rid = (req.params as { rid?: string }).rid;
+        const driver = rid ? getAgentServices(p).records.byRecording(rid) : undefined;
+        if (!maySeeSession(driver, callerIdOf(currentActor()))) throw new HttpError(404, "Recording not found. It may have been discarded or the platform was restarted.");
+    });
     const stepIndex = (raw: string) => {
         const n = Number(raw);
         if (!Number.isInteger(n) || n < 0) throw new HttpError(400, "A step number is a whole number from 0.");
@@ -69,7 +78,9 @@ export function registerRecorderRoutes(ctx: RouteCtx): void {
         const body = StartBody.parse(req.body);
         const headed = body.headed ?? true;
         const agents = getAgentServices(p);
-        const where = chooseRecorder({ ...(body.on ? { on: body.on } : {}), ...(body.agentId ? { agentId: body.agentId } : {}), headed, runner: agents.store.getRunner(id), agents: agents.store.listAgents(id) });
+        // The caller's own computers and the project's team runners: another person's computer never hosts their recording.
+        const caller = callerIdOf(currentActor());
+        const where = chooseRecorder({ ...(body.on ? { on: body.on } : {}), ...(body.agentId ? { agentId: body.agentId } : {}), headed, runner: agents.store.getRunner(id), agents: sessionHosts(agents.store, id, caller, agents.clock()), caller });
         if (where.kind === "platform") {
             if (headed && !hasDisplay()) throw new HttpError(422, "This computer has no screen for a recording window. Turn \"Show the browser\" off, or run the platform on a machine with a screen.");
             if (!browserInstalled()) throw new HttpError(422, "No browser is installed on the machine that runs the platform. Run: npx playwright install chromium");
@@ -98,7 +109,7 @@ export function registerRecorderRoutes(ctx: RouteCtx): void {
             // The address is reached from the agent's network: only its shape is checked here (http or https, no credentials), the platform fetches nothing.
             assertAgentTarget(url);
             const agent = where.agent;
-            return reply.code(201).send(service.register(id, () => agents.startRecording({ projectId: id, agent, startUrl: url, headed, ...(body.environment ? { environment: body.environment } : {}), caps: { ...DEFAULT_CAPS, ...recorderOptions.caps }, ...(recorderOptions.remote ? { remote: recorderOptions.remote } : {}) })));
+            return reply.code(201).send(service.register(id, () => agents.startRecording({ projectId: id, agent, startUrl: url, headed, ...(body.environment ? { environment: body.environment } : {}), caps: { ...DEFAULT_CAPS, ...recorderOptions.caps }, ...(recorderOptions.remote ? { remote: recorderOptions.remote } : {}), startedBy: caller })));
         }
         await service.guardUrl(url);
         const started = service.start(id, { url, headed, ...(body.environment ? { environment: body.environment } : {}) });

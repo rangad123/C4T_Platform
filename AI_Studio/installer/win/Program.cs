@@ -233,9 +233,11 @@ namespace AITestingRunner
                 string problem = ctl.Install();
                 if (stop.Value) return 0;
                 if (problem != null) { Print(problem); return 1; }
-                if (o.StartAtSignIn || o.StartMenu)
+                // Started at sign-in by default (round 39), like the window's checkbox; --no-start-at-sign-in says not to.
+                bool atSignIn = !o.NoStartAtSignIn;
+                if (atSignIn || o.StartMenu)
                 {
-                    try { ctl.ApplyShortcuts(o.StartAtSignIn, o.StartMenu); }
+                    try { ctl.ApplyShortcuts(atSignIn, o.StartMenu); }
                     catch (Exception e) { log.Line("Could not add the shortcut: " + e.Message); }
                 }
                 if (o.NoStart) { log.Line("Installed. The runner was not started (--no-start)."); return 0; }

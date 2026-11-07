@@ -5,7 +5,7 @@ import { windowsAdapter } from "./windows.js";
 
 export * from "./types.js";
 export * from "./registry.js";
-export { LocalExecutor, localExecutor, executorFor, setExecutorResolver } from "./executor.js";
+export { LocalExecutor, localExecutor, executorFor, setExecutorResolver, refuseLocalExecution } from "./executor.js";
 export { playwrightAdapter, playwrightApiAdapter, taqwrightAdapter } from "./builtin.js";
 export { windowsAdapter, WindowsAdapter } from "./windows.js";
 export { iosAdapter, IosAdapter } from "./ios.js";

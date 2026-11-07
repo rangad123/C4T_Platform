@@ -7,7 +7,7 @@
  *  - `act` performs ONE action named by an element of the last snapshot, after the checks in actions.ts, then waits for the screen to settle and returns it.
  *
  * What it never does: take coordinates from the AI, run any command other than the closed list in adb.ts, start any app but the configured one, uninstall
- * anything, change a setting, grant or revoke a permission except by tapping the visible dialog like a person, or return a password. Failures of the phone or
+ * anything (except, when asked with removeInstalledApp, the app it installed itself on a real phone, once it closes), change a setting, grant or revoke a permission except by tapping the visible dialog like a person, or return a password. Failures of the phone or
  * the link are thrown as DeviceSessionError (never a verdict about the app); a refused or failed action is returned as `{ ok: false, error }`.
  */
 import fs from "node:fs";
@@ -24,6 +24,8 @@ import { adbKeyboardSelected, encodeForAdbKeyboard } from "../state/unicode.js";
 import { AppMonitor } from "../quality/monitor.js";
 import type { AppHealth } from "./types.js";
 
+/** A person's own computer whose owner did not allow their connected phone (round 39): said instead of using it. */
+export const NO_REAL_PHONE = "This computer's owner has not allowed their connected phone to be used. Set up an emulator on it, or its owner can turn on “Use my connected phone” on the Runners page.";
 export const SESSION_DEFAULTS = { maxActions: 200, maxMinutes: 20 } as const;
 /** The most actions one session may be given (R24: a Thorough exploration, with room for going back and starting again). */
 export const MAX_SESSION_ACTIONS = 1500;
@@ -121,10 +123,16 @@ export async function openLocalDeviceSession(opts: OpenDeviceOptions): Promise<D
     const release = await holdDeviceLock(opts.signal);
     let emulator: EmulatorHandle | undefined;
     let closed = false;
+    /** A real phone this session installed the app on (removeInstalledApp): it is removed again when the session closes. */
+    let removeFrom: string | undefined;
     const closeAll = async (): Promise<void> => {
         if (closed) return;
         closed = true;
         try {
+            if (removeFrom) {
+                log("Removing the app this session installed");
+                await base.forSerial(removeFrom).forCleanup().uninstall(opts.appPackage).catch(() => undefined);
+            }
             if (emulator?.started) {
                 log("Stopping the emulator this session started");
                 await emulator.stop();
@@ -148,7 +156,8 @@ export async function openLocalDeviceSession(opts: OpenDeviceOptions): Promise<D
         if (opts.serial) {
             chosen = devices.find((d) => d.serial === opts.serial);
             if (!chosen) throw new DeviceSessionError(MESSAGES.noDevice);
-        } else if (opts.emulatorOnly) {
+            if (opts.noRealPhone && !chosen.emulator) throw new DeviceSessionError(NO_REAL_PHONE);
+        } else if (opts.emulatorOnly || opts.noRealPhone) {
             // The project asked to run on an emulator: use a running one, else fall through to start an AVD (never the connected phone).
             chosen = devices.find((d) => d.state === "device" && d.emulator);
         } else {
@@ -157,7 +166,8 @@ export async function openLocalDeviceSession(opts: OpenDeviceOptions): Promise<D
         }
         if (chosen && chosen.state !== "device") throw new DeviceSessionError(chosen.state === "unauthorized" ? MESSAGES.unauthorized : MESSAGES.offline);
         if (!chosen) {
-            const avd = opts.avd ?? (opts.emulatorOnly || devices.length === 0 ? listAvds(env)[0] : undefined);
+            const avd = opts.avd ?? (opts.emulatorOnly || opts.noRealPhone || devices.length === 0 ? listAvds(env)[0] : undefined);
+            if (!avd && opts.noRealPhone && devices.some((d) => !d.emulator)) throw new DeviceSessionError(NO_REAL_PHONE);
             if (!avd) {
                 const blocked = devices.find((d) => d.state === "unauthorized");
                 throw new DeviceSessionError(blocked ? MESSAGES.unauthorized : devices.length ? MESSAGES.offline : MESSAGES.noDevice);
@@ -185,8 +195,11 @@ export async function openLocalDeviceSession(opts: OpenDeviceOptions): Promise<D
         }
         if (isLockedFromWindowDump(await windowDump())) throw new DeviceSessionError(MESSAGES.locked);
         if (opts.apkPath) {
+            // On a real phone of a person's own computer: was the app there before? If not, it is removed again when the session closes.
+            const hadIt = opts.removeInstalledApp && !chosen.emulator ? await dev.hasPackage(opts.appPackage).catch(() => true) : true;
             log("Installing the app");
             await dev.install(opts.apkPath).catch((e) => Promise.reject(toSessionError(e)));
+            if (!hadIt) removeFrom = chosen.serial;
         } else if (!(await dev.hasPackage(opts.appPackage).catch((e) => Promise.reject(toSessionError(e))))) {
             throw new DeviceSessionError(`The app ${opts.appPackage} is not installed on this phone, and no app file was given.`);
         }

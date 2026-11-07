@@ -263,7 +263,7 @@ describe("start: the panel", () => {
         await pwExpect(dialog().getByRole("radio", { name: /This server/ })).toBeDisabled();
         await pwExpect(dialog()).toContainText("There is no Android emulator on this server.");
         await pwExpect(dialog()).toContainText("No phone or emulator is ready");
-        await pwExpect(dialog()).toContainText("Connect a runner on a computer with an Android emulator or phone: Settings, Runners, Add a runner. For a real phone, turn on USB debugging first.");
+        await pwExpect(dialog()).toContainText("Connect a runner on a computer with an Android emulator or phone: open Runners and add that computer. For a real phone, turn on USB debugging first.");
         await pwExpect(dialog().getByRole("link", { name: "Open Runners", exact: true })).toHaveAttribute("href", `#/runners?project=${p.id}`); // round 37: runners are machine-level, on the Runners page
         await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeDisabled();
         await shot("start-no-device-light-1280");
@@ -283,13 +283,13 @@ describe("start: the panel", () => {
         await pwExpect(radio("Old laptop")).toBeDisabled();
         await pwExpect(dialog()).toContainText("Offline, last seen 3 hours ago.");
         await pwExpect(radio("Build box")).toBeDisabled();
-        await pwExpect(dialog()).toContainText("This runner is out of date and cannot explore phone apps. Update it from Settings, Runners.");
+        await pwExpect(dialog()).toContainText("This runner is out of date and cannot explore phone apps. Update it from its page in Runners.");
         await pwExpect(radio("Desk PC")).toBeDisabled();
         await pwExpect(dialog()).toContainText("Android: no devices connected.");
         // The one that can is chosen without being asked, and says where it will run from now on.
         await pwExpect(radio("Maya’s laptop")).toBeChecked();
         await pwExpect(dialog()).toContainText("Android: 1 emulator ready.");
-        await pwExpect(dialog().getByTestId("phone-runner-change")).toHaveText("Phone tests for this project will run there from now on. You can change it in Settings, Runners.");
+        await pwExpect(dialog().getByTestId("phone-runner-change")).toHaveText("Phone tests for this project will run there from now on. You can change it on the Runners page.");
         await dialog().getByRole("button", { name: "Start exploring", exact: true }).click();
         await pwExpect(page).toHaveURL(new RegExp(`#/projects/${p.id}$`));
         const order = fake.requests.filter((r) => (r.method === "PUT" && /\/runner$/.test(r.path)) || (r.method === "POST" && /test-generation$/.test(r.path))).slice(-2);

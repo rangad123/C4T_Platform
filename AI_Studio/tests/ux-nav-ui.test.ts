@@ -352,10 +352,10 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         const order = await page.locator(".content h2, .content summary .t-section").allTextContents();
         expect(order.indexOf("Connected runners")).toBeGreaterThanOrEqual(0);
         expect(order.indexOf("Connected runners")).toBeLessThan(order.indexOf("Advanced: start a runner from the project folder"));
-        // Most people do not need a runner: the guided panel opens on request, the old steps stay closed.
+        // The guided panel opens on request, the old steps stay closed.
         await pwExpect(page.getByRole("button", { name: "Add a runner", exact: true })).toBeVisible();
         await pwExpect(page.locator("details.ag-add")).not.toHaveAttribute("open", "");
-        await pwExpect(page.getByText("Most people do not need one.")).toBeVisible();
+        await pwExpect(page.getByText("Nothing runs until one of them is online.", { exact: false })).toBeVisible();
         await shot("setup-light-1280");
     });
 

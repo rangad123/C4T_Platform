@@ -13,7 +13,7 @@
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { PROTOCOL_VERSION, type Capabilities, type HelloResponse } from "../agent-protocol/schema.js";
+import { SUPPORTED_PROTOCOLS, type Capabilities, type HelloRequest, type HelloResponse } from "../agent-protocol/schema.js";
 import { REPO_ROOT } from "../config.js";
 import { backoffDelay, sleep, type BackoffOptions } from "./backoff.js";
 import { BrowserSetup } from "./browser-setup.js";
@@ -22,7 +22,13 @@ import { CapabilityProbe, describeCapabilities } from "./capabilities.js";
 import { PlatformClient, PlatformError } from "./client.js";
 import { AGENT_VERSION, type AgentConfig } from "./config.js";
 import { FileCache } from "./file-cache.js";
+import { machineIdFor, saveCredential, type StoreDeps } from "./credential-store.js";
+
+/** A runner that stays connected says hello again this often, so a credential due for renewal is renewed (round 39). */
+const ROTATION_CHECK_MS = 24 * 60 * 60_000;
 import type { Logger } from "./log.js";
+import { ResultOutbox } from "./outbox.js";
+import { clearStopRequest, watchStopFile } from "./stop-file.js";
 import { TaskRunner } from "./task-runner.js";
 import type { RunnerUpdater } from "./updater.js";
 
@@ -44,9 +50,22 @@ export interface AgentOptions {
     browsers?: BrowserSetup | false;
     backoff?: BackoffOptions;
     random?: () => number;
+    /** Tests: a stand-in for the computer's credential store commands (credential-store.ts). */
+    credentialStore?: StoreDeps;
     /** Tests: heartbeat period and DELETE timeout overrides. */
     heartbeatMs?: number;
     deleteTimeoutMs?: number;
+    /** Tests: the protocol versions this agent offers (default: every version it speaks). [1] makes it a protocol-1 agent. */
+    protocols?: readonly number[];
+    /** Tests: live event batching (default 50 events, 1 s). */
+    liveBatch?: { maxBatch?: number; maxDelayMs?: number };
+    /** Tests: the outbox's longest wait between tries (default a minute). */
+    outboxMaxDelayMs?: number;
+    /**
+     * Where a launcher may write `stop.request` (stop-file.ts) to stop the agent gracefully, as SIGTERM does. Default: the work folder. The
+     * program's entry (index.ts) also watches the folder of runner.mjs, which is where the Windows host writes it.
+     */
+    stopDir?: string;
 }
 
 /** Make sure scripts under `workDir` can resolve `@playwright/test`: if the folder is outside a Node project, link this checkout's node_modules into it. */
@@ -105,11 +124,30 @@ export class Agent {
     private fatal?: { code: number; message: string };
     /** Set when the runner switched to a new version and must be started again (RUNNER_UPDATE_EXIT). */
     private exitWith?: number;
+    /** This installation's id (credential-store.ts), sent with hello and enroll; undefined for a token given by hand. */
+    private readonly machineId?: string;
+    /** BLOCK_PRIVATE_TARGETS as this computer's environment had it, restored when the owner allows private addresses again. */
+    private readonly ownBlockSetting?: string;
+    /** When to say hello again to learn whether the credential is due for renewal (a long-connected runner). */
+    private nextRotationCheck = Number.POSITIVE_INFINITY;
+    /** Results waiting for the platform (outbox.ts). */
+    private outbox?: ResultOutbox;
+    /** The protocol spoken with the platform since the last hello. */
+    private protocol = 1;
+    /** The platform retired this runner (protocol 2 `shutdown`): take nothing new, finish, exit. */
+    private retiring = false;
+    private unwatchStop?: () => void;
+    /** What the last hello said about this runner (kind and switches), so a heartbeat's `config` is applied with the same rules. */
+    private lastRunnerSwitches?: HelloResponse["runner"];
 
     constructor(private readonly opts: AgentOptions) {
         this.log = opts.log;
         this.cfg = opts.config;
         this.env = opts.env ?? process.env;
+        this.ownBlockSetting = this.env.BLOCK_PRIVATE_TARGETS;
+        // Only a runner whose credential lives in the computer's store (added with an enrollment code) says which installation it is; a token
+        // given by hand keeps today's behaviour (round 39).
+        this.machineId = this.cfg.tokenSource === "store" ? machineIdFor(this.cfg.credentialDir ?? this.cfg.workDir) : undefined;
         this.client = new PlatformClient({ baseUrl: this.cfg.baseUrl, token: this.cfg.token, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
         this.browsers = opts.browsers === false ? undefined : (opts.browsers ?? (opts.probe ? undefined : new BrowserSetup({ ...(this.cfg.browser ? { policy: this.cfg.browser } : {}), env: this.env, log: this.log, workDir: this.cfg.workDir, onChange: () => this.probe.invalidate() })));
         // Android phone tools: a kit runner fetches Google's platform-tools itself when a phone session needs them (AITP_PHONE_TOOLS, runner.json phoneTools).
@@ -129,6 +167,7 @@ export class Agent {
         this.state = "stopping";
         this.log.info("Stopping: running tasks are being cancelled.");
         this.stopSignal.abort();
+        this.unwatchStop?.();
         this.runner?.cancelAll("The agent was stopped.");
         this.browsers?.stop();
         this.opts.updater?.stop();
@@ -170,7 +209,7 @@ export class Agent {
 
     /** Runs until stopped or until something makes continuing pointless. Resolves with the process exit code. */
     async run(): Promise<number> {
-        this.log.addSecrets([this.cfg.token]);
+        this.log.addSecrets([this.cfg.token, this.cfg.enroll?.code ?? ""].filter(Boolean));
         try {
             await this.prepare();
         } catch (e) {
@@ -186,6 +225,19 @@ export class Agent {
         await this.browsers?.prepare().catch((e) => this.log.warn(`The runner could not look for a browser: ${e instanceof Error ? e.message : "unknown problem"}.`));
         // Phone tools fetched on an earlier day are used again; with AITP_PHONE_TOOLS=now a missing set is fetched in the background.
         this.phoneTools?.prepare();
+        // A launcher's graceful stop (stop-file.ts): handled exactly like SIGTERM.
+        this.unwatchStop = watchStopFile(this.opts.stopDir ?? this.cfg.workDir, () => {
+            this.log.info("A stop was asked for (stop.request).");
+            this.stop();
+        });
+        // Round 39: a runner added with an enrollment code trades it for its own credential first (retried while the network is down).
+        if (!this.cfg.token && this.cfg.enroll) {
+            const code = await this.enroll(this.cfg.enroll);
+            if (code !== undefined) {
+                this.unwatchStop?.();
+                return code;
+            }
+        }
 
         while (!this.stopping && !this.fatal && this.exitWith === undefined) {
             try {
@@ -212,6 +264,8 @@ export class Agent {
             this.runner?.cancelAll("The agent stopped.");
         }
         await this.drain(20_000);
+        await this.outbox?.stop();
+        this.unwatchStop?.();
         this.state = "stopped";
         return this.fatal ? this.fatal.code : (this.exitWith ?? EXIT.stopped);
     }
@@ -223,16 +277,49 @@ export class Agent {
         await fs.mkdir(path.join(this.cfg.workDir, "tasks"), { recursive: true });
         this.cache = new FileCache(path.join(this.cfg.workDir, "cache"), this.cfg.cacheBytes);
         await this.cache.init();
+        // Results an earlier run of the agent could not deliver are kept (unlike the task folders) and sent once connected.
+        this.outbox = new ResultOutbox(this.cfg.workDir, { client: this.client, log: this.log, ...(this.opts.outboxMaxDelayMs ? { maxDelayMs: this.opts.outboxMaxDelayMs } : {}) });
+        await this.outbox.init();
+        // A stop asked of an earlier run must not stop this one.
+        try {
+            clearStopRequest(this.opts.stopDir ?? this.cfg.workDir);
+        } catch {
+            /* nothing to clear */
+        }
+    }
+
+    /** Protocol 2: the platform retired this runner while it worked. Running tasks finish; nothing new is taken; then the agent exits. */
+    private retire(): void {
+        if (this.retiring || this.stopping) return;
+        this.retiring = true;
+        this.log.warn("This runner was retired on the platform. It finishes what it is running, takes nothing new, and then stops.");
+        this.wake();
+    }
+
+    /** Hello, offering every protocol this agent speaks; a platform that refuses the offer is asked once more with protocol 1 only. */
+    private async sayHello(req: Omit<HelloRequest, "protocol" | "protocols">): Promise<HelloResponse> {
+        const offered = [...(this.opts.protocols ?? SUPPORTED_PROTOCOLS)].sort((a, b) => a - b);
+        // `protocol` is the oldest version offered (1), so a protocol-1 platform, which reads only that field, accepts the hello as it always did.
+        const first: HelloRequest = { ...req, protocol: offered[0] ?? 1, ...(offered.length > 1 ? { protocols: offered } : {}) };
+        try {
+            return await this.client.hello(first);
+        } catch (e) {
+            if (!(e instanceof PlatformError) || e.kind !== "protocol" || offered.length < 2 || !offered.includes(1)) throw e;
+            this.log.warn("The platform did not accept the newer protocol; connecting again with protocol 1.");
+            return this.client.hello({ ...req, protocol: 1 });
+        }
     }
 
     private async connect(): Promise<void> {
         const capabilities = await this.probeUnlessStopped(true);
         if (!capabilities) return; // stopped meanwhile: run() ends
         this.noteCapabilities(capabilities);
-        const hello = await this.client.hello({ protocol: PROTOCOL_VERSION, name: this.cfg.name, version: AGENT_VERSION, capabilities, concurrency: this.cfg.concurrency });
-        if (hello.protocol !== PROTOCOL_VERSION) {
-            throw new PlatformError("protocol", `This agent speaks protocol ${PROTOCOL_VERSION} but the platform speaks protocol ${hello.protocol}. Update the agent (or the platform) so both are the same version.`);
+        const hello = await this.sayHello({ name: this.cfg.name, version: AGENT_VERSION, capabilities, concurrency: this.cfg.concurrency, ...(this.machineId ? { machineId: this.machineId } : {}) });
+        const speaks = this.opts.protocols ?? SUPPORTED_PROTOCOLS;
+        if (!speaks.includes(hello.protocol)) {
+            throw new PlatformError("protocol", `This agent speaks protocol ${speaks.join(" and ")} but the platform speaks protocol ${hello.protocol}. Update the agent (or the platform) so both speak the same version.`);
         }
+        this.protocol = hello.protocol;
         this.client.setPollSeconds(hello.pollSeconds);
         this.agentId = hello.agentId;
         if (this.runner) this.runner.setHello(hello);
@@ -251,10 +338,103 @@ export class Agent {
                 ...(this.phoneTools && this.phoneTools.policy !== "off" ? { phoneTools: this.phoneTools } : {}),
                 ...(this.opts.heartbeatMs ? { heartbeatMs: this.opts.heartbeatMs } : {}),
                 ...(this.opts.deleteTimeoutMs ? { deleteTimeoutMs: this.opts.deleteTimeoutMs } : {}),
+                ...(this.outbox ? { outbox: this.outbox } : {}),
+                ...(this.opts.liveBatch ? { liveBatch: this.opts.liveBatch } : {}),
+                onShutdown: () => this.retire(),
+                // A heartbeat's `config` (protocol 2) goes through the same rules as hello `runner` (a team runner keeps --allow-custom-scripts).
+                onConfig: (c) => (this.lastRunnerSwitches ? this.applyRunnerSwitches({ ...this.lastRunnerSwitches, ...c }) : this.runner?.applyConfig(c)),
             });
         this.state = "connected";
-        this.log.info(`${this.retries > 0 ? "Reconnected to the platform" : "Connected to the platform"} as "${this.cfg.name}" (agent ${hello.agentId.slice(0, 12)}, project ${hello.projectId.slice(0, 12)}).`);
+        // Results kept from before (a platform that was away, an agent that was restarted) go first, before any new task is taken.
+        if (this.outbox) {
+            const left = await this.outbox.flush().catch(() => 1);
+            if (left > 0) this.log.warn(`${left} result${left === 1 ? " is" : "s are"} still waiting for the platform; the agent keeps trying.`);
+            this.outbox.start();
+        }
+        this.log.info(`${this.retries > 0 ? "Reconnected to the platform" : "Connected to the platform"} as "${this.cfg.name}" (agent ${hello.agentId.slice(0, 12)}, project ${hello.projectId.slice(0, 12)}, protocol ${hello.protocol}).`);
         this.opts.updater?.connected(hello.agentId, hello.update);
+        // Round 39: what this runner is and what its owner allows, and a new credential when the platform says it is due.
+        this.lastRunnerSwitches = hello.runner;
+        if (hello.runner) this.applyRunnerSwitches(hello.runner);
+        if (hello.rotate) await this.rotateCredential();
+        this.nextRotationCheck = Date.now() + ROTATION_CHECK_MS;
+    }
+
+    /**
+     * The platform's switches for this runner (hello `runner`): a personal runner follows its owner's code-script switch alone; a team runner
+     * also runs them when it was started with --allow-custom-scripts. Private addresses off: every test this runner starts gets
+     * BLOCK_PRIVATE_TARGETS (the address check generated scripts make on every step); on: whatever this computer's environment said.
+     */
+    private applyRunnerSwitches(r: NonNullable<HelloResponse["runner"]>): void {
+        const customScripts = r.kind === "personal" ? r.customScripts : this.cfg.allowCustomScripts === true || r.customScripts;
+        this.runner?.applyConfig({ customScripts, privateTargets: r.privateTargets });
+        if (!r.privateTargets) this.env.BLOCK_PRIVATE_TARGETS = "true";
+        else if (this.ownBlockSetting === undefined) delete this.env.BLOCK_PRIVATE_TARGETS;
+        else this.env.BLOCK_PRIVATE_TARGETS = this.ownBlockSetting;
+    }
+
+    /** Trade the enrollment code for this runner's credential, keep it in the computer's store, delete the code file. Undefined: carry on; a number: exit with it. */
+    private async enroll(e: NonNullable<AgentConfig["enroll"]>): Promise<number | undefined> {
+        const dir = this.cfg.credentialDir ?? this.cfg.workDir;
+        let attempt = 0;
+        while (!this.stopping) {
+            try {
+                const capabilities = await this.probeUnlessStopped(true);
+                if (!capabilities) return EXIT.stopped;
+                const out = await this.client.enroll({ code: e.code, name: this.cfg.name, machineId: this.machineId ?? machineIdFor(dir), version: AGENT_VERSION, capabilities });
+                this.log.addSecrets([out.token]);
+                try {
+                    await saveCredential(dir, out.token, this.opts.credentialStore);
+                } catch (err) {
+                    // Not used, so within the code's 30 minutes this computer may ask again with the same code (the platform allows that once the answer is lost).
+                    this.log.error(`${err instanceof Error ? err.message : "The runner could not keep its credential."} The code still works for this computer for a while: start the runner again.`);
+                    return EXIT.failed;
+                }
+                if (e.file) await fs.rm(e.file, { force: true }).catch(() => undefined);
+                this.client.setToken(out.token);
+                this.cfg.token = out.token;
+                this.cfg.tokenSource = "store";
+                this.log.info(`This computer was added as ${out.kind === "personal" ? "your own runner" : "a team runner"}. Its credential is kept in this computer's store; the code is used up.`);
+                return undefined;
+            } catch (err) {
+                if (this.stopping) return EXIT.stopped;
+                const pe = err instanceof PlatformError ? err : undefined;
+                if (pe && (pe.kind === "auth" || pe.kind === "conflict" || pe.kind === "protocol" || pe.kind === "rejected")) {
+                    this.log.error(pe.message);
+                    return pe.kind === "protocol" ? EXIT.protocol : pe.kind === "conflict" ? EXIT.refused : EXIT.token;
+                }
+                const delay = Math.max(backoffDelay(attempt++, this.opts.backoff, this.opts.random), (pe?.retryAfter ?? 0) * 1000);
+                this.log.warn(`${pe?.message ?? "Could not reach the platform to add this computer."} Trying again in ${Math.max(1, Math.round(delay / 1000))} s.`);
+                await sleep(delay, this.stopSignal.signal);
+            }
+        }
+        return EXIT.stopped;
+    }
+
+    /** Ask for a new credential and keep it. On any trouble the current one keeps working (24 hours at least), and the next hello asks again. */
+    private async rotateCredential(): Promise<void> {
+        if (this.cfg.tokenSource !== "store") return; // a token from the command line, the environment or a file is the person's to change
+        try {
+            const out = await this.client.rotate();
+            this.log.addSecrets([out.token]);
+            await saveCredential(this.cfg.credentialDir ?? this.cfg.workDir, out.token, this.opts.credentialStore);
+            this.client.setToken(out.token);
+            this.cfg.token = out.token;
+            this.log.info("The runner renewed its credential (they are renewed every 30 days).");
+        } catch (e) {
+            this.log.warn(`The runner could not renew its credential (${e instanceof Error ? e.message : "unknown problem"}). It keeps the current one and tries again later.`);
+        }
+    }
+
+    /** A runner that stays connected for days still renews its credential: once a day it says hello again, and rotates when told. */
+    private async checkRotation(): Promise<void> {
+        this.nextRotationCheck = Date.now() + ROTATION_CHECK_MS;
+        if (this.cfg.tokenSource !== "store") return;
+        const capabilities = await this.probeUnlessStopped();
+        if (!capabilities) return;
+        const hello = await this.sayHello({ name: this.cfg.name, version: AGENT_VERSION, capabilities, concurrency: this.cfg.concurrency, ...(this.machineId ? { machineId: this.machineId } : {}) }).catch(() => undefined);
+        if (hello?.runner) this.applyRunnerSwitches(hello.runner);
+        if (hello?.rotate) await this.rotateCredential();
     }
 
     /** While an update is prepared: a poll that cannot be given a task, so the runner stays online (runner-updates.md). */
@@ -275,6 +455,16 @@ export class Agent {
     /** Poll until stopped; throws to make the caller reconnect. */
     private async pollLoop(): Promise<void> {
         while (!this.stopping) {
+            if (Date.now() >= this.nextRotationCheck) await this.checkRotation();
+            // Retired (protocol 2 `shutdown`): wait for the running tasks, then stop like a person's stop (nothing is running any more).
+            if (this.retiring) {
+                if ((this.runner?.active.size ?? 0) === 0) {
+                    this.stop();
+                    return;
+                }
+                await this.waitForSlot(5000);
+                continue;
+            }
             // An update is being prepared or waits for the running tasks: no new claims (updater.ts).
             const updater = this.opts.updater;
             if (updater?.holding()) {

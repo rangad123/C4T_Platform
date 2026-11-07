@@ -21,7 +21,7 @@ jobs:
   quality:
     name: Typecheck, build, access tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -53,4 +53,11 @@ jobs:
         run: npx vitest run tests/permissions.test.ts tests/permissions-unit.test.ts tests/project-access.test.ts tests/api-access.test.ts tests/crowd4test-signin.test.ts tests/secret-leak.test.ts tests/guide-unit.test.ts tests/studio-fixes-unit.test.ts tests/run-address-unit.test.ts tests/reviews-api.test.ts tests/suites.test.ts tests/suites-run.test.ts tests/requirements-api.test.ts tests/runners-shared.test.ts tests/project-folders.test.ts tests/ai-config-api.test.ts tests/live-hardening.test.ts tests/agent-guard.test.ts tests/agent-safety-unit.test.ts tests/agent-runs-unit.test.ts tests/project-basics.test.ts tests/testing-agents.test.ts tests/shared-integrations.test.ts tests/libraries.test.ts tests/review-access-fixes.test.ts tests/agent-choice-paths.test.ts tests/agent-inputs.test.ts tests/generate-cases.test.ts tests/generate-scripts.test.ts tests/inner-call-auth.test.ts tests/ai-writing-permissions.test.ts tests/runs-off-here.test.ts
         env:
           # A path that does not exist, so no test can reach a real phone.
+          TAQWRIGHT_HOME: /nonexistent-taqwright
+
+      # The runner (the program on testers' computers) and its installers, as far as Linux can check them without a real Windows or Mac
+      # (those run in runner-matrix.yml). One file at a time: several of these listen on fixed ports of their own.
+      - name: Runner tests
+        run: npx vitest run --no-file-parallelism tests/agent-platform-unit.test.ts tests/runner-limit-unit.test.ts tests/runner-update-unit.test.ts tests/runner-installer-kit.test.ts tests/record-agent-unit.test.ts tests/live-session-fake-agent.test.ts tests/installer-mac-unit.test.ts tests/agent-program-unit.test.ts tests/agent-platform.test.ts tests/runner-stop-file-unit.test.ts tests/smoke-runner-unit.test.ts tests/runner-matrix-workflow.test.ts tests/credential-store-unit.test.ts tests/runner-protocol2-unit.test.ts tests/run-live-unit.test.ts tests/environment-accounts-unit.test.ts tests/approval-deps.test.ts tests/runner-sessions-personal.test.ts tests/runner-only-mode.test.ts tests/runner-enroll.test.ts tests/runner-personal.test.ts tests/runner-protocol2.test.ts tests/runner-address-guard.test.ts tests/runner-review-fixes.test.ts
+        env:
           TAQWRIGHT_HOME: /nonexistent-taqwright

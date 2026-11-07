@@ -113,6 +113,9 @@ namespace AITestingRunner
             // No browser option: the runner itself uses Chrome or Edge from this computer or downloads a browser, and fetches Firefox and
             // WebKit only when a run needs them.
             foreach (CheckBox c in new CheckBox[] { CbStartup, CbMenu }) { c.AutoSize = true; c.Margin = new Padding(0, 2, 0, 2); c.AccessibleName = c.Text; opts.Controls.Add(c); }
+            // Both on by default (round 39): the runner then runs in the background while the person is signed in, with this icon next to
+            // the clock as its only visible sign. The person's earlier choice wins when there is one (below).
+            CbStartup.Checked = true;
             CbMenu.Checked = true;
             root.Controls.Add(opts, 0, 5);
 

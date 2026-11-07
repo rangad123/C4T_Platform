@@ -17,20 +17,29 @@ import { readHeartbeat } from "./ops/heartbeat.js";
 import { notePluginSkipped } from "./plugin-policy.js";
 import { DEFAULT_JOB_OPTIONS, type JobOptions, type JobRow, type Repo, type TestRow } from "./repo.js";
 import type { Schedule } from "./schedule-store.js";
-import { activeJobOf, OverlapError, runnableTestIds } from "./scheduler.js";
+import { activeJobOf, OverlapError, runnableTestIds, scheduleStarter } from "./scheduler.js";
 import { SuiteStore, type Suite, type SuiteSettings } from "./suite-store.js";
 import { ReviewStore } from "./review-store.js";
+import { dispatchAlive, DISPATCH_DOWN_MESSAGE, EXPLORING_ON_RUNNERS_MESSAGE, PLAIN_ON_RUNNERS_MESSAGE, runnersOnly } from "./runner-only.js";
 
 /** A worker that last said it was alive longer ago than this is gone (GET /readyz uses the same 90 seconds). */
 const WORKER_GONE_MS = 90_000;
 
 export const NO_WORKER_MESSAGE = "Tests do not run on this server: nothing here picks up a run, so a run started now would wait in the queue and never start. Run the suite where tests run (your own installation, or once tests are switched on here).";
 
-/** Can a run started now actually start? Only when a worker runs in this process, or another process said it is alive just now. */
+/**
+ * Can a run started now actually start? Only when a worker runs in this process, or another process said it is alive just now.
+ * EXECUTION_MODE=runners: while the dispatch worker is alive (it starts with the API process); every project then goes to runners,
+ * and the job gate refuses a run plainly when no runner the project may use is online.
+ */
 export function runsCanStartHere(p: Pick<Platform, "config" | "db">, nowMs: number = Date.now()): { ok: true } | { ok: false; reason: string } {
+    const beat = () => {
+        const at = readHeartbeat(p.db);
+        return at !== undefined && nowMs - at <= WORKER_GONE_MS;
+    };
+    if (runnersOnly(p.config)) return dispatchAlive(p.db) || beat() ? { ok: true } : { ok: false, reason: DISPATCH_DOWN_MESSAGE };
     if (p.config.WORKER_EMBEDDED) return { ok: true };
-    const beat = readHeartbeat(p.db);
-    if (beat !== undefined && nowMs - beat <= WORKER_GONE_MS) return { ok: true };
+    if (beat()) return { ok: true };
     return { ok: false, reason: NO_WORKER_MESSAGE };
 }
 
@@ -48,6 +57,14 @@ export const EXPLORING_OFF_MESSAGE = "Tests are switched off on this server: not
  * and says the run did not start instead.
  */
 export function refuseUnlessRunsStart(p: Pick<Platform, "config" | "db">, message: string = RUNS_OFF_MESSAGE): void {
+    if (runnersOnly(p.config)) {
+        // Exploring and describing a test need the server's browser: refused in this mode whatever else is up, before anything is saved.
+        const serverWork = message === EXPLORING_OFF_MESSAGE ? EXPLORING_ON_RUNNERS_MESSAGE : message === PLAIN_OFF_MESSAGE ? PLAIN_ON_RUNNERS_MESSAGE : undefined;
+        if (serverWork) throw new HttpError(409, serverWork, { cannotRunHere: true, executionMode: "runners" });
+        const can = runsCanStartHere(p);
+        if (!can.ok) throw new HttpError(409, can.reason, { cannotRunHere: true, executionMode: "runners" });
+        return;
+    }
     if (!runsCanStartHere(p).ok) throw new HttpError(409, message, { cannotRunHere: true });
 }
 
@@ -69,9 +86,11 @@ export async function chooseVersionsToRun(repo: Repo, _projectId: string, tests:
     const held: HeldTest[] = [];
     for (const t of tests) {
         reviews.track(t.id); // a change written outside the usual paths is a version before it is judged
-        const v = reviews.approved(t.id);
+        // An approved test whose shared parts (reusable steps, elements, helpers) changed since its approval is held back too.
+        const pick = reviews.toRun(t.id);
+        const v = pick.version;
         if (v) run.push({ ...t, spec: v.spec as TestRow["spec"] });
-        else held.push({ id: t.id, testId: t.testKey, reason: `${t.testKey} is waiting for approval: only approved versions run.` });
+        else held.push({ id: t.id, testId: t.testKey, reason: pick.held ? `${t.testKey}: ${pick.held}` : `${t.testKey} is waiting for approval: only approved versions run.` });
     }
     return { run, held };
 }
@@ -153,6 +172,7 @@ export async function startSuiteForSchedule(p: Platform, s: Schedule): Promise<J
     }
     options.trigger = "schedule";
     options.scheduleId = s.id;
+    options.startedBy = scheduleStarter(s);
     const busy = await activeJobOf(repo, s.projectId);
     if (busy) throw new OverlapError(busy.id, busy.status);
     const job = await repo.createJob(s.projectId, app.id as string, options);

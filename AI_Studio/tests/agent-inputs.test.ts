@@ -18,7 +18,7 @@ import { missingInputs, missingInputsMessage, NO_APPLICATION_YET, NOT_AN_AGENT_P
 import { createRequire } from "node:module";
 import { AgentInputsStore } from "../src/platform/agent-inputs-store.js";
 import { buildBackup, restoreBackup } from "../src/platform/backup.js";
-import { Db } from "../src/platform/db.js";
+import { createDatabaseAtVersion, Db, knownSchemaVersion } from "../src/platform/db.js";
 import { startHeartbeat, writeHeartbeat } from "../src/platform/ops/heartbeat.js";
 let stopBeat: (() => void) | undefined;
 import { agentInputsStoreOf, savedCredentialsElsewhere } from "../src/platform/routes/agent-inputs.js";
@@ -396,11 +396,10 @@ describe("saved inputs stay where they were saved, and go only where they may", 
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-slot50-"));
         const file = path.join(dir, "studio.db");
         try {
-            // A database as slot 49 left it: built whole, then slot 50 taken back out.
-            new Db(file).close();
+            // A database as slot 49 left it.
+            createDatabaseAtVersion(file, 49);
             const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
             const raw = new DatabaseSync(file);
-            raw.exec("DROP TABLE project_agent_inputs; DELETE FROM schema_version WHERE version = 50;");
             const box = new SecretBox(dir, "slot-fifty-secret-key-0123456789");
             const t = "2026-10-01T00:00:00.000Z";
             raw.exec(`INSERT INTO users (id, email, created_at) VALUES ('u', 'u@example.com', '${t}')`);
@@ -415,7 +414,7 @@ describe("saved inputs stay where they were saved, and go only where they may", 
 
             const db = new Db(file);
             try {
-                expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(50);
+                expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(knownSchemaVersion());
                 const store = new AgentInputsStore(db, box);
                 expect(store.get("p1")).toEqual({ site: SITE, credentials: { username: "qa@shop.example", password: S.password, apiToken: S.token }, openApiUrl: "https://shop.example/openapi.json", allowMutatingApiTests: true, updatedAt: "2026-10-02T00:00:00.000Z" });
                 expect(store.get("p2")).toEqual({ site: "https://plain.example/", updatedAt: t });

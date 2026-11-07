@@ -1,6 +1,6 @@
 # AI Studio on the Crowd4Test server
 
-A preview of AI Studio at `aistudio.crowd4test.com`, on the same EC2 box as crowd4test.com. It uses SQLite and local disk. **Running tests on this box is switched off**; see [Tests are off](#tests-are-off).
+A preview of AI Studio at `aistudio.crowd4test.com`, on the same EC2 box as crowd4test.com. It uses SQLite and local disk. **Tests never run on this box: every run goes to a runner**; see [Tests run only on runners](#tests-run-only-on-runners).
 
 ## What runs where
 
@@ -42,27 +42,35 @@ The downloads are not code-signed: the Runners page tells people what SmartScree
 
 `npm ci` peaks at about 650 MB and the web build at about 1 GB. `npm ci` runs only when `package-lock.json` changes. Both run at `nice` 15 and are the first thing the OOM killer takes. A deploy stops before it starts if memory plus swap has less than 1,500 MB free, or the disk has less than 2,500 MB free. To make room, enlarge the EBS volume in AWS; the next deploy grows the root partition and filesystem to match (`growpart`, then `resize2fs` or `xfs_growfs`).
 
-## Tests are off
+## Tests run only on runners
 
-**Anything AI Studio runs on this box can currently read every file the `ubuntu` user can.** That includes `/var/www/c4t/api/.env`, the web app's env file and AI Studio's own env file. Running tests here must stay off until that is fixed.
+**Anything AI Studio ran on this box could read every file the `ubuntu` user can**, including `/var/www/c4t/api/.env`, the web app's env file and AI Studio's own env file. So this box never runs a test: every run goes to a runner, a small program on a tester's or a team's own computer.
 
-What keeps it off:
+What makes it so:
 
-- `WORKER_EMBEDDED=false` in the env file. Nothing claims queued jobs, so test runs and AI test writing wait in the queue and never start. Schedules and security assessments do not run at all.
-- `ALLOW_CUSTOM_SCRIPTS` is not set. Do not set it here.
-- There is no setting in the repository that turns tests on. Doing it takes a person adding `WORKER_EMBEDDED=true` to `env.local` on the box, and that decision belongs to the product owner.
+- `EXECUTION_MODE=runners` in the env file. The API process starts a dispatch worker (even with `WORKER_EMBEDDED=false`): it takes only runs of existing tests, hands each to a runner the project may use, and looks after several at once (`DISPATCH_CONCURRENCY`, 8 by default). Every project runs on runners whatever its stored setting says, and a project cannot be set to run here.
+- A run with no runner online is refused at once, in a sentence. Schedules fire and hand their runs to runners, and runner housekeeping runs on the scheduler's tick.
+- As a last line, the server's own browser launches and local script runs throw. A path that should have gone to a runner fails loudly instead of running here.
+- `WORKER_EMBEDDED=false` stays: the full worker, which can run tests here, is never started. `ALLOW_CUSTOM_SCRIPTS` is not set. Do not set either here.
 
-What this does not cover: some actions still open a Chromium browser inside the server, outside the queue. These include recording a test, capturing or checking a saved sign-in, and making a PDF of a report. They do not run test code, but they do open a browser here as `ubuntu`.
+What does not run here (each is refused with a sentence, not queued):
 
-Because nothing claims jobs, `/readyz` reports no worker and jobs in AI Studio show as queued. `/api/health` still answers, and that is what the deploy checks.
+- Exploring an application with the AI, describing a test in plain words, and agent runs. They use a browser on the server.
+- Security assessments, recording on the server, and phone sessions on the server. Recording and phone sessions work on a runner.
+- Checking or capturing a saved sign-in in a browser. A saved sign-in still goes to the runner with the tests; it is not checked first.
+- Repair suggestions that need a browser, after a failing web test.
+- A test data reset to a private or local address. The reset is sent from this box, so only to a public address; otherwise the run stops before any test and says why.
+- Email steps: the test mailbox is read by the platform, so tests with an email step fail on a runner with that message.
 
-Before turning tests on, these must be done:
+One browser still opens here: making a PDF of a report. It renders the platform's own page, with scripts off.
 
-- Test processes isolated from this box's files and internal ports, or moved to runners.
-- Approved tests held back when a reusable step, helper or shared element they use changes. Today such an edit changes what an approved test does, with no review.
+`/readyz` reports the dispatch worker under `worker`. A deploy restarts the API process, and with it the dispatch worker: a runner run still going after `SHUTDOWN_GRACE_SECONDS` (60) is stopped, the runner is told to stop, and its tests go back to not run yet.
+
+Still open before more is allowed here:
+
+- Approved tests held back when a reusable step, helper or shared element they use changes.
 - Environment runs given a project's accounts only on the project's own address.
 - A monthly AI limit per organisation, so one customer cannot use up the platform limit.
-- Agent runs moved to runners, with the plan-approval step. `AGENT_RUNS_ON_SERVER` stays unset here: agent runs use the server's own browser, so they are refused without it. While one waits for a person, it also holds the single worker for up to 10 minutes.
 
 ## Secrets
 

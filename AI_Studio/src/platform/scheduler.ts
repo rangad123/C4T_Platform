@@ -112,6 +112,8 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     }
     options.trigger = "schedule";
     options.scheduleId = s.id;
+    // Who the run belongs to: the schedule and the person who made it (a person's own runner takes only that person's runs).
+    options.startedBy = scheduleStarter(s);
 
     // Synchronous from here to the insert: no other job can slip in between the check and the create.
     const busy = await activeJobOf(repo, s.projectId);
@@ -122,6 +124,9 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     if (s.kind === "validate") await notePluginSkipped(repo, job.id, s.projectId, options.mode === "environment" ? "environment" : "validate");
     return job;
 }
+
+/** The `startedBy` of a schedule's job (COMMON contract): the schedule, and the person who made it (null for older schedules). */
+export const scheduleStarter = (s: Pick<Schedule, "id" | "createdBy">): NonNullable<JobOptions["startedBy"]> => ({ kind: "schedule", id: s.id, ownerId: s.createdBy ?? null });
 
 /** What starting a schedule that is linked to a runbook returns instead of a job: the run that now drives the steps. */
 export interface RunbookStart {

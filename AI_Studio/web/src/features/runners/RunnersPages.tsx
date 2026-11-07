@@ -1,5 +1,5 @@
-import { ChevronRight, Laptop, Pencil, Plus, Smartphone } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, Laptop, Pencil, Server, Smartphone } from "lucide-react";
+import { useEffect, useState } from "react";
 import { ApiError, api } from "../../api";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, Metric, PageHeader, Skeleton } from "../../components/ui";
@@ -7,11 +7,15 @@ import { BadgeKey } from "../../components/Tooltip";
 import { useDocumentTitle } from "../../lib/hooks";
 import { duration, relativeTime } from "../../lib/format";
 import { friendlyError } from "../../lib/labels";
-import { routes } from "../../lib/router";
-import { capabilitySummary, deviceState, OS_LABEL, usePolled } from "../agents/agents";
-import { FreshToken } from "../agents/TokensPanel";
+import { go, routes, useRoute } from "../../lib/router";
+import { useCan } from "../auth/permissions";
+import { capabilitySummary, deviceState, NEEDS_MANUAL_UPDATE, usePolled } from "../agents/agents";
+import { AddRunner } from "../agents/AddRunner";
+import { RunnerCheckDetails, RunnerCheckNote } from "../agents/check";
+import { networkSentence, RunnerNetworkProblem } from "../agents/network";
 import { RunnerProjects } from "./ProjectRunnersSection";
-import { STATUS_WORDS, type Runner, type RunnerStatus, type RunnerSummary, type RunnersAnswer } from "./runners";
+import { RunnerSwitches } from "./RunnerSwitches";
+import { kindOf, machineFacts, mayAdd, offlineSteps, STATUS_WORDS, whose, type Runner, type RunnerStatus, type RunnerSummary, type RunnersAnswer } from "./runners";
 import "../agents/agents.css";
 
 const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
@@ -23,63 +27,92 @@ function StatusBadge({ status }: { status: RunnerStatus }) {
     return <Badge tone={w.tone} tip={w.tip}>{w.label}</Badge>;
 }
 
-/** What to do when there is no runner: the same words wherever the question comes up. */
-export function HowToAddRunner({ canRegister }: { canRegister: boolean }) {
+function WhoseBadge({ r }: { r: Runner }) {
+    const w = whose(r);
+    return (
+        <Badge tone={w.label === "Team" ? "neutral" : "brand"} tip={w.tip}>
+            {w.label}
+        </Badge>
+    );
+}
+
+/** What to do when there is no runner: the same words wherever the question comes up. `here`: said on the Runners page itself. */
+export function HowToAddRunner({ canAddPersonal = false, canAddTeam = false, here = false }: { canAddPersonal?: boolean; canAddTeam?: boolean; here?: boolean }) {
+    const where = here ? "choose" : "open Runners and choose";
     return (
         <>
-            A runner is a small program on a computer of yours that runs the tests. Nothing runs until one connects. To add one, open a project, then Settings, Runners, and choose Add a runner: it downloads an installer for Windows, macOS or Linux.
-            {canRegister ? " You can also register a computer here and start it with its token. Then give it to any of your projects." : " Ask someone who manages runners to give this project one."}
+            A runner is a small program on a Windows computer or a Mac that runs the tests. Nothing runs until one connects.
+            {canAddPersonal ? ` To run tests on your own computer, ${where} Add this computer.` : ""}
+            {canAddTeam ? ` To add a computer that runs tests for a team, ${where} Add a team runner.` : ""}
+            {!canAddPersonal && !canAddTeam ? " Ask someone who manages runners to give this project one." : ""}
         </>
     );
 }
 
-/** Runners (AD-08): every machine the person may see, with filters; opening one shows its details. */
+/** Runners (AD-08): every machine the person may see, with filters; opening one shows its details. `?add=computer` (or `team`) opens Add with it. */
 export function RunnersList() {
     const list = usePolled<RunnersAnswer>("/runners");
+    const route = useRoute();
+    const asked = route.query.get("add");
     const [status, setStatus] = useState<"all" | RunnerStatus>("all");
     const [owner, setOwner] = useState("all");
+    const [kind, setKind] = useState<"all" | "mine" | "team">("all");
     const [project, setProject] = useState("all");
     const [text, setText] = useState("");
-    const [adding, setAdding] = useState(false);
-    const [fresh, setFresh] = useState<{ secret: string; label: string } | null>(null);
+    const [adding, setAdding] = useState<"personal" | "team" | null>(asked === "computer" ? "personal" : asked === "team" ? "team" : null);
+    // A link to ?add=computer from this same page (the project's runners say "add this computer") opens the panel too.
+    useEffect(() => {
+        if (asked === "computer" || asked === "team") setAdding(asked === "computer" ? "personal" : "team");
+    }, [asked]);
     const data = list.data;
     if (list.loading && !data) return <ListSkeleton rows={3} />;
     if (list.error || !data) return <ErrorState error={friendlyError(list.error?.message ?? "")} onRetry={list.reload} />;
+    const may = mayAdd(data);
+    const open = adding === "personal" ? may.personal : adding === "team" ? may.team : false;
+    const close = () => {
+        setAdding(null);
+        // Leave ?add= behind, so a reload does not open the panel again.
+        if (asked) go(routes.allRunners);
+    };
+    const ownerChoices = [...data.owners.map((o) => ({ id: o.id as string | null, label: o.name ?? o.id })), ...(data.canRegisterShared ? [{ id: null, label: "Crowd4Test (shared)" }] : [])];
     const owners = [...new Set(data.runners.map((r) => r.ownerName))].sort();
     const projects = [...new Map(data.runners.flatMap((r) => r.projects).map((p) => [p.id, p.name])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    const anyPersonal = data.runners.some((r) => kindOf(r) === "personal");
     const needle = text.trim().toLowerCase();
     const shown = data.runners.filter(
-        (r) => (status === "all" ? r.status !== "retired" : r.status === status) && (owner === "all" || r.ownerName === owner) && (project === "all" || r.projects.some((p) => p.id === project)) && (!needle || `${r.name} ${r.machineName ?? ""}`.toLowerCase().includes(needle)),
+        (r) =>
+            (status === "all" ? r.status !== "retired" : r.status === status) &&
+            (owner === "all" || r.ownerName === owner) &&
+            (kind === "all" || (kind === "mine" ? kindOf(r) === "personal" && r.mine : kindOf(r) === "team")) &&
+            (project === "all" || r.projects.some((p) => p.id === project)) &&
+            (!needle || `${r.name} ${r.machineName ?? ""}`.toLowerCase().includes(needle)),
     );
     return (
         <>
-            {fresh && <FreshToken secret={fresh.secret} label={fresh.label} who="this runner" onDone={() => setFresh(null)} />}
-            {data.canRegister && !adding && !fresh && (
-                <div>
-                    <Button icon={Plus} onClick={() => setAdding(true)}>
-                        Register a runner
-                    </Button>
+            {(may.personal || may.team) && !open && (
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }} data-testid="runner-add-actions">
+                    {may.personal && (
+                        <Button variant="primary" icon={Laptop} onClick={() => setAdding("personal")}>
+                            Add this computer
+                        </Button>
+                    )}
+                    {may.team && (
+                        <Button icon={Server} onClick={() => setAdding("team")}>
+                            Add a team runner
+                        </Button>
+                    )}
                 </div>
             )}
-            {adding && (
-                <RegisterRunner
-                    answer={data}
-                    onClose={() => setAdding(false)}
-                    onDone={(secret, label) => {
-                        setAdding(false);
-                        setFresh({ secret, label });
-                        void list.reload();
-                    }}
-                />
-            )}
+            {!may.personal && data.personal && data.personal.count >= data.personal.max && data.personal.reason && <p className="t-meta" data-testid="personal-cap">{data.personal.reason}</p>}
+            {open && adding && <AddRunner key={adding} scope={adding} owners={ownerChoices} onClose={close} onChanged={() => void list.reload()} />}
             {data.runners.length === 0 ? (
                 <section className="stack-sm" aria-labelledby="runner-list-title">
                     <h2 className="t-section" id="runner-list-title">
                         Machines
                     </h2>
                     <div className="card">
-                        <EmptyState icon={Laptop} title="No runners yet" actions={<LinkButton href={routes.home}>Open your projects</LinkButton>}>
-                            <HowToAddRunner canRegister={data.canRegister} />
+                        <EmptyState icon={Laptop} title="No runners yet" actions={may.personal || may.team ? undefined : <LinkButton href={routes.home}>Open your projects</LinkButton>}>
+                            <HowToAddRunner canAddPersonal={may.personal} canAddTeam={may.team} here />
                         </EmptyState>
                     </div>
                 </section>
@@ -107,6 +140,16 @@ export function RunnersList() {
                                 ))}
                             </select>
                         </div>
+                        {anyPersonal && (
+                            <div className="field">
+                                <label htmlFor="runner-kind">Kind</label>
+                                <select id="runner-kind" className="input" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+                                    <option value="all">All runners</option>
+                                    <option value="mine">Your computers</option>
+                                    <option value="team">Team runners</option>
+                                </select>
+                            </div>
+                        )}
                         {owners.length > 1 && (
                             <div className="field">
                                 <label htmlFor="runner-owner">Owner</label>
@@ -142,10 +185,12 @@ export function RunnersList() {
                                         <span className="main">
                                             <span className="title truncate">{r.name}</span>
                                             <span className="meta">
-                                                {r.ownerName} · {plural(r.projects.length + r.otherProjects, "project")} · {seen(r)}
+                                                {kindOf(r) === "personal" ? (r.mine ? "Runs the tests you start" : `${r.ownerName}'s computer`) : `${r.ownerName} · ${plural(r.projects.length + r.otherProjects, "project")}`} · {seen(r)}
                                                 {r.queue.waiting > 0 ? ` · ${r.queue.waiting} waiting` : ""}
                                             </span>
+                                            {r.agent?.update?.state === "needs-manual" && <span className="meta" data-testid="runner-needs-manual">{NEEDS_MANUAL_UPDATE}</span>}
                                         </span>
+                                        <WhoseBadge r={r} />
                                         <StatusBadge status={r.status} />
                                         <ChevronRight size={18} className="chev" aria-hidden />
                                     </a>
@@ -156,58 +201,6 @@ export function RunnersList() {
                 </section>
             )}
         </>
-    );
-}
-
-function RegisterRunner({ answer, onClose, onDone }: { answer: RunnersAnswer; onClose: () => void; onDone: (secret: string, label: string) => void }) {
-    const [name, setName] = useState("");
-    const choices = [...answer.owners.map((o) => ({ id: o.id as string | null, label: o.name ?? o.id })), ...(answer.canRegisterShared ? [{ id: null, label: "Crowd4Test (shared)" }] : [])];
-    const [owner, setOwner] = useState(choices[0]?.id ?? "");
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState("");
-    const save = async () => {
-        if (!name.trim()) return setError("Give the runner a name.");
-        setBusy(true);
-        setError("");
-        try {
-            const out = await api<{ secret: string }>("/runners", { method: "POST", body: { name: name.trim(), organizationId: owner || null } });
-            onDone(out.secret, name.trim());
-        } catch (e) {
-            setError(message(e, "The runner was not registered. Try again."));
-            setBusy(false);
-        }
-    };
-    return (
-        <section className="card card-pad stack-sm" aria-labelledby="register-runner-title">
-            <h2 className="t-section" id="register-runner-title">
-                Register a runner
-            </h2>
-            {error && <Callout tone="danger">{error}</Callout>}
-            <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                <div className="field" style={{ flex: "1 1 220px" }}>
-                    <label htmlFor="runner-name">Runner name</label>
-                    <input id="runner-name" className="input" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
-                </div>
-                {choices.length > 1 && (
-                    <div className="field" style={{ flex: "1 1 200px" }}>
-                        <label htmlFor="runner-new-owner">Owner</label>
-                        <select id="runner-new-owner" className="input" value={owner ?? ""} onChange={(e) => setOwner(e.target.value)}>
-                            {choices.map((o) => (
-                                <option key={o.id ?? ""} value={o.id ?? ""}>
-                                    {o.label}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                )}
-                <Button variant="primary" loading={busy} disabled={busy} onClick={() => void save()}>
-                    Register
-                </Button>
-                <Button variant="ghost" onClick={onClose}>
-                    Cancel
-                </Button>
-            </div>
-        </section>
     );
 }
 
@@ -240,47 +233,120 @@ export function RunnerPage({ id }: { id: string }) {
         }
     };
     const active = r.status !== "retired";
+    const personal = kindOf(r) === "personal";
+    const facts = machineFacts(r.agent, r.machine);
+    const c = r.agent?.capabilities;
+    const w = whose(r);
     return (
         <>
-            <PageHeader title={r.name} subtitle={`${r.ownerName} · ${seen(r)}`} actions={<StatusBadge status={r.status} />} />
+            <PageHeader
+                title={r.name}
+                subtitle={`${personal ? (r.mine ? "Your computer" : `${r.ownerName}'s computer`) : `Team runner · ${r.ownerName}`} · ${seen(r)}`}
+                actions={
+                    <>
+                        <Badge tone={personal ? "brand" : "neutral"} tip={w.tip}>
+                            {w.label}
+                        </Badge>
+                        <StatusBadge status={r.status} />
+                    </>
+                }
+            />
             <div className="stack">
                 {note && <Callout tone={note.tone}>{note.text}</Callout>}
                 {r.status === "not-connected" && (
                     <Callout tone="info" title="Waiting for this computer">
-                        Start the runner on the computer with the token you copied when you registered it. If the token is lost, retire this runner and register it again.
+                        Start the runner on its computer. If it was added with a code that has expired, or with a token that is lost, retire this runner and add the computer again.
+                    </Callout>
+                )}
+                {r.status === "offline" && (
+                    <Callout tone="warning" title="This runner is offline">
+                        <div className="stack-sm" data-testid="runner-offline-help">
+                            <p>Nothing has been heard from it {r.lastSeenAt ? `since ${relativeTime(r.lastSeenAt)}` : "yet"}. It runs only while its computer is on, signed in and online.</p>
+                            <ul className="ag-steps">
+                                {offlineSteps(r.agent?.os).map((step) => (
+                                    <li key={step}>{step}</li>
+                                ))}
+                            </ul>
+                        </div>
                     </Callout>
                 )}
                 <section className="card card-pad stack-sm" aria-labelledby="runner-health-title">
                     <h2 className="t-section" id="runner-health-title">
-                        Health
+                        This computer
                     </h2>
-                    <div className="ag-facts">
+                    <div className="ag-facts" data-testid="runner-facts">
                         <span>
                             Machine <b>{r.machineName ?? "Unknown until it connects"}</b>
                         </span>
-                        {r.agent && (
+                        {facts.system && (
                             <span>
-                                System <b>{OS_LABEL[r.agent.os]}</b>
+                                System <b>{facts.system}</b>
+                            </span>
+                        )}
+                        {facts.arch && (
+                            <span>
+                                Processor <b>{facts.arch}</b>
+                            </span>
+                        )}
+                        {facts.memory && (
+                            <span>
+                                Memory <b>{facts.memory}</b>
+                            </span>
+                        )}
+                        {facts.cpus && (
+                            <span>
+                                Cores <b>{facts.cpus}</b>
                             </span>
                         )}
                         <span>
-                            Version <b>{r.version ?? "Unknown"}</b>
+                            Runner version <b>{r.version ?? "Unknown"}</b>
                         </span>
+                        {facts.playwright && (
+                            <span>
+                                Playwright <b>{facts.playwright}</b>
+                            </span>
+                        )}
                         {r.agent?.update && <span>{r.agent.update.outOfDate ? <b>Update available: {r.agent.update.latest}</b> : "Up to date"}</span>}
                         <span>
-                            Waiting now <b>{r.queue.waiting}</b>
-                            {r.queue.waiting > 0 ? ` (longest ${duration(r.queue.oldestWaitMs)})` : ""}
+                            Last heard from <b>{r.lastSeenAt ? relativeTime(r.lastSeenAt) : "Never"}</b>
                         </span>
-                        <span>
-                            Average wait <b>{r.queue.averageWaitMs === null ? "No runs yet" : duration(r.queue.averageWaitMs)}</b>
-                        </span>
+                        {r.agent && (
+                            <span>
+                                Runs at once <b>{r.agent.concurrency}</b>
+                            </span>
+                        )}
                     </div>
-                    {r.agent && <p className="t-secondary">{capabilitySummary(r.agent.capabilities)}</p>}
+                    {r.agent?.update?.state === "needs-manual" && (
+                        <Callout tone="warning">
+                            <span data-testid="runner-needs-manual">{NEEDS_MANUAL_UPDATE}</span>
+                        </Callout>
+                    )}
+                    {r.agent?.update?.published === false && r.agent.update.unpublished && <p className="t-secondary">This platform offers no automatic update: {r.agent.update.unpublished}</p>}
+                    {c && <p className="t-secondary" data-testid="runner-capabilities">{capabilitySummary(c)}</p>}
+                    {c?.network && <p className="t-secondary" data-testid="runner-network">{networkSentence(c.network)}</p>}
+                    <RunnerNetworkProblem network={c?.network} />
+                    <RunnerCheckNote check={c?.check} name={r.name} />
+                    {c?.check && (
+                        <details className="disclosure">
+                            <summary>
+                                <ChevronRight size={16} className="chev" aria-hidden />
+                                Computer check
+                            </summary>
+                            <div className="inner">
+                                <RunnerCheckDetails check={c.check} />
+                            </div>
+                        </details>
+                    )}
+                </section>
+                <section className="card card-pad stack-sm" aria-labelledby="runner-work-title">
+                    <h2 className="t-section" id="runner-work-title">
+                        Work
+                    </h2>
                     {r.currentTasks.length > 0 ? (
                         <ul className="list" aria-label="Current work">
                             {r.currentTasks.map((t, i) => (
                                 <li key={i} className="t-secondary">
-                                    {t.kind} for {t.projectName ?? "another project"}
+                                    {t.jobId && t.projectId ? <a href={routes.run(t.projectId, t.jobId)}>{t.kind}</a> : t.kind} for {t.projectName ?? "another project"}
                                     {t.total ? ` (${t.done ?? 0} of ${t.total})` : ""}
                                     {t.startedAt ? `, started ${relativeTime(t.startedAt)}` : ""}
                                 </li>
@@ -289,6 +355,15 @@ export function RunnerPage({ id }: { id: string }) {
                     ) : (
                         <p className="t-secondary">No work in progress.</p>
                     )}
+                    <div className="ag-facts">
+                        <span>
+                            Waiting now <b>{r.queue.waiting}</b>
+                            {r.queue.waiting > 0 ? ` (longest ${duration(r.queue.oldestWaitMs)})` : ""}
+                        </span>
+                        <span>
+                            Average wait <b>{r.queue.averageWaitMs === null ? "No runs yet" : duration(r.queue.averageWaitMs)}</b>
+                        </span>
+                    </div>
                 </section>
                 <section className="card card-pad stack-sm" aria-labelledby="runner-devices-title">
                     <h2 className="t-section" id="runner-devices-title">
@@ -332,8 +407,21 @@ export function RunnerPage({ id }: { id: string }) {
                         </ul>
                     )}
                 </section>
-                {/* Which projects use it, and (for someone who manages it) giving it to a project or taking it away: round 37 moved this out of the projects. */}
-                <RunnerProjects runner={r} onChanged={f.reload} />
+                <RunnerSwitches runner={r} onChanged={f.reload} />
+                {/* Which projects use it, and (for someone who manages it) giving it to a project or taking it away: round 37 moved this out of the projects.
+                    A personal runner is given to no project: it follows its owner. */}
+                {personal ? (
+                    <section className="card card-pad stack-sm" aria-labelledby="runner-takes-title" data-testid="runner-takes">
+                        <h2 className="t-section" id="runner-takes-title">
+                            Which runs it takes
+                        </h2>
+                        <p className="t-secondary">
+                            Only the runs {r.mine ? "you start" : `${r.ownerName} starts`}, and {r.mine ? "your" : "their"} own schedules, in projects {r.mine ? "you" : "they"} can run tests in and that allow people’s own computers. Nobody else’s run ever goes to it.
+                        </p>
+                    </section>
+                ) : (
+                    <RunnerProjects runner={r} onChanged={f.reload} />
+                )}
                 {r.canManage && active && (
                     <section className="card card-pad stack-sm" aria-labelledby="runner-actions-title">
                         <h2 className="t-section" id="runner-actions-title">
@@ -358,12 +446,12 @@ export function RunnerPage({ id }: { id: string }) {
                                     <Button size="sm" onClick={() => setConfirming(false)}>
                                         Keep runner
                                     </Button>
-                                    <Button size="sm" variant="danger" loading={busy} onClick={() => void run(() => api(`/runners/${r.id}/retire`, { method: "POST" }), "Runner retired. Its token no longer works.", "The runner was not retired. Try again.")}>
+                                    <Button size="sm" variant="danger" loading={busy} onClick={() => void run(() => api(`/runners/${r.id}/retire`, { method: "POST" }), "Runner retired. It can no longer connect.", "The runner was not retired. Try again.")}>
                                         Retire runner
                                     </Button>
                                 </>
                             }>
-                                Its token stops working at once, for every project. Work it is running goes back to the queue. This cannot be undone.
+                                It can no longer connect, at once and for every project. Work it is running goes back to the queue. This cannot be undone.
                             </Callout>
                         ) : (
                             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -384,6 +472,7 @@ export function RunnerPage({ id }: { id: string }) {
 
 /** The Dashboard's summary of the runners the person may see. */
 export function RunnerHealthCard() {
+    const can = useCan();
     const f = usePolled<RunnerSummary>("/runners/summary", 15_000);
     const s = f.data;
     return (
@@ -403,7 +492,7 @@ export function RunnerHealthCard() {
                 )
             ) : s.total === 0 ? (
                 <p className="t-secondary">
-                    <HowToAddRunner canRegister={false} />
+                    <HowToAddRunner canAddPersonal={can("ai_studio.tests.run")} canAddTeam={can("ai_studio.runners.manage")} />
                 </p>
             ) : (
                 <>

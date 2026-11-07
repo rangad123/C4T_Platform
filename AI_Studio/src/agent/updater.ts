@@ -4,10 +4,17 @@
  * Only a runner started from a download (a runner.json next to runner.mjs, with a kit version) can update itself; a checkout-based runner
  * never does. When the platform runs a newer runner version it says so (the hello answer, or the x-runner-update header of a poll answer).
  * The runner then:
+ *   0. checks the offer's signature (round 39): the deploy signs a manifest of the update with a private key only it holds, and the runner
+ *      checks it with a public key built into this program (update-keys.ts) and checks that every file the offer names was signed. An
+ *      update that is not signed with a trusted key is not installed: the runner keeps running, reports state "needs-manual" (the Runners
+ *      page then says to download the new version) and asks again at most once an hour. A signed update whose sequence is not larger than
+ *      the one of the installed version (runner.json "updateSequence") is refused the same way, so an old update sent again cannot move
+ *      the runner back. Nothing downloaded is run before these checks;
  *   1. stops claiming new tasks (it keeps polling with no free slot, so it stays online) and lets the running ones finish;
  *   2. downloads the update over its own authenticated connection into .update/next and checks every file against the sha256 in the
  *      offer (a file that does not match is refused and nothing changes); new test tools come from the complete download's pack (checked
- *      file by file) or, for the plain files kit, from `npm install` into the staging folder; a new pinned Node.js is staged in .update/node-next;
+ *      file by file) or, for the plain files kit, from `npm ci --ignore-scripts` with the signed package-lock.json into the staging folder
+ *      (an update without a lock file is refused: it never runs npm install); a new pinned Node.js is staged in .update/node-next;
  *   3. starts the new runner.mjs once with --version (it must load with this computer's Node.js and packages) before anything is switched;
  *   4. switches: the current files are copied to .update/previous (one rollback), the new ones are renamed into place one by one, runner.mjs
  *      last, under a journal in .update/state.json so an interrupted switch is undone at the next start;
@@ -26,13 +33,19 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import zlib from "node:zlib";
 import { RUNNER_UPDATE_EXIT, UpdatePartList, type RunnerUpdateOffer, type RunnerUpdateState, type UpdatePart } from "../agent-protocol/schema.js";
+import { offerMismatch, verifySignedManifest } from "../agent-protocol/update-manifest.js";
 import type { PlatformClient } from "./client.js";
 import type { Logger } from "./log.js";
+import { UPDATE_KEYS } from "./update-keys.js";
 
 export { RUNNER_UPDATE_EXIT };
 export const UPDATE_DIR = ".update";
 /** The bundle files an update replaces; runner.mjs goes last, so a half-done switch still starts the old program. */
 export const UPDATE_FILES = ["LICENSES.txt", "package.json", "record-child.mjs", "task-child.mjs", "runner.mjs"] as const;
+/** Taken when the update has it: the lock file of the test tools (npm ci). */
+export const OPTIONAL_UPDATE_FILES = ["package-lock.json"] as const;
+/** The order files are put in place: runner.json before runner.mjs, so whichever program starts next reads a version that matches its files. */
+const SWITCH_ORDER = ["LICENSES.txt", "package.json", "package-lock.json", "record-child.mjs", "task-child.mjs", "runner.json", "runner.mjs"];
 /** Starts of a new version without one successful connection before it is rolled back. */
 export const MAX_UNCONFIRMED_STARTS = 3;
 const HOUR = 3_600_000;
@@ -45,7 +58,7 @@ interface Persisted {
     backoffUntil?: number;
     /** A version this runner went back from: not tried again automatically. */
     skip?: string;
-    last?: { state: "updated" | "failed" | "rolled-back"; from?: string; to?: string; error?: string; at: string };
+    last?: { state: "updated" | "failed" | "rolled-back" | "needs-manual"; from?: string; to?: string; error?: string; at: string };
     /** The journal of a switch in progress (files are being renamed). */
     switching?: { from: string; to: string; at: string };
     /** A switch that happened and is waiting for the new version's first connection. */
@@ -116,6 +129,8 @@ export interface UpdaterOptions {
     /** First back-off after a failure (default 5 minutes; AITP_UPDATE_RETRY_SECONDS changes it, for tests). */
     retryBaseMs?: number;
     maxPerHour?: number;
+    /** The public keys an update must be signed with (default: the ones built into this program, update-keys.ts). Tests pass a test key. */
+    publicKeys?: readonly string[];
 }
 
 export interface HoldContext {
@@ -136,6 +151,11 @@ export class RunnerUpdater {
     private readonly nodeVersion: string;
     private readonly retryBaseMs: number;
     private readonly maxPerHour: number;
+    private readonly keys: readonly string[];
+    /** The signed sequence of the version installed now (runner.json "updateSequence"; 0 for a download that does not say). */
+    private installedSequence: number;
+    /** The sequence of the verified offer being prepared. */
+    private targetSequence = 0;
     private state: Persisted;
     private phase: "idle" | "preparing" | "ready" = "idle";
     private target?: RunnerUpdateOffer;
@@ -161,6 +181,14 @@ export class RunnerUpdater {
         const envBase = Number(this.env.AITP_UPDATE_RETRY_SECONDS);
         this.retryBaseMs = o.retryBaseMs ?? (Number.isFinite(envBase) && envBase > 0 ? envBase * 1000 : 5 * 60_000);
         this.maxPerHour = o.maxPerHour ?? 3;
+        this.keys = o.publicKeys ?? UPDATE_KEYS;
+        this.installedSequence = 0;
+        try {
+            const seq = (JSON.parse(fs.readFileSync(path.join(o.kitDir, "runner.json"), "utf8").replace(/^\uFEFF/, "")) as { updateSequence?: unknown }).updateSequence;
+            if (typeof seq === "number" && Number.isSafeInteger(seq) && seq > 0) this.installedSequence = seq;
+        } catch {
+            /* no runner.json (a checkout): it cannot update anyway */
+        }
         this.state = this.load();
         let writable = false;
         try {
@@ -310,6 +338,8 @@ export class RunnerUpdater {
     /** Start preparing an offered update (in the background); no new tasks are claimed from now on. */
     consider(offer: RunnerUpdateOffer): void {
         if (!this.wants(offer.reason, offer.version)) return;
+        const refused = this.signatureProblem(offer);
+        if (refused) return this.needsManual(offer.version, refused);
         this.phase = "preparing";
         this.target = offer;
         this.state.attempts = [...this.state.attempts.filter((a) => a > this.now() - HOUR), this.now()];
@@ -324,6 +354,27 @@ export class RunnerUpdater {
             },
             (e) => this.fail(offer.version, e),
         );
+    }
+
+    /** Why the offer is not one this runner may install by itself (its signature, or a file it names that was not signed), or undefined. */
+    signatureProblem(offer: RunnerUpdateOffer): string | undefined {
+        if (!offer.signed) return "The platform sent the update without a signature.";
+        const v = verifySignedManifest(offer.signed.manifest, offer.signed.signature, this.keys);
+        if (!v.ok) return v.reason;
+        const mismatch = offerMismatch(offer, v.manifest);
+        if (mismatch) return mismatch;
+        if (v.manifest.sequence <= this.installedSequence) return "The update is not newer than the version this runner runs (it may be an old update sent again).";
+        this.targetSequence = v.manifest.sequence;
+        return undefined;
+    }
+
+    /** An update it will not install by itself: nothing is downloaded, it keeps running, and it asks again in an hour at the earliest. */
+    private needsManual(to: string, reason: string): void {
+        this.state.attempts = [...this.state.attempts.filter((a) => a > this.now() - HOUR), this.now()];
+        this.state.backoffUntil = this.now() + HOUR;
+        this.state.last = { state: "needs-manual", from: this.version, to, error: reason.slice(0, 380), at: new Date(this.now()).toISOString() };
+        this.save();
+        this.log?.warn(`Version ${to} was not installed: ${reason} This runner keeps running version ${this.version}. Download the new version from the Runners page to update it.`);
     }
 
     private fail(to: string, e: unknown): void {
@@ -377,7 +428,10 @@ export class RunnerUpdater {
         const next = path.join(this.dir, "next");
         this.cleanStaging();
         fs.mkdirSync(next, { recursive: true });
-        const names = new Set<string>(UPDATE_FILES);
+        // Checked again here, so no caller can skip it (consider() checks it first, to report "needs-manual" instead of a failure).
+        const refused = this.signatureProblem(offer);
+        if (refused) throw new UpdateError(`${refused} Nothing was changed.`);
+        const names = new Set<string>([...UPDATE_FILES, ...OPTIONAL_UPDATE_FILES]);
         for (const n of UPDATE_FILES) if (!offer.files.some((f) => f.name === n)) throw new UpdateError(`The update does not contain ${n}. Nothing was changed.`);
         for (const f of offer.files) {
             if (!names.has(f.name)) continue;
@@ -463,7 +517,12 @@ export class RunnerUpdater {
         const cli = candidates.find((c) => fs.existsSync(c));
         if (!cli) throw new UpdateError("This update needs new test tools, and npm was not found next to this computer's Node.js. Download a new runner from the platform.");
         this.log?.info("The update needs new test tools: installing them with npm (this needs the internet and can take a few minutes).");
-        const r = await run(this.execPath, [cli, "install", "--no-audit", "--no-fund"], { cwd: dir, env: { ...this.env, NODE_USE_SYSTEM_CA: "1" }, timeoutMs: 15 * 60_000, signal });
+        // With the update's lock file: exactly the signed versions and checksums of every package, and no package's install script runs
+        // (Playwright needs none; only Android helpers have one, which downloads desktop browser drivers the runner does not use).
+        // Never npm install without the lock file: its versions would float and every package's install script would run.
+        if (!fs.existsSync(path.join(dir, "package-lock.json"))) throw new UpdateError("This update needs new test tools but came without their lock file, so they were not installed (an update never runs npm install without one). Nothing was changed. Download the new version from the Runners page.");
+        const args = [cli, "ci", "--ignore-scripts", "--no-audit", "--no-fund"];
+        const r = await run(this.execPath, args, { cwd: dir, env: { ...this.env, NODE_USE_SYSTEM_CA: "1" }, timeoutMs: 15 * 60_000, signal });
         if (signal.aborted) throw new UpdateError("The update was stopped.");
         if (r.code !== 0 || !fs.existsSync(path.join(dir, "node_modules", "@playwright", "test", "package.json"))) throw new UpdateError(`The new test tools could not be installed (npm exit code ${r.code ?? "none"}). Check that this computer can reach the npm registry. Nothing was changed.`);
     }
@@ -480,11 +539,11 @@ export class RunnerUpdater {
         try {
             // runner.json keeps everything the person added (proxy, browser, ...); only the version changes.
             const conf = JSON.parse(fs.readFileSync(kitJson, "utf8").replace(/^﻿/, "")) as Record<string, unknown>;
-            fs.writeFileSync(path.join(next, "runner.json"), `${JSON.stringify({ ...conf, kitVersion: offer.version }, null, 2)}\n`);
+            fs.writeFileSync(path.join(next, "runner.json"), `${JSON.stringify({ ...conf, kitVersion: offer.version, ...(this.targetSequence ? { updateSequence: this.targetSequence } : {}) }, null, 2)}\n`);
             removeDir(previous);
             removeDir(path.join(this.dir, "node-previous"));
             fs.mkdirSync(previous, { recursive: true });
-            const files = ["runner.json", ...UPDATE_FILES];
+            const files = ["runner.json", ...UPDATE_FILES, ...OPTIONAL_UPDATE_FILES];
             for (const f of files) if (fs.existsSync(path.join(this.kitDir, f))) fs.copyFileSync(path.join(this.kitDir, f), path.join(previous, f));
             this.state.switching = { from: this.version, to: offer.version, at: new Date(this.now()).toISOString() };
             this.save();
@@ -493,7 +552,7 @@ export class RunnerUpdater {
                 renameRetry(path.join(next, "node_modules"), path.join(this.kitDir, "node_modules"));
             }
             // runner.json before runner.mjs: whichever program starts next reads a version that matches its files or recovers from the journal.
-            for (const f of ["LICENSES.txt", "package.json", "record-child.mjs", "task-child.mjs", "runner.json", "runner.mjs"]) renameRetry(path.join(next, f), path.join(this.kitDir, f));
+            for (const f of SWITCH_ORDER) if (f !== "package-lock.json" || fs.existsSync(path.join(next, f))) renameRetry(path.join(next, f), path.join(this.kitDir, f));
         } catch (e) {
             // Put back what was moved; the journal makes the next start do the same if this process dies here.
             try {
@@ -528,9 +587,11 @@ export class RunnerUpdater {
             renameRetry(path.join(previous, "node_modules"), path.join(this.kitDir, "node_modules"));
             removeDir(discard);
         }
-        for (const f of ["LICENSES.txt", "package.json", "record-child.mjs", "task-child.mjs", "runner.json", "runner.mjs"]) {
+        for (const f of SWITCH_ORDER) {
             const from = path.join(previous, f);
             if (fs.existsSync(from)) fs.copyFileSync(from, path.join(this.kitDir, f));
+            // A lock file belongs to the version it came with: the one gone back to had none.
+            else if (f === "package-lock.json") fs.rmSync(path.join(this.kitDir, f), { force: true });
         }
     }
 

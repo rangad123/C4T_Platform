@@ -442,7 +442,7 @@ export type StepState = "passed" | "failed" | "unknown";
 export const GLOSSARY = {
     "shared element": "A button, field or link you name once, so every test that uses it finds it the same way. Fix it once and every test is fixed.",
     "reusable steps": "A set of steps you write once, like signing in, and use in many tests.",
-    runner: "A computer that runs your tests, for example your laptop. Tests run on this server unless you choose a runner.",
+    runner: "A computer that runs your tests, for example your own laptop or a shared team machine. It connects to this platform and takes the runs it may do.",
     finding: "Something the test noticed that may be a problem in your application, like a missing security header. The test itself works.",
     repair: "A suggested change to a test, for example for a button that was renamed. Nothing changes until you apply it.",
     "auto-fix": "A correction the platform made while it created the test, so the test would pass. The test’s history lists it.",

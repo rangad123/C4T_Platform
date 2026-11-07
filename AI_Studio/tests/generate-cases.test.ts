@@ -17,7 +17,7 @@ import { casesFromAnswer, casesPrompt } from "../src/engine/manual/generate.js";
 import { ManualCaseStore } from "../src/platform/manual-case-store.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
-import { Db } from "../src/platform/db.js";
+import { createDatabaseAtVersion, Db, knownSchemaVersion } from "../src/platform/db.js";
 import { buildServer } from "../src/platform/server.js";
 import { seedProject, type Seed } from "./fixtures/dashboard-seed.js";
 import { startFakeProvider, type FakeProvider } from "./fixtures/fake-llm-provider.js";
@@ -341,11 +341,9 @@ describe("a case's type and requirement through the cases API", () => {
 describe("migration slot 49", () => {
     it("upgrades a slot-48 database with cases: every row kept, each manual, numbered per project in the order added", () => {
         const file = path.join(tempDir("aitp-slot49-"), "studio.db");
-        // A database as slot 48 left it: built whole, then slots 50 and 49 taken back out.
-        new Db(file).close();
+        // A database as slot 48 left it.
+        createDatabaseAtVersion(file, 48);
         const raw = new DatabaseSync(file);
-        raw.exec("DROP TABLE project_agent_inputs; DELETE FROM schema_version WHERE version = 50;");
-        raw.exec("DROP INDEX idx_manual_cases_number; DROP INDEX idx_manual_cases_requirement; ALTER TABLE manual_cases DROP COLUMN requirement_id; ALTER TABLE manual_cases DROP COLUMN number; ALTER TABLE manual_cases DROP COLUMN automation; DELETE FROM schema_version WHERE version = 49;");
         const t = "2026-10-01T00:00:00.000Z";
         raw.exec(`INSERT INTO users (id, email, created_at) VALUES ('u', 'u@example.com', '${t}')`);
         for (const p of ["p1", "p2"]) raw.exec(`INSERT INTO projects (id, owner_id, name, created_at, updated_at) VALUES ('${p}', 'u', '${p}', '${t}', '${t}')`);
@@ -356,7 +354,7 @@ describe("migration slot 49", () => {
 
         const db = new Db(file);
         try {
-            expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(50);
+            expect(db.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version")!.v).toBe(knownSchemaVersion());
             const after = db.all("SELECT id, project_id, title, priority, requirement, steps_json, linked_json, automation, number, requirement_id FROM manual_cases ORDER BY project_id, number");
             expect(after).toEqual([
                 { id: "c-b", project_id: "p1", title: "Second? no, first", priority: "high", requirement: "REQ-9", steps_json: '[{"action":"a","expected":"b"}]', linked_json: '["t1"]', automation: "manual", number: 1, requirement_id: null },

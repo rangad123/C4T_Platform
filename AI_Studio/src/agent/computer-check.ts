@@ -29,6 +29,7 @@ import { installedPhoneTools, phoneToolsHost } from "../engine/mobile/platform-t
 import { adbPath } from "../engine/mobile/toolchain.js";
 import { detectBrowsers, expectedRevisions, playwrightBrowsersDir, type ExecFn } from "./capabilities.js";
 import { AGENT_VERSION, parseAgentArgs, type AgentConfig } from "./config.js";
+import { loadCredential } from "./credential-store.js";
 import { applyKitDefaults, KIT_CONFIG_FILE } from "./kit.js";
 import { addWindowsProxy, applyRunnerNetwork, kitNetworkDefaults, type NetworkSettings } from "./net.js";
 import { phoneToolsPolicy } from "./phone-tools.js";
@@ -458,14 +459,19 @@ export async function checkComputer(input: { argv: string[]; env: NodeJS.Process
     const env = kitNet?.ok ? kitNet.env : kit.kit === "broken" ? input.env : kit.env;
     const parsed = kit.kit === "broken" || (kitNet && !kitNet.ok) ? undefined : parseAgentArgs(input.argv.filter((a) => a !== "--check"), env);
     const cfg = parsed?.kind === "run" ? parsed.config : undefined;
-    if (cfg) secrets.push(cfg.token);
+    // Round 39: a runner added with an enrollment code keeps its credential in this computer's store (credential-store.ts).
+    if (cfg && cfg.tokenSource === "store") {
+        cfg.token = (await loadCredential(cfg.credentialDir ?? cfg.workDir).catch(() => null)) ?? "";
+        if (cfg.enroll) secrets.push(cfg.enroll.code);
+    }
+    if (cfg?.token) secrets.push(cfg.token);
     if (kit.kit === "broken") lines.push(line("settings", "missing", "The runner's settings (runner.json) cannot be used", kit.message));
     else if (kitNet && !kitNet.ok) lines.push(line("settings", "missing", "runner.json has a network line the runner cannot use", kitNet.message));
     else if (!cfg) lines.push(line("settings", "missing", "The runner's settings are not complete", parsed?.kind === "error" ? parsed.message : "Give the platform address and the token (see ai-test-agent --help)."));
     else {
         const host = new URL(cfg.baseUrl).host;
         header = `Check this computer for the AI Testing Platform runner "${cfg.name}" (platform ${host}).`;
-        const tokenFrom = cfg.tokenSource === "file" ? `read from ${path.basename(env.AITP_AGENT_TOKEN_FILE ?? "the token file")}` : cfg.tokenSource === "flag" ? "given with --token" : "from AITP_AGENT_TOKEN";
+        const tokenFrom = cfg.tokenSource === "store" ? (cfg.token ? "kept in this computer's credential store" : cfg.enroll ? "not made yet: the runner trades its enrollment code when it starts" : "missing: add this computer on the Runners page") : cfg.tokenSource === "file" ? `read from ${path.basename(env.AITP_AGENT_TOKEN_FILE ?? "the token file")}` : cfg.tokenSource === "flag" ? "given with --token" : "from AITP_AGENT_TOKEN";
         lines.push(line("settings", "ok", `Settings: platform ${host}, runner name "${cfg.name}", token ${tokenFrom} (not shown)`, undefined, kit.kit === false ? ["Not started from a download (no runner.json next to the runner): the settings come from the command line and the environment."] : undefined));
     }
     const workDir = cfg?.workDir ?? path.join(input.kitDir, "work");
@@ -489,7 +495,8 @@ export async function checkComputer(input: { argv: string[]; env: NodeJS.Process
         lines.push(platformLine(host, platform));
         const reached = platform.reached && platform.status < 300;
         if (platform.reached) serverDate = platform.date;
-        lines.push(tokenLine(reached ? await askToken(d, cfg, s, host) : { skipped: true }));
+        if (!cfg.token) lines.push(line("token", cfg.enroll ? "optional" : "missing", cfg.enroll ? "This runner has no credential yet; it trades its enrollment code when it starts" : "This runner has no credential and no enrollment code", cfg.enroll ? "Start the runner within 30 minutes of the download, or make a new code on the Runners page." : "Add this computer on the Runners page."));
+        else lines.push(tokenLine(reached ? await askToken(d, cfg, s, host) : { skipped: true }));
     }
 
     lines.push(diskLine(d.freeBytes(workDir)));

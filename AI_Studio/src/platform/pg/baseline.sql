@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-50 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 50;
+-- Equal to SQLite migration slots 1-54 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 54;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -117,6 +117,7 @@ CREATE TABLE generation_jobs (
     finished_at TEXT,
     updated_at TEXT NOT NULL,
     lease_owner TEXT,
+    ran_on_json TEXT,
     seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
 CREATE INDEX idx_jobs_status ON generation_jobs (status, created_at);
@@ -284,7 +285,8 @@ CREATE TABLE schedules (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     environment TEXT,
-    confirm_production BIGINT NOT NULL DEFAULT 0
+    confirm_production BIGINT NOT NULL DEFAULT 0,
+    created_by TEXT
 );
 CREATE INDEX idx_schedules_due ON schedules (enabled, next_run_at);
 
@@ -783,7 +785,8 @@ CREATE TABLE runner_settings (
     project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
     run_on TEXT NOT NULL,
     agent_id TEXT,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    allow_personal BIGINT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE agent_tasks (
@@ -806,9 +809,18 @@ CREATE TABLE agent_tasks (
     created_ms BIGINT NOT NULL,
     claimed_ms BIGINT,
     finished_ms BIGINT,
+    owner_id TEXT,
+    phase TEXT NOT NULL DEFAULT 'queued',
+    phase_ms BIGINT,
+    attempt BIGINT NOT NULL DEFAULT 0,
+    attempt_id TEXT,
+    accepted_ms BIGINT,
+    rejections_json TEXT NOT NULL DEFAULT '[]',
+    result_attempt_id TEXT,
     seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
 CREATE INDEX idx_agent_tasks_job ON agent_tasks (job_id);
+CREATE INDEX idx_agent_tasks_owner ON agent_tasks (owner_id, status);
 CREATE INDEX idx_agent_tasks_queue ON agent_tasks (project_id, status, created_ms);
 
 CREATE TABLE agent_task_files (
@@ -1421,10 +1433,21 @@ CREATE TABLE agent_tokens (
     last_used_at TEXT,
     last_used_ms BIGINT,
     revoked_at TEXT,
+    kind TEXT NOT NULL DEFAULT 'team',
+    owner_id TEXT,
+    allow_code_scripts BIGINT NOT NULL DEFAULT 0,
+    allow_private_targets BIGINT NOT NULL DEFAULT 1,
+    machine_id TEXT,
+    rotated_at TEXT,
+    previous_hash TEXT,
+    previous_until_ms BIGINT,
+    allow_real_phone BIGINT NOT NULL DEFAULT 0,
     seq BIGINT GENERATED ALWAYS AS IDENTITY,
     UNIQUE (token_hash)
 );
 CREATE INDEX idx_agent_tokens_org ON agent_tokens (organization_id);
+CREATE INDEX idx_agent_tokens_owner ON agent_tokens (owner_id);
+CREATE INDEX idx_agent_tokens_previous ON agent_tokens (previous_hash);
 CREATE INDEX idx_agent_tokens_project ON agent_tokens (project_id);
 
 CREATE TABLE agents (
@@ -1440,6 +1463,9 @@ CREATE TABLE agents (
     concurrency BIGINT NOT NULL,
     first_seen_ms BIGINT NOT NULL,
     last_seen_ms BIGINT NOT NULL,
+    os_version TEXT,
+    machine_id TEXT,
+    protocol BIGINT NOT NULL DEFAULT 1,
     UNIQUE (token_id, name)
 );
 CREATE INDEX idx_agents_project ON agents (project_id, last_seen_ms);
@@ -1662,6 +1688,42 @@ CREATE TABLE project_agent_inputs (
     credentials_enc TEXT,
     settings_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE runner_enrollments (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL,
+    hint TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    owner_id TEXT,
+    organization_id TEXT,
+    project_id TEXT,
+    project_ids_json TEXT NOT NULL DEFAULT '[]',
+    label TEXT,
+    created_by TEXT,
+    created_by_id TEXT,
+    created_at TEXT NOT NULL,
+    expires_ms BIGINT NOT NULL,
+    used_ms BIGINT,
+    token_id TEXT,
+    UNIQUE (code_hash)
+);
+CREATE INDEX idx_runner_enrollments_creator ON runner_enrollments (created_by_id);
+
+CREATE TABLE agent_task_events (
+    task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL,
+    seq BIGINT NOT NULL,
+    received_ms BIGINT NOT NULL,
+    PRIMARY KEY (task_id, attempt_id, seq)
+);
+
+CREATE TABLE test_version_deps (
+    version_id TEXT PRIMARY KEY REFERENCES test_versions(id) ON DELETE CASCADE,
+    hash TEXT NOT NULL,
+    covers_json TEXT NOT NULL,
+    recorded TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
 );
 
 CREATE TABLE security_scan_runs (

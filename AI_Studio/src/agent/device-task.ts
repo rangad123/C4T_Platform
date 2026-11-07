@@ -157,6 +157,10 @@ export class DeviceTask {
                 ...(dev.avd ? { avd: dev.avd } : {}),
                 ...(dev.deviceSerial ? { serial: dev.deviceSerial } : {}),
                 ...(dev.credentials ? { credentials: dev.credentials } : {}),
+                // A person's own computer: the plugged-in phone only when its owner allowed it, and what this session installed on it is removed after.
+                ...(dev.emulatorOnly ? { emulatorOnly: true } : {}),
+                ...(dev.realPhone === false ? { noRealPhone: true } : {}),
+                ...(dev.removeInstalledApp ? { removeInstalledApp: true } : {}),
                 maxActions: dev.maxActions,
                 maxMinutes: dev.totalMinutes,
                 signal: this.abort.signal,

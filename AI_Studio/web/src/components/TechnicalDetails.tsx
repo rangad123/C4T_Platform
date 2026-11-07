@@ -6,6 +6,7 @@ import { useFetch } from "../lib/hooks";
 import { Button, Skeleton } from "./ui";
 import { LiveLine } from "../features/live/LiveStatus";
 import { mergeEvents, useJobStream } from "../lib/stream";
+import { PHASE_STEP_WORD, taskPhaseOf } from "../features/runs/live-run";
 
 /** Counters, activity log and ids for one analysis. Loaded only when opened. */
 export function TechnicalDetails({ job }: { job: Job }) {
@@ -55,6 +56,21 @@ function Body({ job }: { job: Job }) {
             <dl className="kv">
                 <dt>Run ID</dt>
                 <dd>{job.jobId}</dd>
+                {job.ranOn?.kind === "agent" && (
+                    <>
+                        <dt>Runner</dt>
+                        <dd>
+                            {job.ranOn.name}
+                            {job.ranOn.agentId ? ` (${job.ranOn.agentId})` : ""}
+                        </dd>
+                        {taskPhaseOf(job) && (
+                            <>
+                                <dt>Runner task</dt>
+                                <dd data-testid="tech-task-phase">{PHASE_STEP_WORD[taskPhaseOf(job)!]}</dd>
+                            </>
+                        )}
+                    </>
+                )}
                 <dt>Pages explored</dt>
                 <dd>{c.pagesDiscovered}</dd>
                 <dt>API endpoints</dt>

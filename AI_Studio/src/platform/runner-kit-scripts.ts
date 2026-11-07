@@ -3,8 +3,16 @@
  * line endings each system expects when the zip is built (CRLF for .cmd and the Windows README, LF for the rest).
  *
  * Nothing in these texts is taken from a person's input except the project name and the runner name in the README, which is only read by
- * a person. The start scripts contain no project, name, address or token: they read runner.json and runner.token through the program, so
- * a name with quotes, percent signs or ampersands cannot reach a shell.
+ * a person. The start scripts contain no project, name, address or token: they read runner.json and runner.enroll (or, for a download
+ * made before round 39, runner.token) through the program, so a name with quotes, percent signs or ampersands cannot reach a shell.
+ *
+ * Enrollment (round 39): a download holds a one-time code in runner.enroll, never a long-lived credential. The scripts start the runner
+ * with --enroll-file runner.enroll while that file is there; the runner trades the code for its own credential, keeps it in this
+ * computer's credential store and deletes the file. Every later start passes no credential at all (the runner reads the stored one); a
+ * folder from an older download still has runner.token and starts with --token-file as before.
+ *
+ * Test tools: with package-lock.json (every download from round 39 on) the scripts run `npm ci --ignore-scripts`, which installs exactly
+ * the locked versions and checksums and runs no package's install script; without it, `npm install` as before.
  *
  * Finding Node.js (both scripts, same rule): a double-clicked file does not get the PATH a person's own terminal has, so "node" can be
  * installed and still invisible. The scripts therefore test every candidate they can find (the PATH, the places installers and version
@@ -147,7 +155,13 @@ rem That address may hold a password: it is never printed, and setlocal keeps bo
 setlocal
 set "NODE_USE_SYSTEM_CA=1"
 if not defined HTTPS_PROXY call :kitproxy
+rem With the download's lock file: exactly the locked versions and checksums, and no package's install script runs.
+if exist "package-lock.json" goto npmci
 call npm install --no-audit --no-fund
+goto npmdone
+:npmci
+call npm ci --ignore-scripts --no-audit --no-fund
+:npmdone
 set "NPMCODE=%errorlevel%"
 endlocal & set "NPMCODE=%NPMCODE%"
 if not "%NPMCODE%"=="0" goto npmfail
@@ -175,7 +189,17 @@ echo If it says it could not reach the platform, check the address in runner.jso
 echo.
 
 :loop
+rem The one-time code while it is there, an older download's token, else the credential the runner saved.
+if exist "runner.enroll" goto runenroll
+if exist "runner.token" goto runtoken
+call node runner.mjs
+goto ran
+:runenroll
+call node runner.mjs --enroll-file runner.enroll
+goto ran
+:runtoken
 call node runner.mjs --token-file runner.token
+:ran
 set "CODE=%errorlevel%"
 if "%CODE%"=="0" goto done
 if "%CODE%"=="2" goto badsettings
@@ -202,8 +226,8 @@ goto fail
 
 :revoked
 echo.
-echo The platform no longer accepts this runner's token. It was revoked, or the project was deleted.
-echo Download a new runner kit from the platform (Settings, Runners, Add a runner).
+echo The platform no longer accepts this runner. It was removed, its code was already used or has expired, or the project was deleted.
+echo Make a new download on the Runners page of the platform.
 goto fail
 
 :versions
@@ -542,10 +566,16 @@ if [ "$AITP_KIT_SKIP_INSTALL" != "1" ]; then
         if [ -z "$HTTPS_PROXY" ] && [ -z "$https_proxy" ]; then
             kit_proxy=$(node -e "try{var p=JSON.parse(require('fs').readFileSync('runner.json','utf8')).proxy;if(typeof p=='string')if(['http:','https:'].indexOf(new URL(p).protocol)!=-1)process.stdout.write(p)}catch(e){}" 2>/dev/null)
         fi
-        if [ -n "$kit_proxy" ]; then
-            HTTPS_PROXY=$kit_proxy NODE_USE_SYSTEM_CA=1 npm install --no-audit --no-fund
+        # With the download's lock file: exactly the locked versions and checksums, and no package's install script runs.
+        if [ -f package-lock.json ]; then
+            set -- ci --ignore-scripts --no-audit --no-fund
         else
-            NODE_USE_SYSTEM_CA=1 npm install --no-audit --no-fund
+            set -- install --no-audit --no-fund
+        fi
+        if [ -n "$kit_proxy" ]; then
+            HTTPS_PROXY=$kit_proxy NODE_USE_SYSTEM_CA=1 npm "$@"
+        else
+            NODE_USE_SYSTEM_CA=1 npm "$@"
         fi
         npm_code=$?
         kit_proxy=""
@@ -565,7 +595,13 @@ echo
 # Ctrl-C stops the runner, which then exits 0; the script follows it instead of starting it again.
 trap 'exit 0' INT TERM
 while :; do
-    node runner.mjs --token-file runner.token
+    if [ -f runner.enroll ]; then
+        node runner.mjs --enroll-file runner.enroll
+    elif [ -f runner.token ]; then
+        node runner.mjs --token-file runner.token
+    else
+        node runner.mjs
+    fi
     code=$?
     case "$code" in
         0)
@@ -580,8 +616,8 @@ while :; do
             ;;
         3)
             echo
-            echo "The platform no longer accepts this runner's token. It was revoked, or the project was deleted."
-            echo "Download a new runner kit from the platform (Settings, Runners, Add a runner)."
+            echo "The platform no longer accepts this runner. It was removed, its code was already used or has expired, or the project was deleted."
+            echo "Make a new download on the Runners page of the platform."
             fail 3
             ;;
         4)
@@ -667,19 +703,19 @@ Kit version: ${i.kitVersion}${c ? `\nDownload: complete, for ${c.words} (${c.tar
 1. Unzip this folder on the computer where your application can be reached.
 2. ${start}
 3. Leave the window open. It says "Connected to the platform" when the runner is ready.
-4. In the platform, open Settings, then Runners. This runner shows as online.
-5. Delete the zip file you downloaded once the runner has connected. The file runner.token in this folder is a secret: anyone who has it can connect a runner to the project "${i.projectName}" and receive its test runs.
+4. In the platform, open the Runners page. This runner shows as online.
+5. The file runner.enroll in this folder is a one-time code. The runner trades it for its own access the first time it starts, keeps that access in this computer's credential store and deletes the file. The code works once, and only for 30 minutes after the download was made: if it has expired, make a new download on the Runners page.
 
 ${node}
 If the runner does not connect: ${win ? "double-click check-computer.cmd" : "run  sh check-computer.sh  in the same Terminal window (or double-click check-computer.command)"}. It checks this computer (Node.js, the runner's files, the browser, the proxy and certificates, the platform and the token, disk space, the clock) and says what to fix. It changes nothing and never shows the token.
 Web tests need a browser. The runner uses Google Chrome or Microsoft Edge when this computer has one, and otherwise downloads a browser once, the first time it starts. It says which one it uses.
 
-Updates: when the platform is updated, the runner downloads its new version itself, checks every file, waits for its running tests to finish and starts again ("The runner updated itself"). It keeps the previous version: run  node runner.mjs --rollback  in this folder to go back. A project owner can turn automatic updates off for this runner in Settings, Runners.
+Updates: when the platform is updated, the runner downloads its new version itself, checks every file, waits for its running tests to finish and starts again ("The runner updated itself"). It keeps the previous version: run  node runner.mjs --rollback  in this folder to go back. It installs only an update signed by the platform's publisher; when it cannot check the signature it keeps running and the Runners page says to download the new version. Automatic updates can be turned off for this runner on the Runners page.
 
 Company network: the runner finds a proxy set in Windows or in the HTTPS_PROXY variable by itself and trusts this computer's certificate store. If it still cannot connect, add lines to runner.json: "proxy": "http://proxy.example:8080" (with a user name and password if the proxy needs them: "http://user:password@proxy.example:8080"; the password is never shown or sent to the platform), "noProxy": "intranet.example,.corp.example" (addresses reached without the proxy), "caFile": "company-root.pem" (your company's certificate file, in this folder) and "proxyTests": true (tests go through the proxy too). The same settings can be given when starting the runner: --proxy http://proxy.example:8080 and --ca-file company-root.pem.
 
 To stop the runner, close the window or press Ctrl+C.
-To take this runner's access away, open Settings, then Runners in the platform and revoke its token. The runner then stops with a message saying so. Deleting this folder removes the program and everything it stored.
+To take this runner's access away, open the Runners page in the platform and remove it. The runner then stops with a message saying so. To remove it from this computer, run  node runner.mjs --forget-credential  in this folder (it deletes the saved access), then delete the folder.
 Android tests also need the Android tools on this computer, and iOS tests a Mac with Xcode. See the platform's runner guide.
 `;
 }

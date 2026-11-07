@@ -12,6 +12,7 @@
  *  An infrastructure failure (the agent stopped answering, the phone went away, a limit) is thrown as DeviceSessionError and is never a test verdict.
  */
 import { randomUUID } from "node:crypto";
+import { ON_SERVER_REFUSED } from "./runner-only.js";
 import { DeviceCommand, DEVICE_MAX_ELEMENTS, DEVICE_MAX_IMAGE_B64, TaskOffer, type DevicePush, type DeviceResultWire, type DeviceSnapshotWire, type ResultRequest } from "../agent-protocol/schema.js";
 import { parseAction } from "../engine/mobile/device/actions.js";
 import { DeviceSessionError } from "../engine/mobile/device/errors.js";
@@ -22,6 +23,7 @@ import { adbPath } from "../engine/mobile/toolchain.js";
 import { deviceSessionProblem } from "../engine/mobile/device/capability.js";
 import type { AgentService } from "./agent-services.js";
 import type { AgentRecord, RunnerSetting } from "./agent-store.js";
+import { sessionHosts, visibleHosts, type SessionHost } from "./agent-record.js";
 import { RateLimiter, scrubSecrets } from "./agent-routing.js";
 import { HttpError } from "./http-error.js";
 import { keyOfStoredFile } from "./object-store.js";
@@ -74,6 +76,18 @@ export function deviceProblem(agent: Pick<AgentRecord, "name" | "capabilities">)
         : `${agent.name} can't be used to explore a phone: ${why ?? "it has no Android tools"}`;
 }
 
+/**
+ * Why a machine cannot host a phone session for this caller, or undefined. On a person's own computer, also: its runner must understand the
+ * phone switches (an older one could pick the plugged-in phone), and without "Use my connected phone" it needs an emulator.
+ */
+export function hostDeviceProblem(agent: Pick<SessionHost, "name" | "capabilities" | "personal" | "allowRealPhone">): string | undefined {
+    const why = deviceProblem(agent);
+    if (why || !agent.personal) return why;
+    if (agent.capabilities.runnerSwitches !== true) return `${agent.name} can't be used to explore a phone: its runner program is too old to keep your own phone out of it. Update the runner.`;
+    if (agent.allowRealPhone !== true && !agent.capabilities.android?.avds?.length) return `${agent.name} has no emulator, and “Use my connected phone” is off for it. Set up an emulator on it, or turn that on for it on the Runners page.`;
+    return undefined;
+}
+
 /** Why this computer cannot be used for a phone session, or undefined. */
 export function localDeviceProblem(env: NodeJS.ProcessEnv = process.env): string | undefined {
     return adbPath(env) ? undefined : "This computer has no Android tools (adb), so a phone can't be explored here. Run `npx @taqwright/taqwright install --with-avd` on it, or use a runner agent that has a phone.";
@@ -85,25 +99,30 @@ export function localDeviceProblem(env: NodeJS.ProcessEnv = process.env): string
  *  - `on: "platform"`: this computer; `on: "agent"`: an online agent of the project that can host a session (the one named, or the one the project is pinned to,
  *    or the least busy of the online ones), otherwise a plain refusal naming what is missing.
  */
-export function chooseDeviceHost(input: { on?: "platform" | "agent"; agentId?: string; runner: RunnerSetting; agents: Array<AgentRecord & { online: boolean; activeTasks?: number }>; localProblem?: string }): DeviceHostChoice {
+export function chooseDeviceHost(input: { on?: "platform" | "agent"; agentId?: string; runnerId?: string | null; runner: RunnerSetting; agents: SessionHost[]; localProblem?: string; caller?: string | null }): DeviceHostChoice {
+    const agents = visibleHosts(input.agents, input.caller);
     const target = input.on ?? (input.runner.runOn === "agent" ? "agent" : "platform");
+    // EXECUTION_MODE=runners: nothing is started on the server, even when asked for by name (runner-only.ts).
+    if (target === "platform" && input.runner.runnersOnly) throw new HttpError(409, ON_SERVER_REFUSED("A phone session"), { executionMode: "runners" });
     if (target === "platform") {
         if (input.localProblem) throw new HttpError(409, input.localProblem);
         return { kind: "platform" };
     }
-    const wanted = input.agentId ?? input.runner.agentId ?? undefined;
+    // The runner chosen for this run (an agent_tokens id) names its latest machine; one this caller may not use is "not found".
+    const chosen = input.runnerId ? (agents.find((a) => a.tokenId === input.runnerId)?.id ?? "") : undefined;
+    const wanted = input.agentId ?? chosen ?? input.runner.agentId ?? undefined;
     if (wanted) {
-        const agent = input.agents.find((a) => a.id === wanted);
+        const agent = agents.find((a) => a.id === wanted);
         if (!agent) throw new HttpError(404, "That runner agent does not belong to this project.");
         if (!agent.online) throw new HttpError(409, `${agent.name} is offline. Start it, or use another agent or the platform.`);
-        const why = deviceProblem(agent);
+        const why = hostDeviceProblem(agent);
         if (why) throw new HttpError(422, why);
         return { kind: "agent", agent };
     }
-    const online = input.agents.filter((a) => a.online);
-    if (online.length === 0) throw new HttpError(409, "No runner agent is online for this project. Start one, or explore on the platform instead.");
-    const capable = online.filter((a) => !deviceProblem(a));
-    if (capable.length === 0) throw new HttpError(422, deviceProblem(online[0]!)!);
+    const online = agents.filter((a) => a.online);
+    if (online.length === 0) throw new HttpError(409, input.runner.runnersOnly ? "No runner is online for this project. Start one that has a phone." : "No runner agent is online for this project. Start one, or explore on the platform instead.");
+    const capable = online.filter((a) => !hostDeviceProblem(a));
+    if (capable.length === 0) throw new HttpError(422, hostDeviceProblem(online[0]!)!);
     capable.sort((a, b) => (a.activeTasks ?? 0) - (b.activeTasks ?? 0));
     return { kind: "agent", agent: capable[0]! };
 }
@@ -168,6 +187,8 @@ export interface RemoteDeviceDeps {
     cancel(taskId: string): void;
     /** Credentials the project knows (exact strings): scrubbed from everything an agent sends. */
     secrets(): string[];
+    /** Why the session must end now (its starter lost access to the project, the computer may no longer host it), or undefined. Asked on every beat. */
+    accessProblem?(): string | undefined;
 }
 
 export interface RemoteDeviceInit {
@@ -178,6 +199,10 @@ export interface RemoteDeviceInit {
     maxActions: number;
     maxMinutes: number;
     timeouts?: RemoteDeviceTimeouts;
+    /** The person who started it (null: the access key or the system). */
+    startedBy?: string | null;
+    /** It runs on a person's own computer: only its starter may read or answer it. */
+    personal?: boolean;
 }
 
 type Status = "queued" | "starting" | "ready" | "ended" | "failed";
@@ -223,6 +248,15 @@ export class RemoteDeviceDriver {
     }
     get agentName(): string {
         return this.init.agent.name;
+    }
+    get startedBy(): string | null {
+        return this.init.startedBy ?? null;
+    }
+    get onPersonalRunner(): boolean {
+        return this.init.personal === true;
+    }
+    get projectId(): string {
+        return this.init.projectId;
     }
     get name(): string {
         return this.deviceName || `Phone on ${this.init.agent.name}`;
@@ -329,6 +363,14 @@ export class RemoteDeviceDriver {
     onHeartbeat(): { commands: Command[]; cancel: boolean } {
         this.lastContact = this.deps.clock();
         this.tick();
+        // Its starter lost access (or the computer may no longer host it): the phone session ends within this beat.
+        const gone = this.finished ? undefined : this.deps.accessProblem?.();
+        if (gone) {
+            this.closing = true;
+            this.deps.cancel(this.init.taskId);
+            this.end("failed", gone);
+            return { commands: [], cancel: true };
+        }
         const t = this.deps.task(this.init.taskId);
         return { commands: this.finished ? [] : this.queue.slice(0, 5), cancel: this.closing || Boolean(t?.cancelRequested) };
     }
@@ -498,6 +540,10 @@ export interface StartDeviceOptions {
     maxActions?: number;
     maxMinutes?: number;
     timeouts?: RemoteDeviceTimeouts;
+    /** The project wants an emulator even when a real phone is connected (its phone setting). */
+    emulatorOnly?: boolean;
+    /** The person who started the session (an exploration's: who started the job); undefined: read from the job. */
+    startedBy?: string | null;
 }
 
 /** Queues the device task for `agent` and returns the driver that mirrors the session for the explorer. */
@@ -518,6 +564,9 @@ export async function startDeviceTask(svc: AgentService, o: StartDeviceOptions):
         files.push({ direction: "in", ref, path: rel, size, sha256: sha });
     }
     const maxActions = Math.min(500, Math.max(1, o.maxActions ?? SESSION_DEFAULTS.maxActions));
+    // A person's own computer: the plugged-in phone only when its owner turned "Use my connected phone" on, and what the session installed there is removed after.
+    const token = svc.store.getToken(o.agent.tokenId);
+    const personal = token?.kind === "personal";
     const maxMinutes = Math.min(120, Math.max(1, o.maxMinutes ?? SESSION_DEFAULTS.maxMinutes));
     let offer: TaskOffer;
     try {
@@ -539,12 +588,16 @@ export async function startDeviceTask(svc: AgentService, o: StartDeviceOptions):
                 ...(o.credentials && (o.credentials.username || o.credentials.password) ? { credentials: { ...(o.credentials.username ? { username: o.credentials.username } : {}), ...(o.credentials.password ? { password: o.credentials.password } : {}) } } : {}),
                 maxActions,
                 totalMinutes: maxMinutes,
+                ...(o.emulatorOnly ? { emulatorOnly: true } : {}),
+                ...(personal && token?.allowRealPhone !== true ? { realPhone: false } : {}),
+                ...(personal ? { removeInstalledApp: true } : {}),
             },
         });
     } catch {
         throw new DeviceSessionError("These phone settings cannot be sent to a runner agent. Check the app id and the emulator name.");
     }
-    svc.store.enqueue({ id: taskId, projectId: o.projectId, jobId: offer.jobId, adapterId: offer.adapterId, payloadEnc: svc.encrypt(offer), files });
+    svc.store.enqueue({ id: taskId, projectId: o.projectId, jobId: offer.jobId, adapterId: offer.adapterId, payloadEnc: svc.encrypt(offer), files, ...(o.startedBy !== undefined ? { ownerId: o.startedBy } : {}) });
+    const startedBy = o.startedBy !== undefined ? o.startedBy : o.jobId ? svc.store.ownerOfJob(o.jobId) : null;
     const password = o.credentials?.password ?? "";
     const driver = new RemoteDeviceDriver(
         {
@@ -552,8 +605,9 @@ export async function startDeviceTask(svc: AgentService, o: StartDeviceOptions):
             task: (tid) => svc.store.getTask(tid),
             cancel: (tid) => svc.store.requestCancel(tid),
             secrets: () => [...svc.projectSecrets(o.projectId), ...(password.length >= 4 ? [password] : [])],
+            accessProblem: () => svc.sessionAccessProblem({ projectId: o.projectId, startedBy, tokenId: o.agent.tokenId, personal }),
         },
-        { id, projectId: o.projectId, taskId, agent: { id: o.agent.id, name: o.agent.name }, maxActions, maxMinutes, timeouts: { ...(deviceOptions.remote ?? {}), ...(o.timeouts ?? {}) } },
+        { id, projectId: o.projectId, taskId, agent: { id: o.agent.id, name: o.agent.name }, maxActions, maxMinutes, timeouts: { ...(deviceOptions.remote ?? {}), ...(o.timeouts ?? {}) }, startedBy, personal },
     );
     svc.devices.add(driver);
     return driver;
@@ -570,6 +624,10 @@ export interface DeviceHost {
     agentId?: string;
     /** The exploration's job id, so a finished or cancelled job takes its phone session on an agent with it. */
     jobId?: string;
+    /** Who the session is for (the job's starter): their own computer may host it, another person's never. */
+    startedBy?: string | null;
+    /** The runner chosen for this run (an agent_tokens id), if any. */
+    runnerId?: string | null;
     timeouts?: RemoteDeviceTimeouts;
 }
 
@@ -590,8 +648,10 @@ export async function openDeviceSession(opts: OpenDeviceOptions, host: DeviceHos
             choice = chooseDeviceHost({
                 ...(host.on ? { on: host.on } : {}),
                 ...(host.agentId ? { agentId: host.agentId } : {}),
+                ...(host.runnerId ? { runnerId: host.runnerId } : {}),
                 runner: host.agents.store.getRunner(host.projectId),
-                agents: host.agents.store.listAgents(host.projectId),
+                agents: sessionHosts(host.agents.store, host.projectId, host.startedBy ?? null, host.agents.clock()),
+                caller: host.startedBy ?? null,
                 ...(localDeviceProblem(env) ? { localProblem: localDeviceProblem(env)! } : {}),
             });
         }
@@ -610,6 +670,8 @@ export async function openDeviceSession(opts: OpenDeviceOptions, host: DeviceHos
         ...(opts.serial ? { serial: opts.serial } : {}),
         ...(opts.credentials ? { credentials: opts.credentials } : {}),
         ...(host.jobId ? { jobId: host.jobId } : {}),
+        ...(host.startedBy !== undefined ? { startedBy: host.startedBy } : {}),
+        ...(opts.emulatorOnly ? { emulatorOnly: true } : {}),
         ...(opts.maxActions ? { maxActions: opts.maxActions } : {}),
         ...(opts.maxMinutes ? { maxMinutes: opts.maxMinutes } : {}),
         ...(host.timeouts ? { timeouts: host.timeouts } : {}),

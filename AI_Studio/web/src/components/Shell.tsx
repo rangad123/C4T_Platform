@@ -69,10 +69,11 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
                     {item(routes.agents, "Agents", Bot, "agents", "nav-agents")}
                     {(can("ai_studio.tests.write") || can("ai_studio.tests.generate")) && item(routes.develop, "Test development", Sparkles, "develop", "nav-develop")}
                     {item(routes.libraries, "Reusable libraries", Library, "libraries", "nav-libraries")}
-                    {(can("ai_studio.runners.manage") || can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && (
+                    {(can("ai_studio.runners.manage") || can("ai_studio.tests.run") || can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && (
                         <>
                             <div className="nav-label">Operations</div>
-                            {can("ai_studio.runners.manage") && item(routes.allRunners, "Runners", Server, "runners", "nav-runners")}
+                            {/* Runners: also for anyone who may run tests, who may add their own computer (round 39). */}
+                            {(can("ai_studio.runners.manage") || can("ai_studio.tests.run")) && item(routes.allRunners, "Runners", Server, "runners", "nav-runners")}
                             {/* Integrations: set up with "manage keys and connections", chosen per project with project settings. */}
                             {(can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && item(routes.integrations, "Integrations", Plug, "integrations", "nav-integrations")}
                         </>

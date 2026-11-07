@@ -436,7 +436,7 @@ describe.skipIf(!BASH)("runner-setup.sh --check: says what would be downloaded a
         const { setup } = makeKit({ withFiles: false });
         const r = runScript(setup, ["--check", "--install-dir", msys(w.install)], w.home, { stubDir: w.stubDir });
         expect(r.status).toBe(1);
-        expect(r.out).toContain("I could not find the runner files (runner.mjs, runner.json and runner.token) next to this app. Unzip the whole runner kit you downloaded from the platform and open the app from inside the unzipped folder.");
+        expect(r.out).toContain("I could not find the runner files (runner.mjs, runner.json and runner.enroll) next to this app. Unzip the whole runner kit you downloaded from the platform and open the app from inside the unzipped folder.");
     });
 
     it("rejects an option it does not know and an option that needs a value, in plain words", () => {
@@ -474,7 +474,7 @@ describe.skipIf(!BASH)("which Mac it is: Apple silicon, Intel, Rosetta, and the 
     it("refuses Linux with a plain message that points at start-runner.sh, and writes nothing", () => {
         const w = world();
         const { setup } = makeKit();
-        const r = runScript(setup, ["--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env: { AITP_INSTALLER_UNAME_S: "Linux", AITP_INSTALLER_UNAME_M: "x86_64" } });
+        const r = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env: { AITP_INSTALLER_UNAME_S: "Linux", AITP_INSTALLER_UNAME_M: "x86_64" } });
         expect(r.status).toBe(1);
         expect(r.out).toContain('This installer is for macOS, and this computer reports "Linux". On Linux, use start-runner.sh from the runner kit.');
         expect(fs.existsSync(w.install)).toBe(false);
@@ -998,7 +998,7 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
     it("without --no-start the runner runs under the chosen Node.js, its output is shown, and the run ends when the runner exits 0", () => {
         const w = world();
         const { setup } = makeKit();
-        const r = runScript(setup, ["--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env: withNode() });
+        const r = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env: withNode() });
         expect(r.status, r.out).toBe(0);
         expect(r.out).toContain('Starting the runner. Look for the line "Connected to the platform" below');
         expect(r.out).toMatch(/RUNNER-RAN v\d+\.\d+\.\d+ in .*Runner \(1\).runner/);
@@ -1010,13 +1010,13 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
     it("explains each reason the runner gives up (settings, revoked token, versions, refused) and exits with its code", () => {
         for (const [code, text] of [
             [2, "The runner could not read its settings."],
-            [3, "The platform no longer accepts this runner's token."],
+            [3, "The platform no longer accepts this runner."],
             [4, "This runner and the platform are different versions."],
             [5, "The platform refused this runner."],
         ] as const) {
             const w = world();
             const { setup } = makeKit({ runner: `console.log("bye"); process.exit(${code});\n` });
-            const r = runScript(setup, ["--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env: withNode() });
+            const r = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env: withNode() });
             expect(r.status, r.out).toBe(code);
             expect(r.out).toContain(text);
         }
@@ -1026,13 +1026,13 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
         const w = world();
         const { setup } = makeKit({ runner: 'console.log(\'Connected to the platform as "stub"\'); setInterval(() => {}, 1000);\n' });
         const env = withNode();
-        const first = spawn(BASH!, [msys(setup), "--install-dir", msys(w.install), "--silent"], { env: mkEnv(w.home, { stubDir: w.stubDir, env }, w.log), stdio: ["ignore", "pipe", "pipe"] });
+        const first = spawn(BASH!, [msys(setup), "--install-dir", msys(w.install), "--silent", "--no-autostart"], { env: mkEnv(w.home, { stubDir: w.stubDir, env }, w.log), stdio: ["ignore", "pipe", "pipe"] });
         let firstOut = "";
         first.stdout.on("data", (d) => (firstOut += d));
         try {
             await waitFor(() => firstOut.includes('Connected to the platform as "stub"'), 40_000, () => firstOut);
             expect(fs.existsSync(path.join(w.install, "runner.pid"))).toBe(true);
-            const second = runScript(setup, ["--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env });
+            const second = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env });
             expect(second.status, second.out).toBe(0);
             expect(second.out).toMatch(/The AI Testing runner is already running on this Mac \(process \d+\)\./);
             expect(second.out).toContain('It belongs to http://127.0.0.1:6619 and is named "Maya\'s "laptop" & co".');
@@ -1040,9 +1040,11 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
             // The first one is still going.
             expect(first.exitCode).toBeNull();
             // --uninstall stops it (it recorded that process) and removes the folder.
-            const un = runScript(setup, ["--uninstall", "--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env });
+            // (This stand-in runner ignores --forget-credential and keeps running: the uninstall gives it 2 seconds, then goes on.)
+            const un = runScript(setup, ["--uninstall", "--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env: { ...env, AITP_INSTALLER_FORGET_SECONDS: "2" } });
             expect(un.status, un.out).toBe(0);
             expect(un.out).toMatch(/Stopping the runner this app started \(process \d+\)\./);
+            expect(un.out).toContain("The runner could not remove its saved access");
             await waitFor(() => first.exitCode !== null, 30_000, () => firstOut);
             expect(fs.existsSync(w.install)).toBe(false);
         } finally {
@@ -1064,7 +1066,7 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
             expect(alive(other)).toBe(true);
             fs.writeFileSync(path.join(w.install, "runner.pid"), `${other}\n`);
             // Running again does not treat it as the runner: it sets up and starts normally (the stub runner exits 0 at once).
-            const run = runScript(setup, ["--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env });
+            const run = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env });
             expect(run.status, run.out).toBe(0);
             expect(run.out).not.toContain("already running");
             expect(alive(other), "the other program was killed").toBe(true);
@@ -1117,7 +1119,7 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
         const { setup, kit } = makeKit();
         expect(w.install).toMatch(/ \[work\] & /);
         expect(kit).toMatch(/runner \(1\)/);
-        const r = runScript(setup, ["--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir, env: withNode() });
+        const r = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env: withNode() });
         expect(r.status, r.out).toBe(0);
         expect(fs.existsSync(path.join(w.install, "runner", "runner.mjs"))).toBe(true);
         expect(r.out).toContain("RUNNER-RAN");
@@ -1146,7 +1148,7 @@ describe.skipIf(!BASH)("the LaunchAgent: a well-formed property list, launchctl 
         stub(w.stubDir, "launchctl");
         const r = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--autostart"], w.home, { stubDir: w.stubDir, env: quick(nodeDir) });
         expect(r.status, r.out).toBe(0);
-        expect(r.out).toContain("The runner now starts when you sign in, and was started in the background.");
+        expect(r.out).toContain("The runner now runs in the background while you are signed in, and starts again when you sign in.");
         expect(r.out).not.toContain("RUNNER-RAN");
         const plistPath = path.join(w.home, "Library", "LaunchAgents", "app.aitesting.runner.plist");
         const plist = read(plistPath);
@@ -1157,7 +1159,8 @@ describe.skipIf(!BASH)("the LaunchAgent: a well-formed property list, launchctl 
         expect(values[0]).toBe("app.aitesting.runner");
         expect(values.slice(1, 6)).toEqual(["/bin/sh", `${msys(w.install)}/runner-setup.sh`, "--run-loop", "--install-dir", msys(w.install)]);
         expect(plist).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
-        expect(plist).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
+        // Started again only after a failure: a stop for good (access removed) stays stopped until the next sign-in.
+        expect(plist).toMatch(/<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/);
         expect(values).toContain(`${msys(w.install)}/logs/launchd.log`);
         // launchctl was asked, in this order: take any old copy out, then bootstrap into gui/<uid>.
         const calls = stubLog(w).split("\n").filter((l) => l.startsWith("launchctl "));
@@ -1271,7 +1274,7 @@ exit 0
         expect(first.status, first.out).toBe(0);
         expect(first.out).toContain("RUNNER-RAN"); // 'Not now' runs it in this window
         const log = stubLog(w);
-        expect(log).toContain("Start the runner automatically when you sign in?");
+        expect(log).toContain("Run the runner in the background, and start it again whenever you sign in?");
         expect(log).toContain("arg: Not now");
         expect(fs.existsSync(path.join(w.home, "Library", "LaunchAgents", "app.aitesting.runner.plist"))).toBe(false);
         expect(read(path.join(w.install, "autostart-asked")).trim()).toBe("no");
@@ -1280,7 +1283,7 @@ exit 0
         osascript(w, ["Set up", "Yes"]);
         const second = runScript(setup, ["--install-dir", msys(w.install)], w.home, { stubDir: w.stubDir, env: withDialogs(nodeDir) });
         expect(second.status, second.out).toBe(0);
-        expect(stubLog(w)).not.toContain("Start the runner automatically");
+        expect(stubLog(w)).not.toContain("Run the runner in the background");
         // The test tools are still missing here (npm is switched off), so the first question comes back; the sign-in one does not.
         expect(stubLog(w)).toContain("It only downloads what is missing: the test tools.");
     });
@@ -1304,7 +1307,7 @@ exit 0
         osascript(w, ["CANCEL", "OK"]);
         const r = runScript(setup, ["--install-dir", msys(w.install)], w.home, { stubDir: w.stubDir, env: withDialogs(fresh("none")) });
         expect(r.status).toBe(1);
-        expect(stubLog(w)).toContain("I could not find the runner files (runner.mjs, runner.json and runner.token) next to this app.");
+        expect(stubLog(w)).toContain("I could not find the runner files (runner.mjs, runner.json and runner.enroll) next to this app.");
         expect(stubLog(w)).toContain("choose folder with prompt");
     });
 
@@ -1402,5 +1405,158 @@ describe("the dmg", () => {
         const text = read(path.join(REPO, "scripts", "make-dmg.sh"));
         expect(text).toContain('hdiutil create -volname "AI Testing Runner" -srcfolder');
         expect(text).toContain("-ov -format UDZO");
+    });
+});
+
+
+// ── Round 39: one-time codes, background by default, lock file, logs, stop for good, the credential on uninstall, the .pkg ──────────
+
+describe.skipIf(!BASH)("round 39: the one-time code, background by default, npm ci, log rotation, stop for good, forgetting the credential", () => {
+    const quick = (nodeDir: string) => ({ AITP_INSTALLER_NODE_SEARCH_ONLY: msys(nodeDir), AITP_INSTALLER_SKIP_NPM: "1", AITP_INSTALLER_SKIP_BROWSER: "1", AITP_INSTALLER_WAIT_SECONDS: "1" });
+    /** A runner stub that records how it was started ("[arguments]" per start) and exits at once. */
+    const ENROLL_RUNNER = 'import fs from "node:fs";\nfs.appendFileSync("started.txt", "[" + process.argv.slice(2).join(" ") + "]\\n");\nconsole.log(\'Connected to the platform as "stub"\');\nprocess.exit(0);\n';
+    /** A download from round 39 on: runner.enroll instead of runner.token, and a lock file. */
+    function enrollKit(runner = ENROLL_RUNNER) {
+        const k = makeKit({ runner });
+        fs.rmSync(path.join(k.kit, "runner.token"));
+        fs.writeFileSync(path.join(k.kit, "runner.enroll"), "aite_ONE-TIME-code-sentinel-7d2\n", { mode: 0o600 });
+        fs.writeFileSync(path.join(k.kit, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}\n');
+        return k;
+    }
+    const nodeBin = () => {
+        const d = fresh("bin");
+        shim(path.join(d, "node"), "v26.0.0");
+        return d;
+    };
+
+    it("copies the one-time code once (0600), never the same code twice, lets it replace an older token, and keeps the code out of every log", () => {
+        const w = world();
+        const { setup, kit } = enrollKit();
+        const nodeDir = nodeBin();
+        const runner = path.join(w.install, "runner");
+        fs.mkdirSync(runner, { recursive: true });
+        fs.writeFileSync(path.join(runner, "runner.token"), "old-token\n");
+        fs.writeFileSync(path.join(w.install, ".created-by-ai-testing-runner"), "");
+        const first = runScript(setup, SETUP_FLAGS(w), w.home, { stubDir: w.stubDir, env: quick(nodeDir) });
+        expect(first.status, first.out).toBe(0);
+        expect(read(path.join(runner, "runner.enroll"))).toBe(read(path.join(kit, "runner.enroll")));
+        if (process.platform !== "win32") expect(fs.statSync(path.join(runner, "runner.enroll")).mode & 0o777).toBe(0o600);
+        expect(fs.existsSync(path.join(runner, "runner.token"))).toBe(false);
+        expect(read(path.join(runner, "package-lock.json"))).toBe(read(path.join(kit, "package-lock.json")));
+        expect(first.out).toContain("[2/5] Runner files ... done (8 of 8 files copied to ");
+        // The runner traded the code and deleted it; opening the app again from the same folder does not bring the used code back.
+        fs.rmSync(path.join(runner, "runner.enroll"));
+        const second = runScript(setup, SETUP_FLAGS(w), w.home, { stubDir: w.stubDir, env: quick(nodeDir) });
+        expect(second.out).toContain("[2/5] Runner files ... found, up to date, skipped");
+        expect(fs.existsSync(path.join(runner, "runner.enroll"))).toBe(false);
+        // Only the sha256 of the code is kept, never the code.
+        expect(read(path.join(w.install, "enroll-copied"))).toMatch(/^[0-9a-f]{64}\n$/);
+        // A new download (a new code) is copied.
+        fs.writeFileSync(path.join(kit, "runner.enroll"), "aite_SECOND-code-sentinel-1b9\n");
+        const third = runScript(setup, SETUP_FLAGS(w), w.home, { stubDir: w.stubDir, env: quick(nodeDir) });
+        expect(third.out).toContain("[2/5] Runner files ... done (1 of 8 files copied to ");
+        const all = first.out + second.out + third.out + read(path.join(w.install, "logs", "setup.log")) + stubLog(w);
+        expect(all).not.toMatch(/ONE-TIME-code-sentinel|SECOND-code-sentinel/);
+    });
+
+    it("starts the runner with --enroll-file while the code is there, then with no credential argument (the Keychain); an older install with --token-file", () => {
+        const w = world();
+        const { setup } = enrollKit();
+        const nodeDir = nodeBin();
+        const r = runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env: quick(nodeDir) });
+        expect(r.status, r.out).toBe(0);
+        const runner = path.join(w.install, "runner");
+        const starts = () => read(path.join(runner, "started.txt")).trim().split("\n");
+        expect(starts()).toEqual(["[--enroll-file runner.enroll]"]);
+        fs.rmSync(path.join(runner, "runner.enroll"));
+        runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env: quick(nodeDir) });
+        expect(starts().pop()).toBe("[]");
+        fs.writeFileSync(path.join(runner, "runner.token"), "t\n");
+        runScript(setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env: quick(nodeDir) });
+        expect(starts().pop()).toBe("[--token-file runner.token]");
+    });
+
+    it("runs in the background by default: --silent and --yes set up the LaunchAgent; the dialog preselects Yes; an earlier LaunchAgent is written again", () => {
+        for (const flag of ["--silent", "--yes"]) {
+            const w = world();
+            const { setup } = makeKit();
+            stub(w.stubDir, "launchctl");
+            const r = runScript(setup, ["--install-dir", msys(w.install), flag], w.home, { stubDir: w.stubDir, env: quick(nodeBin()) });
+            expect(r.status, r.out).toBe(0);
+            expect(fs.existsSync(path.join(w.home, "Library", "LaunchAgents", "app.aitesting.runner.plist")), flag).toBe(true);
+            expect(r.out).not.toContain("RUNNER-RAN");
+        }
+        const text = read(path.join(REPO, "installer/mac/app/Contents/Resources/runner-setup.sh"));
+        expect(text).toMatch(/confirm "Run the runner in the background[^"]*" "Not now" "Yes" yes/);
+        expect(text).not.toMatch(/LaunchDaemons|sudo /);
+    });
+
+    it("installs the test tools with npm ci --ignore-scripts when the download has a lock file", () => {
+        const w = world();
+        const { setup } = enrollKit();
+        const nodeDir = nodeBin();
+        stub(nodeDir, "npm", 'mkdir -p node_modules/fake-a && printf \'{"version":"1.0.0"}\' > node_modules/fake-a/package.json');
+        const r = runScript(setup, SETUP_FLAGS(w), w.home, { stubDir: w.stubDir, env: { AITP_INSTALLER_NODE_SEARCH_ONLY: msys(nodeDir), AITP_INSTALLER_SKIP_BROWSER: "1" } });
+        expect(r.status, r.out).toBe(0);
+        expect(stubLog(w)).toMatch(/^npm ci --ignore-scripts --no-audit --no-fund$/m);
+        expect(stubLog(w)).not.toMatch(/^npm install/m);
+    });
+
+    it("rotates runner.log and launchd.log while running (size-capped, three kept), and stops for good after exit code 3 under launchd", async () => {
+        const w = world();
+        // A runner that writes a lot, then says its access was removed.
+        const { setup } = makeKit({ runner: 'for (let i = 0; i < 400; i++) console.log("x".repeat(100));\nsetTimeout(() => process.exit(3), 3500);\n' });
+        const nodeDir = nodeBin();
+        expect(runScript(setup, SETUP_FLAGS(w), w.home, { stubDir: w.stubDir, env: quick(nodeDir) }).status).toBe(0);
+        const logs = path.join(w.install, "logs");
+        fs.mkdirSync(logs, { recursive: true });
+        fs.writeFileSync(path.join(logs, "launchd.log"), "y".repeat(30_000));
+        const started = Date.now();
+        const loop = spawn(BASH!, [msys(path.join(w.install, "runner-setup.sh")), "--run-loop", "--install-dir", msys(w.install)], { env: mkEnv(w.home, { stubDir: w.stubDir, env: { AITP_INSTALLER_NODE_SEARCH_ONLY: "", AITP_INSTALLER_LOG_MAX_BYTES: "20000", AITP_INSTALLER_LOG_CHECK_SECONDS: "1" } }, w.log), stdio: ["ignore", "pipe", "pipe"] });
+        try {
+            // Exit code 3 under launchd: the loop ends by itself, without an error (no hourly retry), so launchd leaves it stopped.
+            await waitFor(() => loop.exitCode !== null, 40_000, () => "the loop did not stop after code 3");
+            expect(loop.exitCode).toBe(0);
+            expect(Date.now() - started).toBeLessThan(40_000);
+            expect(read(path.join(logs, "runner.log")) + (fs.existsSync(path.join(logs, "runner.log.1")) ? read(path.join(logs, "runner.log.1")) : "")).toMatch(/stopped for good/);
+            expect(fs.existsSync(path.join(logs, "runner.log.1"))).toBe(true);
+            expect(fs.existsSync(path.join(logs, "launchd.log.1"))).toBe(true);
+            expect(fs.statSync(path.join(logs, "launchd.log")).size).toBeLessThan(20_000);
+            expect(fs.existsSync(path.join(logs, "runner.log.4"))).toBe(false);
+        } finally {
+            if (loop.exitCode === null) loop.kill();
+        }
+    }, 120_000);
+
+    it("--uninstall asks the runner to forget its saved credential, and removes a code or token left behind even when the folder is kept", () => {
+        const w = world();
+        const { setup } = enrollKit();
+        const nodeDir = nodeBin();
+        expect(runScript(setup, SETUP_FLAGS(w), w.home, { stubDir: w.stubDir, env: quick(nodeDir) }).status).toBe(0);
+        const runner = path.join(w.install, "runner");
+        const un = runScript(setup, ["--uninstall", "--install-dir", msys(w.install), "--silent"], w.home, { stubDir: w.stubDir });
+        expect(un.status, un.out).toBe(0);
+        expect(un.out).toContain("Removed the runner's saved access from this Mac.");
+        expect(fs.existsSync(w.install)).toBe(false);
+        void runner;
+    });
+});
+
+describe("the .pkg", () => {
+    it("is built only on macOS, says so plainly elsewhere, installs the app only (no install scripts) for one person or the whole Mac", () => {
+        const script = path.join(REPO, "scripts", "build-runner-pkg.sh");
+        if (process.platform !== "darwin" && BASH) {
+            const r = spawnSync(BASH, [msys(script)], { encoding: "utf8" });
+            expect(r.status).toBe(1);
+            expect(r.stderr).toContain("build-runner-pkg.sh needs macOS (pkgbuild and productbuild). It was not run.");
+        }
+        const text = read(script);
+        expect(text).toContain("pkgbuild --root");
+        expect(text).toContain("productbuild --distribution");
+        expect(text).toContain('enable_currentUserHome="true" enable_localSystem="true"');
+        expect(text).toContain("BundleIsRelocatable false");
+        expect(text).not.toMatch(/--scripts|preinstall|postinstall|LaunchDaemons|sudo /);
+        expect(text).not.toMatch(/runner\.(token|enroll)"?\s*(>|cp)/);
+        if (DASH) expect(spawnSync(DASH, ["-n", script]).status).toBe(0);
     });
 });

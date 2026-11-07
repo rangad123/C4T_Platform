@@ -5,7 +5,7 @@
  * .scratch/briefs/KIT-ui.md, served by a front server that forwards everything else to the platform. That lets every state be
  * driven (unavailable, URL warning, 409, 503, 400, waiting, connected, still waiting) without the bundle side being built.
  * The last journey switches the stand-in off and talks to the platform's own routes when KIT-A's routes exist.
- * Ports: 6550 front (the address the browser uses), 6551 platform.
+ * Ports: 8104 front (the address the browser uses), 8105 platform.
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
@@ -29,8 +29,8 @@ import { buildServer } from "../src/platform/server.js";
 import { defaultKind, downloadErrorText, effectiveKind, findNewRunner, guessPlatform, guessTarget, installerAvailable, KitError, sizeWords, startInstructions, targetFromHints, waitLimitMs } from "../web/src/features/agents/kit.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
-const FRONT_PORT = 6550;
-const PLATFORM_PORT = 6551;
+const FRONT_PORT = 8104;
+const PLATFORM_PORT = 8105;
 const BASE = `http://127.0.0.1:${FRONT_PORT}`;
 const SECRET = "aitg_KITSECRET0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -344,8 +344,9 @@ describe("Add a runner panel", () => {
     it("starts with an inviting empty state and opens the first step with the computer preselected", async () => {
         resetFake();
         await open();
-        await pwExpect(page.getByText("No runners yet", { exact: true })).toBeVisible();
-        await pwExpect(page.getByText("Most people do not need one.")).toBeVisible();
+        // The project's section (the machine list below it has its own empty state).
+        await pwExpect(page.getByTestId("project-runners").getByText("No runners yet", { exact: true })).toBeVisible();
+        await pwExpect(page.getByText("Nothing runs until one of them is online.", { exact: false })).toBeVisible();
         await pwExpect(page.getByText("Add one to run tests on a computer where your app can be reached.")).toBeVisible();
         await shot("empty-light-1280");
         await page.getByRole("button", { name: "Add a runner", exact: true }).click();
@@ -462,7 +463,7 @@ describe("Add a runner panel", () => {
 
         const done = page.getByTestId("kit-downloaded");
         await pwExpect(done).toContainText("runner-maya-s-laptop-windows.zip");
-        await pwExpect(done).toContainText("Access created: Maya’s laptop (remove it any time under Access for runners).");
+        await pwExpect(done).toContainText("It holds a one-time code for Maya’s laptop: it works once, within 30 minutes. The runner shows under Access for runners once it connects.");
         await pwExpect(done).toContainText("Unzip it on the computer where your app can be reached. Unzip means right-click, then Extract all.");
         await shot("step2-done-light-1280");
         // the secret is in the file only: not on screen, not in storage, not in the address
@@ -515,7 +516,7 @@ describe("Add a runner panel", () => {
             const alert = panel().getByRole("alert");
             await pwExpect(alert).toContainText(c.title);
             await pwExpect(alert).toContainText(c.text);
-            await pwExpect(panel().getByText("Access created:")).toHaveCount(0);
+            await pwExpect(panel().getByText("It holds a one-time code for")).toHaveCount(0);
             if (c.mode === 409) {
                 await pwExpect(alert).toContainText("Remove access you no longer use under Access for runners");
                 await pwExpect(alert.getByRole("button", { name: "Go to Access for runners", exact: true })).toBeVisible();
@@ -1152,7 +1153,8 @@ describe("Add a runner against the real platform", () => {
     }
     function stubBundle(): string {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-kit-stub-"));
-        const files = { "runner.mjs": "// stand-in", "task-child.mjs": "// stand-in", "record-child.mjs": "// stand-in", "package.json": '{"name":"runner-stub","type":"module"}' };
+        // Every file runner-kit.ts requires (REQUIRED_FILES), or the platform calls the bundle damaged and offers no download.
+        const files = { "runner.mjs": "// stand-in", "task-child.mjs": "// stand-in", "record-child.mjs": "// stand-in", "package.json": '{"name":"runner-stub","type":"module"}', "LICENSES.txt": "stand-in" };
         const sha = (t: string) => createHash("sha256").update(t).digest("hex");
         for (const [n, t] of Object.entries(files)) fs.writeFileSync(path.join(dir, n), t);
         fs.writeFileSync(
@@ -1173,7 +1175,7 @@ describe("Add a runner against the real platform", () => {
         if (installerDir) fs.rmSync(installerDir, { recursive: true, force: true });
     });
 
-    it("downloads a real zip, lists the new access, notices the runner when it says hello, and removes the access", async () => {
+    it("downloads a real zip with a one-time code, notices the runner when it trades the code and says hello, lists its access, and removes it", async () => {
         fake.enabled = false; // the front now only forwards
         try {
             installerDir = installerDir || stubInstaller();
@@ -1193,37 +1195,65 @@ describe("Add a runner against the real platform", () => {
             await pwExpect(panel().getByRole("radio", { name: /Installer/ })).toBeChecked();
             await panel().getByRole("radio", { name: /Plain files/ }).check();
             await panel().getByRole("button", { name: "Continue", exact: true }).click();
+            const kitAnswer = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/projects/${projectId}/runner-kits`);
             const [dl] = await Promise.all([page.waitForEvent("download"), panel().getByRole("button", { name: "Download runner", exact: true }).click()]);
+            // The answer names the code's record, never the code: the page follows it to see when the runner has connected.
+            const enrollmentId = (await kitAnswer).headers()["x-runner-enrollment-id"] ?? "";
+            expect(enrollmentId).not.toBe("");
             const bytes = fs.readFileSync((await dl.path())!);
             expect(bytes.subarray(0, 2).toString()).toBe("PK");
             expect(dl.suggestedFilename()).toMatch(/.zip$/);
             const files = unzipSync(new Uint8Array(bytes));
             const names = Object.keys(files);
             expect(names.some((n) => n.endsWith("/start-runner.cmd"))).toBe(true);
-            const secret = new TextDecoder().decode(files[names.find((n) => n.endsWith("/runner.token"))!]).trim();
-            expect(secret).toMatch(/^aitg_/);
+            // No download carries a runner credential (round 39): a single-use enrollment code instead, which the runner trades once.
+            expect(names.some((n) => n.endsWith("/runner.token"))).toBe(false);
+            expect(names.filter((n) => /aitg_[A-Za-z0-9_-]{20,}/.test(new TextDecoder().decode(files[n])))).toEqual([]);
+            const code = new TextDecoder().decode(files[names.find((n) => n.endsWith("/runner.enroll"))!]).trim();
+            expect(code).toMatch(/^aite_/);
 
-            await pwExpect(page.getByTestId("kit-downloaded")).toContainText("Access created: Real kit computer");
-            // the platform lists the access under the runner's name; the page shows it and never the secret
-            const access = page.locator("[data-access]");
-            await pwExpect(access).toHaveCount(1);
-            await pwExpect(access).toContainText("Real kit computer");
-            expect(await page.content()).not.toContain(secret);
-            const listed = (await (await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/projects/${projectId}/agent-tokens`)).json()) as Array<{ label: string | null }>;
-            expect(listed.map((t) => t.label)).toContain("Real kit computer");
+            await pwExpect(page.getByTestId("kit-downloaded")).toContainText("Real kit computer");
+            expect(await page.content()).not.toContain(code);
+            const enrollment = async () => (await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/runners/enrollments/${enrollmentId}`)).json() as Promise<{ status: string; runnerId: string | null }>;
+            expect(await enrollment()).toMatchObject({ status: "waiting", runnerId: null });
+            // Nothing can connect with the download until its code is traded, so no access exists for it yet.
+            const before = (await (await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/projects/${projectId}/agent-tokens`)).json()) as Array<{ label: string | null }>;
+            expect(before.map((t) => t.label)).not.toContain("Real kit computer");
 
-            // the runner starts: what the program in the kit does first. The page is on step 3 and sees it come online.
+            // the runner starts: what the program in the kit does first (trade the code, then hello with the credential it got back).
+            // The page is on step 3 and sees it come online.
             await panel().getByRole("button", { name: "Continue", exact: true }).click();
             await pwExpect(status()).toHaveAttribute("data-state", "waiting");
+            const traded = await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/agent/enroll`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ code, name: "DESKTOP-REAL", machineId: "machine-real-kit-0001", version: "1.0.0", capabilities: { os: "win32", arch: "x64", node: "v24.0.0", browsers: ["chromium"], kitVersion: "1.2.3" } }),
+            });
+            expect(traded.status, await traded.clone().text()).toBe(201);
+            const secret = ((await traded.json()) as { token: string }).token;
+            expect(secret).toMatch(/^aitg_/);
+            // A code works once.
+            const again1 = await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/agent/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name: "DESKTOP-OTHER", machineId: "machine-real-kit-0002" }) });
+            expect(again1.status).toBeGreaterThanOrEqual(400);
+            // A credential from an enrollment code is bound to the computer that traded it: the runner names it (its install id) in every hello.
             const hello = await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/agent/hello`, {
                 method: "POST",
                 headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
-                body: JSON.stringify({ protocol: 1, name: "DESKTOP-REAL", version: "1.0.0", concurrency: 1, capabilities: { os: "win32", arch: "x64", node: "v24.0.0", browsers: ["chromium"], kitVersion: "1.2.3" } }),
+                body: JSON.stringify({ protocol: 1, name: "DESKTOP-REAL", machineId: "machine-real-kit-0001", version: "1.0.0", concurrency: 1, capabilities: { os: "win32", arch: "x64", node: "v24.0.0", browsers: ["chromium"], kitVersion: "1.2.3" } }),
             });
             expect(hello.status).toBe(200);
             await pwExpect(status()).toHaveAttribute("data-state", "connected", { timeout: 15_000 });
             await pwExpect(status()).toContainText("Connected: DESKTOP-REAL is online");
+            expect(await enrollment()).toMatchObject({ status: "used" });
+            expect((await enrollment()).runnerId).toBeTruthy();
             await panel().getByRole("button", { name: "Done", exact: true }).click();
+            // the platform lists the access under the runner's name now; the page shows it and never the secret
+            const access = page.locator("[data-access]");
+            await pwExpect(access).toHaveCount(1, { timeout: 15_000 });
+            await pwExpect(access).toContainText("Real kit computer");
+            expect(await page.content()).not.toContain(secret);
+            const listed = (await (await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/projects/${projectId}/agent-tokens`)).json()) as Array<{ label: string | null }>;
+            expect(listed.map((t) => t.label)).toContain("Real kit computer");
             const card = page.locator("[data-agent]");
             await pwExpect(card).toContainText("DESKTOP-REAL", { timeout: 15_000 });
             await pwExpect(card).toContainText("Runner download 1.2.3");
@@ -1263,17 +1293,25 @@ describe("Add a runner against the real platform", () => {
             expect(names.some((n) => n.endsWith("/start-runner.cmd"))).toBe(false);
             const readme = new TextDecoder().decode(files[names.find((n) => n.endsWith("/README.txt"))!]);
             expect(readme).toContain("Run anyway");
-            const secret = new TextDecoder().decode(files[names.find((n) => n.endsWith("/runner.token"))!]).trim();
-            expect(secret).toMatch(/^aitg_/);
+            expect(names.some((n) => n.endsWith("/runner.token"))).toBe(false);
+            const code = new TextDecoder().decode(files[names.find((n) => n.endsWith("/runner.enroll"))!]).trim();
+            expect(code).toMatch(/^aite_/);
             await pwExpect(page.getByTestId("kit-downloaded")).toContainText("-windows-setup.zip");
-            expect(await page.content()).not.toContain(secret);
+            expect(await page.content()).not.toContain(code);
             await panel().getByRole("button", { name: "Continue", exact: true }).click();
             await pwExpect(panel().locator("ol.ag-steps li").nth(1)).toContainText("Double-click AITestingRunnerSetup.exe.");
-            // The runner the installer starts says hello with that token, and the page notices it.
+            // The runner the installer starts trades the code for its credential, says hello with it, and the page notices it.
+            const traded = await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/agent/enroll`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ code, name: "DESKTOP-SETUP", machineId: "machine-real-setup-0001", version: "1.0.0" }),
+            });
+            expect(traded.status, await traded.clone().text()).toBe(201);
+            const secret = ((await traded.json()) as { token: string }).token;
             const hello = await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/agent/hello`, {
                 method: "POST",
                 headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
-                body: JSON.stringify({ protocol: 1, name: "DESKTOP-SETUP", version: "1.0.0", concurrency: 1, capabilities: { os: "win32", arch: "x64", node: "v24.0.0", browsers: ["chromium"] } }),
+                body: JSON.stringify({ protocol: 1, name: "DESKTOP-SETUP", machineId: "machine-real-setup-0001", version: "1.0.0", concurrency: 1, capabilities: { os: "win32", arch: "x64", node: "v24.0.0", browsers: ["chromium"] } }),
             });
             expect(hello.status).toBe(200);
             await pwExpect(status()).toHaveAttribute("data-state", "connected", { timeout: 15_000 });

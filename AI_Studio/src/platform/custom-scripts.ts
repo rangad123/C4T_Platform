@@ -22,7 +22,7 @@ import { HttpError } from "./http-error.js";
 import { blocksFor } from "./block-store.js";
 import { LocatorStore } from "./locator-store.js";
 import { storeScript } from "./repo-sink.js";
-import { draftRunNote, trackTestVersion } from "./review-store.js";
+import { draftRunNote, ReviewStore, trackTestVersion } from "./review-store.js";
 import { TERMINAL_STATES, type JobRow, type Repo, type TestRow } from "./repo.js";
 import { slugify } from "./storage.js";
 
@@ -269,6 +269,8 @@ export class CustomScripts {
         if (res.changed && !res.created) {
             const users = this.store.usersOfHelper(projectId, name);
             if (users.length) {
+                // An approved test that imports it waits to be approved again, unless a change by this person would not (review-store.ts).
+                new ReviewStore(this.repo.db).sharedPartChanged(users, `the helper “${name}”`);
                 for (const id of users) this.repo.updateTest(id, { validationStatus: "PENDING", reason: `The helper “${name}” changed. Run this test again.` });
                 revalidating = { tests: users.length, ...(await this.queueValidation(projectId, users)) };
             }

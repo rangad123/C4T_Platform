@@ -23,6 +23,10 @@ import type { MobileTarget } from "../../engine/mobile/target.js";
 import { connectionProblem } from "../../engine/mobile/cloud/providers.js";
 import { farmStoreFor } from "../device-farm-run.js";
 import { HttpError } from "../http-error.js";
+import { isDeviceAdapter } from "../agent-device.js";
+import { callerIdOf, maySeeSession } from "../agent-record.js";
+import { getAgentServices } from "../agent-services.js";
+import { currentActor } from "../auth/actor.js";
 import { answerQuestion, openQuestion } from "../phone-person-gate.js";
 import { latestMobileRow, updateMobileTarget, withSaved } from "../phone-settings-store.js";
 import type { RouteCtx } from "./types.js";
@@ -225,6 +229,10 @@ export function registerPhoneDeviceRoutes(ctx: RouteCtx): void {
         ctx.project(projectId);
         const job = repo.getJob(jobId);
         if (!job || job.projectId !== projectId) throw new HttpError(404, "Job not found");
+        // A phone session on a person's own computer is its starter's alone: nobody else reads or answers its sign-in question.
+        const svc = getAgentServices(p);
+        const caller = callerIdOf(currentActor());
+        for (const t of svc.store.tasksOfJob(jobId)) if (isDeviceAdapter(t.adapterId) && !maySeeSession(svc.devices.get(t.id), caller)) throw new HttpError(404, "Job not found");
         return job;
     };
 

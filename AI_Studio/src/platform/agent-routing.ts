@@ -4,7 +4,8 @@
  * secret scrubbing, rate limiting). Everything here is unit-tested without a server.
  */
 import path from "node:path";
-import { AGENT_TOKEN_PREFIX, SafeName, WireRunEnv, type Capabilities } from "../agent-protocol/schema.js";
+import { AGENT_TOKEN_PREFIX, SafeName, SUPPORTED_PROTOCOLS, WireRunEnv, type Capabilities, type LiveEvent, type TaskPhase } from "../agent-protocol/schema.js";
+import { secretVariants } from "../agent-protocol/secret-variants.js";
 import type { RunEnv } from "../engine/validation/runner.js";
 import type { RunnerNeeds } from "../engine/frameworks/types.js";
 import { iosCapabilityProblem } from "../engine/mobile/ios-capability.js";
@@ -43,15 +44,22 @@ const ROUTES: Array<{ method: string; kind: AgentRoute["kind"]; re: RegExp }> = 
     { method: "POST", kind: "recording", re: new RegExp(`^/api/agent/tasks/(${ID})/recording$`) },
     // Device tasks only: the agent pushes the state of a phone session and the answers to the explorer's commands (AI phone exploration).
     { method: "POST", kind: "device", re: new RegExp(`^/api/agent/tasks/(${ID})/device$`) },
+    // Protocol 2: accept or turn down a task that was handed out, and the run's live events (docs/features/runner-protocol-2.md).
+    { method: "POST", kind: "accept", re: new RegExp(`^/api/agent/tasks/(${ID})/accept$`) },
+    { method: "POST", kind: "reject", re: new RegExp(`^/api/agent/tasks/(${ID})/reject$`) },
+    { method: "POST", kind: "events", re: new RegExp(`^/api/agent/tasks/(${ID})/events$`) },
     // Runner updates: what to update to, and the files of that update (docs/features/runner-updates.md). The empty group keeps the name in m[2].
     { method: "POST", kind: "update", re: /^\/api\/agent\/update$/ },
     { method: "GET", kind: "update-file", re: new RegExp(`^/api/agent/update/files/()(${NAME})$`) },
     // "Check this computer": is this runner's token accepted? Changes nothing (docs/features/runner-check.md).
     { method: "POST", kind: "check", re: /^\/api\/agent\/check$/ },
+    // Round 39: trading a single-use enrollment code for a runner credential (no token yet: the code in the body is checked), and a new credential.
+    { method: "POST", kind: "enroll", re: /^\/api\/agent\/enroll$/ },
+    { method: "POST", kind: "rotate", re: /^\/api\/agent\/rotate$/ },
 ];
 
 export interface AgentRoute {
-    kind: "hello" | "poll" | "heartbeat" | "download" | "upload" | "result" | "recording" | "device" | "update" | "update-file" | "check";
+    kind: "hello" | "poll" | "heartbeat" | "download" | "upload" | "result" | "recording" | "device" | "update" | "update-file" | "check" | "accept" | "reject" | "events" | "enroll" | "rotate";
     taskId?: string;
     name?: string;
 }
@@ -161,9 +169,13 @@ export function anchoredPath(base: string, name: string): string {
 
 // ── secrets ─────────────────────────────────────────────────────────────────
 
-/** Replace every secret of the run, wherever it appears in text, with a marker. Works on any JSON-like value; strings shorter than 4 characters are not secrets. */
+/**
+ * Replace every secret of the run, wherever it appears in text, with a marker. Works on any JSON-like value; strings shorter than 4 characters
+ * are not secrets. Each secret is also masked in the forms text usually carries it in (URL-encoded, with `+` for spaces, lower-case hex,
+ * JSON-escaped; secret-variants.ts), so an error that quotes a sign-in address or a JSON body does not keep it.
+ */
 export function scrubSecrets<T>(value: T, secrets: string[]): T {
-    const list = [...new Set(secrets.filter((s) => s.length >= 4))].sort((a, b) => b.length - a.length);
+    const list = [...new Set(secrets.filter((s) => s.length >= 4).flatMap((s) => secretVariants(s)))].sort((a, b) => b.length - a.length);
     if (list.length === 0) return value;
     const walk = (v: unknown): unknown => {
         if (typeof v === "string") {
@@ -182,6 +194,8 @@ export function scrubSecrets<T>(value: T, secrets: string[]): T {
 export function envSecrets(env: Pick<RunEnv, "credentials" | "roles" | "apiToken" | "apiAuthHeader">): string[] {
     const list: Array<string | undefined> = [env.credentials?.password, env.credentials?.totpSecret, env.apiToken, env.apiAuthHeader];
     for (const r of env.roles ?? []) list.push(r.password, r.totpSecret, r.apiToken);
+    // A Basic sign-in header carries "user:password" in base64: that form is as good as the password.
+    for (const c of [env.credentials, ...(env.roles ?? [])]) if (c?.password && c.password.length >= 4) list.push(...basicAuthForms(c.username, c.password));
     // An auth header "Name: value" is secret as a whole and by its value.
     const h = env.apiAuthHeader;
     if (h && h.includes(":")) list.push(h.slice(h.indexOf(":") + 1).trim());
@@ -227,5 +241,87 @@ export class RateLimiter {
             this.hits.delete(oldest);
         }
         return allowed;
+    }
+}
+
+/** "user:password" as an HTTP Basic sign-in carries it (base64, with and without padding). */
+export function basicAuthForms(username: string, password: string): string[] {
+    const b64 = Buffer.from(`${username}:${password}`, "utf8").toString("base64");
+    return [b64, b64.replace(/=+$/, "")].filter((s) => s.length >= 4);
+}
+
+// ── protocol 2 ──────────────────────────────────────────────────────────────
+
+/**
+ * The protocol to speak with an agent: the highest version in its `protocols` (or its single `protocol`, every protocol-1 agent) that the
+ * platform speaks too. Undefined: none in common (the hello is refused with a plain sentence).
+ */
+export function negotiateProtocol(hello: { protocol: number; protocols?: number[] }): number | undefined {
+    const offered = hello.protocols?.length ? hello.protocols : [hello.protocol];
+    const common = offered.filter((v) => SUPPORTED_PROTOCOLS.includes(v));
+    return common.length ? Math.max(...common) : undefined;
+}
+
+const secs = (ms: number): string => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`);
+const testName = (e: { testId: string; title?: string; variant?: string }): string => `${e.title || e.testId}${e.variant ? ` (${e.variant})` : ""}`;
+const RUN_STATUS_WORD: Record<string, string> = { passed: "passed", failed: "failed", timedOut: "ran out of time", skipped: "was skipped", error: "could not run" };
+
+/** The one line a live event shows in the run's activity log (the structured part travels in the event's data). */
+export function liveEventMessage(e: LiveEvent, runner: string): string {
+    switch (e.type) {
+        case "test_started":
+            return `${runner}: started ${testName(e)}`;
+        case "test_finished":
+            return `${runner}: ${testName(e)} ${RUN_STATUS_WORD[e.status] ?? e.status} (${secs(e.durationMs)})${e.error ? `: ${e.error.replace(/\s+/g, " ").slice(0, 200)}` : ""}`;
+        case "step_started":
+            return `${runner}: step ${e.index + 1} started: ${e.title}`;
+        case "step_finished":
+            return `${runner}: step ${e.index + 1} ${e.status} (${secs(e.durationMs)}): ${e.title}${e.error ? ` — ${e.error.replace(/\s+/g, " ").slice(0, 200)}` : ""}`;
+        case "log":
+            return `${runner}: ${e.line.replace(/\s+/g, " ").trim()}`;
+        case "screenshot":
+            return `${runner}: screenshot of ${testName(e)}${e.step !== undefined ? `, step ${e.step + 1}` : ""}`;
+        case "phase":
+            return `${runner}: ${e.phase === "preparing" ? "getting ready" : e.phase === "uploading" ? "sending the results" : "running the tests"}`;
+    }
+}
+
+/** The structured part of a live event, as the job event's `data` (`runner_step` says whether the step started or finished). */
+export function liveEventData(e: LiveEvent): Record<string, unknown> {
+    // A failure's stack trace stays in the final result only: kept for every event it would be most of the stored bytes.
+    const { type, stack: _stack, ...rest } = e as LiveEvent & { stack?: string };
+    if (type === "step_started") return { ...rest, state: "started" };
+    if (type === "step_finished") return { ...rest, state: "finished" };
+    return rest;
+}
+
+/** A task's phase in words, for the run's activity log. */
+export function phaseSentence(phase: TaskPhase, runner: string | undefined): string {
+    const who = runner ? `“${runner}”` : "the runner";
+    switch (phase) {
+        case "queued":
+            return "Waiting for a runner.";
+        case "assigned":
+            return `Offered to ${who}.`;
+        case "accepted":
+            return `Accepted by ${who}.`;
+        case "preparing":
+            return `${runner ?? "The runner"} is getting ready (downloads, browser).`;
+        case "running":
+            return `${runner ?? "The runner"} is running the tests.`;
+        case "uploading":
+            return `${runner ?? "The runner"} is sending the results.`;
+        case "completed":
+            return `${runner ?? "The runner"} finished the run.`;
+        case "rejected":
+            return "No runner that may take this run can run it.";
+        case "failed":
+            return `${runner ?? "The runner"} could not run the tests.`;
+        case "cancelled":
+            return "The run on the runner was cancelled.";
+        case "timed_out":
+            return "The run on the runner took too long and was stopped.";
+        case "lost_connection":
+            return `${runner ?? "The runner"} stopped answering.`;
     }
 }

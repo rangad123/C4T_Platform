@@ -46,6 +46,9 @@ export interface KitDownload {
     kind: KitKind;
     /** True when the person asked for the installer and the server made plain files instead. */
     fellBack: boolean;
+    /** A download from the Runners page carries a one-time enrollment code: its record (to ask whether the runner has connected) and when it expires. */
+    enrollmentId?: string | null;
+    expiresAt?: string | null;
 }
 
 /** A failed download, with the status the panel needs to choose its words. */
@@ -140,14 +143,35 @@ export const NAME_MAX = 60;
  * The zip holds a secret, so it is kept only as long as the download needs it and the page never reads inside it.
  */
 export async function downloadRunnerKit(projectId: string, name: string, platform: KitPlatform, save: (blob: Blob, fileName: string) => void, kind: KitKind = "files", target?: CompleteTarget): Promise<KitDownload> {
-    // The complete download is asked for by system and processor; the other two only by system.
-    const body =
-        kind === "complete" && target
-            ? { name, platform, complete: true, arch: target.endsWith("arm64") ? "arm64" : "x64", ...(platform === "unix" ? { os: target.startsWith("linux") ? "linux" : "mac" } : {}) }
-            : { name, platform, kind: kind === "complete" ? "files" : kind };
+    return postKit(`/api/projects/${projectId}/runner-kits`, kitBody(name, platform, kind, target), save, kind);
+}
+
+/** Who a download from the Runners page is for: the person's own computer, or a team runner of an organisation (null: Crowd4Test's shared runners) with the projects it may run. */
+export type EnrollScope = { kind: "personal" } | { kind: "team"; organizationId: string | null; projectIds: string[] };
+
+/** Where the Runners page asks for a download (src/platform/routes/runner-kits.ts): no project, because a personal runner belongs to a person. */
+export const RUNNER_KITS_PATH = "/runners/kits";
+
+/**
+ * The download for "Add this computer" or "Add a team runner": the server makes a one-time enrollment code and puts it into the zip as
+ * runner.enroll, never a runner credential; the answer names the code's record and its expiry. The page never reads inside the zip.
+ */
+export async function downloadEnrolledKit(scope: EnrollScope, name: string, platform: KitPlatform, save: (blob: Blob, fileName: string) => void, kind: KitKind = "files", target?: CompleteTarget): Promise<KitDownload> {
+    const body = { runner: scope.kind, ...(scope.kind === "team" ? { ...(scope.organizationId ? { organizationId: scope.organizationId } : {}), projectIds: scope.projectIds } : {}), ...kitBody(name, platform, kind, target) };
+    return postKit(`/api${RUNNER_KITS_PATH}`, body, save, kind);
+}
+
+/** The complete download is asked for by system and processor; the other two only by system. */
+function kitBody(name: string, platform: KitPlatform, kind: KitKind, target?: CompleteTarget): Record<string, unknown> {
+    return kind === "complete" && target
+        ? { name, platform, complete: true, arch: target.endsWith("arm64") ? "arm64" : "x64", ...(platform === "unix" ? { os: target.startsWith("linux") ? "linux" : "mac" } : {}) }
+        : { name, platform, kind: kind === "complete" ? "files" : kind };
+}
+
+async function postKit(url: string, body: Record<string, unknown>, save: (blob: Blob, fileName: string) => void, kind: KitKind): Promise<KitDownload> {
     let res: Response;
     try {
-        res = await fetch(`/api/projects/${projectId}/runner-kits`, {
+        res = await fetch(url, {
             method: "POST",
             headers: { "content-type": "application/json", ...(getKey() ? { "x-api-key": getKey() } : {}), ...csrfHeader("POST") },
             body: JSON.stringify(body),
@@ -166,7 +190,7 @@ export async function downloadRunnerKit(projectId: string, name: string, platfor
     // The server says what it really made (an installer that was not built becomes plain files).
     const header = res.headers.get("x-runner-kit-kind");
     const made: KitKind = header === "installer" ? "installer" : header === "complete" ? "complete" : "files";
-    return { fileName: finalName, tokenId: res.headers.get("x-runner-token-id"), kind: made, fellBack: kind === "installer" && made === "files" };
+    return { fileName: finalName, tokenId: res.headers.get("x-runner-token-id"), kind: made, fellBack: kind === "installer" && made === "files", enrollmentId: res.headers.get("x-runner-enrollment-id"), expiresAt: res.headers.get("x-runner-enrollment-expires") };
 }
 
 function decodeURIComponentSafe(s: string): string {

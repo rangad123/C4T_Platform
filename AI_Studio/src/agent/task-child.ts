@@ -5,6 +5,7 @@
 import { getAdapter } from "../engine/frameworks/index.js";
 import type { MobileRunEnv } from "../engine/validation/mobile-runner.js";
 import type { IosRunEnv } from "../engine/mobile/ios-runner.js";
+import type { LiveRunEvent } from "../engine/validation/runner.js";
 import type { FromChild, ToChild } from "./child-protocol.js";
 
 const send = (m: FromChild): Promise<void> => new Promise((resolve) => (process.send ? process.send(m, () => resolve()) : resolve()));
@@ -54,6 +55,8 @@ async function runTask(m: ToChild): Promise<void> {
             { workers: m.opts.workers, signal: abort.signal, ...(m.allowCustom ? { allowCustom: true } : {}), ...(m.browser ? { browser: m.browser } : {}), ...(m.opts.timeoutMs !== undefined ? { timeoutMs: m.opts.timeoutMs } : {}), ...(m.opts.projects ? { projects: m.opts.projects } : {}), ...(m.opts.testTimeoutMs !== undefined ? { testTimeoutMs: m.opts.testTimeoutMs } : {}), ...(m.opts.startTimeoutMs !== undefined ? { startTimeoutMs: m.opts.startTimeoutMs } : {}),
                 // "Finished 3 of 12 tests" travels to the platform with the next heartbeat (frameworks that cannot report progress ignore this).
                 onProgress: (p) => void send({ type: "log", line: `Finished ${p.done} of ${p.total} tests: ${p.title} (${p.status})`.slice(0, 300) }),
+                // Protocol 2: each test and step as it starts and ends, and each failure screenshot (Playwright web and API runs; others ignore it).
+                ...(m.live ? { onLive: (event: LiveRunEvent) => void send({ type: "live", event }) } : {}),
             },
         );
         await send({ type: "result", runs });

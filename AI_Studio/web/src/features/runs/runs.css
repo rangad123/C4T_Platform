@@ -82,3 +82,30 @@ dialog.run-dialog::backdrop { background: rgba(10, 20, 20, 0.5); }
 .run-changes { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; }
 .run-tests-head { padding: 16px 20px 0; }
 .run-tests-wrap { padding: 4px 20px 16px; display: grid; gap: 12px; }
+
+/* ── a run on a runner, live and afterwards ── */
+.run-live-head { align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.run-phases { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
+.run-phases li { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.run-phases .pdot { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface-raised); flex: none; }
+.run-phases .is-done { color: var(--text-secondary); }
+.run-phases .is-done .pdot { border-color: var(--status-success-line); background: var(--status-success-bg); color: var(--status-success-fg); }
+.run-phases .is-now { color: var(--text-primary); font-weight: var(--fw-medium); }
+.run-phases .is-now .pdot { border-color: var(--status-info-line); background: var(--status-info-bg); color: var(--status-info-fg); }
+.run-phases .is-bad { color: var(--status-error-fg); font-weight: var(--fw-medium); }
+.run-phases .is-bad .pdot { border-color: var(--status-error-line); background: var(--status-error-bg); color: var(--status-error-fg); }
+.run-live-phase { margin: 0; }
+.run-live-phase.is-bad { color: var(--status-error-fg); }
+.run-live .run-facts dd a { display: inline-flex; align-items: center; gap: 2px; }
+.run-test .what .now { color: var(--status-info-fg); overflow-wrap: anywhere; }
+.run-failures { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.run-failures > li { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--status-error-line); border-radius: var(--radius-sm); background: var(--status-error-bg); min-width: 0; }
+.run-failures p { margin: 0; overflow-wrap: anywhere; }
+.run-error { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 500 12.5px/1.6 var(--font-mono); color: var(--text-primary); max-height: 240px; overflow: auto; }
+.run-shots { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 12px; }
+.run-shots figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
+.run-shots img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.run-shots figcaption { display: grid; gap: 2px; font-size: var(--type-caption-size); line-height: var(--type-caption-line); color: var(--text-muted); min-width: 0; }
+.run-shots figcaption .caption { color: var(--text-secondary); overflow-wrap: anywhere; }
+.run-shot-missing { display: grid; place-items: center; gap: 6px; aspect-ratio: 16 / 10; padding: 12px; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); color: var(--text-muted); font-size: var(--type-caption-size); }
+.run-held-why { display: block; overflow-wrap: anywhere; }

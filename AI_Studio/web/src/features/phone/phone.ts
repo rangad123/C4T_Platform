@@ -74,8 +74,11 @@ export const willDo = (app: string): string =>
 export const WONT_DO = ["Pay for anything or subscribe", "Delete accounts or data", "Send messages or money, or make calls", "Use a fingerprint or face check", "Get past captchas", "Explore games"];
 export const ACCOUNT_REMINDER = "If the app needs a login, add a test account under Advanced options.";
 export const NO_WHERE_TITLE = "No phone or emulator is ready";
-export const NO_WHERE_BODY = "Connect a runner on a computer with an Android emulator or phone: Settings, Runners, Add a runner. For a real phone, turn on USB debugging first.";
+export const NO_WHERE_BODY = "Connect a runner on a computer with an Android emulator or phone: open Runners and add that computer. For a real phone, turn on USB debugging first.";
 export const AI_MISSING = "The AI model isn’t set up on this server. Exploring a phone app needs it.";
+/** Runners mode: the platform refuses explorations (the AI's exploration does not run on runners yet). */
+export const EXPLORE_ON_RUNNERS_TITLE = "Exploring a phone app isn’t available here yet";
+export const EXPLORE_ON_RUNNERS = "This platform runs tests only on runners, and the AI’s exploration doesn’t run on them yet. Import your phone tests or write them by hand, then run them on a runner.";
 
 export const screensWords = (n: number): string => `${plural(n, "screen")} seen`;
 export const actionsWords = (n: number): string => plural(n, "action");
@@ -95,17 +98,21 @@ export interface WhereOption {
 /** Can this runner let the AI explore a phone app? Only when it says so. */
 const exploresPhones = (a: Agent): boolean => Boolean(a.capabilities.deviceSession);
 
+/** Where an exploration of the phone app can run. On the hosted platform (runners mode) the server never runs one, so "This server" is not offered. */
 export function whereOptions(config: PlatformConfig | undefined, agents: Agent[], now = Date.now()): WhereOption[] {
     const m = config?.mobile;
-    const out: WhereOption[] = [
-        m?.available
-            ? { id: "platform", label: "This server", can: true, detail: m.avds.length ? `An Android emulator is ready here (${m.avds[0]}).` : "An Android emulator is ready here." }
-            : { id: "platform", label: "This server", can: false, detail: m?.reason ? `${m.reason.replace(/\.$/, "")}.` : "No Android emulator is set up on this server." },
-    ];
+    const runnersOnly = config?.executionMode === "runners";
+    const out: WhereOption[] = runnersOnly
+        ? []
+        : [
+              m?.available
+                  ? { id: "platform", label: "This server", can: true, detail: m.avds.length ? `An Android emulator is ready here (${m.avds[0]}).` : "An Android emulator is ready here." }
+                  : { id: "platform", label: "This server", can: false, detail: m?.reason ? `${m.reason.replace(/\.$/, "")}.` : "No Android emulator is set up on this server." },
+          ];
     for (const a of [...agents].sort((x, y) => Number(y.online) - Number(x.online))) {
         const android = a.capabilities.android;
         if (!a.online) out.push({ id: a.id, label: a.name, can: false, detail: `Offline, last seen ${relativeTime(a.lastSeenAt, now)}.` });
-        else if (!exploresPhones(a)) out.push({ id: a.id, label: a.name, can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from Settings, Runners." });
+        else if (!exploresPhones(a)) out.push({ id: a.id, label: a.name, can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from its page in Runners." });
         else if (!android || android.state === "none" || android.state === "no-tools" || (android.state === undefined && android.devices.length === 0)) {
             out.push({ id: a.id, label: a.name, can: false, detail: android?.summary ? `${android.summary.replace(/\.$/, "")}.` : "No phone or emulator is connected to this runner." });
         } else out.push({ id: a.id, label: a.name, can: true, detail: android.summary ? `${android.summary.replace(/\.$/, "")}.` : "A phone or emulator is ready." });

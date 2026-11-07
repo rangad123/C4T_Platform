@@ -5,7 +5,7 @@
  * Nothing here starts a long process: browsers are found by looking at the folder Playwright installs them in, Android by one
  * short `adb devices -l`, iOS by one `simctl list`. The probe caches its answer for 30 seconds.
  */
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -282,6 +282,10 @@ export class CapabilityProbe {
 
         if (this.opts.allowCustomScripts === true) caps.customScripts = true;
         if (this.opts.kitVersion) caps.kitVersion = this.opts.kitVersion;
+        // Who the machine is (round 39): operating system version, memory, processors, the test tool's version, what this program can run.
+        Object.assign(caps, machineIdentity(platform));
+        // This agent applies the platform's switches for it (code scripts, private addresses; hello `runner` and heartbeats).
+        caps.runnerSwitches = true;
 
         const parsed = Capabilities.safeParse(caps);
         // A value the protocol cannot carry is a bug here, not a reason to stop: fall back to the part that is certainly valid.
@@ -292,6 +296,41 @@ export class CapabilityProbe {
     invalidate(): void {
         this.cached = undefined;
     }
+}
+
+/** The frameworks this runner program runs (whether this computer has what each needs is the rest of the capabilities). */
+export const RUNNER_ADAPTERS = ["playwright", "api", "taqwright", "taqwright-ios", "windows-uia"];
+
+let identityCache: Pick<Capabilities, "osVersion" | "memoryMb" | "cpus" | "playwrightVersion" | "adapters"> | undefined;
+
+/** OS version, memory, processors and Playwright's version, read once (they do not change while the runner runs). */
+export function machineIdentity(platform: NodeJS.Platform = process.platform): Pick<Capabilities, "osVersion" | "memoryMb" | "cpus" | "playwrightVersion" | "adapters"> {
+    if (identityCache && platform === process.platform) return identityCache;
+    let osVersion: string | undefined;
+    if (platform === "darwin") {
+        try {
+            osVersion = execFileSync("/usr/bin/sw_vers", ["-productVersion"], { encoding: "utf8", timeout: 3000, windowsHide: true }).trim();
+        } catch {
+            osVersion = undefined;
+        }
+    }
+    osVersion ||= os.release();
+    let playwrightVersion: string | undefined;
+    try {
+        playwrightVersion = (createRequire(import.meta.url)("@playwright/test/package.json") as { version?: string }).version;
+    } catch {
+        playwrightVersion = undefined;
+    }
+    const cpus = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
+    const out = {
+        ...(osVersion ? { osVersion: osVersion.replace(/[^\x20-\x7e]/g, "").slice(0, 60) } : {}),
+        memoryMb: Math.round(os.totalmem() / (1024 * 1024)),
+        cpus,
+        ...(playwrightVersion ? { playwrightVersion: playwrightVersion.slice(0, 40) } : {}),
+        adapters: RUNNER_ADAPTERS,
+    };
+    if (platform === process.platform) identityCache = out;
+    return out;
 }
 
 /** One plain sentence about what was found, for the log. */

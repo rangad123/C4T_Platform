@@ -50,7 +50,7 @@ export function RunnerAccessPanel({ projectId, onChanged }: { projectId: string;
                 <>
                     {data.runners.length === 0 ? (
                         <p className="t-secondary">
-                            <HowToAddRunner canRegister={false} />
+                            <HowToAddRunner canAddPersonal={can("ai_studio.tests.run")} canAddTeam={can("ai_studio.runners.manage")} />
                         </p>
                     ) : (
                         <ul className="list divided" aria-label="Runners this project may use">

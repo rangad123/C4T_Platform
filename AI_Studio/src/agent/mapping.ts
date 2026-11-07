@@ -29,6 +29,12 @@ export function secretsOfEnv(env: WireRunEnv): string[] {
         if (i > 0) out.push(env.apiAuthHeader.slice(i + 1).trim());
     }
     for (const v of Object.values(env.vars ?? {})) out.push(v);
+    // A Basic sign-in header carries "user:password" in base64: that form is as good as the password.
+    for (const c of [env.credentials, ...(env.roles ?? [])]) {
+        if (!c?.password || c.password.length < 4) continue;
+        const b64 = Buffer.from(`${c.username}:${c.password}`, "utf8").toString("base64");
+        out.push(b64, b64.replace(/=+$/, ""));
+    }
     // The saved sign-in's cookie and storage values are as good as a password.
     if (env.storageState) {
         try {

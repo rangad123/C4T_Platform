@@ -7,6 +7,7 @@ import { getScheduleServices } from "./platform/schedule-services.js";
 import { installProcessLogging, startProcessOps } from "./platform/ops/process.js";
 import { applyServerNetwork } from "./platform/outbound-network.js";
 import { Worker } from "./platform/worker.js";
+import { runnersOnly } from "./platform/runner-only.js";
 import { startStandaloneAssessmentLoop } from "./security/standalone.js";
 
 // Standalone worker process: run with WORKER_EMBEDDED=false on the API process.
@@ -25,11 +26,14 @@ const schedules = getScheduleServices(platform);
 // A runbook run left going by a process that is gone is marked interrupted (never resumed).
 const runbooks = getRunbookServices(platform);
 runbooks.recover();
-const worker = new Worker({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS);
+// EXECUTION_MODE=runners: this process may only hand runs to runners (the API process already does; a second one is safe, jobs are claimed
+// atomically), and security assessments, which use a browser here, do not run (runner-only.ts).
+const runners = runnersOnly(platform.config);
+const worker = runners ? Worker.dispatch({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS) : new Worker({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS);
 worker.start();
-console.log("[worker] standalone worker started");
+console.log(runners ? "[worker] standalone dispatch worker started: tests run only on runners" : "[worker] standalone worker started");
 // Security assessments run in their own loop (src/security), next to the functional worker, never inside it.
-const stopAssessments = startStandaloneAssessmentLoop(platform);
+const stopAssessments = runners ? undefined : startStandaloneAssessmentLoop(platform);
 process.once("beforeExit", () => void stopAssessments?.());
 // Safe next to the API process's own scheduler: a due schedule is claimed atomically, so only one acts on it.
 if (platform.config.SCHEDULER_ENABLED) schedules.scheduler.start();

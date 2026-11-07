@@ -10,6 +10,7 @@ import { checkStillSignedIn, type SignedInVerdict, type StorageState } from "../
 import type { EngineContext } from "../engine/context.js";
 import type { ExecutionBatch, ExecutionEnv, ExecutionOptions, ScriptExecutor, ScriptRun } from "../engine/frameworks/types.js";
 import { localExecutor } from "../engine/frameworks/executor.js";
+import { SIGN_IN_BROWSER_REFUSED } from "./runner-only.js";
 import type { MailSource } from "../engine/auth/mail.js";
 import type { Db } from "./db.js";
 import { HttpError } from "./http-error.js";
@@ -49,10 +50,16 @@ export class HardSignInService {
     constructor(
         private readonly store: SessionStore,
         private readonly opts: HardSignInOptions = {},
+        /** False when the platform runs tests only on runners (EXECUTION_MODE=runners): capturing or checking a sign-in opens a browser here. */
+        private readonly serverBrowser = true,
     ) {}
 
-    static for(db: Db, config: Pick<Config, "dataDir" | "SECRET_KEY">, opts: HardSignInOptions = {}): HardSignInService {
-        return new HardSignInService(new SessionStore(db, new SecretBox(config.dataDir, config.SECRET_KEY)), opts);
+    static for(db: Db, config: Pick<Config, "dataDir" | "SECRET_KEY"> & Partial<Pick<Config, "EXECUTION_MODE">>, opts: HardSignInOptions = {}): HardSignInService {
+        return new HardSignInService(new SessionStore(db, new SecretBox(config.dataDir, config.SECRET_KEY)), opts, config.EXECUTION_MODE !== "runners");
+    }
+
+    private refuseWithoutServerBrowser(): void {
+        if (!this.serverBrowser) throw new HttpError(409, SIGN_IN_BROWSER_REFUSED, { cannotRunHere: true, executionMode: "runners" });
     }
 
     get sessions(): SessionStore {
@@ -62,6 +69,7 @@ export class HardSignInService {
     // ── "Sign in once yourself" ────────────────────────────────────────────
 
     startCapture(projectId: string, account: string, appUrl: string, startUrl: string, headed: boolean): CaptureView {
+        this.refuseWithoutServerBrowser();
         const current = this.active.get(projectId);
         if (current && (current.capture.state().status === "open" || current.capture.state().status === "starting")) {
             throw new HttpError(409, "A sign-in browser is already open for this project. Save or cancel it first.");
@@ -113,6 +121,7 @@ export class HardSignInService {
     async check(projectId: string, account: string): Promise<SignedInVerdict & { session?: PublicSession }> {
         const s = this.store.sessionState(projectId, account);
         if (!s) throw new HttpError(404, "No sign-in is saved for this account.");
+        this.refuseWithoutServerBrowser();
         const browser = await (this.opts.launch ?? ((headless) => chromium.launch({ headless })))(true);
         try {
             const v = await checkStillSignedIn(browser, s.state, s.row.checkUrl);
@@ -182,7 +191,7 @@ export interface JobSignIn {
  * either stop the job with a plain message (nothing has run, so no verdict changes) or wrap the executor so its tests start signed in.
  * A project with a test mailbox gets email steps answered. `checkBrowser` lets tests pass their own browser launcher.
  */
-export async function prepareJobSignIn(ctx: EngineContext, db: Db, config: Pick<Config, "dataDir" | "SECRET_KEY">, projectId: string, appUrl: string, o: { launch?: (headless: boolean) => Promise<Browser> } = {}): Promise<JobSignIn> {
+export async function prepareJobSignIn(ctx: EngineContext, db: Db, config: Pick<Config, "dataDir" | "SECRET_KEY"> & Partial<Pick<Config, "EXECUTION_MODE">>, projectId: string, appUrl: string, o: { launch?: (headless: boolean) => Promise<Browser> } = {}): Promise<JobSignIn> {
     let store: SessionStore;
     try {
         store = new SessionStore(db, new SecretBox(config.dataDir, config.SECRET_KEY));
@@ -200,6 +209,13 @@ export async function prepareJobSignIn(ctx: EngineContext, db: Db, config: Pick<
             store.recordCheck(projectId, MAIN_ACCOUNT, false, why);
             return { stop: signInAgainMessage(MAIN_ACCOUNT, why) };
         }
+        if (config.EXECUTION_MODE === "runners") {
+            // This server opens no browser (runner-only.ts): the sign-in is not checked first. It goes to the runner as it is, and a test that finds it expired fails and says so.
+            ctx.emit({ stage: "orchestration", kind: "sign_in_unchecked", level: "warn", message: "The saved sign-in was not checked before the run: tests run only on runners here, and the platform opens no browser of its own. It goes to the runner with the tests." });
+            session = { state: saved.state, appUrl: saved.row.appUrl };
+        }
+    }
+    if (saved && applies && !session) {
         const browser = await (o.launch ?? ((headless) => chromium.launch({ headless })))(true);
         let v: SignedInVerdict;
         try {

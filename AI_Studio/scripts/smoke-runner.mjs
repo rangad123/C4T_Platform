@@ -8,7 +8,10 @@
 //    computer's own unzip tool (Windows' tar.exe, macOS' ditto, unzip on Linux) into a folder with a space and brackets in its name, and
 //    starts it the way the README says (start-runner.cmd, sh start-runner.sh, or the installer's --silent switch).
 // 4. Waits for the runner to be online, sends the project's runs to it, runs both tests and checks they passed ON THE RUNNER.
-// 5. Revokes the runner's access and checks the runner ends with the plain "no longer accepts this runner's token" message.
+// 5. With --lifecycle (installer only): stops the runner the way a person does (Windows: --stop; Mac: the window's Ctrl-C), starts it
+//    again (it now uses the credential it saved, the one-time code is used up) and waits for it to be online again.
+// 6. Revokes the runner's access and checks the runner ends with the plain "no longer accepts this runner" message. With --lifecycle,
+//    uninstalls with the installer's own --uninstall and checks that nothing is left: no install folder, no sign-in start.
 // 6. Stops what it started: only its own child processes, by the handles it holds (a Windows process tree by the id of the child it
 //    started, a Unix process group it created). Never anything by name or by port. Deletes its temporary folder.
 // It prints a short report and writes report.json, report.md and the logs (secrets removed) to --out. Exit code: 0 passed or skipped
@@ -44,6 +47,7 @@ export const HELP = `Runner smoke check: start the platform and a sample app, do
   --test-timeout <seconds>         how long one test may take (default 300)
   --name <text>                    the runner's name (default "Smoke runner")
   --out <dir>                      where the report and logs go (default .scratch/smoke-runner/<time>)
+  --lifecycle                      (installer only) also stop, start again, uninstall, and check nothing is left
   --keep                           keep the temporary folder (its path is printed)
   --help                           this text
 
@@ -110,6 +114,9 @@ export function parseArgs(argv) {
             case "--build-runner":
                 o.buildRunner = true;
                 break;
+            case "--lifecycle":
+                o.lifecycle = true;
+                break;
             case "--keep":
                 o.keep = true;
                 break;
@@ -124,6 +131,7 @@ export function parseArgs(argv) {
     if (o.noNodeOnPath && o.kit !== "complete") throw new UsageError("--no-node-on-path only makes sense with --kit complete: the other downloads need a Node.js on the computer.");
     if (o.linkNodeModules && o.kit !== "files") throw new UsageError("--link-node-modules only works with --kit files.");
     if (o.buildRunner && o.runnerKitDir) throw new UsageError("Use --build-runner or --runner-kit-dir, not both.");
+    if (o.lifecycle && o.kit !== "installer") throw new UsageError("--lifecycle only works with --kit installer: it stops, restarts and uninstalls what the installer set up.");
     o.onlineTimeout ??= o.linkNodeModules ? 180 : 900;
     return o;
 }
@@ -180,7 +188,8 @@ export function interpretKitAnswer(kit, target, answer) {
 /** How the README says to start each download. `kitDir` is the unpacked folder, `installDir` where an installer may install. */
 export function startCommand(kit, target, kitDir, installDir) {
     if (kit === "installer") {
-        if (target.system === "windows") return { command: path.join(kitDir, "AITestingRunnerSetup.exe"), args: ["--silent", "--install-dir", installDir] };
+        // No sign-in start: a check must not leave a Startup shortcut behind on the computer it runs on.
+        if (target.system === "windows") return { command: path.join(kitDir, "AITestingRunnerSetup.exe"), args: ["--silent", "--no-start-at-sign-in", "--install-dir", installDir] };
         return { command: "sh", args: [path.join(kitDir, "AI Testing Runner.app", "Contents", "Resources", "runner-setup.sh"), "--silent", "--no-autostart", "--install-dir", installDir] };
     }
     if (target.system === "windows") return { command: path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"), args: ["/d", "/c", ".\\start-runner.cmd"] };
@@ -564,8 +573,9 @@ export async function runSmoke(opts, deps = {}) {
             const decision = interpretKitAnswer(opts.kit, target, { status: res.status, kind: res.headers.get("x-runner-kit-kind") ?? undefined, note: res.headers.get("x-runner-kit-note") ?? undefined, message: res.message });
             if (decision.skip) throw new Skip(decision.skip);
             if (decision.fail) throw new Error(decision.fail);
-            tokenId = res.headers.get("x-runner-token-id");
-            if (!tokenId) throw new Error("The download did not say which access it made (x-runner-token-id).");
+            // A download from round 39 on holds a one-time code, and the runner's access is made when the runner trades it: then the access
+            // is found from the runner once it is online.
+            tokenId = res.headers.get("x-runner-token-id") ?? undefined;
             const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "runner.zip";
             if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName)) throw new Error(`Unexpected file name ${fileName}`);
             zipFile = path.join(downloads, fileName);
@@ -580,9 +590,9 @@ export async function runSmoke(opts, deps = {}) {
             const top = fs.readdirSync(dest);
             if (top.length !== 1 || !fs.statSync(path.join(dest, top[0])).isDirectory()) throw new Error(`The zip should hold one folder, it holds: ${top.join(", ")}`);
             kitDir = path.join(dest, top[0]);
-            const tokenFile = path.join(kitDir, "runner.token");
-            if (!fs.existsSync(tokenFile)) throw new Error("The download has no runner.token.");
-            secrets.push(fs.readFileSync(tokenFile, "utf8").trim());
+            const credential = ["runner.enroll", "runner.token"].map((f) => path.join(kitDir, f)).find((f) => fs.existsSync(f));
+            if (!credential) throw new Error("The download has neither runner.enroll nor runner.token.");
+            secrets.push(fs.readFileSync(credential, "utf8").trim());
             if (opts.kit === "complete") {
                 const own = ["node.exe", path.join("bin", "node")].some((f) => fs.existsSync(path.join(kitDir, "node", f)));
                 if (!own) throw new Error("The complete download has no Node.js of its own (no node folder with node.exe or bin/node).");
@@ -606,6 +616,7 @@ export async function runSmoke(opts, deps = {}) {
         }
 
         const cmd = startCommand(opts.kit, target, kitDir, path.join(tmp, "install folder"));
+        report.lifecycle = Boolean(opts.lifecycle);
         await step(`Start it (${[path.basename(cmd.command), ...cmd.args.map((a) => (a.length > 3 && path.isAbsolute(a) ? path.basename(a) : a))].join(" ")})`, async () => {
             const program = opts.kit === "installer" ? (target.system === "windows" ? cmd.command : cmd.args[0]) : path.join(kitDir, target.system === "windows" ? "start-runner.cmd" : "start-runner.sh");
             if (!fs.existsSync(program)) throw new Error(`${path.basename(program)} is not in the download.`);
@@ -623,6 +634,11 @@ export async function runSmoke(opts, deps = {}) {
                 throw new Error(`${e.message}${Children.running(runner) ? `\nLast lines from the runner window:\n${tail(runner.output)}` : ""}`);
             });
             const nodeLine = /^.*(Using (the )?Node\.js[^\r\n]*)$/m.exec(runner.output)?.[1];
+            if (!tokenId) {
+                const list = await api("GET", `/api/projects/${projectId}/agents`);
+                tokenId = (Array.isArray(list.json) ? list.json.find((a) => a.name === opts.name && a.online) : undefined)?.tokenId;
+                if (!tokenId) throw new Error("The runner is online, but the platform did not say which access it uses (tokenId).");
+            }
             return `after ${fmtMs(Date.now() - t0)}${nodeLine ? `; ${nodeLine.trim()}` : ""}`;
         });
 
@@ -660,6 +676,31 @@ export async function runSmoke(opts, deps = {}) {
             });
         }
 
+        const installDir = path.join(tmp, "install folder");
+        if (opts.lifecycle) {
+            await step("Stop the runner the way a person does", async () => {
+                if (target.system === "windows") {
+                    const r = spawnSync(cmd.command, ["--stop", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 90_000, windowsHide: true });
+                    if (r.status !== 0) throw new Error(`--stop ended with code ${r.status}: ${redact(`${r.stdout ?? ""}${r.stderr ?? ""}`.slice(-400), secrets)}`);
+                } else process.kill(-runner.child.pid, "SIGINT");
+                await Promise.race([runner.exited, sleep(60_000)]);
+                if (Children.running(runner)) throw new Error(`The runner was still running a minute after it was asked to stop.\n${tail(runner.output)}`);
+                const list = await api("GET", `/api/projects/${projectId}/agents`);
+                return `ended with code ${runner.code}${Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online) ? " (the platform still shows it online until its last poll times out)" : ""}`;
+            });
+            await step("Start it again (its saved credential, no new code)", async () => {
+                if (fs.existsSync(path.join(installDir, "app", "runner.enroll")) || fs.existsSync(path.join(installDir, "runner", "runner.enroll"))) throw new Error("The one-time code is still in the install folder after the runner used it.");
+                runner = children.start("runner (again)", cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
+                const t0 = Date.now();
+                await until("the runner to be online again", async () => {
+                    if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
+                    const list = await api("GET", `/api/projects/${projectId}/agents`);
+                    return Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online && a.tokenId === tokenId);
+                }, opts.onlineTimeout * 1000, 2000);
+                return `online again after ${fmtMs(Date.now() - t0)}, with the same access`;
+            });
+        }
+
         await step("Revoke the runner's access and check it stops with a plain message", async () => {
             const r = await api("DELETE", `/api/projects/${projectId}/agent-tokens/${tokenId}`);
             if (r.status !== 200) throw new Error(`Revoking failed (${r.status}): ${r.message}`);
@@ -674,6 +715,18 @@ export async function runSmoke(opts, deps = {}) {
             if (leaks.length) throw new Error(`The runner token appeared in the output of: ${leaks.join(", ")}.`);
             return undefined;
         });
+
+        if (opts.lifecycle) {
+            await step("Uninstall it and check nothing is left", async () => {
+                const un = target.system === "windows" ? spawnSync(cmd.command, ["--uninstall", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000, windowsHide: true }) : spawnSync("sh", [cmd.args[0], "--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000 });
+                if (un.status !== 0) throw new Error(`--uninstall ended with code ${un.status}: ${redact(`${un.stdout ?? ""}${un.stderr ?? ""}`.slice(-400), secrets)}`);
+                // The Windows program removes its own folder a few seconds after it exits.
+                await until("the install folder to be gone", async () => !fs.existsSync(installDir), 30_000, 1000).catch(() => undefined);
+                const left = [installDir, ...(target.system === "mac" ? [path.join(os.homedir(), "Library", "LaunchAgents", "app.aitesting.runner.plist")] : []), ...(target.system === "windows" && process.env.APPDATA ? [path.join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "AI Testing Runner.lnk")] : [])].filter((f) => fs.existsSync(f));
+                if (left.length) throw new Error(`Left behind after uninstalling: ${left.join(", ")}`);
+                return "no install folder, no sign-in start";
+            });
+        }
         report.verdict = "passed";
     } catch (e) {
         if (e instanceof Skip) {

@@ -15,6 +15,7 @@
  * the server. Its own work data never leaves the server.
  */
 import { z } from "zod";
+import { ASSESSMENT_REFUSED, runnersOnly } from "../../platform/runner-only.js";
 import { runAs, SYSTEM_ACTOR } from "../../platform/auth/actor.js";
 import type { Db } from "../../platform/db.js";
 import { HttpError } from "../../platform/http-error.js";
@@ -115,7 +116,8 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
     const view = (a: SecurityAssessment & { cancelRequested?: boolean }) => ({ ...a, cancelRequested: a.cancelRequested ?? false, applicationName: store.getApplication(a.applicationId)?.name ?? null });
 
     let loop: AssessmentLoop | undefined;
-    if (p.config.WORKER_EMBEDDED && ctx.settings.enabled && !loops.has(p.db)) {
+    // EXECUTION_MODE=runners: an assessment explores with a browser on the server, so no loop runs and none is started (platform/runner-only.ts).
+    if (p.config.WORKER_EMBEDDED && !runnersOnly(p.config) && ctx.settings.enabled && !loops.has(p.db)) {
         loop = new AssessmentLoop(loopDeps(ctx), 1_500);
         loops.set(p.db, loop);
         // Started once the server is ready (not while routes are still being registered), stopped with it.
@@ -129,6 +131,7 @@ export function registerAssessmentRoutes(ctx: SecurityRouteCtx): void {
     app.post(`${SECURITY_API}/applications/:appId/assessments`, async (req, reply) => {
         const a = ctx.application(params(req).appId!, req);
         const body = ctx.body(StartBody, req.body);
+        if (runnersOnly(p.config)) throw new HttpError(409, ASSESSMENT_REFUSED, { cannotRunHere: true, executionMode: "runners" });
         const auth = store.authorizationState(a);
         if (auth.state !== "current" || !auth.authorizationId) throw new HttpError(409, auth.message);
         const active = store.activeAssessment(a.id);

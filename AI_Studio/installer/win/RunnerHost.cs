@@ -67,6 +67,8 @@ namespace AITestingRunner
             Finished.Reset();
             wake.Reset();
             ReapEarlierRunner();
+            // A stop request left by an earlier session must not stop this start.
+            try { File.Delete(Path.Combine(lay.App, Product.StopFile)); } catch (Exception) { }
             Set(RunnerPhase.Starting, "Starting the runner", 0);
             loop = new Thread(Loop);
             loop.IsBackground = true;
@@ -78,7 +80,7 @@ namespace AITestingRunner
         {
             stopRequested = true;
             wake.Set();
-            KillChild();
+            StopChildGracefully();
             Thread t = loop;
             if (t != null && t.IsAlive && Thread.CurrentThread != t) t.Join(15000);
         }
@@ -93,7 +95,7 @@ namespace AITestingRunner
                 if (code == StartFailed) { code = 1; break; }
                 if (code == 0) { Set(RunnerPhase.Stopped, "The runner stopped", 0); break; }
                 if (code == 2) { Set(RunnerPhase.NeedsAttention, "The runner could not read its settings. Check that you unzipped the whole kit, or download a new one from the platform.", 2); break; }
-                if (code == 3) { Set(RunnerPhase.AccessRemoved, "The platform no longer accepts this runner's token. It was revoked, or the project was deleted. Download a new runner from the platform (Setup, Runners, Add a runner).", 3); break; }
+                if (code == 3) { Set(RunnerPhase.AccessRemoved, "The platform no longer accepts this runner. It was removed, its one-time code was already used or has expired, or the project was deleted. Make a new download on the Runners page of the platform.", 3); break; }
                 if (code == 4) { Set(RunnerPhase.NeedsAttention, "This runner and the platform are different versions. Download a new runner from the platform.", 4); break; }
                 if (code == 5) { Set(RunnerPhase.NeedsAttention, "The platform refused this runner. The log says why.", 5); break; }
                 // 75: the runner switched to a new version of itself (docs/features/runner-updates.md); start it again at once.
@@ -112,7 +114,7 @@ namespace AITestingRunner
             Process p;
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo(nodePath, "runner.mjs --token-file runner.token");
+                ProcessStartInfo psi = new ProcessStartInfo(nodePath, "runner.mjs" + CredentialArgs(lay.App));
                 psi.WorkingDirectory = lay.App;
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
@@ -147,6 +149,17 @@ namespace AITestingRunner
             ClearRecordedPid();
             log.Line("Runner ended with code " + code + ".");
             return code;
+        }
+
+        /// <summary>
+        /// How the runner finds its credential: a one-time code it trades for its own credential and then deletes (runner.enroll), an older
+        /// download's runner.token, or nothing (the runner reads the credential it keeps protected for this Windows user).
+        /// </summary>
+        public static string CredentialArgs(string appDir)
+        {
+            if (File.Exists(Path.Combine(appDir, "runner.enroll"))) return " --enroll-file runner.enroll";
+            if (File.Exists(Path.Combine(appDir, "runner.token"))) return " --token-file runner.token";
+            return "";
         }
 
         static readonly Regex Warn = new Regex(@"^\S+\s+(WARN|ERROR)\s+(.*)$");
@@ -193,6 +206,34 @@ namespace AITestingRunner
         }
 
         // ── the process this program started, and only that ─────────────────
+
+        /// <summary>
+        /// Ask the runner to stop (the stop file it watches, src/agent/stop-file.ts): it reports its running test as stopped and exits. Only
+        /// when it is still there after 25 seconds is it ended hard, with everything it started (the job object).
+        /// </summary>
+        void StopChildGracefully()
+        {
+            Process p;
+            lock (gate) { p = child; }
+            if (p == null) return;
+            string request = Path.Combine(lay.App, Product.StopFile);
+            bool asked = false;
+            try
+            {
+                File.WriteAllText(request, DateTime.UtcNow.ToString("o") + "\r\n", Util.Utf8);
+                asked = true;
+                log.Line("Asked the runner to stop. It reports its running test first.");
+            }
+            catch (Exception e) { log.Line("Could not ask the runner to stop gently (" + e.Message + "). Ending it now."); }
+            bool exited = false;
+            if (asked)
+            {
+                try { exited = p.WaitForExit(Product.StopGraceMs); } catch (Exception) { exited = true; }
+                if (!exited) log.Line("The runner did not stop within " + (Product.StopGraceMs / 1000) + " seconds. Ending it now.");
+            }
+            if (!exited) KillChild();
+            try { File.Delete(request); } catch (Exception) { }
+        }
 
         void KillChild()
         {

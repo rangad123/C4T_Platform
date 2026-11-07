@@ -82,6 +82,8 @@ let projectId = "";
 const idOf: Record<string, string> = {};
 const consoleErrors: string[] = [];
 const runner = { runOn: "platform" as "platform" | "agent", agentId: null as string | null, puts: [] as unknown[] };
+/** Runner ids the browser sent with a run start (`runnerId`, for that run only). */
+const runnerIds: unknown[] = [];
 
 const spec = (title: string, p: string) => ({ title, kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: p }, { action: "assertResponse", check: "status", expected: 200 }] });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -158,6 +160,27 @@ beforeAll(async () => {
             ],
         }),
     );
+    // The runners this person may use (GET /runner-choices), stood in for in the same way: the Run panel lists these.
+    await page.route("**/api/projects/*/runner-choices", (route) =>
+        route.fulfill({
+            json: {
+                allowPersonal: true,
+                defaultRunnerId: null,
+                runners: [
+                    { id: "tok-1", name: "Maya's laptop", kind: "team", mine: false, online: true, busy: false, machine: { os: "darwin", arch: "arm64" }, canRunWeb: true, canRunMobile: false, codeScripts: false, problem: null },
+                    { id: "tok-2", name: "Old desktop", kind: "team", mine: false, online: false, busy: false, machine: { os: "win32", arch: "x64" }, canRunWeb: true, canRunMobile: false, codeScripts: false, problem: null },
+                ],
+            },
+        }),
+    );
+    // A run start with a runner picked: the browser's runnerId is noted and the run goes on to the real platform without it (no runner here).
+    await page.route("**/api/projects/*/runs", async (route) => {
+        const body = route.request().method() === "POST" ? (route.request().postDataJSON() as Record<string, unknown> | null) : null;
+        if (!body || !("runnerId" in body)) return route.continue();
+        runnerIds.push(body.runnerId);
+        const { runnerId: _picked, ...rest } = body;
+        await route.continue({ postData: JSON.stringify(rest) });
+    });
     await page.route("**/api/projects/*/runner", async (route) => {
         if (route.request().method() === "PUT") {
             const body = route.request().postDataJSON() as { runOn: "platform" | "agent"; agentId?: string | null };
@@ -273,21 +296,32 @@ describe("the Run panel", () => {
         await page.setViewportSize({ width: 1280, height: 900 });
     }, 180_000);
 
-    it("shows where it can run, and changing it is said to change the project's setting", async () => {
+    it("shows where it can run, and a runner picked here is for this run only", async () => {
         await testsPage();
         await page.getByRole("button", { name: "Run", exact: true }).click();
+        // The project runs on this server: a run can't be sent to a runner on its own, and the panel says where to change that.
         await pwExpect(panel().getByRole("radio", { name: "This server" })).toBeChecked();
+        await pwExpect(panel().getByRole("radio", { name: /Maya's laptop/ })).toBeDisabled();
+        await pwExpect(panel().getByText("Team · online", { exact: true })).toBeVisible();
+        await pwExpect(panel().getByTestId("project-on-server")).toHaveText("This project runs its tests on this server. To use a runner, choose “On a runner” on the Runners page first.");
+        await page.keyboard.press("Escape");
+
+        // The project runs on its runners: "This server" is not offered, and the runner picked is sent with this run only.
+        runner.runOn = "agent";
+        await testsPage();
+        await page.getByRole("button", { name: "Run", exact: true }).click();
+        await pwExpect(panel().getByRole("radio", { name: "This server" })).toHaveCount(0);
         await pwExpect(panel().getByRole("radio", { name: /Maya's laptop/ })).toBeEnabled();
-        await pwExpect(panel().getByText("online", { exact: true })).toBeVisible();
         await pwExpect(panel().getByRole("radio", { name: /Old desktop/ })).toBeDisabled();
-        await pwExpect(panel().getByText("offline", { exact: true })).toBeVisible();
+        await pwExpect(panel().getByText("Team · offline", { exact: true })).toBeVisible();
         await panel().getByRole("radio", { name: /Maya's laptop/ }).check();
         await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 1 test on Maya's laptop. Results replace the last results of these tests.");
-        await pwExpect(panel().getByText("This also becomes where this project runs its tests, until you change it.")).toBeVisible();
-        // Starting changes the project's runner first (the platform's own route), then starts the run.
+        await pwExpect(panel().getByText("Only this run goes there. Where the project runs its tests does not change.")).toBeVisible();
+        // Starting sends the runner with the run (runnerId) and changes nothing about the project.
         await panel().getByRole("button", { name: "Start run" }).click();
         await pwExpect(strip()).toBeVisible({ timeout: 30_000 });
-        expect(runner.puts).toEqual([{ runOn: "agent", agentId: "ag-1" }]);
+        expect(runnerIds).toEqual(["tok-1"]);
+        expect(runner.puts).toEqual([]);
         await pwExpect(page.getByRole("region", { name: "Run finished" })).toBeVisible({ timeout: 90_000 });
         // Back to this server for the rest of the file.
         runner.runOn = "platform";

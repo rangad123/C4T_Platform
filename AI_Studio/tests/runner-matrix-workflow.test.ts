@@ -1,9 +1,11 @@
 /**
- * The real-machine workflow (.github/workflows/runner-matrix.yml) cannot run here, so it is read and checked: it parses, it runs when the
- * runner's code changes and on demand, every job has a time limit, the six kinds of machine are there, every machine runs the plain,
- * complete (no Node.js on the PATH) and, where one exists, installer smoke checks, a failed check does not hide the next ones, the report
- * is uploaded even after a failure, the browser job runs the platform's pages in every browser, actions are pinned, and nothing secret is
- * in it. Also the branded-browser lookup of scripts/ui-browsers.mjs (file paths only). See docs/features/real-machine-checks.md.
+ * The real-machine workflow (.github/workflows/runner-matrix.yml in this repository) cannot run here, so it is read and checked: it parses,
+ * runs when the runner's code changes and on demand, every job has a time limit, the five machines are there (Windows Server 2022 and 2025,
+ * macOS on Apple silicon and Intel, Linux), every machine installs the runner with the real installer unattended and runs the lifecycle
+ * (start, online, a web and an API test, stop, start again, revoke, uninstall, nothing left), plus the plain and complete downloads; a
+ * failed check does not hide the next ones, the report is uploaded even after a failure, actions are pinned and nothing secret is in it.
+ * Also the runner tests in the main CI workflow (ai-studio-ci.yml) and the signing steps of the deploy workflow. See
+ * docs/features/real-machine-checks.md. The branded-browser lookup of scripts/ui-browsers.mjs is checked below (file paths only).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -12,7 +14,6 @@ import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 // @ts-expect-error plain JavaScript script (no type declarations)
 import { BROWSERS, brandedPaths, installedAt, UI_FILES } from "../scripts/ui-browsers.mjs";
-import { OLDEST_PLAYWRIGHT } from "../src/engine/portable/playwright-apis.js";
 
 const REPO = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 // The workflows live at the repository root, one level above the platform's folder (AI_Studio/).
@@ -21,104 +22,64 @@ const FILE = path.join(WORKFLOWS, "runner-matrix.yml");
 const text = fs.readFileSync(FILE, "utf8");
 const wf = YAML.parse(text) as any;
 
-type Step = { name?: string; run?: string; uses?: string; if?: string; with?: Record<string, unknown>; "continue-on-error"?: boolean };
+type Step = { name?: string; run?: string; uses?: string; if?: string; with?: Record<string, unknown>; env?: Record<string, string>; "continue-on-error"?: boolean | string };
 const runs = (steps: Step[]) => steps.filter((s) => s.run).map((s) => s.run!.trim());
+const PATHS = ["AI_Studio/src/agent/**", "AI_Studio/src/agent-protocol/**", "AI_Studio/installer/**", "AI_Studio/scripts/build-runner*", "AI_Studio/scripts/smoke-runner.mjs", ".github/workflows/runner-matrix.yml"];
 
 describe("the real-machine workflow", () => {
-    it("parses and runs on pushes to main, on pull requests that touch the runner, and on demand", () => {
+    it("parses and runs on demand and on pushes and pull requests that touch the runner", () => {
         expect(wf.name).toBe("Runner on real machines");
-        expect(wf.on.push.branches).toEqual(["main"]);
-        for (const p of ["AI_Studio/src/agent/**", "AI_Studio/installer/**", "AI_Studio/scripts/build-*", "AI_Studio/src/platform/runner-kit*", "AI_Studio/scripts/smoke-runner.mjs", ".github/workflows/runner-matrix.yml"]) expect(wf.on.pull_request.paths).toContain(p);
         expect("workflow_dispatch" in wf.on).toBe(true);
+        expect(wf.on.push.branches).toEqual(["main"]);
+        for (const p of PATHS) {
+            expect(wf.on.push.paths, p).toContain(p);
+            expect(wf.on.pull_request.paths, p).toContain(p);
+        }
         expect(wf.permissions).toEqual({ contents: "read" });
     });
 
-    it("runs every job's commands in the platform's folder (uploads name it, being relative to the repository root)", () => {
-        for (const [name, job] of Object.entries(wf.jobs) as Array<[string, any]>) expect(job.defaults?.run?.["working-directory"], name).toBe("AI_Studio");
+    it("runs in the platform's folder with a time limit, and keeps going when one machine fails", () => {
+        expect(Object.keys(wf.jobs)).toEqual(["smoke"]);
+        const job = wf.jobs.smoke;
+        expect(job.defaults?.run?.["working-directory"]).toBe("AI_Studio");
+        expect(job["timeout-minutes"]).toBeGreaterThan(0);
+        expect(job["timeout-minutes"]).toBeLessThanOrEqual(90);
+        expect(job.strategy["fail-fast"]).toBe(false);
+        expect(job.env.TAQWRIGHT_HOME).toBe("/nonexistent-taqwright");
     });
 
-    it("gives every job a time limit", () => {
-        const jobs = Object.entries(wf.jobs) as Array<[string, any]>;
-        expect(jobs.map(([id]) => id)).toEqual(["smoke", "ui-browsers", "portable-exports"]);
-        for (const [id, job] of jobs) {
-            expect(typeof job["timeout-minutes"], id).toBe("number");
-            expect(job["timeout-minutes"], id).toBeGreaterThan(0);
-            expect(job["timeout-minutes"], id).toBeLessThanOrEqual(90);
-            expect(job.strategy["fail-fast"], id).toBe(false);
-        }
-    });
-
-    it("runs the smoke check on Windows, macOS and Linux, on Intel/AMD and ARM", () => {
+    it("covers Windows Server 2022 and 2025, macOS on Apple silicon and Intel, and Linux", () => {
         const legs = wf.jobs.smoke.strategy.matrix.include as Array<{ os: string; target: string; installer: boolean }>;
-        expect(legs.map((l) => l.os)).toEqual(["windows-latest", "windows-11-arm", "macos-latest", "macos-15-intel", "ubuntu-24.04", "ubuntu-24.04-arm"]);
-        expect(legs.map((l) => l.target)).toEqual(["win-x64", "win-arm64", "mac-arm64", "mac-x64", "linux-x64", "linux-arm64"]);
-        // The installer exists for Windows and macOS only.
-        expect(legs.filter((l) => l.installer).map((l) => l.target)).toEqual(["win-x64", "win-arm64", "mac-arm64", "mac-x64"]);
+        expect(legs.map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-14", "macos-15-intel", "ubuntu-latest"]);
+        expect(legs.map((l) => l.target)).toEqual(["win-x64", "win-x64", "mac-arm64", "mac-x64", "linux-x64"]);
+        expect(legs.filter((l) => l.installer).map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-14", "macos-15-intel"]);
         expect(wf.jobs.smoke["runs-on"]).toBe("${{ matrix.os }}");
+        // Honest about what the machines are.
+        expect(text).toMatch(/not Windows 10 or 11 desktop/);
     });
 
-    it("prepares each machine the way the README and the build scripts say, then runs the three checks", () => {
+    it("builds everything, then installs unattended with the lifecycle, and checks the plain and complete downloads too", () => {
         const steps = wf.jobs.smoke.steps as Step[];
         const r = runs(steps);
         expect(steps.find((s) => s.uses?.startsWith("actions/setup-node"))?.with?.["node-version"]).toBe(24);
-        for (const cmd of ["npm ci", "npm run build:web", "npm run build:runner", "npm run build:installer", "npm run build:installer -- --skip-windows", "npx playwright install-deps chromium"]) expect(r, cmd).toContain(cmd);
-        expect(r.some((x) => x.includes("npm run build:runner -- --complete --targets ${{ matrix.target }}"))).toBe(true);
+        for (const cmd of ["npm ci", "npm run build:web", "npm run build:runner", "npm run build:installer", "npm run build:installer -- --skip-windows", "npx playwright install-deps chromium", "npm run build:runner -- --complete --targets ${{ matrix.target }}"]) expect(r, cmd).toContain(cmd);
+        expect(r.some((x) => x.includes("sh scripts/build-runner-pkg.sh") && x.includes("sh scripts/make-dmg.sh"))).toBe(true);
         const smoke = steps.filter((s) => s.run?.startsWith("node scripts/smoke-runner.mjs"));
         expect(smoke.map((s) => s.run!.trim())).toEqual([
+            "node scripts/smoke-runner.mjs --kit installer --lifecycle --port 6952 --out smoke-report/installer",
             "node scripts/smoke-runner.mjs --kit files --port 6950 --out smoke-report/files",
-            "node scripts/smoke-runner.mjs --kit installer --port 6952 --out smoke-report/installer",
             "node scripts/smoke-runner.mjs --kit complete --no-node-on-path --port 6954 --out smoke-report/complete",
         ]);
-        // A failed check does not hide the next one; the installer check only where an installer exists.
-        expect(smoke[1]!.if).toBe("(success() || failure()) && matrix.installer");
+        expect(smoke[0]!.if).toBe("matrix.installer");
+        expect(smoke[1]!.if).toBe("success() || failure()");
         expect(smoke[2]!.if).toBe("success() || failure()");
-        // Building the installer may fail on a machine without the compiler: the installer check then says skipped.
         for (const s of steps.filter((x) => x.run?.startsWith("npm run build:installer"))) expect(s["continue-on-error"]).toBe(true);
         const upload = steps.find((s) => s.uses?.startsWith("actions/upload-artifact"))!;
         expect(upload.if).toBe("always()");
-        expect(upload.with).toMatchObject({ path: "AI_Studio/smoke-report/", name: "runner-smoke-${{ matrix.target }}" });
+        expect(String(upload.with?.path)).toContain("AI_Studio/smoke-report/");
     });
 
-    it("opens the platform's own pages in every browser on three systems", () => {
-        const job = wf.jobs["ui-browsers"];
-        expect((job.strategy.matrix.include as Array<{ os: string }>).map((l) => l.os)).toEqual(["ubuntu-24.04", "windows-latest", "macos-latest"]);
-        const r = runs(job.steps);
-        expect(r).toContain("npx playwright install --with-deps chromium firefox webkit");
-        expect(r).toContain("npm run build:web");
-        expect(r).toContain("npm run test:ui:browsers -- --report ui-report");
-        expect((job.steps as Step[]).find((s) => s.uses?.startsWith("actions/upload-artifact"))?.if).toBe("always()");
-        expect(JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")).scripts["test:ui:browsers"]).toBe("node scripts/ui-browsers.mjs");
-    });
-
-    it("runs a downloaded project with the oldest supported and the pinned Playwright on Linux, Windows and macOS (portable-code-tests.md)", () => {
-        const job = wf.jobs["portable-exports"];
-        const legs = job.strategy.matrix.include as Array<{ os: string; playwright: string; node: number; id: string }>;
-        expect(legs.map((l) => `${l.os} ${l.playwright} node${l.node}`)).toEqual([
-            `ubuntu-22.04 ${OLDEST_PLAYWRIGHT} node20`,
-            "ubuntu-24.04 pinned node24",
-            `windows-latest ${OLDEST_PLAYWRIGHT} node20`,
-            "windows-latest pinned node24",
-            `macos-latest ${OLDEST_PLAYWRIGHT} node20`,
-            "macos-latest pinned node24",
-        ]);
-        expect(new Set(legs.map((l) => l.id)).size).toBe(legs.length);
-        const steps = job.steps as Step[];
-        // The platform (Node.js 24) makes the download; then the Node.js of the leg runs it, from outside the checkout.
-        const nodes = steps.filter((s) => s.uses?.startsWith("actions/setup-node")).map((s) => s.with?.["node-version"]);
-        expect(nodes).toEqual([24, "${{ matrix.node }}"]);
-        const r = runs(steps);
-        expect(r[0]).toBe("npm ci");
-        expect(r[1]).toBe('node scripts/portable-check.mjs --export-only --dir "$RUNNER_TEMP/portable export" --port 6956 --out portable-report/export');
-        expect(r[2]).toContain('node scripts/portable-check.mjs --from "$RUNNER_TEMP/portable export" --port 6958 --out portable-report/run $extra');
-        expect(r[2]).toContain('extra="--playwright ${{ matrix.playwright }}"');
-        expect(r[2]).toContain('if [ "$RUNNER_OS" = "Linux" ]; then extra="$extra --install-deps"; fi');
-        const upload = steps.find((s) => s.uses?.startsWith("actions/upload-artifact"))!;
-        expect(upload.if).toBe("always()");
-        expect(upload.with).toMatchObject({ path: "AI_Studio/portable-report/", name: "portable-exports-${{ matrix.id }}" });
-        for (const p of ["AI_Studio/src/engine/generators/**", "AI_Studio/src/engine/portable/**", "AI_Studio/src/platform/portable-export.ts", "AI_Studio/scripts/portable-check.mjs"]) expect(wf.on.pull_request.paths).toContain(p);
-    });
-
-    it("pins every action to a major version, uses only the platform's own ports, and holds no secret", () => {
+    it("pins every action to a major version, uses only its own ports, and holds no secret", () => {
         const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]!);
         expect(uses.length).toBeGreaterThan(0);
         for (const u of uses) expect(u).toMatch(/^actions\/(checkout|setup-node|upload-artifact)@v\d+$/);
@@ -130,13 +91,44 @@ describe("the real-machine workflow", () => {
         expect(new Set(ports.flatMap((p) => [p, p + 1])).size).toBe(ports.length * 2);
         expect(text).not.toMatch(/secrets\./);
         expect(text).not.toMatch(/GITHUB_TOKEN|pull_request_target/);
-        expect(text).not.toMatch(/aitg_|x-api-key|API_KEY\s*[:=]/i);
-        expect(text).not.toMatch(/\b4000\b/);
+        expect(text).not.toMatch(/aitg_|aite_|x-api-key|API_KEY\s*[:=]/i);
+    });
+});
+
+describe("the runner tests in the main CI workflow", () => {
+    const ci = YAML.parse(fs.readFileSync(path.join(WORKFLOWS, "ai-studio-ci.yml"), "utf8")) as any;
+    it("runs the runner tests that need no real machine, one file at a time (their fixed ports never meet)", () => {
+        const steps = ci.jobs.quality.steps as Step[];
+        const step = steps.find((s) => s.name === "Runner tests")!;
+        expect(step).toBeDefined();
+        expect(step.run).toContain("--no-file-parallelism");
+        for (const f of ["agent-platform-unit", "runner-limit-unit", "runner-update-unit", "runner-installer-kit", "record-agent-unit", "live-session-fake-agent", "installer-mac-unit", "agent-program-unit", "agent-platform", "runner-stop-file-unit", "smoke-runner-unit", "runner-matrix-workflow", "credential-store-unit", "runner-protocol2-unit", "run-live-unit", "environment-accounts-unit", "approval-deps", "runner-sessions-personal", "runner-only-mode", "runner-enroll", "runner-personal", "runner-protocol2", "runner-address-guard", "runner-review-fixes"]) expect(step.run, f).toContain(`tests/${f}.test.ts`);
+        expect(step.env?.TAQWRIGHT_HOME).toBe("/nonexistent-taqwright");
+    });
+});
+
+describe("the deploy workflow's signing steps", () => {
+    const text = fs.readFileSync(path.join(WORKFLOWS, "ai-studio-deploy.yml"), "utf8");
+    const dep = YAML.parse(text) as any;
+    it("signs the runner update in a job that installs no package, with the key from the secret only, and says so when the key is missing", () => {
+        const job = dep.jobs["sign-runner-update"];
+        expect(job.needs).toBe("runner-downloads");
+        const r = runs(job.steps).join("\n");
+        expect(r).not.toMatch(/npm (ci|install)/);
+        expect(r).toContain("node AI_Studio/scripts/sign-runner-update.mjs --kit");
+        expect(r).toMatch(/RUNNER_UPDATE_SIGNING_KEY is not set/);
+        const sign = (job.steps as Step[]).find((s) => s.run?.includes("sign-runner-update.mjs"))!;
+        expect(sign.env?.RUNNER_UPDATE_SIGNING_KEY).toBe("${{ secrets.RUNNER_UPDATE_SIGNING_KEY }}");
+        // The deploy takes the signed downloads when there are any.
+        expect(dep.jobs.deploy.needs).toEqual(["runner-downloads", "sign-runner-update"]);
     });
 
-    it("leaves the main CI workflow's jobs as they were", () => {
-        const ci = YAML.parse(fs.readFileSync(path.join(WORKFLOWS, "ci.yml"), "utf8")) as any;
-        expect(Object.keys(ci.jobs)).toEqual(["checks", "test"]);
+    it("signs the Windows program and the Mac package only when their secrets exist, and says so when they do not", () => {
+        expect(text).toContain("WIN_CERT_PFX");
+        expect(text).toContain("signtool");
+        expect(text).toMatch(/WIN_CERT_PFX is not set/);
+        for (const s of ["APPLE_DEVELOPER_ID_APPLICATION", "APPLE_DEVELOPER_ID_INSTALLER", "APPLE_TEAM_ID", "notarytool", "productsign"]) expect(text, s).toContain(s);
+        expect(text).toMatch(/Apple signing secrets are not set/);
     });
 });
 

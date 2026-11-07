@@ -6,27 +6,21 @@ import { help } from "../../lib/help";
 import { duration, plural } from "../../lib/format";
 import { routes } from "../../lib/router";
 import { StopRun } from "./StopDialog";
+import { Elapsed } from "./RunTime";
+import { followsRunner, useLiveRun } from "./LiveRun";
+import { currentLine, runPhase, withLive, type LiveRun, type TaskPhase } from "./live-run";
 import { announceRunsChanged, ranSentence, runningLine, STATE_WORD, stoppedLine, useActiveRun, useRunAnswer, whereOf, type RunAnswer, type RunState } from "./runs";
 import "./runs.css";
 
 const STATE_ICON = { waiting: Clock, running: LoaderCircle, passed: CircleCheck, failed: CircleX, finding: TriangleAlert, not_run: Minus } as const;
 const SHOWN = 50;
+/** The strip's word for a runner's task that is not running its tests yet, or is sending results (nothing while it runs). */
+const STRIP_PHASE: Partial<Record<TaskPhase, string>> = { queued: "Waiting for a runner", assigned: "Offered to the runner", accepted: "Accepted by the runner", preparing: "Getting ready", uploading: "Sending results" };
 
-/** Seconds since a moment, ticking. Not announced: the live line is the only part a screen reader hears. */
-function Elapsed({ since }: { since: string | null }) {
-    const [now, setNow] = useState(() => Date.now());
-    useEffect(() => {
-        const t = window.setInterval(() => setNow(Date.now()), 1000);
-        return () => clearInterval(t);
-    }, []);
-    if (!since) return null;
-    return <span aria-hidden>{duration(Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000) * 1000))}</span>;
-}
-
-/** The tests of a run, one row each: state, title (a link), time. At most `SHOWN` until asked for more. */
-export function RunTestList({ tests, onlyId }: { tests: RunAnswer["tests"]; onlyId?: string }) {
+/** The tests of a run, one row each: state, title (a link), time. At most `SHOWN` until asked for more. `live`: what the runner reported so far. */
+export function RunTestList({ tests, onlyId, live }: { tests: RunAnswer["tests"]; onlyId?: string; live?: LiveRun }) {
     const [all, setAll] = useState(false);
-    const rows = onlyId ? tests.filter((t) => t.id === onlyId) : tests;
+    const rows = (onlyId ? tests.filter((t) => t.id === onlyId) : tests).map((t) => withLive(t, live));
     const shown = all ? rows : rows.slice(0, SHOWN);
     return (
         <>
@@ -41,6 +35,7 @@ export function RunTestList({ tests, onlyId }: { tests: RunAnswer["tests"]; only
                             <span className="what">
                                 <a href={routes.test(t.id)}>{t.title}</a>
                                 <span className="t-meta">{t.testId}</span>
+                                {t.step && t.state === "running" && <span className="t-meta now">{t.step}</span>}
                                 {t.reason && t.state !== "passed" && <span className="why t-meta">{t.reason}</span>}
                             </span>
                             {t.flaky ? (
@@ -83,6 +78,9 @@ export function RunStrip({ projectId, testId, exceptJobId }: { projectId: string
     const jobId = active.job?.jobId ?? followed;
     const answer = useRunAnswer(projectId, jobId, Boolean(active.job));
     const [open, setOpen] = useState(false);
+    // A run on a runner: the phase, the test and step it is on, and its results so far, from the run's stored events (not on the run's own page, which shows them itself).
+    const followLive = followsRunner(answer.data?.job) && jobId !== exceptJobId;
+    const { live } = useLiveRun(jobId, followLive, Boolean(answer.data?.active), answer.stream);
 
     const a = answer.data;
     // The run is over when the run itself says so.
@@ -90,12 +88,18 @@ export function RunStrip({ projectId, testId, exceptJobId }: { projectId: string
     if (!jobId || !a || dismissed === jobId || jobId === exceptJobId) return null;
     if (testId && !a.tests.some((t) => t.id === testId)) return null;
 
-    const c = a.counts;
     const job = a.job;
+    const onRunner = followLive && live.detailed;
+    // Until the runner's results are stored, its own report of passed and failed is the better count (never lower than the stored one).
+    const c = onRunner ? { ...a.counts, passed: Math.max(a.counts.passed, live.passed), failed: Math.max(a.counts.failed, live.failed) } : a.counts;
     const scoped = Boolean(testId);
     const done = c.passed + c.failed + c.findings;
     const where = whereOf(job);
     const cancelled = job.cancelled;
+    const phase = followLive ? runPhase(job, live, a.active, a) : null;
+    const waitingWord = phase ? STRIP_PHASE[phase] : undefined;
+    const scopedTest = testId ? a.tests.find((t) => t.id === testId) : undefined;
+    const now = live.current && (!scoped || (scopedTest && (live.current.test.key === scopedTest.testId || live.current.test.key === scopedTest.id))) ? live.current : null;
 
     if (finished) {
         const failedRun = job.status === "FAILED" && !cancelled;
@@ -141,6 +145,12 @@ export function RunStrip({ projectId, testId, exceptJobId }: { projectId: string
                         )}
                         <span className="dot-sep" aria-hidden />
                         <span>{where === "this server" ? "On this server" : where}</span>
+                        {waitingWord && (
+                            <>
+                                <span className="dot-sep" aria-hidden />
+                                <span data-testid="run-strip-phase">{waitingWord}</span>
+                            </>
+                        )}
                         {job.startedAt && (
                             <>
                                 <span className="dot-sep" aria-hidden />
@@ -150,7 +160,13 @@ export function RunStrip({ projectId, testId, exceptJobId }: { projectId: string
                     </p>
                     {/* The one line a screen reader is told about: it changes only when the numbers do. */}
                     <p className="sr-only" role="status" aria-live="polite">{`${runningLine(job.mode, c, scoped)}, ${done} done${c.failed ? `, ${c.failed} failing` : ""}`}</p>
-                    {answer.stream.latest && <p className="t-meta latest truncate">{answer.stream.latest}</p>}
+                    {now ? (
+                        <p className="t-meta latest truncate" data-testid="run-strip-now">
+                            Now: {currentLine(now)}
+                        </p>
+                    ) : (
+                        answer.stream.latest && <p className="t-meta latest truncate">{answer.stream.latest}</p>
+                    )}
                 </div>
                 <div className="acts">
                     {!scoped && (
@@ -162,7 +178,7 @@ export function RunStrip({ projectId, testId, exceptJobId }: { projectId: string
                     <StopRun job={{ jobId, projectId, mode: job.mode }} onRequested={announceRunsChanged} />
                 </div>
             </div>
-            {(open || scoped) && <RunTestList tests={a.tests} onlyId={testId} />}
+            {(open || scoped) && <RunTestList tests={a.tests} onlyId={testId} live={followLive ? live : undefined} />}
         </section>
     );
 }

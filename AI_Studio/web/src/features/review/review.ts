@@ -3,7 +3,7 @@ import type { ValidationStatus } from "../../api";
 
 /** Review and approval of test versions (src/platform/routes/reviews.ts). */
 export type VersionState = "draft" | "in_review" | "approved" | "rejected" | "superseded";
-export type VersionSource = "ai" | "person" | "healing" | "import" | "shared" | "takeover" | "upgrade";
+export type VersionSource = "ai" | "person" | "healing" | "import" | "shared" | "takeover" | "upgrade" | "dependency";
 export type SyncStatus = "in_sync" | "text_changed" | "code_changed" | "needs_regeneration" | "code_only";
 
 export interface VersionSummary {
@@ -97,6 +97,7 @@ export const SOURCE_WORDS: Record<VersionSource, string> = {
     shared: "A shared element or reusable step was renamed",
     takeover: "Switched to code",
     upgrade: "Approved when review arrived",
+    dependency: "Reusable steps, a shared element or a helper it uses changed",
 };
 
 export const COMMENT_WORDS: Record<VersionComment["kind"], string> = {

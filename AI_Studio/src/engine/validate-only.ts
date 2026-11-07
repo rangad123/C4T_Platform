@@ -182,7 +182,11 @@ export async function runValidationOnly(ctx: EngineContext, req: ValidationOnlyR
         // A mobile-only batch needs no browser (and on a small machine the emulator needs the memory).
         // When the scripts run on a runner agent, the application may only be reachable from the agent's network: this machine's browser must not go there, so repair is skipped for a private address.
         const agentOnlyTarget = ctx.executor?.remote === true && isPrivateHost(new URL(req.url).hostname.replace(/^\[|\]$/g, ""));
-        const browser = !agentOnlyTarget && pending.some((t) => !t.custom && getAdapter(t.framework).traits.browserRepair) ? await launchChromium(ctx.config.HEADLESS) : undefined;
+        const wantsRepairBrowser = pending.some((t) => !t.custom && getAdapter(t.framework).traits.browserRepair);
+        // EXECUTION_MODE=runners: this server opens no browser (platform/runner-only.ts), so a failing test gets no repair suggestion that needs one.
+        const noServerBrowser = ctx.config.EXECUTION_MODE === "runners";
+        if (noServerBrowser && wantsRepairBrowser) ctx.emit({ stage: "validation", kind: "repair_browser_skipped", message: "Repair suggestions that need a browser are not made for this run: tests run only on runners here, and the platform opens no browser of its own." });
+        const browser = !agentOnlyTarget && !noServerBrowser && wantsRepairBrowser ? await launchChromium(ctx.config.HEADLESS) : undefined;
         try {
             const apiToken = await resolveApiToken(ctx, req.credentials);
             const batch = (items: TestUnderValidation[]): Promise<ValidationOutcome[]> => validateBatch(

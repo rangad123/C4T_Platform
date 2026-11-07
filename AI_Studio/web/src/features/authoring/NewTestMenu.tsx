@@ -3,7 +3,7 @@ import { useState } from "react";
 import { projectShape, type ProjectDetail } from "../../api";
 import { Menu, MenuItem, MenuLabel } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
-import { useRunsHere } from "../runs/runs-here";
+import { PLAIN_ON_RUNNERS, useExecutionMode, useRunsHere } from "../runs/runs-here";
 import { BuildTestDialog } from "../builder/BuildTestButton";
 import { WriteCodeDialog } from "../code/WriteCodeDialog";
 import { WriteTextDialog } from "../dsl/WriteAsText";
@@ -24,13 +24,15 @@ export function NewTestMenu({ projectId, onDescribe, onImport, variant = "primar
     const PHONE = "Web and API only: this project tests a phone app.";
     // The AI writes a described test inside a run: while tests are switched off on this server it is said here, before the click.
     const runsHere = useRunsHere();
+    // Runners mode: the platform refuses a described test (the AI builds it with a browser on the server).
+    const runnersOnly = useExecutionMode() === "runners";
     return (
         <>
             <Menu label="New test script" icon={Plus} variant={variant} wide dataTour="new-test">
                 {(done) => (
                     <>
                         <MenuLabel>With help</MenuLabel>
-                        <MenuItem icon={PencilLine} description={webOnly ? PHONE : !runsHere ? "Tests are switched off on this server, and the AI writes a described test inside a run." : "The AI writes the steps from your words. Uses the AI model."} disabled={webOnly || !runsHere} onClick={() => { done(); onDescribe(); }}>
+                        <MenuItem icon={PencilLine} description={webOnly ? PHONE : runnersOnly ? PLAIN_ON_RUNNERS : !runsHere ? "Tests are switched off on this server, and the AI writes a described test inside a run." : "The AI writes the steps from your words. Uses the AI model."} disabled={webOnly || !runsHere || runnersOnly} onClick={() => { done(); onDescribe(); }}>
                             Describe it
                         </MenuItem>
                         <MenuLabel>By hand</MenuLabel>

@@ -6,7 +6,7 @@
  * (`win/AITestingRunnerSetup.exe`, built with the C# compiler that ships with Windows) and the macOS app (`mac/AI Testing Runner.app/...`,
  * plain files with Unix modes). `dist/installer/manifest.json` lists every file with its mode and checksum; this module reads only
  * what the manifest names, verifies every checksum, and puts them in a zip next to the same runner bundle, `runner.json` and
- * `runner.token` a files kit holds. Nothing from the server's environment, `.env`, database or data folder is ever read.
+ * `runner.enroll` (a single-use enrollment code) a files kit holds. Nothing from the server's environment, `.env`, database or data folder is ever read.
  *
  * If the installer was not built (or the part for the chosen system is missing or damaged) the caller falls back to the files kit and says so.
  */
@@ -18,7 +18,7 @@ import { z } from "zod";
 import { REPO_ROOT } from "../config.js";
 import { NODE_MIN_MAJOR, withLineEnding, type KitPlatform } from "./runner-kit-scripts.js";
 import { CHECK_FILES } from "./runner-check-scripts.js";
-import type { Bundle } from "./runner-kit.js";
+import { kitCredentialFile, type Bundle } from "./runner-kit.js";
 
 export type KitKind = "installer" | "files";
 
@@ -143,20 +143,20 @@ const WINDOWS_STEPS = `1. Unzip this folder on the computer where your applicati
    Windows may say "Windows protected your PC" because the installer is not signed yet. Choose More info, then Run anyway.
 3. The setup window checks what your computer already has and only downloads what is missing: Node.js and the test tools. You do not need to install anything first, and it does not need administrator rights. The runner itself uses Chrome or Edge from this computer, or downloads a browser once.
 4. Choose Install and start. When the window says "The runner is running", the runner shows as online under Settings, then Runners in the platform. You can close the window: the runner keeps working in the background and has an icon in the notification area next to the clock.
-5. Delete the zip file and this unzipped folder once the runner is online. Setup copies what it needs to your own folder (C:\\Users\\<you>\\AppData\\Local\\AITestingRunner). The file runner.token in this folder is a secret: anyone who has it can connect a runner to the project and receive its test runs.
+5. Delete the zip file and this unzipped folder once the runner is online. Setup copies what it needs to your own folder (C:\\Users\\<you>\\AppData\\Local\\AITestingRunner). The file runner.enroll in this folder is a one-time code: it works once, within 30 minutes of the download, and the runner deletes it when it connects.
 
 Later: open "AI Testing Runner" from the Start menu (if you left that box ticked) to see the runner again. Right-click the notification-area icon to stop the runner, open the platform, show the log or remove the runner from this computer.
 Remove it completely: right-click the icon and choose "Remove this runner from the computer", or run AITestingRunnerSetup.exe --uninstall. That deletes only what Setup put in its own folder; a Node.js that was already on the computer and the shared browser cache stay.
 To take this runner's access away, open Settings, then Runners in the platform and revoke its token. The runner then stops with a message saying so.
 
-If Setup cannot find the runner files, open it from the folder you unzipped: that folder holds runner.mjs, runner.json and runner.token next to it.`;
+If Setup cannot find the runner files, open it from the folder you unzipped: that folder holds runner.mjs, runner.json and runner.enroll next to it.`;
 
 const MAC_STEPS = `1. Unzip this folder on the Mac where your application can be reached (double-click the zip file).
 2. Open the folder and double-click "AI Testing Runner".
    macOS will probably say it could not verify the app, because the app is not signed yet. On macOS 15 and newer: choose Done, open System Settings, Privacy & Security, scroll down to Security and choose Open Anyway, then sign in. On macOS 14 and older: right-click the app, choose Open, then Open. In Terminal you can instead run  xattr -dr com.apple.quarantine "AI Testing Runner.app"  once.
 3. A Terminal window opens and shows what it checks: it only downloads what your Mac is missing (Node.js and the test tools). The runner itself uses Chrome or Edge from this Mac, or downloads a browser once. You do not need to install anything first, and it does not need an administrator password.
 4. When it says the runner is connected, the runner shows as online under Settings, then Runners in the platform.
-5. Delete the zip file and this unzipped folder once the runner is online. The file runner.token in this folder is a secret: anyone who has it can connect a runner to the project and receive its test runs.
+5. Delete the zip file and this unzipped folder once the runner is online. The file runner.enroll in this folder is a one-time code: it works once, within 30 minutes of the download, and the runner deletes it when it connects.
 
 To take this runner's access away, open Settings, then Runners in the platform and revoke its token. The runner then stops with a message saying so.`;
 
@@ -186,8 +186,12 @@ export interface BuildInstallerInput {
     projectName: string;
     projectSlug: string;
     platformUrl: string;
-    /** The new project token (aitg_...). The only copy there will ever be. */
-    token: string;
+    /** The single-use enrollment code (aite_...), written as runner.enroll; every download carries one (round 39). See runner-kit.ts kitCredentialFile. */
+    enrollCode?: string;
+    /** The signed-update sequence of this server's runner files (runner-update.ts downloadSequence): a fresh download refuses older signed updates. */
+    updateSequence?: number;
+    /** @deprecated Test seam only (runner.token); the platform's routes never pass one. */
+    token?: string;
 }
 
 export function buildInstallerZip(i: BuildInstallerInput): Uint8Array {
@@ -202,9 +206,13 @@ export function buildInstallerZip(i: BuildInstallerInput): Uint8Array {
     for (const f of i.part.files) add(f.name, f.data, f.mode);
     // The same runner bundle as a files kit: the exact prebuilt bytes.
     for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) add(name, i.bundle.files.get(name)!);
+    // The test tools' lock file (from round 39 on): the start scripts and installers install from it with npm ci.
+    const lock = i.bundle.files.get("package-lock.json");
+    if (lock) add("package-lock.json", lock);
     // What belongs to this download.
-    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.runnerName, kitVersion }, null, 2)}\n`));
-    add("runner.token", text(`${i.token}\n`), 0o600);
+    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.runnerName, kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
+    const credential = kitCredentialFile(i);
+    add(credential.name, text(credential.text), 0o600);
     // "Check this computer" (docs/features/runner-check.md): checks the runner the installer set up; Setup runs the same check at its end.
     for (const f of CHECK_FILES) add(f.name, text(withLineEnding(f.text, f.eol)), 0o755);
     add("README.txt", text(withLineEnding(installerReadme({ platform: i.platform, projectName: i.projectName, runnerName: i.runnerName, platformUrl: i.platformUrl, kitVersion }), i.platform === "windows" ? "\r\n" : "\n")));

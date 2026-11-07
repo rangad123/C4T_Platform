@@ -9,12 +9,13 @@
  *  - the agent pushes the whole recording state (RecordingPush) and receives the page's commands in the heartbeat reply.
  */
 import { RecordCommand, type LiveResultWire, type RecordCommand as RecordCommandT, type RecordingPush as RecordingPushT, type RecStepWire, type ResultRequest } from "../agent-protocol/schema.js";
+import { ON_SERVER_REFUSED } from "./runner-only.js";
 import { cleanAgentSnapshot, LIVE_LIMITS, type LiveAction, type LiveSnapshot } from "../engine/recorder/act.js";
 import { describeRecStep } from "../engine/recorder/describe.js";
 import { hasSavableSteps, reindex } from "../engine/recorder/normalise.js";
 import { clip, locatorKey, REC_LIMITS, SECRET_PLACEHOLDERS, type RecAssertCheck, type RecStep, type SecretKind } from "../engine/recorder/model.js";
 import { checkPatch, describeStep, type ActOutcome, type StepPatch } from "../engine/recorder/session.js";
-import type { AgentRecord, RunnerSetting } from "./agent-store.js";
+import { ONLINE_MS, type AgentRecord, type AgentTokenRecord, type RunnerSetting } from "./agent-store.js";
 import { RateLimiter, scrubSecrets } from "./agent-routing.js";
 import { HttpError } from "./http-error.js";
 import type { Recording, RecorderDriver } from "./recorder-service.js";
@@ -46,6 +47,51 @@ export const MAX_PUSH_BYTES = 1_000_000;
 
 export type RecorderChoice = { kind: "platform" } | { kind: "agent"; agent: AgentRecord };
 
+/**
+ * A machine a recording, a live session or a phone session may be opened on: the team runners given to the project, and the caller's own
+ * computers (personal runners) while the project allows people's own computers and the caller may still run its tests. Another person's
+ * computer is never in the list: it hosts sessions for its owner only.
+ */
+export type SessionHost = AgentRecord & { online: boolean; activeTasks?: number; personal?: boolean; ownerId?: string | null; allowRealPhone?: boolean };
+
+/** What sessionHosts needs of the runner store (agent-store.ts). */
+export interface SessionHostStore {
+    listAgents(projectId: string): Array<AgentRecord & { online: boolean; activeTasks: number }>;
+    personalTokensOf(ownerId: string): Array<Pick<AgentTokenRecord, "id" | "revokedAt" | "ownerId" | "allowRealPhone">>;
+    agentsOfToken(tokenId: string): AgentRecord[];
+    allowsPersonal(projectId: string): boolean;
+    ownerMayRun(ownerId: string, projectId: string): boolean;
+    runningCount(agentId: string): number;
+}
+
+/** The machines `callerId` may open a session on in this project: the caller's own computers first, then the project's team runners. */
+export function sessionHosts(store: SessionHostStore, projectId: string, callerId: string | null, now: number = Date.now()): SessionHost[] {
+    const team: SessionHost[] = store.listAgents(projectId).map((a) => ({ ...a, personal: false, ownerId: null }));
+    if (!callerId || !store.allowsPersonal(projectId) || !store.ownerMayRun(callerId, projectId)) return team;
+    const own: SessionHost[] = store
+        .personalTokensOf(callerId)
+        .filter((t) => !t.revokedAt && t.ownerId === callerId)
+        .flatMap((t) => store.agentsOfToken(t.id).slice(0, 1).map((a) => ({ ...a, online: now - a.lastSeenMs <= ONLINE_MS, activeTasks: store.runningCount(a.id), personal: true, ownerId: callerId, allowRealPhone: t.allowRealPhone })));
+    return [...own, ...team];
+}
+
+/** Only the caller's own computers and team runners: another person's computer is dropped (defence in depth: sessionHosts never lists one). */
+export const visibleHosts = <T extends SessionHost>(agents: T[], callerId: string | null | undefined): T[] => agents.filter((a) => !a.personal || (Boolean(callerId) && a.ownerId === callerId));
+
+/**
+ * May this person read or drive a session? A session on a person's own computer is its starter's alone (anyone else is told "not found",
+ * like an id that does not exist); a session on a team runner or on the platform follows the project's rules, as before.
+ */
+export function maySeeSession(session: { onPersonalRunner: boolean; startedBy: string | null } | undefined, callerId: string | null): boolean {
+    if (!session?.onPersonalRunner) return true;
+    return Boolean(callerId) && session.startedBy === callerId;
+}
+
+/** The caller as a person (a signed-in user or their own API token), or null for the access key, a schedule, the system. */
+export function callerIdOf(actor: { kind: string; id?: string | undefined }): string | null {
+    return actor.kind === "user" && actor.id ? actor.id : null;
+}
+
 /** Why an agent cannot host this recording, in words for the person, or undefined when it can. */
 export function recordProblem(agent: Pick<AgentRecord, "name" | "capabilities">, headed: boolean): string | undefined {
     const c = agent.capabilities;
@@ -55,25 +101,29 @@ export function recordProblem(agent: Pick<AgentRecord, "name" | "capabilities">,
 }
 
 /**
- * Where does a new recording run? Pure: the decision table of the start route.
+ * Where does a new recording run? Pure: the decision table of the start route. `agents` comes from sessionHosts (the caller's own computers and
+ * the project's team runners); another person's computer is never chosen, named or not (it answers "not found").
  *  - `on` absent: the agent when the project's runner setting is "agent", else the platform (today's behaviour);
  *  - `on: "platform"`: always the platform; `on: "agent"`: an online agent of the project that can record (the one named, or the one the project
  *    is pinned to, or the best of the online ones), otherwise a plain refusal naming what is missing.
  */
-export function chooseRecorder(input: { on?: "platform" | "agent"; agentId?: string; headed: boolean; runner: RunnerSetting; agents: Array<AgentRecord & { online: boolean; activeTasks?: number }> }): RecorderChoice {
+export function chooseRecorder(input: { on?: "platform" | "agent"; agentId?: string; headed: boolean; runner: RunnerSetting; agents: SessionHost[]; caller?: string | null }): RecorderChoice {
+    const agents = visibleHosts(input.agents, input.caller);
     const target = input.on ?? (input.runner.runOn === "agent" ? "agent" : "platform");
+    // EXECUTION_MODE=runners: nothing is started on the server, even when asked for by name (runner-only.ts).
+    if (target === "platform" && input.runner.runnersOnly) throw new HttpError(409, ON_SERVER_REFUSED("Recording"), { executionMode: "runners" });
     if (target === "platform") return { kind: "platform" };
     const wanted = input.agentId ?? input.runner.agentId ?? undefined;
     if (wanted) {
-        const agent = input.agents.find((a) => a.id === wanted);
+        const agent = agents.find((a) => a.id === wanted);
         if (!agent) throw new HttpError(404, "That runner agent does not belong to this project.");
         if (!agent.online) throw new HttpError(409, `${agent.name} is offline. Start it, or use another agent or the platform.`);
         const why = recordProblem(agent, input.headed);
         if (why) throw new HttpError(422, why);
         return { kind: "agent", agent };
     }
-    const online = input.agents.filter((a) => a.online);
-    if (online.length === 0) throw new HttpError(409, "No runner agent is online for this project. Start one, or record on the platform instead.");
+    const online = agents.filter((a) => a.online);
+    if (online.length === 0) throw new HttpError(409, input.runner.runnersOnly ? "No runner is online for this project. Start one to record." : "No runner agent is online for this project. Start one, or record on the platform instead.");
     const capable = online.filter((a) => !recordProblem(a, input.headed));
     if (capable.length === 0) throw new HttpError(422, recordProblem(online[0]!, input.headed)!);
     capable.sort((a, b) => (a.activeTasks ?? 0) - (b.activeTasks ?? 0));
@@ -207,6 +257,8 @@ export interface RemoteDeps {
     settleMs?: number;
     /** Driving step by step: how long an action or a snapshot may wait for the agent's answer (default 30 s). */
     liveWaitMs?: number;
+    /** Why the session must end now (its starter lost access to the project, the computer may no longer host it), or undefined. Asked on every beat. */
+    accessProblem?(): string | undefined;
 }
 
 export interface RemoteInit {
@@ -220,6 +272,10 @@ export interface RemoteInit {
     maxSteps: number;
     /** The agent reports it understands the act and snapshot commands (capabilities.liveSession). */
     live?: boolean;
+    /** The person who started it (null: the access key or the system). */
+    startedBy?: string | null;
+    /** It runs on a person's own computer: only its starter may read or drive it. */
+    personal?: boolean;
 }
 
 /** Said when a session on an agent is driven step by step but the agent does not know how. */
@@ -274,6 +330,12 @@ export class RemoteDriver implements RecorderDriver {
     }
     get taskId(): string {
         return this.init.taskId;
+    }
+    get startedBy(): string | null {
+        return this.init.startedBy ?? null;
+    }
+    get onPersonalRunner(): boolean {
+        return this.init.personal === true;
     }
 
     private get finished(): boolean {
@@ -398,6 +460,14 @@ export class RemoteDriver implements RecorderDriver {
     onHeartbeat(): { commands: RecordCommandT[]; cancel: boolean } {
         this.lastContact = this.deps.clock();
         this.tick();
+        // Its starter lost access (or the computer may no longer host it): the session ends within this beat; the steps so far are kept.
+        const gone = this.finished ? undefined : this.deps.accessProblem?.();
+        if (gone) {
+            this.discarded = true;
+            this.deps.cancel(this.init.taskId);
+            this.end("stopped", gone);
+            return { commands: [], cancel: true };
+        }
         const t = this.deps.task(this.init.taskId);
         return { commands: this.finished ? [] : this.queue.next(), cancel: this.discarded || Boolean(t?.cancelRequested) };
     }
@@ -609,6 +679,11 @@ export class RecordHub {
     }
     get(taskId: string): RemoteDriver | undefined {
         return this.byTask.get(taskId);
+    }
+    /** The driver of a recording, by the recording's id. */
+    byRecording(recordingId: string): RemoteDriver | undefined {
+        for (const d of this.byTask.values()) if (d.id === recordingId) return d;
+        return undefined;
     }
     forget(taskId: string): void {
         this.byTask.delete(taskId);

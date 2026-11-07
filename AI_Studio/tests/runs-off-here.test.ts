@@ -21,7 +21,7 @@ let dir: string;
 let shop: Seed;
 let testId: string;
 
-const call = async (method: "GET" | "POST", url: string, payload?: unknown) => {
+const call = async (method: "GET" | "POST" | "DELETE", url: string, payload?: unknown) => {
     const res = await app.inject({ method, url, ...(payload !== undefined ? { payload: payload as object } : {}) });
     return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
 };
@@ -83,6 +83,20 @@ describe("tests switched off on this server", () => {
         const items = (await call("GET", `/api/projects/${shop.projectId}/setup-check`)).body.items as Array<{ key: string; ok: boolean; text: string }>;
         expect(items.find((i) => i.key === "runner")).toEqual({ key: "runner", ok: false, text: "Tests are switched off on this server, so no run starts here. Tests you make are kept." });
         expect((await call("GET", "/api/config")).body.runsHere).toBe(false);
+    });
+
+    it("a schedule's Run now is refused and queues nothing, and the schedules list says schedules do not fire", async () => {
+        const made = await call("POST", `/api/projects/${shop.projectId}/schedules`, { kind: "validate", cadence: { type: "daily", time: "03:00" } });
+        expect(made.status).toBe(201);
+        const r = await call("POST", `/api/projects/${shop.projectId}/schedules/${made.body.id}/run`);
+        expect(r.status).toBe(409);
+        expect(r.body.error).toBe(RUNS_OFF_MESSAGE);
+        expect(jobs()).toBe(0);
+        const listed = (await call("GET", `/api/projects/${shop.projectId}/schedules`)).body;
+        expect(listed).toMatchObject({ schedulerEnabled: false, schedulesFire: false, executionMode: "local" });
+        expect(listed.schedulesNote).toMatch(/^Schedules are switched off on this server/); // SCHEDULER_ENABLED=false here; with it on, the note is NO_WORKER_MESSAGE
+        expect((await call("GET", "/api/config")).body.executionMode).toBe("local");
+        expect((await call("DELETE", `/api/projects/${shop.projectId}/schedules/${made.body.id}`)).status).toBe(204);
     });
 
     it("starts again once a worker in another process says it is alive, and stops when its word is old", async () => {

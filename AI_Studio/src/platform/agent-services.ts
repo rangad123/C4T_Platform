@@ -11,10 +11,11 @@
  * from whatever the agent sends back before it is stored.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { NO_RUNNER_MESSAGE, runnersOnly } from "./runner-only.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { describeBrowser } from "../engine/browsers/choice.js";
-import { PROTOCOL_VERSION, ResultRequest, SafeName, TaskOffer, WebBrowserUsed, type Capabilities, type HelloRequest, type DeviceCommand, type DevicePush, type HeartbeatRequest, type RecordCommand, type RecordingPush, type WireRun } from "../agent-protocol/schema.js";
+import { LIVE_EVENT_KINDS, PROTOCOL_VERSION, ResultRequest, SafeName, SUPERSEDED, SUPPORTED_PROTOCOLS, TaskOffer, WebBrowserUsed, type Capabilities, type HelloRequest, type DeviceCommand, type DevicePush, type EventsRequest, type HeartbeatRequest, type LiveEvent, type RecordCommand, type RecordingPush, type RejectRequest, type AgentPhase, type RunnerConfigPush, type TaskPhase, type WireRun } from "../agent-protocol/schema.js";
 import { CLEANUP_STATUSES, countItems, summaryLine, type CleanupStatus, type FinishedItem } from "../engine/cleanup/ledger.js";
 import { parseEvidence } from "../engine/evidence/model.js";
 import { adapterForSpec, defaultAdapterFor, getAdapter, IOS_ADAPTER_ID, setExecutorResolver } from "../engine/frameworks/index.js";
@@ -25,8 +26,12 @@ import { secretsOfRun } from "../engine/evidence/model.js";
 import { agentDesktopProblem, assertHostDesktop, desktopApps } from "./desktop-guard.js";
 import { desktopUnavailableReason, lastProbe, probeDesktop } from "../engine/desktop/probe.js";
 import type { Platform } from "./bootstrap.js";
-import { AgentStore, MAX_OFFERS, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type RunnerSetting, type TaskFile, type TaskRecord } from "./agent-store.js";
-import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecrets, RateLimiter, scrubSecrets, toWireEnv } from "./agent-routing.js";
+import { AgentStore, isSharedToken, jobOwnerId, MAX_OFFERS, NEVER_ACCEPTED, refusalsOf, MAX_PERSONAL_RUNNERS, MAX_RUNNERS_PER_ORGANIZATION, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type RunnerSetting, type SweepChange, type TaskFile, type TaskRecord } from "./agent-store.js";
+import { currentActor } from "./auth/actor.js";
+import { isPrivateHost } from "./net-guard.js";
+import { maxTokensFrom } from "./runner-kit.js";
+import type { EnrollRequest, EnrollResponse, RotateResponse } from "../agent-protocol/schema.js";
+import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecrets, liveEventData, liveEventMessage, negotiateProtocol, phaseSentence, RateLimiter, scrubSecrets, toWireEnv } from "./agent-routing.js";
 import { DeviceHub, deviceAgentOf, isDeviceAdapter } from "./agent-device.js";
 import { isRecordAdapter, RecordHub, RemoteDriver, recordAdapterId, recordAgentOf, recordJobId, type RemoteInit } from "./agent-record.js";
 import { IdentityStore } from "./identity-store.js";
@@ -38,6 +43,12 @@ import type { JobOptions, JobRow } from "./repo.js";
 import { SecretBox } from "./secrets.js";
 
 export const NO_AGENT_MESSAGE = "No runner agent is connected for this project. Start one, or switch the project back to running here.";
+/** The project's "Allow people's own computers" is off (migration 51). */
+export const PERSONAL_NOT_ALLOWED = "This project does not allow people's own computers. A project admin can switch that on in the project's settings.";
+/** Live events kept per task attempt (whichever comes first); past them one note, and the rest only in the final result. */
+export const LIVE_EVENTS_MAX = 5_000;
+export const LIVE_EVENT_BYTES_MAX = 5 * 1024 * 1024;
+export const LIVE_EVENTS_TRUNCATED = "Too many live events; the rest are in the final result.";
 /** iOS tests never run on the platform server: they need a Mac with Xcode, which only a runner agent can be. */
 export const IOS_NEEDS_AGENT_MESSAGE = "iOS tests need a runner agent on a Mac with Xcode. Connect one and choose it for this project.";
 
@@ -54,6 +65,8 @@ export interface AgentLimits {
     noAgentGraceMs: number;
     /** How often the executor looks at its task. */
     watchMs: number;
+    /** Protocol 2: how long an agent has to accept a task it was handed before it goes back to the queue. */
+    acceptSeconds: number;
 }
 
 export function agentLimits(env: NodeJS.ProcessEnv = process.env): AgentLimits {
@@ -70,11 +83,61 @@ export function agentLimits(env: NodeJS.ProcessEnv = process.env): AgentLimits {
         taskMaxFiles: Math.round(num("AGENT_TASK_MAX_FILES", 300, 1, 2000)),
         noAgentGraceMs: Math.round(num("AGENT_NO_AGENT_GRACE_SECONDS", 90, 0, 1800)) * 1000,
         watchMs: Math.round(num("AGENT_WATCH_MS", 1000, 20, 5000)),
+        acceptSeconds: Math.round(num("AGENT_ACCEPT_SECONDS", 30, 1, 300)),
     };
 }
 
 /** The failure of the run itself, not of a test: the agent could not run the tests, or was lost. Never a test verdict. */
 export class RunnerAgentError extends Error {}
+
+/** Who a run is for and the runner chosen for it (per-run choice), as eligibility needs them. */
+export interface RunContext {
+    /** The person whose run it is (a schedule's: the person who made it); null: nobody's, so no personal runner takes it. */
+    ownerId: string | null;
+    /** The runner (agent_tokens.id) chosen for this run; null: the project's setting decides. */
+    runnerId?: string | null;
+}
+
+export { jobOwnerId };
+
+/** The runner chosen for this run (`JobOptions.runner.id`), if any. */
+export function chosenRunnerOf(options: JobOptions): string | null {
+    const id = (options as JobOptions & { runner?: { id?: unknown } }).runner?.id;
+    return typeof id === "string" && id.length > 0 && id.length <= 64 ? id : null;
+}
+
+/** Whose a job about to be made is: its recorded starter, else the person acting now (createJob records them only after its gates). */
+export function ownerOfNewJob(options: JobOptions): string | null {
+    if (options.startedBy) return jobOwnerId(options);
+    const a = currentActor();
+    return a.kind === "user" && a.id ? a.id : null;
+}
+
+/**
+ * Is this address private or local from a tester's point of view: loopback, private ranges, link-local (169.254.x), and names only a local
+ * network knows (no dot, .local, .lan, .internal, .home.arpa, .localhost). Names that resolve privately are caught on the runner itself
+ * (BLOCK_PRIVATE_TARGETS in every test it runs).
+ */
+export function looksPrivateAddress(raw: string): boolean {
+    let host: string;
+    try {
+        host = new URL(raw).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    } catch {
+        return false;
+    }
+    if (!host) return false;
+    if (isPrivateHost(host)) return true;
+    if (/^[0-9a-f:]+$/.test(host) && host.includes(":")) return false;
+    if (/^\d+(\.\d+){3}$/.test(host)) return false;
+    return !host.includes(".") || /\.(local|lan|internal|home\.arpa|localhost|localdomain|intranet)$/.test(host);
+}
+
+/** A credential presented from a computer other than the one it is bound to (the route adds an Activity entry). */
+export class MachineRefused extends HttpError {
+    constructor(readonly token: AgentTokenRecord) {
+        super(409, "This runner's credential belongs to another computer, so this one was refused. Add this computer on the Runners page to give it its own.");
+    }
+}
 
 const sleep = (ms: number, signal?: AbortSignal) =>
     new Promise<void>((resolve) => {
@@ -131,6 +194,11 @@ export class AgentService {
     private lastSweepMs = Number.NEGATIVE_INFINITY;
     private apkHashes = new Map<string, { size: number; mtimeMs: number; sha: string }>();
     private lastPrune = 0;
+    /** Who each job is for, and the runner chosen for it (jobContext). */
+    private readonly jobContexts = new Map<string, RunContext>();
+    /** POST /api/agent/enroll, per address and per code (enroll). */
+    private readonly enrollLimit: RateLimiter;
+    private readonly enrollCodeLimit: RateLimiter;
     /** Recordings that live on an agent, by record task id (see agent-record.ts). */
     readonly records = new RecordHub();
     /** Phone sessions that live on an agent, by device task id (see agent-device.ts). */
@@ -146,6 +214,9 @@ export class AgentService {
         this.secrets = new SecretBox(p.config.dataDir, p.config.SECRET_KEY);
         this.helloLimit = new RateLimiter(6, 60_000, this.clock);
         this.generalLimit = new RateLimiter(900, 60_000, this.clock);
+        // Per address (an office may add several computers at once) and, separately, per code (enroll keys them apart).
+        this.enrollLimit = new RateLimiter(30, 60_000, this.clock);
+        this.enrollCodeLimit = new RateLimiter(5, 60_000, this.clock);
     }
     readonly clock: () => number;
 
@@ -168,21 +239,62 @@ export class AgentService {
     }
 
     hello(token: AgentTokenRecord, body: HelloRequest) {
-        if (body.protocol !== PROTOCOL_VERSION) throw new HttpError(409, `This runner agent speaks protocol ${body.protocol} and the platform speaks protocol ${PROTOCOL_VERSION}. Update the agent.`);
+        // Version negotiation (protocol 2): the highest version both speak. An agent that names no list speaks only `protocol` (every protocol-1 agent).
+        const speak = negotiateProtocol(body);
+        if (speak === undefined) throw new HttpError(409, `This runner agent speaks protocol ${body.protocol} and the platform speaks protocol ${PROTOCOL_VERSION}. Update the agent.`);
         // One token stands for one agent: it is what ties a task to the agent that claimed it.
-        const other = this.store.agentsOfToken(token.id).find((a) => a.name !== body.name && this.clock() - a.lastSeenMs <= ONLINE_MS);
+        // The computer a credential is bound to (migration 51): the first install id it was used with. Another computer is refused; a runner
+        // that sends no id keeps today's behaviour, unless its credential came from an enrollment code (such a runner always sends one).
+        if (body.machineId) {
+            if (token.machineId && token.machineId !== body.machineId) throw new MachineRefused(token);
+            if (!token.machineId) this.store.bindMachine(token.id, body.machineId);
+        } else if (token.machineId && (token.kind === "personal" || this.store.isEnrolled(token.id))) throw new MachineRefused(token);
+        const other = this.store.agentsOfToken(token.id).find((a) => a.name !== body.name && (!body.machineId || a.machineId !== body.machineId) && this.clock() - a.lastSeenMs <= ONLINE_MS);
         if (other) throw new HttpError(409, `This token is already used by the agent “${other.name}”, which is online. Make a token for each machine.`);
         const agent = this.store.upsertAgent(token, body);
+        this.store.setAgentProtocol(agent.id, speak);
         return {
             agentId: agent.id,
             // Always a string, as protocol 1 says. An installed runner only prints it; a runner registered on the Runners page has no project of its own.
             projectId: token.projectId ?? "shared",
-            protocol: PROTOCOL_VERSION,
+            protocol: speak,
             pollSeconds: this.limits.pollSeconds,
             heartbeatSeconds: this.limits.heartbeatSeconds,
             maxFileBytes: this.limits.maxFileBytes,
             serverTime: new Date(this.clock()).toISOString(),
+            // What this runner is and what its switches allow (additive; an older agent ignores it), and whether its credential is due for a new one.
+            runner: { id: token.id, kind: token.kind, ...this.runnerSwitches(token.id) },
+            ...(this.store.rotationDue(token) || token.viaPrevious ? { rotate: true } : {}),
         };
+    }
+
+    /**
+     * POST /api/agent/enroll: trade a single-use enrollment code for a runner credential. Limited per address and per code, so codes cannot be
+     * guessed (they are 32 random bytes anyway). The answers say what to do in plain words; the code is never logged.
+     */
+    enroll(body: EnrollRequest, address: string): EnrollResponse {
+        if (!this.enrollLimit.take(`ip:${address}`) || !this.enrollCodeLimit.take(createHash("sha256").update(body.code).digest("hex"))) {
+            throw new HttpError(429, "Too many attempts to add a runner from this address. Wait a minute and try again.");
+        }
+        const out = this.store.redeemEnrollment(body.code, { name: body.name, machineId: body.machineId }, { maxPersonal: MAX_PERSONAL_RUNNERS, maxPerOrganization: MAX_RUNNERS_PER_ORGANIZATION, maxPerProject: maxTokensFrom() });
+        if (!out.ok) {
+            if (out.reason === "expired") throw new HttpError(410, "This code has expired. Make a new one on the Runners page.");
+            if (out.reason === "used") throw new HttpError(410, "This code was already used. Make a new one on the Runners page.");
+            if (out.reason === "personal-cap") throw new HttpError(409, `This person has added ${MAX_PERSONAL_RUNNERS} computers already, the most one person can have. Retire one on the Runners page, then make a new code.`);
+            if (out.reason === "runner-cap") throw new HttpError(409, `This organisation has ${MAX_RUNNERS_PER_ORGANIZATION} runners already, the most it can have. Retire one on the Runners page, then make a new code.`);
+            if (out.reason === "project-cap") throw new HttpError(409, "This project already has as many runners as it may have. Remove one on the Runners page, then make a new code.");
+            if (out.reason === "maker") throw new HttpError(403, "The person who made this code can no longer manage runners. Ask someone who can to make a new one on the Runners page.");
+            throw new HttpError(404, "This enrollment code is not valid. Make a new one on the Runners page.");
+        }
+        return { token: out.secret, runnerId: out.token.id, kind: out.token.kind };
+    }
+
+    /** POST /api/agent/rotate: a new credential; the presented one keeps working until the new one is first used, at most 24 hours. */
+    rotate(token: AgentTokenRecord, header: string | string[] | undefined): RotateResponse {
+        const presented = bearerToken(header);
+        const out = presented ? this.store.rotateToken(token.id, presented) : undefined;
+        if (!out) throw new HttpError(404, "This runner agent token is not valid or was revoked.");
+        return { token: out.secret, previousValidUntil: new Date(out.previousUntilMs).toISOString() };
     }
 
     /** The agent a token's poll speaks for (it must be one this token registered). */
@@ -200,44 +312,151 @@ export class AgentService {
         if (freeSlots < 1) return undefined;
         if (this.clock() - this.lastSweepMs >= SWEEP_EVERY_MS) {
             this.lastSweepMs = this.clock();
-            this.store.sweep();
+            this.sweep();
         }
         if (this.store.runningCount(agent.id) >= agent.concurrency) return undefined;
-        for (const t of this.store.queuedFor(agent.tokenId)) {
+        const token = this.store.getToken(agent.tokenId);
+        if (!token || token.revokedAt) return undefined;
+        // A team runner looks at the projects it was given; a personal runner at its owner's runs, wherever they are (it has no project access of its own).
+        const candidates =
+            token.kind === "personal" ? (token.ownerId ? this.store.queuedOfOwner(token.ownerId) : []) : this.store.queuedFor(agent.tokenId);
+        for (const t of candidates) {
+            // A runner that said no to a task (protocol 2 reject) is never offered it again.
+            if (refusalsOf(t).some((r) => r.agentId === agent.id)) continue;
+            // Recordings, live sessions and phone sessions: only the machine they were started on, and a person's own computer only for its owner's own sessions.
+            if (isRecordAdapter(t.adapterId) || isDeviceAdapter(t.adapterId)) {
+                const session = this.offerSession(agent, token, t);
+                if (session) return session;
+                continue;
+            }
+            if (token.kind === "personal" && !this.personalMayTake(token, t)) continue;
+            // The runner chosen for this run (per-run choice) is the only one that may take it; the project's pin does not apply then.
+            const chosen = this.jobContext(t.jobId).runnerId;
+            if (chosen && chosen !== token.id) continue;
             const setting = this.store.getRunner(t.projectId);
-            const pinnedElsewhere = setting.runOn === "agent" && Boolean(setting.agentId) && setting.agentId !== agent.id;
-            // A record task goes only to the agent the recording was started on (and only if it can record), whatever the project's runner setting says.
-            if (isRecordAdapter(t.adapterId)) {
-                if (recordAgentOf(t.adapterId) !== agent.id || agent.capabilities.record !== true) continue;
-                const rec = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000);
-                if (!rec) continue;
-                return { ...this.secrets.decrypt<TaskOffer>(rec.payloadEnc), leaseSeconds: this.limits.leaseSeconds };
-            }
-            // A phone session likewise goes only to the agent it was started on, and only if that agent reports it can host one (an older agent never sees it).
-            if (isDeviceAdapter(t.adapterId)) {
-                if (deviceAgentOf(t.adapterId) !== agent.id || agent.capabilities.deviceSession !== true) continue;
-                const dev = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, this.deviceOf(t));
-                if (!dev) continue;
-                return { ...this.secrets.decrypt<TaskOffer>(dev.payloadEnc), leaseSeconds: this.limits.leaseSeconds };
-            }
+            const pinnedElsewhere = !chosen && setting.runOn === "agent" && Boolean(setting.agentId) && setting.agentId !== agent.id;
             if (pinnedElsewhere) continue;
             const adapter = this.adapterOrUndefined(t.adapterId);
             if (!adapter || capabilityProblem(adapter, agent.capabilities)) continue;
-            // A task with hand-written scripts goes only to an agent whose owner agreed to run them (it reports customScripts), and never to a
-            // shared runner (no organisation, no project): one customer's code must not run on a machine that serves others.
-            if ((agent.capabilities.customScripts !== true || this.isSharedRunner(agent)) && this.hasCustomScripts(t)) continue;
+            // A task with hand-written scripts goes only where its owner agreed to run them (mayRunCodeScripts), and never to a shared runner.
+            if (this.hasCustomScripts(t) && !this.mayRunCodeScripts(agent, token)) continue;
+            // A private or local address only to a runner that allows them.
+            if (!this.targetAllowed(token, t)) continue;
             const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, this.deviceOf(t));
             if (!claimed) continue;
-            const offer = this.secrets.decrypt<TaskOffer>(claimed.payloadEnc);
-            return { ...offer, leaseSeconds: this.limits.leaseSeconds };
+            return this.handOut(agent, claimed);
         }
         return undefined;
     }
 
-    /** A Crowd4Test shared runner: its token belongs to no organisation and no project. An unknown token counts as shared (fail closed). */
+    /**
+     * A record or device task (a recording, a live session, a phone session) for this machine, or nothing: it goes only to the machine it
+     * was started on, if that machine can host it; on a person's own computer only when its owner started it, the project allows people's
+     * own computers and the owner may still run its tests (a phone session also needs a runner that understands the phone switches).
+     */
+    private offerSession(agent: AgentRecord, token: AgentTokenRecord, t: TaskRecord): TaskOffer | undefined {
+        const record = isRecordAdapter(t.adapterId);
+        if ((record ? recordAgentOf(t.adapterId) : deviceAgentOf(t.adapterId)) !== agent.id) return undefined;
+        if (record ? agent.capabilities.record !== true : agent.capabilities.deviceSession !== true) return undefined;
+        if (token.kind === "personal") {
+            const starter = (record ? this.records.get(t.id) : this.devices.get(t.id))?.startedBy ?? null;
+            if (!token.ownerId || starter !== token.ownerId || !this.store.allowsPersonal(t.projectId) || !this.store.ownerMayRun(token.ownerId, t.projectId)) return undefined;
+            if (!record && agent.capabilities.runnerSwitches !== true) return undefined;
+        }
+        const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, record ? undefined : this.deviceOf(t));
+        return claimed ? this.handOut(agent, claimed) : undefined;
+    }
+
+    /**
+     * Why an open recording, live session or phone session must end now: its starter can no longer run this project's tests; on a person's
+     * own computer also when the project stopped allowing people's own computers or the computer was retired. Undefined: it may go on.
+     * Asked on every beat of the session, so it ends within one heartbeat.
+     */
+    sessionAccessProblem(s: { projectId: string; startedBy: string | null; tokenId: string; personal: boolean }): string | undefined {
+        if (s.personal) {
+            const token = this.store.getToken(s.tokenId);
+            if (!token || token.revokedAt) return "This computer was retired as a runner, so the session ended.";
+            if (!this.store.allowsPersonal(s.projectId)) return "This project no longer allows people's own computers, so the session ended.";
+        }
+        if (s.startedBy && !this.store.ownerMayRun(s.startedBy, s.projectId)) return "The person who started this session can no longer use this project, so the session ended.";
+        return undefined;
+    }
+
+    /**
+     * The offer for a task this agent just claimed: a new attempt (fencing), and for a protocol-2 agent its attempt id and how long it has
+     * to accept. A protocol-1 agent gets exactly the offer it always got. Where the job's scripts run is written down with the job.
+     */
+    private handOut(agent: AgentRecord, claimed: TaskRecord): TaskOffer {
+        const protocol = this.store.agentProtocol(agent.id);
+        const attempt = this.store.beginAttempt(claimed.id, agent.id, { protocol, acceptMs: this.limits.acceptSeconds * 1000 }) ?? claimed;
+        const offer = { ...this.secrets.decrypt<TaskOffer>(claimed.payloadEnc), leaseSeconds: this.limits.leaseSeconds };
+        this.noteRanOn(attempt, agent);
+        if (attempt !== claimed && attempt.attempt > 1) this.emitTask(attempt, "runner_attempt", "info", `Offered to the runner “${agent.name}” (attempt ${attempt.attempt}).`, { attempt: attempt.attempt, agentId: agent.id });
+        if (protocol < 2 || !attempt.attemptId) return offer;
+        // The switches as they are now: one changed while this runner was idle reaches it with the task, not only at its next hello.
+        const config = this.runnerConfig(agent);
+        return { ...offer, attemptId: attempt.attemptId, attempt: attempt.attempt, acceptSeconds: this.limits.acceptSeconds, ...(config ? { config } : {}) };
+    }
+
+    /** A Crowd4Test shared runner: a team runner of no organisation and no project. An unknown token counts as shared (fail closed). */
     private isSharedRunner(agent: AgentRecord): boolean {
         const t = this.store.getToken(agent.tokenId);
-        return !t || (t.organizationId === null && t.projectId === null);
+        return !t || isSharedToken(t);
+    }
+
+    // ── who a run is for, and which runners may take it (migration 51) ─────
+
+    /** Who started a job and which runner they chose for it, read once per job (a job's options never change these). */
+    jobContext(jobId: string): RunContext {
+        const hit = this.jobContexts.get(jobId);
+        if (hit) return hit;
+        let ctx: RunContext = { ownerId: null, runnerId: null };
+        try {
+            const job = this.p.repo.getJob(jobId);
+            if (job) ctx = { ownerId: jobOwnerId(job.options), runnerId: chosenRunnerOf(job.options) };
+        } catch {
+            /* a job that cannot be read is nobody's: no personal runner takes it */
+        }
+        if (this.jobContexts.size > 5000) this.jobContexts.clear();
+        this.jobContexts.set(jobId, ctx);
+        return ctx;
+    }
+
+    /** May hand-written (code) scripts go to this machine? The same rule for offering, the check when a run is made, and the executor's wait. */
+    mayRunCodeScripts(agent: Pick<AgentRecord, "tokenId" | "capabilities">, token: AgentTokenRecord | undefined = this.store.getToken(agent.tokenId)): boolean {
+        if (!token || token.revokedAt) return false;
+        // Personal: its owner's switch, applied by a runner that understands it (an older runner never gets them).
+        if (token.kind === "personal") return token.allowCodeScripts && agent.capabilities.runnerSwitches === true;
+        // Crowd4Test's shared machines never: one customer's code must not run on a machine that serves others.
+        if (isSharedToken(token)) return false;
+        return agent.capabilities.customScripts === true || (token.allowCodeScripts && agent.capabilities.runnerSwitches === true);
+    }
+
+    /** The switches as the platform holds them for a runner (the hello answer and, for protocol 2, heartbeats send them to it). */
+    runnerSwitches(tokenId: string): { customScripts: boolean; privateTargets: boolean } {
+        const t = this.store.getToken(tokenId);
+        if (!t || t.revokedAt) return { customScripts: false, privateTargets: false };
+        return { customScripts: !isSharedToken(t) && t.allowCodeScripts, privateTargets: t.allowPrivateTargets };
+    }
+
+    /**
+     * May this personal runner take this task? It is its owner's run (the candidates are read by agent_tasks.owner_id, and the claim checks it
+     * again), the project allows people's own computers, and the owner may still run its tests (ownerMayRun also checks their role here).
+     */
+    private personalMayTake(token: AgentTokenRecord, t: { projectId: string }): boolean {
+        if (token.kind !== "personal" || !token.ownerId) return false;
+        return this.store.allowsPersonal(t.projectId) && this.store.ownerMayRun(token.ownerId, t.projectId);
+    }
+
+    /** A run against a private or local address goes only to a runner that allows those (a runner whose owner did not switch them on refuses them too). */
+    private targetAllowed(token: AgentTokenRecord, t: { payloadEnc: string }): boolean {
+        if (token.allowPrivateTargets) return true;
+        try {
+            const env = this.secrets.decrypt<TaskOffer>(t.payloadEnc).env;
+            return !looksPrivateAddress(env.baseUrl) && !(env.apiBaseUrl && looksPrivateAddress(env.apiBaseUrl));
+        } catch {
+            return false;
+        }
     }
 
     /** The device a queued task will hold on its runner. An unreadable task holds them all: it can never share a phone by accident. */
@@ -277,12 +496,17 @@ export class AgentService {
         return t;
     }
 
-    heartbeat(token: AgentTokenRecord, taskId: string, beat: HeartbeatRequest): { cancel: boolean; leaseSeconds: number; commands?: RecordCommand[]; deviceCommands?: DeviceCommand[] } {
+    heartbeat(token: AgentTokenRecord, taskId: string, beat: HeartbeatRequest): { cancel: boolean; leaseSeconds: number; commands?: RecordCommand[]; deviceCommands?: DeviceCommand[]; timeout?: boolean; shutdown?: boolean; config?: RunnerConfigPush } {
         const t = this.ownedTask(token, taskId);
+        this.assertAttempt(t, beat.attemptId);
         const leaseSeconds = this.limits.leaseSeconds;
-        if (t.status !== "running") return { cancel: true, leaseSeconds };
-        // A recording shows no progress lines: whatever an agent puts in `log` for one is not kept.
-        this.store.heartbeat(taskId, t.agentId!, leaseSeconds * 1000, { done: beat.done, total: beat.total, log: isRecordAdapter(t.adapterId) || isDeviceAdapter(t.adapterId) ? undefined : beat.log });
+        // Protocol 2: the platform's own time limit ended the run (the executor's deadline): stop now.
+        if (t.status !== "running") return { cancel: true, leaseSeconds, ...(beat.attemptId && t.phase === "timed_out" ? { timeout: true } : {}) };
+        // A recording shows no progress lines: whatever an agent puts in `log` for one is not kept. The lines are scrubbed before they are kept (they sit in the task for a day).
+        const lines = isRecordAdapter(t.adapterId) || isDeviceAdapter(t.adapterId) ? undefined : beat.log ? this.scrubLines(t, beat.log) : undefined;
+        // A protocol-1 beat means the scripts are running; a protocol-2 one says what the agent is doing.
+        this.store.heartbeat(taskId, t.agentId!, leaseSeconds * 1000, { done: beat.done, total: beat.total, log: lines }, beat.attemptId ? beat.phase : "running");
+        this.notePhase(t);
         if (isDeviceAdapter(t.adapterId)) {
             // A phone session: the reply carries what the explorer asked. A session the platform no longer knows (it restarted) is given up.
             const session = this.devices.get(taskId);
@@ -297,8 +521,185 @@ export class AgentService {
             const r = driver.onHeartbeat();
             return { cancel: r.cancel, leaseSeconds, ...(r.commands.length ? { commands: r.commands } : {}) };
         }
-        this.surfaceProgress(t, beat.log);
-        return { cancel: this.store.getTask(taskId)?.cancelRequested ?? false, leaseSeconds };
+        this.surfaceProgress(t, lines);
+        const cancel = this.store.getTask(taskId)?.cancelRequested ?? false;
+        if (!beat.attemptId) return { cancel, leaseSeconds };
+        // Protocol 2 only: the runner was retired (finish and exit), and its switches when they changed since this task was handed out.
+        const agent = this.store.getAgent(t.agentId!);
+        const shutdown = agent ? this.shutdownWanted(agent) : false;
+        const config = agent ? this.configChange(t, agent) : undefined;
+        return { cancel, leaseSeconds, ...(shutdown ? { shutdown: true } : {}), ...(config ? { config } : {}) };
+    }
+
+    /**
+     * Protocol 2 hooks for the runner's own settings (owned by the runner identity code): should this runner finish and exit (it was retired
+     * while working), and what its switches say now. Defaults: never, and nothing to tell.
+     */
+    shutdownWanted: (agent: AgentRecord) => boolean = (agent) => {
+        // Retired (or unknown), or a person's own computer whose owner is gone or switched off here: finish what runs, take nothing new, exit.
+        const t = this.store.getToken(agent.tokenId);
+        if (!t || t.revokedAt) return true;
+        if (t.kind !== "personal") return false;
+        const owner = t.ownerId ? this.p.db.get<{ status: string | null }>("SELECT status FROM users WHERE id = ? AND role IS NOT NULL", t.ownerId) : undefined;
+        return !owner || owner.status !== "active";
+    };
+    runnerConfig: (agent: AgentRecord) => RunnerConfigPush | undefined = (agent) => {
+        // What the runner should apply now: code scripts by the same rule as offering (a team runner's own --allow-custom-scripts counts), and private addresses.
+        const t = this.store.getToken(agent.tokenId);
+        if (!t || t.revokedAt) return undefined;
+        return { customScripts: this.mayRunCodeScripts(agent, t), privateTargets: t.allowPrivateTargets };
+    };
+    private readonly sentConfig = new Map<string, string>();
+    /** Bytes of live events kept per "task:attempt" (the cap in `events`); bounded, oldest forgotten first. */
+    private readonly liveEventBytes = new Map<string, number>();
+
+    /** The runner's switches, when they differ from what this task was last told (the first beat records them without sending). */
+    private configChange(t: TaskRecord, agent: AgentRecord): RunnerConfigPush | undefined {
+        const now = this.runnerConfig(agent);
+        if (!now) return undefined;
+        const key = `${t.id}:${t.attemptId ?? ""}`;
+        const text = JSON.stringify(now);
+        const before = this.sentConfig.get(key);
+        this.sentConfig.set(key, text);
+        if (this.sentConfig.size > 2000) this.sentConfig.delete(this.sentConfig.keys().next().value!);
+        return before !== undefined && before !== text ? now : undefined;
+    }
+
+    /** A message that names an attempt which is no longer the task's current one is refused (409, code "superseded"). Protocol 1 names none. */
+    private assertAttempt(t: TaskRecord, attemptId: string | undefined): void {
+        if (attemptId === undefined) return;
+        if (t.attemptId !== attemptId) throw new HttpError(409, "This attempt of the task was replaced by a newer one. Stop it.", { code: SUPERSEDED });
+    }
+
+    /** Lines from an agent, scrubbed of the run's credentials (in every encoded form) before they are kept anywhere. */
+    private scrubLines(t: TaskRecord, lines: string[]): string[] {
+        const secrets = this.secretsOf(t);
+        return lines.map((l) => scrubSecrets(l, secrets).slice(0, 300));
+    }
+
+    // ── protocol 2: accept, reject, live events ─────────────────────────────
+
+    accept(token: AgentTokenRecord, taskId: string, attemptId: string): { ok: true; leaseSeconds: number } {
+        const t = this.ownedTask(token, taskId);
+        const leaseSeconds = this.limits.leaseSeconds;
+        const r = this.store.accept(taskId, t.agentId!, attemptId, leaseSeconds * 1000);
+        if (r === "superseded") throw new HttpError(409, "This attempt of the task was replaced by a newer one. Stop it.", { code: SUPERSEDED });
+        if (r === "gone") throw new HttpError(410, "The platform no longer expects this task to run.");
+        if (r === "accepted") this.notePhase(t);
+        return { ok: true, leaseSeconds };
+    }
+
+    /** The runner will not run this attempt: it goes to another runner, and the run fails only when no runner that may take it is left. */
+    reject(token: AgentTokenRecord, taskId: string, body: RejectRequest): { ok: true } {
+        const t = this.ownedTask(token, taskId);
+        const name = this.store.getAgent(t.agentId!)?.name ?? "A runner";
+        const message = scrubSecrets(body.message, this.secretsOf(t)).replace(/\s+/g, " ").trim().slice(0, 300);
+        const r = this.store.reject(taskId, t.agentId!, body.attemptId, { reason: body.reason, message });
+        if (r.outcome === "superseded") throw new HttpError(409, "This attempt of the task was replaced by a newer one. Stop it.", { code: SUPERSEDED });
+        if (r.outcome === "gone") return { ok: true };
+        this.emitTask(t, "runner_rejected", "warn", `${name} did not take the run: ${message}`, { agentId: t.agentId, reason: body.reason, attempt: t.attempt });
+        if (r.task) this.notePhase(t);
+        return { ok: true };
+    }
+
+    /**
+     * Live events of an attempt: each (task, attempt, seq) is kept once, scrubbed, as a job event the run's stream carries (and a refresh
+     * replays). A screenshot event must name a file this attempt uploaded. A log line is also kept with the task, as heartbeat lines are.
+     */
+    events(token: AgentTokenRecord, taskId: string, body: EventsRequest): { ok: true; stored: number; duplicates: number } {
+        const t = this.ownedTask(token, taskId);
+        this.assertAttempt(t, body.attemptId);
+        if (t.status !== "running") throw new HttpError(410, "The platform no longer expects events for this task.");
+        if (isRecordAdapter(t.adapterId) || isDeviceAdapter(t.adapterId)) throw new HttpError(409, "Recordings and phone sessions send no live run events.");
+        const secrets = this.secretsOf(t);
+        const name = this.store.getAgent(t.agentId!)?.name ?? "agent";
+        let stored = 0;
+        let duplicates = 0;
+        const lines: string[] = [];
+        let phase: AgentPhase | undefined;
+        // At most LIVE_EVENTS_MAX events or LIVE_EVENT_BYTES_MAX bytes per attempt (rows counted in the database, bytes in this process): past
+        // that one note is kept and the rest are dropped with a 200, so the runner does not send them again. The final result has everything.
+        const key = `${taskId}:${body.attemptId}`;
+        let count = this.store.liveEventCount(taskId, body.attemptId);
+        let bytes = this.liveEventBytes.get(key) ?? 0;
+        let full = count >= LIVE_EVENTS_MAX || bytes >= LIVE_EVENT_BYTES_MAX;
+        this.p.db.tx(() => {
+            for (const raw of [...body.events].sort((a, b) => a.seq - b.seq)) {
+                if (full) break;
+                if (raw.type === "screenshot" && !this.store.getFile(taskId, "out", raw.ref)) continue; // never a file that is not there
+                if (!this.store.noteLiveEvent(taskId, body.attemptId, raw.seq)) {
+                    duplicates++;
+                    continue;
+                }
+                const e = scrubSecrets(raw, secrets) as LiveEvent;
+                if (e.type === "log") lines.push(e.line.slice(0, 300));
+                if (e.type === "phase") phase = e.phase;
+                const level = (e.type === "test_finished" && e.status !== "passed" && e.status !== "skipped") || (e.type === "step_finished" && e.status === "failed") ? "warn" : "info";
+                const message = liveEventMessage(e, name).slice(0, 400);
+                const data = { ...liveEventData(e), taskId, attempt: t.attempt };
+                this.p.repo.addEvent(t.jobId, { stage: "validation", kind: LIVE_EVENT_KINDS[e.type], level, message, data });
+                stored++;
+                count++;
+                bytes += message.length + JSON.stringify(data).length;
+                full = count >= LIVE_EVENTS_MAX || bytes >= LIVE_EVENT_BYTES_MAX;
+            }
+            // Once per attempt (seq -1 is never sent by a runner): say the live view stops here.
+            if (full && this.store.noteLiveEvent(taskId, body.attemptId, -1)) {
+                this.p.repo.addEvent(t.jobId, { stage: "validation", kind: "runner_events_truncated", level: "warn", message: LIVE_EVENTS_TRUNCATED, data: { taskId, attempt: t.attempt } });
+            }
+        });
+        if (this.liveEventBytes.size >= 5_000 && !this.liveEventBytes.has(key)) this.liveEventBytes.delete(this.liveEventBytes.keys().next().value!);
+        this.liveEventBytes.set(key, bytes);
+        if (lines.length || phase) this.store.heartbeat(taskId, t.agentId!, this.limits.leaseSeconds * 1000, { log: lines.length ? lines : undefined }, phase);
+        if (phase) this.notePhase(t);
+        return { ok: true, stored, duplicates };
+    }
+
+    /** A job event about a task (a convenience: a failure to write one changes nothing). */
+    private emitTask(t: { jobId: string; id: string }, kind: string, level: "info" | "warn", message: string, data?: Record<string, unknown>): void {
+        try {
+            this.p.repo.addEvent(t.jobId, { stage: "validation", kind, level, message: message.slice(0, 400), data: { taskId: t.id, ...(data ?? {}) } });
+        } catch {
+            /* the job may be gone */
+        }
+    }
+
+    /** Where the job ran and the task's phase, kept with the job (so "where it ran" outlives the 24 h task prune), plus a phase event when it moved. */
+    private notePhase(before: TaskRecord): void {
+        const t = this.store.getTask(before.id);
+        if (!t || (t.phase === before.phase && t.attempt === before.attempt)) return;
+        const agent = t.agentId ? this.store.getAgent(t.agentId) : undefined;
+        this.noteRanOn(t, agent);
+        this.emitTask(t, "runner_phase", "info", phaseSentence(t.phase, agent?.name), { phase: t.phase, attempt: t.attempt, ...(agent ? { agentId: agent.id } : {}) });
+    }
+
+    private noteRanOn(t: TaskRecord, agent: AgentRecord | undefined): void {
+        try {
+            const prev = this.store.ranOnOf(t.jobId);
+            const who = agent ? { agentId: agent.id, tokenId: agent.tokenId, name: agent.name } : { agentId: prev?.agentId, tokenId: prev?.tokenId, name: prev?.name };
+            this.store.setRanOn(t.jobId, { ...who, taskId: t.id, attempt: t.attempt, phase: t.phase, at: new Date(this.clock()).toISOString() });
+        } catch {
+            /* the job may be gone */
+        }
+    }
+
+    /** The store's housekeeping, plus a plain event in each run whose task it moved (back to the queue, lost, never picked up). */
+    sweep(): ReturnType<AgentStore["sweep"]> {
+        const r = this.store.sweep();
+        for (const c of r.changes) this.reportSweep(c);
+        return r;
+    }
+
+    private reportSweep(c: SweepChange): void {
+        const name = c.agentId ? this.store.getAgent(c.agentId)?.name : undefined;
+        const who = name ? `The runner “${name}”` : "The runner";
+        const t = this.store.getTask(c.taskId);
+        if (c.kind === "accept_timeout") this.emitTask({ jobId: c.jobId, id: c.taskId }, "runner_requeued", "warn", `${who} did not accept the run in time; offering it again.`, { reason: "accept_timeout", attempt: c.attempt });
+        else if (c.kind === "never_accepted") this.emitTask({ jobId: c.jobId, id: c.taskId }, "runner_lost", "warn", `${who} did not accept the run in time. ${NEVER_ACCEPTED}`, { reason: "never_accepted", attempt: c.attempt });
+        else if (c.kind === "requeued") this.emitTask({ jobId: c.jobId, id: c.taskId }, "runner_requeued", "warn", `${who} stopped answering; offering the run again.`, { reason: "lost", attempt: c.attempt });
+        else if (c.kind === "lost") this.emitTask({ jobId: c.jobId, id: c.taskId }, "runner_lost", "warn", `${who} stopped answering while it was running these tests.`, { attempt: c.attempt });
+        else if (c.kind === "stale") this.emitTask({ jobId: c.jobId, id: c.taskId }, "runner_lost", "warn", "No runner picked up this run within 30 minutes.", { attempt: c.attempt });
+        if (t) this.noteRanOn(t, undefined);
     }
 
     /** The registered file an agent asks to download for its own running task. */
@@ -310,9 +711,14 @@ export class AgentService {
         return { file, key: validKey(file.path) };
     }
 
-    /** Where an upload for this task goes, after every check that does not need the bytes. */
-    uploadTarget(token: AgentTokenRecord, taskId: string, name: string): { task: TaskRecord; key: string } {
+    /**
+     * Where an upload for this task goes, after every check that does not need the bytes, and how many bytes it may have. The task's file
+     * and byte budget is reserved here until `release` (uploads of one task may run side by side; all go through this one process), so two
+     * uploads at once cannot together pass the limits. Protocol 2: `attemptId` (header x-attempt-id) must be the current attempt.
+     */
+    uploadTarget(token: AgentTokenRecord, taskId: string, name: string, attemptId?: string, declared = 0): { task: TaskRecord; key: string; cap: number; release: () => void } {
         const t = this.ownedTask(token, taskId);
+        this.assertAttempt(t, attemptId);
         if (t.status !== "running") throw new HttpError(409, "This task is no longer running; nothing more can be uploaded.");
         const relDir = path.posix.join(t.projectId, "_agent", t.id, "out");
         let key: string;
@@ -323,29 +729,61 @@ export class AgentService {
             throw new HttpError(400, "Unsafe file name.");
         }
         const totals = this.store.uploadedTotals(taskId);
-        if (totals.count >= this.limits.taskMaxFiles && !this.store.getFile(taskId, "out", name)) throw new HttpError(413, "This task has uploaded too many files.");
-        return { task: t, key };
+        const held = this.uploadsInFlight.get(taskId) ?? { files: 0, bytes: 0 };
+        const replaces = Boolean(this.store.getFile(taskId, "out", name));
+        if (totals.count + held.files >= this.limits.taskMaxFiles && !replaces) throw new HttpError(413, "This task has uploaded too many files.");
+        const cap = Math.min(this.limits.maxFileBytes, Math.max(0, this.limits.taskMaxBytes - totals.bytes - held.bytes));
+        const mine = { files: replaces ? 0 : 1, bytes: declared > 0 ? Math.min(declared, cap) : cap };
+        this.uploadsInFlight.set(taskId, { files: held.files + mine.files, bytes: held.bytes + mine.bytes });
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
+            const cur = this.uploadsInFlight.get(taskId);
+            if (!cur) return;
+            const next = { files: cur.files - mine.files, bytes: cur.bytes - mine.bytes };
+            if (next.files <= 0 && next.bytes <= 0) this.uploadsInFlight.delete(taskId);
+            else this.uploadsInFlight.set(taskId, next);
+        };
+        return { task: t, key, cap, release };
     }
+
+    /** Upload budget held by uploads that are still streaming, per task. */
+    private readonly uploadsInFlight = new Map<string, { files: number; bytes: number }>();
 
     recordUpload(task: TaskRecord, name: string, rel: string, size: number, sha256: string): void {
         this.store.addFile({ taskId: task.id, direction: "out", ref: name, path: rel, size, sha256 });
     }
 
-    /** The agent's final word. Accepted once; the cleanup and files are looked at by the executor that waits for it. */
-    result(token: AgentTokenRecord, taskId: string, body: ResultRequest): { ok: true } {
+    /**
+     * The agent's final word. Accepted once; the cleanup and files are looked at by the executor that waits for it. Protocol 2: the same
+     * result posted again for the same attempt is answered 200 `alreadyReceived` (an agent repeats it until it hears an answer); one for an
+     * attempt that is no longer current gets 409 "superseded"; one for a task the platform already ended (timed out, lost) gets 410.
+     * Protocol 1 keeps its answers (409 for a second result).
+     */
+    result(token: AgentTokenRecord, taskId: string, body: ResultRequest): { ok: true; alreadyReceived?: boolean } {
         const t = this.ownedTask(token, taskId);
         if (t.status === "cancelled") return { ok: true };
+        if (body.attemptId !== undefined) {
+            this.assertAttempt(t, body.attemptId);
+            if (t.status !== "running") {
+                if (t.resultAttemptId === body.attemptId) return { ok: true, alreadyReceived: true };
+                throw new HttpError(410, "The platform stopped waiting for this run, so its result is not needed any more.");
+            }
+        }
         if (t.status !== "running") throw new HttpError(409, "A result for this task was already received.");
         if (isRecordAdapter(t.adapterId)) this.records.get(taskId)?.onResult(body);
         if (isDeviceAdapter(t.adapterId)) this.devices.get(taskId)?.onResult(body);
         const secrets = this.secretsOf(t);
         if (!body.ok) {
             const msg = scrubSecrets((body.error ?? "The runner agent could not run the tests.").slice(0, 500), secrets);
-            if (!this.store.finish(taskId, t.agentId!, { status: "failed", error: msg })) throw new HttpError(409, "A result for this task was already received.");
+            if (!this.store.finish(taskId, t.agentId!, { status: "failed", error: msg, ...(body.attemptId ? { attemptId: body.attemptId } : {}) })) throw new HttpError(409, "A result for this task was already received.");
+            this.notePhase(t);
             return { ok: true };
         }
         const clean = scrubSecrets(body, secrets);
-        if (!this.store.finish(taskId, t.agentId!, { status: "done", resultEnc: this.secrets.encrypt(clean) })) throw new HttpError(409, "A result for this task was already received.");
+        if (!this.store.finish(taskId, t.agentId!, { status: "done", resultEnc: this.secrets.encrypt(clean), ...(body.attemptId ? { attemptId: body.attemptId } : {}) })) throw new HttpError(409, "A result for this task was already received.");
+        this.notePhase(t);
         return { ok: true };
     }
 
@@ -390,7 +828,7 @@ export class AgentService {
     }
 
     /** Asks an agent to record: queues the record task and returns the driver that mirrors the session for the web page. */
-    startRecording(o: { projectId: string; agent: AgentRecord; startUrl: string; headed: boolean; environment?: string; caps: { idleMs: number; totalMs: number; maxSteps: number }; remote?: { lostContactMs?: number; claimWaitMs?: number; settleMs?: number; liveWaitMs?: number } }): RemoteDriver {
+    startRecording(o: { projectId: string; agent: AgentRecord; startUrl: string; headed: boolean; environment?: string; caps: { idleMs: number; totalMs: number; maxSteps: number }; remote?: { lostContactMs?: number; claimWaitMs?: number; settleMs?: number; liveWaitMs?: number }; startedBy?: string | null }): RemoteDriver {
         const id = randomUUID();
         const taskId = randomUUID();
         const offer = TaskOffer.parse({
@@ -411,14 +849,18 @@ export class AgentService {
                 maxSteps: Math.min(1000, Math.max(1, o.caps.maxSteps)),
             },
         });
-        this.store.enqueue({ id: taskId, projectId: o.projectId, jobId: offer.jobId, adapterId: offer.adapterId, payloadEnc: this.encrypt(offer), files: [] });
-        const init: RemoteInit = { id, projectId: o.projectId, taskId, agent: { id: o.agent.id, name: o.agent.name }, startUrl: o.startUrl, headed: o.headed, ...(o.environment ? { environment: o.environment } : {}), maxSteps: o.caps.maxSteps, ...(o.agent.capabilities.liveSession === true ? { live: true } : {}) };
+        // Who started it is kept with the task (a person's own computer claims only its owner's) and with the session (only they may drive it there).
+        const startedBy = o.startedBy ?? null;
+        const personal = this.store.getToken(o.agent.tokenId)?.kind === "personal";
+        this.store.enqueue({ id: taskId, projectId: o.projectId, jobId: offer.jobId, adapterId: offer.adapterId, payloadEnc: this.encrypt(offer), files: [], ownerId: startedBy });
+        const init: RemoteInit = { id, projectId: o.projectId, taskId, agent: { id: o.agent.id, name: o.agent.name }, startUrl: o.startUrl, headed: o.headed, ...(o.environment ? { environment: o.environment } : {}), maxSteps: o.caps.maxSteps, ...(o.agent.capabilities.liveSession === true ? { live: true } : {}), startedBy, personal };
         const driver = new RemoteDriver(
             {
                 clock: this.clock,
                 task: (tid) => this.store.getTask(tid),
                 cancel: (tid) => this.store.requestCancel(tid),
                 secrets: () => this.projectSecrets(o.projectId),
+                accessProblem: () => this.sessionAccessProblem({ projectId: o.projectId, startedBy, tokenId: o.agent.tokenId, personal }),
                 ...(o.remote ?? {}),
             },
             init,
@@ -470,9 +912,78 @@ export class AgentService {
         }
     }
 
-    /** Online agents that may take this project's work (the chosen one, or any). */
-    eligibleAgents(projectId: string, setting: RunnerSetting = this.store.getRunner(projectId)) {
-        return this.store.listAgents(projectId).filter((a) => a.online && (!setting.agentId || a.id === setting.agentId));
+    /**
+     * Online agents that may take this project's work: the team runners given to it (the project's pinned machine, or any), and, for a run
+     * of a person (`who`), that person's own computers while the project allows them. A runner chosen for the run is the only one then, and
+     * the project's pin does not apply. Without `who`: team runners only, as before.
+     */
+    eligibleAgents(projectId: string, setting: RunnerSetting = this.store.getRunner(projectId), who?: RunContext) {
+        const chosen = who?.runnerId ?? null;
+        const team = this.store.listAgents(projectId).filter((a) => a.online && (chosen ? a.tokenId === chosen : !setting.agentId || a.id === setting.agentId));
+        if (!who?.ownerId || (setting.agentId && !chosen) || !this.store.allowsPersonal(projectId) || !this.store.ownerMayRun(who.ownerId, projectId)) return team;
+        const now = this.clock();
+        const personal = this.store
+            .personalTokensOf(who.ownerId)
+            .filter((t) => !t.revokedAt && (!chosen || t.id === chosen))
+            .flatMap((t) => this.store.agentsOfToken(t.id).slice(0, 1))
+            .filter((a) => now - a.lastSeenMs <= ONLINE_MS)
+            .map((a) => ({ ...a, online: true, activeTasks: this.store.runningCount(a.id) }));
+        return [...personal, ...team];
+    }
+
+    /**
+     * The runner chosen for one run (`runnerId` of a run-start route): it must be one this person may use for this project, else the same
+     * 404 as an unknown id (another person's computer, a runner the project was not given); a plain 409 when it cannot take the run now.
+     */
+    private assertChosenRunner(projectId: string, who: RunContext): void {
+        const t = who.runnerId ? this.store.getToken(who.runnerId) : undefined;
+        const usable = t && (t.kind === "personal" ? Boolean(who.ownerId) && t.ownerId === who.ownerId : this.store.hasAccess(t.id, projectId));
+        if (!t || !usable) throw new HttpError(404, "Runner not found");
+        const name = t.label ?? this.store.agentsOfToken(t.id)[0]?.name ?? "That runner";
+        if (t.revokedAt) throw new HttpError(409, `“${name}” is retired. Choose another runner.`);
+        if (t.kind === "personal" && !this.store.allowsPersonal(projectId)) throw new HttpError(409, PERSONAL_NOT_ALLOWED);
+        const latest = this.store.agentsOfToken(t.id)[0];
+        if (!latest || this.clock() - latest.lastSeenMs > ONLINE_MS) throw new HttpError(409, `“${name}” is offline. Start it, or choose another runner.`);
+    }
+
+    /**
+     * GET /api/projects/:id/runner-choices: the runners this person may choose for a run of this project (their own computers first, then the
+     * team runners the project was given), with what each can run and why it cannot take the run now.
+     */
+    runnerChoices(projectId: string, ownerId: string | null) {
+        const setting = this.store.getRunner(projectId);
+        const allowPersonal = this.store.allowsPersonal(projectId);
+        const mayRun = ownerId ? this.store.ownerMayRun(ownerId, projectId) : false;
+        const now = this.clock();
+        const tokens = [...(ownerId ? this.store.personalTokensOf(ownerId) : []), ...this.store.listTokens(projectId).filter((t) => t.kind === "team")].filter((t) => !t.revokedAt);
+        const web = this.adapterOrUndefined("playwright");
+        const mobile = this.adapterOrUndefined("taqwright");
+        const runners = tokens.map((t) => {
+            const latest = this.store.agentsOfToken(t.id)[0];
+            const online = Boolean(latest) && now - latest!.lastSeenMs <= ONLINE_MS;
+            const personal = t.kind === "personal";
+            let problem: string | null = null;
+            if (!latest) problem = "It has not connected yet.";
+            else if (!online) problem = "It is offline.";
+            else if (personal && !allowPersonal) problem = PERSONAL_NOT_ALLOWED;
+            else if (personal && !mayRun) problem = "You can't run this project's tests.";
+            return {
+                id: t.id,
+                name: t.label ?? latest?.name ?? "Unnamed runner",
+                kind: t.kind,
+                mine: personal,
+                online,
+                busy: Boolean(latest) && this.store.runningCount(latest!.id) >= latest!.concurrency,
+                machine: latest ? { os: latest.os, ...(latest.osVersion ?? latest.capabilities.osVersion ? { osVersion: latest.osVersion ?? latest.capabilities.osVersion } : {}), arch: latest.arch } : null,
+                canRunWeb: Boolean(latest && web && !capabilityProblem(web, latest.capabilities)),
+                canRunMobile: Boolean(latest && mobile && !capabilityProblem(mobile, latest.capabilities)),
+                codeScripts: latest ? this.mayRunCodeScripts(latest, t) : personal ? t.allowCodeScripts : t.allowCodeScripts && !isSharedToken(t),
+                problem,
+            };
+        });
+        runners.sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.online) - Number(a.online));
+        const pinned = setting.agentId ? this.store.getAgent(setting.agentId)?.tokenId ?? null : null;
+        return { runners, allowPersonal, defaultRunnerId: pinned };
     }
 
     /** Adapter ids a job's script execution will use. */
@@ -513,13 +1024,29 @@ export class AgentService {
         // Windows desktop tests start an application: the computer that runs them must be set up for it (allow-list), whoever runs them.
         const desktop = this.adaptersFor(options).includes("windows-uia") ? desktopApps(this.specsOf(options)) : [];
         const runsIos = this.adaptersFor(options).includes(IOS_ADAPTER_ID);
-        if (setting.runOn !== "agent") {
+        const chosen = chosenRunnerOf(options);
+        if (!this.routesToAgent(projectId)) {
+            if (chosen) throw new HttpError(409, "This project's tests run on this server, so a runner can't be chosen for a run. Choose “On a runner” in the project's settings first.");
             assertHostDesktop(desktop);
             if (runsIos) throw new HttpError(409, IOS_NEEDS_AGENT_MESSAGE);
             return;
         }
-        const agents = this.eligibleAgents(projectId, setting);
-        if (agents.length === 0) throw new HttpError(409, runsIos ? IOS_NEEDS_AGENT_MESSAGE : NO_AGENT_MESSAGE);
+        // Whose run it is, and the runner chosen for it: a person's own computer takes only their runs (migration 51).
+        const who: RunContext = { ownerId: ownerOfNewJob(options), runnerId: chosen };
+        if (chosen) this.assertChosenRunner(projectId, who);
+        const agents = this.eligibleAgents(projectId, setting, who);
+        if (agents.length === 0) {
+            if (runsIos) throw new HttpError(409, IOS_NEEDS_AGENT_MESSAGE);
+            // Their own computer is online, but this project does not take people's own computers.
+            const ownOnline = who.ownerId && !this.store.allowsPersonal(projectId) && this.store.personalTokensOf(who.ownerId).some((t) => !t.revokedAt && this.store.agentsOfToken(t.id).some((a) => this.clock() - a.lastSeenMs <= ONLINE_MS));
+            throw new HttpError(409, ownOnline ? `${PERSONAL_NOT_ALLOWED} No team runner is online for it.` : runnersOnly(this.p.config) ? NO_RUNNER_MESSAGE : NO_AGENT_MESSAGE);
+        }
+        // Code scripts are checked next by the custom gate (custom-policy.ts), with the same rule as offering (mayRunCodeScripts).
+        // A private or local address: only runners that allow them (a person's own computer does not, unless its owner switched it on).
+        const address = this.projectAddress(projectId);
+        if (address && looksPrivateAddress(address) && !agents.some((a) => this.store.getToken(a.tokenId)?.allowPrivateTargets === true)) {
+            throw new HttpError(409, "This project's address is a private or local one (such as localhost or a computer on your network), and the runners that could take this run don't open those. The runner's owner can allow private addresses on the Runners page.");
+        }
         for (const id of this.adaptersFor(options)) {
             const adapter = this.adapterOrUndefined(id)!;
             const problems = agents.map((a) => ({ a, why: capabilityProblem(adapter, a.capabilities) }));
@@ -539,6 +1066,19 @@ export class AgentService {
 
     /** What the Agents page shows about where this project's tests run. */
     runnerStatus(projectId: string) {
+        return { ...this.runnerStatusOf(projectId), allowPersonal: this.store.allowsPersonal(projectId) };
+    }
+
+    /** The address the project's tests run against: its latest application's (an environment of it may differ; the runner checks every address itself). */
+    private projectAddress(projectId: string): string | undefined {
+        try {
+            return this.p.db.get<{ url: string }>(`SELECT url FROM applications WHERE project_id = ? ORDER BY created_at DESC, ${this.p.db.dialect.insertionOrder()} DESC LIMIT 1`, projectId)?.url;
+        } catch {
+            return undefined;
+        }
+    }
+
+    private runnerStatusOf(projectId: string) {
         const setting = this.store.getRunner(projectId);
         const all = this.store.listAgents(projectId);
         const eligible = all.filter((a) => a.online && (!setting.agentId || a.id === setting.agentId));
@@ -574,16 +1114,26 @@ export class AgentService {
         return { runOn: "agent" as const, agentId: setting.agentId, status, canRunWeb: canWeb, canRunMobile: canMobile, canRunWindows: canWindows, canRunIos: canIos, phones: { canRun: canMobile, text: phonesText }, unavailableReason: reason };
     }
 
-    /** Where did this job run? Present for the kinds of job that run scripts. */
-    ranOn(job: JobRow): { kind: "platform" } | { kind: "agent"; agentId: string; name: string; browser?: WebBrowserUsed } | undefined {
+    /**
+     * Where did this job run? Present for the kinds of job that run scripts. For a runner: the machine (agentId, name), the runner it
+     * belongs to (runnerId, an agent_tokens id), the latest task's phase and attempt. Read from the live task while it exists, and after the
+     * 24 h task prune from what was kept with the job (generation_jobs.ran_on_json), so an old run never names the project's current runner.
+     */
+    ranOn(job: JobRow): { kind: "platform" } | { kind: "agent"; agentId: string; name: string; browser?: WebBrowserUsed; runnerId?: string; phase?: TaskPhase; attempt?: number } | undefined {
         const mode = job.options.mode ?? "generate";
         if (mode !== "validate" && mode !== "variants" && mode !== "environment") return undefined;
-        const task = this.store.tasksOfJob(job.id).find((t) => t.agentId);
-        const agentId = task?.agentId ?? (job.options.runOn === "agent" ? this.store.getRunner(job.projectId).agentId : null);
-        if (!task && job.options.runOn !== "agent") return { kind: "platform" };
+        const tasks = this.store.tasksOfJob(job.id);
+        const latest = tasks[tasks.length - 1];
+        const stored = this.store.ranOnOf(job.id);
+        if (!latest && !stored && job.options.runOn !== "agent") return { kind: "platform" };
+        const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+        const agentId = latest?.agentId ?? [...tasks].reverse().find((t) => t.agentId)?.agentId ?? str(stored?.agentId) ?? (!stored && job.options.runOn === "agent" ? this.store.getRunner(job.projectId).agentId : null);
         const agent = agentId ? this.store.getAgent(agentId) : undefined;
         const browser = this.browserOfJob(job.id);
-        return { kind: "agent", agentId: agentId ?? "", name: agent?.name ?? "A runner agent", ...(browser ? { browser } : {}) };
+        const phase = (latest?.phase ?? str(stored?.phase)) as TaskPhase | undefined;
+        const attempt = latest?.attempt ?? (typeof stored?.attempt === "number" ? stored.attempt : undefined);
+        const runnerId = agent?.tokenId ?? str(stored?.tokenId);
+        return { kind: "agent", agentId: agentId ?? "", name: agent?.name ?? str(stored?.name) ?? "A runner agent", ...(browser ? { browser } : {}), ...(runnerId ? { runnerId } : {}), ...(phase ? { phase } : {}), ...(attempt ? { attempt } : {}) };
     }
 
     /** The browser the runner said its web tests used (the job's latest `agent_browser` event; see collect). Kept with the job's events, so it outlives the task. */
@@ -605,7 +1155,7 @@ export class AgentService {
 
     /** The scheduler's tick: expire leases, fail stale tasks, and once in a while remove old finished ones with their files. */
     async maintain(): Promise<void> {
-        this.store.sweep();
+        this.sweep();
         const now = this.clock();
         if (now - this.lastPrune < 10 * 60_000) return;
         this.lastPrune = now;
@@ -615,6 +1165,8 @@ export class AgentService {
             await fsp.rm(path.join(this.p.config.scratchDir, "agent-files", t.id), { recursive: true, force: true }).catch(() => undefined);
         }
         this.store.pruneAgents();
+        // Enrollment codes nobody used, a day after they expired (migration 51).
+        this.store.pruneEnrollments();
         // A phone session that ended long ago no longer needs its driver here.
         this.devices.prune((d) => {
             const t = this.store.getTask(d.taskId);
@@ -765,18 +1317,25 @@ class RemoteExecutor implements ScriptExecutor {
                 svc.store.requestCancel(taskId);
                 throw new Error("Job cancelled");
             }
-            svc.store.sweep();
+            svc.sweep();
             const t = svc.store.getTask(taskId);
             if (!t) throw new RunnerAgentError("The run was removed before it finished.");
             if (t.status === "queued") {
                 // A task with hand-written scripts waits for an agent that was started with --allow-custom-scripts.
                 const needsCustom = batch.scripts.some((s) => s.custom);
-                const capable = svc.eligibleAgents(projectId).some((a) => !capabilityProblem(adapter, a.capabilities) && (!needsCustom || a.capabilities.customScripts === true));
+                // A runner that said no (protocol 2 reject) is not counted: the task is never offered to it again.
+                const refused = new Set(refusalsOf(t).map((r) => r.agentId));
+                // The same rules as offering (migration 51): the job's owner's own computers count, and code scripts only where they may run.
+                const capable = svc.eligibleAgents(projectId, undefined, svc.jobContext(jobId)).some((a) => !refused.has(a.id) && !capabilityProblem(adapter, a.capabilities) && (!needsCustom || svc.mayRunCodeScripts(a)));
                 if (capable) noAgentSince = undefined;
-                else {
+                else if (refusalsOf(t).length > 0) {
+                    // Every runner that could take it said no: the run fails now, with their reasons (each is also in the run's events).
+                    const reasons = [...new Map(refusalsOf(t).map((r) => [r.agentId, r.message])).values()].join(" ");
+                    svc.store.failQueuedOrRunning(taskId, `No runner that may take this run can run it. ${reasons}`.slice(0, 1000), "rejected");
+                } else {
                     noAgentSince ??= svc.clock();
                     if (svc.clock() - noAgentSince >= svc.limits.noAgentGraceMs) {
-                        svc.store.failQueuedOrRunning(taskId, "No runner agent that can run these tests is connected. Start one, or switch the project back to running here.");
+                        svc.store.failQueuedOrRunning(taskId, runnersOnly(svc.p.config) ? "No runner that can run these tests is online. Start the runner, or add one on the Runners page." : "No runner agent that can run these tests is connected. Start one, or switch the project back to running here.");
                     }
                 }
             } else if (t.status === "running") {
@@ -796,7 +1355,7 @@ class RemoteExecutor implements ScriptExecutor {
             }
             if (svc.clock() > deadline) {
                 svc.store.requestCancel(taskId);
-                svc.store.failQueuedOrRunning(taskId, "The runner agent did not finish in time.");
+                svc.store.failQueuedOrRunning(taskId, "The runner agent did not finish in time.", "timed_out");
                 throw new RunnerAgentError("The runner agent did not finish in time.");
             }
             await sleep(svc.limits.watchMs, opts.signal);
@@ -841,6 +1400,7 @@ class RemoteExecutor implements ScriptExecutor {
         })();
         const environment = svc.p.repo.getJob(task.jobId)?.options.environment;
         const ledger: FinishedItem[] = [];
+        const missing: string[] = [];
 
         const runs: ScriptRun[] = [];
         for (const w of result.runs as WireRun[]) {
@@ -848,7 +1408,11 @@ class RemoteExecutor implements ScriptExecutor {
             const artifacts: ScriptRun["artifacts"] = [];
             for (const a of w.artifacts) {
                 const file = local(a.ref);
-                if (!file) continue; // named but never uploaded: skipped, as a missing file is for a local run
+                if (!file) {
+                    // Named but never uploaded: left out, as a missing file is for a local run, and the run says so.
+                    missing.push(`${a.kind} of ${w.testId}`);
+                    continue;
+                }
                 if (a.kind === "evidence") {
                     // Defence in depth: the agent already masked it; it is parsed and masked again here before it is kept.
                     try {
@@ -884,6 +1448,13 @@ class RemoteExecutor implements ScriptExecutor {
         }
         this.seq += ledger.length;
         if (ledger.length) this.storeLedger(task, ledger);
+        if (missing.length) {
+            try {
+                svc.p.repo.addEvent(task.jobId, { stage: "validation", kind: "runner_file_missing", level: "warn", message: `The runner named ${missing.length} file${missing.length === 1 ? "" : "s"} it never uploaded, so ${missing.length === 1 ? "it is" : "they are"} not attached: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ", …" : ""}.`.slice(0, 400), data: { taskId: task.id, files: missing.slice(0, 50) } });
+            } catch {
+                /* an event is a convenience */
+            }
+        }
 
         if (opts.projects?.length) return runs;
         return batch.scripts.map((s): ScriptRun => runs.find((r) => r.testId === s.testId) ?? { testId: s.testId, status: "error", durationMs: 0, error: "The runner agent returned no result for this script.", failedStepIndex: -1, steps: [], artifacts: [], responses: [] });

@@ -13,7 +13,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { ResultRequest, type HelloResponse, type TaskOffer, type WebBrowserUsed, type WireRun } from "../agent-protocol/schema.js";
+import { ResultRequest, type AgentPhase, type HelloResponse, type RejectRequest, type RunnerConfigPush, type TaskOffer, type WebBrowserUsed, type WireRun } from "../agent-protocol/schema.js";
 import { enginesOf, type BrowserInUse, type BrowserLaunch, type BrowserSetup } from "./browser-setup.js";
 import { withDeviceLock } from "../engine/mobile/emulator.js";
 import { iosCapabilityProblem } from "../engine/mobile/ios-capability.js";
@@ -21,10 +21,10 @@ import { withSimulatorLock } from "../engine/mobile/ios-runner.js";
 import { MobileTargetSchema, SIMULATOR_NAME } from "../engine/mobile/target.js";
 import { scriptRefusal } from "../engine/desktop/policy.js";
 import { desktopUnavailableReason } from "../engine/desktop/probe.js";
-import type { ScriptInput, ScriptRun } from "../engine/validation/runner.js";
+import type { LiveRunEvent, ScriptInput, ScriptRun } from "../engine/validation/runner.js";
 import { sleep } from "./backoff.js";
 import { BeatPacer } from "./beat-pacer.js";
-import type { CapabilityProbe } from "./capabilities.js";
+import { hasDisplay, type CapabilityProbe } from "./capabilities.js";
 import type { ChildRun, IosDescriptor, MobileDescriptor } from "./child-protocol.js";
 import { PlatformError, type PlatformClient } from "./client.js";
 import { DeviceTask } from "./device-task.js";
@@ -33,9 +33,12 @@ import { RecordTask } from "./record-task.js";
 import { runAgentCleanup } from "./cleanup.js";
 import { sha256OfFile, type FileCache } from "./file-cache.js";
 import type { Logger } from "./log.js";
+import { LiveEventSender, type LiveEventInput } from "./live-events.js";
+import type { ResultOutbox } from "./outbox.js";
 import { maskRun, planUploads, secretsOfEnv, toRunEnv, toWireRun, type UploadOutcome } from "./mapping.js";
 import { resolveInside, sanitizeName } from "./names.js";
 import { TaskProcess } from "./task-process.js";
+import { guardedEnv, proxyTestsConflict, refusesPrivateAddresses, runAddressRefusal, startAddressGuard } from "./address-guard.js";
 import { checkScript, describeErrors } from "../engine/custom/guard.js";
 
 const require = createRequire(import.meta.url);
@@ -73,6 +76,20 @@ export interface TaskRunnerDeps {
     /** Heartbeat period override (tests); default is what the platform announced. */
     heartbeatMs?: number;
     deleteTimeoutMs?: number;
+    /** Results are kept here until the platform answers (outbox.ts). Absent (tests of older shape): posted with a few retries, as before. */
+    outbox?: ResultOutbox;
+    /** Protocol 2: the platform retired this runner while it worked (heartbeat `shutdown`): finish, take nothing new, exit. */
+    onShutdown?(): void;
+    /** Live events: largest batch and longest wait (tests); default 50 events, 1 s. */
+    liveBatch?: { maxBatch?: number; maxDelayMs?: number };
+    /** Protocol 2: the runner's switches changed (heartbeat `config`); the agent applies them with its own rules. Absent: applyConfig as they are. */
+    onConfig?(c: RunnerConfigPush): void;
+}
+
+/** Why this computer will not take a task, before anything is downloaded or started (protocol 2: a reject; protocol 1: ok=false). */
+interface Refusal {
+    reason: RejectRequest["reason"];
+    message: string;
 }
 
 export interface ActiveTask {
@@ -102,18 +119,122 @@ export class TaskRunner {
     /** Highest number of tasks that were running at the same time (a fact the tests and the status line use). */
     peak = 0;
 
-    constructor(private deps: TaskRunnerDeps) {}
+    constructor(private deps: TaskRunnerDeps) {
+        this.ownCustomScripts = deps.allowCustomScripts;
+    }
 
     /** A new hello after a reconnect can change the limits (file size, heartbeat period). */
     setHello(hello: HelloResponse): void {
-        this.deps = { ...this.deps, hello };
+        this.deps = { ...this.deps, hello, allowCustomScripts: this.ownCustomScripts };
+        // A new hello says the switches afresh (hello `runner`): what an older heartbeat said no longer counts.
+        delete this.switches.customScripts;
+        delete this.switches.privateTargets;
     }
+
+    /** --allow-custom-scripts as this computer was started (the switches from the platform are applied on top of it). */
+    private readonly ownCustomScripts: boolean | undefined;
 
     cancelAll(reason: string): void {
         for (const t of this.active.values()) t.cancel(reason);
     }
 
+    /** The runner's switches as the platform last said them (heartbeat `config`, protocol 2): they apply to the next task. */
+    readonly switches: { customScripts?: boolean; privateTargets?: boolean } = {};
+
+    applyConfig(c: RunnerConfigPush): void {
+        if (c.customScripts !== undefined && this.switches.customScripts !== c.customScripts) {
+            this.switches.customScripts = c.customScripts;
+            this.deps = { ...this.deps, allowCustomScripts: c.customScripts };
+            this.deps.log.info(`The runner's owner ${c.customScripts ? "allowed" : "switched off"} code scripts on this computer; it applies to the next task.`);
+        }
+        if (c.privateTargets !== undefined && this.switches.privateTargets !== c.privateTargets) {
+            this.switches.privateTargets = c.privateTargets;
+            this.deps.log.info(`The runner's owner ${c.privateTargets ? "allowed" : "switched off"} private and local addresses on this computer; it applies to the next task.`);
+        }
+    }
+
+    /** Does this runner refuse private and local addresses now (the platform's switch, or BLOCK_PRIVATE_TARGETS=true here)? See address-guard.ts. */
+    private refusesPrivate(): boolean {
+        return refusesPrivateAddresses(this.deps.hello, this.switches, this.deps.env);
+    }
+
+    /** Protocol 2 is spoken with the platform and this offer is a protocol-2 attempt. */
+    private v2(task: TaskOffer): task is TaskOffer & { attemptId: string } {
+        return this.deps.hello.protocol >= 2 && typeof task.attemptId === "string";
+    }
+
+    /**
+     * Can this computer take the task at all? Decided before anything is downloaded, so a protocol-2 platform can offer it to another runner:
+     * a runtime it does not have, code scripts its owner did not allow, a visible browser window where there is no display.
+     */
+    private async refusalOf(task: TaskOffer): Promise<Refusal | undefined> {
+        if (task.kind === "record" || task.kind === "device") return undefined;
+        const runtime = SUPPORTED[task.adapterId];
+        if (!runtime) return { reason: "unsupported", message: `This agent can't run ${task.adapterId} tasks yet.` };
+        if (task.scripts.some((s) => s.custom) && this.deps.allowCustomScripts !== true) return { reason: "code-scripts-off", message: "This task has hand-written scripts, and this agent was not started with --allow-custom-scripts, so it did not run them." };
+        // Private and local addresses (address-guard.ts): the run's addresses are looked up on THIS computer's network, before anything is downloaded.
+        if (runtime === "playwright" && this.refusesPrivate()) {
+            const why = proxyTestsConflict(this.deps.env) ?? (await runAddressRefusal(task.env));
+            if (why) return { reason: "private-target", message: why };
+        }
+        // Decision 8: a visible browser only where a person can see it. Without a display the run is refused with a sentence, not left to fail inside the browser.
+        if (runtime === "playwright" && task.env.headless === false) {
+            const caps = await this.deps.probe.get();
+            if (!hasDisplay(caps.os === "win32" ? "win32" : caps.os === "darwin" ? "darwin" : "linux", this.deps.env, caps.windows?.interactive)) {
+                return { reason: "no-display", message: "This run asks for a visible browser window, and this computer has no screen the runner can show it on (no signed-in desktop). Run it with the browser hidden, or start the runner from a signed-in session." };
+            }
+        }
+        return undefined;
+    }
+
+    /** Protocol 2: take the task (within the offer's acceptSeconds). False when the platform already took it back; network trouble carries on (a heartbeat accepts it too). */
+    private async acceptTask(task: TaskOffer & { attemptId: string }, short: string): Promise<boolean> {
+        const { client, log } = this.deps;
+        for (let i = 1; i <= 3; i++) {
+            try {
+                await client.accept(task.taskId, task.attemptId);
+                return true;
+            } catch (e) {
+                if (e instanceof PlatformError && e.kind !== "network") {
+                    log.warn(`Task ${short}: the platform took the task back before it was accepted (${e.message})`);
+                    return false;
+                }
+                await sleep(1000 * i);
+            }
+        }
+        log.warn(`Task ${short}: the platform did not answer the accept; the run starts, and stops if the platform gave it to another runner.`);
+        return true;
+    }
+
+    /** Protocol 2: turn the task down so the platform offers it to another runner. */
+    private async rejectTask(task: TaskOffer & { attemptId: string }, r: Refusal, short: string): Promise<void> {
+        const { client, log } = this.deps;
+        for (let i = 1; i <= 3; i++) {
+            try {
+                await client.reject(task.taskId, { attemptId: task.attemptId, reason: r.reason, message: r.message.slice(0, 300) });
+                log.info(`Task ${short} turned down: ${r.message}`);
+                return;
+            } catch (e) {
+                if (e instanceof PlatformError && e.kind !== "network") return;
+                await sleep(1000 * i);
+            }
+        }
+        log.warn(`Task ${short}: the platform did not hear that this computer turned the task down; it offers it again after a short wait.`);
+    }
+
     async run(task: TaskOffer): Promise<void> {
+        const short0 = task.taskId.slice(0, 12);
+        // Protocol 2: the switches as the platform holds them now (one changed while this runner was idle), applied with the agent's own rules.
+        if (task.config) (this.deps.onConfig ?? ((c: RunnerConfigPush) => this.applyConfig(c)))(task.config);
+        // Protocol 2: a task this computer cannot take is turned down at once (another runner gets it); one it can take is accepted first.
+        const refusal = await this.refusalOf(task);
+        if (this.v2(task)) {
+            if (refusal) return this.rejectTask(task, refusal, short0);
+            if (!(await this.acceptTask(task, short0))) return;
+        } else if (refusal?.reason === "no-display" || refusal?.reason === "private-target") {
+            // Protocol 1 has no reject: the run ends with the same sentence (the other refusals are answered in execute(), as before).
+            return this.postResult(task.taskId, { ok: false, error: refusal.message, runs: [] }, short0);
+        }
         // A record task hosts a recording session instead of running scripts (see record-task.ts).
         if (task.kind === "record") return this.runRecord(task);
         // A device task opens the app under test on a phone or emulator of this computer and answers the explorer's commands (see device-task.ts).
@@ -121,6 +242,8 @@ export class TaskRunner {
         const { client, log, cache } = this.deps;
         const short = task.taskId.slice(0, 12);
         const forgetSecrets = log.addSecrets(secretsOfEnv(task.env));
+        const v2 = this.v2(task);
+        const attemptId = v2 ? task.attemptId : undefined;
         const abort = new AbortController();
         let stopReason: string | undefined;
         let lost = false;
@@ -143,6 +266,22 @@ export class TaskRunner {
         this.active.set(task.taskId, entry);
         this.peak = Math.max(this.peak, this.active.size);
 
+        // Protocol 2: the run's live events (tests, steps, screenshots, lines, phases), batched and numbered (live-events.ts).
+        let phase: AgentPhase = "preparing";
+        const live = v2
+            ? new LiveEventSender({
+                  send: async (events) => {
+                      await client.events(task.taskId, { attemptId: attemptId!, events });
+                  },
+                  redact: (t) => log.redact(t),
+                  onGone: () => {
+                      lost = true;
+                      entry.cancel("The platform no longer expects a result for this task.");
+                  },
+                  ...(this.deps.liveBatch ?? {}),
+              })
+            : undefined;
+
         // Heartbeats: keep the lease, send progress and emulator messages, and learn about cancel.
         const beatStop = new AbortController();
         const heartbeatMs = this.deps.heartbeatMs ?? Math.max(1000, this.deps.hello.heartbeatSeconds * 1000);
@@ -154,9 +293,11 @@ export class TaskRunner {
                 const lines = pendingLogs.splice(0, 20);
                 pacer.markBeat();
                 try {
-                    const res = await client.heartbeat(task.taskId, { done, total: task.scripts.length, ...(lines.length ? { log: lines.map((l) => log.redact(l).slice(0, 300)) } : {}) });
+                    const res = await client.heartbeat(task.taskId, { done, total: task.scripts.length, ...(lines.length ? { log: lines.map((l) => log.redact(l).slice(0, 300)) } : {}), ...(attemptId ? { attemptId, phase } : {}) });
                     beatFailures = 0;
-                    if (res.cancel) entry.cancel("The run was cancelled.");
+                    if (res.cancel) entry.cancel(res.timeout ? "The run took longer than the platform allows, so the platform stopped it." : "The run was cancelled.");
+                    if (res.config) (this.deps.onConfig ?? ((c: RunnerConfigPush) => this.applyConfig(c)))(res.config);
+                    if (res.shutdown) this.deps.onShutdown?.();
                 } catch (e) {
                     pendingLogs.unshift(...lines); // not delivered: they go with the next beat
                     if (e instanceof PlatformError && (e.status === 404 || e.status === 409 || e.status === 410)) {
@@ -174,11 +315,19 @@ export class TaskRunner {
         let result: { ok: boolean; error?: string; runs: WireRun[]; browser?: WebBrowserUsed };
         try {
             log.info(`Task ${short} started: ${task.adapterId}, ${task.scripts.length} script${task.scripts.length === 1 ? "" : "s"}${task.projects?.length ? `, ${task.projects.length} variants` : ""}.`);
+            live?.push({ type: "phase", phase });
             result = await this.execute(task, dir, { abort, isStopped: () => stopReason, setProc: (p) => (proc = p), pushLog: (l) => {
+                    // Protocol 2: a line is a live event; protocol 1: it goes with the next heartbeat, as before.
+                    if (live) return live.push({ type: "log", line: l.slice(0, 300) });
                     pendingLogs.push(l);
                     if (pendingLogs.length > 400) pendingLogs.splice(0, pendingLogs.length - 400); // a flood keeps the newest
                     pacer.nudge();
-                }, setDone: (n) => (done = n), pinned, entry });
+                }, setDone: (n) => (done = n), pinned, entry, ...(live ? { live, attemptId: attemptId!, setPhase: (p: AgentPhase) => {
+                    if (p === phase) return;
+                    phase = p;
+                    live.push({ type: "phase", phase: p });
+                    pacer.nudge();
+                } } : {}) });
         } catch (e) {
             if (e instanceof TaskStopped || stopReason) result = { ok: false, error: stopReason ?? "The run was stopped.", runs: [] };
             else {
@@ -202,7 +351,9 @@ export class TaskRunner {
                 break;
             }
         }
-        if (!lost) await this.postResult(task.taskId, { ok: result.ok, ...(result.error ? { error: log.redact(result.error).slice(0, 500) } : {}), runs: result.runs, ...(result.ok && result.browser ? { browser: result.browser } : {}) }, short);
+        // Protocol 2: the live events still waiting go before the result (bounded: a platform that does not answer must not hold it back).
+        await live?.close(5000);
+        if (!lost) await this.postResult(task.taskId, { ok: result.ok, ...(result.error ? { error: log.redact(result.error).slice(0, 500) } : {}), runs: result.runs, ...(result.ok && result.browser ? { browser: result.browser } : {}), ...(attemptId ? { attemptId } : {}) }, short);
         else log.warn(`Task ${short} was taken away by the platform; its result was not sent.`);
 
         this.active.delete(task.taskId);
@@ -228,6 +379,7 @@ export class TaskRunner {
             log,
             env: this.deps.env,
             ...(browser ? { browser } : {}),
+            ...(this.refusesPrivate() ? { refusePrivate: true } : {}),
             postResult: (body) => this.postResult(task.taskId, body, short),
             setPid: (pid) => void (entry.pid = pid),
             ...(this.deps.heartbeatMs ? { beatMs: this.deps.heartbeatMs } : {}),
@@ -281,6 +433,10 @@ export class TaskRunner {
             setDone(n: number): void;
             pinned: string[];
             entry: ActiveTask;
+            /** Protocol 2 only. */
+            live?: LiveEventSender;
+            attemptId?: string;
+            setPhase?(p: AgentPhase): void;
         },
     ): Promise<{ ok: boolean; error?: string; runs: WireRun[]; browser?: WebBrowserUsed }> {
         const { client, cache, log, hello } = this.deps;
@@ -387,9 +543,28 @@ export class TaskRunner {
             ...(web && (web.launch.channel || web.launch.executablePath) ? { browser: web.launch } : {}),
             opts: { workers: task.workers, ...(task.timeoutMs !== undefined ? { timeoutMs: task.timeoutMs } : {}), ...(task.projects ? { projects: task.projects } : {}), ...(task.testTimeoutMs !== undefined ? { testTimeoutMs: task.testTimeoutMs } : {}), ...(task.startTimeoutMs !== undefined ? { startTimeoutMs: task.startTimeoutMs } : {}) },
         };
+        // Protocol 2: the child reports each test and step as it happens; a failure screenshot is uploaded at once and then named in an event.
+        const liveShots = new Map<string, string>();
+        let shots: Promise<void> = Promise.resolve();
+        let sawTests = false;
+        if (ctl.live) message.live = true;
+        const onChildLive = (e: LiveRunEvent): void => {
+            if (!ctl.live) return;
+            if (e.type === "screenshot") {
+                shots = shots.then(() => this.liveScreenshot(task.taskId, e, liveShots, ctl.attemptId, ctl.abort.signal, ctl.live!)).catch(() => undefined);
+                return;
+            }
+            if (e.type === "test_started" || e.type === "test_finished") sawTests = true;
+            ctl.live.push(e as LiveEventInput);
+        };
         const runChild = async () => {
             stopCheck();
-            const proc = new TaskProcess(this.deps.env, (line) => ctl.pushLog(line));
+            // A runner that refuses private addresses sends every request of the run through its own address guard (address-guard.ts), closed with the run.
+            const guard = runtime === "playwright" && this.refusesPrivate() ? await startAddressGuard() : undefined;
+            try {
+            const proc = new TaskProcess(guard ? guardedEnv(this.deps.env, guard) : this.deps.env, (line) => ctl.pushLog(line));
+            proc.onLive = onChildLive;
+            ctl.setPhase?.("running");
             ctl.setProc(proc);
             ctl.entry.pid = proc.pid;
             proc.start(message);
@@ -405,6 +580,9 @@ export class TaskRunner {
             clearTimeout(timer);
             if (outcome.kind !== "result") proc.kill(); // sweep whatever the runner left behind
             return { outcome, watchdogFired, output: proc.output };
+            } finally {
+                await guard?.close().catch(() => undefined);
+            }
         };
         // One device runs one task at a time, whatever the concurrency setting says.
         const ran = runtime === "taqwright" ? await withDeviceLock(runChild) : runtime === "ios" ? await withSimulatorLock(runChild) : await runChild();
@@ -424,6 +602,8 @@ export class TaskRunner {
         const infra = this.infrastructureProblem(runs);
         if (infra) return fail(infra);
         ctl.setDone(runs.length);
+        // Frameworks that report no live tests (phones, iOS, Windows desktop): each test's outcome now, before the files are sent.
+        if (ctl.live && !sawTests) for (const r of runs) ctl.live.push({ type: "test_finished", testId: r.testId, ...(r.variant ? { variant: r.variant } : {}), status: r.status, durationMs: Number.isFinite(r.durationMs) ? Math.max(0, r.durationMs) : 0, ...(r.error ? { error: r.error.slice(0, 2000) } : {}) });
 
         // 4. cleanup of the records the run created
         if (task.env.cleanup === "agent") {
@@ -434,8 +614,10 @@ export class TaskRunner {
         stopCheck();
 
         // 5. upload and describe
+        ctl.setPhase?.("uploading");
+        await shots; // the live screenshots finish first: they are not sent twice
         if (runs.some((r) => r.artifacts.length > 0)) ctl.pushLog("Uploading screenshots and other files");
-        const outcome = await this.uploadAll(task.taskId, runs, hello.maxFileBytes, ctl.abort.signal, short);
+        const outcome = await this.uploadAll(task.taskId, runs, hello.maxFileBytes, ctl.abort.signal, short, liveShots, ctl.attemptId);
         stopCheck();
         const wire = runs.map((r) => maskRun(toWireRun(r, outcome), (text) => log.redact(text)));
         const body = { ok: true, runs: wire };
@@ -560,13 +742,40 @@ export class TaskRunner {
         return file;
     }
 
+    /**
+     * Protocol 2: a failure screenshot, uploaded the moment Playwright wrote it (under a name of its own, `live-<n>-...`) and then named in a
+     * `screenshot` event, so the run page shows it before the run ends. The final upload round reuses it instead of sending it again.
+     */
+    private async liveScreenshot(taskId: string, e: Extract<LiveRunEvent, { type: "screenshot" }>, done: Map<string, string>, attemptId: string | undefined, signal: AbortSignal, live: LiveEventSender): Promise<void> {
+        if (done.has(e.path) || signal.aborted || live.isGone) return;
+        const st = await fs.stat(e.path).catch(() => undefined);
+        if (!st?.isFile() || st.size > this.deps.hello.maxFileBytes) return;
+        const ext = path.extname(e.path).toLowerCase() === ".jpg" || path.extname(e.path).toLowerCase() === ".jpeg" ? ".jpg" : ".png";
+        const name = `live-${done.size + 1}-${sanitizeName(e.testId, 40, "test")}${ext}`;
+        try {
+            const local = await sha256OfFile(e.path);
+            const res = await this.deps.client.upload(taskId, name, e.path, st.size, signal, attemptId);
+            if (res.size !== local.size || res.sha256.toLowerCase() !== local.sha256) return;
+            done.set(e.path, res.ref);
+            live.push({ type: "screenshot", testId: e.testId, ...(e.variant ? { variant: e.variant } : {}), ref: res.ref, kind: "screenshot" });
+        } catch {
+            /* a live picture is a bonus: the final upload round sends the file */
+        }
+    }
+
     /** Upload every file the runs name. A file that cannot be uploaded is left out and the run says so; it never fails the task. */
-    private async uploadAll(taskId: string, runs: ScriptRun[], maxBytes: number, signal: AbortSignal, short: string): Promise<UploadOutcome> {
+    private async uploadAll(taskId: string, runs: ScriptRun[], maxBytes: number, signal: AbortSignal, short: string, already: ReadonlyMap<string, string> = new Map(), attemptId?: string): Promise<UploadOutcome> {
         const { client, log } = this.deps;
         const out: UploadOutcome = { uploaded: new Map(), skipped: new Map() };
         let bytes = 0;
         for (const item of planUploads(runs)) {
             if (signal.aborted) break;
+            // Sent already while the run was going (a live screenshot): the same file under the name it has on the platform.
+            const sent = already.get(item.path);
+            if (sent) {
+                out.uploaded.set(item.path, sent);
+                continue;
+            }
             const st = await fs.stat(item.path).catch(() => undefined);
             if (!st?.isFile()) {
                 out.skipped.set(item.path, "a file was missing when it should have been uploaded");
@@ -585,7 +794,7 @@ export class TaskRunner {
             let reason = "";
             for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS && !signal.aborted; attempt++) {
                 try {
-                    const res = await client.upload(taskId, item.name, item.path, st.size, signal);
+                    const res = await client.upload(taskId, item.name, item.path, st.size, signal, attemptId);
                     if (res.size === local.size && res.sha256.toLowerCase() === local.sha256) {
                         out.uploaded.set(item.path, res.ref);
                         bytes += st.size;
@@ -609,7 +818,31 @@ export class TaskRunner {
         return out;
     }
 
+    /**
+     * Deliver a result. With an outbox (every agent program; outbox.ts) it is kept on disk first and only removed once the platform answered;
+     * after a few quick tries the outbox keeps trying in the background (across a restart of the agent), so the task's slot is free again.
+     */
     private async postResult(taskId: string, body: ResultRequest, short: string): Promise<void> {
+        const { log, outbox } = this.deps;
+        if (outbox) {
+            try {
+                await outbox.put(taskId, body);
+            } catch (e) {
+                log.warn(`Task ${short}: the result could not be kept on this computer (${e instanceof Error ? e.message : "unknown problem"}); it is sent directly.`);
+                return this.postDirect(taskId, body, short);
+            }
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                if ((await outbox.deliver(taskId)) !== "pending") return;
+                if (attempt < 3) await sleep(500 * 2 ** attempt);
+            }
+            log.warn(`Task ${short}: the platform did not answer; the result is kept on this computer and is sent as soon as the platform answers.`);
+            outbox.wake();
+            return;
+        }
+        return this.postDirect(taskId, body, short);
+    }
+
+    private async postDirect(taskId: string, body: ResultRequest, short: string): Promise<void> {
         const { client, log } = this.deps;
         for (let attempt = 1; attempt <= RESULT_ATTEMPTS; attempt++) {
             try {

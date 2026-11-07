@@ -41,9 +41,12 @@ describe("the check made when a step runs", () => {
     });
 
     it("judges hosts as platform/net-guard.ts does", () => {
-        for (const h of ["localhost", "a.localhost", "db.internal", "127.0.0.1", "10.2.3.4", "172.16.0.1", "172.32.0.1", "192.168.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "8.8.8.8", "::1", "::", "fd00::1", "fe80::1", "::ffff:7f00:1", "::ffff:8.8.8.8", "2606:4700::1111", "app.example"]) {
+        for (const h of ["localhost", "a.localhost", "db.internal", "127.0.0.1", "10.2.3.4", "172.16.0.1", "172.32.0.1", "192.168.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "8.8.8.8", "::1", "::", "fd00::1", "fe80::1", "fe90::1", "febf::1", "fec0::1", "fe7f::1", "::ffff:7f00:1", "::ffff:8.8.8.8", "2606:4700::1111", "app.example"]) {
             expect(rt.privateAddress(h), h).toBe(isPrivateHost(h));
         }
+        // all of fe80::/10 is link-local, not only addresses that start with "fe80"
+        for (const h of ["fe90::1", "febf::1"]) expect(isPrivateHost(h), h).toBe(true);
+        expect(isPrivateHost("fe7f::1")).toBe(false);
     });
 });
 

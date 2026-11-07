@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { AGENT_TOKEN_PREFIX } from "../agent-protocol/schema.js";
+import { AGENT_TOKEN_PREFIX, ENROLLMENT_CODE_PREFIX } from "../agent-protocol/schema.js";
 import { REPO_ROOT } from "../config.js";
 import { isDeniedProgram } from "../engine/desktop/target.js";
 import { BROWSER_POLICIES, isBrowserPolicy, type BrowserPolicy } from "../engine/browsers/choice.js";
@@ -29,8 +29,15 @@ export interface AgentConfig {
     cacheBytes: number;
     /** Set when the address is plain http and was accepted anyway: the text of the warning to print once. */
     insecureWarning?: string;
-    /** Where the token came from, for the one-time advice about the command line. */
-    tokenSource: "flag" | "env" | "file";
+    /**
+     * Where the token came from, for the one-time advice about the command line. "store": the computer's credential store (credential-store.ts),
+     * read by main() before the agent starts, or filled by trading `enroll` at first contact; `token` is empty until then.
+     */
+    tokenSource: "flag" | "env" | "file" | "store";
+    /** The folder whose credential the store keeps (the runner's folder; AITP_CREDENTIAL_DIR, else the work folder). Its install id lives there too. */
+    credentialDir?: string;
+    /** A single-use enrollment code to trade for the credential: given on the command line (`explicit`, replaces a stored one) or in a file (runner.enroll, used only while none is stored). */
+    enroll?: { code: string; file?: string; explicit: boolean };
     /**
      * Applications Windows desktop tests may start on this computer (--allow-app, AITP_ALLOW_APPS, --allow-apps-file). Empty = none: a desktop
      * test is refused with a plain message. Command shells and script hosts are dropped here and never allowed (see engine/desktop/target.ts).
@@ -55,6 +62,7 @@ export type ParsedArgs =
     | { kind: "help" }
     | { kind: "version" }
     | { kind: "run"; config: AgentConfig }
+    | { kind: "forget"; credentialDir: string }
     | { kind: "error"; message: string };
 
 export const USAGE = `ai-test-agent: runs tests for the AI Testing Platform on this computer.
@@ -69,6 +77,13 @@ Options:
   --url <address>        Platform address, e.g. https://tests.example.com        (env AITP_URL)
   --token <token>        Agent token from the project's Agents page              (env AITP_AGENT_TOKEN)
   --token-file <file>    Read the token from a file (first line)                 (env AITP_AGENT_TOKEN_FILE)
+  --enroll <code>        Add this computer with a single-use code from the Runners page (aite_...).
+                         The runner trades it for its own credential, keeps that in this computer's
+                         store (Windows data protection, the macOS Keychain, or a file only you can
+                         read on Linux) and needs no token afterwards        (env AITP_ENROLL_CODE)
+  --enroll-file <file>   The same code read from a file, deleted once used (a download's runner.enroll)
+                                                                                 (env AITP_AGENT_ENROLL_FILE)
+  --forget-credential    Delete the credential this runner keeps, then exit (for uninstalling)
   --name <label>         Name shown on the Agents page, default: this computer   (env AITP_AGENT_NAME)
   --concurrency <1-8>    Runs at the same time, default 1                        (env AITP_AGENT_CONCURRENCY)
   --work-dir <folder>    Where runs and the file cache live, default .agent-work (env AITP_AGENT_WORK_DIR)
@@ -118,6 +133,9 @@ const OPTIONS = {
     url: { type: "string" },
     token: { type: "string" },
     "token-file": { type: "string" },
+    enroll: { type: "string" },
+    "enroll-file": { type: "string" },
+    "forget-credential": { type: "boolean" },
     name: { type: "string" },
     concurrency: { type: "string" },
     "work-dir": { type: "string" },
@@ -174,6 +192,7 @@ export function checkPlatformAddress(raw: string, allowInsecure: boolean): Addre
 }
 
 const TOKEN_SHAPE = new RegExp(`^${AGENT_TOKEN_PREFIX}[A-Za-z0-9_-]{20,200}$`);
+const ENROLL_SHAPE = new RegExp(`^${ENROLLMENT_CODE_PREFIX}[A-Za-z0-9_-]{20,200}$`);
 
 /** The default folder for runs: inside the checkout, so the generated scripts find @playwright/test in node_modules. */
 export const defaultWorkDir = (): string => path.join(REPO_ROOT, ".agent-work");
@@ -204,6 +223,10 @@ export function parseAgentArgs(argv: string[], env: NodeJS.ProcessEnv = process.
     const { values, positionals } = parsed;
     if (values.help) return { kind: "help" };
     if (values.version) return { kind: "version" };
+    if (values["forget-credential"]) {
+        const dirRaw = env.AITP_CREDENTIAL_DIR?.trim() || values["work-dir"]?.trim() || env.AITP_AGENT_WORK_DIR?.trim();
+        return { kind: "forget", credentialDir: dirRaw ? path.resolve(dirRaw) : defaultWorkDir() };
+    }
     if (positionals.length > 0) return { kind: "error", message: `Unexpected argument "${positionals[0]!.slice(0, 40)}". Run ai-test-agent --help.` };
 
     const url = values.url ?? env.AITP_URL;
@@ -227,8 +250,28 @@ export function parseAgentArgs(argv: string[], env: NodeJS.ProcessEnv = process.
         token = env.AITP_AGENT_TOKEN;
     }
     token = token?.trim();
-    if (!token) return { kind: "error", message: "Give the agent token with AITP_AGENT_TOKEN, --token-file or --token. Create one on the project's Agents page." };
-    if (!TOKEN_SHAPE.test(token)) return { kind: "error", message: `That is not an agent token (they start with ${AGENT_TOKEN_PREFIX}). Copy it again from the project's Agents page.` };
+    // Round 39: no token given means the credential this runner keeps (credential-store.ts), or an enrollment code to get one.
+    let enroll: AgentConfig["enroll"];
+    const enrollCode = values.enroll ?? env.AITP_ENROLL_CODE;
+    const enrollFile = values["enroll-file"] ?? env.AITP_AGENT_ENROLL_FILE;
+    if (!token && enrollCode !== undefined && enrollCode.trim()) {
+        if (!ENROLL_SHAPE.test(enrollCode.trim())) return { kind: "error", message: `That is not an enrollment code (they start with ${ENROLLMENT_CODE_PREFIX}). Copy it again from the Runners page.` };
+        enroll = { code: enrollCode.trim(), explicit: true };
+    } else if (!token && enrollFile) {
+        let code = "";
+        try {
+            code = (fs.readFileSync(enrollFile, "utf8").split(/\r?\n/)[0] ?? "").trim();
+        } catch {
+            /* the file was used and deleted already: the stored credential counts (main.ts) */
+        }
+        if (code && !ENROLL_SHAPE.test(code)) return { kind: "error", message: `The enrollment file does not hold an enrollment code. Download the runner again from the Runners page.` };
+        if (code) enroll = { code, file: path.resolve(enrollFile), explicit: false };
+    }
+    if (token && !TOKEN_SHAPE.test(token)) return { kind: "error", message: `That is not an agent token (they start with ${AGENT_TOKEN_PREFIX}). Copy it again from the project's Agents page.` };
+    if (!token) {
+        token = "";
+        tokenSource = "store";
+    }
 
     const allowInsecure = values["allow-insecure"] === true || truthy(env.AITP_AGENT_ALLOW_INSECURE);
     const address = checkPlatformAddress(url.trim(), allowInsecure);
@@ -244,6 +287,7 @@ export function parseAgentArgs(argv: string[], env: NodeJS.ProcessEnv = process.
     const name = (values.name ?? env.AITP_AGENT_NAME ?? os.hostname()).replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 64) || "agent";
     const workDirRaw = values["work-dir"] ?? env.AITP_AGENT_WORK_DIR;
     const workDir = workDirRaw?.trim() ? path.resolve(workDirRaw.trim()) : defaultWorkDir();
+    const credentialDir = env.AITP_CREDENTIAL_DIR?.trim() ? path.resolve(env.AITP_CREDENTIAL_DIR.trim()) : workDir;
 
     // Applications desktop tests may start. Three places to say it, all kept on this computer: the command line, the environment, a file.
     const listed: string[] = [...(values["allow-app"] ?? [])];
@@ -283,6 +327,6 @@ export function parseAgentArgs(argv: string[], env: NodeJS.ProcessEnv = process.
 
     return {
         kind: "run",
-        config: { baseUrl: address.baseUrl, token, name, concurrency, workDir, allowInsecure, cacheBytes: cacheMb * 1024 * 1024, ...(address.warning ? { insecureWarning: address.warning } : {}), tokenSource, allowApps, allowAppNotes, ...(values["allow-custom-scripts"] === true || truthy(env.AITP_ALLOW_CUSTOM_SCRIPTS) ? { allowCustomScripts: true } : {}), ...(kitVersion ? { kitVersion } : {}), ...(browser ? { browser } : {}), network: net.settings },
+        config: { baseUrl: address.baseUrl, token, name, concurrency, workDir, credentialDir, ...(enroll ? { enroll } : {}), allowInsecure, cacheBytes: cacheMb * 1024 * 1024, ...(address.warning ? { insecureWarning: address.warning } : {}), tokenSource, allowApps, allowAppNotes, ...(values["allow-custom-scripts"] === true || truthy(env.AITP_ALLOW_CUSTOM_SCRIPTS) ? { allowCustomScripts: true } : {}), ...(kitVersion ? { kitVersion } : {}), ...(browser ? { browser } : {}), network: net.settings },
     };
 }

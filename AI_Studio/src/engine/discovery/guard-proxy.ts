@@ -34,12 +34,16 @@ export class GuardProxy {
     private constructor(
         private readonly server: http.Server,
         private readonly trusted: ReadonlySet<string>,
+        private readonly refusal: string = PRIVATE_ADDRESS_REFUSED,
     ) {}
 
-    /** `trust`: "host:port" pairs passed as they are. For tests only, where a local site stands in for a public one; the platform never sets it. */
-    static async start(opts: { trust?: string[] } = {}): Promise<GuardProxy> {
+    /**
+     * `trust`: "host:port" pairs passed as they are. For tests only, where a local site stands in for a public one; the platform never sets it.
+     * `refusal`: the text of a refused page (a runner's own guard, src/agent/address-guard.ts, words it for a person's computer). Default: the platform's.
+     */
+    static async start(opts: { trust?: string[]; refusal?: string } = {}): Promise<GuardProxy> {
         const server = http.createServer();
-        const proxy = new GuardProxy(server, new Set(opts.trust ?? []));
+        const proxy = new GuardProxy(server, new Set(opts.trust ?? []), opts.refusal ?? PRIVATE_ADDRESS_REFUSED);
         server.on("connection", (s) => {
             proxy.sockets.add(s);
             s.on("close", () => proxy.sockets.delete(s));
@@ -77,7 +81,7 @@ export class GuardProxy {
         const ip = this.trusted.has(`${u.hostname}:${u.port || 80}`) ? u.hostname : await publicAddressOf(u.hostname);
         if (!ip) {
             this.refuse(u.host);
-            res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end(PRIVATE_ADDRESS_REFUSED);
+            res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end(this.refusal);
             return;
         }
         const headers: http.OutgoingHttpHeaders = {};

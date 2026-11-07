@@ -44,6 +44,7 @@ import { meterFor } from "./usage-store.js";
 import { routedLlmForJob } from "./llm-routing.js";
 import { configuredLlmForJob, resolveProjectAi } from "./ai-config.js";
 import { jobPersonGate } from "./phone-person-gate.js";
+import { RunnerAgentError } from "./agent-services.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
 import type { ArtifactStore } from "./storage.js";
 
@@ -238,7 +239,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         const pins = runsTests ? pinRunVersions(repo.db, job.id, o.testIds ?? []) : undefined;
         if (pins) {
             sink.keepSteps = pins.stale;
-            for (const id of pins.waiting) ctx.emit({ stage: "validation", kind: "waiting_for_approval", level: "warn", message: `${repo.getTest(id)?.testKey ?? id}: not run. It is waiting for approval: only approved versions run.` });
+            for (const id of pins.waiting) ctx.emit({ stage: "validation", kind: pins.held.has(id) ? "shared_part_changed" : "waiting_for_approval", level: "warn", message: `${repo.getTest(id)?.testKey ?? id}: not run. ${pins.held.get(id) ?? "It is waiting for approval: only approved versions run."}` });
             for (const id of pins.stale) ctx.emit({ stage: "validation", kind: "approved_version_ran", message: `${repo.getTest(id)?.testKey ?? id}: ran its approved version. A newer draft is waiting for approval.` });
             if (pins.waiting.length) {
                 const waiting = new Set(pins.waiting);
@@ -289,6 +290,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 });
             }
             for (const id of prepared.missing) ctx.emit({ stage: "validation", kind: "test_missing", level: "warn", message: `Test ${id} no longer exists; skipped` });
+            for (const note of prepared.notes) ctx.emit({ stage: "validation", kind: "project_accounts_withheld", level: "warn", message: note });
             summary = await runEnvironmentJob(ctx, { ...prepared.request, render: { ...prepared.request.render, deleteOps: projectDeleteOps((app.model ?? repo.getLatestAppModel(job.projectId))?.apis) }, cleanup, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, prepared.tests, sink);
         } else if (o.mode === "plain") {
             // One test described in plain words: built, run for real, stored (see engine/authoring/plain.ts).
@@ -433,6 +435,12 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                     repo.setJobStatus(job.id, "FAILED", msg);
                     const facts = cancelSummary(repo.getJob(job.id) ?? { ...job, status: "FAILED", error: msg });
                     if (facts) emit({ stage: "orchestration", kind: "cancel_summary", message: facts.note, data: { planned: facts.planned, ran: facts.ran, notRun: facts.notRun } });
+                } else if (validateOnly && err instanceof RunnerAgentError) {
+                    // The runner, not a test, failed (it stopped answering, could not start, refused): no test gets a verdict from that.
+                    // Tests that had no result yet go back to what they were, as on a cancel, and the run says why (runner-agent.md).
+                    const restored = await sink.restoreInterrupted();
+                    if (restored) emit({ stage: "orchestration", kind: "runner_failed_tests_restored", level: "warn", message: `The runner could not finish this run, so ${restored === 1 ? "one test that had no result yet is" : `${restored} tests that had no result yet are`} back to what ${restored === 1 ? "it was" : "they were"}. Tests that finished keep their result.` });
+                    await sink.writes.flush();
                 } else if (validateOnly) {
                     // Tests this job had started must not stay VALIDATING forever (runs that finished were recorded).
                     repo.resetValidatingTests(o.testIds ?? [], "FAILED_VALIDATION", `Validation interrupted: ${msg}`);

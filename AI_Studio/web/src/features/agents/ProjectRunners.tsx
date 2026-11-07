@@ -9,7 +9,9 @@ import { AccessPanel, RemoveAccessDialog, type AccessTarget } from "./RemoveAcce
 import { RunnerChoicePanel } from "./RunnerChoicePanel";
 import { TokensPanel } from "./TokensPanel";
 import { usePolled, type Agent, type AgentToken } from "./agents";
+import { useFetch } from "../../lib/hooks";
 import { RunnerAccessPanel } from "../runners/RunnerAccessPanel";
+import { ADD_COMPUTER_HREF } from "../runners/runners";
 import "./agents.css";
 
 /**
@@ -21,8 +23,12 @@ export function ProjectRunners({ id, embedded = false }: { id: string; embedded?
     // Polled with the agents, so a run that starts elsewhere locks the form within a few seconds.
     const jobs = usePolled<Job[]>(`/projects/${id}/jobs`);
     const agents = usePolled<Agent[]>(`/projects/${id}/agents`);
-    const tokens = usePolled<AgentToken[]>(`/projects/${id}/agent-tokens`);
-    const info = usePolled<{ maxRunners?: number; activeRunners?: number }>(`/projects/${id}/runner-kits/info`);
+    // Adding a runner for the project, its access list and the token panel are for someone who may manage its runners: the server says
+    // (it also applies the side and organisation rules), so nobody is shown a button that answers 403. Nobody else polls the token list.
+    const access = useFetch<{ canManage?: boolean }>(`/projects/${id}/runner-access`);
+    const manage = access.data?.canManage === true;
+    const tokens = usePolled<AgentToken[]>(manage ? `/projects/${id}/agent-tokens` : null);
+    const info = usePolled<{ maxRunners?: number; activeRunners?: number }>(manage ? `/projects/${id}/runner-kits/info` : null);
     const running = !!jobs.data?.some((j) => isActive(j.status));
     // One runner per project (server default; AGENT_MAX_TOKENS can raise it). Count the active tokens here, falling back to the info answer.
     const maxRunners = info.data?.maxRunners ?? 1;
@@ -41,13 +47,23 @@ export function ProjectRunners({ id, embedded = false }: { id: string; embedded?
 
     return (
         <>
-            {embedded ? <p className="t-secondary">Runners run your tests on another computer. Most people do not need one.</p> : <PageHeader title="Runners" subtitle="Runners run your tests on another computer. Most people do not need one." />}
+            {embedded ? (
+                <p className="t-secondary">Runners are the computers that run this project’s tests. Nothing runs until one of them is online.</p>
+            ) : (
+                <PageHeader title="Runners" subtitle="Runners are the computers that run this project’s tests. Nothing runs until one of them is online." />
+            )}
             <div className="stack">
-                <AgentsList projectId={id} agents={agents} addOpen={adding} atLimit={atLimit} maxRunners={maxRunners} onAdd={() => setAdding(true)} onRemove={setRemoving} />
-                {adding && <AddRunner projectId={id} agents={agents.data ?? []} onClose={() => setAdding(false)} onChanged={changed} />}
+                <AgentsList projectId={id} agents={agents} addOpen={adding} atLimit={atLimit} maxRunners={maxRunners} canManage={manage} onAdd={() => setAdding(true)} onRemove={setRemoving} />
+                {!manage && access.data && (
+                    <p className="t-secondary" data-testid="project-runners-own">
+                        To run this project’s tests on your own computer, <a href={ADD_COMPUTER_HREF}>add this computer</a>. It then runs the tests you start here, if the project allows people’s own computers.
+                    </p>
+                )}
+                {adding && manage && <AddRunner projectId={id} agents={agents.data ?? []} onClose={() => setAdding(false)} onChanged={changed} />}
                 <RunnerAccessPanel projectId={id} onChanged={changed} />
-                <AccessPanel projectId={id} agents={agents.data ?? []} tokens={tokens} onChanged={changed} />
+                {manage && <AccessPanel projectId={id} agents={agents.data ?? []} tokens={tokens} onChanged={changed} />}
                 <RunnerChoicePanel projectId={id} agents={agents.data ?? []} jobRunning={running} />
+                {manage && (
                 <details className="card ag-add" open={advanced} onToggle={(e) => setAdvanced((e.currentTarget as HTMLDetailsElement).open)}>
                     <summary className="ag-add-sum">
                         <ChevronRight size={16} className="chev" aria-hidden />
@@ -76,6 +92,7 @@ export function ProjectRunners({ id, embedded = false }: { id: string; embedded?
                         <TokensPanel key={tick} projectId={id} maxRunners={maxRunners} onChanged={changed} />
                     </div>
                 </details>
+                )}
             </div>
             {removing && (
                 <RemoveAccessDialog

@@ -9,6 +9,13 @@ export default defineConfig({
     test: {
         include: [
             "tests/agent-platform-unit.test.ts",
+            "tests/approval-deps.test.ts",
+            "tests/credential-store-unit.test.ts",
+            "tests/environment-accounts-unit.test.ts",
+            "tests/run-live-unit.test.ts",
+            "tests/runner-protocol2-unit.test.ts",
+            "tests/runner-sessions-personal.test.ts",
+            "tests/runner-stop-file-unit.test.ts",
             "tests/live-hardening.test.ts",
             "tests/hard-signin-unit.test.ts",
             "tests/floating-promises-unit.test.ts",

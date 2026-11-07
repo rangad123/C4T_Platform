@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
-import { AGENTS_MIGRATION, RUNNER_SHARING_MIGRATION } from "./agent-store.js";
+import { AGENTS_MIGRATION, PERSONAL_RUNNERS_MIGRATION, repairPersonalRunnerColumns, RUNNER_LIFECYCLE_MIGRATION, RUNNER_SHARING_MIGRATION } from "./agent-store.js";
 import { BLOCKS_MIGRATION } from "./block-store.js";
 import { CLEANUP_MIGRATION } from "./cleanup-store.js";
 import { CUSTOM_MIGRATION } from "./custom-script-store.js";
@@ -37,6 +37,7 @@ import { SHARED_STATE_MIGRATION } from "./shared-state.js";
 import { FOLDERS_MIGRATION } from "./project-folders.js";
 import { LIBRARY_MIGRATION } from "./library-store.js";
 import { REVIEW_MIGRATION } from "./review-store.js";
+import { APPROVAL_DEPS_MIGRATION } from "./approval-deps.js";
 import { TESTING_AGENTS_MIGRATION } from "./testing-agents.js";
 import { SHARED_INTEGRATIONS_MIGRATION } from "./shared-integrations.js";
 import { PROJECT_APP_MIGRATION } from "./project-app.js";
@@ -287,6 +288,12 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 48: integrations set up once for an organisation, and which projects use them (schema lives in shared-integrations.ts; each project keeps its own row in integrations or alert_channels) */ SHARED_INTEGRATIONS_MIGRATION,
     /* 49: written test cases say whether they can be automated, carry a number per project (TC-001; existing cases numbered in the order they were added) and the requirement record they come from (schema lives in manual-case-store.ts; existing cases become manual) */ caseTypesMigration(sqliteDialect),
     /* 50: what a project's testing agents need, saved once on its Requirements tab and changed only there (schema lives in agent-inputs-store.ts; each existing project starts with what its latest application holds) */ agentInputsMigration(sqliteDialect),
+    // 51-54 are filled: 51-53 by the local runner round (reserved one per builder, filled in any order, so 51 and 53 are also in
+    // LATE_FILLED_SLOTS below; 52 adds only a column), and 54 by approval dependencies.
+    /* 51: personal and team runners, enrollment codes, owner switches, the project's "allow people's own computers" (schema lives in agent-store.ts; every existing runner becomes a team runner with today's rules, every project allows people's own computers) */ PERSONAL_RUNNERS_MIGRATION,
+    /* 52: runs that start only on runners: who made each schedule, so a person's own runner can take that person's scheduled runs (schedule-store.ts; existing schedules have none: null) */ `ALTER TABLE schedules ADD COLUMN created_by TEXT;`,
+    /* 53: a runner task's phases and attempts, and its live events (schema lives in agent-store.ts; existing tasks get their phase from their status, every existing runner speaks protocol 1 until its next hello) */ RUNNER_LIFECYCLE_MIGRATION,
+    /* 54: what an approved test version depends on (shared steps, helpers, elements), so a change there holds it back (schema lives in approval-deps.ts; existing approved versions have no record and get one the first time a run checks them) */ APPROVAL_DEPS_MIGRATION,
 ];
 
 /** Slots that were reserved before their SQL existed: the slot number and a table only that slot creates. */
@@ -303,6 +310,10 @@ const LATE_FILLED_SLOTS: ReadonlyArray<{ slot: number; table: string }> = [
     { slot: 45, table: "library_items" },
     { slot: 46, table: "project_testing_agents" },
     { slot: 48, table: "shared_integrations" },
+    { slot: 51, table: "runner_enrollments" },
+    // After 51: it may rebuild the agents table that 53 adds a column to.
+    { slot: 53, table: "agent_task_events" },
+    { slot: 54, table: "test_version_deps" },
 ];
 
 export type Row = Record<string, any>;
@@ -340,6 +351,8 @@ export class Db {
             current++;
         }
         this.repairSkippedMigrations();
+        // Slot 51's columns where a late repair above rebuilt agent_tokens or agents (agent-store.ts); idempotent.
+        if (this.dialect.tableExists(this.raw, "runner_enrollments")) repairPersonalRunnerColumns(this.raw, (t, c) => this.dialect.columnExists(this.raw, t, c));
         // Older audit tables say who acted (people and access, user-store.ts); after the repair, so a repaired table gets it too.
         addActorColumns(this.raw);
         // Prompt-cache counts and prices on the AI usage tables (usage-store.ts); idempotent, no numbered migration.
@@ -392,3 +405,21 @@ export class Db {
 
 /** How many migrations this code knows: GET /readyz compares the database's recorded version with it (platform/ops/health.ts). */
 export const knownSchemaVersion = (): number => MIGRATIONS.length;
+
+/**
+ * For upgrade tests: a new database file holding exactly the schema of migration slots 1..version, as an older release left
+ * it. The next `new Db(file)` then runs the later slots, as an upgrade does.
+ */
+export function createDatabaseAtVersion(file: string, version: number): void {
+    if (version < 0 || version > MIGRATIONS.length) throw new Error(`No migration slot ${version}`);
+    const raw = new DatabaseSyncImpl(file);
+    try {
+        raw.exec("PRAGMA foreign_keys = ON; CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)");
+        for (let i = 0; i < version; i++) {
+            raw.exec(MIGRATIONS[i]!);
+            raw.prepare("INSERT INTO schema_version (version) VALUES (?)").run(i + 1);
+        }
+    } finally {
+        raw.close();
+    }
+}

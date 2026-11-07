@@ -5,9 +5,10 @@ import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "..
 import { BadgeKey } from "../../components/Tooltip";
 import { SCHEDULE_HELP } from "../../lib/help";
 import { relativeTime } from "../../lib/format";
-import { useFetch } from "../../lib/hooks";
+import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
+import { DISPATCH_OFF, RUNS_OFF_TIP, executionModeOf } from "../runs/runs-here";
 import { WEEKDAYS, utcOffsetText, whenText, type Cadence, type Schedule, type ScheduleKind, type ScheduleList } from "./schedules";
 import "./schedules.css";
 
@@ -22,6 +23,11 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
     }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const data = list.data;
+    // Do schedules really start their runs? Only while scheduling is on AND runs can start (a worker, or in runners mode the dispatch
+    // that hands runs to runners): the scheduler runs only next to one, so without it a schedule shows a next time that never comes.
+    const config = useConfig();
+    const runnersOnly = executionModeOf(config) === "runners";
+    const runsStart = config?.runsHere !== false;
     const zone = data ? `server time, ${data.timezone.name.replace(/_/g, " ")} (${utcOffsetText(data.timezone.utcOffsetMinutes)})` : "server time";
 
     return (
@@ -45,13 +51,23 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                 </div>
             ) : (
                 <>
-                    {!data.schedulerEnabled && (
-                        <div className="card-pad" style={{ paddingBottom: 0 }}>
+                    {!data.schedulerEnabled ? (
+                        <div className="card-pad" style={{ paddingBottom: 0 }} data-testid="schedules-fire">
                             <Callout tone="warning" title="Scheduling is switched off on this server">
-                                Schedules are saved but won’t start on their own. “Run now” still works.
+                                Schedules are saved but won’t start on their own.{runsStart ? " “Run now” still works." : ""}
                             </Callout>
                         </div>
-                    )}
+                    ) : !runsStart ? (
+                        <div className="card-pad" style={{ paddingBottom: 0 }} data-testid="schedules-fire">
+                            <Callout tone="warning" title="Scheduled runs don’t start right now">
+                                {runnersOnly ? DISPATCH_OFF : "Tests are switched off on this server, so a schedule’s run would never start, and “Run now” would not either. Schedules are saved and start again once runs can start here."}
+                            </Callout>
+                        </div>
+                    ) : runnersOnly && data.schedules.length > 0 ? (
+                        <p className="t-meta" style={{ padding: "12px 20px 0" }} data-testid="schedules-fire">
+                            Schedules start their runs on time. Each run goes to a runner of this project that is online then, or to a computer of the person who made the schedule. When none is online, the schedule says so below.
+                        </p>
+                    ) : null}
                     {data.schedules.length === 0 && !adding ? (
                         <EmptyState icon={CalendarClock} title="Nothing is scheduled yet" actions={<Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>New schedule</Button>}>
                             Run your tests automatically — for example every night — and get told when something starts failing.
@@ -60,7 +76,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                         <ul className="list divided">
                             {data.schedules.map((s) => (
                                 <li key={s.id}>
-                                    <ScheduleRow s={s} projectId={projectId} onChanged={list.reload} onRunStarted={onRunStarted} />
+                                    <ScheduleRow s={s} projectId={projectId} onChanged={list.reload} onRunStarted={onRunStarted} runBlock={runsStart ? null : runnersOnly ? DISPATCH_OFF : RUNS_OFF_TIP} />
                                 </li>
                             ))}
                         </ul>
@@ -83,7 +99,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
     );
 }
 
-function ScheduleRow({ s, projectId, onChanged, onRunStarted }: { s: Schedule; projectId: string; onChanged: () => Promise<void>; onRunStarted: () => void }) {
+function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock }: { s: Schedule; projectId: string; onChanged: () => Promise<void>; onRunStarted: () => void; runBlock: string | null }) {
     const [busy, setBusy] = useState<"run" | "toggle" | "delete" | null>(null);
     const [error, setError] = useState("");
     const [started, setStarted] = useState(false);
@@ -130,7 +146,7 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted }: { s: Schedule; p
             {started && <Callout tone="success">Run started. Follow it in <a href={routes.runs(projectId)}>Runs</a>; the results appear below when it finishes.</Callout>}
             {error && <Callout tone="danger">{error}</Callout>}
             <div className="acts">
-                <Button size="sm" icon={Zap} loading={busy === "run"} onClick={() => act("run")} aria-label={`Run now: ${s.name}`} tip="Starts this schedule’s run now. Its next time does not change.">
+                <Button size="sm" icon={Zap} loading={busy === "run"} disabled={Boolean(runBlock)} onClick={() => act("run")} aria-label={`Run now: ${s.name}`} tip={runBlock ?? "Starts this schedule’s run now. Its next time does not change."}>
                     Run now
                 </Button>
                 <Button size="sm" variant="ghost" icon={s.enabled ? Pause : Play} loading={busy === "toggle"} onClick={() => act("toggle")} aria-label={`${s.enabled ? "Pause" : "Resume"}: ${s.name}`} tip={s.enabled ? "It starts nothing on its own until you resume it. Run now still works." : "It starts again at its next time from now. Times missed while paused are not made up."}>

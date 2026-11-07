@@ -3,7 +3,7 @@
 //
 //   devices -l | -s S <command> | shell uiautomator dump | exec-out uiautomator dump /dev/tty | exec-out screencap -p
 //   shell input tap|text|keyevent|swipe | shell monkey -p PKG ... | shell am force-stop PKG | shell dumpsys window|input_method
-//   shell pm list packages | shell getprop NAME | install -r FILE | shell settings put ... | emu avd name | emu kill | start-server
+//   shell pm list packages | shell getprop NAME | install -r FILE | uninstall PKG | shell settings put ... | emu avd name | emu kill | start-server
 //
 // Environment (all optional):
 //   AITP_FAKE_APP        shop (default) | notes         the mock app
@@ -964,6 +964,14 @@ function main() {
             save(state);
         }
         return;
+    }
+    // Round 39: a session on a person's own phone removes the app it installed (uninstall PKG); recorded in state.uninstalled.
+    if (cmd === "uninstall") {
+        const pkg = args[1];
+        state.installed = state.installed.filter((p) => p !== pkg);
+        state.uninstalled = [...(state.uninstalled || []), pkg];
+        save(state);
+        return out("Success\n");
     }
     if (cmd === "install") {
         const file = args[args.length - 1];

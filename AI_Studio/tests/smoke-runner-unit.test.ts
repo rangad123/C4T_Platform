@@ -106,7 +106,7 @@ describe("decisions", () => {
         expect(path.basename(w.command).toLowerCase()).toBe("cmd.exe");
         expect(w.args).toEqual(["/d", "/c", ".\\start-runner.cmd"]);
         expect(startCommand("complete", linux, "K", "I")).toEqual({ command: "sh", args: ["start-runner.sh"] });
-        expect(startCommand("installer", win, "K", "I")).toEqual({ command: path.join("K", "AITestingRunnerSetup.exe"), args: ["--silent", "--install-dir", "I"] });
+        expect(startCommand("installer", win, "K", "I")).toEqual({ command: path.join("K", "AITestingRunnerSetup.exe"), args: ["--silent", "--no-start-at-sign-in", "--install-dir", "I"] });
         expect(startCommand("installer", mac, "K", "I")).toEqual({ command: "sh", args: [path.join("K", "AI Testing Runner.app", "Contents", "Resources", "runner-setup.sh"), "--silent", "--no-autostart", "--install-dir", "I"] });
     });
 
@@ -301,4 +301,14 @@ describe("a whole run that ends in the plain skip", () => {
         expect(fs.readFileSync(path.join(out, "report.md"), "utf8")).toContain("Runner smoke check skipped: complete download with no Node.js on the PATH, Linux x64");
         expect(fs.existsSync(path.join(out, "sample-app.log"))).toBe(true);
     }, 60_000);
+});
+
+describe("--lifecycle (round 39: stop, start again, uninstall, nothing left)", () => {
+    it("is accepted with the installer only, and the installer never adds a sign-in start during a check", () => {
+        expect(parseArgs(["--kit", "installer", "--lifecycle"]).lifecycle).toBe(true);
+        expect(() => parseArgs(["--kit", "files", "--lifecycle"])).toThrow(UsageError);
+        expect(() => parseArgs(["--lifecycle"])).toThrow(/only works with --kit installer/);
+        expect(startCommand("installer", hostTarget("win32", "x64"), "K", "I").args).toContain("--no-start-at-sign-in");
+        expect(startCommand("installer", hostTarget("darwin", "arm64"), "K", "I").args).toContain("--no-autostart");
+    });
 });

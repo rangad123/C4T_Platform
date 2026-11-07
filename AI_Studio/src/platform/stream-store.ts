@@ -7,10 +7,23 @@ import type { StreamEvent } from "./stream-core.js";
 
 export const TERMINAL_STATUSES = ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"];
 
-const toEvent = (r: Record<string, any>): StreamEvent => ({ id: Number(r.id), at: String(r.created_at), level: String(r.level), message: String(r.message), stage: String(r.stage), kind: String(r.kind), jobId: String(r.job_id) });
+const toEvent = (r: Record<string, any>): StreamEvent => ({ id: Number(r.id), at: String(r.created_at), level: String(r.level), message: String(r.message), stage: String(r.stage), kind: String(r.kind), jobId: String(r.job_id), ...liveData(r) });
+
+/**
+ * A runner's live events (kinds `runner_*`, written already scrubbed by agent-services.ts) carry their structured part on the job stream, so
+ * the run page can show the current test, steps and screenshots. Every other event's data stays off the stream, as before.
+ */
+function liveData(r: Record<string, any>): { data?: unknown } {
+    if (typeof r.data_json !== "string" || !String(r.kind).startsWith("runner_")) return {};
+    try {
+        return { data: JSON.parse(r.data_json) as unknown };
+    } catch {
+        return {};
+    }
+}
 
 export function jobEventsAfter(db: Db, jobId: string, afterId: number, limit: number): StreamEvent[] {
-    return db.all("SELECT id, job_id, stage, kind, level, message, created_at FROM agent_events WHERE job_id = ? AND id > ? ORDER BY id LIMIT ?", jobId, afterId, limit).map(toEvent);
+    return db.all("SELECT id, job_id, stage, kind, level, message, created_at, data_json FROM agent_events WHERE job_id = ? AND id > ? ORDER BY id LIMIT ?", jobId, afterId, limit).map(toEvent);
 }
 
 /**

@@ -62,9 +62,15 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/agent/tasks/:id/recording": "own",
     "POST /api/agent/tasks/:id/result": "own",
     "POST /api/agent/tasks/:id/device": "own",
+    "POST /api/agent/tasks/:id/accept": "own",
+    "POST /api/agent/tasks/:id/reject": "own",
+    "POST /api/agent/tasks/:id/events": "own",
     "POST /api/agent/update": "own",
     "GET /api/agent/update/files/:name": "own",
     "POST /api/agent/check": "own",
+    // Round 39 (migration 51): trading an enrollment code (the code in the body is the credential, once) and a new credential for a runner.
+    "POST /api/agent/enroll": "own",
+    "POST /api/agent/rotate": "own",
 
     // ── signing in, and a person's own account (routes/auth.ts) ──
     "GET /api/auth/state": "public",
@@ -269,11 +275,20 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "GET /api/runners/summary": "read",
     "GET /api/runners/:runnerId": "read",
     "POST /api/runners": "ai_studio.runners.manage",
-    "PATCH /api/runners/:runnerId": "ai_studio.runners.manage",
-    "POST /api/runners/:runnerId/retire": "ai_studio.runners.manage",
+    // Round 39: the handler decides by kind (a person's own computer: its owner; a team runner: "manage runners" and the organisation rule).
+    "PATCH /api/runners/:runnerId": "read",
+    "POST /api/runners/:runnerId/retire": "read",
     "GET /api/projects/:id/runner-access": "read",
     "PUT /api/projects/:id/runner-access/:runnerId": "ai_studio.runners.manage",
     "DELETE /api/projects/:id/runner-access/:runnerId": "ai_studio.runners.manage",
+    // Round 39: enrollment codes and kits from the Runners page. The handler decides by kind: a person's own computer needs running tests in some
+    // project (canAddPersonal), a team runner "manage runners" and the organisation rule (canManageRunner). Reading a code's state: its maker.
+    "POST /api/runners/enroll": "read",
+    "POST /api/runners/kits": "read",
+    "GET /api/runners/kits/info": "read",
+    "GET /api/runners/enrollments/:enrollmentId": "read",
+    // The runners a person may choose for one run of the project (their own computers and the project's team runners).
+    "GET /api/projects/:id/runner-choices": "ai_studio.tests.run",
 
     // ── issue trackers, Sentry (tokens of other systems) ──
     "GET /api/projects/:id/integrations": "read",
@@ -401,6 +416,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "DELETE /api/test-generation/:jobId": "ai_studio.tests.run",
     "GET /api/test-generation/:jobId/events": "read",
     "GET /api/test-generation/:jobId/stream": "read",
+    "GET /api/projects/:id/runs/:jobId/runner-files/:taskId/:name": "read",
 
     // ── one test ──
     "GET /api/tests/:id": "read",

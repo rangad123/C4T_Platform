@@ -23,6 +23,7 @@ namespace AITestingRunner
         public int RunnerPid;
         public string RunnerStart = "";   // the start time (UTC ticks) of that process, so a reused process id is never mistaken for it
         public string CreatedAt = "";
+        public string EnrollSha = "";     // the sha256 of the last one-time code copied (never the code), so a used code is not copied again
 
         public static InstallState Load(Layout lay)
         {
@@ -38,6 +39,7 @@ namespace AITestingRunner
             s.RunnerPid = pid;
             s.RunnerStart = Util.Str(d, "runnerStart");
             s.CreatedAt = Util.Str(d, "createdAt");
+            s.EnrollSha = Util.Str(d, "enrollSha");
             return s;
         }
 
@@ -54,7 +56,8 @@ namespace AITestingRunner
             sb.Append("  \"startupShortcut\": " + (StartupShortcut ? "true" : "false") + ",\r\n");
             sb.Append("  \"startMenuShortcut\": " + (StartMenuShortcut ? "true" : "false") + ",\r\n");
             sb.Append("  \"runnerPid\": " + RunnerPid + ",\r\n");
-            sb.Append("  \"runnerStart\": " + Util.Json(RunnerStart) + "\r\n");
+            sb.Append("  \"runnerStart\": " + Util.Json(RunnerStart) + ",\r\n");
+            sb.Append("  \"enrollSha\": " + Util.Json(EnrollSha) + "\r\n");
             sb.Append("}\r\n");
             string tmp = lay.StateFile + ".tmp";
             File.WriteAllText(tmp, sb.ToString(), Util.Utf8);
@@ -144,7 +147,8 @@ namespace AITestingRunner
         public void DetectSource()
         {
             string exeDir = Path.GetDirectoryName(ExePath);
-            bool kit = File.Exists(Path.Combine(exeDir, "runner.mjs")) && File.Exists(Path.Combine(exeDir, "runner.json")) && File.Exists(Path.Combine(exeDir, "runner.token")) && !Util.SamePath(exeDir, L.App);
+            bool credential = File.Exists(Path.Combine(exeDir, "runner.enroll")) || File.Exists(Path.Combine(exeDir, "runner.token"));
+            bool kit = File.Exists(Path.Combine(exeDir, "runner.mjs")) && File.Exists(Path.Combine(exeDir, "runner.json")) && credential && !Util.SamePath(exeDir, L.App);
             SourceDir = kit ? exeDir : null;
             string cfg = Path.Combine(SourceDir ?? L.App, "runner.json");
             Dictionary<string, object> d = File.Exists(cfg) ? Util.ReadJson(cfg) : null;
@@ -212,13 +216,14 @@ namespace AITestingRunner
             Set("files", S.Checking, "Comparing the runner files");
             if (SourceDir == null)
             {
-                if (File.Exists(Path.Combine(L.App, "runner.mjs")) && File.Exists(Path.Combine(L.App, "runner.json")) && File.Exists(Path.Combine(L.App, "runner.token")))
+                // An installed runner keeps its credential protected for this user (or, from an older download, in runner.token).
+                if (File.Exists(Path.Combine(L.App, "runner.mjs")) && File.Exists(Path.Combine(L.App, "runner.json")))
                     Set("files", S.Found, "Installed in " + L.App);
                 else
                 {
                     Set("files", S.Failed, "The runner files are not next to this program");
                     res.CannotContinue = true;
-                    res.Problem = "I cannot find the runner files. Open AITestingRunnerSetup.exe from the folder you unzipped: that folder also holds runner.mjs, runner.json and runner.token.";
+                    res.Problem = "I cannot find the runner files. Open AITestingRunnerSetup.exe from the folder you unzipped: that folder also holds runner.mjs, runner.json and runner.enroll.";
                 }
             }
             else
@@ -234,7 +239,7 @@ namespace AITestingRunner
                 else
                 {
                     int differ = 0;
-                    foreach (string name in AllFiles()) if (File.Exists(Path.Combine(SourceDir, name)) && !Util.SameFile(Path.Combine(SourceDir, name), Path.Combine(L.App, name))) differ++;
+                    foreach (string name in AllFiles()) if (WillCopy(name)) differ++;
                     if (differ == 0) Set("files", S.Found, "Already copied to " + L.App);
                     else Set("files", S.Missing, differ + (differ == 1 ? " file" : " files") + " will be copied to " + L.App);
                 }
@@ -273,11 +278,22 @@ namespace AITestingRunner
         {
             List<string> all = new List<string>(Product.BundleFiles);
             all.AddRange(Product.KitFiles);
+            all.AddRange(Product.OptionalFiles);
             // Only in a complete download: what it holds (the Node.js version, the packages). Copied when it is there.
             all.Add("complete-kit.json");
             return all;
         }
         IEnumerable<string> AllFiles() { return AllFilesList(); }
+
+        /// <summary>Is this file of the download copied: present, different, and not a one-time code that was copied before (or a token beside a code).</summary>
+        bool WillCopy(string name)
+        {
+            string src = Path.Combine(SourceDir, name);
+            if (!File.Exists(src) || Util.SameFile(src, Path.Combine(L.App, name))) return false;
+            if (name == "runner.enroll" && Util.Sha256File(src) == State.EnrollSha) return false;
+            if (name == "runner.token" && File.Exists(Path.Combine(SourceDir, "runner.enroll"))) return false;
+            return true;
+        }
 
         // ── Install: do what is missing ─────────────────────────────────────
 
@@ -483,21 +499,33 @@ namespace AITestingRunner
             Directory.CreateDirectory(L.App);
             int copied = 0;
             int toCopy = 0;
-            foreach (string name in AllFiles()) if (File.Exists(Path.Combine(SourceDir, name)) && !Util.SameFile(Path.Combine(SourceDir, name), Path.Combine(L.App, name))) toCopy++;
+            foreach (string name in AllFiles()) if (WillCopy(name)) toCopy++;
             if (toCopy > 0) Set("files", S.Installing, "Copying the runner files");
             foreach (string name in AllFiles())
             {
                 string src = Path.Combine(SourceDir, name), dst = Path.Combine(L.App, name);
                 if (!File.Exists(src))
                 {
-                    if (name == "LICENSES.txt" || name == "complete-kit.json") continue;
+                    if (name == "LICENSES.txt" || name == "complete-kit.json" || Array.IndexOf(Product.OptionalFiles, name) >= 0) continue;
                     throw new PlainException("The unzipped folder is incomplete (" + name + " is missing). Download the runner again from the platform.");
                 }
                 if (Util.SameFile(src, dst)) continue;
+                if (name == "runner.enroll")
+                {
+                    // A one-time code is copied once: the runner deletes its copy after trading it, and the same code is never copied again
+                    // (opening this program again from the same unzipped folder must not undo a working setup).
+                    string sha = Util.Sha256File(src);
+                    if (sha == State.EnrollSha) continue;
+                    State.EnrollSha = sha;
+                    State.Save(L);
+                    // The new code replaces the credential of an older download.
+                    try { if (File.Exists(Path.Combine(L.App, "runner.token"))) File.Delete(Path.Combine(L.App, "runner.token")); } catch (Exception) { }
+                }
+                if (name == "runner.token" && File.Exists(Path.Combine(SourceDir, "runner.enroll"))) continue;
                 File.Copy(src, dst, true);
+                if (name == "runner.enroll" || name == "runner.token") RestrictToCurrentUser(dst);
                 copied++;
             }
-            RestrictToCurrentUser(Path.Combine(L.App, "runner.token"));
             // This program copies itself next to the runner, so it can start the runner again after the unzipped folder is deleted.
             try
             {
@@ -575,12 +603,16 @@ namespace AITestingRunner
             string npm = FindNpmCli();
             if (npm == null) throw new PlainException("I cannot find npm next to " + Node.Path + ". Install the LTS version of Node.js from nodejs.org, or remove this Node.js so I can download my own.");
             Set("tools", S.Installing, "npm is installing the test tools. This needs the internet and can take a few minutes");
-            Say("Running npm install in " + L.App + ".");
+            // With the download's lock file: exactly the locked versions and checksums, and no package's install script runs (Playwright
+            // needs none). A download from before round 39 has no lock file: npm install, as before.
+            bool locked = File.Exists(Path.Combine(L.App, "package-lock.json"));
+            string npmArgs = locked ? " ci --ignore-scripts --no-audit --no-fund" : " install --no-audit --no-fund";
+            Say("Running npm" + (locked ? " ci" : " install") + " in " + L.App + ".");
             Dictionary<string, string> env = ToolEnv();
             StringBuilder tail = new StringBuilder();
             Queue<string> lastLines = new Queue<string>();
             bool timedOut;
-            int code = Util.RunStreaming(Node.Path, Util.Quote(npm) + " install --no-audit --no-fund", L.App, env, delegate(string line)
+            int code = Util.RunStreaming(Node.Path, Util.Quote(npm) + npmArgs, L.App, env, delegate(string line)
             {
                 Say("npm: " + line);
                 lock (lastLines) { lastLines.Enqueue(line); if (lastLines.Count > 6) lastLines.Dequeue(); }
@@ -771,6 +803,26 @@ namespace AITestingRunner
 
         // ── uninstall ───────────────────────────────────────────────────────
 
+        /// <summary>
+        /// The runner deletes the credential it keeps protected for this user (it knows where; this program never reads it), before its folder
+        /// goes. Then the files that could hold one: a one-time code not yet traded, and an older download's runner.token.
+        /// </summary>
+        string ForgetCredential()
+        {
+            string node = State.NodePath.Length > 0 && File.Exists(State.NodePath) ? State.NodePath : Path.Combine(L.NodeDir, "node.exe");
+            string said = "The runner's saved access was not found (it never connected, or an older runner kept it in runner.token).";
+            if (File.Exists(node) && File.Exists(Path.Combine(L.App, "runner.mjs")))
+            {
+                Util.Captured c = Util.Run(node, "runner.mjs --forget-credential", 30000, L.App, null);
+                if (c.Code == 0) said = "Removed the runner's saved access from this computer.";
+            }
+            foreach (string f in new string[] { "runner.enroll", "runner.token" })
+            {
+                try { File.Delete(Path.Combine(L.App, f)); } catch (Exception) { }
+            }
+            return said;
+        }
+
         /// <summary>Removes what this program created. Returns the lines to show. Never touches a Node.js found elsewhere, the shared browser cache, or files it did not make.</summary>
         public List<string> Uninstall(out bool selfRemovalScheduled)
         {
@@ -784,6 +836,7 @@ namespace AITestingRunner
             }
             if (RemoveOwnShortcut(L.StartupLink())) removed.Add("Removed the Startup shortcut " + L.StartupLink());
             if (RemoveOwnShortcut(L.StartMenuLink())) removed.Add("Removed the Start menu shortcut " + L.StartMenuLink());
+            removed.Add(ForgetCredential());
             string[] folders = { L.App, L.NodeDir, L.Logs, L.Downloads, L.NodeDir + ".new" };
             foreach (string d in folders)
             {

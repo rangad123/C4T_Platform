@@ -90,7 +90,7 @@ export function TestHeader({
                                 Accept new screenshot
                             </Button>
                         )}
-                        {(!isMobile || t.kind === "mobile") && <RunMenu projectId={t.projectId} scope="test" test={{ id: t.id, kind: t.kind }} split onStarted={onStarted} onError={onError} />}
+                        {(!isMobile || t.kind === "mobile") && <RunMenu projectId={t.projectId} scope="test" test={{ id: t.id, kind: t.kind, custom: t.custom }} split onStarted={onStarted} onError={onError} />}
                         <Menu label="More actions" icon={MoreHorizontal} iconOnly>
                             {(close) => (
                                 <>

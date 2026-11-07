@@ -3,7 +3,8 @@
  *
  * It runs the same recorder core the platform uses for a local recording. The safety rules that make sense here apply: only http(s) pages, no credentials in
  * an address, the step and time caps, passwords and one-time codes never read in the page (the core's private binding), no cookies or storage recorded.
- * The platform's address guard does not apply: this computer's own network is the point. Nothing the person typed is ever logged.
+ * The platform's address guard does not apply: this computer's own network is the point, unless the runner refuses private addresses (then the
+ * browser goes through the agent's own guard, see address-guard.ts). Nothing the person typed is ever logged.
  */
 import { chromium } from "playwright";
 import type { LiveResultWire, RecordCommand } from "../agent-protocol/schema.js";
@@ -122,7 +123,10 @@ function start(m: RecordStart): void {
     const debug = Number.isInteger(debugPort) && debugPort > 1023 && debugPort < 65536;
     // The runner's browser setting: the computer's Chrome or Edge when it uses one (see browser-setup.ts), else Playwright's own Chromium.
     const chosen = { ...(m.browser?.channel ? { channel: m.browser.channel } : {}), ...(m.browser?.executablePath ? { executablePath: m.browser.executablePath } : {}) };
-    const launch = debug || Object.keys(chosen).length ? (headless: boolean) => chromium.launch({ headless, ...chosen, ...(debug ? { args: [`--remote-debugging-port=${debugPort}`] } : {}) }) : undefined;
+    // A runner that refuses private addresses: the whole browser goes through the agent's address guard, loopback included (address-guard.ts).
+    const guard = m.guardProxy && /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(m.guardProxy) ? { proxy: { server: m.guardProxy, bypass: "<-loopback>" } } : {};
+    if (m.guardProxy && !("proxy" in guard)) throw new Error("The agent's address guard has an address the recording cannot use.");
+    const launch = debug || Object.keys(chosen).length || "proxy" in guard ? (headless: boolean) => chromium.launch({ headless, ...chosen, ...guard, ...(debug ? { args: [`--remote-debugging-port=${debugPort}`] } : {}) }) : undefined;
     session = new RecorderSession({
         startUrl: m.startUrl,
         ...(launch ? { launch } : {}),

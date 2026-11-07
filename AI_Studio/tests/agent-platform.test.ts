@@ -213,10 +213,12 @@ describe("tokens and who may call the agent routes", () => {
         const r = await a.hello();
         expect(r.status).toBe(200);
         expect(r.json).toMatchObject({ projectId, protocol: 1, pollSeconds: 1, heartbeatSeconds: 10, maxFileBytes: 200000 });
-        expect(Object.keys(r.json).sort()).toEqual(["agentId", "heartbeatSeconds", "maxFileBytes", "pollSeconds", "projectId", "protocol", "serverTime"]);
-        const wrong = await a.hello({ protocol: 2 });
+        // Round 39 adds `runner` (what it is and what its switches allow; an older agent ignores it).
+        expect(Object.keys(r.json).sort()).toEqual(["agentId", "heartbeatSeconds", "maxFileBytes", "pollSeconds", "projectId", "protocol", "runner", "serverTime"]);
+        // Protocol 2 is spoken too (runner-protocol-2.md); a version neither side knows is a plain 409.
+        const wrong = await a.hello({ protocol: 9 });
         expect(wrong.status).toBe(409);
-        expect(wrong.json.error).toMatch(/protocol 2.*protocol 1.*Update the agent/);
+        expect(wrong.json.error).toMatch(/protocol 9.*protocol 2.*Update the agent/);
         const bad = await a.hello({ concurrency: 99 });
         expect(bad.status).toBe(400);
         expect(bad.json.error).toMatch(/not in the expected format/);
@@ -259,7 +261,7 @@ describe("the registry and where a project's tests run", () => {
         const projectId = await newProject("Runner");
         const first = await admin("GET", `/api/projects/${projectId}/runner`);
         expect(first.body).toMatchObject({ runOn: "platform", agentId: null, status: "Runs on this platform.", canRunWeb: true });
-        expect(Object.keys(first.body).sort()).toEqual(["agentId", "canRunIos", "canRunMobile", "canRunWeb", "canRunWindows", "phones", "runOn", "status", "unavailableReason"]);
+        expect(Object.keys(first.body).sort()).toEqual(["agentId", "allowPersonal", "canRunIos", "canRunMobile", "canRunWeb", "canRunWindows", "phones", "runOn", "status", "unavailableReason"]);
         const refused = await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" });
         expect(refused.status).toBe(409);
         expect(refused.body.error).toMatch(/No runner agent is online/);
@@ -287,7 +289,7 @@ describe("the registry and where a project's tests run", () => {
     });
 
     it("/api/config names the protocol version", async () => {
-        expect((await admin("GET", "/api/config")).body.agentProtocol).toBe(1);
+        expect((await admin("GET", "/api/config")).body.agentProtocol).toBe(2);
     });
 });
 
@@ -739,7 +741,7 @@ describe("one validation job through the worker, end to end", () => {
         worker = undefined;
 
         // where it ran
-        expect(last.ranOn).toEqual({ kind: "agent", agentId: agent.agentId, name: "maya-laptop" });
+        expect(last.ranOn).toEqual({ kind: "agent", agentId: agent.agentId, name: "maya-laptop", runnerId: expect.any(String), phase: "completed", attempt: 1 });
         const jobs = (await admin("GET", `/api/projects/${projectId}/jobs`)).body as Array<{ ranOn?: unknown }>;
         expect(jobs.every((j) => (j.ranOn as { kind: string }).kind === "agent")).toBe(true);
         // the stored results look like a local run's

@@ -9,7 +9,7 @@ import type { LiveResultWire, RecordCommand } from "../agent-protocol/schema.js"
 import type { BrowserLaunch } from "../engine/browsers/choice.js";
 import type { RecState } from "../engine/recorder/session.js";
 import type { MobileTarget } from "../engine/mobile/target.js";
-import type { RunEnv, RunnerProject, ScriptInput, ScriptRun } from "../engine/validation/runner.js";
+import type { LiveRunEvent, RunEnv, RunnerProject, ScriptInput, ScriptRun } from "../engine/validation/runner.js";
 
 /** What to run on a device (the part of MobileRunEnv that can be sent as data; `log` is wired up inside the child). */
 export interface MobileDescriptor {
@@ -52,11 +52,13 @@ export interface ChildRun {
     /** The installed Chrome or Edge this runner uses for web tests (from its own browser setting). Absent: Playwright's own Chromium. */
     browser?: BrowserLaunch;
     opts: { workers: number; timeoutMs?: number; projects?: RunnerProject[]; testTimeoutMs?: number; startTimeoutMs?: number };
+    /** Protocol 2: report each test, step and failure screenshot as it happens (`live` messages). Absent: the run is exactly as before. */
+    live?: boolean;
 }
 
 export type ToChild = ChildRun;
 
-export type FromChild = { type: "log"; line: string } | { type: "result"; runs: ScriptRun[] } | { type: "error"; message: string };
+export type FromChild = { type: "log"; line: string } | { type: "result"; runs: ScriptRun[] } | { type: "error"; message: string } | { type: "live"; event: LiveRunEvent };
 
 // ── a recording session (record tasks) ──────────────────────────────────────
 // A record task runs the shared recorder core (src/engine/recorder/session.ts) in its own process, like a script run, so a crash or hang cannot take the
@@ -71,6 +73,8 @@ export interface RecordStart {
     maxSteps: number;
     /** The installed Chrome or Edge to record in (the runner's browser setting). Absent: Playwright's own Chromium. */
     browser?: BrowserLaunch;
+    /** The agent's address guard on 127.0.0.1 (a runner that refuses private addresses, address-guard.ts): every request of the browser goes through it. */
+    guardProxy?: string;
 }
 
 /** What the agent tells the recording process. */

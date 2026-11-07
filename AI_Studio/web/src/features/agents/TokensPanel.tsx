@@ -133,7 +133,7 @@ function NewTokenForm({ projectId, onCreated }: { projectId: string; onCreated: 
     );
 }
 
-function useCopy(text: string) {
+export function useCopy(text: string) {
     const [copied, setCopied] = useState(false);
     const timer = useRef<number>();
     useEffect(() => () => clearTimeout(timer.current), []);

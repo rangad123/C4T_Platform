@@ -14,6 +14,7 @@
 import { TERMINAL_STATES, type JobRow, type Repo, type TestRow } from "./repo.js";
 import type { Db, Row } from "./db.js";
 import { ReviewStore } from "./review-store.js";
+import { DEPENDENCY_CHANGED } from "./approval-deps.js";
 
 export type RunTestState = "waiting" | "running" | "passed" | "failed" | "finding" | "not_run";
 
@@ -30,13 +31,15 @@ export interface RunTestRow {
     flaky?: true;
 }
 
-/** A test the run left out because it has no approved version. */
+/** A test the run left out because it has no approved version, or because a shared part it uses changed after its approval. */
 export interface HeldBackTest {
     id: string;
     testId: string;
     title: string;
     /** The version waiting for review, for the link to it. */
     version: number | null;
+    /** Only when a shared part it uses changed after approval: what to do (otherwise it waits for a first approval). */
+    reason?: string;
 }
 
 export interface RunCounts {
@@ -235,9 +238,9 @@ function heldBackTests(repo: Repo, job: JobRow): HeldBackTest[] {
     const reviews = new ReviewStore(repo.db);
     const out: HeldBackTest[] = [];
     for (const r of reviews.runVersions(job.id)) {
-        if (r.outcome !== "waiting") continue;
+        if (r.outcome !== "waiting" && r.outcome !== "changed") continue;
         const t = repo.getTest(r.testId);
-        if (t && t.projectId === job.projectId) out.push({ id: t.id, testId: t.testKey, title: t.title, version: reviews.latest(t.id)?.version ?? null });
+        if (t && t.projectId === job.projectId) out.push({ id: t.id, testId: t.testKey, title: t.title, version: reviews.latest(t.id)?.version ?? null, ...(r.outcome === "changed" ? { reason: DEPENDENCY_CHANGED } : {}) });
     }
     return out.sort((a, b) => a.testId.localeCompare(b.testId, undefined, { numeric: true }));
 }
@@ -246,7 +249,7 @@ export function buildRunDetail(repo: Repo, job: JobRow): RunDetail {
     const db = repo.db;
     const tests = plannedTests(repo, job);
     const heldBack = heldBackTests(repo, job);
-    const held = new Set(heldBack.map((t) => t.id));
+    const held = new Map(heldBack.map((t) => [t.id, t.reason ?? HELD_BACK_REASON]));
     // Waiting in the queue counts as going: the run has not ended.
     const active = !TERMINAL_STATES.includes(job.status);
     const got = verdicts(db, job, tests);
@@ -258,7 +261,7 @@ export function buildRunDetail(repo: Repo, job: JobRow): RunDetail {
         const v = got.get(t.id);
         const base = { id: t.id, testId: t.testKey, title: t.title, suite: t.suite };
         if (v) return { ...base, state: v.state, ...(v.reason ? { reason: v.reason } : {}), ...(v.durationMs !== undefined ? { durationMs: v.durationMs } : {}), ...(v.flaky ? { flaky: true as const } : {}) };
-        if (held.has(t.id)) return { ...base, state: "not_run", reason: HELD_BACK_REASON };
+        if (held.has(t.id)) return { ...base, state: "not_run", reason: held.get(t.id)! };
         if (active) {
             // Scripts run together and are recorded when they finish: before that a test is waiting for the run to begin, or part of the run in progress.
             const running = started && (mode === "environment" || mode === "variants" ? true : t.validationStatus === "VALIDATING");

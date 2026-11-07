@@ -623,7 +623,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         title: "Runners",
         what: "Every computer that runs your tests: its health, its phones and browsers, and the projects that use it. Also the Android emulator on this computer.",
         canDo: [
-            { text: "Choose Register a runner to add a computer once, then open it and give it to any of your projects.", button: "Read about runners", to: { topic: "runners" }, ui: ["Register a runner"] },
+            { text: "Choose Add this computer to run your own tests on the computer you are using. Runner managers can also choose Add a team runner and give it to their organisation's projects.", button: "Read about runners", to: { topic: "runners" }, ui: ["Add this computer"] },
             { text: "Use Runners for a project to add a runner for one project, get its kit, and set where its tests run.", button: "Read about runners", to: { topic: "runners", search: "runner" }, ui: ["Runners for a project"] },
             { text: "Open a runner to see its current work, the phones in use, recent failures and the projects that use it, and to rename or retire it.", button: "Read about runners", to: { topic: "runners" } },
             { text: "Set up an Android emulator to test phone apps.", button: "Read about phones and emulators", to: { topic: "phones-and-emulators" } },

@@ -15,6 +15,7 @@ import { HttpError } from "./http-error.js";
 import { trackTestVersion, type VersionSource } from "./review-store.js";
 import { currentActor } from "./auth/actor.js";
 import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
+import { requestedRunnerId } from "./run-request.js";
 
 export const JOB_STATES = [
     "QUEUED",
@@ -51,8 +52,13 @@ function startedByOf(): { kind: string; id: string | null } | undefined {
 }
 
 export interface JobOptions {
-    /** Who started the job (set by createJob from the person acting). */
-    startedBy?: { kind: string; id: string | null };
+    /**
+     * Who started the job (set by createJob from the person acting). A schedule's job says which schedule and who made it
+     * (`{ kind: "schedule", id: <scheduleId>, ownerId: <user id or null> }`), so a person's own runner can take their own schedules.
+     */
+    startedBy?: { kind: string; id: string | null; ownerId?: string | null };
+    /** The runner a person chose for this one run (an agent_tokens id). Carried only: the job gate checks it, the dispatch offers it only to that runner. */
+    runner?: { id: string };
     maxPages: number;
     maxDepth: number;
     maxScenarios: number;
@@ -146,6 +152,9 @@ export interface JobOptions {
  * "plain": build one test from a description in plain words (`plainDescription`), run it, store it.
  * "agent": the AI pursues an objective in a browser and reports what it found (`agentRunId`, see agent-run.ts). Nothing here runs a test.
  */
+/** Why a job whose worker was lost three times is given up (reclaimStaleJobs). */
+export const WORKER_LOST_GIVE_UP = "This run was given up: the platform lost track of it three times, because the process looking after it stopped each time. No test got a result from it, so tests that had not finished are back to not run yet.";
+
 export type JobMode = "generate" | "validate" | "variants" | "environment" | "plain" | "agent";
 
 export const DEFAULT_JOB_OPTIONS: JobOptions = {
@@ -451,10 +460,21 @@ export class Repo {
     /** May hand-written tests run for this project right now? Schedules and runbooks leave them out when not (platform/custom-policy.ts). */
     customPolicy?: (projectId: string) => Promise<{ allowed: true } | { allowed: false; message: string }>;
 
+    /** Refuses (HTTP 409) a job that cannot be handed to a runner when the platform runs tests only on runners (platform/runner-only.ts). */
+    executionGate?: (projectId: string, options: JobOptions) => Promise<void>;
+
+    /** Called for each job `reclaimStaleJobs` is about to put back in the queue: the earlier attempt's runner tasks are cancelled first (runner-only.ts). */
+    beforeRequeue?: (jobId: string) => void;
+
     /** Async because its gates are (POSTGRES_S3_MIGRATION.md 3.2): they will read asynchronous stores; the insert itself is unchanged. */
     async createJob(projectId: string, applicationId: string, options: JobOptions): Promise<JobRow> {
         // An archived project starts no run, whoever asks (a person, a schedule, a deploy trigger): project-folders.ts.
         if (isArchived(this.db, projectId)) throw new HttpError(409, PROJECT_ARCHIVED);
+        // The runner the person chose for this run, from the request that starts it (run-request.ts): in the options before the gates read them.
+        const chosen = options.runner ? undefined : requestedRunnerId();
+        if (chosen) options = { ...options, runner: { id: chosen } };
+        // EXECUTION_MODE=runners: a job that would need this server's browser is refused before anything else is checked (runner-only.ts).
+        await this.executionGate?.(projectId, options);
         await this.pluginGate?.(projectId, options);
         await this.frameworkGate?.(projectId, options);
         await this.jobGate?.(projectId, options);
@@ -492,12 +512,14 @@ export class Repo {
      * READ COMMITTED: a worker that waited on the row re-checks only the outer condition, so without it two workers could both get
      * the job. `skipLocked` lets the next worker pass over a row being claimed instead of waiting for it.
      */
-    claimNextJob(leaseMs: number, owner: string): JobRow | undefined {
+    claimNextJob(leaseMs: number, owner: string, modes?: readonly JobMode[]): JobRow | undefined {
+        // The dispatch worker (EXECUTION_MODE=runners) takes only the kinds of job a runner can do; the mode is a fixed word list, never input.
+        const only = modes ? ` AND ${this.db.dialect.jsonText("options_json", "mode")} IN (${modes.map((m) => `'${m.replace(/[^a-z]/g, "")}'`).join(",")})` : "";
         const r = this.db.get(
             `UPDATE generation_jobs
                 SET status = CASE ${this.db.dialect.jsonText("options_json", "mode")} WHEN 'validate' THEN 'VALIDATING' ELSE 'DISCOVERING' END,
                     lease_until = ?, lease_owner = ?, attempts = attempts + 1, started_at = COALESCE(started_at, ?), updated_at = ?
-              WHERE id = (SELECT id FROM generation_jobs WHERE status = 'QUEUED' ORDER BY created_at LIMIT 1${this.db.dialect.skipLocked()}) AND status = 'QUEUED'
+              WHERE id = (SELECT id FROM generation_jobs WHERE status = 'QUEUED'${only} ORDER BY created_at LIMIT 1${this.db.dialect.skipLocked()}) AND status = 'QUEUED'
           RETURNING *`,
             Date.now() + leaseMs,
             owner,
@@ -505,6 +527,21 @@ export class Repo {
             now(),
         );
         return r ? toJob(r) : undefined;
+    }
+
+    /**
+     * Queued jobs of kinds a dispatch worker never takes (made before the platform ran tests only on runners): ended with `reason`, so they do
+     * not wait forever and hold their project's one active job. Returns how many.
+     */
+    failQueuedJobsExcept(modes: readonly JobMode[], reason: string): number {
+        const mode = this.db.dialect.jsonText("options_json", "mode");
+        const list = modes.map((m) => `'${m.replace(/[^a-z]/g, "")}'`).join(",");
+        const rows = this.db.all<{ id: string }>(`SELECT id FROM generation_jobs WHERE status = 'QUEUED' AND (${mode} IS NULL OR ${mode} NOT IN (${list}))`);
+        for (const { id } of rows) {
+            this.db.run("UPDATE generation_jobs SET status = 'FAILED', error = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'QUEUED'", reason, now(), now(), id);
+            eventBus.publish(id);
+        }
+        return rows.length;
     }
 
     /** The job `claimNextJob` would take next, without taking it. */
@@ -536,16 +573,23 @@ export class Repo {
             Date.now(),
         );
         for (const s of stale) {
+            // A runner may still be running the lost attempt: it is told to stop before the job is offered again or given up (never twice at once).
+            try {
+                this.beforeRequeue?.(s.id);
+            } catch (err) {
+                console.warn(`[job ${String(s.id).slice(0, 8)}] could not cancel the earlier attempt's runner tasks:`, err);
+            }
             this.db.tx(() => {
                 if (s.mode === "validate") {
+                    // Losing the worker is not a verdict on any test, the third time either: tests without a result go back to not run yet
+                    // (what they were before the run is known only to the process that was lost), and the job says why it was given up.
                     const ids: string[] = s.test_ids ? JSON.parse(s.test_ids) : [];
-                    const giveUp = s.attempts >= 3;
-                    this.resetValidatingTests(ids, giveUp ? "FAILED_VALIDATION" : "PENDING", giveUp ? "Validation interrupted: worker lost repeatedly" : null);
+                    this.resetValidatingTests(ids, "PENDING", null);
                 } else {
                     this.db.run("DELETE FROM test_cases WHERE job_id = ?", s.id);
                 }
                 if (s.attempts >= 3) {
-                    this.db.run("UPDATE generation_jobs SET status='FAILED', error='Worker lost repeatedly (lease expired)', finished_at=?, updated_at=? WHERE id=?", now(), now(), s.id);
+                    this.db.run("UPDATE generation_jobs SET status='FAILED', error=?, finished_at=?, updated_at=? WHERE id=?", WORKER_LOST_GIVE_UP, now(), now(), s.id);
                 } else {
                     this.db.run(
                         "UPDATE generation_jobs SET status='QUEUED', progress_json=?, counters_json=?, lease_until=NULL, lease_owner=NULL, updated_at=? WHERE id=?",

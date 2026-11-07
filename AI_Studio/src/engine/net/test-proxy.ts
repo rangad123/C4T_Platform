@@ -22,8 +22,22 @@ const testProxy = (() => {
 })();
 `;
 
-/** The config with the proxy added when the environment asks for it (AITP_PROXY_TESTS=1 and a proxy is set); otherwise unchanged. */
+/** The address a runner's own address guard listens on (src/agent/address-guard.ts): plain http on 127.0.0.1, nothing else. */
+const GUARD_ADDRESS = /^http:\/\/127\.0\.0\.1:\d{1,5}$/;
+
+/**
+ * The config with the proxy added when the environment asks for it (AITP_PROXY_TESTS=1 and a proxy is set); otherwise unchanged.
+ *
+ * AITP_ADDRESS_GUARD (set only by a runner that refuses private addresses, never by the platform): the browser and the tests' API calls go
+ * through that guard instead, loopback included. It cannot be combined with a company proxy (the agent refuses such a run first), and a
+ * value or config the guard cannot be applied to stops the run rather than letting it go out unguarded.
+ */
 export function withTestProxy(config: string, env: NodeJS.ProcessEnv): string {
+    const guard = env.AITP_ADDRESS_GUARD;
+    if (guard !== undefined) {
+        if (!GUARD_ADDRESS.test(guard) || !config.includes("    use: {")) throw new Error("The runner's address guard could not be applied to this run, so nothing was run.");
+        return config.replace("    use: {", () => `    use: {\n        // This runner refuses private addresses: every request goes through its address guard (src/agent/address-guard.ts).\n        proxy: { server: ${JSON.stringify(guard)}, bypass: "<-loopback>" },`);
+    }
     if (!truthy(env.AITP_PROXY_TESTS)) return config;
     if (!(env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY)) return config;
     const firstLineEnd = config.indexOf("\n");

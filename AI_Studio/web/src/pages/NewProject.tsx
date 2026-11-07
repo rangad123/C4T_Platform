@@ -15,7 +15,7 @@ import { SecurityStartGate } from "../features/security/TestingType";
 import { applyPendingTestingType } from "../features/security/security";
 import type { AgentInputs } from "../features/requirements/AgentInputs";
 import { MissingInputsDialog } from "../features/requirements/AgentInputsDialog";
-import { EXPLORING_OFF_HERE } from "../features/runs/runs-here";
+import { EXPLORING_OFF_HERE, EXPLORING_ON_RUNNERS, executionModeOf } from "../features/runs/runs-here";
 
 export function NewProject({ welcome = false, projectId, initialUrl }: { welcome?: boolean; projectId?: string; initialUrl?: string }) {
     useDocumentTitle(welcome ? "" : "New project");
@@ -150,7 +150,11 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                         Exploring the web application needs it, so only the application’s API is explored here. API tests are created without the AI.
                     </Callout>
                 )}
-                {config?.runsHere === false && (
+                {executionModeOf(config) === "runners" ? (
+                    <Callout tone="warning" title="Exploring isn’t available here yet">
+                        <span data-testid="exploring-off">{EXPLORING_ON_RUNNERS}</span>
+                    </Callout>
+                ) : config?.runsHere === false && (
                     <Callout tone="warning" title="Exploring does not run here">
                         <span data-testid="exploring-off">{EXPLORING_OFF_HERE} Explore where tests run, or once tests are switched on here.</span>
                     </Callout>
@@ -158,7 +162,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                 {error && <Callout tone="danger" title="We couldn’t start the exploration">{error}</Callout>}
 
                 <div className="row">
-                    <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} disabled={config?.runsHere === false}>
+                    <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} disabled={config?.runsHere === false || executionModeOf(config) === "runners"}>
                         {busy ? "Starting…" : projectId ? "Explore again" : "Start exploring"}
                     </Button>
                     {agents && (

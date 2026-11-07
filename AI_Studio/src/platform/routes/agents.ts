@@ -7,28 +7,32 @@
  * encapsulated scope, so a handler cannot forget). An API key is never accepted instead of the token.
  */
 import { PassThrough, Transform } from "node:stream";
+import { PLATFORM_SETTING_REFUSED, runnersOnly } from "../runner-only.js";
 import { pipeline } from "node:stream/promises";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { DevicePush, HeartbeatRequest, HelloRequest, PollRequest, RecordingPush, ResultRequest, SafeName, type UploadResponse } from "../../agent-protocol/schema.js";
+import { AcceptRequest, ATTEMPT_HEADER, DevicePush, EventsRequest, HeartbeatRequest, HelloRequest, PollRequest, RecordingPush, RejectRequest, ResultRequest, SafeName, type UploadResponse } from "../../agent-protocol/schema.js";
+import { EnrollRequest } from "../../agent-protocol/schema.js";
 import { MAX_DEVICE_PUSH_BYTES } from "../agent-device.js";
 import { MAX_PUSH_BYTES } from "../agent-record.js";
 import type { AgentTokenRecord } from "../agent-store.js";
 import { androidSummary } from "../agent-routing.js";
-import { getAgentServices, type AgentService } from "../agent-services.js";
+import { getAgentServices, MachineRefused, type AgentService } from "../agent-services.js";
 import { HttpError } from "../http-error.js";
 import { redactCredentials } from "../../engine/net/company-network.js";
 import { RUNNER_UPDATE_HEADER } from "../../agent-protocol/schema.js";
 import { runnerUpdatesFor } from "../runner-update.js";
 import { maxTokensFrom, runnerLimitMessage } from "../runner-kit.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
-import { currentActor } from "../auth/actor.js";
+import { actorLabel, currentActor } from "../auth/actor.js";
 import { assertMayAddRunner, CANNOT_MANAGE_RUNNER, canManageRunner } from "../runner-health.js";
 import { registerUpdateAgentRoutes } from "./runner-updates.js";
 import type { RouteCtx } from "./types.js";
 
 const JSON_CAP = 2_000_000;
 const RESULT_CAP = 8_000_000;
+/** Protocol 2: a batch of live events (at most 100 short events). */
+const EVENTS_CAP = 1_000_000;
 
 const publicToken = (t: AgentTokenRecord) => ({ id: t.id, label: t.label, hint: `aitg_…${t.hint}`, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt, revokedAt: t.revokedAt });
 
@@ -98,6 +102,9 @@ async function readJson(req: FastifyRequest, cap: number): Promise<unknown> {
     }
 }
 
+/** The caller's address, for the enrollment rate limit and Activity (a proxy in front is trusted only as the server is configured to). */
+const clientAddress = (req: FastifyRequest): string => String(req.ip ?? "unknown").slice(0, 64);
+
 function tooLarge(_req: FastifyRequest): HttpError {
     return new HttpError(413, "The request is too large.");
 }
@@ -142,7 +149,8 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         // One runner per project (same limit as the kit download): refuse a new token until the current runner is removed.
         const max = maxTokensFrom();
         if (svc.store.countActiveTokens(id) >= max) throw new HttpError(409, runnerLimitMessage(max));
-        const { secret, record } = svc.store.createToken(id, body.label);
+        // Who made it is kept with the runner, as on the Runners page.
+        const { secret, record } = svc.store.createToken(id, body.label, actorLabel(actorOf(req) ?? currentActor()));
         // The only time the token is shown. It is not stored, logged or returned again.
         return reply.code(201).send({ token: publicToken(record), secret });
     });
@@ -154,12 +162,13 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         if (!token || token.revokedAt || !svc.store.hasAccess(tid, id)) throw new HttpError(404, "Token not found, or already revoked.");
         // Registered from this project and used by no other: it goes, as it always did. Otherwise only this project's access ends.
         const others = svc.store.projectsOf(tid).some((x) => x.projectId !== id);
+        // The same rule as adding one, whichever way the runner goes (round 39: retiring the project's own runner skipped it).
+        const actor = actorOf(req) ?? currentActor();
+        if (!canManageRunner(accessControlOf(app).projects, actor, token.organizationId)) throw new HttpError(403, CANNOT_MANAGE_RUNNER);
         if (token.projectId === id && !others) {
             if (!svc.store.revokeToken(id, tid)) throw new HttpError(404, "Token not found, or already revoked.");
             return { ok: true };
         }
-        const actor = actorOf(req) ?? currentActor();
-        if (!canManageRunner(accessControlOf(app).projects, actor, token.organizationId)) throw new HttpError(403, CANNOT_MANAGE_RUNNER);
         svc.store.removeAccess(tid, id);
         return { ok: true };
     });
@@ -181,7 +190,19 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
     app.put("/api/projects/:id/runner", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
-        const body = z.object({ runOn: z.enum(["platform", "agent"]), agentId: z.string().max(64).nullable().optional() }).parse(req.body ?? {});
+        const body = z.object({ runOn: z.enum(["platform", "agent"]).optional(), agentId: z.string().max(64).nullable().optional(), allowPersonal: z.boolean().optional() }).parse(req.body ?? {});
+        // "Allow people's own computers" (migration 51) may be changed on its own; it does not move the project's runs.
+        if (body.allowPersonal !== undefined) {
+            if (svc.store.allowsPersonal(id) !== body.allowPersonal) {
+                svc.store.setAllowPersonal(id, body.allowPersonal);
+                const actor = actorOf(req) ?? currentActor();
+                accessControlOf(app).users.addActivity({ actorKind: actor.kind, actorId: actor.id ?? null, actorName: actor.name, action: "runner-personal-switched", detail: body.allowPersonal ? "People's own computers may run this project's tests." : "People's own computers no longer run this project's tests.", projectId: id });
+            }
+            if (body.runOn === undefined) return svc.runnerStatus(id);
+        }
+        if (body.runOn === undefined) throw new HttpError(400, "Say where the project's tests run (runOn), or send allowPersonal.");
+        // EXECUTION_MODE=runners: nothing runs on this server, so a project cannot be set to run here (runner-only.ts).
+        if (body.runOn === "platform" && runnersOnly(ctx.p.config)) throw new HttpError(409, PLATFORM_SETTING_REFUSED, { executionMode: "runners" });
         await ctx.assertNoActiveJob(id);
         if (body.runOn === "agent") {
             const agentId = body.agentId ?? null;
@@ -191,6 +212,42 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             svc.store.setRunner(id, { runOn: "agent", agentId });
         } else svc.store.setRunner(id, { runOn: "platform", agentId: null });
         return svc.runnerStatus(id);
+    });
+
+    // ── a run's live pictures (protocol 2) ─────────────────────────────────
+    // A screenshot a runner uploaded during a run (named by a runner_screenshot event), shown on the run page before the run's results are
+    // stored. Only an image of a task of this job of this project; kept with the task for a day, after which the run's own artifacts remain.
+    app.get("/api/projects/:id/runs/:jobId/runner-files/:taskId/:name", async (req, reply) => {
+        const { id, jobId, taskId, name } = req.params as { id: string; jobId: string; taskId: string; name: string };
+        ctx.project(id);
+        const job = p.repo.getJob(jobId);
+        if (!job || job.projectId !== id) throw new HttpError(404, "Run not found.");
+        const type = /\.png$/i.test(name) ? "image/png" : /\.jpe?g$/i.test(name) ? "image/jpeg" : undefined;
+        if (!SafeName.safeParse(name).success || !type) throw new HttpError(404, "File not found.");
+        const task = svc.store.getTask(taskId);
+        if (!task || task.jobId !== jobId || task.projectId !== id) throw new HttpError(410, "This live picture is no longer kept. The run's own screenshots are with its results.");
+        const file = svc.store.getFile(taskId, "out", name);
+        if (!file) throw new HttpError(404, "File not found.");
+        const body = await p.store.get(file.path).catch(() => undefined);
+        if (!body) throw new HttpError(404, "File not found.");
+        return reply.header("content-type", type).header("cache-control", "private, max-age=300").header("x-content-type-options", "nosniff").send(body);
+    });
+
+    // ── enrollment: the one agent route without a runner credential (the single-use code in the body is the credential) ──
+    void app.register(async (scope) => {
+        scope.removeAllContentTypeParsers();
+        scope.addContentTypeParser("*", (_req, _payload, done) => done(null));
+        scope.post("/api/agent/enroll", async (req, reply) => {
+            // Never an Authorization header here: a runner credential is not a code, and a code is never sent as one.
+            if (req.headers.authorization) throw new HttpError(400, "Send the enrollment code in the body, without an Authorization header.");
+            const body = parse(EnrollRequest, await readJson(req, 64_000), "enrollment request");
+            const out = svc.enroll(body, clientAddress(req));
+            const t = svc.store.getToken(out.runnerId);
+            // Who added which runner, where people look (Activity); the code and the credential are never written anywhere.
+            if (t) accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-enrolled", detail: `${t.kind === "personal" ? "A person's own computer" : "A team runner"} “${t.label ?? body.name.slice(0, 64)}” connected with its enrollment code.`, projectId: t.projectId });
+            req.log.info({ audit: "runner-enrolled", tokenId: out.runnerId, kind: out.kind }, "runner enrolled");
+            return reply.code(201).send(out);
+        });
     });
 
     // ── the agent protocol ──────────────────────────────────────────────────
@@ -206,10 +263,32 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         });
         const token = (req: FastifyRequest): AgentTokenRecord => tokenOf.get(req)!;
         const other = (req: FastifyRequest) => svc.throttle(token(req), "other");
+
+        // A new credential (migration 51): the presented one keeps working until the new one is first used, at most 24 hours.
+        scope.post("/api/agent/rotate", async (req) => {
+            svc.throttle(token(req), "hello");
+            await readJson(req, JSON_CAP);
+            const out = svc.rotate(token(req), req.headers.authorization);
+            // Where people look (Activity): which runner changed its credential. Never the credential itself.
+            const t = token(req);
+            accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-credential-rotated", detail: `${t.kind === "personal" ? "A person's own computer" : "The team runner"} “${t.label ?? `…${t.hint}`}” changed its credential. The previous one stops working once the new one is used, or after 24 hours.`, projectId: t.projectId });
+            req.log.info({ audit: "runner-credential-rotated", tokenId: t.id }, "runner credential rotated");
+            return out;
+        });
         scope.post("/api/agent/hello", async (req) => {
             svc.throttle(token(req), "hello");
             const body = parse(HelloRequest, await readJson(req, JSON_CAP), "hello message");
-            const answer = svc.hello(token(req), body);
+            let answer: ReturnType<AgentService["hello"]>;
+            try {
+                answer = svc.hello(token(req), body);
+            } catch (e) {
+                // A credential used from another computer: refused, and written down where people look (Activity). Never the credential.
+                if (e instanceof MachineRefused) {
+                    const t = e.token;
+                    accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-refused", detail: `Runner “${t.label ?? t.hint}” was refused: its credential was used from another computer (“${body.name.slice(0, 64)}”, ${clientAddress(req)}).`, projectId: t.projectId });
+                }
+                throw e;
+            }
             // Runner updates: record what it reports, and offer the platform's runner files when it should move to them.
             const registered = svc.store.getAgent(answer.agentId);
             if (!registered) return answer;
@@ -288,47 +367,72 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         scope.put("/api/agent/tasks/:id/files/:name", async (req, reply) => {
             other(req);
             const { id, name } = req.params as { id: string; name: string };
-            const target = svc.uploadTarget(token(req), id, name);
-            const cap = Math.min(svc.limits.maxFileBytes, Math.max(0, svc.limits.taskMaxBytes - svc.store.uploadedTotals(id).bytes));
             const declared = Number(req.headers["content-length"] ?? 0);
-            if (declared > cap) {
-                reply.header("connection", "close");
-                throw new HttpError(413, `The file is larger than the ${Math.round(svc.limits.maxFileBytes / 1024 / 1024)} MB this platform accepts.`);
-            }
-            const claimed = String(req.headers["x-content-sha256"] ?? "").toLowerCase();
-            if (claimed && !/^[0-9a-f]{64}$/.test(claimed)) throw new HttpError(400, "X-Content-SHA256 must be 64 hexadecimal characters.");
-            // Streamed into the store, which never shows a half-sent file under the final name (object-store.ts, put).
-            const counter = new CapturingLimit(cap);
-            const body = new PassThrough();
-            const feeding = pipeline(req.raw, counter, body);
-            feeding.catch(() => undefined); // its outcome is read below
-            let saved: { size: number; sha256?: string };
+            const attempt = req.headers[ATTEMPT_HEADER];
+            // The task's upload budget is reserved for this upload until it ends (two uploads at once cannot pass the limits together).
+            const target = svc.uploadTarget(token(req), id, name, typeof attempt === "string" ? attempt : undefined, Number.isFinite(declared) ? declared : 0);
             try {
-                saved = await p.store.put(target.key, body, {
-                    contentType: "application/octet-stream",
-                    ...(declared > 0 ? { size: declared } : {}),
-                    // The platform's own hash is the truth; a client claim that disagrees means the bytes were damaged on the way, and the file is not kept.
-                    verify: (r) => {
-                        if (claimed && claimed !== r.sha256) throw new HttpError(400, "The uploaded bytes do not match the hash the agent announced.");
-                    },
-                });
-            } catch (e) {
-                body.destroy();
-                const fed = await feeding.then(
-                    () => undefined,
-                    (err: unknown) => err,
-                );
-                if (fed instanceof HttpError) {
+                const cap = target.cap;
+                if (declared > cap) {
                     reply.header("connection", "close");
-                    throw fed;
+                    throw new HttpError(413, `The file is larger than the ${Math.round(svc.limits.maxFileBytes / 1024 / 1024)} MB this platform accepts.`);
                 }
-                if (e instanceof HttpError) throw e;
-                throw new HttpError(400, "The upload was interrupted.");
+                const claimed = String(req.headers["x-content-sha256"] ?? "").toLowerCase();
+                if (claimed && !/^[0-9a-f]{64}$/.test(claimed)) throw new HttpError(400, "X-Content-SHA256 must be 64 hexadecimal characters.");
+                // Streamed into the store, which never shows a half-sent file under the final name (object-store.ts, put).
+                const counter = new CapturingLimit(cap);
+                const body = new PassThrough();
+                const feeding = pipeline(req.raw, counter, body);
+                feeding.catch(() => undefined); // its outcome is read below
+                let saved: { size: number; sha256?: string };
+                try {
+                    saved = await p.store.put(target.key, body, {
+                        contentType: "application/octet-stream",
+                        ...(declared > 0 ? { size: declared } : {}),
+                        // The platform's own hash is the truth; a client claim that disagrees means the bytes were damaged on the way, and the file is not kept.
+                        verify: (r) => {
+                            if (claimed && claimed !== r.sha256) throw new HttpError(400, "The uploaded bytes do not match the hash the agent announced.");
+                        },
+                    });
+                } catch (e) {
+                    body.destroy();
+                    const fed = await feeding.then(
+                        () => undefined,
+                        (err: unknown) => err,
+                    );
+                    if (fed instanceof HttpError) {
+                        reply.header("connection", "close");
+                        throw fed;
+                    }
+                    if (e instanceof HttpError) throw e;
+                    throw new HttpError(400, "The upload was interrupted.");
+                }
+                const sha256 = saved.sha256!;
+                svc.recordUpload(target.task, name, target.key, saved.size, sha256);
+                const out: UploadResponse = { ref: name, size: saved.size, sha256 };
+                return out;
+            } finally {
+                target.release();
             }
-            const sha256 = saved.sha256!;
-            svc.recordUpload(target.task, name, target.key, saved.size, sha256);
-            const out: UploadResponse = { ref: name, size: saved.size, sha256 };
-            return out;
+        });
+
+        // Protocol 2 (docs/features/runner-protocol-2.md): accept or turn down a task that was handed out, and the run's live events.
+        scope.post("/api/agent/tasks/:id/accept", async (req) => {
+            other(req);
+            const { id } = req.params as { id: string };
+            return svc.accept(token(req), id, parse(AcceptRequest, await readJson(req, JSON_CAP), "accept message").attemptId);
+        });
+
+        scope.post("/api/agent/tasks/:id/reject", async (req) => {
+            other(req);
+            const { id } = req.params as { id: string };
+            return svc.reject(token(req), id, parse(RejectRequest, await readJson(req, JSON_CAP), "reject message"));
+        });
+
+        scope.post("/api/agent/tasks/:id/events", async (req) => {
+            other(req);
+            const { id } = req.params as { id: string };
+            return svc.events(token(req), id, parse(EventsRequest, await readJson(req, EVENTS_CAP), "events message"));
         });
 
         // A recording's state (record tasks only). The body is capped and validated; nothing in it is logged.

@@ -44,7 +44,7 @@ function privateAddress(raw) {
     }
     const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
     if (dotted) return privateAddress(dotted[1]);
-    return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80") || h.startsWith("ff");
+    return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || /^fe[89a-f]/.test(h) || h.startsWith("ff");
 }
 
 /** The finished address of a step, as the browser or the request will use it. Throws before anything is opened or sent. */

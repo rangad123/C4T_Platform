@@ -1,6 +1,6 @@
 /**
- * The Runners pages in a real browser against a real platform (port 7802) and a fake runner speaking protocol 1: the empty states say
- * how to add a runner; a person registers one (the token shown once), gives it to a project in project settings, sees it online with
+ * The Runners pages in a real browser against a real platform (port 8102) and a fake runner speaking protocol 1: the empty states say
+ * how to add a runner; a runner registered with a token (the older way, through the API) is given to a project in project settings, seen online with
  * its phone on the Runners page, on its own page and in the Dashboard's summary, filters the list, renames it, stops a project using
  * it, and retires it. Light-mode accessibility of the pages. Requires `web/dist` (vite build).
  */
@@ -18,7 +18,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, viaFetch } from "./fixtures/fake-agent.js";
 
-const PORT = 7802;
+const PORT = 8102;
 const BASE = `http://127.0.0.1:${PORT}`;
 const KEY = "runners-ui-owner-key-41ab";
 let browser: Browser;
@@ -64,7 +64,10 @@ describe("runners in the web app", () => {
         await page.goto(`${BASE}/#/runners`);
         await pwExpect(page.getByRole("heading", { name: "Runners", level: 1 })).toBeVisible();
         await pwExpect(page.getByText("No runners yet")).toBeVisible();
-        await pwExpect(page.getByText(/downloads an installer for Windows, macOS or Linux/)).toBeVisible();
+        await pwExpect(page.getByText(/Nothing runs until one connects/)).toContainText("To add a computer that runs tests for a team, choose Add a team runner.");
+        await pwExpect(page.getByRole("button", { name: "Add a team runner" })).toBeVisible();
+        // The old way, a token shown on screen, is gone from the page: a team runner is added with a one-time code (runner-personal-ui.test.ts).
+        await pwExpect(page.getByRole("button", { name: "Register a runner" })).toHaveCount(0);
         await pwExpect(page.getByTestId("planned-runner-registry")).toHaveCount(0);
         expect(await axeClean(page)).toEqual([]);
         await page.goto(`${BASE}/#/dashboard`);
@@ -74,15 +77,18 @@ describe("runners in the web app", () => {
         await pwExpect(page.getByTestId("runner-access").getByText(/Nothing runs until one connects/)).toBeVisible();
     });
 
-    it("registers a runner, showing the token once, and gives it to a project", async () => {
-        await page.goto(`${BASE}/#/runners`);
-        await page.getByRole("button", { name: "Register a runner" }).click();
-        await page.getByLabel("Runner name").fill("Lab Mac");
-        await page.getByRole("button", { name: "Register", exact: true }).click();
-        const secret = await page.getByTestId("new-token").inputValue();
+    it("lists a runner registered with a token, and gives it to a project", async () => {
+        const made = await page.evaluate(async () => {
+            const csrf = /(?:^|;\s*)aitp_csrf=([^;]+)/.exec(document.cookie)?.[1];
+            const headers: Record<string, string> = { "content-type": "application/json", "x-requested-with": "ai-studio", ...(csrf ? { "x-csrf-token": decodeURIComponent(csrf) } : {}) };
+            const r = await fetch("/api/runners", { method: "POST", headers, body: JSON.stringify({ name: "Lab Mac" }) });
+            return { status: r.status, body: (await r.json()) as { secret?: string } };
+        });
+        expect(made.status).toBe(201);
+        const secret = made.body.secret!;
         expect(secret).toMatch(/^aitg_/);
-        await page.getByRole("button", { name: "I have copied it" }).click();
-        await pwExpect(page.getByTestId("new-token")).toHaveCount(0);
+        await page.goto(`${BASE}/#/runners`);
+        await page.reload();
         await pwExpect(page.getByRole("list", { name: "Runners" }).getByText("Not connected yet")).toBeVisible();
         await page.goto(`${BASE}/#/projects/${shop}/settings?section=runners`);
         const access = page.getByTestId("runner-access");
@@ -135,7 +141,7 @@ describe("runners in the web app", () => {
         await pwExpect(page.getByRole("heading", { name: "Studio Mac", level: 1 })).toBeVisible();
         await page.getByRole("button", { name: "Retire", exact: true }).click();
         await page.getByRole("button", { name: "Retire runner" }).click();
-        await pwExpect(page.getByText("Runner retired. Its token no longer works.")).toBeVisible();
+        await pwExpect(page.getByText("Runner retired. It can no longer connect.")).toBeVisible();
         await pwExpect(page.getByRole("heading", { name: "Actions" })).toHaveCount(0);
     });
 });

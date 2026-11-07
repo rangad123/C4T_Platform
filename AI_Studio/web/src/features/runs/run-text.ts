@@ -46,7 +46,7 @@ export interface RunAnswer {
     counts: RunCounts;
     tests: RunTest[];
     /** Tests left out because they are waiting for approval. */
-    heldBack: { id: string; testId: string; title: string; version: number | null }[];
+    heldBack: { id: string; testId: string; title: string; version: number | null; /** Why it was held back when it is not simply a draft (a shared step changed after approval). */ reason?: string }[];
     startedBy: { kind: "person" | "schedule" | "deploy" | "sequence"; label?: string };
     changes: { comparedWith: { jobId: string; at: string }; newlyFailing: RunChange[]; newlyPassing: RunChange[] } | null;
 }
