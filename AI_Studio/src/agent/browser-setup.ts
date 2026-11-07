@@ -15,7 +15,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { BROWSER_LABEL, bundledChromium, bundledReady, chooseBrowser, describeBrowser, findInstalledBrowsers, type BrowserLaunch, type BrowserPolicy, type EngineName, type FoundBrowser, type InstalledName, type VersionExec, type WebBrowserName } from "../engine/browsers/choice.js";
+import { BROWSER_LABEL, bundledChromium, bundledReady, ffmpegReady, chooseBrowser, describeBrowser, findInstalledBrowsers, type BrowserLaunch, type BrowserPolicy, type EngineName, type FoundBrowser, type InstalledName, type VersionExec, type WebBrowserName } from "../engine/browsers/choice.js";
 import { detectBrowsers, execText, expectedRevisions, playwrightBrowsersDir } from "./capabilities.js";
 import type { Logger } from "./log.js";
 import { killTree } from "./task-process.js";
@@ -81,6 +81,8 @@ export class BrowserSetup {
     private installed: FoundBrowser[] = [];
     private prepared?: Promise<void>;
     private download?: Promise<void>;
+    /** The background fetch of Playwright's video tool, for an installed browser (see decide). */
+    private videoTool?: Promise<void>;
     private readonly engines = new Map<EngineName, Promise<{ ok: true } | { ok: false; error: string }>>();
     private readonly children = new Set<ChildProcess>();
     private stopped = false;
@@ -115,7 +117,14 @@ export class BrowserSetup {
             this.setReady({ name: "chromium", ...(bundled ? { version: bundled.version } : {}), source: downloaded ? "downloaded" : "bundled", launch: {} });
         } else if (decision.use === "installed") {
             const b = decision.browser;
-            this.setReady({ name: b.name, ...(b.version ? { version: b.version } : {}), source: "installed", launch: { channel: b.name, executablePath: b.path } });
+            // Recording a failure video needs Playwright's video tool even in an installed browser. Without it every test would fail at its
+            // first page, so tests run without failure videos until the tool (about 2 MB) has been fetched in the background.
+            const video = ffmpegReady(this.dir);
+            this.setReady({ name: b.name, ...(b.version ? { version: b.version } : {}), source: "installed", launch: { channel: b.name, executablePath: b.path, ...(video ? {} : { video: false }) } });
+            if (!video) {
+                log.info("Failure videos are off until Playwright's video tool is downloaded (about 2 MB, only once); tests run meanwhile.");
+                this.videoTool = this.downloadVideoTool();
+            }
         } else if (decision.use === "none") {
             this.state = { kind: "missing", reason: decision.reason };
             log.warn(`${decision.reason} The browser setting is ${this.policy}, so the runner does not use another browser. Install it, or start the runner with --browser auto. Web tests cannot run here until then.`);
@@ -152,6 +161,18 @@ export class BrowserSetup {
         }
     }
 
+    /** Fetches Playwright's video tool for an installed browser; once it is there, failure videos are kept again. */
+    private async downloadVideoTool(): Promise<void> {
+        const r = await this.install("ffmpeg", "Video tool");
+        if (this.stopped) return;
+        if (r.ok && ffmpegReady(this.dir) && this.state.kind === "ready" && this.state.browser.launch.video === false) {
+            const { video: _off, ...launch } = this.state.browser.launch;
+            this.state = { kind: "ready", browser: { ...this.state.browser, launch } };
+            this.o.log.info("Failure videos are on: Playwright's video tool is downloaded.");
+            this.o.onChange?.();
+        } else if (!r.ok) this.o.log.warn(`Playwright's video tool could not be downloaded (${r.reason}). Tests still run, without failure videos.`);
+    }
+
     private async downloadChromium(bundled: ReturnType<typeof bundledChromium>): Promise<void> {
         const r = await this.install("chromium", "Chromium");
         if (this.stopped) return;
@@ -170,7 +191,7 @@ export class BrowserSetup {
      * Run Playwright's own installer for one browser, with a time limit. Only the process started here is ever stopped, by its handle.
      * Output is read for a few progress lines and, on failure, the reason.
      */
-    private install(what: "chromium" | EngineName, label: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    private install(what: "chromium" | "ffmpeg" | EngineName, label: string): Promise<{ ok: true } | { ok: false; reason: string }> {
         const { log } = this.o;
         const env: NodeJS.ProcessEnv = {};
         for (const [k, v] of Object.entries(this.o.env)) if (v !== undefined && !k.toUpperCase().startsWith("AITP_")) env[k] = v; // the runner's own settings (the token) stay out

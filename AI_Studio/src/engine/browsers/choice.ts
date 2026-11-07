@@ -30,6 +30,11 @@ export type EngineName = "firefox" | "webkit";
 export interface BrowserLaunch {
     channel?: InstalledName;
     executablePath?: string;
+    /**
+     * False when Playwright's video tool (ffmpeg) is not on this computer. A run in an installed Chrome or Edge then keeps no failure
+     * video instead of failing at its first page ("Executable doesn't exist at …/ffmpeg-…"). Unset: videos as usual.
+     */
+    video?: boolean;
 }
 
 export const BROWSER_POLICIES = ["auto", "bundled", "chrome", "msedge"] as const;
@@ -208,6 +213,19 @@ export async function findInstalledBrowsers(o: FindOptions = {}): Promise<FoundB
 }
 
 /** Playwright's own Chromium of `revision` is complete in `dir` (both the full browser, for windows people watch, and the headless shell). */
+/** Is Playwright's video tool (ffmpeg, which recording a failure video needs whatever the browser) in Playwright's folder? */
+export function ffmpegReady(dir: string): boolean {
+    if (!dir) return false;
+    try {
+        const require = createRequire(import.meta.url);
+        const file = path.join(path.dirname(require.resolve("playwright-core/package.json")), "browsers.json");
+        const rev = (JSON.parse(fs.readFileSync(file, "utf8")) as { browsers: Array<{ name: string; revision: string }> }).browsers.find((b) => b.name === "ffmpeg")?.revision;
+        return !!rev && fs.existsSync(path.join(dir, `ffmpeg-${rev}`, "INSTALLATION_COMPLETE"));
+    } catch {
+        return false;
+    }
+}
+
 export function bundledReady(dir: string, revision: string | undefined): boolean {
     if (!dir || !revision) return false;
     return ["chromium", "chromium_headless_shell"].every((f) => fs.existsSync(path.join(dir, `${f}-${revision}`, "INSTALLATION_COMPLETE")));

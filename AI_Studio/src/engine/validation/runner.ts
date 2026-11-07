@@ -164,7 +164,9 @@ export function configFor(projects: RunnerProject[], testTimeoutMs?: number, bro
     const timed = testTimeoutMs !== undefined && testTimeoutMs !== 60_000 ? CONFIG.replace("    timeout: 60_000,", () => `    timeout: ${Math.round(testTimeoutMs)},`) : CONFIG;
     // A runner that uses the computer's Chrome or Edge (../browsers/choice.ts): Chromium tests run in it. Firefox and WebKit variants keep their own engine.
     const launch = browser?.channel || browser?.executablePath ? `${browser.channel ? `channel: ${JSON.stringify(browser.channel)}, ` : ""}${browser.executablePath ? `launchOptions: { executablePath: ${JSON.stringify(browser.executablePath)} }, ` : ""}`.replace(/, $/, "") : "";
-    const base = launch && projects.length === 0 ? timed.replace("    use: {\n", () => `    use: {\n        ${launch},\n`) : timed;
+    // No video tool on this computer (a runner using an installed browser that has not fetched it yet): no failure video, rather than no test.
+    const filmed = browser?.video === false ? timed.replace('video: "retain-on-failure",', () => 'video: "off",') : timed;
+    const base = launch && projects.length === 0 ? filmed.replace("    use: {\n", () => `    use: {\n        ${launch},\n`) : filmed;
     if (projects.length === 0) return base;
     const list = projects
         .map((p) => `        { name: ${JSON.stringify(p.name)}, use: { ...devices[${JSON.stringify(p.device)}]${p.viewport ? `, viewport: ${JSON.stringify(p.viewport)}` : ""}${launch ? `, ...(devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "firefox" || devices[${JSON.stringify(p.device)}]?.defaultBrowserType === "webkit" ? {} : { ${launch} })` : ""} } },`)

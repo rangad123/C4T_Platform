@@ -9,6 +9,7 @@
  */
 import fs from "node:fs";
 import os from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyBrowserReport, execText } from "../src/agent/capabilities.js";
@@ -17,7 +18,7 @@ import { parseAgentArgs } from "../src/agent/config.js";
 import { applyKitDefaults } from "../src/agent/kit.js";
 import { memoryLogger } from "../src/agent/log.js";
 import { Capabilities, ResultRequest } from "../src/agent-protocol/schema.js";
-import { bundledChromium, candidatePaths, chooseBrowser, describeBrowser, findInstalledBrowsers, judge, MAX_MAJORS_BEHIND, parsePlistVersion, parseVersionOutput, readInstalledVersion, type FoundBrowser } from "../src/engine/browsers/choice.js";
+import { bundledChromium, candidatePaths, chooseBrowser, describeBrowser, ffmpegReady, findInstalledBrowsers, judge, MAX_MAJORS_BEHIND, parsePlistVersion, parseVersionOutput, readInstalledVersion, type FoundBrowser } from "../src/engine/browsers/choice.js";
 import { configFor } from "../src/engine/validation/runner.js";
 
 const TOKEN = "aitg_BrowserUnitToken0123456789abcdefghij";
@@ -194,6 +195,27 @@ describe("the run's Playwright config", () => {
         // Only the projects carry it: the shared `use` block stays as it was, so a Firefox project never inherits a Chromium channel.
         expect(variants.split("projects: [")[1]!.split("    ],")[1]).toBe(configFor(projects).split("projects: [")[1]!.split("    ],")[1]);
     });
+    it("keeps no failure video when the computer has no video tool, instead of failing every test at its first page", () => {
+        const noVideo = configFor([], undefined, { ...edge, video: false });
+        expect(noVideo).toContain('video: "off",');
+        expect(noVideo).not.toContain('video: "retain-on-failure"');
+        expect(noVideo).toContain('trace: "retain-on-failure"'); // traces need no video tool
+        expect(noVideo.replace('video: "off",', 'video: "retain-on-failure",')).toBe(configFor([], undefined, edge));
+        expect(configFor(projects, undefined, { ...edge, video: false })).toContain('video: "off",');
+        // With the tool there (or no installed browser at all) videos are kept as before.
+        expect(configFor([], undefined, { ...edge, video: true })).toBe(configFor([], undefined, edge));
+        expect(configFor([])).toContain('video: "retain-on-failure",');
+    });
+    it("finds Playwright's video tool only where Playwright keeps a finished install of it", () => {
+        const dir = fresh("ffmpeg");
+        expect(ffmpegReady(dir)).toBe(false);
+        expect(ffmpegReady("")).toBe(false);
+        const rev = (JSON.parse(fs.readFileSync(path.join(path.dirname(createRequire(import.meta.url).resolve("playwright-core/package.json")), "browsers.json"), "utf8")) as { browsers: Array<{ name: string; revision: string }> }).browsers.find((b) => b.name === "ffmpeg")!.revision;
+        fs.mkdirSync(path.join(dir, `ffmpeg-${rev}`), { recursive: true });
+        expect(ffmpegReady(dir)).toBe(false); // half downloaded
+        fs.writeFileSync(path.join(dir, `ffmpeg-${rev}`, "INSTALLATION_COMPLETE"), "");
+        expect(ffmpegReady(dir)).toBe(true);
+    });
     it("knows which engines a run on other browsers needs", async () => {
         expect(await enginesOf([])).toEqual({ chromium: true, engines: [] });
         expect(await enginesOf([{ device: "Desktop Firefox" }, { device: "Desktop Safari" }, { device: "Pixel 7" }])).toEqual({ chromium: true, engines: ["firefox", "webkit"] });
@@ -266,13 +288,27 @@ describe("the runner's own decision (no download)", () => {
         const edgeExe = layWin(env["ProgramFiles(x86)"], "msedge", "155.0.4283.62");
         const { s, lines } = setup(env);
         const w = await s.forWeb();
-        expect(w).toEqual({ ok: true, browser: { name: "msedge", version: "155.0.4283.62", source: "installed", launch: { channel: "msedge", executablePath: edgeExe } } });
+        // No Playwright video tool in that folder: tests run without failure videos rather than not at all, and the runner says so.
+        expect(w).toEqual({ ok: true, browser: { name: "msedge", version: "155.0.4283.62", source: "installed", launch: { channel: "msedge", executablePath: edgeExe, video: false } } });
         const text = lines.join("\n");
+        expect(text).toContain("Failure videos are off until Playwright's video tool is downloaded");
         expect(text).toContain("Looking for a browser for web tests (setting: auto, the default).");
         expect(text).toContain(`Not using Google Chrome at ${chromeExe}: Google Chrome 100 is too old`);
         expect(text).toContain("Ready for web tests in Microsoft Edge 155, installed on this computer.");
         // The paths stay in the runner's window: the report has none.
         expect(JSON.stringify(s.report())).not.toContain(root.slice(3));
+    });
+    it("an installed browser keeps failure videos when Playwright's video tool is already on the computer", async () => {
+        const root = fresh("dec2v");
+        const pw = path.join(root, "empty");
+        const rev = (JSON.parse(fs.readFileSync(path.join(path.dirname(createRequire(import.meta.url).resolve("playwright-core/package.json")), "browsers.json"), "utf8")) as { browsers: Array<{ name: string; revision: string }> }).browsers.find((b) => b.name === "ffmpeg")!.revision;
+        fs.mkdirSync(path.join(pw, `ffmpeg-${rev}`), { recursive: true });
+        fs.writeFileSync(path.join(pw, `ffmpeg-${rev}`, "INSTALLATION_COMPLETE"), "");
+        const env = { ...winEnv(root), PLAYWRIGHT_BROWSERS_PATH: pw };
+        const edgeExe = layWin(env["ProgramFiles(x86)"], "msedge", "155.0.4283.62");
+        const { s, lines } = setup(env);
+        expect(await s.forWeb()).toEqual({ ok: true, browser: { name: "msedge", version: "155.0.4283.62", source: "installed", launch: { channel: "msedge", executablePath: edgeExe } } });
+        expect(lines.join("\n")).not.toContain("Failure videos are off");
     });
     it("a setting of msedge on a computer without Edge uses nothing else and says what to do", async () => {
         const root = fresh("dec3");

@@ -62,3 +62,13 @@ A runner (see `runner-agent.md`) needs a Chromium-family browser for web tests. 
 - A real Chromium, Firefox or WebKit download from Playwright's servers was not done in tests (local fake host only). Linux may need system libraries for a downloaded browser (`npx playwright install-deps`, administrator rights); the runner does not install them.
 - The age rule is a rule of thumb, not a guarantee: a much newer Chrome can in principle change behaviour Playwright relies on.
 - Without `--browser`, a computer that has Playwright's Chromium keeps using it (it is the browser the platform's own tests run in), even when Chrome or Edge is installed.
+
+## Failure videos in an installed browser
+
+Playwright records a failure video with its own small video tool (ffmpeg), whatever the browser. A runner that uses the computer's
+installed Chrome or Edge has never downloaded Playwright's browsers, so that tool is usually missing, and without it every test failed
+at its first page ("Executable doesn't exist at …/ffmpeg-…"). Now the runner checks for the tool when it chooses an installed browser
+(`ffmpegReady` in `src/engine/browsers/choice.ts`). When it is missing, tests run without failure videos (`video: "off"` in the run's
+config; screenshots and traces are kept as before), the runner says so, and it fetches the tool in the background (about 2 MB, once).
+From the next run on, failure videos are kept again. Found by the first run of `.github/workflows/runner-matrix.yml` on GitHub's
+Windows and macOS machines.

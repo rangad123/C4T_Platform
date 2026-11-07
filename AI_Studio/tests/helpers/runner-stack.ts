@@ -355,6 +355,9 @@ export async function startRunnerStack(opts: StackOptions): Promise<RunnerStack>
                 AITP_URL: "",
                 AITP_AGENT_TOKEN: "",
                 AITP_AGENT_TOKEN_FILE: "",
+                // RUNNER_STACK_AGENT_BROWSERS_PATH=/nowhere hides Playwright's own browsers from the runner only, so it takes the computer's
+                // installed Chrome or Edge, as on a tester's computer (the test's own browser keeps Playwright's).
+                ...(process.env.RUNNER_STACK_AGENT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: process.env.RUNNER_STACK_AGENT_BROWSERS_PATH } : {}),
                 ...(a.extraEnv ?? {}),
             },
             "The runner",
