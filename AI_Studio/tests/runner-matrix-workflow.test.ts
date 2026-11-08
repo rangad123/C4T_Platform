@@ -50,9 +50,9 @@ describe("the real-machine workflow", () => {
 
     it("covers Windows Server 2022 and 2025, macOS on Apple silicon and Intel, and Linux", () => {
         const legs = wf.jobs.smoke.strategy.matrix.include as Array<{ os: string; target: string; installer: boolean }>;
-        expect(legs.map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-14", "macos-15-intel", "ubuntu-latest"]);
+        expect(legs.map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-15", "macos-15-intel", "ubuntu-latest"]);
         expect(legs.map((l) => l.target)).toEqual(["win-x64", "win-x64", "mac-arm64", "mac-x64", "linux-x64"]);
-        expect(legs.filter((l) => l.installer).map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-14", "macos-15-intel"]);
+        expect(legs.filter((l) => l.installer).map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-15", "macos-15-intel"]);
         expect(wf.jobs.smoke["runs-on"]).toBe("${{ matrix.os }}");
         // Honest about what the machines are.
         expect(text).toMatch(/not Windows 10 or 11 desktop/);
@@ -102,7 +102,7 @@ describe("the runner tests in the main CI workflow", () => {
         const step = steps.find((s) => s.name === "Runner tests")!;
         expect(step).toBeDefined();
         expect(step.run).toContain("--no-file-parallelism");
-        for (const f of ["agent-platform-unit", "runner-limit-unit", "runner-update-unit", "runner-installer-kit", "record-agent-unit", "live-session-fake-agent", "installer-mac-unit", "agent-program-unit", "agent-platform", "runner-stop-file-unit", "smoke-runner-unit", "runner-matrix-workflow", "credential-store-unit", "runner-protocol2-unit", "run-live-unit", "environment-accounts-unit", "approval-deps", "runner-sessions-personal", "runner-only-mode", "runner-enroll", "runner-personal", "runner-protocol2", "runner-address-guard", "runner-review-fixes"]) expect(step.run, f).toContain(`tests/${f}.test.ts`);
+        for (const f of ["agent-platform-unit", "runner-limit-unit", "runner-update-unit", "runner-installer-kit", "record-agent-unit", "live-session-fake-agent", "installer-mac-unit", "agent-program-unit", "agent-platform", "runner-stop-file-unit", "smoke-runner-unit", "runner-matrix-workflow", "credential-store-unit", "runner-protocol2-unit", "run-live-unit", "environment-accounts-unit", "approval-deps", "runner-sessions-personal", "runner-only-mode", "runner-enroll", "runner-personal", "runner-protocol2", "runner-address-guard", "runner-review-fixes", "trace-scrub-unit", "runner-resources-unit", "runner-untrusted-unit", "runner-access-isolation", "runner-trace-secrets", "runner-restart", "runner-handover"]) expect(step.run, f).toContain(`tests/${f}.test.ts`);
         expect(step.env?.TAQWRIGHT_HOME).toBe("/nonexistent-taqwright");
     });
 });

@@ -461,7 +461,7 @@ For a server on the internet use the deploy kit in `deploy/`: [deploy/README.md]
 | `BACKUP_KEEP` | `7` | How many verified backups to keep |
 | `BACKUP_UPLOAD_COMMAND` | none | A command run after each backup with the file in `$BACKUP_FILE` (for example `rclone copy "$BACKUP_FILE" remote:aitp`) |
 
-**Stopping:** SIGTERM (Docker stop, systemd stop, Ctrl+C) stops taking new jobs, gives the running job `SHUTDOWN_GRACE_SECONDS`, then stops it the way Stop does and records it as "Interrupted: the platform was shut down…" so nobody mistakes it for a run in progress; it is not restarted on its own.
+**Stopping:** SIGTERM (Docker stop, systemd stop, Ctrl+C) stops taking new jobs, gives the running job `SHUTDOWN_GRACE_SECONDS`, then stops it the way Stop does and records it as "Interrupted: the platform was shut down…" so nobody mistakes it for a run in progress; it is not restarted on its own. A job whose tests run on a runner is not stopped: it is handed over, the runner keeps going, and the platform picks it up again when it starts (`docs/features/runner-restarts.md`).
 
 **Scheduled backups** are a full copy of the database (every project, history and the encrypted secrets), made while the platform runs and checked by opening the copy before it counts. Without `SECRET_KEY` the encryption key file is copied next to each backup; with `SECRET_KEY`, keep that value safe yourself. Screenshots, recordings and traces are not included. One backup now: `npx tsx src/platform/ops/backup-cli.ts`. Restore: stop the platform, copy the backup to `<DATA_DIR>/platform.db` (delete `platform.db-wal` and `platform.db-shm`), put the key back, start.
 

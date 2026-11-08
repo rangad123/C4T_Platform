@@ -1198,6 +1198,15 @@ export class AgentStore {
         this.db.run("DELETE FROM device_reservations WHERE task_id = ?", taskId);
     }
 
+    /**
+     * When the platform process starts: runners could not report while it was away, so every running task gets at least one full lease
+     * from now before the sweep may call it lost (a runner reconnects within its back-off, 30 s at most). Returns how many were extended.
+     */
+    extendRunningLeases(leaseMs: number): number {
+        const until = this.clock() + leaseMs;
+        return Number(this.db.run("UPDATE agent_tasks SET lease_until = ? WHERE status = 'running' AND (lease_until IS NULL OR lease_until < ?)", until, until).changes);
+    }
+
     // ── attempts (protocol 2; protocol-1 agents get an attempt too, they just never name it) ──
 
     /** The protocol a runner machine speaks (1 until it said hello with protocol 2). */

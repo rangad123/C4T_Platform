@@ -16,6 +16,7 @@ import { trackTestVersion, type VersionSource } from "./review-store.js";
 import { currentActor } from "./auth/actor.js";
 import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
 import { requestedRunnerId } from "./run-request.js";
+import { HANDED_OVER } from "./runner-handover.js";
 
 export const JOB_STATES = [
     "QUEUED",
@@ -463,8 +464,12 @@ export class Repo {
     /** Refuses (HTTP 409) a job that cannot be handed to a runner when the platform runs tests only on runners (platform/runner-only.ts). */
     executionGate?: (projectId: string, options: JobOptions) => Promise<void>;
 
-    /** Called for each job `reclaimStaleJobs` is about to put back in the queue: the earlier attempt's runner tasks are cancelled first (runner-only.ts). */
-    beforeRequeue?: (jobId: string) => void;
+    /**
+     * Called for each job `reclaimStaleJobs` is about to put back in the queue or give up (runner-only.ts): a runner task of the earlier
+     * attempt that is still alive is kept for the next attempt to pick up, unless the job is given up (`giveUp`) or no longer goes to a
+     * runner; then it is cancelled first. `handedOver`: the platform restarted gracefully while the job was on a runner (runner-handover.ts).
+     */
+    beforeRequeue?: (jobId: string, o: { giveUp: boolean; handedOver: boolean }) => void;
 
     /** Async because its gates are (POSTGRES_S3_MIGRATION.md 3.2): they will read asynchronous stores; the insert itself is unchanged. */
     async createJob(projectId: string, applicationId: string, options: JobOptions): Promise<JobRow> {
@@ -568,16 +573,20 @@ export class Repo {
      */
     reclaimStaleJobs(): number {
         const stale = this.db.all<Row>(
-            `SELECT id, attempts, ${this.db.dialect.jsonText("options_json", "mode")} AS mode, ${this.db.dialect.jsonText("options_json", "testIds")} AS test_ids
+            `SELECT id, attempts, lease_owner, ${this.db.dialect.jsonText("options_json", "mode")} AS mode, ${this.db.dialect.jsonText("options_json", "testIds")} AS test_ids
                FROM generation_jobs WHERE status IN ('DISCOVERING','ANALYZING','PLANNING','GENERATING','VALIDATING') AND lease_until < ?`,
             Date.now(),
         );
         for (const s of stale) {
-            // A runner may still be running the lost attempt: it is told to stop before the job is offered again or given up (never twice at once).
+            // A job handed over by a graceful restart was not lost: it goes back to the queue whatever its attempts (handOverJob did not count it).
+            const handedOver = s.lease_owner === HANDED_OVER;
+            const giveUp = !handedOver && s.attempts >= 3;
+            // A runner may still be running the earlier attempt: the next attempt picks that task up (never a second one at once); a job
+            // given up, or one that no longer goes to a runner, has it cancelled first.
             try {
-                this.beforeRequeue?.(s.id);
+                this.beforeRequeue?.(s.id, { giveUp, handedOver });
             } catch (err) {
-                console.warn(`[job ${String(s.id).slice(0, 8)}] could not cancel the earlier attempt's runner tasks:`, err);
+                console.warn(`[job ${String(s.id).slice(0, 8)}] could not look after the earlier attempt's runner tasks:`, err);
             }
             this.db.tx(() => {
                 if (s.mode === "validate") {
@@ -588,7 +597,7 @@ export class Repo {
                 } else {
                     this.db.run("DELETE FROM test_cases WHERE job_id = ?", s.id);
                 }
-                if (s.attempts >= 3) {
+                if (giveUp) {
                     this.db.run("UPDATE generation_jobs SET status='FAILED', error=?, finished_at=?, updated_at=? WHERE id=?", WORKER_LOST_GIVE_UP, now(), now(), s.id);
                 } else {
                     this.db.run(
@@ -602,6 +611,22 @@ export class Repo {
             });
         }
         return stale.length;
+    }
+
+    /**
+     * A graceful restart hands a job that waits for a runner over to the next platform process (runner-handover.ts): its lease is released
+     * at once with the HANDED_OVER mark, and the attempt is not counted (the claim that takes it again adds it back). Only while `owner`
+     * still holds it. True when it was handed over.
+     */
+    handOverJob(jobId: string, owner: string): boolean {
+        const r = this.db.run(
+            "UPDATE generation_jobs SET lease_owner = ?, lease_until = 0, attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END, updated_at = ? WHERE id = ? AND lease_owner = ? AND status IN ('DISCOVERING','ANALYZING','PLANNING','GENERATING','VALIDATING')",
+            HANDED_OVER,
+            now(),
+            jobId,
+            owner,
+        );
+        return Number(r.changes) === 1;
     }
 
     /** Tests left in VALIDATING by an interrupted validation job get a truthful final state. */

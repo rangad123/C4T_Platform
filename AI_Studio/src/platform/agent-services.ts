@@ -12,6 +12,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { NO_RUNNER_MESSAGE, runnersOnly } from "./runner-only.js";
+import { isHandedOver, isLeaseLoss, parkForHandover } from "./runner-handover.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { describeBrowser } from "../engine/browsers/choice.js";
@@ -23,6 +24,7 @@ import type { ExecutionBatch, ExecutionEnv, ExecutionOptions, ExecutorScope, Scr
 import { mobileAvailability } from "../engine/mobile/toolchain.js";
 import type { TestSpec } from "../engine/spec/schema.js";
 import { secretsOfRun } from "../engine/evidence/model.js";
+import { scrubTraceFile, traceSecretsOfRun } from "../engine/evidence/trace-scrub.js";
 import { agentDesktopProblem, assertHostDesktop, desktopApps } from "./desktop-guard.js";
 import { desktopUnavailableReason, lastProbe, probeDesktop } from "../engine/desktop/probe.js";
 import type { Platform } from "./bootstrap.js";
@@ -30,7 +32,7 @@ import { AgentStore, isSharedToken, jobOwnerId, MAX_OFFERS, NEVER_ACCEPTED, refu
 import { currentActor } from "./auth/actor.js";
 import { isPrivateHost } from "./net-guard.js";
 import { maxTokensFrom } from "./runner-kit.js";
-import type { EnrollRequest, EnrollResponse, RotateResponse } from "../agent-protocol/schema.js";
+import type { EnrollRequest, EnrollResponse, RotateResponse, WireRunEnv } from "../agent-protocol/schema.js";
 import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecrets, liveEventData, liveEventMessage, negotiateProtocol, phaseSentence, RateLimiter, scrubSecrets, toWireEnv } from "./agent-routing.js";
 import { DeviceHub, deviceAgentOf, isDeviceAdapter } from "./agent-device.js";
 import { isRecordAdapter, RecordHub, RemoteDriver, recordAdapterId, recordAgentOf, recordJobId, type RemoteInit } from "./agent-record.js";
@@ -203,6 +205,17 @@ export class AgentService {
     readonly records = new RecordHub();
     /** Phone sessions that live on an agent, by device task id (see agent-device.ts). */
     readonly devices = new DeviceHub();
+    /**
+     * The platform is stopping (a deploy): nothing new is handed to a runner, open polls end, and every job waiting for a runner parks so
+     * it can be handed over to the next process with its runner task left running (runner-handover.ts). Never undone in this process.
+     */
+    draining = false;
+    /** Runner tasks an executor in this process is waiting for right now: never picked up or stopped by another executor (RemoteExecutor). */
+    readonly following = new Set<string>();
+
+    drain(): void {
+        this.draining = true;
+    }
 
     constructor(
         readonly p: Platform,
@@ -309,7 +322,7 @@ export class AgentService {
      * another task holds stays queued and the next one is tried, so a busy phone does not hold up browser work.
      */
     offerTo(agent: AgentRecord, freeSlots: number): TaskOffer | undefined {
-        if (freeSlots < 1) return undefined;
+        if (freeSlots < 1 || this.draining) return undefined;
         if (this.clock() - this.lastSweepMs >= SWEEP_EVERY_MS) {
             this.lastSweepMs = this.clock();
             this.sweep();
@@ -476,7 +489,8 @@ export class AgentService {
         let gone = false;
         const mark = () => void (gone = true);
         this.polls.set(agentId, mark);
-        return { superseded: () => gone, end: () => void (this.polls.get(agentId) === mark && this.polls.delete(agentId)) };
+        // A stopping platform ends every open poll at once, so a deploy does not wait for them (drain).
+        return { superseded: () => gone || this.draining, end: () => void (this.polls.get(agentId) === mark && this.polls.delete(agentId)) };
     }
 
     private adapterOrUndefined(id: string) {
@@ -1202,6 +1216,57 @@ export class AgentService {
 
 // ── the executor ────────────────────────────────────────────────────────────
 
+type EmitFn = (message: string, level?: "info" | "warn", kind?: string) => void;
+
+/**
+ * What makes two runner tasks of one job the same work, for the pick-up after a restart (RemoteExecutor.earlierTask): everything the task
+ * offer sends except its id, its time limits and the environment's secret values. That is the framework; each script's test, file name
+ * and content (sha256), whether it is a code script or starts signed in, and its baselines and test files (sha256); the helpers (sha256);
+ * the environment without its secret values (envKey); the phone or iOS part (the app file by its sha256); each browser variant with its
+ * device and screen size. Made from the offer on both sides, so a task an earlier version of the platform sent is compared the same way.
+ */
+function batchKey(offer: Pick<TaskOffer, "adapterId" | "scripts" | "helpers" | "projects" | "mobile" | "ios"> & { env?: WireRunEnv }): string {
+    return JSON.stringify([
+        offer.adapterId,
+        (offer.scripts ?? []).map((s) => [s.testId, s.filename, sha256Of(s.content), s.custom === true, s.session === true, (s.baselines ?? []).map((b) => [b.name, b.file.sha256])]),
+        (offer.helpers ?? []).map((h) => [h.name, sha256Of(h.content)]),
+        envKey(offer.env),
+        stableJson(offer.mobile ?? null),
+        stableJson(offer.ios ?? null),
+        stableJson(offer.projects ?? []),
+    ]);
+}
+
+/**
+ * The run's environment as sent, without its secret values: a fetched API token or a refreshed saved sign-in differs from one attempt to the
+ * next, and a password never needs comparing. Account names, whether each secret is there, the auth header's name, the addresses, headed or
+ * not, cleanup and the variables (not secret: environments-store.ts) count. A sha256, so no secret-shaped text is kept in the key.
+ */
+function envKey(env: WireRunEnv | undefined): string {
+    if (!env) return "";
+    const { credentials, roles, apiToken, apiAuthHeader, storageState, vars, ...plain } = env;
+    const headerName = apiAuthHeader === undefined ? null : apiAuthHeader.includes(":") ? apiAuthHeader.slice(0, apiAuthHeader.indexOf(":")).trim() : true;
+    return sha256Of(
+        stableJson({
+            plain,
+            credentials: credentials ? { username: credentials.username, totp: credentials.totpSecret !== undefined } : null,
+            roles: (roles ?? []).map((r) => ({ name: r.name, username: r.username, totp: r.totpSecret !== undefined, apiToken: r.apiToken !== undefined })),
+            apiToken: apiToken !== undefined,
+            apiAuthHeader: headerName,
+            storageState: storageState !== undefined,
+            vars: vars ?? {},
+        }),
+    );
+}
+
+const sha256Of = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+/** JSON with every object's keys in order, so the same value always gives the same text. */
+function stableJson(v: unknown): string {
+    const order = (x: unknown): unknown => (Array.isArray(x) ? x.map(order) : x && typeof x === "object" ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, order((x as Record<string, unknown>)[k])])) : x);
+    return JSON.stringify(order(v));
+}
+
 class RemoteExecutor implements ScriptExecutor {
     readonly name = "agent";
     /** Tells the engine that scripts run elsewhere: a mobile run is planned against the agent's devices, not this machine's. */
@@ -1222,10 +1287,24 @@ class RemoteExecutor implements ScriptExecutor {
         // Same answer as a local run without a device.
         if (adapter.needs.android && !env.mobile) return batch.scripts.map((s): ScriptRun => ({ testId: s.testId, status: "error", durationMs: 0, error: "No Android device is set up for this run.", failedStepIndex: -1, steps: [], artifacts: [], responses: [] }));
         if (adapter.needs.ios && !env.ios) return batch.scripts.map((s): ScriptRun => ({ testId: s.testId, status: "error", durationMs: 0, error: "No iOS simulator is set up for this run.", failedStepIndex: -1, steps: [], artifacts: [], responses: [] }));
+        // A stopping platform sends nothing new to a runner: the job parks and the next platform process carries on (runner-handover.ts).
+        if (svc.draining) return parkForHandover(jobId);
+        const emit: EmitFn = (message, level = "info", kind = "agent_task") => {
+            // Handed over to the next platform process (runner-handover.ts): it writes this job's events now.
+            if (isHandedOver(jobId)) return;
+            try {
+                svc.p.repo.addEvent(jobId, { stage: "validation", kind, level, message });
+            } catch {
+                /* an event is a convenience */
+            }
+        };
+        const secrets = envSecrets(env.run);
 
         const taskId = randomUUID();
         const files: Array<Omit<TaskFile, "taskId">> = [];
         const relIn = path.posix.join(projectId, "_agent", taskId, "in");
+        // Baseline images are stored with the task only when it is sent: a task that is picked up again needs no copy of them.
+        const toStore: Array<{ key: string; bytes: Buffer }> = [];
         let offer: TaskOffer;
         try {
             const scripts = [];
@@ -1241,7 +1320,7 @@ class RemoteExecutor implements ScriptExecutor {
                     }
                     const sha = FILE_NAME_SHA(bytes);
                     const ref = `b${n++}-${sha.slice(0, 12)}.png`;
-                    await svc.p.store.put(path.posix.join(relIn, ref), bytes, { contentType: "image/png" });
+                    toStore.push({ key: path.posix.join(relIn, ref), bytes });
                     files.push({ direction: "in", ref, path: path.posix.join(relIn, ref), size: bytes.length, sha256: sha });
                     baselines.push({ name: b.name, file: { ref, size: bytes.length, sha256: sha } });
                 }
@@ -1297,29 +1376,123 @@ class RemoteExecutor implements ScriptExecutor {
             throw new RunnerAgentError(`These tests cannot be sent to a runner agent: ${e instanceof Error ? e.message.split("\n")[0] : "invalid run"}`);
         }
 
-        const secrets = envSecrets(env.run);
-        svc.store.enqueue({ id: taskId, projectId, jobId, adapterId, payloadEnc: svc.encrypt(offer), files });
-        const emit = (message: string, level: "info" | "warn" = "info", kind = "agent_task") => {
-            try {
-                svc.p.repo.addEvent(jobId, { stage: "validation", kind, level, message });
-            } catch {
-                /* an event is a convenience */
-            }
-        };
-        emit(`Sent ${batch.scripts.length} script(s) to a runner agent.`, "info", "agent_task_queued");
+        // Taken up again after a restart of the platform, or after the worker that looked after the job was lost: the runner task an earlier
+        // attempt left for exactly this work (still waiting, still going, or finished with its result stored) is followed, not sent a second
+        // time. Exactly: the same scripts with the same content, flags, baselines and helpers (batchKey), so a result is never attached to a
+        // script that did not run.
+        const earlier = this.earlierTask(batchKey(offer));
+        if (earlier) {
+            this.taken.add(earlier.id);
+            const n = batch.scripts.length;
+            emit(earlier.status === "done" ? `Picked up again: the runner had already finished ${n === 1 ? "this script" : `these ${n} scripts`}, so its stored result is used.` : `Picked up again: the runner carries on with ${n === 1 ? "this script" : `these ${n} scripts`}; nothing is sent or run a second time.`, "info", "runner_task_resumed");
+            return this.follow(earlier.id, earlier.createdMs, adapter, batch, env, opts, secrets, emit);
+        }
+        if (svc.draining) return parkForHandover(jobId);
+        try {
+            for (const f of toStore) await svc.p.store.put(f.key, f.bytes, { contentType: "image/png" });
+        } catch (e) {
+            throw new RunnerAgentError(`These tests cannot be sent to a runner agent: ${e instanceof Error ? e.message.split("\n")[0] : "invalid run"}`);
+        }
 
-        const deadline = svc.clock() + (opts.timeoutMs ? opts.timeoutMs + 5 * 60_000 : 4 * 3_600_000);
+        // A runner task of an earlier attempt for any of these tests that this one did not pick up is stopped before a new one is sent: a test
+        // never runs twice at once.
+        await this.stopLeftovers(batch.scripts, opts, emit);
+        svc.store.enqueue({ id: taskId, projectId, jobId, adapterId, payloadEnc: svc.encrypt(offer), files });
+        this.taken.add(taskId);
+        emit(`Sent ${batch.scripts.length} script(s) to a runner agent.`, "info", "agent_task_queued");
+        return this.follow(taskId, svc.clock(), adapter, batch, env, opts, secrets, emit);
+    }
+
+    /** Runner tasks this attempt of the job sent or picked up (a later call never picks them up again). */
+    private readonly taken = new Set<string>();
+
+    /**
+     * The runner task an earlier attempt of this job left for the same work (`want`: batchKey of what would be sent now) that can still give
+     * a result: queued, running and not being stopped, or finished with its result stored. Oldest first, each one once.
+     */
+    private earlierTask(want: string): TaskRecord | undefined {
+        const { svc } = this;
+        svc.sweep();
+        for (const t of svc.store.tasksOfJob(this.scope.jobId!)) {
+            if (this.taken.has(t.id) || svc.following.has(t.id) || isRecordAdapter(t.adapterId) || isDeviceAdapter(t.adapterId)) continue;
+            const usable = t.status === "queued" || (t.status === "running" && !t.cancelRequested) || (t.status === "done" && t.resultEnc !== null);
+            if (!usable) continue;
+            let offer: TaskOffer;
+            try {
+                offer = svc.decrypt<TaskOffer>(t.payloadEnc);
+            } catch {
+                continue;
+            }
+            if (batchKey(offer) === want) return t;
+        }
+        return undefined;
+    }
+
+    /**
+     * Stop the runner tasks of earlier attempts this one did not pick up that hold any of these tests, and wait until none of them runs any
+     * more (a lease at most). A task of an earlier attempt for other tests only is left alone: this attempt picks it up when it gets to
+     * them, or it is stopped when the job ends (the sweep's rule for a finished job), so those tests are not run a second time.
+     */
+    private async stopLeftovers(scripts: ReadonlyArray<{ testId: string }>, opts: ExecutionOptions, emit: EmitFn): Promise<void> {
+        const { svc } = this;
+        const jobId = this.scope.jobId!;
+        const testIds = new Set(scripts.map((s) => s.testId));
+        const left = svc.store.tasksOfJob(jobId).filter((t) => !this.taken.has(t.id) && !svc.following.has(t.id) && !isRecordAdapter(t.adapterId) && !isDeviceAdapter(t.adapterId) && (t.status === "queued" || t.status === "running") && this.holdsAnyOf(t, testIds));
+        if (left.length === 0) return;
+        for (const t of left) svc.store.requestCancel(t.id);
+        emit(`The runner was told to stop ${left.length === 1 ? "a task" : `${left.length} tasks`} of an earlier attempt of this run for the same tests before they are sent again, so a test never runs twice at once.`, "warn", "runner_attempt_cancelled");
+        const ids = new Set(left.map((t) => t.id));
+        const until = svc.clock() + svc.limits.leaseSeconds * 1000 + 30_000;
+        while (svc.clock() < until) {
+            if (opts.signal?.aborted) throw new Error("Job cancelled");
+            if (svc.draining) return parkForHandover(jobId);
+            svc.sweep();
+            if (!svc.store.tasksOfJob(jobId).some((t) => ids.has(t.id) && t.status === "running")) return;
+            await sleep(svc.limits.watchMs, opts.signal);
+        }
+    }
+
+    /** Whether a task holds any of these tests. One whose offer cannot be read counts as holding them all (it is stopped: never two at once). */
+    private holdsAnyOf(t: TaskRecord, testIds: ReadonlySet<string>): boolean {
+        try {
+            return (this.svc.decrypt<TaskOffer>(t.payloadEnc).scripts ?? []).some((s) => testIds.has(s.testId));
+        } catch {
+            return true;
+        }
+    }
+
+    /** Wait for the task and turn its result into the run's results. `sentMs`: when it was sent (the deadline counts from then, across restarts). */
+    private async follow(taskId: string, sentMs: number, adapter: ReturnType<typeof getAdapter>, batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions, secrets: string[], emit: EmitFn): Promise<ScriptRun[]> {
+        this.svc.following.add(taskId);
+        try {
+            return await this.waitFor(taskId, sentMs, adapter, batch, env, opts, secrets, emit);
+        } finally {
+            this.svc.following.delete(taskId);
+        }
+    }
+
+    private async waitFor(taskId: string, sentMs: number, adapter: ReturnType<typeof getAdapter>, batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions, secrets: string[], emit: EmitFn): Promise<ScriptRun[]> {
+        const { svc } = this;
+        const projectId = this.scope.projectId!;
+        const jobId = this.scope.jobId!;
+        const deadline = sentMs + (opts.timeoutMs ? opts.timeoutMs + 5 * 60_000 : 4 * 3_600_000);
         let announced = false;
         let logSeen = 0;
         let noAgentSince: number | undefined;
         for (;;) {
             if (opts.signal?.aborted) {
-                svc.store.requestCancel(taskId);
+                // A lost lease: the job, and its runner task with it, belong to the attempt that takes it next (runner-handover.ts). Anything
+                // else (a person's stop, the job's time limit, the platform shutting the job down) stops the task.
+                if (!isLeaseLoss(opts.signal.reason)) svc.store.requestCancel(taskId);
                 throw new Error("Job cancelled");
             }
+            // Handed over (another test of this job parked first): nothing more is collected or written here; the next process does it.
+            if (isHandedOver(jobId)) return parkForHandover(jobId);
             svc.sweep();
             const t = svc.store.getTask(taskId);
             if (!t) throw new RunnerAgentError("The run was removed before it finished.");
+            // A stopping platform leaves the runner going and hands the job over; a finished task is collected first.
+            if (svc.draining && (t.status === "queued" || t.status === "running")) return parkForHandover(jobId);
             if (t.status === "queued") {
                 // A task with hand-written scripts waits for an agent that was started with --allow-custom-scripts.
                 const needsCustom = batch.scripts.some((s) => s.custom);
@@ -1365,6 +1538,8 @@ class RemoteExecutor implements ScriptExecutor {
     /** Turn the agent's wire result into the ScriptRun[] a local run would have returned: files rewritten to local paths, the cleanup ledger stored. */
     private async collect(task: TaskRecord, batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions, secrets: string[]): Promise<ScriptRun[]> {
         const { svc } = this;
+        // Handed over (runner-handover.ts): the next platform process collects this result and writes its events.
+        if (isHandedOver(task.jobId)) return parkForHandover(task.jobId);
         const result = svc.decrypt<ResultRequest>(task.resultEnc!);
         // Which browser the runner's web tests used (additive in protocol 1): one plain line among the run's events, which the job's `ranOn` reads back.
         const used = result.browser === undefined ? undefined : WebBrowserUsed.safeParse(result.browser);
@@ -1380,9 +1555,11 @@ class RemoteExecutor implements ScriptExecutor {
         // in the scratch folder that maintain() removes with the task (object-store.ts, localCopyIn).
         const scratch = path.join(svc.p.config.scratchDir, "agent-files", task.id);
         const localFiles = new Map<string, string>();
+        const storedKeys = new Map<string, string>();
         for (const f of svc.store.filesOf(task.id, "out")) {
             try {
                 localFiles.set(f.ref, await localCopyIn(svc.p.store, f.path, scratch));
+                storedKeys.set(f.ref, f.path);
             } catch {
                 /* a bad path, or a file that vanished: as if it was never uploaded */
             }
@@ -1390,6 +1567,11 @@ class RemoteExecutor implements ScriptExecutor {
         const local = (ref: string): string | undefined => localFiles.get(ref);
         const known = new Set(batch.scripts.map((s) => s.testId));
         const evidenceSecrets = secretsOfRun(env.run);
+        const traceSecrets = [...traceSecretsOfRun(env.run), ...secrets];
+        const withheld: string[] = [];
+        // Traces that are not kept: deleted only after the run's events say so (below), so a hand-over in between leaves them for the next
+        // process to withhold and report, instead of a trace gone without a word.
+        const dropped: Array<{ file: string; key: string | undefined }> = [];
         const cleanupOn = Boolean(env.run.cleanup);
         const origin = (() => {
             try {
@@ -1401,6 +1583,8 @@ class RemoteExecutor implements ScriptExecutor {
         const environment = svc.p.repo.getJob(task.jobId)?.options.environment;
         const ledger: FinishedItem[] = [];
         const missing: string[] = [];
+        // A finished task picked up again whose trace an earlier collection did not keep (and deleted): that trace is not "never uploaded".
+        const tracesWithheldBefore = eventOfTask(svc, task, "runner_trace_withheld") !== undefined;
 
         const runs: ScriptRun[] = [];
         for (const w of result.runs as WireRun[]) {
@@ -1408,6 +1592,8 @@ class RemoteExecutor implements ScriptExecutor {
             const artifacts: ScriptRun["artifacts"] = [];
             for (const a of w.artifacts) {
                 const file = local(a.ref);
+                // A trace an earlier collection of this task did not keep is gone (deleted then, and said so then): not reported again.
+                if (a.kind === "trace" && tracesWithheldBefore && !(file && (await fsp.stat(file).catch(() => null)))) continue;
                 if (!file) {
                     // Named but never uploaded: left out, as a missing file is for a local run, and the run says so.
                     missing.push(`${a.kind} of ${w.testId}`);
@@ -1421,6 +1607,23 @@ class RemoteExecutor implements ScriptExecutor {
                         await fsp.writeFile(file, JSON.stringify(evidence));
                     } catch {
                         continue;
+                    }
+                }
+                if (a.kind === "trace") {
+                    // A failure trace holds what the test typed and what the browser sent. A runner from round 40 on masks the run's secrets in it
+                    // before it uploads; older runners do not. It is masked here too, and one that cannot be cleaned is not kept at all.
+                    const key = storedKeys.get(a.ref);
+                    const clean = await scrubTraceFile(file, traceSecrets);
+                    if (!clean.ok) {
+                        withheld.push(`${w.testId}: ${clean.reason}`);
+                        dropped.push({ file, key });
+                        continue;
+                    }
+                    // On a store that is not this disk, the upload itself is replaced by the cleaned copy (it is kept with the task for a day);
+                    // when that fails, the upload is removed rather than kept as it came (the run keeps the cleaned copy).
+                    if (clean.masked > 0 && key && svc.p.store.kind !== "local") {
+                        const store = svc.p.store;
+                        await store.putFile(key, file).catch(() => store.delete(key).catch(() => false));
                     }
                 }
                 artifacts.push({ kind: a.kind, path: file });
@@ -1446,14 +1649,27 @@ class RemoteExecutor implements ScriptExecutor {
             if (cleanupOn && w.created?.length) ledger.push(...ledgerFromAgent(w.created, w.testId, { origin, ...(environment ? { environment } : {}) }, this.seq + ledger.length));
             runs.push(run);
         }
+        // Handed over while the files were looked at (runner-handover.ts): the next platform process collects this result; nothing is written here.
+        if (isHandedOver(task.jobId)) return parkForHandover(task.jobId);
         this.seq += ledger.length;
         if (ledger.length) this.storeLedger(task, ledger);
+        if (withheld.length) {
+            try {
+                svc.p.repo.addEvent(task.jobId, { stage: "validation", kind: "runner_trace_withheld", level: "warn", message: `${withheld.length === 1 ? "A trace was" : `${withheld.length} traces were`} not kept: ${withheld.length === 1 ? "it" : "they"} could not be cleaned of the run's passwords and tokens safely (${withheld.slice(0, 3).join("; ")}).`.slice(0, 400), data: { taskId: task.id } });
+            } catch {
+                /* an event is a convenience */
+            }
+        }
         if (missing.length) {
             try {
                 svc.p.repo.addEvent(task.jobId, { stage: "validation", kind: "runner_file_missing", level: "warn", message: `The runner named ${missing.length} file${missing.length === 1 ? "" : "s"} it never uploaded, so ${missing.length === 1 ? "it is" : "they are"} not attached: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ", …" : ""}.`.slice(0, 400), data: { taskId: task.id, files: missing.slice(0, 50) } });
             } catch {
                 /* an event is a convenience */
             }
+        }
+        for (const d of dropped) {
+            await fsp.rm(d.file, { force: true }).catch(() => undefined);
+            if (d.key) await svc.p.store.delete(d.key).catch(() => false);
         }
 
         if (opts.projects?.length) return runs;
@@ -1463,13 +1679,29 @@ class RemoteExecutor implements ScriptExecutor {
     private storeLedger(task: TaskRecord, items: FinishedItem[]): void {
         const { svc } = this;
         try {
+            // A finished task picked up again (after a restart or a lost worker) was collected before: its ledger is stored once.
+            if (eventOfTask(svc, task, "cleanup_finished")) return;
             new CleanupStore(svc.p.db).record({ projectId: task.projectId, jobId: task.jobId, items });
             const counts = countItems(items);
-            svc.p.repo.addEvent(task.jobId, { stage: "validation", kind: "cleanup_finished", level: counts.leftBehind > 0 ? "warn" : "info", message: summaryLine(counts), data: { created: counts.created, removed: counts.removed, leftBehind: counts.leftBehind } });
+            svc.p.repo.addEvent(task.jobId, { stage: "validation", kind: "cleanup_finished", level: counts.leftBehind > 0 ? "warn" : "info", message: summaryLine(counts), data: { created: counts.created, removed: counts.removed, leftBehind: counts.leftBehind, taskId: task.id } });
         } catch (err) {
             console.error(`[agent] could not store the cleanup ledger of job ${task.jobId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
         }
     }
+}
+
+/** The data of the job's latest event of this kind written for this runner task (its `data.taskId`), if there is one. */
+function eventOfTask(svc: AgentService, task: TaskRecord, kind: string): Record<string, unknown> | undefined {
+    const rows = svc.p.db.all<{ data_json: string | null }>("SELECT data_json FROM agent_events WHERE job_id = ? AND kind = ? ORDER BY id DESC", task.jobId, kind);
+    for (const r of rows) {
+        try {
+            const data = r.data_json ? (JSON.parse(r.data_json) as Record<string, unknown>) : null;
+            if (data?.taskId === task.id) return data;
+        } catch {
+            /* not ours */
+        }
+    }
+    return undefined;
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────

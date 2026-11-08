@@ -126,9 +126,18 @@ export function removeServerExecutionGuard(): void {
  * In runners mode: every project routes to runners, jobs that need the server's browser are refused when they are made, and the guard is on.
  */
 export function installRunnerOnly(p: Platform, agents: AgentService): void {
-    p.repo.beforeRequeue = (jobId) => {
+    p.repo.beforeRequeue = (jobId, o) => {
+        const live = agents.store.tasksOfJob(jobId).filter((t) => t.status === "queued" || (t.status === "running" && !t.cancelRequested));
+        // The next attempt picks up a runner task that is still alive, or one whose result is stored (agent-services.ts RemoteExecutor), so
+        // the runner's work is neither lost nor done twice. Not when the job is given up, or no longer goes to a runner.
+        const projectId = live[0]?.projectId;
+        if (!o.giveUp && (!projectId || agents.routesToAgent(projectId))) {
+            if (o.handedOver) p.repo.addEvent(jobId, { stage: "orchestration", kind: "runner_job_resumed", message: "The platform is back. It picks this run up where it is on the runner." });
+            else if (live.length) p.repo.addEvent(jobId, { stage: "orchestration", kind: "runner_attempt_kept", level: "warn", message: `The platform lost track of this run and takes it up again. The runner's work is kept (${live.length === 1 ? "one task" : `${live.length} tasks`}): it is picked up where it is, and a test is not run again unless it changed meanwhile.` });
+            return;
+        }
         const n = cancelRunnerTasksOf(agents, jobId);
-        if (n) p.repo.addEvent(jobId, { stage: "orchestration", kind: "runner_attempt_cancelled", level: "warn", message: `The platform lost track of this run, so it starts again. The runner was told to stop the earlier attempt first (${n === 1 ? "one task" : `${n} tasks`}).` });
+        if (n) p.repo.addEvent(jobId, { stage: "orchestration", kind: "runner_attempt_cancelled", level: "warn", message: `The platform lost track of this run${o.giveUp ? " and gave it up" : ", so it starts again"}. The runner was told to stop the earlier attempt first (${n === 1 ? "one task" : `${n} tasks`}).` });
     };
     if (!runnersOnly(p.config)) return;
     agents.store.runnersOnly = true;

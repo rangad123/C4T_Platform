@@ -1,6 +1,6 @@
 /**
  * The live view of a run on a runner, in a real browser against a real platform: the task's phase, the runner (yours, with a link),
- * the test and step it is on, steps done, passed and failed so far, the failure text with its stack, a screenshot as it arrives and
+ * the test and step it is on, steps done, passed and failed so far, the failure text (its stack stays in the final result), a screenshot as it arrives and
  * the runner's log, all as they happen (the run's live stream, no reload); a refresh mid-run rebuilds the same picture from the stored
  * events and keeps following; the strip on another page says where the run is; after the result, and when coming back later, the
  * final report. A protocol-1 runner (text lines only) is said to be one. Axe in light and dark, no sideways scroll at phone width.
@@ -244,8 +244,9 @@ describe("a run on a runner, live", () => {
         await pwExpect(failures).toContainText("Checkout (WEB-002)");
         await pwExpect(failures).toContainText("Step 1: Click Pay");
         await pwExpect(failures).toContainText("Timed out waiting for the Pay button");
-        await failures.getByText("Stack trace").click();
-        await pwExpect(failures.getByText("at checkout.spec.ts:12:5")).toBeVisible();
+        // The runner sent a stack, but live events do not keep one (it is in the final result only), so the live card shows none.
+        await pwExpect(failures.getByText("Stack trace")).toHaveCount(0);
+        await pwExpect(failures).not.toContainText("at checkout.spec.ts:12:5");
         const shot = panel().getByTestId("run-live-shots").getByRole("img", { name: "WEB-002 Checkout, step 1: Click Pay" });
         await pwExpect(shot).toBeVisible();
         await pwExpect.poll(() => shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);

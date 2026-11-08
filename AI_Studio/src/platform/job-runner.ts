@@ -45,6 +45,7 @@ import { routedLlmForJob } from "./llm-routing.js";
 import { configuredLlmForJob, resolveProjectAi } from "./ai-config.js";
 import { jobPersonGate } from "./phone-person-gate.js";
 import { RunnerAgentError } from "./agent-services.js";
+import { LEASE_LOST, onHandover } from "./runner-handover.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
 import type { ArtifactStore } from "./storage.js";
 
@@ -103,12 +104,18 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     const meter = meterFor(repo, config, job, undefined, ai.billing);
     // The job's events and its agents' actions go through this sink's ordered queue, with the sink's database-only writes (repo-sink.ts).
     const sink = new RepoSink(repo, store, { id: job.id, projectId: job.projectId, applicationId: job.applicationId, mode: job.options.mode });
+    // Set when a graceful restart hands this job over (runner-handover.ts): from then on the engine's writes for it are not made.
+    let handingOver = false;
+    // The engine's sink calls that are still going: the hand-over waits for them before it releases the lease.
+    const going = new Set<Promise<unknown>>();
+    // What the engine writes through: the same sink, closed by a hand-over (fenceSink).
+    const engineSink = fenceSink(sink, () => handingOver, going);
     // With a fast model set, routine steps go to it and hard ones (or ones it fumbles) to the main model; without one this is the main client itself (llm-routing.ts).
     // A project's own configuration keeps to its own models: the server's fallback and fast models are never used for it (ai-config.ts).
     const rawLlm =
         ai.source === "server"
             ? routedLlmForJob(
-                  { db: repo.db, config, emit: (e) => (job.options.mode === "validate" ? undefined : sink.event(e)) },
+                  { db: repo.db, config, emit: (e) => (job.options.mode === "validate" || handingOver ? undefined : sink.event(e)) },
                   job,
                   (deps.makeLlm ?? createLlmClientOrUnavailable)(config),
                   deps.makeFastLlm ? { fast: deps.makeFastLlm(config) } : {},
@@ -131,7 +138,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             cancelRequested: () => repo.isCancelRequested(job.id),
             lost: () => {
                 leaseLost = true;
-                abort.abort();
+                // The reason tells a runner executor not to cancel its task: the attempt that takes the job next picks it up (runner-handover.ts).
+                abort.abort(LEASE_LOST);
             },
             cancel: () => {
                 abort.abort();
@@ -157,6 +165,8 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         else console.warn(`[job ${job.id.slice(0, 8)}] lease lost; not recording final status ${status}`);
     };
     const emit: EngineContext["emit"] = (e) => {
+        // Handed over: the next platform process writes this job's events now.
+        if (handingOver) return;
         sink.event(e);
         const line = `[job ${job.id.slice(0, 8)}] ${e.stage}/${e.kind}: ${e.message}`;
         if (e.level === "error") console.error(line);
@@ -164,6 +174,25 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     };
     const o = job.options;
     const validateOnly = o.mode === "validate";
+    // A graceful restart while this job waits for a runner (runner-handover.ts): the runner keeps going and the next platform process takes the
+    // job up again. Here, in this order, so that nothing of this attempt is written after the lease is released, even with several tests of the
+    // job going at once: no more lease beats; no new write starts (the engine's calls, its events, the runner executor's: isHandedOver); the
+    // writes already going are waited for and stored; the tests without a result go back to what they were; the queue is closed; the lease
+    // is released.
+    const unhook = onHandover(job.id, async () => {
+        handingOver = true;
+        clearInterval(ticker);
+        clearTimeout(deadline);
+        await Promise.allSettled([...going]);
+        await sink.writes.flush();
+        const restored = await sink.restoreInterrupted();
+        sink.event({ stage: "orchestration", kind: "job_handed_over", level: "warn", message: `The platform is restarting. This run carries on on its runner, and the platform takes it up again when it is back. A test is not run again unless it changed meanwhile.${restored ? ` ${restored === 1 ? "One test without a result yet is" : `${restored} tests without a result yet are`} back to what ${restored === 1 ? "it was" : "they were"} until then.` : ""}` });
+        await sink.writes.flush();
+        sink.writes.close();
+        if (!repo.handOverJob(job.id, owner)) console.warn(`[job ${job.id.slice(0, 8)}] could not be handed over: its lease had moved on`);
+        frameHub.drop(job.id);
+        meter?.finish();
+    });
 
     try {
         // A project on its own key that cannot be used: the AI work stops here, in plain words. A run of existing tests needs no AI and goes on.
@@ -291,11 +320,11 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             }
             for (const id of prepared.missing) ctx.emit({ stage: "validation", kind: "test_missing", level: "warn", message: `Test ${id} no longer exists; skipped` });
             for (const note of prepared.notes) ctx.emit({ stage: "validation", kind: "project_accounts_withheld", level: "warn", message: note });
-            summary = await runEnvironmentJob(ctx, { ...prepared.request, render: { ...prepared.request.render, deleteOps: projectDeleteOps((app.model ?? repo.getLatestAppModel(job.projectId))?.apis) }, cleanup, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, prepared.tests, sink);
+            summary = await runEnvironmentJob(ctx, { ...prepared.request, render: { ...prepared.request.render, deleteOps: projectDeleteOps((app.model ?? repo.getLatestAppModel(job.projectId))?.apis) }, cleanup, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, prepared.tests, engineSink);
         } else if (o.mode === "plain") {
             // One test described in plain words: built, run for real, stored (see engine/authoring/plain.ts).
             const model = app.model ?? repo.getLatestAppModel(job.projectId);
-            summary = await runPlainJob({ repo, config, ctx, job, app: { ...app, model }, roles, sink, cleanup, dataSets, deleteOps: projectDeleteOps(model?.apis) });
+            summary = await runPlainJob({ repo, config, ctx, job, app: { ...app, model }, roles, sink: engineSink, cleanup, dataSets, deleteOps: projectDeleteOps(model?.apis) });
         } else if (o.mode === "variants") {
             // Compatibility checks only: the tests' own validation status is never touched.
             const tests: VariantTest[] = [];
@@ -310,7 +339,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                 if (!resolved.ok) continue;
                 tests.push({ handle: { id: t.id, testId: t.testKey }, spec: resolved.spec, validationStatus: t.validationStatus, scriptId: repo.getCurrentScript(t.id)?.id as string | undefined, ...(custom.byTest.has(t.id) ? { custom: { filename: custom.byTest.get(t.id)!.filename, content: custom.byTest.get(t.id)!.content } } : {}) });
             }
-            summary = await runVariantsJob(ctx, { url: app.url, credentials: app.credentials, roles, dataSets, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, tests, o.variants ?? [], sink);
+            summary = await runVariantsJob(ctx, { url: app.url, credentials: app.credentials, roles, dataSets, ...(custom.helpers.length ? { helpers: custom.helpers } : {}) }, tests, o.variants ?? [], engineSink);
         } else if (validateOnly) {
             // A newer application (e.g. created by a spec import) may not have been discovered yet.
             const model = app.model ?? repo.getLatestAppModel(job.projectId);
@@ -348,7 +377,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                     ...(custom.byTest.has(t.id) ? { custom: custom.byTest.get(t.id)! } : {}),
                 });
             }
-            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}) }, tests, sink);
+            summary = await runValidationOnly(ctx, { url: app.url, apiBaseUrl: app.config.apiBaseUrl ?? o.apiBaseUrl, credentials: app.credentials, roles, mobile: app.config.mobile, model, retryFailures: o.retryFailures, variants: o.variants, dataSets, cleanup, deleteOps: projectDeleteOps(model?.apis), ...(custom.helpers.length ? { helpers: custom.helpers } : {}), ...(o.stopOnFirstFailure ? { stopOnFirstFailure: true } : {}) }, tests, engineSink);
         } else {
             // Creating from a plan the person approved: the plan is read back here, so a missing one fails before anything is touched.
             const fromPlan = o.fromPlan ? await requireStoredPlan(repo, store, o.fromPlan) : undefined;
@@ -390,7 +419,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
                     cleanup,
                     ...(signIn.savedSession ? { savedSession: signIn.savedSession } : {}),
                 },
-                sink,
+                engineSink,
             );
         }
 
@@ -449,6 +478,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
             await finish("FAILED", msg);
         }
     } finally {
+        unhook();
         clearInterval(ticker);
         clearTimeout(deadline);
         // Nothing about the Explorer view outlives its job.
@@ -465,6 +495,34 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         await cleanScratch(config.scratchDir).catch(() => undefined);
         await notifyFinished(deps, job.id);
     }
+}
+
+/** The sink's fire-and-forget calls (nobody waits for them): once the job is handed over they are dropped. */
+const SINK_EVENTS = new Set<PropertyKey>(["event", "agentAction"]);
+
+/**
+ * The job's sink as the engine sees it, for the hand-over (runner-handover.ts): while `closed()` is false every call goes straight to the
+ * sink, and one that returns a promise is in `going` until it settles; once it is true a call makes no write at all: an event is dropped,
+ * any other call returns a promise that never settles, so that part of the job stops right there while the process stops.
+ */
+export function fenceSink<T extends object>(sink: T, closed: () => boolean, going: Set<Promise<unknown>>): T {
+    return new Proxy(sink, {
+        get(target, prop, receiver) {
+            const v = Reflect.get(target, prop, receiver) as unknown;
+            if (typeof v !== "function") return v;
+            return (...args: unknown[]) => {
+                if (closed()) return SINK_EVENTS.has(prop) ? undefined : new Promise<never>(() => undefined);
+                const r = (v as (...a: unknown[]) => unknown).apply(target, args);
+                if (r && typeof (r as { then?: unknown }).then === "function") {
+                    const p = Promise.resolve(r);
+                    going.add(p);
+                    const done = () => void going.delete(p);
+                    void p.then(done, done);
+                }
+                return r;
+            };
+        },
+    });
 }
 
 /** Run the finished-job hook for a job that reached a terminal state (not one another worker now owns). */

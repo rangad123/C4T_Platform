@@ -132,6 +132,12 @@ function filesUnder(dir: string, since = 0): string[] {
     }
     return out;
 }
+/** A file's readable parts: a zip (a failure trace, round 40) is unpacked, so its compressed text is searched too; anything else is itself. */
+function partsOf(file: string): Array<[string, Buffer]> {
+    const bytes = fs.readFileSync(file);
+    if (!bytes.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return [[file, bytes]];
+    return [[file, bytes], ...Object.entries(unzipSync(new Uint8Array(bytes))).map(([name, b]): [string, Buffer] => [`${file}!${name}`, Buffer.from(b)])];
+}
 /** Which secrets appear (as text, in any common encoding) in these bytes? */
 function leaksIn(bytes: Buffer): string[] {
     const forms = [bytes.toString("latin1"), bytes.toString("utf16le")];
@@ -380,16 +386,21 @@ describe("secrets never leave the encrypted store", () => {
 
     it("keeps secrets out of the database, its journal, stored scripts and evidence (they are encrypted at rest)", () => {
         platform.db.raw.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-        const leaked = filesUnder(dataDir).flatMap((f) => leaksIn(fs.readFileSync(f)).map((s) => `${s} in ${path.relative(dataDir, f)}`));
+        const leaked = filesUnder(dataDir).flatMap((f) => partsOf(f).flatMap(([name, b]) => leaksIn(b).map((s) => `${s} in ${path.relative(dataDir, name)}`)));
         expect(leaked).toEqual([]);
         expect(filesUnder(dataDir).some((f) => f.endsWith("platform.db"))).toBe(true);
+        // The failing web test above typed the password: its stored failure trace was unpacked and searched (round 40).
+        expect(filesUnder(dataDir).some((f) => /[\\/]trace\.zip$/.test(f))).toBe(true);
     });
 
     it("keeps secrets out of the scratch directories the scripts ran from, and artifacts they wrote", () => {
         const scratch = path.join(REPO_ROOT, ".validation");
-        const files = fs.existsSync(scratch) ? filesUnder(scratch, startedAt).filter((f) => !/\.(mp4|webm|zip)$/i.test(f)) : [];
+        // Videos are pictures and cannot be searched (a password field is drawn as dots: tests/runner-trace-secrets.test.ts). A zip, the
+        // failure trace of a test that typed the password, is unpacked and every part is searched (round 40: traces are cleaned).
+        const files = fs.existsSync(scratch) ? filesUnder(scratch, startedAt).filter((f) => !/\.(mp4|webm)$/i.test(f)) : [];
         expect(files.length).toBeGreaterThan(0); // the scripts really ran from here
-        const leaked = files.flatMap((f) => leaksIn(fs.readFileSync(f)).map((s) => `${s} in ${path.relative(scratch, f)}`));
+        expect(files.some((f) => /[\\/]trace\.zip$/.test(f))).toBe(true); // and a failing test left its trace
+        const leaked = files.flatMap((f) => partsOf(f).flatMap(([name, b]) => leaksIn(b).map((s) => `${s} in ${path.relative(scratch, name)}`)));
         expect(leaked).toEqual([]);
     });
 

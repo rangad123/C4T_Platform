@@ -64,7 +64,7 @@ What does not run here (each is refused with a sentence, not queued):
 
 One browser still opens here: making a PDF of a report. It renders the platform's own page, with scripts off.
 
-`/readyz` reports the dispatch worker under `worker`. A deploy restarts the API process, and with it the dispatch worker: a runner run still going after `SHUTDOWN_GRACE_SECONDS` (60) is stopped, the runner is told to stop, and its tests go back to not run yet.
+`/readyz` reports the dispatch worker under `worker`. A deploy restarts the API process, and with it the dispatch worker. A run going on a runner is not stopped: it is handed over, the runner keeps going, and the new process picks it up where it is (`docs/features/runner-restarts.md`). Only a job busy with something else is waited for, up to `SHUTDOWN_GRACE_SECONDS` (60), and then stopped. A run sequence (runbook) is not resumed after a deploy.
 
 Still open before more is allowed here:
 

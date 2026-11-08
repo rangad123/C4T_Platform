@@ -36,6 +36,8 @@ const NOT_A_TOPIC: Record<string, string> = {
     "runner-personal.md": "the rules for a person's own computer as a runner; people see them as the runner topic and on the runner's page",
     "runner-protocol-2.md": "the wire protocol between runners and the platform, for developers",
     "runner-sessions-personal.md": "who may use recordings and phone sessions on a person's own computer; the choosers and the runner's switches say what a person needs; the document is the technical detail",
+    "runner-restarts.md": "how runs on runners survive a restart of the platform, for whoever runs the platform; nothing for a person to do",
+    "runner-resources.md": "the runner's limits on priority, memory and disk, set in the runner's environment by whoever installs it",
     "runner-only-mode.md": "how a hosted server runs tests only on runners (EXECUTION_MODE=runners), for whoever runs the platform; people see it as the runner topic",
     "runner-agent-setup.md": "install and token steps for the person who sets up a runner; the runner topic links runner-agent.md and the admin guide",
     "runner-installer.md": "how the runner installer program is built, what it checks and where it installs; the runners topic covers what a tester does",

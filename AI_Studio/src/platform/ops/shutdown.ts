@@ -3,7 +3,9 @@
  *
  * 1. Mark the process as stopping: GET /readyz answers 503 from now on, so a load balancer stops sending new work.
  * 2. Stop taking work: the scheduler, run sequences, scheduled backups and the worker's loop stop claiming jobs.
- * 3. Let the running job finish, for up to SHUTDOWN_GRACE_SECONDS (default 60).
+ * 3. Let the running job finish, for up to SHUTDOWN_GRACE_SECONDS (default 60). A job that waits for a runner is not waited for and not
+ *    stopped: the platform drains (nothing new goes to a runner, open polls end), the job is handed over with its runner task left running,
+ *    and the next platform process takes it up where it is (runner-handover.ts).
  * 4. If it is still running then, stop it the way a person's Stop does (its browsers and test processes are closed by the job's own stop path,
  *    the tests that did not run keep their earlier result), wait a little more, and record honestly what happened: the job ends as failed with
  *    "Interrupted: the platform was shut down…" and an event saying so. If even that does not finish, the job is marked interrupted directly
@@ -24,7 +26,9 @@ const ACTIVE = "('DISCOVERING','ANALYZING','PLANNING','GENERATING','VALIDATING')
 export interface ShutdownParts {
     repo: Repo;
     db: Db;
-    worker?: { stop(): Promise<void>; readonly leaseOwner: string };
+    worker?: { stop(opts?: { handOver?: boolean }): Promise<void>; readonly leaseOwner: string };
+    /** Stop handing work to runners and park the jobs that wait for one (AgentService.drain); the worker then hands them over. */
+    drainRunners?: () => void;
     /** Stop taking new work (scheduler, run sequences, backups, heartbeat). Run in order before the worker is waited for. */
     stopTakingWork: Array<() => Promise<void> | void>;
     closeServer?: () => Promise<void>;
@@ -82,9 +86,15 @@ export function createShutdown(parts: ShutdownParts): (signal: string) => Promis
                 parts.log("warn", `[shutdown] A part did not stop cleanly: ${err instanceof Error ? err.message : String(err)}`);
             }
         }
+        // Runs on runners carry on across the restart: nothing new is handed out, and their jobs are handed over instead of waited for.
+        try {
+            parts.drainRunners?.();
+        } catch (err) {
+            parts.log("warn", `[shutdown] Runner work could not be drained: ${err instanceof Error ? err.message : String(err)}`);
+        }
         if (parts.worker) {
             const owner = parts.worker.leaseOwner;
-            const stopped = parts.worker.stop().then(() => "done" as const);
+            const stopped = parts.worker.stop(parts.drainRunners ? { handOver: true } : undefined).then(() => "done" as const);
             if ((await Promise.race([stopped, sleep(parts.graceMs)])) === "timeout") {
                 const jobs = activeJobsOf(parts.db, owner);
                 for (const j of jobs) {

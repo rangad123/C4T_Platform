@@ -88,7 +88,10 @@ describe("the Windows host (read, not run)", () => {
         expect(common).toContain('case "--no-start-at-sign-in": o.NoStartAtSignIn = true; break;');
         expect(engine).toContain('string npmArgs = locked ? " ci --ignore-scripts --no-audit --no-fund" : " install --no-audit --no-fund";');
         const uninstall = engine.slice(engine.indexOf("public List<string> Uninstall("));
-        expect(uninstall.indexOf("removed.Add(ForgetCredential());")).toBeLessThan(uninstall.indexOf("Util.DeleteTree(d)"));
+        expect(uninstall.indexOf("removed.Add(ForgetCredential());")).toBeLessThan(uninstall.indexOf("Util.DeleteTreeRetrying(d)"));
+        expect(uninstall.indexOf("removed.Add(ForgetCredential());")).toBeGreaterThan(-1);
+        // A folder Windows cannot remove at once (a file still held by another program) is tried again rather than left behind, empty.
+        expect(common).toContain("public static void DeleteTreeRetrying(string dir)");
         expect(engine).toContain('Util.Run(node, "runner.mjs --forget-credential", 30000, L.App, null)');
         // C# 5 only (the compiler that ships with Windows): no string interpolation, no null-conditional, no nameof.
         for (const f of ["RunnerHost.cs", "Engine.cs", "Common.cs", "Program.cs", "Ui.cs"]) expect(cs(f), f).not.toMatch(/[\s(=,]\$@?"|\w\?\.\w|nameof\(/);

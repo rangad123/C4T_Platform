@@ -5,6 +5,7 @@ import { diskFreeBytes } from "./ops/health.js";
 import { loadOpsSettings } from "./ops/settings.js";
 import type { JobMode } from "./repo.js";
 import { dispatching, RUNNER_JOB_MODES } from "./runner-only.js";
+import { handOver, whenParked } from "./runner-handover.js";
 
 /** What kind of worker this is. The default is today's: one job at a time, every kind of job, run in this process. */
 export interface WorkerOptions {
@@ -35,6 +36,8 @@ export class Worker {
     private timer?: NodeJS.Timeout;
     private wake?: () => void;
     private readonly active = new Set<Promise<void>>();
+    /** The job each active run is for (a graceful stop hands parked ones over: runner-handover.ts). */
+    private readonly jobOf = new Map<Promise<void>, string>();
     private readonly slots: number;
     /** Identity recorded as the lease owner of every job this worker claims. */
     private readonly id = randomUUID();
@@ -105,9 +108,11 @@ export class Worker {
                         .catch((err) => console.error("[worker] job error:", err))
                         .finally(() => {
                             this.active.delete(run);
+                            this.jobOf.delete(run);
                             this.wake?.();
                         });
                     this.active.add(run);
+                    this.jobOf.set(run, job.id);
                 }
             } catch (err) {
                 console.error("[worker] loop error:", err);
@@ -125,11 +130,25 @@ export class Worker {
         return this.id;
     }
 
-    async stop(): Promise<void> {
+    /**
+     * Stop claiming and wait for the jobs being looked after. `handOver` (a graceful restart, after AgentService.drain): a job that waits for a
+     * runner parks instead of finishing, and is handed over to the next platform process with its runner task left running (runner-handover.ts);
+     * a job doing anything else is waited for as before.
+     */
+    async stop(opts: { handOver?: boolean } = {}): Promise<void> {
         this.running = false;
         if (this.timer) clearTimeout(this.timer);
         this.wake?.();
         dispatching.delete(this.deps.repo.db);
-        await Promise.allSettled([...this.active]);
+        if (!opts.handOver) {
+            await Promise.allSettled([...this.active]);
+            return;
+        }
+        await Promise.allSettled(
+            [...this.active].map((run) => {
+                const jobId = this.jobOf.get(run);
+                return jobId ? Promise.race([run, whenParked(jobId).then(() => handOver(jobId).then(() => undefined))]) : run;
+            }),
+        );
     }
 }

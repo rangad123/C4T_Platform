@@ -6,7 +6,7 @@
  * handed to the runner and finished with results while the stored project setting stays "this server"; several runs at once; no
  * runner online is a plain 409; work that needs the server's browser is refused when it is made; the last-line guard (no browser
  * launch, no local script run, proven by its counter and by trying); a schedule firing to the runner with its owner; Run now with no
- * runner refused and nothing queued; a re-queued job cancelling the earlier attempt's runner task; a runner failure leaving the
+ * runner refused and nothing queued; a re-queued job keeping the earlier attempt's runner task (cancelled when it is given up); a runner failure leaving the
  * tests as they were; the third worker loss giving the job up without failing tests; and local mode unchanged.
  *
  * No browser, no model, no network beyond 127.0.0.1. Ports: platform 8000, local-mode platform 8002, fixture application 8001.
@@ -275,7 +275,7 @@ describe("runners only: the server's own browser and network inside a runner job
 });
 
 describe("runners only: a job whose worker was lost", () => {
-    it("is re-queued only after the earlier attempt's runner task is cancelled; the third loss gives it up without failing tests", async () => {
+    it("is re-queued with the earlier attempt's runner task kept for the next attempt; the third loss cancels it and gives the job up without failing tests", async () => {
         const pid = await newProject("Lost worker");
         await connect(pid, "lost-pc");
         const [t] = await importTests(pid, ["Health answers"]);
@@ -288,14 +288,17 @@ describe("runners only: a job whose worker was lost", () => {
         platform.db.run("UPDATE generation_jobs SET lease_until = ? WHERE id = ?", Date.now() - 1, job.id);
         platform.db.run("UPDATE test_cases SET validation_status = 'VALIDATING' WHERE id = ?", t!.id);
         expect(platform.repo.reclaimStaleJobs()).toBe(1);
-        expect(svc.store.getTask("task-of-attempt-1")!.status).toBe("cancelled");
+        // Kept: the next attempt picks it up instead of sending the run a second time (runner-restart.test.ts runs that end to end).
+        expect(svc.store.getTask("task-of-attempt-1")!.status).toBe("queued");
         expect(platform.repo.getJob(job.id)!.status).toBe("QUEUED");
-        expect(platform.repo.listEvents(job.id).map((e) => String(e.kind))).toContain("runner_attempt_cancelled");
+        expect(platform.repo.listEvents(job.id).map((e) => String(e.kind))).toContain("runner_attempt_kept");
         // Third loss: given up, the test is back to not run yet (never failed by it).
         platform.db.run("UPDATE generation_jobs SET status = 'VALIDATING', attempts = 3, lease_until = ?, lease_owner = 'lost-worker' WHERE id = ?", Date.now() - 1, job.id);
         platform.db.run("UPDATE test_cases SET validation_status = 'VALIDATING' WHERE id = ?", t!.id);
         platform.repo.reclaimStaleJobs();
         expect(platform.repo.getJob(job.id)).toMatchObject({ status: "FAILED", error: WORKER_LOST_GIVE_UP });
+        expect(svc.store.getTask("task-of-attempt-1")!.status).toBe("cancelled");
+        expect(platform.repo.listEvents(job.id).map((e) => String(e.kind))).toContain("runner_attempt_cancelled");
         expect(platform.repo.getTest(t!.id)!.validationStatus).toBe("PENDING");
         startDispatch();
     });

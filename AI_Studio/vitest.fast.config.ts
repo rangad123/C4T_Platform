@@ -9,6 +9,10 @@ export default defineConfig({
     test: {
         include: [
             "tests/agent-platform-unit.test.ts",
+            "tests/runner-handover.test.ts",
+            "tests/trace-scrub-unit.test.ts",
+            "tests/runner-resources-unit.test.ts",
+            "tests/runner-untrusted-unit.test.ts",
             "tests/approval-deps.test.ts",
             "tests/credential-store-unit.test.ts",
             "tests/environment-accounts-unit.test.ts",

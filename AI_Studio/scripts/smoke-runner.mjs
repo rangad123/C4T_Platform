@@ -196,6 +196,42 @@ export function startCommand(kit, target, kitDir, installDir) {
     return { command: "sh", args: ["start-runner.sh"] };
 }
 
+/**
+ * Files under `dir` that hold a runner credential (aitg_...) or enrollment code (aite_...) as readable text (UTF-8 or UTF-16), as paths
+ * relative to `dir`. After enrollment an installed runner keeps its credential only in the computer's store (DPAPI-protected file on
+ * Windows, the login Keychain on macOS) and deletes the code, so the install and work folders must hold neither. Links are not followed;
+ * `node_modules`, the private Node.js and files over 64 MB (no credential is written there) are skipped.
+ */
+export function plainCredentialsIn(dir, { skip = ["node_modules"], maxBytes = 64 * 1024 * 1024 } = {}) {
+    const found = [];
+    const shape = /ait[ge]_[A-Za-z0-9_-]{20,}/;
+    const walk = (d) => {
+        let entries;
+        try {
+            entries = fs.readdirSync(d, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const e of entries) {
+            const full = path.join(d, e.name);
+            if (e.isSymbolicLink()) continue;
+            if (e.isDirectory()) {
+                if (!skip.includes(e.name) && !(d === dir && e.name === "node")) walk(full);
+                continue;
+            }
+            try {
+                if (!e.isFile() || fs.statSync(full).size > maxBytes) continue;
+                const bytes = fs.readFileSync(full);
+                if (shape.test(bytes.toString("latin1")) || shape.test(bytes.toString("utf16le"))) found.push(path.relative(dir, full));
+            } catch {
+                /* a file in use or gone: nothing to read */
+            }
+        }
+    };
+    walk(dir);
+    return found;
+}
+
 /** Secrets never reach a report or log: the access key, the runner token and anything that looks like a project token. */
 export function redact(text, secrets = []) {
     let out = String(text);
@@ -678,6 +714,11 @@ export async function runSmoke(opts, deps = {}) {
 
         const installDir = path.join(tmp, "install folder");
         if (opts.lifecycle) {
+            await step("Check the install folder holds no credential or one-time code as plain text", async () => {
+                const plain = plainCredentialsIn(installDir);
+                if (plain.length) throw new Error(`A runner credential or one-time code is readable in: ${plain.join(", ")}`);
+                return "the credential is only in the computer's own store";
+            });
             await step("Stop the runner the way a person does", async () => {
                 if (target.system === "windows") {
                     const r = spawnSync(cmd.command, ["--stop", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 90_000, windowsHide: true });
@@ -699,6 +740,62 @@ export async function runSmoke(opts, deps = {}) {
                 }, opts.onlineTimeout * 1000, 2000);
                 return `online again after ${fmtMs(Date.now() - t0)}, with the same access`;
             });
+            // A renewal (every 30 days, or when the platform asks), made due now in the platform's own database, then two restarts: the first
+            // renews and keeps the new credential in the computer's store; the second can only come online if it reads the new one back,
+            // because the old one stopped working when the new one was first used. Only with the platform this check started itself.
+            const dbFile = path.join(tmp, "data", "platform.db");
+            if (!deps.startPlatform && fs.existsSync(dbFile)) {
+                const tokenRow = async (update) => {
+                    const { DatabaseSync } = await import("node:sqlite");
+                    const db = new DatabaseSync(dbFile);
+                    try {
+                        db.exec("PRAGMA busy_timeout = 10000");
+                        if (update) db.prepare("UPDATE agent_tokens SET rotated_at = ? WHERE id = ?").run(update, tokenId);
+                        return db.prepare("SELECT rotated_at, previous_hash FROM agent_tokens WHERE id = ?").get(tokenId);
+                    } finally {
+                        db.close();
+                    }
+                };
+                const stopRunner = async () => {
+                    if (target.system === "windows") {
+                        const r = spawnSync(cmd.command, ["--stop", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 90_000, windowsHide: true });
+                        if (r.status !== 0) throw new Error(`--stop ended with code ${r.status}: ${redact(`${r.stdout ?? ""}${r.stderr ?? ""}`.slice(-400), secrets)}`);
+                    } else process.kill(-runner.child.pid, "SIGINT");
+                    await Promise.race([runner.exited, sleep(60_000)]);
+                    if (Children.running(runner)) throw new Error(`The runner was still running a minute after it was asked to stop.\n${tail(runner.output)}`);
+                };
+                const startRunner = async (name) => {
+                    runner = children.start(name, cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
+                    await until("the runner to be online again", async () => {
+                        if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
+                        const list = await api("GET", `/api/projects/${projectId}/agents`);
+                        return Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online && a.tokenId === tokenId);
+                    }, opts.onlineTimeout * 1000, 2000);
+                };
+                await step("Renew its credential (made due now) and start it again", async () => {
+                    const due = new Date(Date.now() - 31 * 24 * 3600_000).toISOString();
+                    await stopRunner();
+                    await tokenRow(due);
+                    await startRunner("runner (renewing)");
+                    // Renewed (a new rotation time), and the new credential is in use (the old one's grace ended).
+                    const row = await until("the runner to renew its credential", async () => {
+                        if (!Children.running(runner)) throw new Error(`The runner stopped while renewing its credential (code ${runner.code}).\n${tail(runner.output)}`);
+                        const r = await tokenRow();
+                        return r && r.rotated_at !== due && r.previous_hash === null ? r : undefined;
+                    }, 120_000, 2000);
+                    const plain = plainCredentialsIn(installDir);
+                    if (plain.length) throw new Error(`After the renewal a runner credential is readable in: ${plain.join(", ")}`);
+                    return `renewed at ${row.rotated_at}; the old credential no longer works`;
+                });
+                await step("Start it again on the renewed credential (read back from the computer's store)", async () => {
+                    await stopRunner();
+                    await startRunner("runner (renewed)");
+                    // A runner that read back the old credential would be refused at once and stop.
+                    await sleep(20_000);
+                    if (!Children.running(runner)) throw new Error(`The runner stopped after starting on its renewed credential (code ${runner.code}).\n${tail(runner.output)}`);
+                    return "online with the renewed credential, still running 20 s later";
+                });
+            }
         }
 
         await step("Revoke the runner's access and check it stops with a plain message", async () => {
@@ -718,12 +815,40 @@ export async function runSmoke(opts, deps = {}) {
 
         if (opts.lifecycle) {
             await step("Uninstall it and check nothing is left", async () => {
-                const un = target.system === "windows" ? spawnSync(cmd.command, ["--uninstall", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000, windowsHide: true }) : spawnSync("sh", [cmd.args[0], "--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000 });
+                const un = target.system === "windows" ? spawnSync(cmd.command, ["--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000, windowsHide: true }) : spawnSync("sh", [cmd.args[0], "--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000 });
                 if (un.status !== 0) throw new Error(`--uninstall ended with code ${un.status}: ${redact(`${un.stdout ?? ""}${un.stderr ?? ""}`.slice(-400), secrets)}`);
                 // The Windows program removes its own folder a few seconds after it exits.
                 await until("the install folder to be gone", async () => !fs.existsSync(installDir), 30_000, 1000).catch(() => undefined);
                 const left = [installDir, ...(target.system === "mac" ? [path.join(os.homedir(), "Library", "LaunchAgents", "app.aitesting.runner.plist")] : []), ...(target.system === "windows" && process.env.APPDATA ? [path.join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "AI Testing Runner.lnk")] : [])].filter((f) => fs.existsSync(f));
-                if (left.length) throw new Error(`Left behind after uninstalling: ${left.join(", ")}`);
+                if (left.length) {
+                    // Say what is still there and what the uninstall said, so a failure on a machine nobody can log in to explains itself.
+                    const inside = (dir, depth = 0) => {
+                        try {
+                            return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => [path.join(dir, e.name).slice(installDir.length + 1) + (e.isDirectory() ? "/" : ""), ...(e.isDirectory() && depth < 2 ? inside(path.join(dir, e.name), depth + 1) : [])]);
+                        } catch {
+                            return [];
+                        }
+                    };
+                    const contents = fs.existsSync(installDir) ? inside(installDir).slice(0, 40) : [];
+                    const said = redact(`${un.stdout ?? ""}${un.stderr ?? ""}`.trim().slice(-600), secrets);
+                    // On Windows a folder stays when a process still has it (or something in it) open, or as its current folder: name the
+                    // processes whose program or command line points into the install folder, and what removing what is left answers now.
+                    let holders = "";
+                    if (target.system === "windows" && fs.existsSync(installDir)) {
+                        const ps = spawnSync("powershell", ["-NoProfile", "-Command", `Get-CimInstance Win32_Process | Where-Object { ($_.CommandLine -and $_.CommandLine.IndexOf(${JSON.stringify(installDir).replace(/"/g, "'")}, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.ExecutablePath -and $_.ExecutablePath.StartsWith(${JSON.stringify(installDir).replace(/"/g, "'")}, [StringComparison]::OrdinalIgnoreCase)) } | ForEach-Object { "$($_.ProcessId) $($_.Name) parent $($_.ParentProcessId): $($_.CommandLine)" }`], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+                        const list = redact(`${ps.stdout ?? ""}`.trim(), secrets).slice(0, 1200);
+                        const tries = contents.filter((c) => c.endsWith("/")).map((c) => {
+                            try {
+                                fs.rmdirSync(path.join(installDir, c));
+                                return `${c} removed now`;
+                            } catch (e) {
+                                return `${c} ${e && typeof e === "object" && "code" in e ? e.code : "error"}`;
+                            }
+                        });
+                        holders = `; processes using it: ${list || "none found"}${tries.length ? `; removing now: ${tries.join(", ")}` : ""}`;
+                    }
+                    throw new Error(`Left behind after uninstalling: ${left.join(", ")}${contents.length ? `; still in the install folder: ${contents.join(", ")}` : ""}${said ? `; the uninstall said: ${said}` : ""}${holders}`);
+                }
                 return "no install folder, no sign-in start";
             });
         }

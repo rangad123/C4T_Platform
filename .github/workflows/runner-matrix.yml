@@ -55,8 +55,9 @@ jobs:
             label: Windows Server 2025 x64
             target: win-x64
             installer: true
-          - os: macos-14
-            label: macOS 14 Apple silicon
+          # macos-14 was retired by GitHub ("The configuration 'macos-14-arm64-us-default' is not supported"); macos-15 is Apple silicon.
+          - os: macos-15
+            label: macOS 15 Apple silicon
             target: mac-arm64
             installer: true
           # macos-13 (Intel) was retired by GitHub; macos-15-intel is the Intel image that remains.

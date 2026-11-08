@@ -33,6 +33,7 @@ import { LAUNCH_APP_PATCH } from "../mobile/device/start-script.js";
 import { effectiveRunsOn } from "../mobile/phone-settings.js";
 import type { AdbDevice } from "../mobile/device/adb.js";
 import { CHILD_ENV_ALLOW, parseReport, type ScriptInput, type ScriptRun } from "./runner.js";
+import { scrubRunTraces, traceSecretsOfChildEnv } from "../evidence/trace-scrub.js";
 
 const require = createRequire(import.meta.url);
 
@@ -367,5 +368,8 @@ export async function runTaqwrightCli(o: TaqwrightCliRun): Promise<ScriptRun[]> 
         });
     });
 
-    return parseReport(o.runDir, o.scripts, stderr, timedOut, "Taqwright");
+    const runs = await parseReport(o.runDir, o.scripts, stderr, timedOut, "Taqwright");
+    // Taqwright's failure trace (one HTML file) keeps what the test typed: masked with the run's secrets, or not kept (../evidence/trace-scrub.ts).
+    await scrubRunTraces(runs, traceSecretsOfChildEnv(o.childEnv));
+    return runs;
 }

@@ -76,10 +76,59 @@ Both ends use the same code (`src/engine/evidence/capture.ts`), so the script an
 - Hiding by parameter name is deliberately broad: a parameter named `keycode` or `promo_code` is hidden too.
 - Only the main page and the pages it opens are recorded. Requests made by a web worker or a service worker are not.
 - Requests that are still running when the test fails are listed as "No answer yet".
-- Playwright's own trace (`trace.zip`, the "detailed trace" download) is a separate existing artifact and contains full network
-  details; this feature does not change it.
+- Playwright's own trace (`trace.zip`, the "detailed trace" download) is a separate artifact with full network details. See
+  "Traces without the run's secrets" below.
 - **API tests**: not covered. They already record each request's method, path and status as steps. **Mobile tests**: not covered.
 - Evidence is stored with the execution in the artifact store, next to its screenshot, and follows the same lifecycle as the screenshot; there is no separate retention setting. The `ai-test` command's evidence folder does not include it.
+
+## Traces without the run's secrets
+
+A trace of a failed test keeps what the test typed and what the browser sent and received. A check of a real Playwright trace found the
+password in the action log (the `fill` call, its title and its log), in the page snapshot (the password field's value), in the network
+log (the form body, the `Authorization` header, a header the page echoed), in response bodies and in the error-context attachment.
+
+Every text part of a trace is now masked with the run's secrets before the trace is kept or sent (`src/engine/evidence/trace-scrub.ts`):
+
+- **Which secrets.** The run's password, authenticator secret and API token, those of its named accounts, the auth header and its value,
+  the base64 of a Basic sign-in, the values of a saved sign-in, and an environment variable whose name says it is a secret (ending in
+  `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY` and the like). Other environment variables are plain settings and stay in the trace as they are
+  (the runner's own log masks every variable, as a precaution for text that is only read by people). Each secret in the forms a trace
+  carries it in: exact, URL-encoded, form-encoded (as a browser sends a form and `URLSearchParams` writes it: `! ' ( ) ~` escaped too and
+  `+` for a space), the strict RFC 3986 form many HTTP libraries send, each also with lower-case hex, JSON-escaped once and twice,
+  HTML-escaped, `encodeURI`'s form and base64.
+- **How.** Each value is replaced with `[hidden]`, in one pass, so a secret that is part of the word itself (such as `hidden`) is masked
+  like any other. A value made only of digits is replaced with as many 9s (8s when it is all 9s) instead, so a number in the trace's JSON
+  stays a number and the viewer still opens it.
+- **Where.** On the computer that ran the test: a runner cleans each trace before it uploads it (`src/agent/task-runner.ts`), and a run on
+  the platform itself cleans it before it is stored (`engine/validation/runner.ts`, `mobile-runner.ts` for Taqwright's one-file HTML trace).
+  The platform cleans a runner's trace again when it takes the result (`agent-services.ts`, `collect`), which covers runners that are
+  older than this change.
+- **What is kept.** Pictures (screencast frames, screenshots), fonts and every part without a secret keep their original bytes and names,
+  and the trace opens in Playwright's trace viewer as before. Playwright names a resource after the sha1 of its content
+  (`resources/<sha1>.dat`); that name would let anyone with the trace test a guessed password with one hash. So a resource that is masked
+  is renamed to the sha1 of its cleaned content, and every reference to it in the action and network logs is rewritten in the same pass
+  (two bodies that differed only by a secret become one part). While masking, the references to the trace's own parts (resource sha1s,
+  screencast frame names) are set aside, so a short secret that matches inside one does not break it.
+- **When a trace is not kept.** If a secret is found in a part that is not text, or the archive cannot be read, or it declares more than
+  the limits (20,000 parts, 64 MB a part, 256 MB in all; a one-file HTML trace up to 256 MB), or a part unpacks to more or less than it
+  declares or with the wrong checksum, the trace is not sent and not kept. The run says so: a line in the run's events and a note on the
+  result (runner), or a `runner_trace_withheld` event (platform). On a store that is not the platform's own disk, a runner's upload is
+  replaced by its cleaned copy; if that write fails, the upload is deleted rather than kept for a day as it came.
+- **Without holding up the platform.** The platform's API and its dispatch worker are one process, and it cleans every trace a runner sends.
+  The archive is read from its central directory; each part is unpacked and packed again by `node:zlib` on its thread pool (only the parts
+  that changed are packed again), and the masking gives way to other work every few milliseconds. One trace is cleaned at a time per
+  process. Measured on the development machine with a trace of 60 MB of text (35 MB packed) that needed masking: before, the event loop was
+  blocked for 4.0 s; now its longest pause was 71 ms (the whole clean takes about 6 s, in the background).
+  `tests/trace-scrub-unit.test.ts` checks the longest pause stays under 400 ms for 48 MB of text.
+
+Limits: masking is by known value of at least 4 characters. A value the test made itself (a one-time code from the authenticator secret, a
+password a code script keeps in its own source), a secret transformed some other way, and anything inside a compressed part (a zip or
+gzip body the application served) are not found. The failure screenshot and video are pictures: a password field is drawn as dots (two
+passwords of the same length give the same picture; `tests/runner-trace-secrets.test.ts`), but a secret shown as text on the page, or
+typed into a field that is not a password field, stays visible in them. A secret that looks like a number but is not only digits (`-1234`,
+`12.50`), or one equal to a JSON word (`true`, `null`), becomes `[hidden]` where it stands outside a string too, so that JSON line no longer
+parses: the trace still opens, without that step's details. A secret made of digits also changes the numbers it is part of (a timestamp,
+a size). A trace someone already downloaded, or one stored before this change, is not changed.
 
 ## Files
 
@@ -88,7 +137,14 @@ Both ends use the same code (`src/engine/evidence/capture.ts`), so the script an
 `src/engine/generators/playwright.ts`, collection in `src/engine/validation/runner.ts`, the UI in `web/src/features/evidence/`.
 Tests: `tests/evidence-unit.test.ts` (redaction, schema, recorder, sentences, no browser), `tests/evidence.test.ts` (real runs, API,
 issues, report, the secrets sweep, standalone script), `tests/evidence-ui.test.ts` (browser journey), plus a sentinel in
-`tests/secret-leak.test.ts`.
+`tests/secret-leak.test.ts`. Traces: `src/engine/evidence/trace-scrub.ts`; `tests/trace-scrub-unit.test.ts` (every form and part, refusals,
+the runner's upload, form encoding, `hidden`, digits, parts that lie about their size, the event loop, variables, renamed resources and
+their references, a short secret inside a sha1 or a frame name),
+`tests/runner-trace-secrets.test.ts` (a real run on the real agent program, an older runner, a store whose write fails, a real Chromium form
+sign-in with `! ' ( ) ~` and a space in the password, loaded afterwards by Playwright's own trace loader, password-field pixels), and `tests/secret-leak.test.ts`, which unpacks every stored
+and scratch trace and searches each part. The form sign-in and the real run are checked by `tests/fixtures/secret-oracle.ts`, which
+decodes each part (percent and form decoding, HTML entities, JSON escapes, UTF-16) and looks for the plain value, instead of reusing the
+cleaner's own list of forms.
 
 ## On the test page
 

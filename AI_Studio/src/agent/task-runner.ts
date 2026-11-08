@@ -36,8 +36,10 @@ import type { Logger } from "./log.js";
 import { LiveEventSender, type LiveEventInput } from "./live-events.js";
 import type { ResultOutbox } from "./outbox.js";
 import { maskRun, planUploads, secretsOfEnv, toRunEnv, toWireRun, type UploadOutcome } from "./mapping.js";
+import { scrubTraceFile, traceSecretsOfRun } from "../engine/evidence/trace-scrub.js";
 import { resolveInside, sanitizeName } from "./names.js";
 import { TaskProcess } from "./task-process.js";
+import { lowDiskRefusal, overMemory, resourceLimits, watchMemory } from "./resources.js";
 import { guardedEnv, proxyTestsConflict, refusesPrivateAddresses, runAddressRefusal, startAddressGuard } from "./address-guard.js";
 import { checkScript, describeErrors } from "../engine/custom/guard.js";
 
@@ -49,6 +51,8 @@ const SUPPORTED: Record<string, "playwright" | "taqwright" | "windows" | "ios"> 
 /** Extra time on top of the task's own limit before the agent kills the process tree itself. */
 const WATCHDOG_GRACE_MS = 90_000;
 
+/** How a run says its trace was held back (it could not be cleaned of the run's secrets). */
+const TRACE_HELD_BACK = "The trace was not sent because it could not be cleaned of the run's passwords and tokens";
 const UPLOAD_ATTEMPTS = 3;
 const RESULT_ATTEMPTS = 6;
 
@@ -90,6 +94,8 @@ export interface TaskRunnerDeps {
 interface Refusal {
     reason: RejectRequest["reason"];
     message: string;
+    /** Too little free disk space: protocol 1 is answered at once too. */
+    lowDisk?: true;
 }
 
 export interface ActiveTask {
@@ -98,6 +104,8 @@ export interface ActiveTask {
     adapterId: string;
     /** Stop this task and post "ok: false" with the given reason. */
     cancel(reason: string): void;
+    /** Stop this task without posting anything: the platform handed it out again (a script task only). */
+    supersede?(): void;
 }
 
 class TaskStopped extends Error {}
@@ -184,6 +192,9 @@ export class TaskRunner {
                 return { reason: "no-display", message: "This run asks for a visible browser window, and this computer has no screen the runner can show it on (no signed-in desktop). Run it with the browser hidden, or start the runner from a signed-in session." };
             }
         }
+        // A run writes screenshots, traces and videos: none is taken while the work folder's disk is nearly full (resources.ts).
+        const disk = await lowDiskRefusal(this.deps.workDir, resourceLimits(this.deps.env).minFreeMb);
+        if (disk) return { reason: "other", message: disk, lowDisk: true };
         return undefined;
     }
 
@@ -222,7 +233,32 @@ export class TaskRunner {
         log.warn(`Task ${short}: the platform did not hear that this computer turned the task down; it offers it again after a short wait.`);
     }
 
+    /** Each task's run on this computer, by task id, until it has ended (folder removed, result handed to the outbox). `n` tells runs apart. */
+    private readonly runs = new Map<string, { n: number; done: Promise<void> }>();
+    private runCount = 0;
+
+    /**
+     * Run a task. The platform hands a task out again when it stopped hearing from its run (the lease ran out); if that run is still going
+     * here, it is stopped without a result and has ended before the new one starts, so the same task never runs twice at once on this computer.
+     */
     async run(task: TaskOffer): Promise<void> {
+        const before = this.runs.get(task.taskId)?.done;
+        if (before) {
+            this.deps.log.warn(`Task ${task.taskId.slice(0, 12)}: the platform handed this task out again while it was still running here; the earlier run is stopped first and sends no result.`);
+            const old = this.active.get(task.taskId);
+            if (old?.supersede) old.supersede();
+            else old?.cancel("The platform handed this task out again.");
+            await before.catch(() => undefined);
+        }
+        const n = ++this.runCount;
+        const done = this.runOnce(task).finally(() => {
+            if (this.runs.get(task.taskId)?.n === n) this.runs.delete(task.taskId);
+        });
+        this.runs.set(task.taskId, { n, done });
+        await done;
+    }
+
+    private async runOnce(task: TaskOffer): Promise<void> {
         const short0 = task.taskId.slice(0, 12);
         // Protocol 2: the switches as the platform holds them now (one changed while this runner was idle), applied with the agent's own rules.
         if (task.config) (this.deps.onConfig ?? ((c: RunnerConfigPush) => this.applyConfig(c)))(task.config);
@@ -231,7 +267,7 @@ export class TaskRunner {
         if (this.v2(task)) {
             if (refusal) return this.rejectTask(task, refusal, short0);
             if (!(await this.acceptTask(task, short0))) return;
-        } else if (refusal?.reason === "no-display" || refusal?.reason === "private-target") {
+        } else if (refusal?.reason === "no-display" || refusal?.reason === "private-target" || refusal?.lowDisk) {
             // Protocol 1 has no reject: the run ends with the same sentence (the other refusals are answered in execute(), as before).
             return this.postResult(task.taskId, { ok: false, error: refusal.message, runs: [] }, short0);
         }
@@ -261,6 +297,10 @@ export class TaskRunner {
                 stopReason = reason;
                 abort.abort();
                 proc?.kill();
+            },
+            supersede: () => {
+                lost = true;
+                entry.cancel("The platform handed this task out again.");
             },
         };
         this.active.set(task.taskId, entry);
@@ -562,7 +602,9 @@ export class TaskRunner {
             // A runner that refuses private addresses sends every request of the run through its own address guard (address-guard.ts), closed with the run.
             const guard = runtime === "playwright" && this.refusesPrivate() ? await startAddressGuard() : undefined;
             try {
-            const proc = new TaskProcess(guard ? guardedEnv(this.deps.env, guard) : this.deps.env, (line) => ctl.pushLog(line));
+            // Below-normal priority and a capped heap for the test processes; the memory of the whole tree only where a limit is set (resources.ts).
+            const limits = resourceLimits(this.deps.env);
+            const proc = new TaskProcess(guard ? guardedEnv(this.deps.env, guard) : this.deps.env, (line) => ctl.pushLog(line), undefined, { ...(limits.priority !== undefined ? { priority: limits.priority } : {}), heapMb: limits.heapMb });
             proc.onLive = onChildLive;
             ctl.setPhase?.("running");
             ctl.setProc(proc);
@@ -576,10 +618,16 @@ export class TaskRunner {
                 watchdogFired = true;
                 proc.kill();
             }, limit);
+            let overLimit: string | undefined;
+            const stopWatch = watchMemory(proc.pid, limits.memoryMb, (used) => {
+                overLimit = overMemory(limits.memoryMb, used);
+                proc.kill();
+            });
             const outcome = await proc.done;
             clearTimeout(timer);
+            stopWatch();
             if (outcome.kind !== "result") proc.kill(); // sweep whatever the runner left behind
-            return { outcome, watchdogFired, output: proc.output };
+            return { outcome, watchdogFired, overLimit, output: proc.output };
             } finally {
                 await guard?.close().catch(() => undefined);
             }
@@ -588,6 +636,7 @@ export class TaskRunner {
         const ran = runtime === "taqwright" ? await withDeviceLock(runChild) : runtime === "ios" ? await withSimulatorLock(runChild) : await runChild();
         stopCheck();
         if (ran.watchdogFired) return fail("The run took longer than its time limit and was stopped.");
+        if (ran.overLimit) return fail(ran.overLimit);
         if (ran.outcome.kind === "crashed") {
             const tail = log.redact(ran.output).replace(/\s+/g, " ").trim().slice(-200);
             return fail(`${ran.outcome.detail}${tail ? ` Last output: ${tail}` : ""}`);
@@ -617,7 +666,9 @@ export class TaskRunner {
         ctl.setPhase?.("uploading");
         await shots; // the live screenshots finish first: they are not sent twice
         if (runs.some((r) => r.artifacts.length > 0)) ctl.pushLog("Uploading screenshots and other files");
-        const outcome = await this.uploadAll(task.taskId, runs, hello.maxFileBytes, ctl.abort.signal, short, liveShots, ctl.attemptId);
+        const outcome = await this.uploadAll(task.taskId, runs, hello.maxFileBytes, ctl.abort.signal, short, liveShots, ctl.attemptId, traceSecretsOfRun(task.env));
+        // A trace that could not be cleaned of the run's secrets was not sent: the run's events say so (the run's notes say it too).
+        for (const why of new Set([...outcome.skipped.values()].filter((w) => w.startsWith(TRACE_HELD_BACK)))) ctl.pushLog(why);
         stopCheck();
         const wire = runs.map((r) => maskRun(toWireRun(r, outcome), (text) => log.redact(text)));
         const body = { ok: true, runs: wire };
@@ -764,7 +815,7 @@ export class TaskRunner {
     }
 
     /** Upload every file the runs name. A file that cannot be uploaded is left out and the run says so; it never fails the task. */
-    private async uploadAll(taskId: string, runs: ScriptRun[], maxBytes: number, signal: AbortSignal, short: string, already: ReadonlyMap<string, string> = new Map(), attemptId?: string): Promise<UploadOutcome> {
+    private async uploadAll(taskId: string, runs: ScriptRun[], maxBytes: number, signal: AbortSignal, short: string, already: ReadonlyMap<string, string> = new Map(), attemptId?: string, secrets: readonly string[] = []): Promise<UploadOutcome> {
         const { client, log } = this.deps;
         const out: UploadOutcome = { uploaded: new Map(), skipped: new Map() };
         let bytes = 0;
@@ -785,6 +836,17 @@ export class TaskRunner {
                 out.skipped.set(item.path, `${item.name} (${mb(st.size)}) is larger than the ${mb(maxBytes)} limit`);
                 log.warn(`Task ${short}: ${item.name} is ${mb(st.size)}, over the platform's limit of ${mb(maxBytes)}; it was not uploaded.`);
                 continue;
+            }
+            // A failure trace holds what the test typed and what the browser sent (a password, a token, a cookie): it leaves this computer
+            // only with the run's secrets masked (engine/evidence/trace-scrub.ts), or not at all.
+            if (item.kind === "trace") {
+                const clean = await scrubTraceFile(item.path, secrets);
+                if (!clean.ok) {
+                    out.skipped.set(item.path, `${TRACE_HELD_BACK}: ${clean.reason}`);
+                    log.warn(`Task ${short}: ${item.name} was not uploaded: ${clean.reason}.`);
+                    await fs.rm(item.path, { force: true }).catch(() => undefined);
+                    continue;
+                }
             }
             const local = await sha256OfFile(item.path).catch(() => undefined);
             if (!local) {

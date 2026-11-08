@@ -10,6 +10,15 @@ import { fileURLToPath } from "node:url";
 import type { LiveRunEvent, ScriptRun } from "../engine/validation/runner.js";
 import { CHILD_ENV_ALLOW } from "../engine/validation/runner.js";
 import type { ChildRun, FromChild } from "./child-protocol.js";
+import { lowerPriority } from "./resources.js";
+
+/** What the task's process may take from this computer (resources.ts). */
+export interface ProcessLimits {
+    /** os.setPriority value; undefined = normal priority. */
+    priority?: number;
+    /** --max-old-space-size in MB for this process and the test runner it starts (AITP_TEST_HEAP_MB); 0 = Node's own limit. */
+    heapMb?: number;
+}
 
 export type TaskOutcome = { kind: "result"; runs: ScriptRun[] } | { kind: "error"; message: string } | { kind: "crashed"; detail: string };
 
@@ -53,13 +62,18 @@ export class TaskProcess {
     /** Protocol 2: the child's live events (set before `start`). */
     onLive?: (e: LiveRunEvent) => void;
 
-    constructor(source: NodeJS.ProcessEnv, private readonly onLog: (line: string) => void, entry: string = ENTRY) {
+    constructor(source: NodeJS.ProcessEnv, private readonly onLog: (line: string) => void, entry: string = ENTRY, limits: ProcessLimits = {}) {
+        const heap = limits.heapMb && limits.heapMb > 0 ? Math.round(limits.heapMb) : 0;
         this.child = fork(entry, [], {
-            env: childEnvFrom(source),
+            // The heap cap: this process by its own flag, the test runner and its workers through AITP_TEST_HEAP_MB (engine/validation/runner.ts).
+            env: { ...childEnvFrom(source), ...(heap ? { AITP_TEST_HEAP_MB: String(heap) } : {}) },
+            ...(heap ? { execArgv: [...process.execArgv.filter((a) => !a.startsWith("--max-old-space-size")), `--max-old-space-size=${heap}`] } : {}),
             stdio: ["ignore", "pipe", "pipe", "ipc"],
             windowsHide: true,
             detached: process.platform !== "win32",
         });
+        // Below-normal priority before the run is even sent (start), so everything it starts (test runner, workers, browsers) inherits it.
+        this.priorityLowered = lowerPriority(this.child.pid, limits.priority);
         this.done = new Promise((resolve) => {
             this.settled = resolve;
         });
@@ -85,6 +99,9 @@ export class TaskProcess {
     get pid(): number | undefined {
         return this.child.pid;
     }
+
+    /** Whether the process runs at the lowered priority it was asked for. */
+    readonly priorityLowered: boolean;
 
     private finish(o: TaskOutcome): void {
         if (this.outcome) return;

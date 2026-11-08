@@ -14,6 +14,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { BROWSER_LABEL, bundledChromium, bundledReady, ffmpegReady, chooseBrowser, describeBrowser, findInstalledBrowsers, type BrowserLaunch, type BrowserPolicy, type EngineName, type FoundBrowser, type InstalledName, type VersionExec, type WebBrowserName } from "../engine/browsers/choice.js";
 import { detectBrowsers, execText, expectedRevisions, playwrightBrowsersDir } from "./capabilities.js";
@@ -203,7 +204,9 @@ export class BrowserSetup {
         return new Promise((resolve) => {
             let child: ChildProcess;
             try {
-                child = spawn(process.execPath, [this.o.cli ?? playwrightCli(), "install", what], { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
+                // Started from the system's temporary folder, not the runner's: a process's current folder cannot be removed on Windows, so a
+                // download still going would keep the runner's folder from being uninstalled. Playwright writes to its own folder either way.
+                child = spawn(process.execPath, [this.o.cli ?? playwrightCli(), "install", what], { cwd: os.tmpdir(), env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
             } catch (e) {
                 resolve({ ok: false, reason: e instanceof Error ? e.message : "the installer could not be started" });
                 return;

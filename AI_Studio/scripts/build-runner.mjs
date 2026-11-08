@@ -36,7 +36,7 @@ export const KIT_OPTIONAL = ["@taqwright/taqwright"];
 export const ENTRIES = { runner: "src/agent/index.ts", "task-child": "src/agent/task-child.ts", "record-child": "src/agent/record-child.ts" };
 export const NODE_MIN = 24;
 /** Packages whose code is copied into the bundle (everything esbuild followed into node_modules). */
-export const BUNDLED_LICENCES = ["zod", "yaml"];
+export const BUNDLED_LICENCES = ["zod", "yaml", "fflate"];
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");

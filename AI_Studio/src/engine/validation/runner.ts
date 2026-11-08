@@ -13,6 +13,7 @@ import path from "node:path";
 import { createdFileName } from "../cleanup/helper.js";
 import { EVIDENCE_ATTACHMENT } from "../evidence/capture.js";
 import { parseEvidence, secretsOfRun } from "../evidence/model.js";
+import { scrubRunTraces, traceSecretsOfRun } from "../evidence/trace-scrub.js";
 import { parseCreatedLog, type CreatedLine } from "../cleanup/ledger.js";
 import { parseMetrics } from "../performance/specs.js";
 import { checkScript, describeErrors } from "../custom/guard.js";
@@ -501,6 +502,8 @@ export async function runScripts(
         ),
         // AITP_EVIDENCE=always keeps the page's network/console evidence for passing tests too (it is only kept on failure otherwise).
         ...(process.env.AITP_EVIDENCE === "always" ? { AITP_EVIDENCE: "always" } : {}),
+        // A runner caps the heap of the test runner and its workers (agent/resources.ts): a number only, never other Node options.
+        ...(/^[1-9]\d{2,5}$/.test(process.env.AITP_TEST_HEAP_MB ?? "") ? { NODE_OPTIONS: `--max-old-space-size=${process.env.AITP_TEST_HEAP_MB}` } : {}),
         API_TOKEN: env.apiToken ?? "",
         API_AUTH_HEADER: env.apiAuthHeader ?? "",
         ...(env.cleanup ? { AITP_CLEANUP: env.cleanup, AITP_CREATED_DIR: path.join(runDir, "created") } : {}),
@@ -557,6 +560,8 @@ export async function runScripts(
     const evidenceTexts = new Map<string, string>();
     const runs = await parseReport(runDir, scripts, stderr, timedOut, "Playwright", projects.map((p) => p.name), evidenceTexts);
     await storeEvidence(runDir, runs, evidenceTexts, [...secretsOfRun(env), ...extras.secrets]);
+    // Failure traces keep what the test typed and what the browser sent: masked with the run's secrets, or not kept (../evidence/trace-scrub.ts).
+    await scrubRunTraces(runs, [...traceSecretsOfRun(env), ...extras.secrets]);
     // Records data-changing API tests created: written as they happened, so a run that was killed still reports them.
     if (env.cleanup && projects.length === 0) {
         for (const run of runs) {

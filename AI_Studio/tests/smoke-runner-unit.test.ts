@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 import { afterAll, describe, expect, it } from "vitest";
 // @ts-expect-error plain JavaScript script (no type declarations)
-import { Children, hostTarget, interpretKitAnswer, kitRequestBody, parseArgs, pathWithoutNode, platformEnv, redact, renderReport, runnerEnv, runSmoke, startCommand, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
+import { Children, hostTarget, interpretKitAnswer, kitRequestBody, parseArgs, pathWithoutNode, plainCredentialsIn, platformEnv, redact, renderReport, runnerEnv, runSmoke, startCommand, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
 
 const WIN = process.platform === "win32";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-smoke-unit-"));
@@ -310,5 +310,29 @@ describe("--lifecycle (round 39: stop, start again, uninstall, nothing left)", (
         expect(() => parseArgs(["--lifecycle"])).toThrow(/only works with --kit installer/);
         expect(startCommand("installer", hostTarget("win32", "x64"), "K", "I").args).toContain("--no-start-at-sign-in");
         expect(startCommand("installer", hostTarget("darwin", "arm64"), "K", "I").args).toContain("--no-autostart");
+    });
+});
+
+describe("--lifecycle: no credential as plain text in the install folder (round 40)", () => {
+    it("finds an aitg_ credential or aite_ code in any file (UTF-8 or UTF-16), and nothing in a clean folder, the private Node.js or node_modules", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-plain-cred-"));
+        try {
+            const token = `aitg_${"A1b2C3d4".repeat(4)}`;
+            const code = `aite_${"x9Y8z7W6".repeat(4)}`;
+            fs.mkdirSync(path.join(dir, "app", "work", "outbox"), { recursive: true });
+            fs.mkdirSync(path.join(dir, "app", "node_modules", "pkg"), { recursive: true });
+            fs.mkdirSync(path.join(dir, "node"), { recursive: true });
+            fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+            fs.writeFileSync(path.join(dir, "app", "runner.credential"), "dpapi:AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAA\n"); // protected: fine
+            fs.writeFileSync(path.join(dir, "logs", "runner.log"), "Runner online. Token aitg_*** hidden\n");
+            fs.writeFileSync(path.join(dir, "app", "node_modules", "pkg", "x.js"), `const t = "${token}";`);
+            fs.writeFileSync(path.join(dir, "node", "x.txt"), token);
+            expect(plainCredentialsIn(dir)).toEqual([]);
+            fs.writeFileSync(path.join(dir, "app", "work", "outbox", "task.json"), `{"t":"${token}"}`);
+            fs.writeFileSync(path.join(dir, "logs", "setup.log"), Buffer.from(`code ${code}`, "utf16le"));
+            expect(plainCredentialsIn(dir).sort()).toEqual([path.join("app", "work", "outbox", "task.json"), path.join("logs", "setup.log")].sort());
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     });
 });

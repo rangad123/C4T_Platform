@@ -35,8 +35,8 @@ As the last line, the server's Playwright launch functions and its local script 
 ## When things go wrong (both modes)
 
 - **A runner fails** (stops answering, cannot start, refuses): the job fails with the runner's words, and tests that had no result yet go back to what they were. No test is marked failed by it.
-- **The process looking after a job is lost** (its lease runs out): before the job is queued again, its earlier runner tasks are cancelled, so a runner never runs it twice at once. After the third loss the job is given up with a plain reason, and its unfinished tests are back to not run yet.
-- **A deploy or restart** stops the dispatch worker. Runs still going after `SHUTDOWN_GRACE_SECONDS` (60) are stopped: the runner is told to stop, the run is marked interrupted, and its unfinished tests go back to not run yet. A run cannot yet be picked up again by the new process.
+- **The process looking after a job is lost** (its lease runs out): the job is queued again. A runner task of the earlier attempt that is still alive, or whose result is stored, is kept: the next attempt picks it up when what it would send is exactly what that task holds, and otherwise stops it before it sends the tests again, so a test never runs twice at once ([runner-restarts.md](runner-restarts.md)). The task is cancelled at once only when the job is given up or no longer goes to a runner. After the third loss the job is given up with a plain reason, and its unfinished tests are back to not run yet.
+- **A deploy or restart** does not stop runs on runners. The platform stops handing out work, and every job that waits for a runner is handed over to the next process with its runner task left running; the next process picks the run up where it is ([runner-restarts.md](runner-restarts.md)). Only a job busy with something else at that moment (for example the test data reset before its first test) is waited for, up to `SHUTDOWN_GRACE_SECONDS` (60), and then stopped as before.
 
 ## Limits
 

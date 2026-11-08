@@ -68,6 +68,19 @@ export interface AgentOptions {
     stopDir?: string;
 }
 
+/**
+ * Make the runner's own folders under `workDir` readable by this OS user only (0700). Not the work folder itself, which a person may have
+ * pointed at a folder they share. Windows keeps permissions by folder ACL (the profile's AppData is private already): nothing to do there.
+ */
+export async function restrictToOwner(workDir: string, names: readonly string[], platform: NodeJS.Platform = process.platform): Promise<void> {
+    if (platform === "win32") return;
+    for (const n of names) {
+        const dir = path.join(workDir, n);
+        await fs.mkdir(dir, { recursive: true }).catch(() => undefined);
+        await fs.chmod(dir, 0o700).catch(() => undefined);
+    }
+}
+
 /** Make sure scripts under `workDir` can resolve `@playwright/test`: if the folder is outside a Node project, link this checkout's node_modules into it. */
 export async function ensureResolvable(workDir: string): Promise<void> {
     const can = (dir: string): boolean => {
@@ -263,6 +276,10 @@ export class Agent {
             this.log.error(this.fatal.message);
             this.runner?.cancelAll("The agent stopped.");
         }
+        // Whatever way the runner ends (a stop, a revoked credential, a refused protocol), nothing it started in the background keeps running
+        // after it: a download left behind would hold the runner's folder, and on Windows an uninstall could not remove it.
+        this.browsers?.stop();
+        this.opts.updater?.stop();
         await this.drain(20_000);
         await this.outbox?.stop();
         this.unwatchStop?.();
@@ -280,6 +297,9 @@ export class Agent {
         // Results an earlier run of the agent could not deliver are kept (unlike the task folders) and sent once connected.
         this.outbox = new ResultOutbox(this.cfg.workDir, { client: this.client, log: this.log, ...(this.opts.outboxMaxDelayMs ? { maxDelayMs: this.opts.outboxMaxDelayMs } : {}) });
         await this.outbox.init();
+        // The run folders (scripts, a saved sign-in for the run, traces before upload), the file cache and the kept results are this OS
+        // user's alone: other accounts on the computer cannot list or read them (POSIX; on Windows the profile folder already is).
+        await restrictToOwner(this.cfg.workDir, ["tasks", "cache", "outbox"]);
         // A stop asked of an earlier run must not stop this one.
         try {
             clearStopRequest(this.opts.stopDir ?? this.cfg.workDir);

@@ -310,6 +310,23 @@ describe("the runner's own decision (no download)", () => {
         expect(await s.forWeb()).toEqual({ ok: true, browser: { name: "msedge", version: "155.0.4283.62", source: "installed", launch: { channel: "msedge", executablePath: edgeExe } } });
         expect(lines.join("\n")).not.toContain("Failure videos are off");
     });
+    it("fetches the video tool from the system's temporary folder, so a download still going never holds the runner's folder", async () => {
+        const root = fresh("dec2cwd");
+        const env = { ...winEnv(root), PLAYWRIGHT_BROWSERS_PATH: path.join(root, "empty") };
+        layWin(env["ProgramFiles(x86)"], "msedge", "155.0.4283.62");
+        // A stand-in for Playwright's installer: it writes where it was started, and what it was asked for, then fails.
+        const said = path.join(root, "installer-said.json");
+        const cli = touch(path.join(root, "fake-cli.js"), `require("fs").writeFileSync(${JSON.stringify(said)}, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) })); process.exit(1);\n`);
+        const { log, lines } = memoryLogger();
+        const s = new BrowserSetup({ env, log, workDir: fresh("workcwd"), platform: "win32", cli });
+        await s.prepare();
+        for (let i = 0; i < 100 && !lines.join("\n").includes("could not be downloaded"); i++) await new Promise((r) => setTimeout(r, 50));
+        const run = JSON.parse(fs.readFileSync(said, "utf8")) as { cwd: string; args: string[] };
+        expect(run.args).toEqual(["install", "ffmpeg"]);
+        expect(fs.realpathSync(run.cwd)).toBe(fs.realpathSync(os.tmpdir()));
+        expect(lines.join("\n")).toContain("Tests still run, without failure videos.");
+        s.stop();
+    });
     it("a setting of msedge on a computer without Edge uses nothing else and says what to do", async () => {
         const root = fresh("dec3");
         const env = { ...winEnv(root), PLAYWRIGHT_BROWSERS_PATH: layBundled(path.join(root, "pw")) };

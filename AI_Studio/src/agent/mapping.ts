@@ -53,6 +53,8 @@ export interface UploadItem {
     path: string;
     /** Name it is uploaded under (a valid protocol name, unique within the task). */
     name: string;
+    /** The artifact kind that named it ("trace" is cleaned of the run's secrets before it is sent); unset for vision shots and baselines. */
+    kind?: string;
 }
 
 const extOf = (p: string): string => {
@@ -64,13 +66,13 @@ const extOf = (p: string): string => {
 export function planUploads(runs: ScriptRun[]): UploadItem[] {
     const names = new NameAllocator();
     const byPath = new Map<string, UploadItem>();
-    const add = (file: string, stem: string, ext = extOf(file)): void => {
+    const add = (file: string, stem: string, ext = extOf(file), kind?: string): void => {
         if (!file || byPath.has(file)) return;
-        byPath.set(file, { path: file, name: names.allocate(stem, ext) });
+        byPath.set(file, { path: file, name: names.allocate(stem, ext), ...(kind ? { kind } : {}) });
     };
     for (const run of runs) {
         const base = `${sanitizeName(run.testId, 40, "test")}${run.variant ? `-${sanitizeName(run.variant, 30, "v")}` : ""}`;
-        for (const a of run.artifacts) add(a.path, `${base}-${a.kind}`);
+        for (const a of run.artifacts) add(a.path, `${base}-${a.kind}`, extOf(a.path), a.kind);
         for (const v of run.vision ?? []) add(v.path, `${base}-vision-${v.step}`);
         // A baseline keeps its own name: that name is what the platform stores it under.
         for (const b of run.newBaselines ?? []) add(b.path, path.basename(b.name, path.extname(b.name)), extOf(b.name));

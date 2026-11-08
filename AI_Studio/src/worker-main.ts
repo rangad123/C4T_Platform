@@ -8,6 +8,7 @@ import { installProcessLogging, startProcessOps } from "./platform/ops/process.j
 import { applyServerNetwork } from "./platform/outbound-network.js";
 import { Worker } from "./platform/worker.js";
 import { runnersOnly } from "./platform/runner-only.js";
+import { getAgentServices } from "./platform/agent-services.js";
 import { startStandaloneAssessmentLoop } from "./security/standalone.js";
 
 // Standalone worker process: run with WORKER_EMBEDDED=false on the API process.
@@ -44,6 +45,8 @@ const shutdown = startProcessOps({
     platform,
     settings: ops,
     worker,
+    // A job of this process that waits for a runner is handed over on a restart, its runner left running (runner-handover.ts).
+    drainRunners: () => getAgentServices(platform).drain(),
     runsSchedules: platform.config.SCHEDULER_ENABLED,
     stopScheduler: () => schedules.scheduler.stop(),
     stopRunbooks: () => runbooks.stop(),

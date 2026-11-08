@@ -40,10 +40,14 @@ export class FileCache {
         private readonly maxBytes: number,
     ) {}
 
-    /** Create the folder and remove half-finished downloads left by an earlier run that was killed. */
+    /**
+     * Create the folder, remove half-finished downloads left by an earlier run that was killed, and bring the cache within its cap (the cap
+     * may have been lowered, or the runner stopped before a prune finished).
+     */
     async init(): Promise<void> {
         await fsp.mkdir(this.dir, { recursive: true });
         for (const f of await fsp.readdir(this.dir).catch(() => [] as string[])) if (f.startsWith(".tmp-")) await fsp.rm(path.join(this.dir, f), { force: true });
+        await this.prune();
     }
 
     private pathOf(sha256: string, ext: string): string {

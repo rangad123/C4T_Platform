@@ -841,7 +841,7 @@ namespace AITestingRunner
             foreach (string d in folders)
             {
                 if (!Directory.Exists(d)) continue;
-                try { Util.DeleteTree(d); removed.Add("Removed " + d + (d == L.NodeDir ? " (the private Node.js)" : "")); }
+                try { Util.DeleteTreeRetrying(d); removed.Add("Removed " + d + (d == L.NodeDir ? " (the private Node.js)" : "")); }
                 catch (Exception e) { removed.Add("Could not remove " + d + ": " + e.Message); }
             }
             bool selfInside = Util.IsUnder(ExePath, L.Root);
@@ -869,8 +869,13 @@ namespace AITestingRunner
             }
             else
             {
-                try { if (Directory.Exists(L.Root) && Directory.GetFileSystemEntries(L.Root).Length == 0) { Directory.Delete(L.Root); removed.Add("Removed " + L.Root); } }
-                catch (Exception) { }
+                // The install folder goes when nothing else is in it, tried again for a few seconds for the same reason as DeleteTreeRetrying.
+                for (int i = 0; i < 16 && Directory.Exists(L.Root); i++)
+                {
+                    // An entry still listed may be one Windows has only marked for deletion: wait a moment and look again before giving up.
+                    try { if (Directory.GetFileSystemEntries(L.Root).Length > 0) { System.Threading.Thread.Sleep(400); continue; } Directory.Delete(L.Root); removed.Add("Removed " + L.Root); break; }
+                    catch (Exception) { System.Threading.Thread.Sleep(400); }
+                }
             }
             removed.Add("Left alone: any Node.js that was already on this computer, and the shared browser cache.");
             return removed;

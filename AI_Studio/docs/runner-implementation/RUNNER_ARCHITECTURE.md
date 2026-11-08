@@ -280,7 +280,7 @@ Taken on 2026-11-07.
 - S3 storage and time-limited links (not built).
 - PostgreSQL for the runner tables: the schema is ready, the stores still use the synchronous database interface (not built in this round).
 - AI authoring and exploring on runners: refused in `runners` mode (not built).
-- Picking a runner run up again after a deploy or restart (not built: runs still going after `SHUTDOWN_GRACE_SECONDS` are stopped and marked interrupted).
+- Run sequences (runbooks) across a restart: a sequence is not resumed. At a deploy it ends as interrupted while the test run of its current step, when it already runs on a runner, carries on and finishes (runs on runners themselves survive a deploy or restart and are picked up again: `docs/features/runner-restarts.md`).
 - The agent's own version: still the constant `"1.0.0"` in `src/agent/config.ts`; a downloaded runner reports its `kitVersion`.
 - OS-level isolation of test processes (sandbox, separate user): not built. Tests run with the rights of the person's account.
 - A real pass on Windows 10/11 and on Macs with Apple chip and Intel: see `MANUAL_VERIFICATION.md`.

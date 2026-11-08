@@ -208,7 +208,7 @@ jobs:
   # artifact only: the platform keeps serving the zip until a pass on a real Mac is green.
   installer-mac-package:
     name: Build the Mac package
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     if: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     defaults:

@@ -13,6 +13,12 @@ Update signing (steps about updates) needs the update-signing key: until the own
 
 Expected results describe the design. If what you see differs, that is a finding: write down exactly what you saw.
 
+## What GitHub's machines already proved, and what they did not
+
+The real-machine workflow (`.github/workflows/runner-matrix.yml`) installs and runs the runner on GitHub's hosted machines: Windows Server 2022 and 2025 (x64), macOS 15 on an Apple chip, macOS 15 on Intel, and Ubuntu. Results are in `PROGRESS.md` with run ids. On those machines it has shown: the unattended install, the runner coming online, a web test and an API test run on it, a stop and a restart on the credential it saved in DPAPI or the Keychain, a forced credential renewal, revocation (the runner stops with exit code 3), and an uninstall that leaves nothing; on macOS also the `.pkg` and `.dmg` builds (unsigned).
+
+It does **not** prove: a Windows 10 or Windows 11 **desktop** (GitHub's Windows machines are Windows Server, with no signed-in desktop user, no SmartScreen and no tray), the windowed installer and the tray menu, start at sign-in after a real sign-out and sign-in, sleep and wake, a network change, antivirus products, Gatekeeper and "Background items added" on a real Mac, or a person's own Chrome or Edge profile. Those are this checklist's job.
+
 ## Before you start
 
 You need:
@@ -101,6 +107,16 @@ Get the SHA-256 with `Get-FileHash <file>` (PowerShell) or `shasum -a 256 <file>
     Expected: no result. Also run the pattern search from step 9 on the logs folder: no result.
 23. [ ] Run the API test. Expected: it runs and reports.
 24. [ ] If the project allows a visible browser for a run, start one. Expected: a browser window opens on the desktop and closes at the end.
+24a. [ ] **Secrets in the failure trace.** Make the web test fail once (for example, change its expected text in a draft and approve it on the test deployment), run it, and download the failure trace from the run's page. Search the zip's contents for the test account's password:
+
+    ```
+    Expand-Archive trace.zip -DestinationPath trace-out
+    Get-ChildItem -Recurse trace-out | Select-String -SimpleMatch "<the test password>"
+    ```
+
+    Expected: no result (the password is replaced). Also open the trace in Playwright's trace viewer (`npx playwright show-trace trace.zip` on a computer with Node.js): it opens, and the typed value shows as masked. Record whether the viewer opened.
+24b. [ ] **Priority.** While a web test runs, open Task Manager, **Details**: the `node.exe` and `chrome.exe` (or `msedge.exe`) processes of the run show priority **Below normal**. The computer stays usable. Record what you see.
+24c. [ ] **A platform restart during a run** (test deployment only; the person running the platform restarts it). Start the one-minute web test, and restart the platform while it runs. Expected: the run carries on, finishes once, shows one result, and its log says it was handed over and picked up again. Record whether the test ran once or twice (the sample app's or the site's own logs show it).
 
 ### Stop
 
@@ -202,6 +218,8 @@ Repeat steps 1 to 38. Record any difference in the SmartScreen wording, the tray
 
     Expected: the run reports "The agent was stopped." Record the time. Start it again by opening the app (or log out and in).
 21. [ ] Do Windows step 27 (network off for two minutes during a run).
+21a. [ ] Do Windows steps 24a and 24c. For the trace search use `unzip -o trace.zip -d trace-out && grep -rF '<the test password>' trace-out`.
+21b. [ ] **Priority.** While a web test runs: `ps -o pid,nice,comm -ax | grep -Ei 'node|chrom'`. Expected: the run's processes show nice 10.
 22. [ ] Open the app a second time while the runner is running. Expected: it shows the status and the end of the log, and offers "Leave it running" or "Uninstall". It never starts a second runner.
 
 ### Switches, isolation and update

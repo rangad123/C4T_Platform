@@ -43,6 +43,12 @@ if (platform.llm.modelName === "unavailable") {
     console.log(`[llm] ${platform.config.LLM_PROVIDER} / ${platform.llm.modelName}`);
 }
 
+// Runners could not report while this process was away (a deploy, a crash): their running tasks get a full lease from now before the sweep may
+// call them lost, so a run still going on a runner is taken up again instead of being offered a second time (runner-handover.ts).
+const agents = getAgentServices(platform);
+const extended = agents.store.extendRunningLeases(agents.limits.leaseSeconds * 1000);
+if (extended) console.log(`[agents] ${extended} run(s) still on runners after the restart; waiting for them to report again`);
+
 let worker: Worker | undefined;
 if (runnersOnly(platform.config)) {
     // EXECUTION_MODE=runners (the hosted platform): this process never runs test code or opens a browser for a run. The dispatch worker
@@ -55,7 +61,7 @@ if (runnersOnly(platform.config)) {
         console.log(`[scheduler] started (checks every ${platform.config.SCHEDULER_TICK_MS / 1000}s)`);
     } else {
         // Runner housekeeping rides on the scheduler's tick; without it, it still runs (leases, stale tasks, old task files).
-        setInterval(() => void getAgentServices(platform).maintain().catch((err) => console.error("[agents] housekeeping failed:", err)), platform.config.SCHEDULER_TICK_MS).unref();
+        setInterval(() => void agents.maintain().catch((err) => console.error("[agents] housekeeping failed:", err)), platform.config.SCHEDULER_TICK_MS).unref();
     }
 } else if (platform.config.WORKER_EMBEDDED) {
     worker = new Worker({ ...platform, onJobFinished: schedules.onJobFinished }, platform.config.WORKER_POLL_MS);
@@ -77,6 +83,8 @@ const shutdown = startProcessOps({
     settings: ops,
     app,
     ...(worker ? { worker } : {}),
+    // A deploy does not stop runs on runners: nothing new is handed out, and their jobs are handed over to the next process.
+    drainRunners: () => agents.drain(),
     runsSchedules: platform.config.SCHEDULER_ENABLED,
     stopScheduler: () => schedules.scheduler.stop(),
     stopRunbooks: () => runbooks.stop(),

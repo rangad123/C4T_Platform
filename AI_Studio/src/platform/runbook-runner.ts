@@ -314,6 +314,12 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
         const done = await waitForJob(run, job.id, signal, deadlineAt);
         if (done === "gone") return { status: "failed", reason: "The job no longer exists." };
         if (done === "cancelled" || done === "timeout") {
+            // The platform is stopping (a deploy), not a person: a job that already runs on a runner is handed over and finishes there, with
+            // nothing run twice (runner-handover.ts), so it is not stopped. The run sequence itself ends here, as interrupted.
+            if (done === "cancelled" && stopping && !store.isCancelRequested(run.id)) {
+                const now = repo.getJob(job.id);
+                if (now?.options.runOn === "agent" && now.status !== "QUEUED") return { status: "stopped", reason: "The platform restarted. This step's test run carries on on its runner and finishes on its own; the steps after it were not run.", detail: { jobId: job.id } };
+            }
             // The job belongs to this step: stop it too, or it would keep the project busy.
             repo.requestCancel(job.id);
             return done === "cancelled" ? { status: "stopped", reason: "The run was cancelled and the job was asked to stop.", detail: { jobId: job.id } } : { status: "timed_out", reason: "The job did not finish in time and was asked to stop.", detail: { jobId: job.id } };

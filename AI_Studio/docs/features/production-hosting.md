@@ -46,7 +46,7 @@ On SIGTERM or SIGINT (`src/platform/ops/shutdown.ts`, used by `src/main.ts` and 
 
 1. `/readyz` answers 503 from now on.
 2. The scheduler, run sequences, scheduled backups and the heartbeat stop; the worker stops claiming jobs. The HTTP server keeps answering meanwhile (people can still look; new jobs stay queued for the next start).
-3. The running job gets `SHUTDOWN_GRACE_SECONDS` (default 60) to finish. If it does, it keeps its real result.
+3. The running job gets `SHUTDOWN_GRACE_SECONDS` (default 60) to finish. If it does, it keeps its real result. A job waiting for a runner is not waited for: it is handed over with its runner task left running, and the next start picks it up ([runner-restarts.md](runner-restarts.md)).
 4. If not, it is stopped the way a person's Stop does: its own stop path closes its browsers and test processes, keeps the results of tests that finished and puts the others back to what they were. After at most 20 more seconds the job is recorded as **failed with "Interrupted: the platform was shut down before this job finished. Start it again when the platform is back."**, an event `job_interrupted` says how long it waited, and its lease is cleared so a restart does **not** silently run it again. If the job did not even stop in those 20 s, its tests still marked running go back to "not run yet".
 5. The HTTP server closes (this ends recordings and their browsers, and live streams), alerts in flight get 5 s, the log is flushed, the database is closed, exit 0. A second signal exits at once (code 1).
 

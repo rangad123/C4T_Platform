@@ -23,7 +23,9 @@ export interface ProcessParts {
     platform: Platform;
     settings: OpsSettings;
     app?: FastifyInstance;
-    worker?: { stop(): Promise<void>; readonly leaseOwner: string };
+    worker?: { stop(opts?: { handOver?: boolean }): Promise<void>; readonly leaseOwner: string };
+    /** Graceful restart of work on runners (AgentService.drain): runs on runners carry on and the next process takes them up again. */
+    drainRunners?: () => void;
     /** This process runs the scheduler (and so the backup schedule). */
     runsSchedules: boolean;
     stopScheduler: () => Promise<void>;
@@ -57,6 +59,7 @@ export function startProcessOps(parts: ProcessParts): (signal: string) => Promis
         repo: platform.repo,
         db: platform.db,
         ...(parts.worker ? { worker: parts.worker } : {}),
+        ...(parts.drainRunners ? { drainRunners: parts.drainRunners } : {}),
         stopTakingWork: [parts.stopScheduler, parts.stopRunbooks, () => backups?.stop(), () => stopBeat?.()],
         ...(parts.app ? { closeServer: () => parts.app!.close() } : {}),
         flush: parts.flush,

@@ -12,17 +12,21 @@
  */
 export class JobWriteQueue {
     private tail: Promise<void> | null = null;
+    private closed = false;
 
     constructor(private readonly onError: (err: unknown) => void = (err) => console.error("[job writes] a queued write failed:", err)) {}
 
     /** Fire and forget, for `emit` and `agentAction`. A failure of a write that had to wait is reported and the writes after it still run. */
     push(write: () => unknown): void {
+        if (this.closed) return;
         const r = this.enqueue(write);
         if ("promise" in r) r.promise.catch(this.onError);
     }
 
     /** An awaited write (the sink's methods): its result, or its error, once every earlier write is done. */
     run<T>(write: () => T | Promise<T>): Promise<T> {
+        // A closed queue makes no write: the caller waits for good, as the rest of a handed-over job does while the process stops.
+        if (this.closed) return new Promise<T>(() => undefined);
         try {
             const r = this.enqueue(write);
             return "promise" in r ? r.promise : Promise.resolve(r.value);
@@ -34,6 +38,14 @@ export class JobWriteQueue {
     /** Resolves when every write handed in so far (and any handed in meanwhile) is done. Never rejects. */
     async flush(): Promise<void> {
         while (this.tail) await this.tail;
+    }
+
+    /**
+     * No more writes from now on (a job handed over to the next platform process, runner-handover.ts): `push` drops them and `run` never
+     * settles. Writes already handed in still land; `flush` first to wait for them.
+     */
+    close(): void {
+        this.closed = true;
     }
 
     /** Whether writes are still waiting (for tests and diagnostics). */

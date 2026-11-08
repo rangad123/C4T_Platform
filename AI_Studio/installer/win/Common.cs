@@ -423,6 +423,20 @@ namespace AITestingRunner
             return n;
         }
 
+        /// <summary>
+        /// DeleteTree, tried again for a few seconds: on Windows a file another program still holds (an antivirus scan, the search indexer,
+        /// a process that is just exiting) is only marked for deletion, so its folder cannot be removed yet and would be left behind, empty.
+        /// Throws the last error when it still cannot.
+        /// </summary>
+        public static void DeleteTreeRetrying(string dir)
+        {
+            for (int i = 0; ; i++)
+            {
+                try { DeleteTree(dir); return; }
+                catch (Exception) { if (i >= 15) throw; Thread.Sleep(400); }
+            }
+        }
+
         public static void DeleteTreeQuietly(string dir)
         {
             for (int i = 0; i < 4; i++)

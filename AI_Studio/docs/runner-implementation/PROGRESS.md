@@ -30,12 +30,17 @@ Last updated: 2026-11-08 (after integration, before release).
 | 11 | Design documents (this folder) | all | built | — | brought in line with the code on 2026-11-07 |
 | — | Integration (baseline, CI lists, journey flags, full test run) | all | done | fast tier 3,625 passed; every runner and run-view file passed (see the log) | baseline regenerated for slots 1 to 54; type checks clean; the runner tests that run on Linux are in `ai-studio-ci.yml` |
 | — | Upgrade proof on a production-shaped database (schema 50 to 54) | all | done | 8 of 8 checks passed (see the log) | a runner of the previous release still runs tests in `runners` mode |
-| — | Real-machine workflow, first run | 6 | not started | `.github/workflows/runner-matrix.yml` | Windows Server, not desktop Windows |
+| — | Real-machine workflow, first run | 6 | ran; one fault found and fixed; re-run going | `.github/workflows/runner-matrix.yml` | Windows Server, not desktop Windows (see the 2026-11-08 release entry) |
 | — | Manual pass: Windows 11, Windows 10, Mac (Apple chip), Mac (Intel) | 6 | not started | `MANUAL_VERIFICATION.md` | |
 | — | Update-signing key made and set as an Actions secret | 6 | not started | deploy log says whether update offers were published | product owner's step; `PINNED_UPDATE_KEYS` in `src/agent/update-keys.ts` is empty until then |
 | — | OS code signing (Authenticode, Developer ID and notarisation) | 6 | not started | — | no certificates yet; the steps skip themselves without secrets |
 
 ## Log
+
+### 2026-11-08: released
+
+- **Released** as `32a39ac` on 2026-11-07 (deploy finished about 21:37 UTC). The hosted platform runs in `runners` mode: the dispatch worker started ("tests run only on runners, up to 8 runs at once"), the database is at schema 54 with a copy taken just before the deploy, health and readiness answer 200, and the page served is the build that was tested.
+- **First run of the real-machine workflow** (Windows Server 2022 and 2025, macOS 14 and 15 Intel, Ubuntu): on every machine the runner installed, started and connected, and every web test then failed. Cause, older than this work: a runner that uses the computer's installed Chrome or Edge never downloads Playwright's video tool (ffmpeg), and a run that keeps failure videos needs it, so every test failed at its first page. Fixed in `ae9237d` (tests run without failure videos until the runner has fetched the tool in the background; see `docs/features/runner-browsers.md`), reproduced and checked on Linux with the runner on the installed Chrome (`runner-journey-ui`, 11 of 11). The stop, restart and uninstall steps come after the web test, so they have not run on a real machine yet.
 
 ### 2026-11-08: integrated and checked
 
