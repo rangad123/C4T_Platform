@@ -1,8 +1,5 @@
-import { KeyRound } from "lucide-react";
-import { useState } from "react";
-import { getKey, setKey } from "../api";
 import { usePage } from "../components/Shell";
-import { Badge, Button, Callout, PageHeader, Skeleton } from "../components/ui";
+import { Badge, Callout, PageHeader, Skeleton } from "../components/ui";
 import { StorageSettings } from "../features/storage/StorageSettings";
 import { UsagePanel } from "../features/usage/UsagePanel";
 import { ModelHealth } from "../features/usage/ModelHealth";
@@ -28,8 +25,6 @@ export function Settings() {
     const can = useCan();
     // A person limited to some projects: the platform-wide panels (AI usage across projects, storage, evaluation) are not theirs.
     const limited = auth.state?.projectAccess === "only";
-    const [key, setKeyValue] = useState(getKey());
-    const [saved, setSaved] = useState(false);
 
     return (
         <div style={{ maxWidth: 720 }}>
@@ -69,33 +64,7 @@ export function Settings() {
                 {/* The keys projects can use: the organisation's or the platform's (features/aiconfig). */}
                 {can("ai_studio.ai_keys.manage") && <AiConfigurationsCard />}
 
-                <section className="card card-pad stack-sm">
-                    <h2 className="t-section">Access to this platform</h2>
-                    {config?.authRequired ? (
-                        <>
-                            <p className="t-secondary">This platform requires an access key. It is stored only in this browser. The AI provider key stays on the server and is never shown or shared.</p>
-                            <form
-                                className="row"
-                                onSubmit={(e) => {
-                                    e.preventDefault();
-                                    setKey(key);
-                                    setSaved(true);
-                                    setTimeout(() => location.reload(), 600);
-                                }}
-                            >
-                                <div className="input-wrap" style={{ flex: "1 1 260px" }}>
-                                    <KeyRound size={16} className="lead" aria-hidden />
-                                    <input className="input" type="password" autoComplete="off" aria-label="Access key" value={key} onChange={(e) => { setKeyValue(e.target.value); setSaved(false); }} />
-                                </div>
-                                <Button type="submit" variant="primary">{saved ? "Saved" : "Save key"}</Button>
-                            </form>
-                        </>
-                    ) : auth.state?.mode === "protected" ? (
-                        <p className="t-secondary">Everyone signs in with their own account (see People). Set <code>API_KEY</code> in <code>.env</code> if scripts need a shared owner-level key.</p>
-                    ) : (
-                        <p className="t-secondary">Anyone who can reach this server can use it. Set <code>API_KEY</code> in <code>.env</code> to require a key before exposing it on a network, or add the first owner below so everyone signs in.</p>
-                    )}
-                </section>
+                {/* No access-key card: the sign-in screen asks for the key when a server requires one (features/auth/AuthGate). */}
 
                 {/* People and access: the first owner, your account, people, activity, single sign-on (features/auth). */}
                 <PeopleSettings />

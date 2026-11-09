@@ -221,14 +221,15 @@ describe("the tabs follow the project's kind", () => {
 });
 
 describe("the project header sits above the tabs on every place", () => {
-    it("the kind's tile, the name as the one h1 and the type chip; the place's title is an h2 under the tab bar", async () => {
-        for (const [id, kind, chips] of [[agent, "agent", ["Agent"]], [code, "code", ["Code"]], [mixed, "mixed", ["Agent", "Code"]]] as const) {
+    it("the kind's tile beside the name as the one h1, no second type chip (only a mixed project shows its two); the place's title is an h2 under the tab bar", async () => {
+        for (const [id, kind, label, chips] of [[agent, "agent", "Agent project", []], [code, "code", "Code project", []], [mixed, "mixed", "Agent and code project", ["Agent", "Code"]]] as const) {
             for (const [h, title] of [[routes.requirements(id), "Requirements"], [routes.runs(id), "Runs"], [routes.projectSettings(id), "Settings"]] as const) {
                 await visit(h);
                 const head = page.getByTestId("project-head");
                 await pwExpect(head).toHaveAttribute("data-kind", kind);
                 await pwExpect(page.locator("h1")).toHaveCount(1);
                 await pwExpect(head.locator("h1")).not.toHaveText("…");
+                await pwExpect(head.getByRole("img", { name: label })).toBeVisible();
                 await pwExpect(head.getByTestId("kind-chips").locator(".badge")).toHaveText([...chips]);
                 await pwExpect(page.getByTestId("place-head").locator("h2")).toHaveText(title);
                 // Header, then the tab bar, then the place's title.

@@ -72,7 +72,6 @@ export const platform: Topic[] = [
             step("Choose Settings in the sidebar.", "Settings"),
             step("Read AI model to see whether the AI is connected.", "AI model"),
             step("Under AI model, see how its recent requests went, or choose Check the connection to send one tiny request.", "AI model"),
-            step("If the platform asks for an access key, save it under Access to this platform.", "Access to this platform"),
         ],
         goodToKnow: [
             "Your admin, not you, changes the AI service and other server settings.",

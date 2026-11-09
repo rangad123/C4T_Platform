@@ -105,7 +105,7 @@ Four switches decide what the platform may do. Each is off or restrictive by def
 
 | Switch | What it does | Rule |
 |---|---|---|
-| `API_KEY` | Every API call needs the `x-api-key` header. | Set it on any shared host, and whenever `HOST` is not a local address. The web app asks for the key once under **Settings → Access to this platform**. The two switches below do nothing unless an `API_KEY` is also set. |
+| `API_KEY` | Every API call needs the `x-api-key` header. | Set it on any shared host, and whenever `HOST` is not a local address. The web app asks for the key once, on its sign-in screen. The two switches below do nothing unless an `API_KEY` is also set. |
 | `BLOCK_PRIVATE_TARGETS` | Refuses addresses on localhost and private networks, for the platform's own calls (tests, alerts, issue trackers). | Turn on for hosted setups. A runner agent reaches your application from its own network, so this guard does not apply to runs on an agent. |
 | `ALLOW_CUSTOM_SCRIPTS` | Lets code tests (written, imported from Git, or taken over from a generated test) run on the platform computer. | Off by default. A code test is arbitrary code that runs with the rights of the platform. It has no effect without `API_KEY`. Never turn it on for authors you do not trust: the check before saving catches mistakes, it is not a security boundary. A runner agent allows code tests only when started with `--allow-custom-scripts`. |
 | `ALLOW_ADAPTER_PLUGINS` | Loads plug-in frameworks listed in `ADAPTER_PLUGINS`. | Off by default, and any value other than the word `true` is off. A plug-in runs with the full power of the platform process, so load only plug-ins you wrote or reviewed. It has no effect without `API_KEY`. |
@@ -383,7 +383,7 @@ Results are written to `results/junit.xml` for your pipeline. Credentials are ne
 | Problem | Fix |
 |---|---|
 | "No LLM credentials configured" | Add an AI service key to `.env` and restart. API-only testing still works. |
-| 401 from the API | Send the `x-api-key` header (the web app asks once under **Settings → Access to this platform**). |
+| 401 from the API | Send the `x-api-key` header (the web app asks once, on its sign-in screen). |
 | "This computer can't run mobile tests yet" | Run `npx @taqwright/taqwright install --with-avd` on the computer that runs the platform. |
 | "Mobile tests need an app to test" | **Setup → Mobile app → Change**: add a package or upload an .apk, then run again. |
 | "The Android emulator didn't respond" | Free up memory (the emulator needs 2 to 3 GB), close other emulators, run again. |

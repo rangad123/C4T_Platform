@@ -141,10 +141,11 @@ describe("one platform and one mode in Settings", () => {
         await pwExpect(general.getByText("Saved.")).toBeVisible();
         expect((await api("GET", `/api/projects/${id}`)).body).toMatchObject({ platforms: ["android"], testingModes: ["code"] });
         await pwExpect(general.getByText("Choose one platform")).toHaveCount(0);
-        // A code-mode project has no Agent runs tab (round 38: no project has one), and its header says Code.
+        // A code-mode project has no Agent runs tab (round 38: no project has one), and its header's tile says Code (no second chip).
         await pwExpect(page.getByRole("navigation", { name: "Project sections" }).getByRole("link", { name: "Test scripts" })).toBeVisible();
         await pwExpect(page.getByRole("navigation", { name: "Project sections" }).getByRole("link", { name: "Agent runs" })).toHaveCount(0);
-        await pwExpect(page.getByTestId("project-head").getByTestId("kind-chips")).toHaveText("Code");
+        await pwExpect(page.getByTestId("project-head").getByRole("img", { name: "Code project" })).toBeVisible();
+        await pwExpect(page.getByTestId("project-head").getByTestId("kind-chips")).toHaveCount(0);
     });
 
     it("saves the web address from Settings, General", async () => {

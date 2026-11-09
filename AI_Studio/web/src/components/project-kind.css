@@ -8,7 +8,7 @@
 .pk-chips { display: inline-flex; gap: 6px; flex: none; }
 .pk-platform { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--type-body-sm-size); white-space: nowrap; flex: none; }
 
-/* The project's header: tile, name and chip on one line; the place's own title sits under the tab bar. */
+/* The project's header: tile and name on one line (a mixed project's two chips too); the place's own title sits under the tab bar. */
 .project-head { align-items: center; margin-bottom: 24px; }
 .project-head .titles { gap: 4px; }
 .pk-name-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }

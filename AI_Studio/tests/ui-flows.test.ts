@@ -83,9 +83,10 @@ describe("API-key protected server", () => {
         await pwExpect(page.getByRole("heading", { name: "Test any web application automatically" })).toBeVisible();
         await page.reload();
         await pwExpect(page.getByRole("heading", { name: "Test any web application automatically" })).toBeVisible();
-        // Settings shows the key field because the server requires one
+        // Settings has no second place to enter the key: the sign-in screen is where it goes.
         await page.getByRole("link", { name: "Settings", exact: true }).click();
-        await pwExpect(page.getByLabel("Access key")).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+        await pwExpect(page.getByText("Access to this platform")).toHaveCount(0);
     });
 });
 

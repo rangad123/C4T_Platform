@@ -735,7 +735,6 @@ On a first exploration most of these checks are on by default. Each finding says
 - **Why you'd use it:** You see whether the AI is connected and the platform is ready.
 - **How:** Choose **Settings** in the sidebar. You see:
   - **AI model**: connected or not set up, how its recent requests went, **Fallback models**, and the switches that make AI work cheaper (prompt caching, smaller page snapshots, repairs and re-explorations without AI, a fast model for routine steps; each is described below).
-  - **Access to this platform**: where you save the access key in your browser if the platform asks for one.
   - **People**, **Your account**, **Activity** and **Single sign-on** (see [People, roles and sign-in](#people-roles-and-sign-in)).
   - **Mobile testing**, **Test formats**, **AI usage**, **Storage** and **Quality of the AI tester**.
 - **Good to know:** Viewers and editors can read these settings; owners change them. A choice saved here wins over the server's own setting, and **Use the server's setting** goes back to it. Pages for the whole platform (AI usage, Storage, Quality of the AI tester, People, Activity) are shown only to people with access to all projects. Your admin, not you, connects the AI service and changes other server settings. See the [admin guide](ADMIN_GUIDE.md#2-settings-env).
@@ -930,7 +929,7 @@ These ideas run through the whole product.
 - **Alert:** a message sent to Slack, Teams, email or another system when a run finds something.
 - **API:** the way programs talk to your application. A website's screens are for people, and its API is for programs. Like a restaurant's kitchen window: customers use the menu, the waiters use the window.
 - **API endpoint:** one place in an API where a program asks for something, such as "the list of products".
-- **Access key** (also called the API key): a secret code the owner may set so that only people who have it can use the platform. You type it on the first screen or save it under **Settings**, **Access to this platform**. It is not the AI provider key. The AI provider key stays on the server, and nobody who uses the platform ever sees or needs it.
+- **Access key** (also called the API key): a secret code the owner may set so that only people who have it can use the platform. You type it on the first screen. It is not the AI provider key. The AI provider key stays on the server, and nobody who uses the platform ever sees or needs it.
 - **API token:** a secret code that lets a program use your API as a signed-in user. Other tools use the same word, or "access token", for a secret code you create there. The sign-in form calls it a **Bearer token**.
 - **Authorization:** in a security assessment, the record that the client owns the application, or that its owner agreed in writing, to have it assessed within a stated scope. No assessment runs without a current one.
 - **Auto-fix:** a fix the platform makes by itself while it creates a test. It is listed in the test's history. Compare *repair*.
@@ -988,7 +987,7 @@ These ideas run through the whole product.
 | Problem | What to do |
 |---|---|
 | **The AI is not set up.** The sidebar says **AI not set up**, or exploring says the AI model is not set up. | Ask your admin to add the AI service key and restart. API tests and accessibility checks still work without it. |
-| **I cannot reach the platform, or it asks for a key.** | Check the address. If it says access is denied, ask the owner for the access key and save it under **Settings**, **Access to this platform**. |
+| **I cannot reach the platform, or it asks for a key.** | Check the address. If it says access is denied, ask the owner for the access key and type it on the first screen. |
 | **"We couldn't access this application".** | Check that the address is right and that the app is running and reachable from the platform's computer. A site on your own network may need a runner. |
 | **Only sign-in tests were made.** | Add a test account when you explore, so the platform can see past the sign-in page. |
 | **Protected API tests fail.** | Give an API token, or OAuth2 sign-in details, when you explore. |
