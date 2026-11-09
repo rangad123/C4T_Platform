@@ -49,3 +49,6 @@ dialog.write-test::backdrop { background: rgba(10, 20, 20, 0.5); }
 .gen-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--accent-100); border-radius: var(--radius-sm); background: var(--status-success-bg); }
 .gen-fails { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 @media (max-width: 640px) { .gen-row > .gen-text { padding-left: 0; border-left: 0; } }
+/* "Generate from test cases" on Test scripts (GenerateFromCasesDialog): the case picker scrolls inside the dialog. */
+.gen-pick { max-height: min(48vh, 420px); overflow-y: auto; }
+.gen-pick thead th { position: sticky; top: 0; z-index: 1; }

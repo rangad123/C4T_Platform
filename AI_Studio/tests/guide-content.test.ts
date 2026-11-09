@@ -26,6 +26,8 @@ const NOT_A_TOPIC: Record<string, string> = {
     "model-routing.md":"an administrator's cost setting in Settings, AI model (a fast model for routine steps, empty by default); the field's own help, the user guide's section on it and the job's activity explain it",
     "framework-adapters.md": "internal structure; the document itself says nothing changes for a user",
     "test-suite.md": "how the platform's own developers run its test suite and release gate; nothing a tester sees",
+    "scripts-from-test-cases.md": "how the AI writes test scripts, web text or Android phone steps, from written test cases; the Test cases card and the Test scripts menu say on screen what it makes and why it cannot, and each phone draft says to check it on the device; the document is the detail",
+    "suites-from-scripts.md": "the Test suites page's Generate suites menu and the Test scripts selection bar's Create suite from selection say on screen what each does (the plan before anything is made, the AI's proposal before anything is saved); the guide has no suites topic yet, the document is the detail",
     "phone-device-session.md": "how the platform talks to a phone or emulator through adb (the device session); the phone topics link phone-ai-tests.md and ux-phone-ai.md, which say what a tester sees",
     "phone-setup-simple.md": "the runner fetching Google's phone tools by itself; the phone topic (Test a phone app) says it in a good-to-know line, the runner's row says it, and the user guide section Phones on a runner covers it",
     "live-session.md": "its feature (an assistant trying a test in a live browser) is one step of the AI assistant topic, which links mcp-server.md",

@@ -24,6 +24,7 @@ import { ProjectTabs } from "./ProjectOverview";
 import { RunMenu } from "../features/runs/RunMenu";
 import { RunStrip } from "../features/runs/RunStrip";
 import { SelectToggle, SelectionBar, useTestSelection, type TestSelection } from "../features/runs/Selection";
+import { SuiteFromSelection } from "../features/suites/SuiteFromSelection";
 import { EXPLORING_OFF_HERE, EXPLORING_ON_RUNNERS, useExecutionMode, useRunsHere } from "../features/runs/runs-here";
 import { versionHref, type ScriptRow } from "../features/review/review";
 import "../features/authoring/authoring.css";
@@ -181,7 +182,7 @@ export function ProjectTests({ id }: { id: string }) {
                         </Button>
                         {/* Choosing where tests run and which ones is one control (UX-A); making a script is another. */}
                         <RunMenu projectId={id} tests={all} selectedIds={[...selection.picked]} />
-                        <NewTestMenu projectId={id} onDescribe={() => setShowWrite(true)} onImport={() => setShowImport(true)} />
+                        <NewTestMenu projectId={id} onDescribe={() => setShowWrite(true)} onImport={() => setShowImport(true)} onMade={() => void Promise.all([tests.reload(), reqLinks.reload(), reviews.reload()])} />
                         <Menu label="More actions" icon={MoreHorizontal} iconOnly>
                             {(close) => (
                                 <>
@@ -257,7 +258,7 @@ export function ProjectTests({ id }: { id: string }) {
                                 </Button>
                                 <SelectToggle selection={selection} />
                             </div>
-                            {selection.selecting && <SelectionBar selection={selection} shownIds={shown.map((t) => t.id)} run={<RunMenu projectId={id} tests={all} selectedIds={[...selection.picked]} label="Run selected" variant="primary" />} />}
+                            {selection.selecting && <SelectionBar selection={selection} shownIds={shown.map((t) => t.id)} run={<><SuiteFromSelection projectId={id} testIds={[...selection.picked]} canWrite={!project.data?.access || project.data.access.permissions.includes("ai_studio.tests.write")} /><RunMenu projectId={id} tests={all} selectedIds={[...selection.picked]} label="Run selected" variant="primary" /></>} />}
                             <div className="chips" role="group" aria-label="Filter by status">
                                 {FILTERS.filter((f) => f.key === "all" || counts[f.key] > 0 || filter === f.key).map((f) => (
                                     <Tooltip key={f.key} content={FILTER_TIP[f.key]}>

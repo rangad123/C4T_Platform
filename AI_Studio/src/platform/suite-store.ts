@@ -5,6 +5,11 @@
  *
  * A suite belongs to one project, and so does every test in it (checked by the routes). Positions are 0..n-1 after every change.
  * Which schedules start a suite is kept in a link table of its own, so the schedules table stays as it was.
+ *
+ * A suite made by "Generate suites, by requirement" remembers where it came from (its origin: the requirement, and every script the
+ * generation put in it), so a later generation finds it by the requirement, not by its name, and never puts back a script a person
+ * took out. There is no column for it: the origin is kept in `browsers_json`, which then holds `{ "browsers": [...], "origin": {...} }`
+ * instead of the plain list every other suite keeps. Both shapes are read; a suite without an origin is written exactly as before.
  */
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -34,16 +39,37 @@ export type SuiteSettings = z.infer<typeof SuiteSettingsSchema>;
 
 export const DEFAULT_SUITE_SETTINGS: SuiteSettings = { environment: null, confirmProduction: false, browsers: [], retries: 0, stopOnFirstFailure: false };
 
+/** Where a generated suite came from. `added`: every script a generation put in it (or found in it), so none of them is added again. */
+export interface SuiteOrigin {
+    kind: "requirement";
+    requirementId: string;
+    added: string[];
+}
+/** Scripts an origin remembers; past this the oldest are forgotten (a suite holds at most 500). */
+const MAX_ORIGIN_ADDED = 2000;
+
 export interface Suite {
     id: string;
     projectId: string;
     name: string;
     description: string;
     settings: SuiteSettings;
+    /** Set on a suite "Generate suites, by requirement" made; null on every other suite (a duplicate does not inherit it). */
+    origin: SuiteOrigin | null;
     testCount: number;
     createdBy: string | null;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface NewSuiteInput {
+    projectId: string;
+    name: string;
+    description?: string;
+    settings?: SuiteSettings;
+    testIds?: string[];
+    createdBy?: string | null;
+    origin?: SuiteOrigin | null;
 }
 
 export type SuiteRunTrigger = "manual" | "schedule";
@@ -59,14 +85,25 @@ export interface SuiteRunRow {
 
 const now = () => new Date().toISOString();
 
-const toSettings = (r: Row): SuiteSettings => {
-    let browsers: SuiteSettings["browsers"] = [];
+/** `browsers_json`: the plain list of extra browsers, or `{ browsers, origin }` for a generated suite. */
+const readBrowsersJson = (raw: string | null | undefined): { browsers: unknown; origin: SuiteOrigin | null } => {
     try {
-        const parsed = JSON.parse(r.browsers_json ?? "[]");
-        if (Array.isArray(parsed)) browsers = parsed.filter((b): b is SuiteSettings["browsers"][number] => (EXTRA_VARIANT_IDS as readonly string[]).includes(b));
+        const parsed = JSON.parse(raw ?? "[]");
+        if (Array.isArray(parsed)) return { browsers: parsed, origin: null };
+        const o = parsed?.origin;
+        const origin: SuiteOrigin | null =
+            o && o.kind === "requirement" && typeof o.requirementId === "string" ? { kind: "requirement", requirementId: o.requirementId, added: Array.isArray(o.added) ? o.added.filter((x: unknown): x is string => typeof x === "string") : [] } : null;
+        return { browsers: parsed?.browsers, origin };
     } catch {
-        browsers = [];
+        return { browsers: [], origin: null };
     }
+};
+const writeBrowsersJson = (browsers: SuiteSettings["browsers"], origin: SuiteOrigin | null): string =>
+    origin ? JSON.stringify({ browsers, origin: { ...origin, added: [...new Set(origin.added)].slice(-MAX_ORIGIN_ADDED) } }) : JSON.stringify(browsers);
+
+const toSettings = (r: Row): SuiteSettings => {
+    const raw = readBrowsersJson(r.browsers_json).browsers;
+    const browsers: SuiteSettings["browsers"] = Array.isArray(raw) ? raw.filter((b): b is SuiteSettings["browsers"][number] => (EXTRA_VARIANT_IDS as readonly string[]).includes(b)) : [];
     return { environment: r.environment ?? null, confirmProduction: Number(r.confirm_production) === 1, browsers, retries: Number(r.retries) || 0, stopOnFirstFailure: Number(r.stop_on_failure) === 1 };
 };
 
@@ -76,6 +113,7 @@ const toSuite = (r: Row): Suite => ({
     name: r.name,
     description: r.description ?? "",
     settings: toSettings(r),
+    origin: readBrowsersJson(r.browsers_json).origin,
     testCount: Number(r.test_count ?? 0),
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
@@ -102,30 +140,41 @@ export class SuiteStore {
         return (await this.list(projectId)).find((s) => s.name.trim().toLowerCase() === key);
     }
 
-    async create(input: { projectId: string; name: string; description?: string; settings?: SuiteSettings; testIds?: string[]; createdBy?: string | null }): Promise<Suite> {
-        const id = randomUUID();
+    async create(input: NewSuiteInput): Promise<Suite> {
+        return (await this.createMany([input]))[0]!;
+    }
+
+    /** Several suites in one transaction: all of them are saved, or none (a failing insert undoes the ones before it). */
+    async createMany(inputs: readonly NewSuiteInput[]): Promise<Suite[]> {
+        const made = inputs.map(() => randomUUID());
         const t = now();
-        const s = input.settings ?? DEFAULT_SUITE_SETTINGS;
         await this.sql.tx(async (q) => {
-            await q.run(
-                "INSERT INTO built_suites (id, project_id, name, description, environment, confirm_production, browsers_json, retries, stop_on_failure, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                id,
-                input.projectId,
-                input.name,
-                input.description ?? "",
-                s.environment,
-                s.confirmProduction ? 1 : 0,
-                JSON.stringify(s.browsers),
-                s.retries,
-                s.stopOnFirstFailure ? 1 : 0,
-                input.createdBy ?? null,
-                t,
-                t,
-            );
-            const ids = [...new Set(input.testIds ?? [])];
-            for (let i = 0; i < ids.length; i++) await q.run("INSERT INTO built_suite_tests (suite_id, test_case_id, position) VALUES (?,?,?)", id, ids[i]!, i);
+            for (let n = 0; n < inputs.length; n++) {
+                const input = inputs[n]!;
+                const id = made[n]!;
+                const s = input.settings ?? DEFAULT_SUITE_SETTINGS;
+                await q.run(
+                    "INSERT INTO built_suites (id, project_id, name, description, environment, confirm_production, browsers_json, retries, stop_on_failure, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    id,
+                    input.projectId,
+                    input.name,
+                    input.description ?? "",
+                    s.environment,
+                    s.confirmProduction ? 1 : 0,
+                    writeBrowsersJson(s.browsers, input.origin ?? null),
+                    s.retries,
+                    s.stopOnFirstFailure ? 1 : 0,
+                    input.createdBy ?? null,
+                    t,
+                    t,
+                );
+                const ids = [...new Set(input.testIds ?? [])];
+                for (let i = 0; i < ids.length; i++) await q.run("INSERT INTO built_suite_tests (suite_id, test_case_id, position) VALUES (?,?,?)", id, ids[i]!, i);
+            }
         });
-        return (await this.get(id))!;
+        const out: Suite[] = [];
+        for (const id of made) out.push((await this.get(id))!);
+        return out;
     }
 
     async update(id: string, patch: { name?: string; description?: string; settings?: SuiteSettings }): Promise<Suite | undefined> {
@@ -138,7 +187,8 @@ export class SuiteStore {
             patch.description ?? cur.description,
             s.environment,
             s.confirmProduction ? 1 : 0,
-            JSON.stringify(s.browsers),
+            // A generated suite keeps its origin whatever else changes.
+            writeBrowsersJson(s.browsers, cur.origin),
             s.retries,
             s.stopOnFirstFailure ? 1 : 0,
             now(),
@@ -173,6 +223,26 @@ export class SuiteStore {
             const at = position === undefined ? cur.length : Math.max(0, Math.min(cur.length, position));
             await this.write(q, suiteId, [...cur.slice(0, at), ...fresh, ...cur.slice(at)]);
             return fresh.length;
+        });
+    }
+
+    /**
+     * A generation's update of the suite it made: adds `fresh` at the end (those not in the suite yet) and remembers every script in
+     * `seen` as one the generation has handled, in one transaction. Returns how many were added.
+     */
+    async addGenerated(suiteId: string, fresh: string[], seen: string[]): Promise<number> {
+        return this.sql.tx(async (q) => {
+            const row = await q.get<{ browsers_json: string }>("SELECT browsers_json FROM built_suites WHERE id = ?", suiteId);
+            if (!row) return 0;
+            const { browsers, origin } = readBrowsersJson(row.browsers_json);
+            if (!origin) return 0;
+            const cur = (await q.all<{ test_case_id: string }>("SELECT test_case_id FROM built_suite_tests WHERE suite_id = ? ORDER BY position, test_case_id", suiteId)).map((r) => r.test_case_id);
+            const have = new Set(cur);
+            const add = [...new Set(fresh)].filter((x) => !have.has(x));
+            const kept = Array.isArray(browsers) ? browsers.filter((b): b is SuiteSettings["browsers"][number] => (EXTRA_VARIANT_IDS as readonly string[]).includes(b)) : [];
+            await q.run("UPDATE built_suites SET browsers_json = ? WHERE id = ?", writeBrowsersJson(kept, { ...origin, added: [...origin.added, ...seen, ...add] }), suiteId);
+            if (add.length) await this.write(q, suiteId, [...cur, ...add]);
+            return add.length;
         });
     }
 

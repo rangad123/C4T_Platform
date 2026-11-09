@@ -1,13 +1,15 @@
-import { ChevronRight, Layers, ListOrdered, Plus } from "lucide-react";
+import { ChevronRight, Layers, ListOrdered, ListTree, Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { api, type ProjectDetail } from "../../api";
 import { ProjectPlace } from "../../components/ProjectHub";
 import { BadgeKey } from "../../components/Tooltip";
-import { Badge, Button, Callout, EmptyState, ErrorState, JobBadge, jobKey, ListSkeleton } from "../../components/ui";
+import { Badge, Button, Callout, EmptyState, ErrorState, JobBadge, jobKey, ListSkeleton, Menu, MenuItem } from "../../components/ui";
 import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
+import { useProjectAiReady } from "../aiconfig/aiconfig";
+import { AiSuites, RequirementSuites } from "../suites/GenerateSuites";
 import { SuiteDetail } from "../suites/SuiteDetail";
 import { runResult, type Suite, type SuiteList } from "../suites/suites";
 import "../suites/suites.css";
@@ -19,7 +21,7 @@ import { useExecutionMode } from "../runs/runs-here";
  */
 export function SuitesPage({ id, suiteId }: { id: string; suiteId?: string }) {
     return (
-        <ProjectPlace id={id} place="suites" title="Test suites" subtitle="Groups of test cases that run together, in an order you choose, and how they run.">
+        <ProjectPlace id={id} place="suites" title="Test suites" subtitle="Groups of test scripts that run together, in an order you choose, and how they run.">
             {suiteId ? <SuiteDetail projectId={id} suiteId={suiteId} /> : <SuiteIndex id={id} />}
         </ProjectPlace>
     );
@@ -29,10 +31,54 @@ function SuiteIndex({ id }: { id: string }) {
     const list = useFetch<SuiteList>(`/projects/${id}/test-suites`);
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     const canWrite = !project.data?.access || project.data.access.permissions.includes("ai_studio.tests.write");
+    // The AI's proposal uses the AI and is there to be saved: both permissions, as the server asks.
+    const canGenerate = canWrite && (!project.data?.access || project.data.access.permissions.includes("ai_studio.tests.generate"));
+    const aiReady = useProjectAiReady(id);
     const runnersOnly = useExecutionMode() === "runners";
     const [adding, setAdding] = useState(false);
+    /** "Generate suites": by requirement (no AI) or using AI, shown in the card until closed. */
+    const [making, setMaking] = useState<"requirement" | "ai" | null>(null);
     const data = list.data;
     const full = data ? data.suites.length >= data.limits.suitesPerProject : false;
+    const generate = canWrite && data && !making && (
+        <Menu label="Generate suites" icon={Sparkles} tip={full ? `A project can have up to ${data.limits.suitesPerProject} suites.` : "Make suites from the test scripts: one per requirement, or proposed by the AI."}>
+            {(close) => (
+                <>
+                    <MenuItem
+                        icon={ListTree}
+                        description="One suite per requirement, with the scripts made from its test cases. No AI."
+                        onClick={() => {
+                            close();
+                            setAdding(false);
+                            setMaking("requirement");
+                        }}
+                    >
+                        By requirement
+                    </MenuItem>
+                    <MenuItem
+                        icon={Sparkles}
+                        disabled={!aiReady || !canGenerate || full}
+                        description={
+                            !canGenerate
+                                ? "Needs permission to use the AI to write tests."
+                                : !aiReady
+                                  ? "Needs an AI model. A project admin can set one up in Settings, AI configuration."
+                                  : full
+                                    ? `A project can have up to ${data.limits.suitesPerProject} suites.`
+                                    : "The AI proposes suites; you check and edit them before anything is saved. Uses the AI model."
+                        }
+                        onClick={() => {
+                            close();
+                            setAdding(false);
+                            setMaking("ai");
+                        }}
+                    >
+                        Using AI
+                    </MenuItem>
+                </>
+            )}
+        </Menu>
+    );
 
     return (
         <>
@@ -49,8 +95,9 @@ function SuiteIndex({ id }: { id: string }) {
                     </h2>
                     {data && data.suites.some((s) => s.lastRun) && <BadgeKey label="the run badges" entries={jobKey(data.suites.flatMap((s) => (s.lastRun ? [s.lastRun.job] : [])))} />}
                     <span className="spacer" />
+                    {data && data.suites.length > 0 && generate}
                     {canWrite && data && data.suites.length > 0 && !adding && (
-                        <Button size="sm" icon={Plus} onClick={() => setAdding(true)} disabled={full} tip={full ? `A project can have up to ${data.limits.suitesPerProject} suites.` : "Name a suite, then add test cases to it."}>
+                        <Button size="sm" icon={Plus} onClick={() => { setMaking(null); setAdding(true); }} disabled={full} tip={full ? `A project can have up to ${data.limits.suitesPerProject} suites.` : "Name a suite, then add test scripts to it."}>
                             New suite
                         </Button>
                     )}
@@ -63,9 +110,24 @@ function SuiteIndex({ id }: { id: string }) {
                     </div>
                 ) : (
                     <>
-                        {data.suites.length === 0 && !adding ? (
-                            <EmptyState icon={ListOrdered} title="No suites yet" actions={canWrite ? <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>New suite</Button> : undefined}>
-                                A suite is a list of test cases in the order they run, with how they run: for example a quick smoke suite and a full suite.
+                        {making === "requirement" && <RequirementSuites projectId={id} onClose={() => setMaking(null)} onSaved={() => void list.reload()} />}
+                        {making === "ai" && <AiSuites projectId={id} existingNames={data.suites.map((s) => s.name)} onClose={() => setMaking(null)} onSaved={() => void list.reload()} />}
+                        {data.suites.length === 0 && !adding && !making ? (
+                            <EmptyState
+                                icon={ListOrdered}
+                                title="No suites yet"
+                                actions={
+                                    canWrite ? (
+                                        <>
+                                            <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>
+                                                New suite
+                                            </Button>
+                                            {generate}
+                                        </>
+                                    ) : undefined
+                                }
+                            >
+                                A suite is a list of test scripts in the order they run, with how they run: for example a quick smoke suite and a full suite. Make one by hand, or generate suites from your test scripts.
                                 {!canWrite && " You can look at suites here; building them needs permission to change tests."}
                             </EmptyState>
                         ) : (

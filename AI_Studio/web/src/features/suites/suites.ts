@@ -95,3 +95,57 @@ export function runResult(r: SuiteRun): string {
     if (c.testsNeedingReview) bits.push(`${c.testsNeedingReview} found a problem`);
     return `${bits.join(", ")} of ${r.testCount}`;
 }
+
+/** POST /projects/:id/test-suites/generate { by: "requirement", dryRun? }: one suite per requirement (src/platform/routes/suites.ts). */
+export interface RequirementSuitesAnswer {
+    dryRun: boolean;
+    suites: Array<{
+        requirementId: string;
+        ref: string;
+        title: string;
+        action: "create" | "add" | "up-to-date";
+        suiteId: string | null;
+        name: string;
+        testIds: string[];
+        adding: number;
+        /** Scripts of the requirement a person took out of its suite: they stay out. */
+        keptOut: number;
+        /** The schedules that run the suite: their next run includes the added scripts. */
+        schedules: Array<{ id: string; name: string; enabled: boolean }>;
+    }>;
+    skipped: Array<{ requirementId: string; ref: string; title: string; reason: "no-scripts" | "retired" | "limit" | "full"; detail: string }>;
+    created: number;
+    updated: number;
+}
+
+/** POST /projects/:id/test-suites/propose: the AI's proposal, saved by nothing until the person approves it (POST …/batch). */
+export interface SuiteProposal {
+    suites: Array<{ name: string; description: string; testIds: string[]; nameTaken: boolean }>;
+    scripts: Array<{ id: string; testId: string; title: string; kind: string; area: string }>;
+    notes: string[];
+    limits: { suites: number; nameLength: number };
+}
+
+/** What generating by requirement will do, or did: "Create 2 suites and update 1", "Made 1 suite and added scripts to 2". */
+export function requirementPlanLine(created: number, updated: number, done = false): string {
+    const suites = (n: number) => `${n} ${n === 1 ? "suite" : "suites"}`;
+    if (created && updated) return done ? `Made ${suites(created)} and added scripts to ${updated}` : `Create ${suites(created)} and update ${updated}`;
+    if (created) return done ? `Made ${suites(created)}` : `Create ${suites(created)}`;
+    if (updated) return done ? `Added scripts to ${suites(updated)}` : `Update ${suites(updated)}`;
+    return "";
+}
+
+/** Moves a script from one proposed suite to another (it leaves the first; the second gets it at the end unless it has it already). */
+export function moveScript<T extends { testIds: string[] }>(drafts: T[], from: number, to: number, testId: string): T[] {
+    if (from === to || !drafts[from] || !drafts[to]) return drafts;
+    return drafts.map((d, i) => (i === from ? { ...d, testIds: d.testIds.filter((x) => x !== testId) } : i === to ? { ...d, testIds: d.testIds.includes(testId) ? d.testIds : [...d.testIds, testId] } : d));
+}
+
+/** Why a proposed suite's name cannot be saved, or null: empty, the project has it, or another proposed suite has it. */
+export function draftNameProblem(name: string, index: number, all: ReadonlyArray<{ name: string }>, existing: readonly string[]): string | null {
+    const key = name.trim().toLowerCase();
+    if (!key) return "Give the suite a name.";
+    if (existing.some((n) => n.trim().toLowerCase() === key)) return "This project already has a suite with this name.";
+    if (all.some((d, i) => i !== index && d.name.trim().toLowerCase() === key)) return "Another suite here has this name.";
+    return null;
+}

@@ -147,6 +147,12 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "PUT /api/projects/:id/test-suites/:sid/order": "ai_studio.tests.write",
     "POST /api/projects/:id/test-suites/:sid/duplicate": "ai_studio.tests.write",
     "POST /api/projects/:id/test-suites/:sid/run": "ai_studio.tests.run",
+    // Suites made from test scripts: from a selection, by requirement (no AI) and saving an approved proposal change tests; the AI's
+    // proposal saves nothing but uses the AI (ai_studio.tests.generate), and the handler also asks for ai_studio.tests.write.
+    "POST /api/projects/:id/test-suites/from-scripts": "ai_studio.tests.write",
+    "POST /api/projects/:id/test-suites/generate": "ai_studio.tests.write",
+    "POST /api/projects/:id/test-suites/batch": "ai_studio.tests.write",
+    "POST /api/projects/:id/test-suites/propose": "ai_studio.tests.generate",
     "GET /api/projects/:id/specs": "read",
     "POST /api/projects/:id/specs": "ai_studio.tests.write",
     "GET /api/projects/:id/compliance": "read",

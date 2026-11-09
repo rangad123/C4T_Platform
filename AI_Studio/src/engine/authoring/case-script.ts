@@ -26,6 +26,23 @@ export interface CaseForScript {
     steps: Array<{ action: string; expected: string }>;
     /** The requirement the case comes from, in words, when it has one. */
     requirement: string;
+    /** The references of the requirements the case comes from (REQ-01...), kept on a phone script's spec. */
+    requirementRefs?: string[];
+}
+
+/** The shortest title a test may have (TestSpecSchema). */
+const MIN_TITLE = 3;
+/**
+ * The title a script made from this case gets: the case's own title, or, when that is shorter than a test's title may be (a case title
+ * may be one character), the case's reference before it ("TC-004: Go"). Set in code before the AI is asked, so the AI is never asked to
+ * fix it.
+ */
+export function scriptTitleOf(c: Pick<CaseForScript, "ref" | "title">): string {
+    const t = c.title.trim();
+    if (t.length >= MIN_TITLE) return t;
+    const ref = c.ref.trim();
+    const named = ref && t ? `${ref}: ${t}` : ref || t;
+    return named.length >= MIN_TITLE ? named : `Test case ${named}`.trim();
 }
 
 export interface AppForScript {
@@ -67,12 +84,17 @@ export function unmarked(s: string): string {
     }
 }
 
-/** The case as data for the model: everything the case says, its reference, title and area too, is inside the data block. */
-export function scriptPrompt(c: CaseForScript, app: AppForScript): string {
+/** What the case says, as the data block's text: its reference, title, area, priority, requirement and steps, markers taken out, capped. */
+export function caseData(c: CaseForScript): string {
     const steps = c.steps.map((s, i) => `${i + 1}. ${s.action}${s.expected ? `\n   Expected: ${s.expected}` : ""}`).join("\n");
-    const body = unmarked(
+    return unmarked(
         [`Case: ${c.ref}`, `Title: ${c.title.replace(/"/g, "'")}`, `Area: ${c.area.replace(/"/g, "'") || "Test cases"}`, `Priority: ${c.priority}`, c.requirement ? `Requirement: ${c.requirement}` : "", "Steps:", steps || "(none written)"].filter(Boolean).join("\n"),
     ).slice(0, MAX_CASE_CHARS);
+}
+
+/** The case as data for the model: everything the case says, its reference, title and area too, is inside the data block. */
+export function scriptPrompt(c: CaseForScript, app: AppForScript): string {
+    const body = caseData(c);
     return [
         `The application: ${app.address ?? "its address is not known; use paths that start with /"}`,
         'Write the script for the test case below. Its first line is "Test: " followed by the case\'s Title, and its second "Category: " followed by its Area, both exactly as the data gives them.',

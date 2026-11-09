@@ -23,6 +23,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { ManualCaseStore } from "../src/platform/manual-case-store.js";
 import { RequirementStore } from "../src/platform/requirement-store.js";
 import { ReviewStore } from "../src/platform/review-store.js";
+import { NO_APP_FOR_SCRIPTS } from "../src/platform/routes/generate-scripts.js";
 import { buildServer } from "../src/platform/server.js";
 
 const PORT = 7864;
@@ -224,7 +225,7 @@ describe("Generate test cases without an AI model", () => {
 });
 
 describe("a phone project", () => {
-    it("says Describe it and Write it as text are for web and API, and the Generate card says phones are not covered yet", async () => {
+    it("says Describe it and Write it as text are for web and API, and Generate from test cases and the Generate card that the app comes first", async () => {
         await page.goto(`${BASE}/#/projects/${phone}/scripts`);
         await page.getByRole("button", { name: "New test script", exact: true }).click();
         for (const name of [/Describe it/, /Write it as text/]) {
@@ -233,11 +234,15 @@ describe("a phone project", () => {
             await pwExpect(item).toContainText("Web and API only: this project tests a phone app.");
         }
         await pwExpect(page.getByRole("menuitem", { name: /Build steps by hand/ })).toBeEnabled();
+        // Round 41: the AI writes phone scripts from test cases, for the project's Android app (this project has none yet).
+        const fromCases = page.getByRole("menuitem", { name: /Generate from test cases/ });
+        await pwExpect(fromCases).toBeDisabled();
+        await pwExpect(fromCases).toContainText(NO_APP_FOR_SCRIPTS);
         if (process.env.UI_REVIEW_SHOTS) await page.screenshot({ path: path.join(process.env.UI_REVIEW_SHOTS, "phone-new-test-menu.png") });
         await page.keyboard.press("Escape");
         await page.goto(`${BASE}/#/projects/${phone}/tests`);
         const card = page.getByTestId("generate-scripts");
-        await pwExpect(card.getByTestId("generate-scripts-phone")).toHaveText("The AI writes test scripts as text steps, and text steps cover web and API tests only for now. This project tests a phone app: write its scripts by hand or import them.");
+        await pwExpect(card.getByTestId("generate-scripts-why")).toHaveText(NO_APP_FOR_SCRIPTS);
         await pwExpect(card.getByRole("button", { name: "Generate test scripts" })).toBeDisabled();
     });
 });
@@ -257,5 +262,14 @@ describe("Generate test scripts using AI", () => {
         await pwExpect(card.getByRole("button", { name: "Generate test scripts" })).toBeDisabled();
         await pwExpect(card).toContainText("The AI model isn’t set up for this project");
         if (shots) await card.screenshot({ path: path.join(shots, "generate-scripts-card.png") });
+    });
+
+    it("is in the New test script menu on Test scripts too, saying it needs an AI model here", async () => {
+        await page.goto(`${BASE}/#/projects/${code}/scripts`);
+        await page.getByRole("button", { name: "New test script", exact: true }).click();
+        const fromCases = page.getByRole("menuitem", { name: /Generate from test cases/ });
+        await pwExpect(fromCases).toBeDisabled();
+        await pwExpect(fromCases).toContainText("Needs an AI model. A project admin can set one up in Settings, AI configuration.");
+        await page.keyboard.press("Escape");
     });
 });

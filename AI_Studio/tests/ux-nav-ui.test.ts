@@ -463,11 +463,13 @@ describe("Test scripts > Scripts (the old Tests page)", () => {
         await visit(routes.tests(P()));
         await page.getByRole("button", { name: "New test script", exact: true }).click();
         const items = page.getByRole("menuitem");
-        expect(await items.evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? e.textContent))).toEqual(["Describe it", "Build steps by hand", "Write it as text", "Write code", "Import scripts…"]);
+        expect(await items.evaluateAll((els) => els.map((e) => e.querySelector("span > span")?.textContent ?? e.textContent))).toEqual(["Describe it", "Generate from test cases", "Build steps by hand", "Write it as text", "Write code", "Import scripts…"]);
         // Each entry's name is its title; the explanation is its description.
         for (const [name, words] of [
             // Round 38: recording and exploring a phone app are no longer entries of this menu.
             ["Describe it", /AI writes the steps/],
+            // Round 41: scripts from the project's written test cases (it says what it needs where it cannot write).
+            ["Generate from test cases", /Automated test case you choose|AI model|permission|code-based|Android|application address/],
             ["Build steps by hand", /one by one/],
             ["Write it as text", /^The DSL: one line per step.*No AI needed/],
             ["Write code", /Runs only where code tests are allowed/],
