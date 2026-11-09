@@ -835,8 +835,10 @@ export async function runSmoke(opts, deps = {}) {
                     // processes whose program or command line points into the install folder, and what removing what is left answers now.
                     let holders = "";
                     if (target.system === "windows" && fs.existsSync(installDir)) {
-                        const ps = spawnSync("powershell", ["-NoProfile", "-Command", `Get-CimInstance Win32_Process | Where-Object { ($_.CommandLine -and $_.CommandLine.IndexOf(${JSON.stringify(installDir).replace(/"/g, "'")}, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.ExecutablePath -and $_.ExecutablePath.StartsWith(${JSON.stringify(installDir).replace(/"/g, "'")}, [StringComparison]::OrdinalIgnoreCase)) } | ForEach-Object { "$($_.ProcessId) $($_.Name) parent $($_.ParentProcessId): $($_.CommandLine)" }`], { encoding: "utf8", timeout: 30_000, windowsHide: true });
-                        const list = redact(`${ps.stdout ?? ""}`.trim(), secrets).slice(0, 1200);
+                        // Which processes could hold it: a process whose current folder is in there does not show the path in its command line,
+                        // so list every runner-related program (this is GitHub's throwaway machine, not a person's computer), with its parent.
+                        const ps = spawnSync("powershell", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|powershell|pwsh|chrome|msedge|chrome_crashpad_handler|AITestingRunner.*|cmd|conhost|npm.*)\\.exe$' -and $_.ProcessId -ne $PID } | ForEach-Object { \"$($_.ProcessId)/$($_.ParentProcessId) $($_.Name): $($_.CommandLine)\" }"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+                        const list = redact(`${ps.stdout ?? ""}`.trim().replace(/\r?\n/g, " | "), secrets).slice(0, 2500);
                         const tries = contents.filter((c) => c.endsWith("/")).map((c) => {
                             try {
                                 fs.rmdirSync(path.join(installDir, c));

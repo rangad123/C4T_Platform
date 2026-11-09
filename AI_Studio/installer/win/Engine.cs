@@ -838,11 +838,12 @@ namespace AITestingRunner
             if (RemoveOwnShortcut(L.StartMenuLink())) removed.Add("Removed the Start menu shortcut " + L.StartMenuLink());
             removed.Add(ForgetCredential());
             string[] folders = { L.App, L.NodeDir, L.Logs, L.Downloads, L.NodeDir + ".new" };
+            List<string> stuck = new List<string>();
             foreach (string d in folders)
             {
                 if (!Directory.Exists(d)) continue;
                 try { Util.DeleteTreeRetrying(d); removed.Add("Removed " + d + (d == L.NodeDir ? " (the private Node.js)" : "")); }
-                catch (Exception e) { removed.Add("Could not remove " + d + ": " + e.Message); }
+                catch (Exception e) { removed.Add("Could not remove " + d + ": " + e.Message); stuck.Add(d); }
             }
             bool selfInside = Util.IsUnder(ExePath, L.Root);
             if (File.Exists(L.SelfCopy) && !Util.SamePath(ExePath, L.SelfCopy))
@@ -876,6 +877,24 @@ namespace AITestingRunner
                     try { if (Directory.GetFileSystemEntries(L.Root).Length > 0) { System.Threading.Thread.Sleep(400); continue; } Directory.Delete(L.Root); removed.Add("Removed " + L.Root); break; }
                     catch (Exception) { System.Threading.Thread.Sleep(400); }
                 }
+            }
+            // A folder another program still held (one that was just ending, often) is removed a few seconds after this program exits, by the
+            // same kind of small helper that removes this program itself, and the install folder with it when it is then empty.
+            if (stuck.Count > 0 && !selfRemovalScheduled)
+            {
+                StringBuilder cmdText = new StringBuilder("/c ping -n 6 127.0.0.1 >nul");
+                foreach (string d in stuck) cmdText.Append(" & rmdir /s /q " + Util.Quote(d));
+                cmdText.Append(" & rmdir " + Util.Quote(L.Root));
+                try
+                {
+                    System.Diagnostics.ProcessStartInfo later = new System.Diagnostics.ProcessStartInfo("cmd.exe", cmdText.ToString());
+                    later.CreateNoWindow = true;
+                    later.UseShellExecute = false;
+                    later.WorkingDirectory = Path.GetTempPath();
+                    System.Diagnostics.Process.Start(later);
+                    removed.Add("What could not be removed yet will be removed in a few seconds.");
+                }
+                catch (Exception) { removed.Add("Delete " + L.Root + " by hand to finish."); }
             }
             removed.Add("Left alone: any Node.js that was already on this computer, and the shared browser cache.");
             return removed;
