@@ -4,6 +4,7 @@ import { api, getKey, projectKind, type ProjectDetail, type ProjectKind } from "
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, Disclosure, ErrorState, LinkButton, Metric, PageHeader, Ribbon, RibbonLegend, Skeleton } from "../../components/ui";
 import { downloadBlob, plural, relativeTime } from "../../lib/format";
+import { externalHref } from "../../lib/url";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { friendlyError, plainWords } from "../../lib/labels";
 import { routes } from "../../lib/router";
@@ -447,7 +448,7 @@ function CheckItem({ item, shown, locked, trackers, releaseId, projectId, onSave
                 {item.result === "failed" && (
                     <div className="mc-issue">
                         {item.issue ? (
-                            <a href={item.issue.url} target="_blank" rel="noreferrer" className="row" style={{ gap: 4 }}>
+                            <a href={externalHref(item.issue.url)} target="_blank" rel="noreferrer" className="row" style={{ gap: 4 }}>
                                 Issue {item.issue.externalId} <ExternalLink size={13} aria-hidden />
                             </a>
                         ) : tracker ? (

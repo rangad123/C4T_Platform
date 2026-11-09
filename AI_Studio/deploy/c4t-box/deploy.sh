@@ -21,7 +21,8 @@ MIN_FREE_MB="${MIN_FREE_MB:-1500}"
 # node_modules 325 MB, Chromium about 600 MB, the Node download, room to spare.
 MIN_DISK_MB=2500
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# BASH_SOURCE, not $0: the same when run, and right when a test sources the script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROOT_DIR="$(cd "$APP_DIR/.." && pwd)"
 
@@ -118,6 +119,8 @@ write_env() {
     printf 'DATA_DIR=%s\n' "$DATA_DIR"
     printf 'API_KEY=%s\n' "$AI_STUDIO_API_KEY"
     printf 'SECRET_KEY=%s\n' "$AI_STUDIO_SECRET_KEY"
+    # Refuse to start without it (an empty SECRET_KEY in env.local) instead of making a key file in the data folder.
+    printf 'SECRET_KEY_REQUIRED=true\n'
     printf 'C4T_API_ORIGIN=http://127.0.0.1:4000\n'
     printf 'C4T_SITE_URL=https://crowd4test.com\n'
     # AI Studio's name for the API's AI_STUDIO_SERVICE_TOKEN (src/config.ts).
@@ -299,6 +302,25 @@ check_tree() {
     printf '%s\n' "$dirty" >&2
     die "The deploy left AI_Studio changed in the checkout, which would block the next deploy."
   fi
+}
+
+# A deploy started by a CI run passes the commit that run checked (TESTED_SHA).
+# deploy-pull.sh resets the checkout to main as it is now, which can already
+# hold newer AI Studio changes that no CI run has passed yet. Those are not
+# started here: their own CI run starts their deploy once it passes. A deploy
+# run by hand passes none and deploys main, as before.
+check_tested_commit() {
+  local tested="${TESTED_SHA:-}" want here
+  [ -n "$tested" ] || return 0
+  [[ "$tested" =~ ^[0-9a-f]{40}$ ]] || die "TESTED_SHA is not a full commit id. Nothing was changed."
+  want="$(git -C "$ROOT_DIR" rev-parse --verify --quiet "$tested:AI_Studio" 2>/dev/null || true)"
+  here="$(git -C "$ROOT_DIR" rev-parse --verify --quiet "HEAD:AI_Studio" 2>/dev/null || true)"
+  [ -n "$want" ] && [ -n "$here" ] || die "Could not compare AI_Studio at ${tested:0:12} with the checkout. Nothing was changed."
+  if [ "$want" != "$here" ]; then
+    say "main has AI Studio changes newer than ${tested:0:12}, the commit CI checked; nothing was restarted. The deploy of the newer commit follows its own CI run."
+    return 1
+  fi
+  return 0
 }
 
 # ── Going live ───────────────────────────────────────────────────────────────
@@ -484,6 +506,7 @@ backup_before_start() {
 
 main() {
   check_secrets
+  check_tested_commit || return 0
   prepare_dirs
   check_room
   ensure_node

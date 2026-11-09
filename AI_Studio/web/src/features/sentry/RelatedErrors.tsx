@@ -2,6 +2,7 @@ import { ExternalLink, Radar } from "lucide-react";
 import { useState } from "react";
 import { Button, Callout } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
+import { externalHref } from "../../lib/url";
 import { useFetch } from "../../lib/hooks";
 import { LEVEL_WORD, eventsText, type RelatedAnswer } from "./sentry";
 import "./sentry.css";
@@ -40,7 +41,7 @@ export function RelatedErrors({ testId }: { testId: string }) {
                     <ul className="sentry-list" aria-label="Errors that might be related">
                         {a.issues.map((i) => (
                             <li key={i.id} className="sentry-item">
-                                <a className="sentry-title" href={i.url} target="_blank" rel="noreferrer">
+                                <a className="sentry-title" href={externalHref(i.url)} target="_blank" rel="noreferrer">
                                     {i.title}
                                     <ExternalLink size={13} aria-hidden />
                                     <span className="sr-only"> (opens in a new tab)</span>

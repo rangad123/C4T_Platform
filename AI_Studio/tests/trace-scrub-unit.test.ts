@@ -195,6 +195,32 @@ describe("the runner cleans a trace before it leaves the computer", () => {
         expect(toWireRun(runs[1]!, outcome).notes).toEqual([expect.stringContaining("could not be cleaned of the run's passwords and tokens")]);
         expect(lines.join("\n")).not.toContain(TOKEN);
     });
+
+    it("announces the cleaned trace's size, not the size it had before cleaning (a wrong content-length fails every upload)", async () => {
+        const { TaskRunner } = await import("../src/agent/task-runner.js");
+        const announced = new Map<string, { said: number; real: number }>();
+        const client = {
+            upload: async (_task: string, name: string, file: string, size: number) => {
+                const bytes = fs.readFileSync(file);
+                announced.set(name, { said: size, real: bytes.length });
+                // What fetch does with a body whose length differs from its content-length header.
+                if (size !== bytes.length) throw new Error("Request body length does not match content-length header");
+                return { ref: name, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+            },
+        } as unknown as PlatformClient;
+        const { log } = memoryLogger();
+        const runner = new TaskRunner({ client, cache: {} as never, log, workDir: tmp, hello: { agentId: "a", projectId: "p", protocol: 2, pollSeconds: 1, heartbeatSeconds: 1, maxFileBytes: 10_000_000, serverTime: "now" }, probe: { get: async () => ({}) } as never, env: {} });
+        const file = path.join(tmp, "runner-size.zip");
+        const original = trace();
+        fs.writeFileSync(file, original);
+        const runs = [{ testId: "WEB-3", status: "failed" as const, durationMs: 1, failedStepIndex: 0, steps: [], artifacts: [{ kind: "trace" as const, path: file }], responses: [] }];
+        const uploadAll = (runner as unknown as { uploadAll: (...a: unknown[]) => Promise<{ uploaded: Map<string, string>; skipped: Map<string, string> }> }).uploadAll.bind(runner);
+        const outcome = await uploadAll("task-2", runs, 10_000_000, new AbortController().signal, "task-2", new Map(), "attempt-1", traceSecretsOfRun(env));
+        const a = announced.get("WEB-3-trace.zip")!;
+        expect(a.real).not.toBe(original.length); // cleaning changed the file's length
+        expect(a.said).toBe(a.real);
+        expect(outcome.uploaded.get(file)).toBe("WEB-3-trace.zip");
+    });
 });
 
 describe("round 40 review: what the cleaner missed or got wrong", () => {

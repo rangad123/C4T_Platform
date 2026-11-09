@@ -33,16 +33,17 @@ function privateAddress(raw) {
     if (v4) {
         const a = Number(v4[1]);
         const b = Number(v4[2]);
-        return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+        return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
     }
     if (!h.includes(":")) return false;
-    const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
+    // IPv4-mapped (::ffff:), the old IPv4-compatible form (::) and NAT64 (64:ff9b::) carry an IPv4 address: judged as that address.
+    const hex = /^(?:::ffff:|::|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
     if (hex) {
         const x = parseInt(hex[1], 16);
         const y = parseInt(hex[2], 16);
         return privateAddress([x >> 8, x & 255, y >> 8, y & 255].join("."));
     }
-    const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
+    const dotted = /^(?:::ffff:|::|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(h);
     if (dotted) return privateAddress(dotted[1]);
     return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || /^fe[89a-f]/.test(h) || h.startsWith("ff");
 }

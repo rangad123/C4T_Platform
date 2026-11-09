@@ -9,18 +9,21 @@ export function isPrivateHost(host: string): boolean {
         const [a, b] = host.split(".").map(Number) as [number, number];
         return (
             a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
-            (a === 100 && b >= 64 && b <= 127) // CGNAT
+            (a === 100 && b >= 64 && b <= 127) || // CGNAT
+            (a === 198 && (b === 18 || b === 19)) || // benchmarking
+            a >= 224 // multicast, reserved and broadcast
         );
     }
     if (net.isIPv6(host)) {
         const h = host.toLowerCase();
         // IPv4-mapped addresses: the URL parser normalises ::ffff:127.0.0.1 to ::ffff:7f00:1.
-        const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
+        // The old IPv4-compatible form (::7f00:1) and NAT64 (64:ff9b::7f00:1) are checked the same way.
+        const hex = /^(?:::ffff:|::|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
         if (hex) {
             const [x, y] = [parseInt(hex[1]!, 16), parseInt(hex[2]!, 16)];
             return isPrivateHost(`${x >> 8}.${x & 255}.${y >> 8}.${y & 255}`);
         }
-        const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
+        const dotted = /^(?:::ffff:|::|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(h);
         if (dotted) return isPrivateHost(dotted[1]!);
         // fc00::/7 unique local, fe80::/10 link-local and the old fec0::/10 site-local (fe8x-fefx), ff00::/8 multicast.
         return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || /^fe[89a-f]/.test(h) || h.startsWith("ff");

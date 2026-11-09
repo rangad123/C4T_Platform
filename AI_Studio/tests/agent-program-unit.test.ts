@@ -630,6 +630,17 @@ describe("agent-side cleanup", () => {
         await agentGuard("http://127.0.0.1:5872/x"); // private addresses are the point of running on the agent
     });
 
+    it("on a runner that refuses private addresses, a delete whose name now leads to a private address is not sent", async () => {
+        seen.length = 0;
+        const run = baseRun({ created: [created("1", "2026-01-01T00:00:01Z")] });
+        // The name was public when the run was checked; by the time of the cleanup it leads to this computer (DNS rebinding).
+        const lookup = async () => [{ address: "127.0.0.1" }];
+        const r = await runAgentCleanup([run], [{ testId: "API-001", filename: "x.spec.ts", content: script(["/api/items/{id}"]) }], { baseUrl: `http://rebind.example:${PORT}`, apiToken: "tok-cleanup-2", headless: true }, { refusePrivate: true, lookup });
+        expect(seen).toEqual([]);
+        expect(r).toMatchObject({ created: 1, removed: 0, leftBehind: 1 });
+        expect((run.created![0] as unknown as { reason: string }).reason).toMatch(/private or local address/);
+    });
+
     it("reports what it could not do instead of throwing", async () => {
         const run = baseRun({ created: [created("1", "2026-01-01T00:00:01Z")] });
         const r = await runAgentCleanup([run], [{ testId: "API-001", filename: "x.spec.ts", content: script(["/api/items/{id}"]) }], { baseUrl: "http://127.0.0.1:1", headless: true });

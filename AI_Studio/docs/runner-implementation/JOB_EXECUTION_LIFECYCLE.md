@@ -122,7 +122,7 @@ For each: what happens, the words people see, and how the platform reconciles it
 - The executor's "is a capable runner online" check uses the same rules as offering (owner, chosen runner, code scripts, rejections), so a run that only a shared runner could take, but that has code scripts, is no longer left waiting 30 minutes. *Built.*
 
 ### Runner busy
-The task waits in the queue. If no runner takes it within 30 minutes it fails: "No runner agent picked up this run within 30 minutes." (`agent-store.ts:641`). *Built.*
+The task waits in the queue. If no runner takes it within 30 minutes it fails: "No runner agent picked up this run within 30 minutes." (`AgentStore.sweep`). The 30 minutes count from when the task last went into the queue, so a task put back after a long run whose runner went silent gets its full wait for the re-offer. *Built.*
 
 ### Disconnect mid-run
 - **On the server:** the heartbeats stop, the 60 s lease runs out, and `sweep` puts the task back in the queue while it has used fewer than 2 offers. The second time it fails: "The runner agent stopped responding while it was running these tests." (`agent-store.ts:639-640`). The job ends `FAILED`. *Built.*

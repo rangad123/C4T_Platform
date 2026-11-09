@@ -44,6 +44,9 @@ export interface RunnerChoiceRow {
     /** The server's sentence when the person cannot use it here (for example a personal runner in a project that does not allow them). */
     problem: string | null;
 }
+/** Why the Run controls are off for a person who may look at this project but not run its tests (the server refuses them too). */
+export const NO_RUN_PERMISSION = "Running tests needs permission to run tests in this project. Ask a Project Admin.";
+
 export interface RunnerChoices {
     runners: RunnerChoiceRow[];
     /** The project allows people's own computers ("Allow people's own computers" on the Runners page). */

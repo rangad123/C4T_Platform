@@ -205,6 +205,10 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
     const [password, setPassword] = useState("");
     const [address, setAddress] = useState("");
     const [busy, setBusy] = useState(false);
+    // The saved password is only sent to the server it was entered for (routes/hard-signin.ts): another host or port, or TLS turned
+    // off, needs it again, so the form says so by the field instead of offering to keep it.
+    const saved = mailbox?.kind === "imap" ? mailbox.imap : undefined;
+    const keepsPassword = Boolean(saved?.hasPassword) && saved!.host.toLowerCase() === host.trim().replace(/^\[|\]$/g, "").toLowerCase() && saved!.port === (Number(port) || 993) && (tls || !saved!.tls);
     const [msg, setMsg] = useState<{ tone: "success" | "danger" | "warning"; text: string } | null>(null);
 
     async function run(fn: () => Promise<void>) {
@@ -256,7 +260,12 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
                     </div>
                     <div className="field">
                         <label htmlFor="imap-pass">Password</label>
-                        <input id="imap-pass" className="input" type="password" autoComplete="new-password" value={password} placeholder={mailbox?.imap?.hasPassword ? "Saved — leave empty to keep" : ""} onChange={(e) => setPassword(e.target.value)} />
+                        <input id="imap-pass" className="input" type="password" autoComplete="new-password" value={password} placeholder={keepsPassword ? "Saved — leave empty to keep" : ""} aria-describedby={saved?.hasPassword && !keepsPassword ? "imap-pass-again" : undefined} onChange={(e) => setPassword(e.target.value)} />
+                        {saved?.hasPassword && !keepsPassword && (
+                            <span className="t-meta" id="imap-pass-again">
+                                Enter the password again: the saved one is only sent to the server it was entered for.
+                            </span>
+                        )}
                     </div>
                     <label className="row" style={{ minHeight: 44 }}>
                         <input type="checkbox" checked={tls} onChange={(e) => setTls(e.target.checked)} /> Use TLS (port 993)
@@ -277,7 +286,7 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
                     icon={KeyRound}
                     tip={kind === "inbound" && mailbox?.kind === "inbound" ? "Makes a new private address and shows it once. The old address stops working." : undefined}
                     loading={busy}
-                    disabled={busy || (kind === "imap" && (!host.trim() || !user.trim() || (!password && !mailbox?.imap?.hasPassword)))}
+                    disabled={busy || (kind === "imap" && (!host.trim() || !user.trim() || (!password && !keepsPassword)))}
                     onClick={() =>
                         run(async () => {
                             const r = await api<{ inboundPath?: string }>(`/projects/${projectId}/mailbox`, {

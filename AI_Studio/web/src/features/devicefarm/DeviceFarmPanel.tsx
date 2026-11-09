@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { BadgeKey, keyEntries } from "../../components/Tooltip";
 import { DEVICE_FARM_RESULT } from "../../lib/help";
+import { externalHref } from "../../lib/url";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 
@@ -306,7 +307,7 @@ function RecentSessions({ projectId }: { projectId: string }) {
                         <span>{x.device}</span>
                         <Badge tone={x.status === "passed" ? "success" : x.status === "failed" ? "danger" : "warning"} tip={DEVICE_FARM_RESULT[farmResult(x.status)]}>{x.status === "passed" ? "Passing" : x.status === "failed" ? "Failing" : "Could not run"}</Badge>
                         {x.link && (
-                            <a href={x.link} target="_blank" rel="noreferrer noopener">
+                            <a href={externalHref(x.link)} target="_blank" rel="noreferrer noopener">
                                 Video and logs
                             </a>
                         )}

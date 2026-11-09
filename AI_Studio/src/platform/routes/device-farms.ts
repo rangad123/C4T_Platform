@@ -10,6 +10,7 @@ import { wdRequest, WebDriverError } from "../../engine/mobile/cloud/webdriver.j
 import { farmStoreFor } from "../device-farm-run.js";
 import { HttpError } from "../http-error.js";
 import { assertAllowedTarget } from "../net-guard.js";
+import { NEW_PASSWORD_NEEDED } from "./shared-integrations.js";
 import type { RouteCtx } from "./types.js";
 
 const Label = z.string().trim().min(1, "Give the connection a name.").max(FARM_LIMITS.labelMax);
@@ -48,6 +49,16 @@ const ChoiceBody = z
         matrix: z.boolean().default(false),
     })
     .strict();
+
+/** The site (scheme, host and port) of an address, or the address itself when it is not one. */
+const siteOf = (url: string | null | undefined): string => {
+    if (!url) return "";
+    try {
+        return new URL(url).origin;
+    } catch {
+        return url;
+    }
+};
 
 /** The settings a connection would have, checked the way a run checks them (plain sentence on a problem). */
 async function assertUsable(conn: FarmConnection): Promise<void> {
@@ -96,6 +107,8 @@ export function registerDeviceFarmRoutes(ctx: RouteCtx): void {
         if (!current) throw new HttpError(404, "Device farm connection not found");
         if (current.provider !== "appium" && body.hubUrl) throw new HttpError(400, "Only “Any Appium server” takes an address: the other farms have fixed ones.");
         if (current.provider !== "saucelabs" && body.region) throw new HttpError(400, "Only Sauce Labs has data centres to choose from.");
+        // The stored access key is only sent to the server it was entered for: an Appium address on another site needs it again.
+        if (current.accessKey && body.accessKey === undefined && body.hubUrl !== undefined && siteOf(body.hubUrl) !== siteOf(current.hubUrl)) throw new HttpError(400, NEW_PASSWORD_NEEDED);
         const next: FarmConnection = {
             ...current,
             ...(body.label ? { label: body.label } : {}),

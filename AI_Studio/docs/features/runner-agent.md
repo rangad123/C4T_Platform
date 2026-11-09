@@ -76,7 +76,7 @@ A cancelled run on an agent keeps no partial results: see "Cancelling a run" in 
 
 ### Failures that are not test failures
 
-If the agent says `ok: false`, disappears (no heartbeat for 60 seconds, twice) or never shows up, the run fails as a **runner problem** with a plain message ("The runner agent stopped responding while it was running these tests."). The platform never invents a failing verdict for a test in that case: it stops the job, exactly as it does when a tool is missing locally. After 60 seconds without a heartbeat a task is offered once more (to the same or another agent); a second loss fails it. A task nobody picks up for 30 minutes fails; a queued task with no capable agent online fails after about 90 seconds. Cancelling a job cancels its task.
+If the agent says `ok: false`, disappears (no heartbeat for 60 seconds, twice) or never shows up, the run fails as a **runner problem** with a plain message ("The runner agent stopped responding while it was running these tests."). The platform never invents a failing verdict for a test in that case: it stops the job, exactly as it does when a tool is missing locally. After 60 seconds without a heartbeat a task is offered once more (to the same or another agent); a second loss fails it. A task nobody picks up for 30 minutes fails (counted from when it last went into the queue, so a re-offered task gets its full wait); a queued task with no capable agent online fails after about 90 seconds. Cancelling a job cancels its task.
 
 ### Cleanup of test data
 
@@ -108,6 +108,7 @@ When they are refused (`src/agent/address-guard.ts`):
 - Before a web or API run or a recording starts, the runner looks up its addresses **on its own network**: the site, the API address and every `http(s)` value of the environment. A private, loopback or link-local address, or a name that cannot be found, ends the task with a plain sentence. A protocol-2 runner turns the task down with the reason `private-target`, so the platform can offer it to another runner.
 - The run's browser and the tests' API calls go through the runner's own address guard (`src/engine/discovery/guard-proxy.ts`, started inside the agent on `127.0.0.1` for each task). It looks up every name itself and refuses a private address on every request, frame and redirect hop, so a public page that redirects to the person's router is refused before any connection is made. The config gets Playwright's `proxy` option through `AITP_ADDRESS_GUARD` (`src/engine/net/test-proxy.ts`); the platform never sets it. Generated scripts also get `BLOCK_PRIVATE_TARGETS=true`, so a step that names another private address is refused with the usual sentence.
 - Recordings and live sessions on such a runner open their browser through the same guard (`src/agent/record-task.ts`, `record-child.ts`).
+- The cleanup after the run (`env.cleanup = "agent"`, `src/agent/cleanup.ts`) runs after the task's guard is closed, so each delete looks its address up again on the runner's network and is not sent when the name now leads to a private, loopback or link-local address; the record is reported as left behind with the reason.
 - A runner started with `--proxy-tests` cannot check where the company proxy sends a test, so it refuses such runs with a sentence that says what to do.
 
 What the guard does **not** cover:

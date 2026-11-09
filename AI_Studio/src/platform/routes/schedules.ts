@@ -9,6 +9,7 @@ import { HttpError } from "../http-error.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import { getScheduleServices } from "../schedule-services.js";
 import { sharedOrigin, sharedRowMessage } from "../shared-integrations.js";
+import { NEW_PASSWORD_NEEDED } from "./shared-integrations.js";
 import { CadenceSchema, describeCadence, SCHEDULE_KINDS, type Schedule } from "../schedule-store.js";
 import { RunbookOverlapError, getRunbookServices } from "../runbook-runner.js";
 import { runsCanStartHere, suiteStoreFor } from "../suite-run.js";
@@ -294,6 +295,12 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
             if (recipients !== undefined || smtp !== undefined) {
                 // Check the settings the channel would end up with before saving anything.
                 const cur = svc.alertStore.emailOf(cid);
+                // The stored password is only sent to the server it was entered for: another host or port, or TLS turned off, needs it again.
+                const was = cur.smtp;
+                if (smtp && was?.password && smtp.password === undefined && smtp.username !== null) {
+                    const moves = (smtp.host !== undefined && smtp.host.toLowerCase() !== (was.host ?? "").toLowerCase()) || (smtp.port !== undefined && smtp.port !== was.port) || (smtp.secure === false && was.secure);
+                    if (moves) throw new HttpError(400, NEW_PASSWORD_NEEDED);
+                }
                 const merged = smtp === undefined ? cur.smtp : smtp === null ? undefined : mergeSmtp(cur.smtp, smtp);
                 const effective = merged ?? serverSmtp(p.config);
                 if (!effective) throw new HttpError(422, NO_MAIL_SERVER_MESSAGE);

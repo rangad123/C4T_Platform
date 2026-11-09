@@ -230,8 +230,15 @@ export async function sendEmail(smtp: SmtpSettings, to: string[], mail: BuiltEma
     return last;
 }
 
+export const SMTP_NEW_PASSWORD_NEEDED = "Enter the password or access key again when you change the server: a stored one is only sent where it was entered for.";
+
 /** A channel's own settings after a change. Needs a host and a sender once merged; a user name given without a password keeps the old one. */
 export function mergeSmtp(cur: SmtpSettings | undefined, patch: SmtpPatchT): SmtpSettings {
+    // The stored password is only ever sent to the server it was entered for, whoever calls this (the route says so first, in the same words).
+    if (cur?.password && patch.password === undefined && patch.username !== null) {
+        const moves = (patch.host !== undefined && patch.host.toLowerCase() !== (cur.host ?? "").toLowerCase()) || (patch.port !== undefined && patch.port !== cur.port) || (patch.secure === false && cur.secure);
+        if (moves) throw new HttpError(400, SMTP_NEW_PASSWORD_NEEDED);
+    }
     const host = patch.host ?? cur?.host;
     const from = patch.from ?? cur?.from;
     if (!host || !from) throw new HttpError(400, "Give the mail server's host and the sender address");

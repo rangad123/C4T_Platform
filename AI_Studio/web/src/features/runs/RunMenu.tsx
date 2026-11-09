@@ -1,6 +1,6 @@
 import { ChevronDown, Play } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, type TestSummary } from "../../api";
+import { api, type ProjectDetail, type TestSummary } from "../../api";
 import { Button, Callout, Disclosure, LinkButton } from "../../components/ui";
 import { HelpTip } from "../../components/Tooltip";
 import { help } from "../../lib/help";
@@ -10,7 +10,7 @@ import { routes } from "../../lib/router";
 import type { RunnerChoice } from "../agents/agents";
 import { PRODUCTION_WARNING, type Environment } from "../environments/environments";
 import { announceRunsChanged, planSentence, useActiveRun } from "./runs";
-import { ADD_THIS_COMPUTER_HREF, DISPATCH_OFF, NO_NEEDS, NO_RUNNER_ONLINE, NO_RUNNER_PERSONAL_HINT, NO_RUNNER_TEAM_HINT, NO_RUNNER_TIP, NO_RUNNER_TITLE, PROJECT_ON_SERVER, RUNS_OFF_HERE, RUNS_OFF_TIP, defaultChoice, executionModeOf, codeScriptsNotice, kindWord, sortChoices, useRunnerChoices, whyNotRunner, type RunNeeds } from "./runs-here";
+import { ADD_THIS_COMPUTER_HREF, DISPATCH_OFF, NO_NEEDS, NO_RUN_PERMISSION, NO_RUNNER_ONLINE, NO_RUNNER_PERSONAL_HINT, NO_RUNNER_TEAM_HINT, NO_RUNNER_TIP, NO_RUNNER_TITLE, PROJECT_ON_SERVER, RUNS_OFF_HERE, RUNS_OFF_TIP, defaultChoice, executionModeOf, codeScriptsNotice, kindWord, sortChoices, useRunnerChoices, whyNotRunner, type RunNeeds } from "./runs-here";
 import { resetSentence, type ResetAnswer } from "../webpages/webpages";
 import "./runs.css";
 
@@ -72,6 +72,11 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     }, [open]);
     const active = useActiveRun(projectId);
     const busyRun = Boolean(active.job);
+    // What this person may do in this project: without ai_studio.tests.run, Run is shown switched off with the reason, not as a
+    // button that only answers with a refusal. An older server sends no `access`: then nothing is assumed.
+    const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
+    const perms = project.data?.access?.permissions;
+    const noPermission = Boolean(perms) && !perms!.includes("ai_studio.tests.run");
 
     const config = useConfig();
     // Runners mode (the hosted platform): every run goes to a runner, so "This server" is never offered, and Run waits for a runner
@@ -290,7 +295,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     return (
         <div className={`run-menu${split ? " is-split" : ""}`} ref={root} data-tour="run">
             {split && (
-                <Button variant={variant} size={size} disabled={busyRun || starting || off || noRunner || (runnersOnly && choicesPending)} loading={starting && !open} onClick={() => void start(true)} tip={off ? offText : busyRun ? BUSY : noRunner ? NO_RUNNER_TIP : runnersOnly ? "Runs it now on the project’s default runner, or on a runner of yours or the team’s that is online." : "Runs it now where this project runs its tests."} className="run-main">
+                <Button variant={variant} size={size} disabled={noPermission || busyRun || starting || off || noRunner || (runnersOnly && choicesPending)} loading={starting && !open} onClick={() => void start(true)} tip={noPermission ? NO_RUN_PERMISSION : off ? offText : busyRun ? BUSY : noRunner ? NO_RUNNER_TIP : runnersOnly ? "Runs it now on the project’s default runner, or on a runner of yours or the team’s that is online." : "Runs it now where this project runs its tests."} className="run-main">
                     {main}
                 </Button>
             )}
@@ -302,8 +307,8 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                 aria-expanded={open}
                 aria-controls={open ? panelId : undefined}
                 aria-label={split ? "More ways to run" : undefined}
-                disabled={busyRun && !open}
-                tip={off && !open ? offText : busyRun && !open ? BUSY : noRunner && !open ? NO_RUNNER_TIP : split ? "Choose which tests, where they run and how." : undefined}
+                disabled={noPermission || (busyRun && !open)}
+                tip={noPermission ? NO_RUN_PERMISSION : off && !open ? offText : busyRun && !open ? BUSY : noRunner && !open ? NO_RUNNER_TIP : split ? "Choose which tests, where they run and how." : undefined}
                 onClick={() => setOpen((o) => !o)}
             >
                 {split ? null : main}
@@ -476,7 +481,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                     {error && <Callout tone="danger">{error}</Callout>}
                     <div className="run-foot">
                         <Button onClick={() => setOpen(false)}>Close</Button>
-                        <Button variant="primary" icon={Play} loading={starting} disabled={off || count === 0 || (needsConfirm && !confirmProduction) || busyRun || envsPending || choicesPending || chosenPlace === null} onClick={() => void start()}>
+                        <Button variant="primary" icon={Play} loading={starting} disabled={noPermission || off || count === 0 || (needsConfirm && !confirmProduction) || busyRun || envsPending || choicesPending || chosenPlace === null} onClick={() => void start()}>
                             Start run
                         </Button>
                     </div>

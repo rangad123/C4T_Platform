@@ -25,6 +25,7 @@ Files:
 - `nginx-site.conf` is the site, before certbot adds TLS.
 - `.github/workflows/ai-studio-ci.yml` checks a push.
 - `.github/workflows/ai-studio-deploy.yml` deploys after CI succeeds on `main`, or when run by hand.
+  A deploy started by CI passes the commit CI checked (`TESTED_SHA`). The box resets to `main` as it is then, so when `main` already holds newer AI Studio changes, `deploy.sh` restarts nothing and says so: the newer commit is deployed by its own CI run once that passes. A run by hand deploys `main`. This guard only decides what is restarted: the checkout on the box has already moved to the newer `main`, and AI Studio runs from that checkout, so a restart before the newer commit's own deploy (pm2's memory limit, a crash or a reboot) would start the newer, not yet tested source with the older packages and web build. If its CI fails, run the deploy by hand for the last good commit.
 
 ### Runner downloads
 

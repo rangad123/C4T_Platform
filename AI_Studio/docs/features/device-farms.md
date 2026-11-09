@@ -58,7 +58,8 @@ The result of each session is reported back to the provider (BrowserStack, Sauce
 
 - Credentials are write-only (the API only says `credentialsSet`), encrypted at rest, sent only in the `Authorization` header and only to the
   provider's own fixed addresses (a person never types an address for BrowserStack, Sauce Labs or LambdaTest). For "Any Appium server" the address
-  passes the outbound guard, may not contain credentials, and credentials are only sent over https (or to this computer). Links are built from the
+  passes the outbound guard, may not contain credentials, and credentials are only sent over https (or to this computer). Moving an Appium address to another
+  site needs the access key again: a stored key is only sent where it was entered for. Links are built from the
   session id only. Messages from a provider have the account's secrets removed before they reach a result.
 - The project's test account is typed on the farm's phone when a step uses `{{credentials.*}}`: the password then exists on the provider's side
   (BrowserStack, Sauce Labs and LambdaTest can show typed text in their command logs). **Use a test account, not a real one.**

@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, csrfHeader, getKey } from "../../api";
 import { useFetch } from "../../lib/hooks";
-import type { Tone } from "../../lib/labels";
+import { signedOutText, type Tone } from "../../lib/labels";
 import type {
     AssessmentState,
     Confidence,
@@ -363,7 +363,7 @@ export function securityError(e: unknown): string {
     if (e instanceof ApiError) {
         if (e.status === 0) return "We couldn’t reach the platform server. Check that it is running and try again.";
         if (e.status === 403) return e.message && !/^forbidden$/i.test(e.message) ? e.message : "Your role in this project does not allow this. Ask a project owner.";
-        if (e.status === 401) return "Sign in again, or add the access key in Settings.";
+        if (e.status === 401) return signedOutText(e.message);
         return e.message || "Something went wrong. Try again.";
     }
     return e instanceof Error ? e.message : String(e);

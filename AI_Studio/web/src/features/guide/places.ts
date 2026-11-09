@@ -523,10 +523,10 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     settings: {
         title: "Settings",
-        what: "How this whole platform is set up: the AI model, the access key and what kinds of tests are allowed. It affects every project.",
+        what: "How this whole platform is set up: the AI model, the people who use it and what kinds of tests are allowed. It affects every project.",
         canDo: [
             { text: "Check that the AI model is connected.", button: "Read about the AI model", to: { topic: "settings-page", search: "AI model settings" } },
-            { text: "See whether an access key protects this platform.", button: "Read about the access key", to: { topic: "settings-page", search: "access key" } },
+            { text: "Let colleagues in with their own accounts and roles.", button: "Read about people and access", to: { topic: "people-and-access", search: "people" } },
             { text: "Read which kinds of tests can run here.", button: "Read about settings", to: { topic: "settings-page", search: "settings" } },
         ],
         words: ["access-key", "frameworks"],

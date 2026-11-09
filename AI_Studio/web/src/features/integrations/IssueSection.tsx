@@ -2,6 +2,7 @@ import { Bug, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../api";
 import { Button, Callout, LinkButton, Menu, MenuItem, Skeleton } from "../../components/ui";
+import { externalHref } from "../../lib/url";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
@@ -77,7 +78,7 @@ export function IssueSection({ testId, projectId }: { testId: string; projectId:
                     {made.map((l) => (
                         <li key={l.id}>
                             <Tooltip content={l.title ?? undefined}>
-                                <a className="chip" href={l.url} target="_blank" rel="noreferrer">
+                                <a className="chip" href={externalHref(l.url)} target="_blank" rel="noreferrer">
                                     {TRACKER_LABEL[l.provider]} {l.externalId}
                                     <ExternalLink size={13} aria-hidden />
                                     <span className="sr-only"> (opens in a new tab)</span>

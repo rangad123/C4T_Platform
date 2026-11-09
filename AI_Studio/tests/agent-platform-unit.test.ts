@@ -263,6 +263,28 @@ describe("the task state machine", () => {
         expect(store.getTask(t)!.status).toBe("cancelled");
     });
 
+    it("a task that ran longer than the queue limit and lost its runner is offered again, not failed as never picked up", () => {
+        const id = newTask();
+        const a = agentFor("long-run");
+        store.claimFor(id, a.agent, LEASE);
+        // The runner works on it, beating, for longer than a task may wait in the queue.
+        for (let ran = 0; ran <= QUEUE_MAX_MS; ran += LEASE - 5_000) {
+            now += LEASE - 5_000;
+            expect(store.heartbeat(id, a.agent.id, LEASE, {})).toBe(true);
+        }
+        // Then it goes silent: the sweep puts the task back for its one re-offer.
+        now += LEASE + 1;
+        store.sweep();
+        expect(store.getTask(id)).toMatchObject({ status: "queued", offers: 1 });
+        // It still waits in the queue its full time from being put back, and only then times out.
+        now += QUEUE_MAX_MS - 1;
+        store.sweep();
+        expect(store.getTask(id)!.status).toBe("queued");
+        now += 2;
+        store.sweep();
+        expect(store.getTask(id)).toMatchObject({ status: "failed", error: "No runner agent picked up this run within 30 minutes." });
+    });
+
     it("finished tasks are removed after 24 hours, with their files listed for removal; long-gone agents are forgotten", () => {
         const id = newTask();
         const a = agentFor("prune");

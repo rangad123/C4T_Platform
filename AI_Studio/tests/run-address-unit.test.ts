@@ -48,6 +48,21 @@ describe("the check made when a step runs", () => {
         for (const h of ["fe90::1", "febf::1"]) expect(isPrivateHost(h), h).toBe(true);
         expect(isPrivateHost("fe7f::1")).toBe(false);
     });
+
+    it("agrees with platform/net-guard.ts on benchmarking, multicast and reserved IPv4, IPv4-compatible IPv6 and NAT64", () => {
+        const refused = ["198.18.0.1", "198.19.255.255", "224.0.0.1", "239.255.255.250", "240.0.0.1", "255.255.255.255", "::7f00:1", "::127.0.0.1", "::a00:1", "64:ff9b::7f00:1", "64:ff9b::10.0.0.1", "64:ff9b::a9fe:a9fe"];
+        const allowed = ["198.17.0.1", "198.20.0.1", "223.255.255.255", "::808:808", "64:ff9b::808:808", "64:ff9b::1.1.1.1"];
+        for (const h of refused) {
+            expect(isPrivateHost(h), h).toBe(true);
+            expect(rt.privateAddress(h), h).toBe(true);
+        }
+        for (const h of allowed) {
+            expect(isPrivateHost(h), h).toBe(false);
+            expect(rt.privateAddress(h), h).toBe(false);
+        }
+        // the URL parser's own form of a bracketed address is what the helper sees
+        expect(rt.privateAddress(new URL("http://[::127.0.0.1]/").hostname.replace(/^\[|\]$/g, ""))).toBe(true);
+    });
 });
 
 describe("the rule when a test is saved", () => {

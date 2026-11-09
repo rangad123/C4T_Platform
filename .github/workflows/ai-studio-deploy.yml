@@ -330,11 +330,13 @@ jobs:
           AI_STUDIO_API_KEY: ${{ secrets.AI_STUDIO_API_KEY }}
           AI_STUDIO_SERVICE_TOKEN: ${{ secrets.AI_STUDIO_SERVICE_TOKEN }}
           ENABLE_SHARED_SIGN_IN: ${{ inputs.enable_shared_sign_in && 'true' || 'false' }}
+          # The commit the CI run checked: deploy.sh starts nothing newer (empty for a run by hand, which deploys main).
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha || '' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: AI_STUDIO_SECRET_KEY,AI_STUDIO_API_KEY,AI_STUDIO_SERVICE_TOKEN,ENABLE_SHARED_SIGN_IN
+          envs: AI_STUDIO_SECRET_KEY,AI_STUDIO_API_KEY,AI_STUDIO_SERVICE_TOKEN,ENABLE_SHARED_SIGN_IN,TESTED_SHA
           # The action stops a command after 10 minutes unless told otherwise.
           command_timeout: 40m
           script_stop: true

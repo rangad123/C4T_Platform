@@ -37,6 +37,8 @@ const MANAGE: Permission = "ai_studio.ai_keys.manage";
 const LINK: Permission = "ai_studio.project.settings";
 const CANNOT_MANAGE = "You can set up integrations only for your own organisation.";
 export const NEW_SECRET_NEEDED = "Enter the token or the webhook address again when you change where it goes: a stored secret is only sent where it was entered for.";
+/** The same rule for a password or an access key kept with a server's address (an alert channel's mail server, a device farm, the test mailbox). */
+export const NEW_PASSWORD_NEEDED = "Enter the password or access key again when you change the server: a stored one is only sent where it was entered for.";
 const LABEL: Record<SharedKind, string> = { jira: "Jira", github: "GitHub Issues", notion: "Notion", sentry: "Sentry", slack: "Slack", teams: "Microsoft Teams", webhook: "Webhook" };
 
 const HttpUrl = z

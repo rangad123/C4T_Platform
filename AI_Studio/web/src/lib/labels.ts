@@ -278,13 +278,23 @@ export function friendlyJobErrors(error: string | null | undefined): FriendlyErr
     return out;
 }
 
+/**
+ * A refused sign-in (401). The server's own sentence says what to do (a Crowd4Test session to renew, a live-update link that was
+ * used up); its bare refusals of a missing or wrong access key do not, so they become one plain sentence. Settings has no
+ * access-key card: the key is entered on the sign-in screen.
+ */
+export function signedOutText(message: string): string {
+    const bare = !message.trim() || /^unauthori[sz]ed$/i.test(message.trim()) || /x-api-key|^sign in first, or send an access key/i.test(message);
+    return bare ? "You are signed out, or the access key was not accepted. Reload the page to sign in again." : message;
+}
+
 /** API errors from user actions → a sentence for the user. */
 export function describeApiError(e: unknown): string {
     if (e instanceof Error) {
         const status = (e as { status?: number }).status;
         if (status === 0) return "We couldn’t reach the platform server. Check that it is running and try again.";
         if (status === 409) return e.message.startsWith("Job ") ? "A run is already in progress for this project. Wait for it to finish or stop it first." : e.message;
-        if (status === 401) return "The server requires an API key. Add it in Settings.";
+        if (status === 401) return signedOutText(e.message);
         if (status === 400 && /private|loopback/i.test(e.message)) return "This server is configured to block private or local addresses.";
         return e.message;
     }

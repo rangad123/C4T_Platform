@@ -35,7 +35,9 @@ and the **Recent alerts** log work the same for every type. See [schedules.md](s
 * **The user name and password are secrets.** In a channel they are stored encrypted (the same `SecretBox` as webhook addresses),
   can be written but never read back (the API says only whether a sign-in is saved), and are never put in a message, a log
   line or an error text. In the environment they are only read by the server process. To change a password, send the new one
-  (`PATCH …/alert-channels/:id` with `{ "smtp": { "password": "…" } }`); anything left out stays as it was. `{ "smtp": null }`
+  (`PATCH …/alert-channels/:id` with `{ "smtp": { "password": "…" } }`); anything left out stays as it was. A stored password
+  is only sent to the server it was entered for: a new host or port, or turning the secure connection off, needs the password
+  again (HTTP 400 otherwise). `{ "smtp": null }`
   goes back to the server-wide settings.
 * **No mail server set up?** Creating an email channel answers HTTP 422 with a plain sentence naming what to set (`SMTP_HOST` and
   `SMTP_FROM`, or the channel's own settings). The form tells the same thing.

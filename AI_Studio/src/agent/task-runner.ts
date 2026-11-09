@@ -358,7 +358,7 @@ export class TaskRunner {
             live?.push({ type: "phase", phase });
             result = await this.execute(task, dir, { abort, isStopped: () => stopReason, setProc: (p) => (proc = p), pushLog: (l) => {
                     // Protocol 2: a line is a live event; protocol 1: it goes with the next heartbeat, as before.
-                    if (live) return live.push({ type: "log", line: l.slice(0, 300) });
+                    if (live) return live.push({ type: "log", line: log.redact(l).slice(0, 300) }); // masked before it is cut: a cut secret is not found
                     pendingLogs.push(l);
                     if (pendingLogs.length > 400) pendingLogs.splice(0, pendingLogs.length - 400); // a flood keeps the newest
                     pacer.nudge();
@@ -652,12 +652,12 @@ export class TaskRunner {
         if (infra) return fail(infra);
         ctl.setDone(runs.length);
         // Frameworks that report no live tests (phones, iOS, Windows desktop): each test's outcome now, before the files are sent.
-        if (ctl.live && !sawTests) for (const r of runs) ctl.live.push({ type: "test_finished", testId: r.testId, ...(r.variant ? { variant: r.variant } : {}), status: r.status, durationMs: Number.isFinite(r.durationMs) ? Math.max(0, r.durationMs) : 0, ...(r.error ? { error: r.error.slice(0, 2000) } : {}) });
+        if (ctl.live && !sawTests) for (const r of runs) ctl.live.push({ type: "test_finished", testId: r.testId, ...(r.variant ? { variant: r.variant } : {}), status: r.status, durationMs: Number.isFinite(r.durationMs) ? Math.max(0, r.durationMs) : 0, ...(r.error ? { error: log.redact(r.error).slice(0, 2000) } : {}) });
 
         // 4. cleanup of the records the run created
         if (task.env.cleanup === "agent") {
             if (runs.some((r) => (r.created?.length ?? 0) > 0)) ctl.pushLog("Removing the test data the run created");
-            const c = await runAgentCleanup(runs, scripts, runEnv, { signal: ctl.abort.signal, ...(this.deps.deleteTimeoutMs ? { deleteTimeoutMs: this.deps.deleteTimeoutMs } : {}) });
+            const c = await runAgentCleanup(runs, scripts, runEnv, { signal: ctl.abort.signal, ...(this.refusesPrivate() ? { refusePrivate: true } : {}), ...(this.deps.deleteTimeoutMs ? { deleteTimeoutMs: this.deps.deleteTimeoutMs } : {}) });
             if (c.created > 0) log.info(`Task ${short}: ${c.summary}`);
         }
         stopCheck();
@@ -827,7 +827,7 @@ export class TaskRunner {
                 out.uploaded.set(item.path, sent);
                 continue;
             }
-            const st = await fs.stat(item.path).catch(() => undefined);
+            let st = await fs.stat(item.path).catch(() => undefined);
             if (!st?.isFile()) {
                 out.skipped.set(item.path, "a file was missing when it should have been uploaded");
                 continue;
@@ -846,6 +846,18 @@ export class TaskRunner {
                     log.warn(`Task ${short}: ${item.name} was not uploaded: ${clean.reason}.`);
                     await fs.rm(item.path, { force: true }).catch(() => undefined);
                     continue;
+                }
+                // Cleaning rewrites the file (a masked value changes its length): the size sent with the upload is the cleaned file's.
+                if (clean.masked > 0) {
+                    st = await fs.stat(item.path).catch(() => undefined);
+                    if (!st?.isFile()) {
+                        out.skipped.set(item.path, "a file could not be read");
+                        continue;
+                    }
+                    if (st.size > maxBytes) {
+                        out.skipped.set(item.path, `${item.name} (${mb(st.size)}) is larger than the ${mb(maxBytes)} limit`);
+                        continue;
+                    }
                 }
             }
             const local = await sha256OfFile(item.path).catch(() => undefined);

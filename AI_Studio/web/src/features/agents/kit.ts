@@ -1,5 +1,6 @@
 /** "Add a runner" as a guided download: the shapes of the runner-kit API and the small rules the panel uses. */
 import { csrfHeader, getKey } from "../../api.js";
+import { signedOutText } from "../../lib/labels.js";
 
 export type KitPlatform = "windows" | "unix";
 /** "complete" carries its own Node.js and test tools; "installer" is the setup program (Windows) or app (Mac); "files" is the plain zip with the start scripts. */
@@ -296,7 +297,7 @@ export function downloadErrorText(e: unknown): { text: string; limit: boolean } 
     if (e instanceof KitError) {
         if (e.status === 409) return { text: e.message, limit: true };
         if (e.status === 503) return { text: /\bask\b/i.test(e.message) ? e.message : `${e.message} Ask whoever runs the platform to prepare the runner download.`, limit: false };
-        if (e.status === 401) return { text: "The server requires an API key. Add it in Settings, then try again.", limit: false };
+        if (e.status === 401) return { text: signedOutText(e.message), limit: false };
         return { text: e.message, limit: false };
     }
     return { text: e instanceof Error ? e.message : String(e), limit: false };

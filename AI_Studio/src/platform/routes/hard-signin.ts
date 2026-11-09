@@ -18,6 +18,7 @@ import { plainImapProblem, testImap, type ImapOptions } from "../mailbox/imap.js
 import { assertAllowedTarget } from "../net-guard.js";
 import { SecretBox } from "../secrets.js";
 import { ACCOUNT_NAME, MAIN_ACCOUNT, type ImapConfig } from "../session-store.js";
+import { NEW_PASSWORD_NEEDED } from "./shared-integrations.js";
 import type { RouteCtx } from "./types.js";
 
 /** Tests set the browser launcher, the address guard and IMAP TLS options here before building the server. Normal runs leave it empty. */
@@ -202,9 +203,13 @@ export function registerHardSignInRoutes(ctx: RouteCtx): void {
             return { mailbox: store.publicMailbox(id), inboundPath: inboundPath(token!) };
         }
         const old = store.mailbox(id);
-        const password = body.imap.password ?? (old?.kind === "imap" ? old.imap.password : undefined);
+        const host = body.imap.host.replace(/^\[|\]$/g, "");
+        // The stored password is only sent to the server it was entered for: another host or port, or TLS turned off, needs it again.
+        const sameServer = old?.kind === "imap" && old.imap.host.toLowerCase() === host.toLowerCase() && old.imap.port === body.imap.port && (body.imap.tls || !old.imap.tls);
+        if (!body.imap.password && old?.kind === "imap" && old.imap.password && !sameServer) throw new HttpError(400, NEW_PASSWORD_NEEDED);
+        const password = body.imap.password ?? (sameServer ? old.imap.password : undefined);
         if (!password) throw new HttpError(400, "The mailbox needs a password.");
-        const imap: ImapConfig = { host: body.imap.host.replace(/^\[|\]$/g, ""), port: body.imap.port, tls: body.imap.tls, user: body.imap.user, password, ...(body.imap.mailbox ? { mailbox: body.imap.mailbox } : {}) };
+        const imap: ImapConfig = { host, port: body.imap.port, tls: body.imap.tls, user: body.imap.user, password, ...(body.imap.mailbox ? { mailbox: body.imap.mailbox } : {}) };
         const problem = plainImapProblem(imap);
         if (problem) throw new HttpError(400, problem);
         await guard(`http://${imap.host.includes(":") ? `[${imap.host}]` : imap.host}:${imap.port}/`);

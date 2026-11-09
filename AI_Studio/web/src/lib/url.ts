@@ -18,3 +18,17 @@ export function normalizeUrl(raw: string): { url?: string; error?: string } {
         return { error: "That doesn’t look like a valid address. Try something like https://example.com." };
     }
 }
+
+/**
+ * An address from another system (an issue tracker, Sentry, a device farm) made safe for a link: only http(s) is kept. React 18
+ * still follows a `javascript:` href, so an address such a system sent back is never used as it came.
+ */
+export function externalHref(raw: string | null | undefined): string | undefined {
+    if (!raw) return undefined;
+    try {
+        const u = new URL(raw);
+        return u.protocol === "http:" || u.protocol === "https:" ? u.href : undefined;
+    } catch {
+        return undefined;
+    }
+}
