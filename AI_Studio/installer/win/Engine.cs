@@ -878,21 +878,24 @@ namespace AITestingRunner
                     catch (Exception) { System.Threading.Thread.Sleep(400); }
                 }
             }
-            // A folder another program still held (one that was just ending, often) is removed a few seconds after this program exits, by the
-            // same kind of small helper that removes this program itself, and the install folder with it when it is then empty.
+            // A folder another program still holds (an antivirus scan of files just written, or a program that is just ending) is removed after
+            // this program exits by a small helper that tries again every 5 seconds for up to 2 minutes, then removes the install folder when it
+            // is empty. Paths go in single quotes, with any quote doubled, so nothing in a path is read as a command.
             if (stuck.Count > 0 && !selfRemovalScheduled)
             {
-                StringBuilder cmdText = new StringBuilder("/c ping -n 6 127.0.0.1 >nul");
-                foreach (string d in stuck) cmdText.Append(" & rmdir /s /q " + Util.Quote(d));
-                cmdText.Append(" & rmdir " + Util.Quote(L.Root));
+                StringBuilder ps = new StringBuilder("$ErrorActionPreference='SilentlyContinue'; $dirs=@(");
+                for (int i = 0; i < stuck.Count; i++) ps.Append((i > 0 ? "," : "") + "'" + stuck[i].Replace("'", "''") + "'");
+                ps.Append("); for($n=0; $n -lt 24; $n++){ Start-Sleep -Seconds 5; foreach($d in $dirs){ if(Test-Path -LiteralPath $d){ Remove-Item -LiteralPath $d -Recurse -Force } }; if(-not ($dirs | Where-Object { Test-Path -LiteralPath $_ })){ break } }; ");
+                ps.Append("$r='" + L.Root.Replace("'", "''") + "'; if((Test-Path -LiteralPath $r) -and -not (Get-ChildItem -LiteralPath $r -Force)){ Remove-Item -LiteralPath $r -Force }");
+                string cmdLine = "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"" + ps.ToString().Replace("\"", "\\\"") + "\"";
                 try
                 {
-                    System.Diagnostics.ProcessStartInfo later = new System.Diagnostics.ProcessStartInfo("cmd.exe", cmdText.ToString());
+                    System.Diagnostics.ProcessStartInfo later = new System.Diagnostics.ProcessStartInfo("powershell.exe", cmdLine);
                     later.CreateNoWindow = true;
                     later.UseShellExecute = false;
                     later.WorkingDirectory = Path.GetTempPath();
                     System.Diagnostics.Process.Start(later);
-                    removed.Add("What could not be removed yet will be removed in a few seconds.");
+                    removed.Add("What could not be removed yet is removed in the background as soon as the program holding it lets go (within 2 minutes).");
                 }
                 catch (Exception) { removed.Add("Delete " + L.Root + " by hand to finish."); }
             }

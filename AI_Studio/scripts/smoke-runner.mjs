@@ -817,8 +817,11 @@ export async function runSmoke(opts, deps = {}) {
             await step("Uninstall it and check nothing is left", async () => {
                 const un = target.system === "windows" ? spawnSync(cmd.command, ["--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000, windowsHide: true }) : spawnSync("sh", [cmd.args[0], "--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000 });
                 if (un.status !== 0) throw new Error(`--uninstall ended with code ${un.status}: ${redact(`${un.stdout ?? ""}${un.stderr ?? ""}`.slice(-400), secrets)}`);
-                // The Windows program removes its own folder a few seconds after it exits.
-                await until("the install folder to be gone", async () => !fs.existsSync(installDir), 30_000, 1000).catch(() => undefined);
+                // The Windows program removes its own folder after it exits, and a folder another program still held (an antivirus scan of the
+                // files the install just wrote, on a machine that installs and uninstalls within minutes) as soon as it is let go, within 2 minutes.
+                const goneT0 = Date.now();
+                await until("the install folder to be gone", async () => !fs.existsSync(installDir), target.system === "windows" ? 150_000 : 30_000, 1000).catch(() => undefined);
+                const goneAfter = fs.existsSync(installDir) ? null : Math.round((Date.now() - goneT0) / 1000);
                 const left = [installDir, ...(target.system === "mac" ? [path.join(os.homedir(), "Library", "LaunchAgents", "app.aitesting.runner.plist")] : []), ...(target.system === "windows" && process.env.APPDATA ? [path.join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "AI Testing Runner.lnk")] : [])].filter((f) => fs.existsSync(f));
                 if (left.length) {
                     // Say what is still there and what the uninstall said, so a failure on a machine nobody can log in to explains itself.
@@ -851,7 +854,7 @@ export async function runSmoke(opts, deps = {}) {
                     }
                     throw new Error(`Left behind after uninstalling: ${left.join(", ")}${contents.length ? `; still in the install folder: ${contents.join(", ")}` : ""}${said ? `; the uninstall said: ${said}` : ""}${holders}`);
                 }
-                return "no install folder, no sign-in start";
+                return `no install folder, no sign-in start${goneAfter !== null && goneAfter > 2 ? ` (the folder went ${goneAfter} s after the uninstall ended)` : ""}`;
             });
         }
         report.verdict = "passed";
