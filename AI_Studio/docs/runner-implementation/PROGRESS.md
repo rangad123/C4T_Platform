@@ -12,7 +12,7 @@ Status words, as in `IMPLEMENTATION_PLAN.md`:
 
 ## Status
 
-Last updated: 2026-11-08 (after integration, before release).
+Last updated: 2026-11-09 (final verification round: hardening, GitHub's real machines, reviews).
 
 | # | Work item | Phase | Status | Proof (tests) | Notes |
 |---|---|---|---|---|---|
@@ -20,7 +20,7 @@ Last updated: 2026-11-08 (after integration, before release).
 | 1 | Runner-only execution | 2, 3, 4 | built | `tests/runner-only-mode.test.ts`, `tests/runs-off-here.test.ts` (both modes) | migration 52; `src/platform/runner-only.ts`, `Worker.dispatch` in `src/platform/worker.ts` |
 | 2 | Runner identity and access | 2, 3, 4, 7 | built | `tests/runner-enroll.test.ts`, `tests/runner-personal.test.ts`, `tests/credential-store-unit.test.ts` | migration 51; DPAPI and Keychain only unit-tested on Linux |
 | 3 | Task lifecycle, protocol 2 and live events | 3, 4, 7 | built | `tests/runner-protocol2.test.ts`, `tests/runner-protocol2-unit.test.ts`, `tests/runner-stop-file-unit.test.ts` | migration 53 |
-| 4 | Installers, background start, signed updates and CI | 6, 7 | built (Linux parts) | `installer-win-unit`, `installer-mac-unit`, `runner-update-unit`, `runner-kit*`, `runner-matrix-workflow` | C# not compiled here; Mac scripts run under bash and dash with stubs; no signing key yet |
+| 4 | Installers, background start, signed updates and CI | 6, 7 | verified on GitHub's hosted machines (Windows Server 2022 and 2025, macOS 15 Apple chip and Intel, Ubuntu); not on a Windows 10 or 11 desktop or a person's Mac | `installer-win-unit`, `installer-mac-unit`, `runner-update-unit`, `runner-kit*`, `runner-matrix-workflow`, `runner-stop-file-unit`; real-machine run `42670671653` | update offers stay off until the signing key exists; nothing is code-signed |
 | 5 | Website: Runners pages | 5 | built | `tests/runner-personal-ui.test.ts`, `runners-ui`, `add-runner-ui`, `agents-ui` | |
 | 6 | Website: Run panel, readiness and project setting | 5 | built | `tests/run-on-runner-ui.test.ts`, `runs-off-here` UI parts | |
 | 7 | Website: live run view | 5 | built | `tests/run-live-ui.test.ts`, `tests/run-live-unit.test.ts` | |
@@ -30,12 +30,32 @@ Last updated: 2026-11-08 (after integration, before release).
 | 11 | Design documents (this folder) | all | built | — | brought in line with the code on 2026-11-07 |
 | — | Integration (baseline, CI lists, journey flags, full test run) | all | done | fast tier 3,625 passed; every runner and run-view file passed (see the log) | baseline regenerated for slots 1 to 54; type checks clean; the runner tests that run on Linux are in `ai-studio-ci.yml` |
 | — | Upgrade proof on a production-shaped database (schema 50 to 54) | all | done | 8 of 8 checks passed (see the log) | a runner of the previous release still runs tests in `runners` mode |
-| — | Real-machine workflow, first run | 6 | ran; one fault found and fixed; re-run going | `.github/workflows/runner-matrix.yml` | Windows Server, not desktop Windows (see the 2026-11-08 release entry) |
+| — | Real-machine workflow | 6 | every step passed on all five machines (run `42670671653`) | `.github/workflows/runner-matrix.yml`, `scripts/smoke-runner.mjs --lifecycle` | Windows Server, not desktop Windows; the runs that found faults are listed in the 2026-11-09 entry |
+| 12 | Secrets out of failure traces | 7 | built and reviewed | `trace-scrub-unit`, `runner-trace-secrets`, `secret-leak` | the runner cleans before upload, the platform again on collect; a trace that cannot be cleaned is withheld (`runner_trace_withheld`); cleaned by value only |
+| 13 | Runs survive a platform restart | 3, 4 | built and reviewed | `runner-restart`, `runner-handover` | a run handed over at a restart is picked up again only when the whole offer matches, secrets aside; run sequences are not resumed |
+| 14 | Test process limits on the runner | 6 | built and reviewed | `runner-resources-unit`, `runner-untrusted-unit`, `runner-access-isolation` | below-normal priority, a 2,048 MB heap, an optional memory limit on macOS and Linux only, a 512 MB free-disk refusal, one copy of each task |
 | — | Manual pass: Windows 11, Windows 10, Mac (Apple chip), Mac (Intel) | 6 | not started | `MANUAL_VERIFICATION.md` | |
 | — | Update-signing key made and set as an Actions secret | 6 | not started | deploy log says whether update offers were published | product owner's step; `PINNED_UPDATE_KEYS` in `src/agent/update-keys.ts` is empty until then |
 | — | OS code signing (Authenticode, Developer ID and notarisation) | 6 | not started | — | no certificates yet; the steps skip themselves without secrets |
 
 ## Log
+
+### 2026-11-09: final verification
+
+Asked for: check the release on real machines, review its security and reliability, fix what is found, and say plainly what is still unproven. Every fix below has a regression test, and two independent reviews read the work (no blockers left open).
+
+- **Built in this round** (status table rows 12 to 14): secrets taken out of failure traces (form, URL, JSON, HTML and base64 forms; a cleaned part is renamed to the hash of its cleaned content; digits become 9s), on the runner before upload and again on the platform; runs that survive a platform restart (hand-over, a fence on the old attempt, pick-up only on a matching offer); limits on the test processes a runner starts.
+- **Found by GitHub's real machines and fixed:**
+  1. Every web test failed on a runner using the computer's own Chrome or Edge (no video tool): fixed in `ae9237d` (2026-11-08 entry).
+  2. GitHub retired its macOS 14 machines: both workflows use macOS 15.
+  3. The smoke's uninstall waited on the confirmation box: it passes `--silent`, as a scripted uninstall must.
+  4. **The computer check said every download since round 39 was damaged** ("Runner files do not match this download"): the build counts `package-lock.json` in the download's checksum and the check did not. Now it does; a download built without a lock file also matches once npm writes one. `tests/runner-kit-unit.test.ts` runs the check on a freshly built download.
+  5. **The Windows uninstall left the empty `app` folder.** The runner's phone check runs `adb devices`, which starts adb's server; the server kept the runner's folder as its current folder, and Windows cannot delete that. The phone tools (adb, the emulator, the probe commands) now start in the temp folder (`toolCwd`, `src/engine/mobile/toolchain.ts`). A first fix, a background job that kept deleting for two minutes, was taken out after review: Windows PowerShell's `Remove-Item -Recurse` can follow a junction out of the folder, and a reinstall within those minutes would have lost its files. A folder still held is now left with a sentence saying what to do. `cmd.exe` and `taskkill.exe` are started by their full System32 path.
+- **CI ("AI Studio CI") on the verification branch:** `42459301841` (c034db7) passed; `42463961956` and `42532279108` (91360aa) failed on one test's heap bound (Node 24 reports more heap than the cap; the bound was relaxed, not the cap); `42538039114` (6645d9f) passed; `42670774651` (c257e9b, the same code as the release commit) passed.
+- **Real-machine runs** (`runner-matrix.yml`, each machine: install, online, a web test and an API test on the runner, no credential in plain text, stop, restart on the saved credential, a forced renewal and a restart on the renewed credential read back from DPAPI or the Keychain, revoke with exit code 3, no secret printed, uninstall leaving nothing): `42415777816` (32a39ac) found fault 1; `42418849357`, `42420722676`, `42457500826`, `42459252387`, `42463935341`, `42538023401`, `42639347971` and `42650995449` found faults 2, 3 and 5 on the way (Linux and both Macs passed every step from the macOS 15 switch on, `.pkg` and `.dmg` built); `42662942977` (c3915b8): every step passed on Windows Server 2022 and 2025, Linux and macOS 15 Intel, with the computer check saying the files match; `42670671653` (c257e9b, the same code as the release commit): every step passed on all five machines (Windows Server 2022 and 2025, macOS 15 Apple chip and Intel, Ubuntu), the uninstall left nothing, and the computer check said the files match.
+- **Local runs (Linux, Node 22):** type checks clean; fast tier 3,702 passed, and the 9 machine failures this computer always has; every runner, port and browser file this round touched passed one at a time. Two phone files fail one case each (`phone-run` "a locked phone", `device-session` "no device, offline, unauthorized, locked") and fail the same way without this round's changes.
+- **Still unproven:** a Windows 10 or 11 desktop and a person's Mac (`MANUAL_VERIFICATION.md`; GitHub's Windows machines are Windows Server with no desktop user, tray or SmartScreen); the update-signing key, so no runner updates itself; OS code signing.
+- **Known limits, written down:** a trace is cleaned of the secrets the platform knows, by value; the credential store protects against other users, not the same user; code scripts can open their own connections; no memory limit for the test processes on Windows; run sequences are not resumed after a platform restart; the runner's own downloaded adb, once its server runs, holds `app\work\phone-tools` until it is stopped (the installer's job object ends it with the runner); Appium may start adb's server from a run's folder if none is running at that moment. The Windows setup window still opens its log with `notepad.exe` by name (older than this round; only a program the same user put in the download folder could start instead).
 
 ### 2026-11-08: released
 

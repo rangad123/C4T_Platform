@@ -851,24 +851,25 @@ namespace AITestingRunner
                 try { File.Delete(L.SelfCopy); removed.Add("Removed " + L.SelfCopy); } catch (Exception e) { removed.Add("Could not remove " + L.SelfCopy + ": " + e.Message); }
             }
             try { File.Delete(L.StateFile); } catch (Exception) { }
-            // The folder itself goes only when nothing else is in it. A running copy of this program cannot delete itself, so a small helper does it afterwards.
+            // The folder itself goes only when nothing else is in it. A running copy of this program cannot delete itself, so a small helper does it afterwards
+            // (cmd's rmdir without /s: it removes the folder only when it is empty, and never follows a link).
             if (selfInside)
             {
                 string cmd = "/c ping -n 4 127.0.0.1 >nul & del /f /q " + Util.Quote(ExePath) + " & rmdir " + Util.Quote(L.Root);
                 try
                 {
-                    System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", cmd);
+                    System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo(Util.SystemTool("cmd.exe"), cmd);
                     psi.CreateNoWindow = true;
                     psi.UseShellExecute = false;
                     // Not inside the folder it is about to remove: a folder that is some process's current folder cannot be deleted.
                     psi.WorkingDirectory = Path.GetTempPath();
                     System.Diagnostics.Process.Start(psi);
                     selfRemovalScheduled = true;
-                    removed.Add("This program will remove itself and " + L.Root + " in a few seconds.");
+                    removed.Add(stuck.Count == 0 ? "This program will remove itself and " + L.Root + " in a few seconds." : "This program will remove itself in a few seconds. " + L.Root + " stays until the folders above are deleted.");
                 }
                 catch (Exception) { removed.Add("Delete " + L.Root + " by hand to finish."); }
             }
-            else
+            else if (stuck.Count == 0)
             {
                 // The install folder goes when nothing else is in it, tried again for a few seconds for the same reason as DeleteTreeRetrying.
                 for (int i = 0; i < 16 && Directory.Exists(L.Root); i++)
@@ -878,27 +879,10 @@ namespace AITestingRunner
                     catch (Exception) { System.Threading.Thread.Sleep(400); }
                 }
             }
-            // A folder another program still holds (an antivirus scan of files just written, or a program that is just ending) is removed after
-            // this program exits by a small helper that tries again every 5 seconds for up to 2 minutes, then removes the install folder when it
-            // is empty. Paths go in single quotes, with any quote doubled, so nothing in a path is read as a command.
-            if (stuck.Count > 0 && !selfRemovalScheduled)
-            {
-                StringBuilder ps = new StringBuilder("$ErrorActionPreference='SilentlyContinue'; $dirs=@(");
-                for (int i = 0; i < stuck.Count; i++) ps.Append((i > 0 ? "," : "") + "'" + stuck[i].Replace("'", "''") + "'");
-                ps.Append("); for($n=0; $n -lt 24; $n++){ Start-Sleep -Seconds 5; foreach($d in $dirs){ if(Test-Path -LiteralPath $d){ Remove-Item -LiteralPath $d -Recurse -Force } }; if(-not ($dirs | Where-Object { Test-Path -LiteralPath $_ })){ break } }; ");
-                ps.Append("$r='" + L.Root.Replace("'", "''") + "'; if((Test-Path -LiteralPath $r) -and -not (Get-ChildItem -LiteralPath $r -Force)){ Remove-Item -LiteralPath $r -Force }");
-                string cmdLine = "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"" + ps.ToString().Replace("\"", "\\\"") + "\"";
-                try
-                {
-                    System.Diagnostics.ProcessStartInfo later = new System.Diagnostics.ProcessStartInfo("powershell.exe", cmdLine);
-                    later.CreateNoWindow = true;
-                    later.UseShellExecute = false;
-                    later.WorkingDirectory = Path.GetTempPath();
-                    System.Diagnostics.Process.Start(later);
-                    removed.Add("What could not be removed yet is removed in the background as soon as the program holding it lets go (within 2 minutes).");
-                }
-                catch (Exception) { removed.Add("Delete " + L.Root + " by hand to finish."); }
-            }
+            // A folder another program still has open is left for the person, with the reason: nothing deletes it later behind their back (a later
+            // install into the same folder must never lose its files, and a background delete could follow a link out of the folder).
+            if (stuck.Count > 0)
+                removed.Add("Another program still has " + (stuck.Count == 1 ? "that folder" : "those folders") + " open (often a File Explorer or terminal window in it). Close it, then delete " + L.Root + " by hand, or delete it after restarting the computer.");
             removed.Add("Left alone: any Node.js that was already on this computer, and the shared browser cache.");
             return removed;
         }

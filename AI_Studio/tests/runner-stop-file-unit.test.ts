@@ -92,6 +92,15 @@ describe("the Windows host (read, not run)", () => {
         expect(uninstall.indexOf("removed.Add(ForgetCredential());")).toBeGreaterThan(-1);
         // A folder Windows cannot remove at once (a file still held by another program) is tried again rather than left behind, empty.
         expect(common).toContain("public static void DeleteTreeRetrying(string dir)");
+        // What is still held is left for the person, with the reason: no background delete (Windows PowerShell's Remove-Item -Recurse can follow
+        // a junction out of the folder, and a reinstall into the same folder must keep its files). The self-removal helper's rmdir has no /s.
+        expect(uninstall).not.toMatch(/powershell|Remove-Item|rmdir \/s/i);
+        expect(uninstall).toContain("Close it, then delete");
+        expect(uninstall).toMatch(/del \/f \/q " \+ Util\.Quote\(ExePath\) \+ " & rmdir " \+ Util\.Quote\(L\.Root\)/);
+        // System tools by their full path, never a same-named file in Downloads or the current folder.
+        expect(engine).toContain('Util.SystemTool("cmd.exe")');
+        expect(common).toContain('SystemTool("taskkill.exe")');
+        expect(common).toContain("Path.Combine(Environment.SystemDirectory, exe)");
         expect(engine).toContain('Util.Run(node, "runner.mjs --forget-credential", 30000, L.App, null)');
         // C# 5 only (the compiler that ships with Windows): no string interpolation, no null-conditional, no nameof.
         for (const f of ["RunnerHost.cs", "Engine.cs", "Common.cs", "Program.cs", "Ui.cs"]) expect(cs(f), f).not.toMatch(/[\s(=,]\$@?"|\w\?\.\w|nameof\(/);

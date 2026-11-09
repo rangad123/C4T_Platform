@@ -11,7 +11,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { adbPath, androidSdk, commandFor } from "./toolchain.js";
+import { adbPath, androidSdk, commandFor, toolCwd } from "./toolchain.js";
 
 const SNAPSHOT = "aitp-clean";
 const exe = (name: string) => (process.platform === "win32" ? `${name}.exe` : name);
@@ -34,7 +34,8 @@ function sh(file: string, args: string[], timeout = 30_000, env?: NodeJS.Process
     return new Promise((resolve) => {
         try {
             const c = commandFor(file, args);
-            execFile(c.file, c.args, { timeout, windowsHide: true, ...(env ? { env } : {}) }, (_e, out) => resolve(String(out ?? "")));
+            const cwd = toolCwd();
+            execFile(c.file, c.args, { timeout, windowsHide: true, ...(env ? { env } : {}), ...(cwd ? { cwd } : {}) }, (_e, out) => resolve(String(out ?? "")));
         } catch {
             resolve("");
         }
@@ -109,7 +110,9 @@ export async function ensureEmulator(avd: string, opts: EmulatorOptions = {}): P
 
     const childEnv: NodeJS.ProcessEnv = sdk ? { ...env, ANDROID_SDK_ROOT: sdk, ANDROID_HOME: sdk } : { ...env };
     const launch = commandFor(emulatorBin, args);
-    const child: ChildProcess = spawn(launch.file, launch.args, { env: childEnv, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const cwd = toolCwd();
+    // Outside the runner's folder: the emulator starts adb's server if none runs, and that server keeps the folder it was started from.
+    const child: ChildProcess = spawn(launch.file, launch.args, { env: childEnv, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...(cwd ? { cwd } : {}) });
     // Keep the emulator's own words for the error message if it dies; it says exactly what is wrong.
     let output = "";
     const keep = (d: Buffer) => {

@@ -26,7 +26,7 @@ import { RunnerCheck, type Capabilities, type RunnerCheckItem } from "../agent-p
 import { BROWSER_LABEL, bundledChromium, bundledReady, chooseBrowser, describeBrowser, findInstalledBrowsers, isBrowserPolicy, type BrowserPolicy, type Decision, type FoundBrowser } from "../engine/browsers/choice.js";
 import { bypassMatches, describeNetworkError, problemSentence, proxySecrets, redactCredentials, withLoopbackBypass, type ProxyAddress } from "../engine/net/company-network.js";
 import { installedPhoneTools, phoneToolsHost } from "../engine/mobile/platform-tools.js";
-import { adbPath } from "../engine/mobile/toolchain.js";
+import { adbPath, toolCwd } from "../engine/mobile/toolchain.js";
 import { detectBrowsers, expectedRevisions, playwrightBrowsersDir, type ExecFn } from "./capabilities.js";
 import { AGENT_VERSION, parseAgentArgs, type AgentConfig } from "./config.js";
 import { loadCredential } from "./credential-store.js";
@@ -41,6 +41,8 @@ export const CHECK_MARKER = "aitp-computer-check/1";
 export const CHECK_NODE_MIN = 24;
 /** The bundle files a download's version hash covers, sorted as scripts/build-runner.mjs hashes them. */
 export const BUNDLE_FILES = ["LICENSES.txt", "package.json", "record-child.mjs", "runner.mjs", "task-child.mjs"] as const;
+/** Covered too when the download has it (every build from round 39 on): the test tools' lock file. */
+export const BUNDLE_LOCK_FILE = "package-lock.json";
 /** Less free space than this in the runner's folder is "missing": a browser download alone is about 150 MB, and runs keep their files there. */
 export const DISK_MIN_BYTES = 1024 ** 3;
 /** A clock further off than this from the platform's is "missing": https certificates and tokens depend on the time. */
@@ -77,22 +79,31 @@ export function isBundledNode(execPath: string, kitDir: string): boolean {
 
 /**
  * The runner files against their download's version: runner.json's kitVersion ends in the first 10 hex characters of the SHA-256 of
- * "name\0sha256\n" for each bundle file in name order (scripts/build-runner.mjs), so a damaged or changed file is found without a manifest.
+ * "name\0sha256\n" for each bundle file in name order (scripts/build-runner.mjs), package-lock.json included when the download has it, so a
+ * damaged or changed file is found without a manifest.
  */
 export function filesLine(kitVersion: string | undefined, read: (name: string) => Buffer | undefined): CheckLine {
     const missing: string[] = [];
-    const parts: string[] = [];
+    const parts = new Map<string, string>();
     for (const name of BUNDLE_FILES) {
         const bytes = read(name);
         if (!bytes) missing.push(name);
-        else parts.push(`${name}\0${createHash("sha256").update(bytes).digest("hex")}\n`);
+        else parts.set(name, `${name}\0${createHash("sha256").update(bytes).digest("hex")}\n`);
     }
+    const lock = read(BUNDLE_LOCK_FILE);
     const again = "Unzip the whole download again, or download a new runner from the platform (Settings, Runners, Add a runner).";
     if (missing.length) return line("files", "missing", `Runner files: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing`, again);
     const want = /\+([0-9a-f]{10})$/.exec(kitVersion ?? "")?.[1];
     if (!want) return line("files", "optional", "Runner files are all here; this download has no checksum to compare them with", "Nothing to do unless the runner behaves oddly; then download a new runner from the platform.");
-    const have = createHash("sha256").update(parts.join("")).digest("hex").slice(0, 10);
-    if (have !== want) return line("files", "missing", `Runner files do not match this download (version ${kitVersion}): one of them was changed or is damaged`, again);
+    // The build hashes the lock file with the others, in the same name order, when the download has one. A download built without one gets a
+    // lock file from npm install on this computer, so the files also match without it; a download whose version covers its lock file still
+    // fails when that file is changed or deleted (neither sum matches then).
+    const sum = (withLock: boolean): string => {
+        const m = new Map(parts);
+        if (withLock && lock) m.set(BUNDLE_LOCK_FILE, `${BUNDLE_LOCK_FILE}\0${createHash("sha256").update(lock).digest("hex")}\n`);
+        return createHash("sha256").update([...m.keys()].sort().map((n) => m.get(n)!).join("")).digest("hex").slice(0, 10);
+    };
+    if (sum(true) !== want && sum(false) !== want) return line("files", "missing", `Runner files do not match this download (version ${kitVersion}): one of them was changed or is damaged`, again);
     return line("files", "ok", `Runner files match this download (version ${kitVersion})`);
 }
 
@@ -284,7 +295,8 @@ export interface CheckDeps {
 const execShort: ExecFn = (file, args, timeoutMs, env) =>
     new Promise((resolve) => {
         try {
-            execFile(file, args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 256 * 1024, ...(env ? { env } : {}) }, (error, stdout) => resolve(error ? undefined : String(stdout)));
+            const cwd = toolCwd();
+            execFile(file, args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 256 * 1024, ...(env ? { env } : {}), ...(cwd ? { cwd } : {}) }, (error, stdout) => resolve(error ? undefined : String(stdout)));
         } catch {
             resolve(undefined);
         }

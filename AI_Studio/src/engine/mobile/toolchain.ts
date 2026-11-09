@@ -83,6 +83,22 @@ export function adbPath(env: NodeJS.ProcessEnv = process.env): string | undefine
 }
 
 /**
+ * The folder the phone tools are started in: the system's temp folder (the home folder if that is missing). adb leaves its server running in the
+ * folder it was started from, and on Windows a folder that is a running program's current folder cannot be deleted, so started from the
+ * runner's folder it kept the uninstall from removing that folder until the computer restarted. Undefined only when neither exists.
+ */
+export function toolCwd(): string | undefined {
+    for (const d of [os.tmpdir(), os.homedir()]) {
+        try {
+            if (d && fs.statSync(d).isDirectory()) return d;
+        } catch {
+            /* try the next */
+        }
+    }
+    return undefined;
+}
+
+/**
  * How to start a program for `execFile` / `spawn`: a Node script (the stand-in tools of the tests) is run by this Node, anything else is run as it is.
  * Never goes through a shell, so no argument is ever interpreted.
  */

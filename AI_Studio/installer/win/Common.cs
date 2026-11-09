@@ -268,13 +268,23 @@ namespace AITestingRunner
             return c.StartsWith(p, StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// A Windows program by its full path in System32, so a file of the same name in this program's own folder (often Downloads) or in the
+        /// current folder is never started in its place. The bare name only if System32 does not have it.
+        /// </summary>
+        public static string SystemTool(string exe)
+        {
+            string p = Path.Combine(Environment.SystemDirectory, exe);
+            return File.Exists(p) ? p : exe;
+        }
+
         /// <summary>Stops a process this program started, and the processes it started.</summary>
         public static void KillTree(Process p)
         {
             try
             {
                 if (p == null || p.HasExited) return;
-                ProcessStartInfo psi = new ProcessStartInfo("taskkill.exe", "/PID " + p.Id + " /T /F");
+                ProcessStartInfo psi = new ProcessStartInfo(SystemTool("taskkill.exe"), "/PID " + p.Id + " /T /F");
                 psi.CreateNoWindow = true;
                 psi.UseShellExecute = false;
                 using (Process k = Process.Start(psi)) { if (k != null) k.WaitForExit(15000); }

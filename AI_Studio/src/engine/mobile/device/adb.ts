@@ -7,7 +7,7 @@
  * argument array), and the text of `input text` is wrapped in single quotes so the phone's shell reads it as one literal word.
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { adbPath, commandFor } from "../toolchain.js";
+import { adbPath, commandFor, toolCwd } from "../toolchain.js";
 import { isComponent } from "../quality/startup.js";
 import { allowedChangeCommand, allowedReadCommand } from "./setup-commands.js";
 
@@ -220,12 +220,13 @@ export class Adb {
         const full = this.o.serial ? ["-s", this.o.serial, ...args] : args;
         const call = commandFor(this.file, full);
         const secrets = this.o.secrets ?? [];
+        const cwd = toolCwd();
         return new Promise((resolve, reject) => {
             try {
                 execFile(
                     call.file,
                     call.args,
-                    { timeout: opt.timeoutMs ?? this.o.timeoutMs ?? 20_000, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true, encoding: "buffer", env: this.o.env ?? process.env, ...(this.o.signal ? { signal: this.o.signal } : {}) },
+                    { timeout: opt.timeoutMs ?? this.o.timeoutMs ?? 20_000, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true, encoding: "buffer", env: this.o.env ?? process.env, ...(cwd ? { cwd } : {}), ...(this.o.signal ? { signal: this.o.signal } : {}) },
                     (error, stdout, stderr) => {
                         if (!error) return resolve(stdout);
                         const text = scrub(`${stderr?.toString("utf8") ?? ""}\n${stdout?.toString("utf8").slice(0, 600) ?? ""}`, secrets);
@@ -395,7 +396,8 @@ export class Adb {
         if (!this.o.server || !allowedServerCommand(UIA2_START) || this.o.signal?.aborted) return undefined;
         const call = commandFor(this.file, this.o.serial ? ["-s", this.o.serial, ...UIA2_START] : [...UIA2_START]);
         try {
-            return spawn(call.file, call.args, { windowsHide: true, stdio: "ignore", env: this.o.env ?? process.env });
+            const cwd = toolCwd();
+            return spawn(call.file, call.args, { windowsHide: true, stdio: "ignore", env: this.o.env ?? process.env, ...(cwd ? { cwd } : {}) });
         } catch {
             return undefined;
         }

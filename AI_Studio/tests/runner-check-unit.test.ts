@@ -12,6 +12,8 @@ import path from "node:path";
 import { unzipSync } from "fflate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RunnerCheck, type Capabilities } from "../src/agent-protocol/schema.js";
+import { execText } from "../src/agent/capabilities.js";
+import { toolCwd } from "../src/engine/mobile/toolchain.js";
 import {
     BUNDLE_FILES,
     browserLine,
@@ -142,6 +144,10 @@ describe("each line on a fake computer", () => {
         const v = JSON.parse(fs.readFileSync(path.join(ok, "runner.json"), "utf8")).kitVersion as string;
         const read = (dir: string) => (n: string) => (fs.existsSync(path.join(dir, n)) ? fs.readFileSync(path.join(dir, n)) : undefined);
         expect(filesLine(v, read(ok))).toMatchObject({ status: "ok", title: `Runner files match this download (version ${v})` });
+        // A download built without a lock file, which npm install then wrote one into: still the same download.
+        fs.writeFileSync(path.join(ok, "package-lock.json"), '{"lockfileVersion":3}\n');
+        expect(filesLine(v, read(ok))).toMatchObject({ status: "ok" });
+        fs.rmSync(path.join(ok, "package-lock.json"));
         const bad = fakeKit("files-bad", { damage: true });
         expect(filesLine(v, read(bad))).toMatchObject({ status: "missing", title: expect.stringContaining("do not match this download") });
         fs.rmSync(path.join(bad, "record-child.mjs"));
@@ -444,5 +450,24 @@ describe("check-computer in every download", () => {
         const r = spawnSync(BASH!, ["check-computer.sh"], { cwd: dir, encoding: "utf8", env: { ...process.env, HOME: path.join(tmp, "empty-home"), AITP_KIT_NO_PAUSE: "1" } });
         expect(r.status).toBe(1);
         expect(r.stdout).toContain("missing   The runner is not set up on this computer yet.");
+    });
+});
+
+describe("the phone tools start outside the runner's folder", () => {
+    // adb leaves its server running in the folder it was started from; on Windows that folder then cannot be deleted, which kept the
+    // uninstall from removing the runner's folder (GitHub's Windows machines have adb, so their uninstall check found it).
+    it("probe commands run in the temp folder, whatever folder the runner itself is in", async () => {
+        const tool = path.join(tmp, "print-cwd.mjs");
+        fs.writeFileSync(tool, "process.stdout.write(process.cwd());\n");
+        const out = await execText(process.execPath, [tool], 10_000);
+        expect(out && fs.realpathSync(out)).toBe(fs.realpathSync(os.tmpdir()));
+        expect(toolCwd()).toBe(os.tmpdir());
+    });
+
+    it("every place that starts adb or the emulator passes that folder", () => {
+        const src = (f: string) => fs.readFileSync(path.join(import.meta.dirname, "..", f), "utf8");
+        expect(src("src/engine/mobile/device/adb.ts").match(/\.\.\.\(cwd \? \{ cwd \} : \{\}\)/g)?.length).toBe(2);
+        expect(src("src/engine/mobile/emulator.ts").match(/\.\.\.\(cwd \? \{ cwd \} : \{\}\)/g)?.length).toBe(2);
+        expect(src("src/agent/computer-check.ts")).toMatch(/const cwd = toolCwd\(\);\s+execFile\(/);
     });
 });

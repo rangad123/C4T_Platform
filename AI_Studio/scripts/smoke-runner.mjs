@@ -817,10 +817,10 @@ export async function runSmoke(opts, deps = {}) {
             await step("Uninstall it and check nothing is left", async () => {
                 const un = target.system === "windows" ? spawnSync(cmd.command, ["--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000, windowsHide: true }) : spawnSync("sh", [cmd.args[0], "--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000 });
                 if (un.status !== 0) throw new Error(`--uninstall ended with code ${un.status}: ${redact(`${un.stdout ?? ""}${un.stderr ?? ""}`.slice(-400), secrets)}`);
-                // The Windows program removes its own folder after it exits, and a folder another program still held (an antivirus scan of the
-                // files the install just wrote, on a machine that installs and uninstalls within minutes) as soon as it is let go, within 2 minutes.
+                // A copy of the Windows program that runs from the install folder removes itself a few seconds after it exits; nothing else is
+                // removed later, so a folder still here after 30 s is a finding (the report below says what could hold it).
                 const goneT0 = Date.now();
-                await until("the install folder to be gone", async () => !fs.existsSync(installDir), target.system === "windows" ? 150_000 : 30_000, 1000).catch(() => undefined);
+                await until("the install folder to be gone", async () => !fs.existsSync(installDir), 30_000, 1000).catch(() => undefined);
                 const goneAfter = fs.existsSync(installDir) ? null : Math.round((Date.now() - goneT0) / 1000);
                 const left = [installDir, ...(target.system === "mac" ? [path.join(os.homedir(), "Library", "LaunchAgents", "app.aitesting.runner.plist")] : []), ...(target.system === "windows" && process.env.APPDATA ? [path.join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "AI Testing Runner.lnk")] : [])].filter((f) => fs.existsSync(f));
                 if (left.length) {
@@ -840,7 +840,7 @@ export async function runSmoke(opts, deps = {}) {
                     if (target.system === "windows" && fs.existsSync(installDir)) {
                         // Which processes could hold it: a process whose current folder is in there does not show the path in its command line,
                         // so list every runner-related program (this is GitHub's throwaway machine, not a person's computer), with its parent.
-                        const ps = spawnSync("powershell", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|powershell|pwsh|chrome|msedge|chrome_crashpad_handler|AITestingRunner.*|cmd|conhost|npm.*)\\.exe$' -and $_.ProcessId -ne $PID } | ForEach-Object { \"$($_.ProcessId)/$($_.ParentProcessId) $($_.Name): $($_.CommandLine)\" }"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+                        const ps = spawnSync("powershell", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|powershell|pwsh|chrome|msedge|chrome_crashpad_handler|AITestingRunner.*|cmd|conhost|npm.*|adb|emulator.*|qemu.*|ffmpeg.*)\\.exe$' -and $_.ProcessId -ne $PID } | ForEach-Object { \"$($_.ProcessId)/$($_.ParentProcessId) $($_.Name): $($_.CommandLine)\" }"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
                         const list = redact(`${ps.stdout ?? ""}`.trim().replace(/\r?\n/g, " | "), secrets).slice(0, 2500);
                         const tries = contents.filter((c) => c.endsWith("/")).map((c) => {
                             try {

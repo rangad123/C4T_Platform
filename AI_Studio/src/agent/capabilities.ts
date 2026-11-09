@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { Capabilities } from "../agent-protocol/schema.js";
-import { adbPath, commandFor, listAvds, taqwrightHome } from "../engine/mobile/toolchain.js";
+import { adbPath, commandFor, listAvds, taqwrightHome, toolCwd } from "../engine/mobile/toolchain.js";
 import { deviceSessionProblem } from "../engine/mobile/device/capability.js";
 import { resolvedAllowList } from "../engine/desktop/policy.js";
 import { probeDesktop, type DesktopProbeResult } from "../engine/desktop/probe.js";
@@ -162,11 +162,12 @@ export function hasDisplay(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, in
 
 export type ExecFn = (file: string, args: string[], timeoutMs: number, env?: NodeJS.ProcessEnv) => Promise<string | undefined>;
 
-/** Run a short command; undefined when it is missing, fails or times out. */
+/** Run a short command; undefined when it is missing, fails or times out. Started outside the runner's folder (toolCwd: adb leaves a server behind). */
 export const execText: ExecFn = (file, args, timeoutMs, env) =>
     new Promise((resolve) => {
         try {
-            execFile(file, args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 4 * 1024 * 1024, ...(env ? { env } : {}) }, (error, stdout) => resolve(error ? undefined : String(stdout)));
+            const cwd = toolCwd();
+            execFile(file, args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 4 * 1024 * 1024, ...(env ? { env } : {}), ...(cwd ? { cwd } : {}) }, (error, stdout) => resolve(error ? undefined : String(stdout)));
         } catch {
             resolve(undefined);
         }

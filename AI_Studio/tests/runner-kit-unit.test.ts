@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyKitDefaults, parseKitFile } from "../src/agent/kit.js";
 import { parseAgentArgs } from "../src/agent/config.js";
 import { CapabilityProbe } from "../src/agent/capabilities.js";
+import { filesLine } from "../src/agent/computer-check.js";
 import { Capabilities } from "../src/agent-protocol/schema.js";
 import { buildKitZip, decideAddress, KitRequest, loadBundle, projectSlugOf, type Bundle } from "../src/platform/runner-kit.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
@@ -145,6 +146,21 @@ describe("the zip a download produces", () => {
         const dir = "runner-shop-checkout-windows";
         expect(JSON.parse(text(z[`${dir}/runner.json`]!))).toEqual({ url: "https://tests.example.com/app", name: "Maya's laptop", kitVersion: bundle.manifest.kitVersion });
         expect(text(z[`${dir}/runner.token`]!)).toBe(`${TOKEN}\n`);
+    });
+
+    it("passes the computer check's file comparison as it comes out of the zip, lock file included (it once said every download was damaged)", () => {
+        const z = entries(makeZip("windows"));
+        const dir = "runner-shop-checkout-windows";
+        expect(z[`${dir}/package-lock.json`], "this build has a lock file").toBeDefined();
+        const read = (n: string) => (z[`${dir}/${n}`] ? Buffer.from(z[`${dir}/${n}`]!) : undefined);
+        const kitVersion = JSON.parse(text(z[`${dir}/runner.json`]!)).kitVersion as string;
+        expect(filesLine(kitVersion, read)).toMatchObject({ status: "ok" });
+        // A changed lock file is still found.
+        const changed = (n: string) => (n === "package-lock.json" ? Buffer.concat([read(n)!, Buffer.from("\n")]) : read(n));
+        expect(filesLine(kitVersion, changed)).toMatchObject({ status: "missing", title: expect.stringContaining("do not match this download") });
+        // So is a deleted one: this download's version covers it.
+        const deleted = (n: string) => (n === "package-lock.json" ? undefined : read(n));
+        expect(filesLine(kitVersion, deleted)).toMatchObject({ status: "missing", title: expect.stringContaining("do not match this download") });
     });
 
     it("marks the shell scripts executable and the token owner-only, as a Unix zip (Apple's Archive Utility and unzip honour that)", () => {
