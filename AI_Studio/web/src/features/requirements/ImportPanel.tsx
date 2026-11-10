@@ -5,7 +5,7 @@ import { api } from "../../api";
 import { Badge, Button, Callout, FilePicker } from "../../components/ui";
 import { plural, toBase64 } from "../../lib/format";
 import { useConfig } from "../../lib/hooks";
-import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import { apiMessage } from "../manual/manual";
 import { IMPORT_ACCEPT, type ImportPreview } from "./requirements";
 
@@ -16,7 +16,7 @@ import { IMPORT_ACCEPT, type ImportPreview } from "./requirements";
  */
 export function ImportPanel({ projectId, onCancel, onImported }: { projectId: string; onCancel: () => void; onImported: (summary: string) => void | Promise<void> }) {
     const config = useConfig();
-    const can = useCan();
+    const can = useHere(projectId).may;
     const aiReady = useProjectAiReady(projectId);
     const [mode, setMode] = useState<"paste" | "file">("paste");
     const [text, setText] = useState("");

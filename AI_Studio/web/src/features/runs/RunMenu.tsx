@@ -1,10 +1,11 @@
 import { ChevronDown, Play } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, type ProjectDetail, type TestSummary } from "../../api";
+import { api, type TestSummary } from "../../api";
 import { Button, Callout, Disclosure, LinkButton } from "../../components/ui";
 import { HelpTip } from "../../components/Tooltip";
 import { help } from "../../lib/help";
 import { useConfig, useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import type { RunnerChoice } from "../agents/agents";
@@ -74,9 +75,8 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     const busyRun = Boolean(active.job);
     // What this person may do in this project: without ai_studio.tests.run, Run is shown switched off with the reason, not as a
     // button that only answers with a refusal. An older server sends no `access`: then nothing is assumed.
-    const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
-    const perms = project.data?.access?.permissions;
-    const noPermission = Boolean(perms) && !perms!.includes("ai_studio.tests.run");
+    // The page's own answer is used when it shares one (features/auth/project-access.tsx), so Run does not ask for the project again.
+    const noPermission = !useHere(projectId).may("ai_studio.tests.run");
 
     const config = useConfig();
     // Runners mode (the hosted platform): every run goes to a runner, so "This server" is never offered, and Run waits for a runner

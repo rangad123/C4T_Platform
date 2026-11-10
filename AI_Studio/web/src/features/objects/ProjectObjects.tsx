@@ -1,6 +1,7 @@
 import { Download, Plus, Puzzle, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { api, ApiError, getKey, type ProjectDetail } from "../../api";
+import { useHere } from "../auth/project-access";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton, PageHeader } from "../../components/ui";
 import { plural } from "../../lib/format";
@@ -22,6 +23,11 @@ export function ProjectObjects({ id }: { id: string }) {
     const [confirming, setConfirming] = useState<string | null>(null);
     const [error, setError] = useState("");
     const fileRef = useRef<HTMLInputElement>(null);
+    // Adding, changing and importing elements needs tests.write here, deleting one tests.delete, the export reports.export.
+    const here = useHere(id, project);
+    const noWrite = here.why("ai_studio.tests.write");
+    const noExport = here.why("ai_studio.reports.export");
+    const mayDelete = here.may("ai_studio.tests.delete");
 
     const name = project.data?.name;
     useDocumentTitle(name ? `Shared elements · ${name}` : "Shared elements");
@@ -58,7 +64,8 @@ export function ProjectObjects({ id }: { id: string }) {
         setError("");
         try {
             const res = await fetch(`/api/projects/${id}/objects/export`, { headers: getKey() ? { "x-api-key": getKey() } : {} });
-            if (!res.ok) throw new ApiError(res.status, "The export could not be created");
+            // The server's own words for a refusal (a missing permission, a project that is gone), not a general sentence.
+            if (!res.ok) throw new ApiError(res.status, ((await res.json().catch(() => null)) as { error?: string } | null)?.error || "The export could not be created");
             const url = URL.createObjectURL(new Blob([await res.text()], { type: "application/json" }));
             const a = document.createElement("a");
             a.href = url;
@@ -93,9 +100,9 @@ export function ProjectObjects({ id }: { id: string }) {
                 subtitle="Name the buttons and fields your tests use once, and fix them in one place."
                 actions={
                     <>
-                        <Button icon={Plus} variant="primary" onClick={() => setDialog({})}>Add element</Button>
-                        <Button icon={Download} onClick={exportFile} disabled={!elements.length} tip={elements.length ? "Downloads every shared element as a JSON file another project can import." : "There are no shared elements to export yet."}>Export</Button>
-                        <Button icon={Upload} onClick={() => fileRef.current?.click()} tip="Adds the elements from a file exported here. If a name is already used with a different way of finding it, nothing is imported.">Import</Button>
+                        <Button icon={Plus} variant="primary" disabled={Boolean(noWrite)} tip={noWrite} onClick={() => setDialog({})}>Add element</Button>
+                        <Button icon={Download} onClick={exportFile} disabled={!elements.length || Boolean(noExport)} tip={noExport ?? (elements.length ? "Downloads every shared element as a JSON file another project can import." : "There are no shared elements to export yet.")}>Export</Button>
+                        <Button icon={Upload} disabled={Boolean(noWrite)} onClick={() => fileRef.current?.click()} tip={noWrite ?? "Adds the elements from a file exported here. If a name is already used with a different way of finding it, nothing is imported."}>Import</Button>
                         <input ref={fileRef} type="file" accept="application/json,.json" hidden aria-label="Import elements from a file" onChange={(e) => void importFile(e.target.files?.[0])} />
                     </>
                 }
@@ -113,7 +120,7 @@ export function ProjectObjects({ id }: { id: string }) {
                 {list.error && !list.data && <ErrorState error={friendlyError(list.error.message)} onRetry={list.reload} />}
                 {list.data && elements.length === 0 && (
                     <div className="card">
-                        <EmptyState icon={Puzzle} title="No shared elements yet" seeHow={{ topic: "shared-elements" }} actions={<Button variant="primary" icon={Plus} onClick={() => setDialog({})}>Add element</Button>}>
+                        <EmptyState icon={Puzzle} title="No shared elements yet" seeHow={{ topic: "shared-elements" }} actions={<Button variant="primary" icon={Plus} disabled={Boolean(noWrite)} tip={noWrite} onClick={() => setDialog({})}>Add element</Button>}>
                             Name the buttons and fields your tests use once, and fix them in one place. When a page changes, you update the element and every test that uses it follows.
                         </EmptyState>
                     </div>
@@ -147,8 +154,8 @@ export function ProjectObjects({ id }: { id: string }) {
                                             </>
                                         ) : (
                                             <>
-                                                <Button size="sm" onClick={() => setDialog({ element: e })} aria-label={`Edit ${e.name}`}>Edit</Button>
-                                                <Button size="sm" variant="ghost" onClick={() => setConfirming(e.id)} aria-label={`Delete ${e.name}`}>Delete</Button>
+                                                <Button size="sm" onClick={() => setDialog({ element: e })} aria-label={`${noWrite ? "View" : "Edit"} ${e.name}`}>{noWrite ? "View" : "Edit"}</Button>
+                                                {mayDelete && <Button size="sm" variant="ghost" onClick={() => setConfirming(e.id)} aria-label={`Delete ${e.name}`}>Delete</Button>}
                                             </>
                                         )}
                                     </div>
@@ -158,9 +165,9 @@ export function ProjectObjects({ id }: { id: string }) {
                     </section>
                 ))}
 
-                <ExtractPanel projectId={id} onApplied={() => void list.reload()} />
+                {!noWrite && <ExtractPanel projectId={id} onApplied={() => void list.reload()} />}
             </div>
-            {dialog && <ElementDialog key={dialog.element?.id ?? "new"} projectId={id} element={dialog.element} onClose={() => setDialog(null)} onDone={changed} />}
+            {dialog && (!noWrite || dialog.element) && <ElementDialog key={dialog.element?.id ?? "new"} projectId={id} element={dialog.element} readOnly={Boolean(noWrite)} onClose={() => setDialog(null)} onDone={changed} />}
         </>
     );
 }

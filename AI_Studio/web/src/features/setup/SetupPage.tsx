@@ -2,7 +2,7 @@ import type { Job, ProjectDetail } from "../../api";
 import { CollapsedSetting, ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { MobileAppPanel } from "../../components/MobileAppPanel";
 import { useConfig, useFetch } from "../../lib/hooks";
-import { isActive } from "../../lib/labels";
+import { describeApiError, isActive } from "../../lib/labels";
 import { routes, useRoute, type SettingsSection } from "../../lib/router";
 import { ExploreWithAi } from "../phone/PhoneStart";
 import { DeviceFarmPanel } from "../devicefarm/DeviceFarmPanel";
@@ -37,7 +37,7 @@ function FrameworksSetting({ id }: { id: string }) {
     const d = settings.data;
     const changed = d ? settingsSentence(d.settings, d.defaults) : "";
     return (
-        <CollapsedSetting title="Frameworks" summary={d ? (changed ? `${changed}.` : "Tests run with the platform’s standard settings.") : "Loading…"} testId="setting-frameworks">
+        <CollapsedSetting title="Frameworks" summary={d ? (changed ? `${changed}.` : "Tests run with the platform’s standard settings.") : settings.error ? `Could not load the framework settings: ${describeApiError(settings.error)}` : "Loading…"} testId="setting-frameworks">
             <FrameworksSection projectId={id} jobRunning={running} />
         </CollapsedSetting>
     );

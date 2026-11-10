@@ -9,6 +9,7 @@ import { BuildTestDialog } from "../features/builder/BuildTestButton";
 import { NewTestMenu } from "../features/authoring/NewTestMenu";
 import { EXPORT_ICONS, ExportDialog, ImportDialog, type ExportItem } from "../features/authoring/ImportExport";
 import { GitImportDialog } from "../features/code/GitImportDialog";
+import { useHere } from "../features/auth/project-access";
 import { HandWrittenBadge } from "../features/code/TakeOver";
 import { CompatBadge } from "../features/variants/CompatBadge";
 import { api, getKey, projectKind, type ProjectDetail, type TestSummary, type ValidationStatus } from "../api";
@@ -68,6 +69,11 @@ export function ProjectTests({ id }: { id: string }) {
     // The Requirement column, and the Status column's word about drafts waiting for review (features/review).
     const reqLinks = useFetch<{ links: RequirementLink[] }>(`/projects/${id}/requirements/links`);
     const reviews = useFetch<{ scripts: ScriptRow[] }>(`/projects/${id}/scripts`);
+    // What this person may do in this project: Import needs tests.write, other browsers tests.run, the downloads reports.export.
+    const here = useHere(id, project);
+    const writeWhy = here.why("ai_studio.tests.write");
+    const runWhy = here.why("ai_studio.tests.run");
+    const exportWhy = here.why("ai_studio.reports.export");
     const name = project.data?.name;
     useOnFinish(isActive(project.data?.latestJob?.status), () => {
         void tests.reload();
@@ -149,11 +155,11 @@ export function ProjectTests({ id }: { id: string }) {
     }
 
     const exportItems: ExportItem[] = [
-        { key: "zip", icon: EXPORT_ICONS.zip, title: "Tests to run in your own pipeline", text: "The tests that pass, as a folder that runs anywhere: exact package versions, a lockfile and a README with three steps.", button: "Download tests", disabled: !hasValidated, ...(hasValidated ? {} : { tip: "Needs at least one passing test: only passing tests are in the folder." }), run: () => void fetchFile(`/projects/${id}/download`, `${name ?? "tests"}-tests.zip`) },
+        { key: "zip", icon: EXPORT_ICONS.zip, title: "Tests to run in your own pipeline", text: "The tests that pass, as a folder that runs anywhere: exact package versions, a lockfile and a README with three steps.", button: "Download tests", disabled: !hasValidated || Boolean(exportWhy), ...(exportWhy ? { tip: exportWhy } : hasValidated ? {} : { tip: "Needs at least one passing test: only passing tests are in the folder." }), run: () => void fetchFile(`/projects/${id}/download`, `${name ?? "tests"}-tests.zip`) },
         { key: "json", icon: FileJson, title: "Tests as JSON", text: "Every test, in the format Import understands.", button: "Export as JSON", disabled: all.length === 0, run: () => void fetchFile(`/projects/${id}/specs`, `${name ?? "tests"}-specs.json`) },
-        { key: "pdf", icon: FileText, title: "Report as PDF", text: "The project's results, ready to share.", button: "Download PDF", disabled: all.length === 0, run: () => void fetchFile(`/projects/${id}/report?format=pdf`, `${name ?? "project"}-report.pdf`) },
-        { key: "html", icon: FileText, title: "Report as a web page", text: "The same report as one HTML file.", button: "Download web page", disabled: all.length === 0, run: () => void fetchFile(`/projects/${id}/report?format=html`, `${name ?? "project"}-report.html`) },
-        { key: "junit", icon: EXPORT_ICONS.junit, title: "Results for your pipeline", text: "JUnit XML, read by most CI tools.", button: "Download results", disabled: all.length === 0, run: () => void fetchFile(`/projects/${id}/junit`, `${name ?? "tests"}-results.xml`) },
+        { key: "pdf", icon: FileText, title: "Report as PDF", text: "The project's results, ready to share.", button: "Download PDF", disabled: all.length === 0 || Boolean(exportWhy), ...(exportWhy ? { tip: exportWhy } : {}), run: () => void fetchFile(`/projects/${id}/report?format=pdf`, `${name ?? "project"}-report.pdf`) },
+        { key: "html", icon: FileText, title: "Report as a web page", text: "The same report as one HTML file.", button: "Download web page", disabled: all.length === 0 || Boolean(exportWhy), ...(exportWhy ? { tip: exportWhy } : {}), run: () => void fetchFile(`/projects/${id}/report?format=html`, `${name ?? "project"}-report.html`) },
+        { key: "junit", icon: EXPORT_ICONS.junit, title: "Results for your pipeline", text: "JUnit XML, read by most CI tools.", button: "Download results", disabled: all.length === 0 || Boolean(exportWhy), ...(exportWhy ? { tip: exportWhy } : {}), run: () => void fetchFile(`/projects/${id}/junit`, `${name ?? "tests"}-results.xml`) },
     ];
 
     async function importSpecs(file: File) {
@@ -177,7 +183,7 @@ export function ProjectTests({ id }: { id: string }) {
                 subtitle={all.length ? `${plural(all.length, "test script")}, ${counts.validated} passing${counts.review + counts.failed ? `, ${counts.review + counts.failed} not passing` : ""}` : name}
                 actions={
                     <>
-                        <Button icon={FileUp} disabled={isActive(job?.status)} tip={isActive(job?.status) ? "Wait until the job that is running has finished." : "Bring scripts from a JSON file, Maestro flows or a Git repository."} onClick={() => setShowImport(true)}>
+                        <Button icon={FileUp} disabled={Boolean(writeWhy) || isActive(job?.status)} tip={writeWhy ?? (isActive(job?.status) ? "Wait until the job that is running has finished." : "Bring scripts from a JSON file, Maestro flows or a Git repository.")} onClick={() => setShowImport(true)}>
                             Import
                         </Button>
                         {/* Choosing where tests run and which ones is one control (UX-A); making a script is another. */}
@@ -189,7 +195,7 @@ export function ProjectTests({ id }: { id: string }) {
                                     <MenuItem icon={Download} onClick={() => { close(); setShowExport(true); }}>
                                         Export…
                                     </MenuItem>
-                                    <MenuItem icon={MonitorSmartphone} disabled={isActive(job?.status) || counts.validated === 0} tip={counts.validated === 0 ? "Needs at least one passing test." : isActive(job?.status) ? "Wait until the job that is running has finished." : "Choose other browsers and screen sizes to run the passing web tests on."} onClick={() => { close(); setShowVariants(true); }}>
+                                    <MenuItem icon={MonitorSmartphone} disabled={Boolean(runWhy) || isActive(job?.status) || counts.validated === 0} tip={runWhy ?? (counts.validated === 0 ? "Needs at least one passing test." : isActive(job?.status) ? "Wait until the job that is running has finished." : "Choose other browsers and screen sizes to run the passing web tests on.")} onClick={() => { close(); setShowVariants(true); }}>
                                         Check other browsers &amp; screen sizes
                                     </MenuItem>
                                 </>
@@ -208,7 +214,7 @@ export function ProjectTests({ id }: { id: string }) {
                 {showBuild && <BuildTestDialog projectId={id} onClose={() => setShowBuild(false)} />}
                 {showMaestro && <MaestroImportPanel projectId={id} busy={isActive(job?.status)} onClose={() => setShowMaestro(false)} onImported={reloadAll} />}
                 {showGit && <GitImportDialog projectId={id} onClose={() => setShowGit(false)} onImported={reloadAll} />}
-                {showImport && <ImportDialog onClose={() => setShowImport(false)} disabled={isActive(job?.status)} onJsonFile={(file) => void importSpecs(file)} onMaestro={() => setShowMaestro(true)} onGit={() => setShowGit(true)} />}
+                {showImport && !writeWhy && <ImportDialog onClose={() => setShowImport(false)} disabled={isActive(job?.status)} onJsonFile={(file) => void importSpecs(file)} onMaestro={() => setShowMaestro(true)} onGit={() => setShowGit(true)} />}
                 {showVariants && <CheckVariantsPanel projectId={id} onStarted={() => void project.reload()} onClose={() => setShowVariants(false)} />}
                 {showExport && <ExportDialog onClose={() => setShowExport(false)} items={exportItems} />}
                 <RunStrip projectId={id} />
@@ -258,7 +264,7 @@ export function ProjectTests({ id }: { id: string }) {
                                 </Button>
                                 <SelectToggle selection={selection} />
                             </div>
-                            {selection.selecting && <SelectionBar selection={selection} shownIds={shown.map((t) => t.id)} run={<><SuiteFromSelection projectId={id} testIds={[...selection.picked]} canWrite={!project.data?.access || project.data.access.permissions.includes("ai_studio.tests.write")} /><RunMenu projectId={id} tests={all} selectedIds={[...selection.picked]} label="Run selected" variant="primary" /></>} />}
+                            {selection.selecting && <SelectionBar selection={selection} shownIds={shown.map((t) => t.id)} run={<><SuiteFromSelection projectId={id} testIds={[...selection.picked]} canWrite={!writeWhy} /><RunMenu projectId={id} tests={all} selectedIds={[...selection.picked]} label="Run selected" variant="primary" /></>} />}
                             <div className="chips" role="group" aria-label="Filter by status">
                                 {FILTERS.filter((f) => f.key === "all" || counts[f.key] > 0 || filter === f.key).map((f) => (
                                     <Tooltip key={f.key} content={FILTER_TIP[f.key]}>

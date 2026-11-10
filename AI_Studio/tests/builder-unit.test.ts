@@ -149,6 +149,13 @@ describe("what an edited test may contain", () => {
         expect(blanks.spec).toBeUndefined();
     });
 
+    it("says a locator with no strategy is missing one, not that it has the wrong kind of value", () => {
+        const r = checkSpecInput(web([nav, { action: "click", locator: {} }]), ctx());
+        const msgs = errorsOf(r.diagnostics).map((d) => d.message);
+        expect(msgs.some((m) => m.startsWith("Step 2:") && m.endsWith("is missing."))).toBe(true);
+        expect(msgs.some((m) => m.includes("wrong kind of value"))).toBe(false);
+    });
+
     it("keeps API steps out of web tests and the other way round", () => {
         const a = checkSpecInput(web([nav, { action: "request", method: "GET", path: "/x" }]), ctx());
         expect(errorsOf(a.diagnostics)[0]!.message).toMatch(/Step 2: This kind of step belongs in an API test/);

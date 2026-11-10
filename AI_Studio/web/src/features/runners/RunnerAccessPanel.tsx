@@ -4,14 +4,14 @@ import { ApiError, api } from "../../api";
 import { Badge, Button, Callout, ErrorState, ListSkeleton } from "../../components/ui";
 import { friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import { usePolled } from "../agents/agents";
 import { HowToAddRunner } from "./RunnersPages";
 import { STATUS_WORDS, type RunnerAccess } from "./runners";
 
 /** Project settings: the runners this project may use, and (with "manage runners") giving or removing access. */
 export function RunnerAccessPanel({ projectId, onChanged }: { projectId: string; onChanged: () => void }) {
-    const can = useCan();
+    const can = useHere(projectId).may;
     const f = usePolled<RunnerAccess>(`/projects/${projectId}/runner-access`);
     const [choice, setChoice] = useState("");
     const [busy, setBusy] = useState(false);

@@ -22,9 +22,9 @@ const Scalar = z.union([z.string().max(200), z.number(), z.boolean()]);
 export const ApiPlanSchema = z.object({
     operation: z.string().nullable().describe('One line from the list of operations, copied exactly ("GET /products/{id}"), or null if none of them fits the description'),
     explanation: z.string().max(400).describe("One plain sentence: why this operation, or why none fits"),
-    pathValues: z.record(Scalar).default({}).describe('Values for {placeholders} in the path, e.g. {"id": "1"}'),
-    query: z.record(Scalar).default({}).describe("Query parameters to send"),
-    body: z.record(z.unknown()).optional().describe("JSON body, only for operations that send data"),
+    pathValues: z.record(z.string(), Scalar).default({}).describe('Values for {placeholders} in the path, e.g. {"id": "1"}'),
+    query: z.record(z.string(), Scalar).default({}).describe("Query parameters to send"),
+    body: z.record(z.string(), z.unknown()).optional().describe("JSON body, only for operations that send data"),
     expect: z
         .object({
             status: z.number().int().min(100).max(599).optional().describe("Exact HTTP status the description expects; leave out for plain success"),

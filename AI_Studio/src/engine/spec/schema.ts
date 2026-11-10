@@ -92,13 +92,13 @@ const StepLocatorSchema = z
     })
     .superRefine((l, ctx) => {
         if (l.ref === undefined) {
-            if (l.by === undefined) ctx.addIssue({ code: z.ZodIssueCode.invalid_type, expected: "string", received: "undefined", path: ["by"], message: "Required" });
+            if (l.by === undefined) ctx.addIssue({ code: "invalid_type", expected: "string", input: undefined, path: ["by"], message: "Required" });
             return;
         }
         if (l.by !== undefined || l.role !== undefined || l.value !== undefined || l.exact !== undefined || l.nth !== undefined || l.frame !== undefined || l.fallbacks !== undefined) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A locator is either a shared element ({ \"ref\": \"name\" }) or a concrete locator, not both" });
         }
-    }) as unknown as z.ZodType<Locator, z.ZodTypeDef, unknown>;
+    }) as unknown as z.ZodType<Locator, unknown>;
 
 const base = { description: z.string().default("") };
 /** Web steps only: the step works in the popup window (or new tab) an earlier click opened (see `opensPopup`), not the page the test started on. */
@@ -212,7 +212,7 @@ export const RESPONSE_CHECKS = [
     "statusDenied",
 ] as const;
 
-type AnyLocatorSchema = z.ZodType<Locator, z.ZodTypeDef, unknown>;
+type AnyLocatorSchema = z.ZodType<Locator, unknown>;
 /** The step list is built once for the concrete locator (what models are asked for) and once for the stored form that also allows `{ ref }`. */
 function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
     return z.discriminatedUnion("action", [
@@ -296,8 +296,8 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
         /** Path relative to the API base URL, may contain {{vars}}. */
         path: z.string(),
-        query: z.record(z.string()).optional(),
-        headers: z.record(z.string()).optional(),
+        query: z.record(z.string(), z.string()).optional(),
+        headers: z.record(z.string(), z.string()).optional(),
         body: z.unknown().optional(),
         /** "default" attaches the configured API credential, "none" sends the request unauthenticated. */
         auth: z.enum(["default", "none"]).default("default"),
@@ -306,7 +306,7 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
          * { varName: "dot.path" } (e.g. { "productId": "0.id" }); later steps use {{productId}}.
          * This is what makes multi-request workflow tests (list → detail, create → read → delete) possible.
          */
-        extract: z.record(z.string()).optional(),
+        extract: z.record(z.string(), z.string()).optional(),
         ...base,
     }),
     z.object({
@@ -316,7 +316,7 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         path: z.string().optional(),
         expected: z.union([z.string(), z.number(), z.boolean()]).optional(),
         /** matchesSchema only: the documented response schema (a JSON-Schema subset), size-bounded by the generator. */
-        schema: z.record(z.unknown()).optional(),
+        schema: z.record(z.string(), z.unknown()).optional(),
         ...base,
     }),
     // ── reusable steps (see ../blocks/*): expanded into the block's own steps before any script is rendered ──
@@ -325,7 +325,7 @@ function buildStepSchema(LocatorSchema: AnyLocatorSchema) {
         /** The name of the project's reusable steps. */
         block: z.string().min(1).max(80),
         /** Values for the block's parameters; they replace {{name}} in the block's steps. */
-        args: z.record(z.string().max(500)).optional(),
+        args: z.record(z.string(), z.string().max(500)).optional(),
         ...base,
     }),
     // ── web: emailed codes and magic links (see ../auth/email-step.ts, docs/features/hard-sign-ins.md) ──
@@ -388,7 +388,7 @@ export const TestSpecSchema = z.object({
     steps: z.array(StoredStepSchema).min(1),
     expectedResults: z.array(z.string()).default([]),
     /** Named values referenced as {{name}} in steps. `{{unique}}` is always available at runtime. */
-    testData: z.record(z.string()).default({}),
+    testData: z.record(z.string(), z.string()).default({}),
     tags: z.array(z.string()).default([]),
     /** Which scenario/flow this was derived from + how it was produced. */
     source: z

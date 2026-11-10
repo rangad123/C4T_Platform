@@ -4,7 +4,7 @@ import { projectShape, type ProjectDetail } from "../../api";
 import { Menu, MenuItem, MenuLabel } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { useProjectAiReady } from "../aiconfig/aiconfig";
-import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import { PLAIN_ON_RUNNERS, useExecutionMode, useRunsHere } from "../runs/runs-here";
 import { BuildTestDialog } from "../builder/BuildTestButton";
 import { WriteCodeDialog } from "../code/WriteCodeDialog";
@@ -31,12 +31,14 @@ export function NewTestMenu({ projectId, onDescribe, onImport, onMade, variant =
     // Runners mode: the platform refuses a described test (the AI builds it with a browser on the server).
     const runnersOnly = useExecutionMode() === "runners";
     // Scripts from test cases: the AI writes and saves them (both permissions in this project, as the server asks), with the project's AI model.
-    const can = useCan();
+    const here = useHere(projectId, project);
     const aiReady = useProjectAiReady(projectId);
-    const fromCasesWhy = project.data && !mayGenerateScripts(project.data, can) ? NO_PERMISSION_FOR_SCRIPTS : generateScriptsBlock(project.data, aiReady);
+    const fromCasesWhy = project.data && !mayGenerateScripts(project.data, here.may) ? NO_PERMISSION_FOR_SCRIPTS : generateScriptsBlock(project.data, aiReady);
+    // Every way in makes a test script (ai_studio.tests.write in this project): without it the menu is switched off with the reason.
+    const writeWhy = here.why("ai_studio.tests.write");
     return (
         <>
-            <Menu label="New test script" icon={Plus} variant={variant} wide dataTour="new-test">
+            <Menu label="New test script" icon={Plus} variant={variant} wide dataTour="new-test" disabled={Boolean(writeWhy)} tip={writeWhy}>
                 {(done) => (
                     <>
                         <MenuLabel>With help</MenuLabel>

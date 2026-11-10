@@ -12,7 +12,8 @@ hljs.registerLanguage("json", json);
 /** Syntax-highlighted, scrollable code with copy/download. Renders escaped text — highlight.js output is safe HTML. */
 export function CodeViewer({ code, language = "typescript", filename, label, fullCode }: { code: string; language?: "typescript" | "json"; filename?: string; label?: string; /** What Copy and Download give when only part of the script is shown (the test body, with the setup code folded away). */ fullCode?: string }) {
     const html = useMemo(() => hljs.highlight(code, { language }).value, [code, language]);
-    const [copied, setCopied] = useState(false);
+    /** "done" after a copy; "failed" when the clipboard refused (said on the button, never "Copied"). */
+    const [copied, setCopied] = useState<"done" | "failed" | null>(null);
     return (
         <div className="code-wrap">
             <div className="code-bar">
@@ -21,15 +22,17 @@ export function CodeViewer({ code, language = "typescript", filename, label, ful
                 <Button
                     size="sm"
                     variant="ghost"
-                    icon={copied ? Check : Copy}
-                    tip={fullCode !== undefined && fullCode !== code ? "Copies the whole script, including the setup code folded below." : undefined}
+                    icon={copied === "done" ? Check : Copy}
+                    tip={copied === "failed" ? "The browser did not allow copying here. Select the code and copy it yourself." : fullCode !== undefined && fullCode !== code ? "Copies the whole script, including the setup code folded below." : undefined}
                     onClick={async () => {
-                        await navigator.clipboard.writeText(fullCode ?? code).catch(() => undefined);
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
+                        const ok = await Promise.resolve()
+                            .then(() => navigator.clipboard.writeText(fullCode ?? code))
+                            .then(() => true, () => false);
+                        setCopied(ok ? "done" : "failed");
+                        setTimeout(() => setCopied(null), ok ? 1500 : 4000);
                     }}
                 >
-                    {copied ? "Copied" : "Copy"}
+                    <span aria-live="polite">{copied === "done" ? "Copied" : copied === "failed" ? "Could not copy" : "Copy"}</span>
                 </Button>
                 {filename && (
                     <Button size="sm" variant="ghost" icon={Download} tip={fullCode !== undefined && fullCode !== code ? `Saves the whole script as ${filename}, including the setup code folded below.` : `Saves it as ${filename}.`} onClick={() => downloadBlob(new Blob([fullCode ?? code], { type: "text/plain" }), filename)}>

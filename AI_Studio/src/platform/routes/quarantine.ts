@@ -18,7 +18,7 @@ import type { RouteCtx } from "./types.js";
  *
  * Every lookup is by project and id together. Nothing is ever quarantined automatically.
  */
-const By = z.string({ required_error: "Your name is required", invalid_type_error: "Your name must be text" }).trim().min(1, "Your name is required").max(MAX_BY, `Your name can be at most ${MAX_BY} characters`);
+const By = z.string({ error: (iss) => (iss.input === undefined ? "Your name is required" : "Your name must be text") }).trim().min(1, "Your name is required").max(MAX_BY, `Your name can be at most ${MAX_BY} characters`);
 const Note = z.string().trim().max(MAX_REASON, `The note can be at most ${MAX_REASON} characters`).optional();
 
 const QuarantineBody = z.object({

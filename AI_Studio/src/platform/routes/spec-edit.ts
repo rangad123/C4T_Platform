@@ -12,7 +12,7 @@ export function registerSpecEditRoutes(ctx: RouteCtx): void {
     // The editor previews while the person types (debounced): at most five a second.
     const previews = new RateLimiter(5, 1000);
 
-    const Body = z.object({ spec: z.unknown(), note: z.string().max(200).optional(), run: z.boolean().optional() });
+    const Body = z.object({ spec: z.unknown().optional(), note: z.string().max(200).optional(), run: z.boolean().optional() });
 
     app.get("/api/tests/:id/spec", async (req) => svc.describe((req.params as { id: string }).id));
 

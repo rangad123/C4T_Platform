@@ -124,6 +124,10 @@ describe("items and versions", () => {
         expect(helperItem && elementItem).toBeTruthy();
         // Taken names (per kind, ignoring case), a bad helper name, code the guard refuses, a typed secret, a broken locator.
         expect((await as("t-cora", "POST", "/api/libraries/items", { organizationId: "org-a", kind: "steps", name: "pay BY card", content: STEPS_V1 })).status).toBe(409);
+        // No content at all reaches the kind's own check (which names what is wrong), not a refusal of the request's shape.
+        const empty = await as("t-cora", "POST", "/api/libraries/items", { organizationId: "org-a", kind: "steps", name: "Nothing yet" });
+        expect(empty.status).toBe(400);
+        expect(empty.body.error).toMatch(/^steps: /);
         expect((await as("t-cora", "POST", "/api/libraries/items", { organizationId: "org-a", kind: "helper", name: "Open Page", content: { content: HELPER("a") } })).status).toBe(400);
         const evil = await as("t-cora", "POST", "/api/libraries/items", { organizationId: "org-a", kind: "helper", name: "evil", content: { content: 'import { exec } from "child_process";\nexport const run = exec;\n' } });
         expect(evil.status).toBe(422);

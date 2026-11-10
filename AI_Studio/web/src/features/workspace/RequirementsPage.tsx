@@ -4,7 +4,7 @@ import { projectKind, type ProjectDetail } from "../../api";
 import { ProjectPlace } from "../../components/ProjectHub";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { Tooltip } from "../../components/Tooltip";
-import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import { plural } from "../../lib/format";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
@@ -29,12 +29,15 @@ export function RequirementsPage({ id, rid }: { id: string; rid?: string }) {
 function RequirementList({ id }: { id: string }) {
     const list = useFetch<RequirementList>(`/projects/${id}/requirements`);
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
-    const can = useCan();
-    const canWrite = can("ai_studio.tests.write");
+    // What this person may do in this project (its own list, not only their platform-wide one): they may look at the requirements,
+    // so adding and importing are shown switched off with the reason when they may not change them.
+    const here = useHere(id, project);
+    const canWrite = here.may("ai_studio.tests.write");
+    const writeWhy = here.why("ai_studio.tests.write");
     // Code-based (and mixed) projects write test cases from their requirements with the AI; AI agent projects do not.
     const kind = project.data ? projectKind(project.data) : null;
     // The AI writes and saves the cases: adding tests and using the AI to write them, as the server asks.
-    const canGenerate = canWrite && can("ai_studio.tests.generate") && (kind === "code" || kind === "mixed");
+    const canGenerate = canWrite && here.may("ai_studio.tests.generate") && (kind === "code" || kind === "mixed");
     // New cases change the Test cases tab's count: every part showing the project asks again.
     const gen = useGenerateCases(id, useRoute().query.get("generate") === "1", async () => {
         announceProjectChanged(id);
@@ -65,21 +68,20 @@ function RequirementList({ id }: { id: string }) {
             place="requirements"
             title="Requirements"
             subtitle="What the application must do, and which test cases check it."
+            project={project}
             actions={
-                canWrite ? (
-                    <>
-                        <Button icon={Upload} onClick={() => setOpen(open === "import" ? null : "import")} aria-expanded={open === "import"}>
-                            Import
-                        </Button>
-                        <Button variant="primary" icon={Plus} onClick={() => setOpen(open === "add" ? null : "add")} aria-expanded={open === "add"}>
-                            Add requirement
-                        </Button>
-                    </>
-                ) : undefined
+                <>
+                    <Button icon={Upload} disabled={!canWrite} tip={writeWhy} onClick={() => setOpen(open === "import" ? null : "import")} aria-expanded={open === "import"}>
+                        Import
+                    </Button>
+                    <Button variant="primary" icon={Plus} disabled={!canWrite} tip={writeWhy} onClick={() => setOpen(open === "add" ? null : "add")} aria-expanded={open === "add"}>
+                        Add requirement
+                    </Button>
+                </>
             }
         >
             {notice && <Callout tone={notice.tone}>{notice.text}</Callout>}
-            {open === "add" && (
+            {open === "add" && canWrite && (
                 <RequirementForm
                     projectId={id}
                     onCancel={() => setOpen(null)}
@@ -89,7 +91,7 @@ function RequirementList({ id }: { id: string }) {
                     }}
                 />
             )}
-            {open === "import" && (
+            {open === "import" && canWrite && (
                 <ImportPanel
                     projectId={id}
                     onCancel={() => setOpen(null)}

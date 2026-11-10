@@ -5,6 +5,7 @@ import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "..
 import { BadgeKey } from "../../components/Tooltip";
 import { SCHEDULE_HELP } from "../../lib/help";
 import { relativeTime } from "../../lib/format";
+import { useHere } from "../auth/project-access";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
@@ -23,6 +24,9 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
     }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const data = list.data;
+    // Making, changing and starting schedules all need ai_studio.tests.run in this project: without it they are shown to read, with
+    // New schedule and Run now switched off with the reason, and Pause and Delete left out.
+    const noRun = useHere(projectId).why("ai_studio.tests.run");
     // Do schedules really start their runs? Only while scheduling is on AND runs can start (a worker, or in runners mode the dispatch
     // that hands runs to runners): the scheduler runs only next to one, so without it a schedule shows a next time that never comes.
     const config = useConfig();
@@ -38,7 +42,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                 {data && <BadgeKey label="the schedule states"entries={data.schedules.map((s) => (s.enabled ? { word: "Active", text: SCHEDULE_HELP.on } : { word: "Paused", text: SCHEDULE_HELP.off }))} />}
                 <span className="spacer" />
                 {data && data.schedules.length > 0 && !adding && (
-                    <Button size="sm" icon={Plus} onClick={() => setAdding(true)}>
+                    <Button size="sm" icon={Plus} disabled={Boolean(noRun)} tip={noRun} onClick={() => setAdding(true)}>
                         New schedule
                     </Button>
                 )}
@@ -69,19 +73,19 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                         </p>
                     ) : null}
                     {data.schedules.length === 0 && !adding ? (
-                        <EmptyState icon={CalendarClock} title="Nothing is scheduled yet" actions={<Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>New schedule</Button>}>
+                        <EmptyState icon={CalendarClock} title="Nothing is scheduled yet" actions={<Button variant="primary" icon={Plus} disabled={Boolean(noRun)} tip={noRun} onClick={() => setAdding(true)}>New schedule</Button>}>
                             Run your tests automatically — for example every night — and get told when something starts failing.
                         </EmptyState>
                     ) : (
                         <ul className="list divided">
                             {data.schedules.map((s) => (
                                 <li key={s.id}>
-                                    <ScheduleRow s={s} projectId={projectId} onChanged={list.reload} onRunStarted={onRunStarted} runBlock={runsStart ? null : runnersOnly ? DISPATCH_OFF : RUNS_OFF_TIP} />
+                                    <ScheduleRow s={s} projectId={projectId} onChanged={list.reload} onRunStarted={onRunStarted} runBlock={noRun ?? (runsStart ? null : runnersOnly ? DISPATCH_OFF : RUNS_OFF_TIP)} mayChange={!noRun} />
                                 </li>
                             ))}
                         </ul>
                     )}
-                    {adding && (
+                    {adding && !noRun && (
                         <NewScheduleForm
                             projectId={projectId}
                             zone={zone}
@@ -99,7 +103,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
     );
 }
 
-function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock }: { s: Schedule; projectId: string; onChanged: () => Promise<void>; onRunStarted: () => void; runBlock: string | null }) {
+function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock, mayChange }: { s: Schedule; projectId: string; onChanged: () => Promise<void>; onRunStarted: () => void; runBlock: string | null; /** False: Pause and Delete are left out (the person may not change schedules here). */ mayChange: boolean }) {
     const [busy, setBusy] = useState<"run" | "toggle" | "delete" | null>(null);
     const [error, setError] = useState("");
     const [started, setStarted] = useState(false);
@@ -149,10 +153,10 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock }: { s: S
                 <Button size="sm" icon={Zap} loading={busy === "run"} disabled={Boolean(runBlock)} onClick={() => act("run")} aria-label={`Run now: ${s.name}`} tip={runBlock ?? "Starts this schedule’s run now. Its next time does not change."}>
                     Run now
                 </Button>
-                <Button size="sm" variant="ghost" icon={s.enabled ? Pause : Play} loading={busy === "toggle"} onClick={() => act("toggle")} aria-label={`${s.enabled ? "Pause" : "Resume"}: ${s.name}`} tip={s.enabled ? "It starts nothing on its own until you resume it. Run now still works." : "It starts again at its next time from now. Times missed while paused are not made up."}>
+                {mayChange && <Button size="sm" variant="ghost" icon={s.enabled ? Pause : Play} loading={busy === "toggle"} onClick={() => act("toggle")} aria-label={`${s.enabled ? "Pause" : "Resume"}: ${s.name}`} tip={s.enabled ? "It starts nothing on its own until you resume it. Run now still works." : "It starts again at its next time from now. Times missed while paused are not made up."}>
                     {s.enabled ? "Pause" : "Resume"}
-                </Button>
-                {confirm ? (
+                </Button>}
+                {!mayChange ? null : confirm ? (
                     <>
                         <span className="t-secondary">Delete this schedule?</span>
                         <Button size="sm" variant="danger" loading={busy === "delete"} onClick={() => act("delete")}>Yes, delete</Button>

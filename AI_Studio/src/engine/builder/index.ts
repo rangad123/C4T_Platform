@@ -11,6 +11,7 @@ import type { BlockIndex } from "../blocks/model.js";
 import { locatorOf, refProblems, type ObjectIndex } from "../locators/refs.js";
 import { unknownPlaceholders } from "../testdata/dataset.js";
 import { popupProblems } from "../web/pages.js";
+import { isMissingValue, isUnknownChoice, isUnknownKind } from "../zod-issue.js";
 
 /** What the editor refuses to store, in numbers. */
 export const BUILDER_LIMITS = {
@@ -93,17 +94,17 @@ const FIELD_WORDS: Record<string, string> = {
 
 const stepNo = (i: number) => `Step ${i + 1}`;
 
-function describeIssue(issue: { code: string; path: Array<string | number>; message: string; received?: unknown }): BuilderDiagnostic {
+function describeIssue(issue: { code: string; path: PropertyKey[]; message: string; note?: string }): BuilderDiagnostic {
     const path = issue.path;
     if (path[0] === "steps" && typeof path[1] === "number") {
         const i = path[1];
         const field = path.slice(2).filter((p) => typeof p === "string").pop() as string | undefined;
-        if (issue.code === "invalid_union_discriminator") return { stepIndex: i, severity: "error", message: `${stepNo(i)}: choose what this step does.` };
+        if (isUnknownKind(issue)) return { stepIndex: i, severity: "error", message: `${stepNo(i)}: choose what this step does.` };
         if (path.length === 2 && issue.code === "invalid_type") return { stepIndex: i, severity: "error", message: `${stepNo(i)} is not a valid step.` };
         const what = field ? (FIELD_WORDS[field] ?? `“${field}”`) : "this step";
-        if (issue.code === "invalid_type" && issue.received === "undefined") return { stepIndex: i, severity: "error", message: `${stepNo(i)}: ${what} is missing.` };
+        if (isMissingValue(issue)) return { stepIndex: i, severity: "error", message: `${stepNo(i)}: ${what} is missing.` };
         if (issue.code === "invalid_type") return { stepIndex: i, severity: "error", message: `${stepNo(i)}: ${what} has the wrong kind of value.` };
-        if (issue.code === "invalid_enum_value") return { stepIndex: i, severity: "error", message: `${stepNo(i)}: ${what} is not one the platform knows.` };
+        if (isUnknownChoice(issue)) return { stepIndex: i, severity: "error", message: `${stepNo(i)}: ${what} is not one the platform knows.` };
         if (issue.code === "too_big" || issue.code === "too_small") return { stepIndex: i, severity: "error", message: `${stepNo(i)}: ${what} is out of range.` };
         return { stepIndex: i, severity: "error", message: `${stepNo(i)}: ${what} ${issue.message.charAt(0).toLowerCase()}${issue.message.slice(1)}` };
     }

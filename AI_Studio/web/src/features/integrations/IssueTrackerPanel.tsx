@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiError, api } from "../../api";
 import { Button, Callout, Disclosure, ListSkeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { routes } from "../../lib/router";
 import { describeApiError } from "../../lib/labels";
 import { SentryConnect } from "../sentry/SentryConnect";
@@ -34,6 +35,8 @@ export function IssueTrackerPanel({ projectId, onClose }: { projectId: string; o
     const sharedIds = new Set((shared.data ?? []).map((s) => s.targetId));
     const [adding, setAdding] = useState(false);
     const connections = list.data ?? [];
+    // Connections hold another system's token: connecting, testing and removing them needs ai_studio.ai_keys.manage here.
+    const noManage = useHere(projectId).why("ai_studio.ai_keys.manage");
 
     return (
         <section className="card card-pad stack-sm" aria-label="Issue tracker">
@@ -56,16 +59,16 @@ export function IssueTrackerPanel({ projectId, onClose }: { projectId: string; o
                         <ul className="list divided" aria-label="Connected issue trackers">
                             {connections.map((c) => (
                                 <li key={c.id}>
-                                    <Connection c={c} shared={sharedIds.has(c.id)} onRemoved={() => void list.reload()} />
+                                    <Connection c={c} shared={sharedIds.has(c.id)} onRemoved={() => void list.reload()} mayManage={!noManage} />
                                 </li>
                             ))}
                         </ul>
                     )}
-                    {adding ? (
+                    {adding && !noManage ? (
                         <ConnectForm projectId={projectId} onDone={() => { setAdding(false); void list.reload(); }} onCancel={() => setAdding(false)} />
                     ) : (
                         <div className="row">
-                            <Button variant="primary" icon={Plug} onClick={() => setAdding(true)}>{connections.length ? "Connect another" : "Connect an issue tracker"}</Button>
+                            <Button variant="primary" icon={Plug} disabled={Boolean(noManage)} tip={noManage} onClick={() => setAdding(true)}>{connections.length ? "Connect another" : "Connect an issue tracker"}</Button>
                         </div>
                     )}
                 </>
@@ -75,7 +78,7 @@ export function IssueTrackerPanel({ projectId, onClose }: { projectId: string; o
     );
 }
 
-function Connection({ c, shared, onRemoved }: { c: Integration; shared?: boolean; onRemoved: () => void }) {
+function Connection({ c, shared, onRemoved, mayManage }: { c: Integration; shared?: boolean; onRemoved: () => void; mayManage: boolean }) {
     const [state, setState] = useState<{ kind: "idle" } | { kind: "testing" } | { kind: "ok" | "bad"; text: string }>({ kind: "idle" });
     const [confirm, setConfirm] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -117,7 +120,7 @@ function Connection({ c, shared, onRemoved }: { c: Integration; shared?: boolean
                 {error && <span className="meta" role="alert" style={{ color: "var(--status-error-fg)" }}>{error}</span>}
                 {confirm && <span className="meta">Remove this connection? Issues already created stay where they are.</span>}
             </span>
-            <span className="tail">
+            {mayManage && <span className="tail">
                 {confirm ? (
                     <>
                         <Button size="sm" variant="danger" loading={busy} onClick={() => void remove()}>Yes, remove</Button>
@@ -129,7 +132,7 @@ function Connection({ c, shared, onRemoved }: { c: Integration; shared?: boolean
                         {!shared && <Button size="sm" variant="ghost" icon={Trash2} aria-label={`Remove ${c.name}`} onClick={() => setConfirm(true)}>Remove</Button>}
                     </>
                 )}
-            </span>
+            </span>}
         </div>
     );
 }

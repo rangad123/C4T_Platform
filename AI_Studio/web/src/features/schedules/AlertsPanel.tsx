@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { EVENT_LABEL, EVENT_ORDER, type AlertChannel, type AlertEvent, type AlertLogEntry, type AlertOptions, type ChannelKind } from "./schedules";
@@ -25,6 +26,9 @@ export function AlertsPanel({ projectId, reloadKey }: { projectId: string; reloa
     const shared = useFetch<Array<{ targetId: string }>>(`/projects/${projectId}/shared-integrations`);
     const sharedIds = new Set((shared.data ?? []).map((s) => s.targetId));
     const log = useFetch<AlertLogEntry[]>(`/projects/${projectId}/alert-log?limit=15`);
+    // Alert channels hold other systems' addresses and passwords: adding, testing, switching and removing them needs
+    // ai_studio.ai_keys.manage in this project. Without it they are shown to read.
+    const noManage = useHere(projectId).why("ai_studio.ai_keys.manage");
     const [adding, setAdding] = useState(false);
     useEffect(() => {
         if (reloadKey > 0) {
@@ -46,7 +50,7 @@ export function AlertsPanel({ projectId, reloadKey }: { projectId: string; reloa
                     {channels.data && <BadgeKey label="the channel states"entries={channels.data.map((c) => (c.enabled ? { word: "On", text: CHANNEL_ON } : { word: "Off", text: CHANNEL_OFF }))} />}
                     <span className="spacer" />
                     {channels.data && channels.data.length > 0 && !adding && (
-                        <Button size="sm" icon={Plus} onClick={() => setAdding(true)}>
+                        <Button size="sm" icon={Plus} disabled={Boolean(noManage)} tip={noManage} onClick={() => setAdding(true)}>
                             Add a channel
                         </Button>
                     )}
@@ -60,19 +64,19 @@ export function AlertsPanel({ projectId, reloadKey }: { projectId: string; reloa
                 ) : (
                     <>
                         {channels.data.length === 0 && !adding ? (
-                            <EmptyState icon={BellRing} title="No alerts set up" actions={<Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>Add a channel</Button>}>
+                            <EmptyState icon={BellRing} title="No alerts set up" actions={<Button variant="primary" icon={Plus} disabled={Boolean(noManage)} tip={noManage} onClick={() => setAdding(true)}>Add a channel</Button>}>
                                 Get a message in Slack or Microsoft Teams, an email, or a call to any web address, when a run has failures, a test starts failing, or a failure is fixed.
                             </EmptyState>
                         ) : (
                             <ul className="list divided">
                                 {channels.data.map((c) => (
                                     <li key={c.id}>
-                                        <ChannelRow c={c} projectId={projectId} shared={sharedIds.has(c.id)} onChanged={reloadAll} />
+                                        <ChannelRow c={c} projectId={projectId} shared={sharedIds.has(c.id)} onChanged={reloadAll} mayManage={!noManage} />
                                     </li>
                                 ))}
                             </ul>
                         )}
-                        {adding && (
+                        {adding && !noManage && (
                             <NewChannelForm
                                 projectId={projectId}
                                 onCancel={() => setAdding(false)}
@@ -122,7 +126,7 @@ export function AlertsPanel({ projectId, reloadKey }: { projectId: string; reloa
     );
 }
 
-function ChannelRow({ c, projectId, shared, onChanged }: { c: AlertChannel; projectId: string; shared?: boolean; onChanged: () => Promise<void> }) {
+function ChannelRow({ c, projectId, shared, onChanged, mayManage }: { c: AlertChannel; projectId: string; shared?: boolean; onChanged: () => Promise<void>; mayManage: boolean }) {
     const [busy, setBusy] = useState<"test" | "toggle" | "delete" | null>(null);
     const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
     const [confirm, setConfirm] = useState(false);
@@ -165,7 +169,7 @@ function ChannelRow({ c, projectId, shared, onChanged }: { c: AlertChannel; proj
                 )}
             </div>
             {result && <Callout tone={result.ok ? "success" : "danger"}>{result.text}</Callout>}
-            <div className="acts">
+            {mayManage && <div className="acts">
                 <Button size="sm" icon={Send} loading={busy === "test"} onClick={() => act("test")} aria-label={`Send a test message to ${c.name}`} tip={c.kind === "email" ? "Sends a sample email to the people listed, now." : "Sends a sample message to this channel now, so you can see how alerts look."}>
                     Send test
                 </Button>
@@ -183,7 +187,7 @@ function ChannelRow({ c, projectId, shared, onChanged }: { c: AlertChannel; proj
                         Remove
                     </Button>
                 )}
-            </div>
+            </div>}
         </div>
     );
 }

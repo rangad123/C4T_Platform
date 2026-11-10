@@ -8,7 +8,7 @@ import { downloadBlob, plural } from "../../lib/format";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
 import { go, routes, type CasesSection } from "../../lib/router";
-import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import type { RequirementLink, RequirementList } from "../requirements/requirements";
 import { apiMessage, AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
 import "./manual.css";
@@ -31,7 +31,10 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
     const reqs = useFetch<RequirementList>(`/projects/${id}/requirements`);
     const reqLinks = useFetch<{ links: RequirementLink[] }>(`/projects/${id}/requirements/links`);
     const tests = useFetch<TestSummary[]>(`/projects/${id}/tests`);
-    const can = useCan();
+    // What this person may do in this project (its own list): they may read the cases, so Import and Add are switched off with the
+    // reason when they may not write tests here; editing and deleting a case are left out.
+    const here = useHere(id, project);
+    const can = here.may;
     const kind = project.data ? projectKind(project.data) : null;
     // An AI agent project has no Test cases tab; an old link still shows its cases, to read.
     const canWrite = can("ai_studio.tests.write") && kind !== "agent";
@@ -122,6 +125,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             place="tests"
             title="Test cases"
             subtitle="The written checks of this project: what to do and what should happen, from the requirements. Each says whether it can be automated."
+            project={project}
             actions={
                 canWrite ? (
                     <>
@@ -151,6 +155,15 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
                                 </>
                             )}
                         </Menu>
+                    </>
+                ) : kind && kind !== "agent" && !can("ai_studio.tests.write") ? (
+                    <>
+                        <Button icon={Upload} disabled tip={here.why("ai_studio.tests.write")}>
+                            Import
+                        </Button>
+                        <Button variant="primary" icon={Plus} disabled tip={here.why("ai_studio.tests.write")}>
+                            Add test case (manual)
+                        </Button>
                     </>
                 ) : undefined
             }

@@ -285,8 +285,8 @@ dialog::backdrop { background: var(--scrim); }
 pre.code { margin: 0; padding: 16px 20px; background: var(--code-bg); color: var(--code-text); overflow: auto; max-height: 460px; font: 500 12.5px/1.65 var(--font-mono); tab-size: 4; }
 pre.code code { font: inherit; }
 /* Syntax colours stay inside the warm ramp plus the two voices of the system (teal and the status hues). */
-.hljs-keyword, .hljs-literal, .hljs-built_in { color: var(--accent-300); } .hljs-string, .hljs-template-string { color: #e2c88c; }
-.hljs-comment { color: var(--ink-400); font-style: italic; } .hljs-number { color: #f39a89; } .hljs-title, .hljs-title\.function_ { color: #86c6df; }
+.hljs-keyword, .hljs-literal, .hljs-built_in { color: var(--accent-300); } .hljs-string, .hljs-template-string { color: var(--code-string); }
+.hljs-comment { color: var(--ink-400); font-style: italic; } .hljs-number { color: var(--code-number); } .hljs-title, .hljs-title\.function_ { color: var(--code-title); }
 .hljs-attr, .hljs-property { color: var(--ink-300); } .hljs-subst { color: var(--code-text); }
 code { font-family: var(--font-mono); font-size: 0.92em; font-weight: var(--fw-medium); }
 

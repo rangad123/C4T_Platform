@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiError, api } from "../../api";
 import { Button, Callout, Disclosure, Skeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 import type { SentryConnectionAnswer } from "./sentry";
 import "./sentry.css";
@@ -32,6 +33,8 @@ export function SentryConnect({ projectId }: { projectId: string }) {
     const conn = useFetch<SentryConnectionAnswer>(`/projects/${projectId}/sentry`);
     const [adding, setAdding] = useState(false);
     const current = conn.data?.connected ? conn.data.connection : undefined;
+    // The Sentry token is another system's credential: connecting, testing and disconnecting need ai_studio.ai_keys.manage here.
+    const noManage = useHere(projectId).why("ai_studio.ai_keys.manage");
 
     return (
         <section className="stack-sm sentry-connect" aria-label="Sentry">
@@ -46,7 +49,7 @@ export function SentryConnect({ projectId }: { projectId: string }) {
                 <Callout tone="danger" title="We couldn’t load the Sentry connection" actions={<Button size="sm" onClick={() => void conn.reload()}>Try again</Button>}>
                     {describeApiError(conn.error)}
                 </Callout>
-            ) : adding ? (
+            ) : adding && !noManage ? (
                 <SentryForm
                     projectId={projectId}
                     current={current}
@@ -57,10 +60,10 @@ export function SentryConnect({ projectId }: { projectId: string }) {
                     onCancel={() => setAdding(false)}
                 />
             ) : current ? (
-                <Connected projectId={projectId} name={current.name} where={`${current.organization}/${current.project} on ${host(current.baseUrl)}`} onChange={() => setAdding(true)} onRemoved={() => void conn.reload()} />
+                <Connected projectId={projectId} name={current.name} where={`${current.organization}/${current.project} on ${host(current.baseUrl)}`} onChange={() => setAdding(true)} onRemoved={() => void conn.reload()} mayManage={!noManage} />
             ) : (
                 <div className="row">
-                    <Button icon={Plug} onClick={() => setAdding(true)}>
+                    <Button icon={Plug} disabled={Boolean(noManage)} tip={noManage} onClick={() => setAdding(true)}>
                         Connect Sentry
                     </Button>
                 </div>
@@ -69,7 +72,7 @@ export function SentryConnect({ projectId }: { projectId: string }) {
     );
 }
 
-function Connected({ projectId, name, where, onChange, onRemoved }: { projectId: string; name: string; where: string; onChange: () => void; onRemoved: () => void }) {
+function Connected({ projectId, name, where, onChange, onRemoved, mayManage }: { projectId: string; name: string; where: string; onChange: () => void; onRemoved: () => void; mayManage: boolean }) {
     const [state, setState] = useState<{ kind: "idle" } | { kind: "testing" } | { kind: "ok" | "bad"; text: string }>({ kind: "idle" });
     const [confirm, setConfirm] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -118,7 +121,7 @@ function Connected({ projectId, name, where, onChange, onRemoved }: { projectId:
                 )}
                 {confirm && <span className="meta">Disconnect Sentry from this project? Your tests are not affected.</span>}
             </span>
-            <span className="tail">
+            {mayManage && <span className="tail">
                 {confirm ? (
                     <>
                         <Button size="sm" variant="danger" loading={busy} onClick={() => void remove()}>
@@ -141,7 +144,7 @@ function Connected({ projectId, name, where, onChange, onRemoved }: { projectId:
                         </Button>
                     </>
                 )}
-            </span>
+            </span>}
         </div>
     );
 }

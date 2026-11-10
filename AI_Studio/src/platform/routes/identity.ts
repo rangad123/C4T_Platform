@@ -6,9 +6,9 @@ import type { RouteCtx } from "./types.js";
 
 const RoleInput = z.object({
     name: z.string().regex(ROLE_NAME, "use lower-case letters, digits, - or _ (start with a letter, at most 24 characters)"),
-    username: z.string().min(1).max(300),
+    username: z.string().min(1, "Enter the username.").max(300, "The username can be at most 300 characters."),
     /** Omitted for an existing account = keep the saved password. */
-    password: z.string().min(1).max(300).optional(),
+    password: z.string().min(1, "Enter the password.").max(300, "The password can be at most 300 characters.").optional(),
     /** Omitted = keep; empty string = remove. */
     apiToken: z.string().max(4000).optional(),
     totpSecret: z

@@ -54,7 +54,7 @@ export function parseAction(raw: unknown): ParsedAction {
     return { ok: true, action: a };
 }
 
-function explain(action: string, issue: { path: Array<string | number>; message: string; code: string } | undefined): string {
+function explain(action: string, issue: { path: PropertyKey[]; message: string; code: string } | undefined): string {
     const field = String(issue?.path[0] ?? "");
     if (field === "locator") return NEEDS_LOCATOR;
     if (action === "navigate" && field === "url") return "Say which address to open (url).";

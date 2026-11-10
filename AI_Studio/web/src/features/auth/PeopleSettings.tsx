@@ -317,6 +317,8 @@ export function YourAccount() {
     const [tok, setTok] = useState<{ name: string; role: Role; days: string }>({ name: "", role: me.role, days: "90" });
     const [pw, setPw] = useState({ current: "", next: "" });
     const [pwNote, setPwNote] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
+    /** Why "Sign out everywhere" did not work (shown beside it; on success the page signs out). */
+    const [signOutError, setSignOutError] = useState<string | null>(null);
 
     const load = useCallback(() => {
         api<{ tokens: TokenInfo[] }>("/me/tokens")
@@ -452,12 +454,15 @@ export function YourAccount() {
                 <Button
                     size="sm"
                     onClick={() => {
-                        if (confirm("Sign out on every computer, including this one?")) void api("/me/sign-out-everywhere", { method: "POST" }).finally(refresh);
+                        if (!confirm("Sign out on every computer, including this one?")) return;
+                        setSignOutError(null);
+                        void api("/me/sign-out-everywhere", { method: "POST" }).then(refresh, (e) => setSignOutError(msg(e)));
                     }}
                 >
                     Sign out everywhere
                 </Button>
             </div>
+            {signOutError && <Callout tone="danger" title="You are still signed in everywhere">{signOutError}</Callout>}
         </section>
     );
 }

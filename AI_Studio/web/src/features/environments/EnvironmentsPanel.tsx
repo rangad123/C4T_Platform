@@ -5,6 +5,7 @@ import { Badge, Button, Callout, ListSkeleton } from "../../components/ui";
 import { BadgeKey } from "../../components/Tooltip";
 import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 import { PRODUCTION_WARNING, shortAddress, type Environment } from "./environments";
 import "./environments.css";
@@ -64,6 +65,10 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
     /** Production environments whose run the person has confirmed in this panel. */
     const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
 
+    // Adding, changing and removing environments is a project setting; running on one is running tests (as the server asks).
+    const here = useHere(projectId);
+    const noSettings = here.why("ai_studio.project.settings");
+    const noRun = here.why("ai_studio.tests.run");
     const envs = list.data?.environments ?? [];
     const patch = (p: Partial<Form>) => setForm((f) => (f ? { ...f, ...p } : f));
 
@@ -212,19 +217,19 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                                     </label>
                                 )}
                                 <div className="row">
-                                    <Button size="sm" icon={Play} loading={busy === `run-${e.name}`} disabled={!!busy || (e.production && !confirmed.has(e.name))} onClick={() => void run(e)} aria-label={`Run all tests on ${e.name}`}>
+                                    <Button size="sm" icon={Play} loading={busy === `run-${e.name}`} disabled={!!busy || Boolean(noRun) || (e.production && !confirmed.has(e.name))} tip={noRun} onClick={() => void run(e)} aria-label={`Run all tests on ${e.name}`}>
                                         Run all tests here
                                     </Button>
-                                    <Button size="sm" variant="ghost" icon={Pencil} disabled={!!busy} onClick={() => edit(e)} aria-label={`Edit ${e.name}`}>Edit</Button>
-                                    {!e.isDefault && !e.production && <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void makeDefault(e)} aria-label={`Make ${e.name} the default`} tip={DEFAULT_TIP}>Make default</Button>}
+                                    {!noSettings && <Button size="sm" variant="ghost" icon={Pencil} disabled={!!busy} onClick={() => edit(e)} aria-label={`Edit ${e.name}`}>Edit</Button>}
+                                    {!noSettings && !e.isDefault && !e.production && <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void makeDefault(e)} aria-label={`Make ${e.name} the default`} tip={DEFAULT_TIP}>Make default</Button>}
                                     <span className="spacer" />
-                                    <Button size="sm" variant="ghost" icon={Trash2} loading={busy === `rm-${e.name}`} disabled={!!busy} onClick={() => void remove(e)} aria-label={`Remove ${e.name}`} tip="Removes it at once, with the results kept for it. Your tests and their main results stay.">Remove</Button>
+                                    {!noSettings && <Button size="sm" variant="ghost" icon={Trash2} loading={busy === `rm-${e.name}`} disabled={!!busy} onClick={() => void remove(e)} aria-label={`Remove ${e.name}`} tip="Removes it at once, with the results kept for it. Your tests and their main results stay.">Remove</Button>}
                                 </div>
                             </li>
                         ))}
                     </ul>
 
-                    {form ? (
+                    {form && !noSettings ? (
                         <fieldset className="card card-pad stack-sm env-form" style={{ margin: 0 }}>
                             <legend className="t-card">{form.editing ? `Edit ${form.editing}` : "New environment"}</legend>
                             <div className="grid-2">
@@ -317,7 +322,7 @@ export function EnvironmentsPanel({ projectId, onStarted, onClose }: { projectId
                         </fieldset>
                     ) : (
                         <div>
-                            <Button icon={Plus} disabled={envs.length >= (list.data?.max ?? 8)} onClick={() => { setError(""); setNotice(""); setForm(blank()); setNext(0); }}>
+                            <Button icon={Plus} disabled={Boolean(noSettings) || envs.length >= (list.data?.max ?? 8)} tip={noSettings} onClick={() => { setError(""); setNotice(""); setForm(blank()); setNext(0); }}>
                                 Add an environment
                             </Button>
                         </div>

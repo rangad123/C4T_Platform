@@ -1,4 +1,4 @@
-import { Check, Copy, FilePlus2, Pencil, Puzzle, Trash2 } from "lucide-react";
+import { Check, Copy, Eye, FilePlus2, Pencil, Puzzle, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { usePage } from "../../components/Shell";
 import { Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, PageHeader } from "../../components/ui";
@@ -6,6 +6,7 @@ import { relativeTime } from "../../lib/format";
 import { useConfig, useDocumentTitle, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
+import { useHere } from "../auth/project-access";
 import { CodeError, capi, errorText, helperNameProblem, helperStarter, type ConfigWithCode, type SaveResult } from "./code";
 import { Modal } from "./Modal";
 import { Workbench } from "./Workbench";
@@ -48,6 +49,12 @@ export function HelpersPage({ id }: { id: string }) {
     const [delError, setDelError] = useState<{ text: string; tests: string[] } | null>(null);
     const [notice, setNotice] = useState("");
     const [copied, setCopied] = useState("");
+    /** The clipboard refused (a page not served over https, or the browser said no): the button says so instead of "Copied". */
+    const [copyFailed, setCopyFailed] = useState(false);
+    // Adding and changing helpers needs tests.write in this project, deleting one tests.delete: otherwise they are listed to read.
+    const here = useHere(id);
+    const noWrite = here.why("ai_studio.tests.write");
+    const mayDelete = here.may("ai_studio.tests.delete");
 
     const list = helpers.data ?? [];
     const nameProblem = newName ? helperNameProblem(newName) || (list.some((h) => h.name === newName) ? "A helper with this name already exists." : "") : "Enter a name for the helper.";
@@ -114,13 +121,21 @@ export function HelpersPage({ id }: { id: string }) {
                                 tip="Copies this import line, to paste at the top of a code test."
                                 onClick={async () => {
                                     const line = importLine(list[0]?.name ?? "my-helper");
-                                    await navigator.clipboard.writeText(line).catch(() => undefined);
-                                    setCopied(line);
-                                    setTimeout(() => setCopied(""), 1500);
+                                    const ok = await Promise.resolve()
+                                        .then(() => navigator.clipboard.writeText(line))
+                                        .then(() => true, () => false);
+                                    setCopied(ok ? line : "");
+                                    setCopyFailed(!ok);
+                                    setTimeout(() => (setCopied(""), setCopyFailed(false)), ok ? 1500 : 4000);
                                 }}
                             >
                                 {copied ? "Copied" : "Copy"}
                             </Button>
+                            {copyFailed && (
+                                <span className="error-text" role="status">
+                                    Could not copy. Select the line and copy it yourself.
+                                </span>
+                            )}
                         </div>
                         <p className="t-meta">Up to {MAX_HELPERS} helpers per project, 100 KB each. Names use lowercase letters, numbers and dashes.</p>
                     </div>
@@ -147,12 +162,15 @@ export function HelpersPage({ id }: { id: string }) {
                                             {kb(h.bytes)}, used by {h.usedBy} {h.usedBy === 1 ? "test" : "tests"}, changed {relativeTime(h.updatedAt)}
                                         </span>
                                     </span>
-                                    <Button size="sm" icon={Pencil} loading={opening === h.name} onClick={() => void open(h.name)} aria-label={`Edit ${h.name}`}>
-                                        Edit
+                                    {/* Reading a helper needs only access: someone who may not change it opens it to read (View). */}
+                                    <Button size="sm" icon={noWrite ? Eye : Pencil} loading={opening === h.name} onClick={() => void open(h.name)} aria-label={`${noWrite ? "View" : "Edit"} ${h.name}`}>
+                                        {noWrite ? "View" : "Edit"}
                                     </Button>
-                                    <Button size="sm" variant="ghost" icon={Trash2} onClick={() => { setDelError(null); setDeleting(h); }} aria-label={`Delete ${h.name}`}>
-                                        Delete
-                                    </Button>
+                                    {mayDelete && (
+                                        <Button size="sm" variant="ghost" icon={Trash2} onClick={() => { setDelError(null); setDeleting(h); }} aria-label={`Delete ${h.name}`}>
+                                            Delete
+                                        </Button>
+                                    )}
                                 </li>
                             ))}
                         </ul>
@@ -162,6 +180,9 @@ export function HelpersPage({ id }: { id: string }) {
                             <Callout tone="danger" title="We couldn’t open that helper">{openError}</Callout>
                         </div>
                     )}
+                    {noWrite ? (
+                        <p className="t-meta code-body">{noWrite}</p>
+                    ) : (
                     <form
                         className="code-add"
                         onSubmit={(e) => {
@@ -187,16 +208,17 @@ export function HelpersPage({ id }: { id: string }) {
                             Add a helper
                         </Button>
                     </form>
+                    )}
                 </section>
 
-                {editing && (
+                {editing && (!noWrite || !editing.fresh) && (
                     <section aria-labelledby="helper-edit-title" className="stack-sm">
                         <div className="row">
                             <h2 className="t-section" id="helper-edit-title">
-                                {editing.fresh ? "New helper" : "Editing"}: {editing.name}
+                                {editing.fresh ? "New helper" : noWrite ? "Viewing" : "Editing"}: {editing.name}
                             </h2>
                             <span className="spacer" />
-                            <Button onClick={() => (dirty ? setCloseAsk(true) : setEditing(null))}>Close the editor</Button>
+                            <Button onClick={() => (dirty && !noWrite ? setCloseAsk(true) : setEditing(null))}>{noWrite ? "Close" : "Close the editor"}</Button>
                         </div>
                         <Workbench
                             key={editing.name + editing.key}
@@ -208,6 +230,8 @@ export function HelpersPage({ id }: { id: string }) {
                             guard={cfg?.customScripts?.guard}
                             maxBytes={100 * 1024}
                             savedNotice={() => "Saved. Tests that import this helper run again."}
+                            readOnly={Boolean(noWrite)}
+                            readOnlyWhy={noWrite}
                         />
                     </section>
                 )}

@@ -361,7 +361,7 @@ export const WireRunEnv = z.object({
     roles: z.array(z.object({ name: z.string(), username: z.string(), password: z.string(), totpSecret: z.string().optional(), apiToken: z.string().optional() })).optional(),
     apiToken: z.string().optional(),
     apiAuthHeader: z.string().optional(),
-    vars: z.record(z.string()).optional(),
+    vars: z.record(z.string(), z.string()).optional(),
     /** "agent": the agent cleans up the records the run created (the application may only be reachable from its network). */
     cleanup: z.enum(["platform", "off", "agent"]).optional(),
     headless: z.boolean(),
@@ -585,7 +585,7 @@ export const DEVICE_MAX_WAIT_MS = 3000;
 export const DEVICE_MAX_IMAGE_B64 = 164_000;
 
 const ElementIndex = z
-    .number({ invalid_type_error: "The element number must be a whole number." })
+    .number({ error: "The element number must be a whole number." })
     .int("The element number must be a whole number.")
     .min(0, "That element is not on the screen.")
     .max(DEVICE_MAX_ELEMENTS - 1, "That element is not on the screen.");
@@ -594,14 +594,14 @@ const ElementIndex = z
 export const DeviceActionWire = z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("tap"), index: ElementIndex }).strict(),
     z.object({ kind: z.literal("longPress"), index: ElementIndex }).strict(),
-    z.object({ kind: z.literal("type"), index: ElementIndex, text: z.string({ invalid_type_error: "The text to type must be text." }).max(DEVICE_MAX_TYPED, `Text to type can be at most ${DEVICE_MAX_TYPED} characters.`), clear: z.boolean().optional() }).strict(),
-    z.object({ kind: z.literal("scroll"), index: ElementIndex.optional(), direction: z.enum(["up", "down", "left", "right"], { errorMap: () => ({ message: "Scroll up, down, left or right." }) }) }).strict(),
+    z.object({ kind: z.literal("type"), index: ElementIndex, text: z.string({ error: "The text to type must be text." }).max(DEVICE_MAX_TYPED, `Text to type can be at most ${DEVICE_MAX_TYPED} characters.`), clear: z.boolean().optional() }).strict(),
+    z.object({ kind: z.literal("scroll"), index: ElementIndex.optional(), direction: z.enum(["up", "down", "left", "right"], { error: () => "Scroll up, down, left or right." }) }).strict(),
     z.object({ kind: z.literal("back") }).strict(),
     z.object({ kind: z.literal("hideKeyboard") }).strict(),
     z.object({ kind: z.literal("launch") }).strict(),
     z.object({ kind: z.literal("restart") }).strict(),
-    z.object({ kind: z.literal("wait"), ms: z.number({ invalid_type_error: "Waiting needs a number of milliseconds." }).int("Waiting needs a whole number of milliseconds.").min(0, "Waiting needs a positive time.").max(DEVICE_MAX_WAIT_MS, "Waiting is limited to 3 seconds at a time.") }).strict(),
-], { errorMap: () => ({ message: "That is not something the phone can be asked to do." }) });
+    z.object({ kind: z.literal("wait"), ms: z.number({ error: "Waiting needs a number of milliseconds." }).int("Waiting needs a whole number of milliseconds.").min(0, "Waiting needs a positive time.").max(DEVICE_MAX_WAIT_MS, "Waiting is limited to 3 seconds at a time.") }).strict(),
+], { error: () => "That is not something the phone can be asked to do." });
 export type DeviceActionWire = z.infer<typeof DeviceActionWire>;
 
 export const DeviceElementWire = z.object({
@@ -752,7 +752,7 @@ export const CheckedTaskOffer = TaskOffer.superRefine((t, ctx) => {
         if (!t.record) ctx.addIssue({ code: "custom", path: ["record"], message: "a record task needs its record settings" });
     } else if (t.kind === "device") {
         if (!t.device) ctx.addIssue({ code: "custom", path: ["device"], message: "a device task needs its device settings" });
-    } else if (t.scripts.length < 1) ctx.addIssue({ code: "too_small", minimum: 1, type: "array", inclusive: true, path: ["scripts"], message: "a run task needs at least one script" });
+    } else if (t.scripts.length < 1) ctx.addIssue({ code: "too_small", minimum: 1, origin: "array", inclusive: true, path: ["scripts"], message: "a run task needs at least one script" });
 });
 
 // ── heartbeat ───────────────────────────────────────────────────────────────
@@ -822,7 +822,7 @@ export const WireRun = z.object({
     metrics: z.array(z.object({ metric: z.string(), value: z.number(), unit: z.string(), budget: z.number().optional() })).max(100).optional(),
     variant: z.string().optional(),
     /** Cleanup ledger lines (ids and paths only), already executed by the agent when env.cleanup is "agent". */
-    created: z.array(z.record(z.unknown())).max(500).optional(),
+    created: z.array(z.record(z.string(), z.unknown())).max(500).optional(),
 });
 export type WireRun = z.infer<typeof WireRun>;
 

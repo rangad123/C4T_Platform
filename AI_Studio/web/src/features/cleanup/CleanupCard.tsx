@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Badge, Button, Callout, Skeleton } from "../../components/ui";
 import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 import { CLEANUP_STATUS, leftBehind, runSentence, type CleanupItem, type ProjectCleanup, type RetryResult } from "./cleanup";
 import "./cleanup.css";
@@ -34,6 +35,10 @@ export function CleanupCard({ projectId, variant = "card", onClose }: { projectI
     const [notice, setNotice] = useState("");
     /** The box shows the choice straight away, while it is being saved. */
     const [choice, setChoice] = useState<boolean | null>(null);
+    // Retrying is running (tests.run here); switching cleanup on or off is a project setting.
+    const here = useHere(projectId);
+    const noRun = here.why("ai_studio.tests.run");
+    const noSettings = here.why("ai_studio.project.settings");
 
     async function retry() {
         setBusy("retry");
@@ -140,7 +145,7 @@ export function CleanupCard({ projectId, variant = "card", onClose }: { projectI
                                 <h3 className="t-card">Left in the application</h3>
                                 <span className="spacer" />
                                 {retryable > 0 && (
-                                    <Button size="sm" icon={RotateCw} loading={busy === "retry"} disabled={busy !== ""} onClick={() => void retry()}>
+                                    <Button size="sm" icon={RotateCw} loading={busy === "retry"} disabled={busy !== "" || Boolean(noRun)} tip={noRun} onClick={() => void retry()}>
                                         Retry removing {plural(retryable, "record")}
                                     </Button>
                                 )}
@@ -165,7 +170,7 @@ export function CleanupCard({ projectId, variant = "card", onClose }: { projectI
                 </>
             )}
             <label className="check">
-                <input type="checkbox" checked={enabled} disabled={busy === "retry"} onChange={(e) => void setEnabled(e.target.checked)} />
+                <input type="checkbox" checked={enabled} disabled={busy === "retry" || Boolean(noSettings)} title={noSettings} onChange={(e) => void setEnabled(e.target.checked)} />
                 <span>
                     <span className="title">Remove the records tests create after each run</span>
                     <span className="hint">Only records a test created in that run are removed, and only where the application describes how to remove them.</span>

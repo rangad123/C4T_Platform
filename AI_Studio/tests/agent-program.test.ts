@@ -266,9 +266,14 @@ describe("an agent running real tests for a fake platform", () => {
         fake.enqueue({ offer: first });
         const r1 = await fake.result(first.taskId);
         expect(r1.ok, r1.error).toBe(true);
-        // exactly what a local run reports for a missing baseline (the platform recognises it by this text and the new baseline file)
-        expect(runOf(r1, "VIS-001").status).toBe("failed");
-        expect(runOf(r1, "VIS-001").error).toMatch(/A snapshot doesn.t exist/);
+        // exactly what a local run reports for a missing baseline: older Playwright fails the run with "A snapshot doesn't exist", newer
+        // Playwright writes the baseline and passes it. The platform recognises either by the new baseline file (see visual/baseline.ts).
+        const firstVisual = runOf(r1, "VIS-001");
+        if (firstVisual.status === "failed") expect(firstVisual.error).toMatch(/A snapshot doesn.t exist/);
+        else {
+            expect(firstVisual.status).toBe("passed");
+            expect(firstVisual.error).toBeUndefined();
+        }
         const nb = runOf(r1, "VIS-001").newBaselines!;
         expect(nb).toHaveLength(1);
         const baselineBytes = bytesOf(fake, first.taskId, nb[0]!.ref);

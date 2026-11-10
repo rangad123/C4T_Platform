@@ -88,7 +88,7 @@ export function parseSteps(cell: string): Array<{ action: string; expected: stri
         });
 }
 
-function firstMessage(err: { issues: Array<{ message: string; path: Array<string | number> }> }): string {
+function firstMessage(err: { issues: Array<{ message: string; path: PropertyKey[] }> }): string {
     const i = err.issues[0]!;
     // "steps.2.action" reads better as "Step 3".
     const step = i.path[0] === "steps" && typeof i.path[1] === "number" ? `Step ${i.path[1] + 1}: ` : "";

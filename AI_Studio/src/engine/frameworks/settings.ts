@@ -72,8 +72,8 @@ export const defaultFrameworkSettings = (): FrameworkSettings => structuredClone
 
 // ── input ────────────────────────────────────────────────────────────────────
 
-const num = (label: string) => z.number({ invalid_type_error: `${label} must be a number.` }).finite(`${label} must be a number.`);
-const flag = (label: string) => z.boolean({ invalid_type_error: `${label} must be on or off.` });
+const num = (label: string) => z.number({ error: `${label} must be a number.` }).finite(`${label} must be a number.`);
+const flag = (label: string) => z.boolean({ error: `${label} must be on or off.` });
 
 /** A partial update: every group and field is optional; unknown fields are refused (a typo must not be silently ignored). */
 export const FrameworkSettingsInput = z
@@ -81,12 +81,12 @@ export const FrameworkSettingsInput = z
         enabled: z.object({ playwright: flag("Web tests"), "playwright-api": flag("API tests"), taqwright: flag("Android tests"), "windows-uia": flag("Windows desktop tests"), "taqwright-ios": flag("iOS tests") }).partial().strict(),
         web: z.object({ headless: flag("Headless"), workers: num("Workers").nullable(), testTimeoutSeconds: num("The web test time limit") }).partial().strict(),
         api: z.object({ testTimeoutSeconds: num("The API test time limit") }).partial().strict(),
-        android: z.object({ keepEmulator: flag("Keep the emulator running"), defaultAvd: z.string({ invalid_type_error: "The emulator name must be text." }).trim().max(64, "The emulator name is too long."), testTimeoutSeconds: num("The Android test time limit") }).partial().strict(),
+        android: z.object({ keepEmulator: flag("Keep the emulator running"), defaultAvd: z.string({ error: "The emulator name must be text." }).trim().max(64, "The emulator name is too long."), testTimeoutSeconds: num("The Android test time limit") }).partial().strict(),
         windows: z.object({ testTimeoutSeconds: num("The Windows test time limit"), startTimeoutSeconds: num("The start time limit") }).partial().strict(),
         ios: z
             .object({
                 keepSimulator: flag("Keep the simulator running"),
-                defaultSimulator: z.string({ invalid_type_error: "The simulator name must be text." }).trim().max(64, "The simulator name is too long.").refine((v) => v === "" || SIMULATOR_NAME.test(v), "The simulator name has characters that are not allowed."),
+                defaultSimulator: z.string({ error: "The simulator name must be text." }).trim().max(64, "The simulator name is too long.").refine((v) => v === "" || SIMULATOR_NAME.test(v), "The simulator name has characters that are not allowed."),
                 testTimeoutSeconds: num("The iOS test time limit"),
             })
             .partial()

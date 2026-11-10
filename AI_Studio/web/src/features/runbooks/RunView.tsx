@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Badge, Button, Callout, ErrorState, Skeleton } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { RUN_STATUS, STEP_STATUS, TRIGGER_TEXT, tickOf, type RunDetail, type RunSummary, type StepStatus } from "./runbooks";
@@ -59,6 +60,8 @@ export function RunView({ projectId, runId, onChanged, onClose }: { projectId: s
     const run = useFetch<RunDetail>(`/projects/${projectId}/runbook-runs/${runId}`, (d) => (d && d.finished ? null : 1500));
     const [cancelling, setCancelling] = useState(false);
     const [error, setError] = useState("");
+    // Cancelling is running tests (ai_studio.tests.run here): left out for a person who only looks.
+    const mayCancel = useHere(projectId).may("ai_studio.tests.run");
     const finished = run.data?.finished;
 
     // When the run ends, the list around it has news (last result, ribbon).
@@ -95,7 +98,7 @@ export function RunView({ projectId, runId, onChanged, onClose }: { projectId: s
                     {r.durationMs !== null ? `, took ${durationText(r.durationMs)}` : ""}
                 </span>
                 <span className="spacer" />
-                {!r.finished && (
+                {!r.finished && mayCancel && (
                     <Button size="sm" variant="danger" loading={cancelling || r.cancelRequested} onClick={cancel} tip="Ends the run now: the job of the current step is asked to stop, and the steps after it do not run.">
                         Cancel the run
                     </Button>

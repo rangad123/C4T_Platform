@@ -93,6 +93,12 @@ describe("the API", () => {
         projectId = await newProject("Settings API");
     });
 
+    it("an empty body is not refused and keeps the defaults", async () => {
+        const other = await newProject("Settings empty body");
+        expect((await call("PUT", `/api/projects/${other}/framework-settings`, {})).status).toBe(200);
+        expect((await getSettings(other)).settings).toEqual(JSON.parse(JSON.stringify(DEFAULT_FRAMEWORK_SETTINGS)));
+    });
+
     it("needs the API key", async () => {
         expect((await call("GET", `/api/projects/${projectId}/framework-settings`, undefined, {})).status).toBe(401);
         expect((await call("GET", `/api/projects/${projectId}/framework-settings`, undefined, { "x-api-key": "wrong" })).status).toBe(401);

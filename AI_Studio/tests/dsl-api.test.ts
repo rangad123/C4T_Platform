@@ -164,6 +164,10 @@ describe("reading text (nothing is stored)", () => {
         expect(r.body).toMatchObject({ expressible: true, reasons: [] });
         expect(r.body.text).toContain('Click the "Go" button');
         expect((await call("POST", "/api/dsl/print", { spec: { title: 5 } })).status).toBe(422);
+        // No spec at all gets the same plain sentence as an invalid one, not a generic refusal.
+        const none = await call("POST", "/api/dsl/print", {});
+        expect(none.status).toBe(422);
+        expect(none.body.error).toBe("These steps cannot be written as text yet: they are not a valid test.");
         expect(count(projectId)).toBe(before);
     });
 

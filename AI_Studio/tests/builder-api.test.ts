@@ -182,6 +182,12 @@ describe("editing generated steps", () => {
         expect((await call("GET", `/api/tests/${webId}/spec-versions/9`)).status).toBe(404);
     }, 120_000);
 
+    it("an edit with no spec says the test is missing", async () => {
+        const put = await call("PUT", `/api/tests/${webId}/spec`, {});
+        expect(put.status).toBeGreaterThanOrEqual(400);
+        expect(JSON.stringify(put.body)).toContain("The test is missing.");
+    });
+
     it("a deliberately wrong edit is saved but fails validation honestly", async () => {
         const s = await specOf(webId);
         const edited = { ...s.spec, steps: [...s.spec.steps, { action: "assert", check: "text", expected: "A sentence nobody wrote anywhere" }] };

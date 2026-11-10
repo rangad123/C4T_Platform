@@ -5,6 +5,7 @@ import { FieldHelp } from "../../components/Tooltip";
 import { Button, Callout, Skeleton } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 import type { Environment } from "../environments/environments";
 import type { ResetAnswer, ResetHookRow, ResetOutcome } from "./webpages";
@@ -46,6 +47,12 @@ export function ResetHookCard({ projectId }: { projectId: string }) {
     const [error, setError] = useState("");
     const [outcome, setOutcome] = useState<ResetOutcome | null>(null);
     const [notice, setNotice] = useState("");
+    // Saving and removing the reset is a project setting; trying it once is running (as the server asks).
+    const here = useHere(projectId);
+    const noSettings = here.why("ai_studio.project.settings");
+    // Each control is switched off on its own (not a disabled fieldset), so the "?" help beside a field still opens.
+    const ro = Boolean(noSettings);
+    const noRun = here.why("ai_studio.tests.run");
 
     const current = data.data?.hooks.find((h) => h.environment === place);
     // A new place (or fresh data) starts the form from what is saved there.
@@ -157,7 +164,7 @@ export function ResetHookCard({ projectId }: { projectId: string }) {
                 </div>
             )}
             <label className="check">
-                <input type="checkbox" checked={draft.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+                <input disabled={ro} type="checkbox" checked={draft.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
                 <span>
                     <span className="title">Reset the test data before each run</span>
                     <span className="hint">Runs of existing tests only. An exploration makes its own data.</span>
@@ -166,7 +173,7 @@ export function ResetHookCard({ projectId }: { projectId: string }) {
             <div className="wp-grid">
                 <div className="field">
                     <label htmlFor="wp-method">Method</label>
-                    <select id="wp-method" className="input" value={draft.method} onChange={(e) => set({ method: e.target.value })}>
+                    <select disabled={ro} id="wp-method" className="input" value={draft.method} onChange={(e) => set({ method: e.target.value })}>
                         {methods.map((m) => (
                             <option key={m}>{m}</option>
                         ))}
@@ -174,14 +181,14 @@ export function ResetHookCard({ projectId }: { projectId: string }) {
                 </div>
                 <div className="field wp-grow">
                     <label htmlFor="wp-url">Address</label>
-                    <input id="wp-url" className="input" value={draft.url} placeholder="/test/reset" autoComplete="off" aria-describedby="wp-url-hint" onChange={(e) => set({ url: e.target.value })} />
+                    <input disabled={ro} id="wp-url" className="input" value={draft.url} placeholder="/test/reset" autoComplete="off" aria-describedby="wp-url-hint" onChange={(e) => set({ url: e.target.value })} />
                     <p className="hint" id="wp-url-hint">
                         A path of your application, or a full address on the same site.
                     </p>
                 </div>
                 <div className="field">
                     <FieldHelp htmlFor="wp-status" label="Expected answer" help="The HTTP status the reset must answer with, such as 200 or 204. Any other answer stops the run before the tests start." />
-                    <input id="wp-status" className="input bld-narrow" inputMode="numeric" value={draft.expectedStatus} onChange={(e) => set({ expectedStatus: e.target.value.replace(/\D/g, "").slice(0, 3) })} />
+                    <input disabled={ro} id="wp-status" className="input bld-narrow" inputMode="numeric" value={draft.expectedStatus} onChange={(e) => set({ expectedStatus: e.target.value.replace(/\D/g, "").slice(0, 3) })} />
                 </div>
             </div>
             <fieldset className="wp-headers">
@@ -191,17 +198,17 @@ export function ResetHookCard({ projectId }: { projectId: string }) {
                     <div className="wp-header" key={i}>
                         <div className="field">
                             <label htmlFor={`wp-h${i}-name`}>Name</label>
-                            <input id={`wp-h${i}-name`} className="input" value={h.name} autoComplete="off" disabled={h.saved} onChange={(e) => setHeader(i, { name: e.target.value })} />
+                            <input id={`wp-h${i}-name`} className="input" value={h.name} autoComplete="off" disabled={ro || h.saved} onChange={(e) => setHeader(i, { name: e.target.value })} />
                         </div>
                         <div className="field wp-grow">
                             <label htmlFor={`wp-h${i}-value`}>Value</label>
-                            <input id={`wp-h${i}-value`} className="input" type="password" autoComplete="new-password" value={h.value} placeholder={h.saved ? "Saved. Type to replace it" : ""} onChange={(e) => setHeader(i, { value: e.target.value })} />
+                            <input disabled={ro} id={`wp-h${i}-value`} className="input" type="password" autoComplete="new-password" value={h.value} placeholder={h.saved ? "Saved. Type to replace it" : ""} onChange={(e) => setHeader(i, { value: e.target.value })} />
                         </div>
-                        <Button size="sm" variant="ghost" iconOnly icon={X} aria-label={`Remove the header ${h.name || i + 1}`} onClick={() => set({ headers: draft.headers.filter((_, k) => k !== i) })} />
+                        <Button disabled={ro} size="sm" variant="ghost" iconOnly icon={X} aria-label={`Remove the header ${h.name || i + 1}`} onClick={() => set({ headers: draft.headers.filter((_, k) => k !== i) })} />
                     </div>
                 ))}
                 {draft.headers.length < data.data.limits.headers && (
-                    <Button size="sm" variant="ghost" icon={Plus} onClick={() => set({ headers: [...draft.headers, { name: "", value: "", saved: false }] })}>
+                    <Button disabled={ro} size="sm" variant="ghost" icon={Plus} onClick={() => set({ headers: [...draft.headers, { name: "", value: "", saved: false }] })}>
                         Add a header
                     </Button>
                 )}
@@ -212,15 +219,15 @@ export function ResetHookCard({ projectId }: { projectId: string }) {
                 </p>
             )}
             <div className="row wrap">
-                <Button variant="primary" loading={busy === "save"} disabled={busy !== "" || !draft.url.trim()} onClick={() => void save()}>
+                <Button variant="primary" loading={busy === "save"} disabled={busy !== "" || !draft.url.trim() || Boolean(noSettings)} tip={noSettings} onClick={() => void save()}>
                     Save
                 </Button>
                 {current && (
-                    <Button loading={busy === "try"} disabled={busy !== ""} onClick={() => void tryIt()} tip="Sends the saved reset request once now, to see that it works. No test runs.">
+                    <Button loading={busy === "try"} disabled={busy !== "" || Boolean(noRun)} onClick={() => void tryIt()} tip={noRun ?? "Sends the saved reset request once now, to see that it works. No test runs."}>
                         Try it now
                     </Button>
                 )}
-                {current && (
+                {current && !noSettings && (
                     <Button variant="ghost" loading={busy === "remove"} disabled={busy !== ""} onClick={() => void remove()} tip="Deletes this reset request. Runs no longer reset the test data.">
                         Remove
                     </Button>

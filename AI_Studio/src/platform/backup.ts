@@ -414,7 +414,7 @@ export function unpackBackup(data: Uint8Array, limits: { [K in keyof typeof BACK
     return out;
 }
 
-function doc<T>(files: Map<string, Uint8Array>, name: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, empty: T): T {
+function doc<T>(files: Map<string, Uint8Array>, name: string, schema: z.ZodType<T, unknown>, empty: T): T {
     const raw = files.get(name);
     if (!raw) return empty;
     let parsed: unknown;

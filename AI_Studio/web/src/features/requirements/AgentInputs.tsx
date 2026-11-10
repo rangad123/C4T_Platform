@@ -6,7 +6,7 @@ import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { plural } from "../../lib/format";
 import { routes, useRoute } from "../../lib/router";
-import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 
 /** One input a chosen agent cannot work without and that is not saved yet (GET /api/projects/:id/agent-inputs). */
 export interface MissingInput {
@@ -80,7 +80,7 @@ export function AgentInputs({ projectId }: { projectId: string }) {
 }
 
 function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string; data: AgentInputs; justSaved: boolean; onSaved: () => Promise<void> }) {
-    const can = useCan();
+    const can = useHere(projectId).may;
     const canEdit = can("ai_studio.project.settings") && data.application !== null;
     const [username, setUsername] = useState(data.signIn.username ?? "");
     const [secrets, setSecrets] = useState<Record<SecretKey, SecretState>>({ password: FRESH, totpSecret: FRESH, apiToken: FRESH, clientSecret: FRESH });

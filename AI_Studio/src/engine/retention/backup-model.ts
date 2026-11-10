@@ -82,14 +82,14 @@ export const ManifestSchema = z.object({
     createdAt: text(40),
     project: z.object({ name: text(200) }),
     includesFiles: z.boolean().default(false),
-    counts: z.record(z.number().int().min(0)).default({}),
+    counts: z.record(z.string(), z.number().int().min(0)).default({}),
 });
 export type Manifest = z.infer<typeof ManifestSchema>;
 
 export const ProjectDocSchema = z.object({
     name: z.string().trim().min(1).max(120),
     description: text(1000).nullable().default(null),
-    application: z.object({ url, config: z.record(z.unknown()).default({}) }).nullable().default(null),
+    application: z.object({ url, config: z.record(z.string(), z.unknown()).default({}) }).nullable().default(null),
     retention: z.object({ keepDays: z.number(), keepFailedDays: z.number(), keepLatestRuns: z.number(), maxArtifactMB: z.number().nullable().optional() }).nullable().default(null),
     /** What the project tests and how (round 26). Absent from older backups: the restore then uses the defaults. */
     platforms: z.array(z.enum(["web", "android", "ios"])).min(1).optional(),
@@ -174,9 +174,9 @@ export const EnvironmentEntrySchema = z.object({
     production: z.boolean().default(false),
     isDefault: z.boolean().default(false),
     useProjectAccounts: z.boolean().default(true),
-    variables: z.record(z.string().max(1000)).default({}),
+    variables: z.record(z.string(), z.string().max(1000)).default({}),
 });
-export const DataSetEntrySchema = z.object({ name: z.string().min(1).max(60), columns: z.array(z.string().max(60)).max(40), rows: z.array(z.record(z.string().max(1000))).max(1000) });
+export const DataSetEntrySchema = z.object({ name: z.string().min(1).max(60), columns: z.array(z.string().max(60)).max(40), rows: z.array(z.record(z.string(), z.string().max(1000))).max(1000) });
 export const ScheduleEntrySchema = z.object({
     name: z.string().min(1).max(80),
     kind: z.enum(["validate", "generate"]),

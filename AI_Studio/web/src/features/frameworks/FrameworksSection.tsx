@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Button, Callout, ErrorState, Skeleton } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { availabilityLine, FRAMEWORK_NAME, type FrameworkId, type FrameworkSettings, type FrameworkSettingsAnswer } from "./frameworks";
 import { PluginFrameworks } from "./PluginFrameworks";
@@ -115,6 +116,8 @@ export function FrameworksSection({ projectId, jobRunning }: { projectId: string
     const [error, setError] = useState("");
     const [saved, setSaved] = useState(false);
     const [adjusted, setAdjusted] = useState<string[]>([]);
+    // The frameworks are a project setting: without ai_studio.project.settings here they are shown to read.
+    const noSettings = useHere(projectId).why("ai_studio.project.settings");
 
     // Follow the platform's answer until the person starts editing.
     // Only when a NEW answer arrives (not when "dirty" flips after a save, which would put the older answer back).
@@ -195,7 +198,7 @@ export function FrameworksSection({ projectId, jobRunning }: { projectId: string
     const onAgent = runner.runOn === "agent";
     const info = (id: FrameworkId) => cur.adapters.find((a) => a.id === id)!;
     const avdOptions = [...new Set([...cur.avds, ...(draft.defaultAvd ? [draft.defaultAvd] : [])])];
-    const lock = jobRunning;
+    const lock = jobRunning || Boolean(noSettings);
 
     const card = (id: FrameworkId, fields: ReactNode) => {
         const line = availabilityLine(info(id), runner);
@@ -235,7 +238,7 @@ export function FrameworksSection({ projectId, jobRunning }: { projectId: string
                 <p className="t-secondary">
                     Each framework starts with the settings the platform always used. Changes apply to the next run. Retries are not offered on purpose: they hide tests that fail now and then.
                 </p>
-                {lock && <Callout tone="info">A run is in progress for this project. You can change these settings when it finishes.</Callout>}
+                {noSettings ? <p className="t-meta">{noSettings}</p> : jobRunning && <Callout tone="info">A run is in progress for this project. You can change these settings when it finishes.</Callout>}
                 {cur.effective.notes.map((n) => (
                     <Callout key={n} tone="info">
                         {n}
@@ -325,14 +328,14 @@ export function FrameworksSection({ projectId, jobRunning }: { projectId: string
                     </Callout>
                 )}
                 <div className="row">
-                    <Button type="submit" variant="primary" loading={busy} disabled={lock || unchanged}>
+                    <Button type="submit" variant="primary" loading={busy} disabled={lock || unchanged} tip={noSettings}>
                         Save settings
                     </Button>
                     <Button
                         type="button"
                         variant="secondary"
                         disabled={lock || busy}
-                        tip={lock ? "A run is in progress for this project. You can change these settings when it finishes." : "Fills the form with the platform’s standard settings. Nothing changes until you save."}
+                        tip={noSettings ?? (lock ? "A run is in progress for this project. You can change these settings when it finishes." : "Fills the form with the platform’s standard settings. Nothing changes until you save.")}
                         onClick={() => {
                             setDraft(toDraft(cur.defaults));
                             setDirty(true);

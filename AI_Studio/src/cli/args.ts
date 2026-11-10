@@ -50,11 +50,11 @@ const OPTIONS = {
     help: { type: "boolean", short: "h" },
 } as const;
 
-const posInt = (name: string, min: number, max: number) => z.coerce.number({ invalid_type_error: `--${name} must be a number` }).int(`--${name} must be a whole number`).min(min, `--${name} must be at least ${min}`).max(max, `--${name} must be at most ${max}`);
+const posInt = (name: string, min: number, max: number) => z.coerce.number({ error: `--${name} must be a number` }).int(`--${name} must be a whole number`).min(min, `--${name} must be at least ${min}`).max(max, `--${name} must be at most ${max}`);
 const envName = (flag: string) => z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, `--${flag} takes the NAME of an environment variable (like APP_PASSWORD), not the secret itself`);
 const httpUrl = (flag: string) =>
     z
-        .string({ required_error: `--${flag} is required` })
+        .string({ error: (iss) => (iss.input === undefined ? `--${flag} is required` : undefined) })
         .url(`--${flag} must be a full address like https://example.com`)
         .refine((u) => /^https?:/i.test(u), `--${flag} must start with http:// or https://`);
 
@@ -78,7 +78,7 @@ const RunSchema = z
         "max-pages": posInt("max-pages", 1, 100).optional(),
         "max-scenarios": posInt("max-scenarios", 1, 100).optional(),
         timeout: posInt("timeout", 30, 21_600).default(1800),
-        "fail-on": z.enum(FAIL_ON, { errorMap: () => ({ message: `--fail-on must be one of: ${FAIL_ON.join(", ")}` }) }).default("high"),
+        "fail-on": z.enum(FAIL_ON, { error: () => `--fail-on must be one of: ${FAIL_ON.join(", ")}` }).default("high"),
         "fail-on-failed-validation": z.boolean().default(true),
         junit: z.string().min(1).optional(),
         json: z.string().min(1).optional(),
@@ -118,7 +118,7 @@ const ExportSchema = z.object({
     server: httpUrl("server"),
     "api-key": z.string().min(1).optional(),
     "api-key-env": envName("api-key-env").optional(),
-    project: z.string({ required_error: "--project is required" }).min(1, "--project is required"),
+    project: z.string({ error: (iss) => (iss.input === undefined ? "--project is required" : undefined) }).min(1, "--project is required"),
     out: z.string().min(1).default("ai-tests.json"),
 });
 export type ExportArgs = z.infer<typeof ExportSchema>;

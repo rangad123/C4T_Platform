@@ -39,6 +39,18 @@ How it works:
 
 What is not covered: a limited person cannot create projects (an owner creates the project and adds it to their list); there are no groups or teams (each person's list is set on its own); whole-project backups and restores do not carry who may see the project; the Activity list of the whole platform stays owner-only and is not narrowed per project; a project's runner kits and runner tokens follow the project role like everything else in the project.
 
+## Controls that follow the permissions in a project
+
+The page shows and switches off what a person may change by the permissions that count in **that** project: the `access.permissions` that `GET /api/projects/:id` sends (the platform-wide permissions narrowed by the person's role there). It never relies on the platform-wide list alone, so someone who may write tests on the platform but is a Viewer of one project is not offered changes the server refuses there.
+
+- **Read once per page.** A project place (its hub or single page) reads the project once and shares the answer with every control in it (`web/src/features/auth/project-access.tsx`, `useHere`). A control outside such a page reads it once itself.
+- **Same permission as the server.** Each control asks for the permission of its route in `ROUTE_PERMISSIONS` (`src/platform/auth/roles.ts`): writing tests for requirements, test cases, test scripts, reusable steps, shared elements, helpers, test data, test files, run sequences and libraries; deleting for their Delete and Remove; running for Run, schedules and Try it now; project settings for environments, test accounts, saved sign-ins, the data reset, frameworks and cleanup; managing keys for alert channels, deploy tokens, issue trackers, Sentry and the test mailbox; platform settings for the clean-up rules and the backup.
+- **Switched off, or left out.** Where the person may look at the thing, the main action (Add, Import, New, Run, Save) is shown switched off with a one-line reason, reachable by keyboard ("Changing this needs permission to write tests in this project. Ask a Project Admin."). The per-row Edit, Delete and Remove of something they may not change are left out, and so are parts that only change things (the import form, Publish to the library, the backup).
+- **Nothing is guessed.** While the project's answer is not in (still loading, or the read failed) the page uses the person's platform-wide permissions, as before; the server still checks every request. Open mode and an access key hold every permission (the server sends them all), so nothing is hidden there.
+- **Tests**: `tests/project-permissions-unit.test.ts` (the rules above); `tests/project-permissions-ui.test.ts` walks Requirements, a requirement, Test cases, Test scripts and their reusable steps, shared elements and helpers, Schedules, After a deploy and the Settings sections as a project Viewer (no enabled control that changes something, the reasons shown, the server answers 403) and as an owner (every control offered).
+
+Not covered yet: a test script's own page (its editor and history) and a release's page still offer their controls to a Viewer of the project; the server refuses the change, and the page says so.
+
 ## How it works
 
 - **One table** (`src/platform/auth/roles.ts`) gives every route its least role (`owner`, `editor`, `viewer`), or `public` (signing in) or `own` (routes with their own credential). The access hook (`src/platform/auth/access.ts`, installed by `server.ts` before any route) checks it on every `/api` request. A route that is missing from the table needs an **owner** (fail closed), and `tests/users-unit.test.ts` fails when any registered route is missing, so a new route must be mapped.

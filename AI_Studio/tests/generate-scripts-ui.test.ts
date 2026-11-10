@@ -26,6 +26,7 @@ import { RequirementStore } from "../src/platform/requirement-store.js";
 import { ReviewStore } from "../src/platform/review-store.js";
 import { IOS_PROJECT, NO_ADDRESS_FOR_SCRIPTS, NO_APP_FOR_SCRIPTS } from "../src/platform/routes/generate-scripts.js";
 import { buildServer } from "../src/platform/server.js";
+import { NO_PERMISSION_HERE } from "../web/src/features/auth/project-access-rules.js";
 import { startFakeProvider, type FakeProvider } from "./fixtures/fake-llm-provider.js";
 
 const PORT = 8521;
@@ -177,11 +178,13 @@ describe("Generate from test cases, on Test scripts", () => {
             await p2.getByRole("button", { name: "Sign in" }).click();
             await pwExpect(p2.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
             await p2.goto(`${BASE}/#/projects/${phone}/scripts`);
-            await p2.getByRole("button", { name: "New test script", exact: true }).click();
-            const entry = p2.getByRole("menuitem", { name: /Generate from test cases/ });
-            await pwExpect(entry).toBeDisabled();
-            await pwExpect(entry).toContainText("Needs permission to use the AI to write tests.");
-            await p2.keyboard.press("Escape");
+            // Every way in makes a test script, which a viewer of this project may not: the menu itself is switched off with the reason.
+            const menu = p2.getByRole("button", { name: "New test script", exact: true });
+            await pwExpect(menu).toHaveAttribute("aria-disabled", "true");
+            await menu.hover();
+            await pwExpect(p2.locator(".tt:not([hidden])").filter({ hasText: NO_PERMISSION_HERE["ai_studio.tests.write"]! })).toBeVisible();
+            await menu.click({ force: true });
+            await pwExpect(p2.getByRole("menuitem", { name: /Generate from test cases/ })).toHaveCount(0);
             // The card under the Test cases list is not offered either.
             await p2.goto(`${BASE}/#/projects/${phone}/tests`);
             await pwExpect(p2.getByRole("heading", { name: "Test cases", exact: true })).toBeVisible();

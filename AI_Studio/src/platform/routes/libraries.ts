@@ -292,7 +292,7 @@ export function registerLibraryRoutes(ctx: RouteCtx): void {
 
     app.post("/api/libraries/items", async (req, reply) => {
         const body = parsePlain(
-            z.object({ organizationId: OrgId, folderId: Id.nullable().optional(), kind: Kind, name: Name, description: z.string().max(2000).optional(), content: z.unknown(), note: Note }).strict(),
+            z.object({ organizationId: OrgId, folderId: Id.nullable().optional(), kind: Kind, name: Name, description: z.string().max(2000).optional(), content: z.unknown().optional(), note: Note }).strict(),
             req.body,
         );
         const org = body.organizationId;
@@ -334,7 +334,7 @@ export function registerLibraryRoutes(ctx: RouteCtx): void {
 
     app.put("/api/libraries/items/:itemId/content", async (req) => {
         const i = itemSeen(req, (req.params as { itemId: string }).itemId);
-        const body = parsePlain(z.object({ content: z.unknown(), note: Note, expectedVersion: z.number().int().positive().optional() }).strict(), req.body);
+        const body = parsePlain(z.object({ content: z.unknown().optional(), note: Note, expectedVersion: z.number().int().positive().optional() }).strict(), req.body);
         mustChange(req, i.organizationId);
         const content = checkContent(i.kind, i.name, body.content);
         const r = lib.addVersion(i.id, { content, note: body.note ?? "", sourceProjectId: null, createdBy: actorLabel(who(req)), ...(body.expectedVersion !== undefined ? { expectedVersion: body.expectedVersion } : {}) });

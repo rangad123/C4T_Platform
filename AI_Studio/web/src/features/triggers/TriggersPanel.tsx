@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { curlExample, type TriggerList, type TriggerToken } from "./triggers";
 import "./triggers.css";
@@ -17,6 +18,8 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
     useEffect(() => {
         if (reloadKey > 0) void list.reload();
     }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Deploy tokens are credentials: making and revoking them needs ai_studio.ai_keys.manage in this project.
+    const noManage = useHere(projectId).why("ai_studio.ai_keys.manage");
     const [adding, setAdding] = useState(false);
     const [fresh, setFresh] = useState<{ token: string; label: string | null } | null>(null);
     const active = list.data?.tokens.filter((t) => !t.revokedAt) ?? [];
@@ -29,7 +32,7 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
                 <h2 className="t-section" id="triggers-title">Run after a deploy</h2>
                 <span className="spacer" />
                 {active.length > 0 && !adding && (
-                    <Button size="sm" icon={Plus} onClick={() => setAdding(true)}>
+                    <Button size="sm" icon={Plus} disabled={Boolean(noManage)} tip={noManage} onClick={() => setAdding(true)}>
                         New token
                     </Button>
                 )}
@@ -43,7 +46,7 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
             ) : (
                 <>
                     {active.length === 0 && !adding && !fresh && (
-                        <EmptyState icon={KeyRound} title="No deploy tokens yet" actions={<Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>Create a token</Button>}>
+                        <EmptyState icon={KeyRound} title="No deploy tokens yet" actions={<Button variant="primary" icon={Plus} disabled={Boolean(noManage)} tip={noManage} onClick={() => setAdding(true)}>Create a token</Button>}>
                             Give your deploy pipeline a token and it can start a re-run of all tests as soon as a release is live, then ask for the result.
                         </EmptyState>
                     )}
@@ -52,12 +55,12 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
                         <ul className="list divided">
                             {active.map((t) => (
                                 <li key={t.id}>
-                                    <TokenRow t={t} projectId={projectId} onChanged={list.reload} />
+                                    <TokenRow t={t} projectId={projectId} onChanged={list.reload} mayRevoke={!noManage} />
                                 </li>
                             ))}
                         </ul>
                     )}
-                    {adding && (
+                    {adding && !noManage && (
                         <NewTokenForm
                             projectId={projectId}
                             onCancel={() => setAdding(false)}
@@ -76,7 +79,7 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
     );
 }
 
-function TokenRow({ t, projectId, onChanged }: { t: TriggerToken; projectId: string; onChanged: () => Promise<void> }) {
+function TokenRow({ t, projectId, onChanged, mayRevoke }: { t: TriggerToken; projectId: string; onChanged: () => Promise<void>; mayRevoke: boolean }) {
     const [confirm, setConfirm] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -109,7 +112,7 @@ function TokenRow({ t, projectId, onChanged }: { t: TriggerToken; projectId: str
                 <span>Last used <b>{t.lastUsedAt ? relativeTime(t.lastUsedAt) : "never"}</b></span>
             </div>
             {error && <Callout tone="danger">{error}</Callout>}
-            <div className="acts">
+            {mayRevoke && <div className="acts">
                 {confirm ? (
                     <>
                         <span className="t-secondary">Stop this token from working?</span>
@@ -121,7 +124,7 @@ function TokenRow({ t, projectId, onChanged }: { t: TriggerToken; projectId: str
                         Revoke
                     </Button>
                 )}
-            </div>
+            </div>}
         </div>
     );
 }

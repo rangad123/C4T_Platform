@@ -44,9 +44,14 @@ afterAll(async () => {
 async function openRuns(permissions: string[]): Promise<Page> {
     const page = await (await browser.newContext()).newPage();
     await page.route(`**/api/projects/${projectId}`, async (route) => {
-        const res = await route.fetch();
-        const body = (await res.json()) as Record<string, unknown>;
-        await route.fulfill({ response: res, json: { ...body, access: { projectAdmin: false, permissions } } });
+        // A read still on its way when the test closes the page has nobody to answer: let it go.
+        try {
+            const res = await route.fetch();
+            const body = (await res.json()) as Record<string, unknown>;
+            await route.fulfill({ response: res, json: { ...body, access: { projectAdmin: false, permissions } } });
+        } catch {
+            /* the page was closed */
+        }
     });
     await page.route(`**/api/projects/${projectId}/runs`, (route) => {
         if (route.request().method() === "POST") runStarts++;

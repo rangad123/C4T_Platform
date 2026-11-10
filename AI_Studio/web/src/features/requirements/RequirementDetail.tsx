@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { ArrowLeft, Link2, Pencil, Search, Trash2, Unlink, X } from "lucide-react";
-import { api, type TestSummary } from "../../api";
+import { api, type ProjectDetail, type TestSummary } from "../../api";
 import { ProjectPlace } from "../../components/ProjectHub";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
-import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import { apiMessage, type CaseList } from "../manual/manual";
 import { RequirementForm } from "./RequirementForm";
 import { COVERAGE_HINT, COVERAGE_TONE, COVERAGE_WORDS, PRIORITY_WORDS, RESULT_TONE, RESULT_WORDS, SOURCE_WORDS, STATUS_HINT, STATUS_WORDS, type LinkedTest, type RequirementDetailData } from "./requirements";
@@ -15,8 +15,12 @@ import { COVERAGE_HINT, COVERAGE_TONE, COVERAGE_WORDS, PRIORITY_WORDS, RESULT_TO
 /** One requirement: what it says, the test cases that cover it with their latest result, and linking more. */
 export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
     const r = useFetch<RequirementDetailData>(`/projects/${id}/requirements/${rid}`);
-    const can = useCan();
-    const canWrite = can("ai_studio.tests.write");
+    // One read of the project for the page and its controls: what this person may do here (they may look at the requirement, so
+    // Edit, Delete and Link are shown switched off with the reason; Unlink on each row is left out).
+    const project = useFetch<ProjectDetail>(`/projects/${id}`);
+    const here = useHere(id, project);
+    const canWrite = here.may("ai_studio.tests.write");
+    const writeWhy = here.why("ai_studio.tests.write");
     const [editing, setEditing] = useState(false);
     const [linking, setLinking] = useState(false);
     const [confirming, setConfirming] = useState(false);
@@ -62,13 +66,14 @@ export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
                     "What the application must do, and which test cases check it."
                 )
             }
+            project={project}
             actions={
-                d && canWrite && !editing ? (
+                d && !editing ? (
                     <>
-                        <Button icon={Pencil} onClick={() => setEditing(true)}>
+                        <Button icon={Pencil} disabled={!canWrite} tip={writeWhy} onClick={() => setEditing(true)}>
                             Edit
                         </Button>
-                        {confirming ? (
+                        {confirming && canWrite ? (
                             <>
                                 <Button variant="danger" onClick={() => void remove()}>
                                     Delete {d.ref}
@@ -78,7 +83,7 @@ export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
                                 </Button>
                             </>
                         ) : (
-                            <Button variant="ghost" icon={Trash2} onClick={() => setConfirming(true)}>
+                            <Button variant="ghost" icon={Trash2} disabled={!canWrite} tip={writeWhy} onClick={() => setConfirming(true)}>
                                 Delete
                             </Button>
                         )}
@@ -91,7 +96,7 @@ export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
                     <ArrowLeft size={14} aria-hidden /> All requirements
                 </a>
             </div>
-            {confirming && d && (
+            {confirming && canWrite && d && (
                 <Callout tone="warning" title={`Delete ${d.ref}?`}>
                     {d.counts.linked > 0 ? `${plural(d.counts.linked, "test case")} cover${d.counts.linked === 1 ? "s" : ""} it. Deleting it removes those links; the test cases stay.` : "No test case covers it. This cannot be undone."}
                 </Callout>
@@ -155,13 +160,13 @@ export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
                             </h2>
                             <span className="t-meta">{d.counts.linked ? `${d.counts.passed} passed, ${d.counts.failed} failed, ${d.counts.notRun} without a result` : "None yet"}</span>
                             <span className="spacer" />
-                            {canWrite && !linking && (
-                                <Button size="sm" icon={Link2} onClick={() => setLinking(true)}>
+                            {!linking && (
+                                <Button size="sm" icon={Link2} disabled={!canWrite} tip={writeWhy} onClick={() => setLinking(true)}>
                                     Link test cases
                                 </Button>
                             )}
                         </div>
-                        {linking && (
+                        {linking && canWrite && (
                             <LinkPicker
                                 projectId={id}
                                 rid={rid}

@@ -5,6 +5,7 @@ import { SeeHow } from "../guide/SeeHow";
 import { FieldHelp } from "../../components/Tooltip";
 import { Button, Callout, ListSkeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 
 interface SavedRole {
@@ -48,6 +49,10 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
     const [error, setError] = useState("");
     const [done, setDone] = useState(false);
     const [next, setNext] = useState(1);
+    // The accounts are a project setting (PUT /roles): without ai_studio.project.settings here they are shown to read.
+    const noSettings = useHere(projectId).why("ai_studio.project.settings");
+    // Each control is switched off on its own (not a disabled fieldset), so the "?" help beside a field still opens.
+    const ro = Boolean(noSettings);
 
     useEffect(() => {
         if (!saved.data || loaded) return;
@@ -122,15 +127,15 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                                 <div className="grid-2">
                                     <div className="field">
                                         <label htmlFor={`acct-name-${r.key}`}>Name</label>
-                                        <input id={`acct-name-${r.key}`} className="input" value={r.name} placeholder="admin" autoComplete="off" onChange={(e) => patch(r.key, { name: e.target.value.toLowerCase() })} />
+                                        <input disabled={ro} id={`acct-name-${r.key}`} className="input" value={r.name} placeholder="admin" autoComplete="off" onChange={(e) => patch(r.key, { name: e.target.value.toLowerCase() })} />
                                     </div>
                                     <div className="field">
                                         <label htmlFor={`acct-user-${r.key}`}>Username or email</label>
-                                        <input id={`acct-user-${r.key}`} className="input" value={r.username} autoComplete="off" onChange={(e) => patch(r.key, { username: e.target.value })} />
+                                        <input disabled={ro} id={`acct-user-${r.key}`} className="input" value={r.username} autoComplete="off" onChange={(e) => patch(r.key, { username: e.target.value })} />
                                     </div>
                                     <div className="field">
                                         <label htmlFor={`acct-pass-${r.key}`}>Password</label>
-                                        <input id={`acct-pass-${r.key}`} className="input" type="password" autoComplete="new-password" value={r.password} placeholder={r.hasPassword ? "Saved — leave empty to keep" : ""} onChange={(e) => patch(r.key, { password: e.target.value })} />
+                                        <input disabled={ro} id={`acct-pass-${r.key}`} className="input" type="password" autoComplete="new-password" value={r.password} placeholder={r.hasPassword ? "Saved — leave empty to keep" : ""} onChange={(e) => patch(r.key, { password: e.target.value })} />
                                     </div>
                                     <div className="field">
                                         <FieldHelp htmlFor={`acct-totp-${r.key}`} label="Authenticator secret (optional)" helpLabel="Authenticator secret" help="The secret key behind this account’s authenticator app (the text version of its QR code). With it we make the current code and type it when the sign-in asks for one." />
@@ -141,7 +146,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                                             autoComplete="off"
                                             spellCheck={false}
                                             value={r.totpSecret}
-                                            disabled={r.clearTotp}
+                                            disabled={ro || r.clearTotp}
                                             placeholder={r.hasTotp && !r.clearTotp ? "Saved — leave empty to keep" : ""}
                                             onChange={(e) => patch(r.key, { totpSecret: e.target.value })}
                                         />
@@ -155,7 +160,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                                             autoComplete="off"
                                             spellCheck={false}
                                             value={r.apiToken}
-                                            disabled={r.clearApiToken}
+                                            disabled={ro || r.clearApiToken}
                                             placeholder={r.hasApiToken && !r.clearApiToken ? "Saved — leave empty to keep" : ""}
                                             onChange={(e) => patch(r.key, { apiToken: e.target.value })}
                                         />
@@ -164,17 +169,17 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                                 </div>
                                 <div className="row">
                                     {r.hasApiToken && (
-                                        <Button size="sm" variant="ghost" icon={KeyRound} onClick={() => patch(r.key, { clearApiToken: !r.clearApiToken, apiToken: "" })}>
+                                        <Button disabled={ro} size="sm" variant="ghost" icon={KeyRound} onClick={() => patch(r.key, { clearApiToken: !r.clearApiToken, apiToken: "" })}>
                                             {r.clearApiToken ? "Keep the API token" : "Remove the API token"}
                                         </Button>
                                     )}
                                     {r.hasTotp && (
-                                        <Button size="sm" variant="ghost" icon={KeyRound} onClick={() => patch(r.key, { clearTotp: !r.clearTotp, totpSecret: "" })}>
+                                        <Button disabled={ro} size="sm" variant="ghost" icon={KeyRound} onClick={() => patch(r.key, { clearTotp: !r.clearTotp, totpSecret: "" })}>
                                             {r.clearTotp ? "Keep the authenticator secret" : "Remove the authenticator secret"}
                                         </Button>
                                     )}
                                     <span className="spacer" />
-                                    <Button size="sm" variant="ghost" icon={Trash2} onClick={() => { setDone(false); setRows((rs) => rs.filter((x) => x.key !== r.key)); }} aria-label={`Remove account ${r.name || "new"}`}>
+                                    <Button disabled={ro} size="sm" variant="ghost" icon={Trash2} onClick={() => { setDone(false); setRows((rs) => rs.filter((x) => x.key !== r.key)); }} aria-label={`Remove account ${r.name || "new"}`}>
                                         Remove
                                     </Button>
                                 </div>
@@ -182,7 +187,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                         ))}
                     </div>
                     <div className="row">
-                        <Button icon={Plus} disabled={rows.length >= MAX_ACCOUNTS} onClick={() => { setDone(false); setRows((rs) => [...rs, { name: "", username: "", hasPassword: false, hasTotp: false, hasApiToken: false, password: "", totpSecret: "", clearTotp: false, apiToken: "", clearApiToken: false, key: next }]); setNext((n) => n + 1); }}>
+                        <Button icon={Plus} disabled={rows.length >= MAX_ACCOUNTS || Boolean(noSettings)} tip={noSettings} onClick={() => { setDone(false); setRows((rs) => [...rs, { name: "", username: "", hasPassword: false, hasTotp: false, hasApiToken: false, password: "", totpSecret: "", clearTotp: false, apiToken: "", clearApiToken: false, key: next }]); setNext((n) => n + 1); }}>
                             Add an account
                         </Button>
                         {rows.length >= MAX_ACCOUNTS && <span className="t-meta">That’s the most we can keep ({MAX_ACCOUNTS}).</span>}
@@ -191,7 +196,7 @@ export function TestAccountsPanel({ projectId, onClose }: { projectId: string; o
                     {error && <Callout tone="danger">{error}</Callout>}
                     {done && <Callout tone="success">Saved. The next exploration uses these accounts for access-control checks.</Callout>}
                     <div className="row">
-                        <Button variant="primary" loading={busy} disabled={busy || unique.length > 0} onClick={save}>
+                        <Button variant="primary" loading={busy} disabled={busy || unique.length > 0 || Boolean(noSettings)} tip={noSettings} onClick={save}>
                             Save accounts
                         </Button>
                     </div>

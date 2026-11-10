@@ -33,7 +33,7 @@ import type { RouteCtx } from "./types.js";
 
 const Text = (max: number, what: string) =>
     z
-        .string({ invalid_type_error: `${what} must be text` })
+        .string({ error: (iss) => (iss.input === undefined ? `${what} is required` : `${what} must be text`) })
         .transform(clean)
         .pipe(z.string().max(max, `${what} can be at most ${max} characters`));
 const Required = (max: number, what: string) => Text(max, what).pipe(z.string().min(1, `${what} is required`));

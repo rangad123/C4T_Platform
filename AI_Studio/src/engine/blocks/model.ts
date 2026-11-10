@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { StoredStepSchema, type Step } from "../spec/schema.js";
 import { nameKey, nameProblem, normalizeName } from "../locators/model.js";
+import { isMissingValue, isUnknownKind } from "../zod-issue.js";
 
 export { nameKey, normalizeName };
 
@@ -95,8 +96,8 @@ function firstIssue(e: z.ZodError): string {
     const p = i.path;
     if (p[0] === "steps" && typeof p[1] === "number") {
         const field = p.slice(2).filter((x) => typeof x === "string").pop();
-        if (i.code === "invalid_union_discriminator") return `Step ${p[1] + 1}: choose what this step does.`;
-        if (i.code === "invalid_type" && (i as { received?: string }).received === "undefined") return `Step ${p[1] + 1}: ${field ? `“${field}”` : "this step"} is missing.`;
+        if (isUnknownKind(i)) return `Step ${p[1] + 1}: choose what this step does.`;
+        if (isMissingValue(i)) return `Step ${p[1] + 1}: ${field ? `“${field}”` : "this step"} is missing.`;
         return `Step ${p[1] + 1}: ${field ? `“${field}” ` : ""}${i.message.charAt(0).toLowerCase()}${i.message.slice(1)}`;
     }
     const where = p.length ? `${p.join(".")}: ` : "";

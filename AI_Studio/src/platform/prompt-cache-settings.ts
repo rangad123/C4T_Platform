@@ -70,7 +70,7 @@ export function promptCacheView(config: Config, modelName: string): PromptCacheV
     };
 }
 
-const Body = z.object({ enabled: z.boolean({ invalid_type_error: "Send { enabled: true }, { enabled: false } or { enabled: null }" }).nullable() }).strict();
+const Body = z.object({ enabled: z.boolean({ error: "Send { enabled: true }, { enabled: false } or { enabled: null }" }).nullable() }).strict();
 
 export function registerPromptCacheRoutes(ctx: RouteCtx): void {
     const { app, p } = ctx;

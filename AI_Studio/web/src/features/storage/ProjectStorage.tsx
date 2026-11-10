@@ -6,6 +6,8 @@ import { downloadBlob, plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
+import { useCan } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import { UsageBar } from "./StorageSettings";
 import { FieldHelp } from "../../components/Tooltip";
 import { formatBytes, logLine, type Preview, type ProjectStorage as ProjectStorageData, type RestoreResult, type RetentionState } from "./storage";
@@ -58,6 +60,12 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
     const [withoutSecurity, setWithoutSecurity] = useState(false);
     const [file, setFile] = useState<File | null>(null);
     const [restored, setRestored] = useState<RestoreResult | null>(null);
+    // What the server asks: the clean-up settings, removing now and the backup are platform settings (in this project); the preview
+    // and "I have entered them" are project settings; restoring makes a new project, so it is the platform-wide permission.
+    const here = useHere(projectId);
+    const noPlatform = here.why("ai_studio.platform.settings");
+    const noSettings = here.why("ai_studio.project.settings");
+    const mayRestore = useCan()("ai_studio.platform.settings");
 
     useEffect(() => {
         if (retention.data && !form) {
@@ -197,7 +205,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
             <UsageBar usage={s.usage} label={`This project’s files by kind, ${s.usage.text} in total`} />
 
             {s.needsSecrets.length > 0 && (
-                <Callout tone="warning" title="Enter these again, they are not in a backup" actions={<Button size="sm" onClick={() => void clearNeeds()}>I have entered them</Button>}>
+                <Callout tone="warning" title="Enter these again, they are not in a backup" actions={<Button size="sm" disabled={Boolean(noSettings)} tip={noSettings} onClick={() => void clearNeeds()}>I have entered them</Button>}>
                     {s.needsSecrets.map((n) => n.label).join("; ")}.
                 </Callout>
             )}
@@ -216,7 +224,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
                     {r.source === "platform" && r.platformDefaultDays ? ` This project uses the platform default of ${r.platformDefaultDays} days until you save your own settings.` : ""}
                 </p>
                 <label className="check">
-                    <input type="checkbox" checked={form.enabled} onChange={(e) => setField("enabled", e.target.checked)} />
+                    <input type="checkbox" checked={form.enabled} disabled={Boolean(noPlatform)} onChange={(e) => setField("enabled", e.target.checked)} />
                     <span>
                         <span className="title">Remove old files automatically</span>
                         <span className="hint">Once a day, and never while a run is going. Off by default.</span>
@@ -225,30 +233,30 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
                 <div className="st-grid">
                     <div className="field">
                         <label htmlFor="st-days">Keep files of passed runs for (days)</label>
-                        <input id="st-days" className="input" type="number" inputMode="numeric" min={r.limits.keepDays.min} max={r.limits.keepDays.max} value={form.keepDays} onChange={(e) => setField("keepDays", e.target.value)} />
+                        <input id="st-days" className="input" type="number" inputMode="numeric" min={r.limits.keepDays.min} max={r.limits.keepDays.max} value={form.keepDays} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepDays", e.target.value)} />
                     </div>
                     <div className="field">
                         <label htmlFor="st-failed">Keep files of failed runs for (days)</label>
-                        <input id="st-failed" className="input" type="number" inputMode="numeric" min={r.limits.keepFailedDays.min} max={r.limits.keepFailedDays.max} value={form.keepFailedDays} onChange={(e) => setField("keepFailedDays", e.target.value)} />
+                        <input id="st-failed" className="input" type="number" inputMode="numeric" min={r.limits.keepFailedDays.min} max={r.limits.keepFailedDays.max} value={form.keepFailedDays} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepFailedDays", e.target.value)} />
                     </div>
                     <div className="field">
                         <FieldHelp htmlFor="st-latest" label="Always keep the latest runs of each test" helpLabel="keeping the newest runs" help="The newest runs of every test, per browser and environment, keep their files however old they are." />
-                        <input id="st-latest" className="input" type="number" inputMode="numeric" min={r.limits.keepLatestRuns.min} max={r.limits.keepLatestRuns.max} value={form.keepLatestRuns} onChange={(e) => setField("keepLatestRuns", e.target.value)} />
+                        <input id="st-latest" className="input" type="number" inputMode="numeric" min={r.limits.keepLatestRuns.min} max={r.limits.keepLatestRuns.max} value={form.keepLatestRuns} disabled={Boolean(noPlatform)} onChange={(e) => setField("keepLatestRuns", e.target.value)} />
                     </div>
                     <div className="field">
                         <FieldHelp htmlFor="st-cap" label="Size limit in MB (optional)" helpLabel="the size limit" help="When this project’s files take more than this, the oldest files that nothing keeps are removed until they fit." />
-                        <input id="st-cap" className="input" type="number" inputMode="numeric" min={r.limits.maxArtifactMB.min} placeholder="No limit" value={form.maxArtifactMB} onChange={(e) => setField("maxArtifactMB", e.target.value)} />
+                        <input id="st-cap" className="input" type="number" inputMode="numeric" min={r.limits.maxArtifactMB.min} placeholder="No limit" value={form.maxArtifactMB} disabled={Boolean(noPlatform)} onChange={(e) => setField("maxArtifactMB", e.target.value)} />
                     </div>
                 </div>
                 <p className="t-meta">Files of tests that are failing now, of runs an issue or a release is based on, and approved screenshots are always kept.</p>
                 <div className="st-actions">
-                    <Button type="submit" variant="primary" loading={busy === "save"} disabled={busy !== "" || !dirty}>Save settings</Button>
-                    <Button type="button" onClick={() => void showPreview()} loading={busy === "preview"} disabled={busy !== ""} tip="Counts what the values in the form would remove. Nothing is removed.">Preview</Button>
-                    <Button type="button" variant="danger" icon={Trash2} onClick={() => setConfirming(true)} disabled={busy !== "" || !canRemove}>
+                    <Button type="submit" variant="primary" loading={busy === "save"} disabled={busy !== "" || !dirty || Boolean(noPlatform)} tip={noPlatform}>Save settings</Button>
+                    <Button type="button" onClick={() => void showPreview()} loading={busy === "preview"} disabled={busy !== "" || Boolean(noSettings)} tip={noSettings ?? "Counts what the values in the form would remove. Nothing is removed."}>Preview</Button>
+                    <Button type="button" variant="danger" icon={Trash2} onClick={() => setConfirming(true)} disabled={busy !== "" || !canRemove || Boolean(noPlatform)} tip={noPlatform}>
                         Remove old files now
                     </Button>
                 </div>
-                {!canRemove && <p className="t-meta">{r.busy ? "A run is going. Files can be removed when it has finished." : !saved.enabled ? "Turn on automatic removal and save to remove files." : dirty ? "Save your changes to remove files." : ""}</p>}
+                {!canRemove && !noPlatform && <p className="t-meta">{r.busy ? "A run is going. Files can be removed when it has finished." : !saved.enabled ? "Turn on automatic removal and save to remove files." : dirty ? "Save your changes to remove files." : ""}</p>}
                 {preview && (
                     <Callout tone="info" title={preview.sentence}>
                         {preview.files > 0 ? `The oldest are from ${new Date(preview.oldest!).toLocaleDateString()}. Nothing has been removed yet.` : "Nothing has been removed."}
@@ -275,7 +283,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
                 )}
             </form>
 
-            <div className="st-block">
+            {!noPlatform && <div className="st-block">
                 <h3 className="t-card">Backup</h3>
                 <p className="t-secondary">A backup holds the tests, scripts, manual cases, releases, runbooks, environments and schedules of this project. It never holds passwords, tokens, webhook addresses or other secrets: you enter those again after restoring.</p>
                 <label className="check">
@@ -305,6 +313,7 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
                         Download backup
                     </Button>
                 </div>
+                {mayRestore && <>
                 <h3 className="t-card" style={{ marginTop: 8 }}>Restore from a backup</h3>
                 <p className="t-secondary">Restoring always creates a new project. Nothing in your existing projects changes, and nothing is run: restored tests wait for you to run them.</p>
                 <FilePicker id="st-restore" accept=".zip,application/zip" file={file} onChange={(f) => { setFile(f); setRestored(null); }} label="Choose backup file" />
@@ -332,11 +341,12 @@ export function ProjectStorage({ projectId }: { projectId: string }) {
                         ))}
                     </ul>
                 )}
-            </div>
+                </>}
+            </div>}
 
             {error && <Callout tone="danger">{error}</Callout>}
             {notice && <Callout tone="success">{notice}</Callout>}
-            {confirming && <ConfirmRemove projectId={projectId} preview={preview ?? undefined} onCancel={() => setConfirming(false)} onConfirm={() => void run()} />}
+            {confirming && !noPlatform && <ConfirmRemove projectId={projectId} preview={preview ?? undefined} onCancel={() => setConfirming(false)} onConfirm={() => void run()} />}
         </section>
     );
 }
@@ -355,16 +365,23 @@ const KEPT: Record<string, string> = {
 function ConfirmRemove({ projectId, preview, onCancel, onConfirm }: { projectId: string; preview?: Preview; onCancel: () => void; onConfirm: () => void }) {
     const ref = useRef<HTMLDialogElement>(null);
     const [fresh, setFresh] = useState<Preview | null>(preview ?? null);
+    /** Why the count could not be worked out now: said instead of a check that never ends (Cancel stays). */
+    const [failed, setFailed] = useState<string | null>(null);
     useEffect(() => {
         const d = ref.current;
         if (d && !d.open) d.showModal();
-        void api<Preview>(`/projects/${projectId}/retention/preview`, { method: "POST" }).then(setFresh).catch(() => undefined);
+        void api<Preview>(`/projects/${projectId}/retention/preview`, { method: "POST" }).then(setFresh, (e) => setFailed(describeApiError(e)));
     }, [projectId]);
     return (
         <dialog ref={ref} className="st-dialog" aria-labelledby="st-confirm-title" onClose={onCancel} onCancel={onCancel}>
             <div className="inner">
                 <h2 className="t-section" id="st-confirm-title">Remove old files?</h2>
-                <p>{fresh ? fresh.sentence : "Checking what would be removed."}</p>
+                {fresh ? <p>{fresh.sentence}</p> : !failed && <p>Checking what would be removed.</p>}
+                {failed && (
+                    <Callout tone="danger" title="Could not check what would be removed">
+                        {failed}
+                    </Callout>
+                )}
                 <p className="t-secondary">This deletes the files from the disk and cannot be undone. Test results and history stay.</p>
                 <div className="foot">
                     <Button onClick={onCancel}>Cancel</Button>

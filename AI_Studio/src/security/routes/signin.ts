@@ -28,7 +28,7 @@ const SavedSignInBody = z
     .object({
         account: z.string().trim().regex(ACCOUNT_NAME, "Choose “main” (the project's own sign-in) or the name of a test account."),
         /** A Playwright storage state (the file `--save-storage` writes), as an object or as its JSON text. */
-        storageState: z.union([z.string().max(1_000_000), z.record(z.unknown())]),
+        storageState: z.union([z.string().max(1_000_000), z.record(z.string(), z.unknown())]),
         /** A signed-in page of the application (default: its address); opened first by the assessment to tell whether the sign-in works. */
         checkUrl: z.string().trim().min(1).max(2000).optional(),
     })

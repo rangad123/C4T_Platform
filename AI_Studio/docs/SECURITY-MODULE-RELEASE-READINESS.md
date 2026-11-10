@@ -4,7 +4,7 @@ An audit of the Freit Security Assessment engine against the work actually obser
 Every statement below names the evidence it rests on. Where something is not proven, it says so.
 
 Audit date: 2026-10-23. Environment: Windows 11 Pro 10.0.26200, Node v24.19.0, npm 11.17.0, vitest 2.x, TypeScript (strict),
-Fastify 5, zod 3.24, Playwright with Chromium installed.
+Fastify 5, zod 4, Playwright with Chromium installed.
 
 ---
 

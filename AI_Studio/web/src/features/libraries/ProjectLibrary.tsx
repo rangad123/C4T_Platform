@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiError, api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { friendlyError } from "../../lib/labels";
 import { libraryHref } from "./LibrariesPage";
 import { folderPath, folderTree, KIND_LABEL, type ItemKind, type ProjectLibrary as Answer } from "./libraries";
@@ -21,6 +22,8 @@ export function ProjectLibrary({ id }: { id: string }) {
     const lib = useFetch<Answer>(`/projects/${id}/library`);
     const [note, setNote] = useState<Note>(null);
     const [busy, setBusy] = useState("");
+    // Taking an item, updating a copy and publishing one change this project's tests (ai_studio.tests.write here).
+    const noWrite = useHere(id).why("ai_studio.tests.write");
     if (lib.loading) return <ListSkeleton rows={4} />;
     if (lib.error || !lib.data) return <ErrorState error={friendlyError(lib.error?.message ?? "")} onRetry={lib.reload} />;
     const data = lib.data;
@@ -91,7 +94,7 @@ export function ProjectLibrary({ id }: { id: string }) {
                                     {u?.changedHere && <Badge tone="info">Changed in this project</Badge>}
                                     {u && u.inProject && !u.updateAvailable && !u.changedHere && <Badge tone="success">Up to date</Badge>}
                                     {u && u.inProject && (u.updateAvailable || u.changedHere) && (
-                                        <Button size="sm" variant={u.updateAvailable ? "primary" : "ghost"} icon={RefreshCw} loading={busy === i.id} disabled={Boolean(busy)} onClick={() => void update(i.id, u.localName)}>
+                                        <Button size="sm" variant={u.updateAvailable ? "primary" : "ghost"} icon={RefreshCw} loading={busy === i.id} disabled={Boolean(busy) || Boolean(noWrite)} tip={noWrite} onClick={() => void update(i.id, u.localName)}>
                                             {u.updateAvailable ? `Update to version ${i.version}` : "Take the library's version"}
                                         </Button>
                                     )}
@@ -101,7 +104,7 @@ export function ProjectLibrary({ id }: { id: string }) {
                                                 Name taken here
                                             </Badge>
                                         ) : (
-                                            <Button size="sm" icon={Download} loading={busy === i.id} disabled={Boolean(busy)} onClick={() => void run(i.id, () => api(`/projects/${id}/library/use`, { method: "POST", body: { itemId: i.id } }), `“${i.name}” added to this project.`, "It was not added. Try again.")}>
+                                            <Button size="sm" icon={Download} loading={busy === i.id} disabled={Boolean(busy) || Boolean(noWrite)} tip={noWrite} onClick={() => void run(i.id, () => api(`/projects/${id}/library/use`, { method: "POST", body: { itemId: i.id } }), `“${i.name}” added to this project.`, "It was not added. Try again.")}>
                                                 Add to project
                                             </Button>
                                         ))}
@@ -111,7 +114,7 @@ export function ProjectLibrary({ id }: { id: string }) {
                     </ul>
                 )}
             </section>
-            <Publish id={id} data={data} busy={busy} run={run} />
+            {!noWrite && <Publish id={id} data={data} busy={busy} run={run} />}
         </div>
     );
 }

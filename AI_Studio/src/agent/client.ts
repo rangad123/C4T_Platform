@@ -198,7 +198,7 @@ export class PlatformClient {
         return new PlatformError("rejected", `The platform refused a request to ${what} (HTTP ${res.status}).${said}`, res.status);
     }
 
-    private async json<T>(res: Response, schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { issues: Array<{ path: Array<string | number>; message: string }> } } }, what: string): Promise<T> {
+    private async json<T>(res: Response, schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } } }, what: string): Promise<T> {
         let value: unknown;
         try {
             value = await res.json();
@@ -208,7 +208,7 @@ export class PlatformClient {
         const parsed = schema.safeParse(value);
         if (!parsed.success) {
             const issue = parsed.error.issues[0];
-            throw new PlatformError("invalid", `The platform's answer to "${what}" does not match the protocol (${issue ? `${issue.path.join(".") || "answer"}: ${issue.message}` : "unknown problem"}).`);
+            throw new PlatformError("invalid", `The platform's answer to "${what}" does not match the protocol (${issue ? `${issue.path.map(String).join(".") || "answer"}: ${issue.message}` : "unknown problem"}).`);
         }
         return parsed.data;
     }

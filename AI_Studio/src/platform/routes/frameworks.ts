@@ -99,7 +99,7 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
     app.put("/api/projects/:id/framework-settings", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
-        const body = z.object({ settings: z.unknown(), by: z.string().trim().max(60).optional() }).strict().safeParse(req.body ?? {});
+        const body = z.object({ settings: z.unknown().optional(), by: z.string().trim().max(60).optional() }).strict().safeParse(req.body ?? {});
         if (!body.success) throw new HttpError(400, "Send {\"settings\": {...}} with the values to change.");
         const patch = FrameworkSettingsInput.safeParse(body.data.settings ?? {});
         if (!patch.success) throw new HttpError(400, inputProblem(patch.error));

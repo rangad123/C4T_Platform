@@ -5,6 +5,7 @@ import { Button, Callout, FilePicker, ListSkeleton } from "../../components/ui";
 import { SeeHow } from "../guide/SeeHow";
 import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 import type { DataSetBrief } from "./environments";
 import "./environments.css";
@@ -32,6 +33,10 @@ export function TestDataPanel({ projectId, onClose }: { projectId: string; onClo
     const [notice, setNotice] = useState("");
     const [open, setOpen] = useState<DataSetFull | null>(null);
 
+    // Importing and replacing tables needs tests.write in this project, removing one tests.delete: otherwise they are shown to read.
+    const here = useHere(projectId);
+    const noWrite = here.why("ai_studio.tests.write");
+    const mayDelete = here.may("ai_studio.tests.delete");
     const sets = list.data?.dataSets ?? [];
     const limits = list.data?.limits;
     const exists = sets.some((d) => d.name === name.trim());
@@ -123,9 +128,9 @@ export function TestDataPanel({ projectId, onClose }: { projectId: string; onClo
                                         <Button size="sm" variant="ghost" aria-expanded={open?.name === d.name} onClick={() => void show(d)} aria-label={`${open?.name === d.name ? "Hide" : "Show"} rows of ${d.name}`}>
                                             {open?.name === d.name ? "Hide rows" : "Show rows"}
                                         </Button>
-                                        <Button size="sm" variant="ghost" onClick={() => setName(d.name)} aria-label={`Replace ${d.name}`} tip="Puts this name in Import a table below: choose a file there to replace the rows.">Replace</Button>
+                                        {!noWrite && <Button size="sm" variant="ghost" onClick={() => setName(d.name)} aria-label={`Replace ${d.name}`} tip="Puts this name in Import a table below: choose a file there to replace the rows.">Replace</Button>}
                                         <span className="spacer" />
-                                        <Button size="sm" variant="ghost" icon={Trash2} loading={busy === `rm-${d.name}`} disabled={!!busy} onClick={() => void remove(d)} aria-label={`Remove ${d.name}`} tip={d.usedBy ? "A table a test uses can't be removed: change those tests first." : "Deletes this table at once."}>Remove</Button>
+                                        {mayDelete && <Button size="sm" variant="ghost" icon={Trash2} loading={busy === `rm-${d.name}`} disabled={!!busy} onClick={() => void remove(d)} aria-label={`Remove ${d.name}`} tip={d.usedBy ? "A table a test uses can't be removed: change those tests first." : "Deletes this table at once."}>Remove</Button>}
                                     </div>
                                     {open?.name === d.name && (
                                         <div className="data-table-wrap">
@@ -147,6 +152,9 @@ export function TestDataPanel({ projectId, onClose }: { projectId: string; onClo
                         </ul>
                     )}
 
+                    {noWrite ? (
+                        <p className="t-meta">{noWrite}</p>
+                    ) : (
                     <div className="stack-sm">
                         <h3 className="t-card">Import a table</h3>
                         <FilePicker id="data-file" accept=".csv,.tsv,.json,.yaml,.yml,text/csv,application/json" file={file} label="Choose a CSV, JSON or YAML file" onChange={(f) => { setFile(f); if (f && !name.trim()) setName(nameFromFile(f.name)); }} />
@@ -169,6 +177,7 @@ export function TestDataPanel({ projectId, onClose }: { projectId: string; onClo
                             )}
                         </div>
                     </div>
+                    )}
                     {error && <Callout tone="danger">{error}</Callout>}
                     {notice && <Callout tone="success">{notice}</Callout>}
                 </>

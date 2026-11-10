@@ -35,7 +35,7 @@ export function registerDslRoutes(ctx: RouteCtx): void {
 
     // The steps editor shows its unsaved steps as text when the person switches views.
     app.post("/api/dsl/print", async (req, reply) => {
-        const body = z.object({ spec: z.unknown() }).parse(req.body);
+        const body = z.object({ spec: z.unknown().optional() }).parse(req.body);
         if (!parses.take(req.ip)) return reply.code(429).header("retry-after", "1").send({ error: "Checking too fast. Wait a moment." });
         return svc.print(body.spec);
     });

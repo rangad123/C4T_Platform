@@ -52,7 +52,7 @@ const ApiAddress = z
     .refine((u) => /^https?:\/\//i.test(u), "Use an http(s) address");
 
 const Variables = z
-    .record(z.string().max(MAX_VARIABLE_VALUE, `A value can be at most ${MAX_VARIABLE_VALUE} characters.`))
+    .record(z.string(), z.string().max(MAX_VARIABLE_VALUE, `A value can be at most ${MAX_VARIABLE_VALUE} characters.`))
     .superRefine((v, ctx) => {
         const names = Object.keys(v);
         if (names.length > MAX_VARIABLES) ctx.addIssue({ code: "custom", message: `At most ${MAX_VARIABLES} variables.` });

@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { ENV_NAME } from "../environments/env.js";
+import { isUnknownKind } from "../zod-issue.js";
 
 export const RUNBOOK_VERSION = 1;
 export const MAX_STEPS = 12;
@@ -141,7 +142,7 @@ export const RunbookDefinition = z
     })
     .strict()
     .superRefine((def, ctx) => {
-        const add = (path: (string | number)[], message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+        const add = (path: (string | number)[], message: string) => ctx.addIssue({ code: "custom", path, message });
         const index = new Map<string, number>();
         def.steps.forEach((s, i) => {
             if (RESERVED_IDS.includes(s.id)) add(["steps", i, "id"], `“${s.id}” is a routing word; give the step another id`);
@@ -186,9 +187,9 @@ export function parseDefinition(input: unknown): ParseResult {
 
 function friendly(i: z.ZodIssue): string {
     const where = i.path[0] === "steps" && typeof i.path[1] === "number" ? `Step ${i.path[1] + 1}: ` : "";
-    if (i.code === z.ZodIssueCode.custom) return i.message;
-    if (i.code === z.ZodIssueCode.unrecognized_keys) return `${where}${i.keys.map((k) => `“${k}”`).join(", ")} ${i.keys.length === 1 ? "is" : "are"} not a setting of this step`;
-    if (i.code === z.ZodIssueCode.invalid_union_discriminator) return `${where}the step type must be one of ${STEP_TYPES.join(", ")}`;
+    if (i.code === "custom") return i.message;
+    if (i.code === "unrecognized_keys") return `${where}${i.keys.map((k) => `“${k}”`).join(", ")} ${i.keys.length === 1 ? "is" : "are"} not a setting of this step`;
+    if (isUnknownKind(i)) return `${where}the step type must be one of ${STEP_TYPES.join(", ")}`;
     if (i.path.length === 1 && i.path[0] === "version") return `The runbook version must be ${RUNBOOK_VERSION}`;
     const field = i.path.slice(2).join(".");
     return `${where}${field ? `${field}: ` : ""}${i.message}`;

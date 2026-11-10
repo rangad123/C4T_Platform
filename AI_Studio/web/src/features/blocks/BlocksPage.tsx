@@ -1,11 +1,12 @@
 import { Blocks, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type ProjectDetail } from "../../api";
+import { useHere } from "../auth/project-access";
 import { usePage } from "../../components/Shell";
-import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, PageHeader } from "../../components/ui";
+import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, PageHeader, Skeleton } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, stepSentence } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { blockError, KIND_TEXT, paramsText, usedByText, type Block, type BlockList } from "./blocks";
 import { BlockEditor } from "./BlockEditor";
@@ -17,6 +18,10 @@ type Notice = { tone: "success" | "info" | "warning"; title: string; text: strin
 export function BlocksPage({ id, edit }: { id: string; edit?: string }) {
     const project = useFetch<ProjectDetail>(`/projects/${id}`);
     const list = useFetch<BlockList>(`/projects/${id}/blocks`);
+    // Adding and changing reusable steps needs tests.write in this project, deleting them tests.delete.
+    const here = useHere(id, project);
+    const noWrite = here.why("ai_studio.tests.write");
+    const mayDelete = here.may("ai_studio.tests.delete");
     // `undefined` = the list; `{}` = new reusable steps; `{ block }` = change one.
     const [editing, setEditing] = useState<{ block?: Block } | undefined>(undefined);
     const [notice, setNotice] = useState<Notice | null>(null);
@@ -55,7 +60,17 @@ export function BlocksPage({ id, edit }: { id: string; edit?: string }) {
         }
     }
 
-    if (editing && list.data) {
+    // Someone who may only read opens a set of reusable steps to see what is in it (View): its steps and values, nothing to change.
+    if (editing?.block && noWrite) {
+        return (
+            <>
+                <PageHeader title={editing.block.name} subtitle="Reusable steps: what they do, step by step." />
+                <BlockView projectId={id} block={editing.block} why={noWrite} onClose={() => setEditing(undefined)} />
+            </>
+        );
+    }
+
+    if (editing && list.data && !noWrite) {
         return (
             <>
                 <PageHeader title={editing.block ? "Change reusable steps" : "Add reusable steps"} subtitle="Steps that many tests can use. Change them once and every test follows." />
@@ -82,7 +97,7 @@ export function BlocksPage({ id, edit }: { id: string; edit?: string }) {
                 subtitle="Save steps once, such as signing in, and use them in many tests."
                 actions={
                     <>
-                        <Button icon={Plus} variant="primary" onClick={() => setEditing({})} disabled={!list.data}>
+                        <Button icon={Plus} variant="primary" onClick={() => setEditing({})} disabled={!list.data || Boolean(noWrite)} tip={noWrite}>
                             Add reusable steps
                         </Button>
                         <LinkButton href={routes.tests(id)}>Back to the tests</LinkButton>
@@ -118,7 +133,7 @@ export function BlocksPage({ id, edit }: { id: string; edit?: string }) {
                             title="No reusable steps yet"
                             seeHow={{ topic: "reusable-steps" }}
                             actions={
-                                <Button variant="primary" icon={Plus} onClick={() => setEditing({})}>
+                                <Button variant="primary" icon={Plus} disabled={Boolean(noWrite)} tip={noWrite} onClick={() => setEditing({})}>
                                     Add reusable steps
                                 </Button>
                             }
@@ -170,12 +185,14 @@ export function BlocksPage({ id, edit }: { id: string; edit?: string }) {
                                             </>
                                         ) : (
                                             <>
-                                                <Button size="sm" onClick={() => (setNotice(null), setProblem(null), setEditing({ block: b }))} aria-label={`Edit ${b.name}`}>
-                                                    Edit
+                                                <Button size="sm" onClick={() => (setNotice(null), setProblem(null), setEditing({ block: b }))} aria-label={`${noWrite ? "View" : "Edit"} ${b.name}`}>
+                                                    {noWrite ? "View" : "Edit"}
                                                 </Button>
-                                                <Button size="sm" variant="ghost" onClick={() => setConfirming(b.id)} aria-label={`Delete ${b.name}`}>
-                                                    Delete
-                                                </Button>
+                                                {mayDelete && (
+                                                    <Button size="sm" variant="ghost" onClick={() => setConfirming(b.id)} aria-label={`Delete ${b.name}`}>
+                                                        Delete
+                                                    </Button>
+                                                )}
                                             </>
                                         )}
                                     </div>
@@ -186,5 +203,33 @@ export function BlocksPage({ id, edit }: { id: string; edit?: string }) {
                 )}
             </div>
         </>
+    );
+}
+
+/** One set of reusable steps to read (GET /blocks/:name needs only access): its values and steps in plain words. */
+function BlockView({ projectId, block, why, onClose }: { projectId: string; block: Block; why: string; onClose: () => void }) {
+    const full = useFetch<Block>(`/projects/${projectId}/blocks/${encodeURIComponent(block.name)}`);
+    return (
+        <div className="stack" data-testid="block-view">
+            <Callout tone="info">{why}</Callout>
+            {full.loading ? (
+                <Skeleton h={120} />
+            ) : full.error || !full.data ? (
+                <ErrorState error={friendlyError(full.error?.message ?? "These reusable steps were not found")} onRetry={full.reload} />
+            ) : (
+                <section className="card card-pad stack-sm" aria-label={`Steps of ${full.data.name}`}>
+                    {full.data.description && <p className="t-secondary">{full.data.description}</p>}
+                    <p className="t-meta">{full.data.params.length === 0 ? "No values." : `Values: ${paramsText(full.data.params)}.`}</p>
+                    <ol className="stack-sm" style={{ margin: 0 }}>
+                        {(full.data.steps ?? []).map((st, i) => (
+                            <li key={i}>{stepSentence(st)}</li>
+                        ))}
+                    </ol>
+                </section>
+            )}
+            <div>
+                <Button onClick={onClose}>Back to the reusable steps</Button>
+            </div>
+        </div>
     );
 }

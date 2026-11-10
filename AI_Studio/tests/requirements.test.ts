@@ -143,7 +143,7 @@ describe("requirement-aware planning", () => {
             modelName: "mock",
             model: mock,
             usage: { inputTokens: 0, outputTokens: 0 },
-            object: async ({ system, prompt: p, schema }) => (await generateText({ model: mock, system, prompt: p, output: Output.object({ schema }) })).output,
+            object: async ({ system, prompt: p, schema }) => (await generateText({ model: mock, system, prompt: p, output: Output.object({ schema }) })).output as never,
             text: async () => "",
         };
 

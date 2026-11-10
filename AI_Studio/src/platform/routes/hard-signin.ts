@@ -38,7 +38,7 @@ const StartBody = z.object({
 });
 const UploadBody = z.object({
     /** A Playwright storage state (the file `--save-storage` writes), as an object or as its JSON text. */
-    storageState: z.union([z.string().max(1_000_000), z.record(z.unknown())]),
+    storageState: z.union([z.string().max(1_000_000), z.record(z.string(), z.unknown())]),
     /** The signed-in page the "Still signed in?" check opens (default: the application's address). */
     checkUrl: z.string().min(1).max(2000).optional(),
 });

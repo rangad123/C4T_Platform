@@ -330,7 +330,7 @@ export function Disclosure({ label, children, defaultOpen }: { label: string; ch
 }
 
 /** A small dropdown for secondary actions. */
-export function Menu({ label, icon: Icon, children, iconOnly, variant, wide, dataTour, tip }: { label: string; icon?: LucideIcon; children: (close: () => void) => ReactNode; iconOnly?: boolean; variant?: Variant; wide?: boolean; /** The guided tour points at this menu by this name. */ dataTour?: string; /** What is in the menu, shown on the button while the menu is closed (an icon-only menu shows its label anyway). */ tip?: ReactNode }) {
+export function Menu({ label, icon: Icon, children, iconOnly, variant, wide, dataTour, tip, disabled }: { label: string; icon?: LucideIcon; children: (close: () => void) => ReactNode; iconOnly?: boolean; variant?: Variant; wide?: boolean; /** The guided tour points at this menu by this name. */ dataTour?: string; /** What is in the menu, shown on the button while the menu is closed (an icon-only menu shows its label anyway). */ tip?: ReactNode; /** Switched off: the button does not open, and `tip` says why. */ disabled?: boolean }) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     // The menu hangs from its button's right edge; on a narrow screen that can push its left edge off the screen, so slide it back.
@@ -359,10 +359,10 @@ export function Menu({ label, icon: Icon, children, iconOnly, variant, wide, dat
     }, [open]);
     return (
         <div className="menu" ref={ref} data-tour={dataTour}>
-            <Button variant={variant} icon={Icon} iconOnly={iconOnly} aria-haspopup="menu" aria-expanded={open} aria-label={iconOnly ? label : undefined} tip={tip} onClick={() => setOpen((o) => !o)}>
+            <Button variant={variant} icon={Icon} iconOnly={iconOnly} aria-haspopup="menu" aria-expanded={open} aria-label={iconOnly ? label : undefined} tip={tip} disabled={disabled} onClick={() => setOpen((o) => !o)}>
                 {iconOnly ? null : label}
             </Button>
-            {open && (
+            {open && !disabled && (
                 <div className={`menu-pop${wide ? " menu-wide" : ""}`} role="menu">
                     {children(() => {
                         setOpen(false);

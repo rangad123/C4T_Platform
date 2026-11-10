@@ -206,7 +206,8 @@ describe("the routes", () => {
     it("build the bundle", async () => {
         const manifest = await buildRunner({ outDir: bundleDir });
         process.env.RUNNER_KIT_DIR = bundleDir;
-        expect(manifest.files).toHaveLength(5);
+        // The three programs, package.json and LICENSES.txt, plus the kit's package-lock.json when this checkout has one.
+        expect(manifest.files).toHaveLength(fs.existsSync(path.join(REPO, "package-lock.json")) ? 6 : 5);
         projectId = await newProject("Kit Shop");
     }, 120_000);
 

@@ -7,7 +7,7 @@ import { assertAllowedTarget } from "../net-guard.js";
 import type { RouteCtx } from "./types.js";
 
 /** One side of a comparison: the document itself (text or already-parsed object) or an address to download it from. */
-const SideSchema = z.union([z.string().min(2).max(3_000_000), z.record(z.unknown())]);
+const SideSchema = z.union([z.string().min(2).max(3_000_000), z.record(z.string(), z.unknown())]);
 
 async function resolve(side: z.infer<typeof SideSchema>, which: string): Promise<Record<string, any>> {
     if (typeof side !== "string") return side;

@@ -283,6 +283,10 @@ describe("releases", () => {
 
     it("validates the name and the notes", async () => {
         for (const body of [{}, { name: "" }, { name: "n".repeat(81) }, { name: "ok", notes: "n".repeat(1001) }]) expect((await call("POST", releases(ready), body)).status).toBe(400);
+        // A missing name says it is required, not that it must be text.
+        const unnamed = await call("POST", releases(ready), {});
+        expect(JSON.stringify(unnamed.body)).toContain("The release name is required");
+        expect(JSON.stringify(unnamed.body)).not.toContain("must be text");
         expect((await call("POST", releases(ready), { name: "n".repeat(80) })).status).toBe(201);
     });
 

@@ -28,7 +28,7 @@ export const clean = (s: string): string => s.replace(/\r\n?/g, "\n").replace(CO
 
 const text = (max: number, what: string) =>
     z
-        .string({ required_error: `${what} is required`, invalid_type_error: `${what} must be text` })
+        .string({ error: (iss) => (iss.input === undefined ? `${what} is required` : `${what} must be text`) })
         .transform(clean)
         .pipe(z.string().min(1, `${what} is required`).max(max, `${what} can be at most ${max} characters`));
 const optionalText = (max: number, what: string) =>
@@ -53,7 +53,7 @@ export const ManualCaseInputSchema = z.object({
     linkedTestIds: z.array(z.string().min(1).max(100)).max(MAX_LINKED, `A case can be linked to at most ${MAX_LINKED} tests`).default([]),
     requirement: optionalText(MAX_REQUIREMENT, "The requirement").default(""),
     /** Absent: a new case is Manual, a changed case keeps its type. */
-    automation: z.enum(CASE_AUTOMATION, { errorMap: () => ({ message: "The type is automated or manual" }) }).optional(),
+    automation: z.enum(CASE_AUTOMATION, { error: () => "The type is automated or manual" }).optional(),
     /** The requirement record the case comes from (Requirements place). Absent keeps it on a change; null clears it. */
     requirementId: z.string().min(1).max(64).nullable().optional(),
 });

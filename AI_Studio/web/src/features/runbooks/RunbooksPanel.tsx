@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton, Menu, MenuItem } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere, type Here } from "../auth/project-access";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { BadgeKey } from "../../components/Tooltip";
 import { RunbookEditor } from "./RunbookEditor";
@@ -41,6 +42,9 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
     }, [focusRunId, projectId]);
 
     const data = list.data;
+    // Making and changing run sequences needs tests.write in this project, deleting one tests.delete, running one tests.run.
+    const here = useHere(projectId);
+    const noWrite = here.why("ai_studio.tests.write");
     const channels = useFetch<Array<{ id: string; name: string }>>(channelFor ? `/projects/${projectId}/alert-channels` : null);
 
     async function fromTemplate(t: Template, channelId?: string) {
@@ -69,12 +73,12 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
                 <span className="spacer" />
                 {data && data.runbooks.length > 0 && !editing && (
                     <>
-                        <Menu label="From a template" icon={Plus}>
+                        <Menu label="From a template" icon={Plus} disabled={Boolean(noWrite)} tip={noWrite}>
                             {(close) => data.templates.map((t) => (
                                 <MenuItem key={t.id} hint={t.summary} onClick={() => { close(); pickTemplate(t); }}>{t.name}</MenuItem>
                             ))}
                         </Menu>
-                        <Button size="sm" icon={Plus} onClick={() => setEditing({ kind: "new", draft: emptyDraft() })}>New run sequence</Button>
+                        <Button size="sm" icon={Plus} disabled={Boolean(noWrite)} tip={noWrite} onClick={() => setEditing({ kind: "new", draft: emptyDraft() })}>New run sequence</Button>
                     </>
                 )}
             </div>
@@ -85,7 +89,7 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
                 </div>
             )}
 
-            {channelFor && data && (
+            {channelFor && data && !noWrite && (
                 <form
                     className="rb-form"
                     aria-label={`Create “${channelFor.name}”`}
@@ -126,9 +130,9 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
                             actions={
                                 <>
                                     {data.templates.map((t) => (
-                                        <Button key={t.id} onClick={() => pickTemplate(t)} tip={t.summary}>{t.name}</Button>
+                                        <Button key={t.id} disabled={Boolean(noWrite)} onClick={() => pickTemplate(t)} tip={noWrite ?? t.summary}>{t.name}</Button>
                                     ))}
-                                    <Button variant="primary" icon={Plus} onClick={() => setEditing({ kind: "new", draft: emptyDraft() })}>Write your own</Button>
+                                    <Button variant="primary" icon={Plus} disabled={Boolean(noWrite)} tip={noWrite} onClick={() => setEditing({ kind: "new", draft: emptyDraft() })}>Write your own</Button>
                                 </>
                             }
                         >
@@ -140,7 +144,7 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
                         <ul className="list divided">
                             {data.runbooks.map((r) => (
                                 <li key={r.id}>
-                                    {editing?.kind === "edit" && editing.runbook.id === r.id ? (
+                                    {editing?.kind === "edit" && editing.runbook.id === r.id && !noWrite ? (
                                         <RunbookEditor
                                             projectId={projectId}
                                             limits={data.limits}
@@ -162,6 +166,7 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
                                             onEdit={() => { setMessage(null); setEditing({ kind: "edit", runbook: r }); }}
                                             onChanged={list.reload}
                                             onLinked={onLinked}
+                                            here={here}
                                         />
                                     )}
                                 </li>
@@ -169,7 +174,7 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
                         </ul>
                     )}
 
-                    {editing?.kind === "new" && (
+                    {editing?.kind === "new" && !noWrite && (
                         <RunbookEditor
                             projectId={projectId}
                             limits={data.limits}
@@ -189,7 +194,8 @@ export function RunbooksPanel({ projectId, focusRunId, reloadKey, onLinked }: { 
     );
 }
 
-function RunbookRow({ r, projectId, open, onOpen, onEdit, onChanged, onLinked }: { r: Runbook; projectId: string; open: string | null; onOpen: (runId: string | null) => void; onEdit: () => void; onChanged: () => Promise<void>; onLinked?: () => void }) {
+function RunbookRow({ r, projectId, open, onOpen, onEdit, onChanged, onLinked, here }: { r: Runbook; projectId: string; open: string | null; onOpen: (runId: string | null) => void; onEdit: () => void; onChanged: () => Promise<void>; onLinked?: () => void; here: Here }) {
+    const noRun = here.why("ai_studio.tests.run");
     const [busy, setBusy] = useState<"run" | "delete" | null>(null);
     const [error, setError] = useState("");
     const [confirm, setConfirm] = useState(false);
@@ -255,16 +261,18 @@ function RunbookRow({ r, projectId, open, onOpen, onEdit, onChanged, onLinked }:
             {open && <RunView key={open} projectId={projectId} runId={open} onChanged={() => void onChanged()} onClose={() => onOpen(null)} />}
 
             <div className="acts">
-                <Button size="sm" variant="primary" icon={Play} loading={busy === "run"} disabled={r.running} onClick={startRun} aria-label={`Run now: ${r.name}`} tip={r.running ? "This run sequence is running now. Wait for it to finish, or cancel it." : "Starts the steps in order now. A project runs one sequence at a time."}>
+                <Button size="sm" variant="primary" icon={Play} loading={busy === "run"} disabled={r.running || Boolean(noRun)} onClick={startRun} aria-label={`Run now: ${r.name}`} tip={noRun ?? (r.running ? "This run sequence is running now. Wait for it to finish, or cancel it." : "Starts the steps in order now. A project runs one sequence at a time.")}>
                     Run now
                 </Button>
-                <Button size="sm" icon={Pencil} onClick={onEdit} aria-label={`Edit: ${r.name}`}>
-                    Edit
-                </Button>
+                {here.may("ai_studio.tests.write") && (
+                    <Button size="sm" icon={Pencil} onClick={onEdit} aria-label={`Edit: ${r.name}`}>
+                        Edit
+                    </Button>
+                )}
                 <Button size="sm" variant="ghost" icon={History} aria-expanded={history} onClick={() => setHistory((h) => !h)} aria-label={`Earlier runs: ${r.name}`}>
                     Earlier runs
                 </Button>
-                {confirm ? (
+                {!here.may("ai_studio.tests.delete") ? null : confirm ? (
                     <>
                         <span className="t-secondary">Delete this run sequence and its history?</span>
                         <Button size="sm" variant="danger" loading={busy === "delete"} onClick={remove}>Yes, delete</Button>
@@ -277,7 +285,7 @@ function RunbookRow({ r, projectId, open, onOpen, onEdit, onChanged, onLinked }:
                 )}
             </div>
             {history && <EarlierRuns projectId={projectId} runbookId={r.id} onShow={(id) => onOpen(id)} />}
-            <Starters r={r} projectId={projectId} onChanged={onChanged} onLinked={onLinked} />
+            <Starters r={r} projectId={projectId} onChanged={onChanged} onLinked={onLinked} here={here} />
         </div>
     );
 }
@@ -309,12 +317,12 @@ function EarlierRuns({ projectId, runbookId, onShow }: { projectId: string; runb
 }
 
 /** Which schedules and deploy tokens start this runbook. Each can start one runbook. */
-function Starters({ r, projectId, onChanged, onLinked }: { r: Runbook; projectId: string; onChanged: () => Promise<void>; onLinked?: () => void }) {
+function Starters({ r, projectId, onChanged, onLinked, here }: { r: Runbook; projectId: string; onChanged: () => Promise<void>; onLinked?: () => void; here: Here }) {
     const [openIt, setOpenIt] = useState(false);
     return (
         <details className="rb-starters" open={openIt} onToggle={(e) => setOpenIt((e.currentTarget as HTMLDetailsElement).open)}>
             <summary>Start automatically</summary>
-            {openIt && <StartersBody r={r} projectId={projectId} onChanged={onChanged} onLinked={onLinked} />}
+            {openIt && <StartersBody r={r} projectId={projectId} onChanged={onChanged} onLinked={onLinked} here={here} />}
         </details>
     );
 }
@@ -322,7 +330,10 @@ function Starters({ r, projectId, onChanged, onLinked }: { r: Runbook; projectId
 interface Scheduled { id: string; name: string; runbookId?: string | null; runbookName?: string | null }
 interface Token { id: string; label: string | null; hint: string; revokedAt: string | null; runbookId?: string | null; runbookName?: string | null }
 
-function StartersBody({ r, projectId, onChanged, onLinked }: { r: Runbook; projectId: string; onChanged: () => Promise<void>; onLinked?: () => void }) {
+function StartersBody({ r, projectId, onChanged, onLinked, here }: { r: Runbook; projectId: string; onChanged: () => Promise<void>; onLinked?: () => void; here: Here }) {
+    // Linking a schedule needs tests.run here, linking a deploy token ai_keys.manage (as the server asks): otherwise the box is shown to read.
+    const maySchedules = here.may("ai_studio.tests.run");
+    const mayTokens = here.may("ai_studio.ai_keys.manage");
     const schedules = useFetch<{ schedules: Scheduled[] }>(`/projects/${projectId}/schedules`);
     const tokens = useFetch<{ tokens: Token[] }>(`/projects/${projectId}/triggers`);
     const [error, setError] = useState("");
@@ -357,7 +368,7 @@ function StartersBody({ r, projectId, onChanged, onLinked }: { r: Runbook; proje
                     return (
                         <li key={s.id}>
                             <label className="check">
-                                <input type="checkbox" checked={mine} disabled={busy === `schedules${s.id}`} onChange={() => link("schedules", s.id, mine ? null : r.id)} />
+                                <input type="checkbox" checked={mine} disabled={!maySchedules || busy === `schedules${s.id}`} onChange={() => link("schedules", s.id, mine ? null : r.id)} />
                                 <span>
                                     <span className="title">Schedule: {s.name}</span>
                                     {s.runbookId && !mine && <span className="hint">Now starts “{s.runbookName}”. Choosing this replaces it.</span>}
@@ -371,7 +382,7 @@ function StartersBody({ r, projectId, onChanged, onLinked }: { r: Runbook; proje
                     return (
                         <li key={t.id}>
                             <label className="check">
-                                <input type="checkbox" checked={mine} disabled={busy === `triggers${t.id}`} onChange={() => link("triggers", t.id, mine ? null : r.id)} />
+                                <input type="checkbox" checked={mine} disabled={!mayTokens || busy === `triggers${t.id}`} onChange={() => link("triggers", t.id, mine ? null : r.id)} />
                                 <span>
                                     <span className="title">Deploy token: {t.label ?? "Unnamed"} (ends in {t.hint})</span>
                                     {t.runbookId && !mine && <span className="hint">Now starts “{t.runbookName}”. Choosing this replaces it.</span>}
@@ -381,6 +392,7 @@ function StartersBody({ r, projectId, onChanged, onLinked }: { r: Runbook; proje
                     );
                 })}
             </ul>
+            {(!maySchedules || !mayTokens) && <p className="t-meta">{!maySchedules ? here.why("ai_studio.tests.run") : here.why("ai_studio.ai_keys.manage")}</p>}
             <p className="t-meta">A schedule or token linked to a run sequence starts the run sequence instead of a plain re-run.</p>
         </div>
     );

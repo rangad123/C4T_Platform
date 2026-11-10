@@ -67,14 +67,17 @@ export function locatorProblem(kind: ElementKind, l: Locator): string | undefine
 }
 
 /** An element as a person or a file gives it. `locator` is the same shape a spec step uses. */
+/** A concrete locator with no other keys (so no `ref`); `message` is what an extra key is told. */
+const strictLocator = (message: string) => z.strictObject(LocatorSchema.shape, { error: (iss) => (iss.code === "unrecognized_keys" ? message : undefined) });
+
 export const ElementInputSchema = z.object({
     name: z.string().min(1, "Give the element a name.").max(200).transform(normalizeName),
     kind: z.enum(ELEMENT_KINDS),
-    locator: LocatorSchema.strict("An element's locator is a concrete locator (by, role, value, exact, nth), not a reference."),
+    locator: strictLocator("An element's locator is a concrete locator (by, role, value, exact, nth), not a reference."),
     page: z.string().max(200).optional(),
     notes: z.string().max(2000).optional(),
     /** Other ways to find the same element (a repair without AI tries them when the locator finds nothing). Never rendered into a script. */
-    alternatives: z.array(LocatorSchema.strict("Another way to find the element is a concrete locator (by, role, value, exact, nth).")).max(MAX_ALTERNATIVES, `An element can have at most ${MAX_ALTERNATIVES} other ways to find it.`).optional(),
+    alternatives: z.array(strictLocator("Another way to find the element is a concrete locator (by, role, value, exact, nth).")).max(MAX_ALTERNATIVES, `An element can have at most ${MAX_ALTERNATIVES} other ways to find it.`).optional(),
 });
 export type ElementInput = z.infer<typeof ElementInputSchema>;
 

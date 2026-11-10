@@ -313,8 +313,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
         archived: z.string().max(20).optional(),
         q: z.string().max(200, "Search for at most 200 characters.").optional(),
         folder: z.string().max(64).optional(),
-        limit: z.coerce.number({ invalid_type_error: "limit is a number from 1 to 100." }).int().min(1, "limit is a number from 1 to 100.").max(100, "limit is a number from 1 to 100.").optional(),
-        offset: z.coerce.number({ invalid_type_error: "offset is a whole number, 0 or more." }).int().min(0, "offset is a whole number, 0 or more.").optional(),
+        limit: z.coerce.number({ error: "limit is a number from 1 to 100." }).int().min(1, "limit is a number from 1 to 100.").max(100, "limit is a number from 1 to 100.").optional(),
+        offset: z.coerce.number({ error: "offset is a whole number, 0 or more." }).int().min(0, "offset is a whole number, 0 or more.").optional(),
     });
     app.post("/api/projects", async (req, reply) => {
         const body = z

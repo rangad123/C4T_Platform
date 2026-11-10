@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../../api";
 import { Badge, Button, Callout, ErrorState, ListSkeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 
 interface Session {
@@ -55,6 +56,8 @@ export function HardSignInPanel({ projectId }: { projectId: string }) {
     const [busy, setBusy] = useState("");
     const [error, setError] = useState("");
     const [note, setNote] = useState("");
+    // Saving, checking and forgetting a sign-in are project settings (as the server asks): otherwise each account is shown to read.
+    const noSettings = useHere(projectId).why("ai_studio.project.settings");
 
     async function act(key: string, fn: () => Promise<unknown>, done?: string) {
         setBusy(key);
@@ -128,7 +131,7 @@ export function HardSignInPanel({ projectId }: { projectId: string }) {
                                     </p>
                                 )}
                                 {s?.state === "expired" && <Callout tone="warning">This sign-in no longer works. Sign in again so runs can start signed in.</Callout>}
-                                <div className="row wrap">
+                                {!noSettings && <div className="row wrap">
                                     <Button
                                         size="sm"
                                         variant={s?.state === "expired" ? "primary" : "secondary"}
@@ -153,11 +156,12 @@ export function HardSignInPanel({ projectId }: { projectId: string }) {
                                             Forget
                                         </Button>
                                     )}
-                                </div>
+                                </div>}
                             </li>
                         );
                     })}
                 </ul>
+                {noSettings && <p className="t-meta">{noSettings}</p>}
                 {!d.browser.installed && <p className="t-meta">No browser is installed where the platform runs, so signing in by hand isn’t possible here. Upload a saved sign-in file instead.</p>}
                 {d.browser.installed && !d.browser.display && <p className="t-meta">The platform’s computer has no screen, so the browser opens without a window. Upload a saved sign-in file instead (made with npx playwright codegen --save-storage).</p>}
             </section>
@@ -210,6 +214,8 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
     const saved = mailbox?.kind === "imap" ? mailbox.imap : undefined;
     const keepsPassword = Boolean(saved?.hasPassword) && saved!.host.toLowerCase() === host.trim().replace(/^\[|\]$/g, "").toLowerCase() && saved!.port === (Number(port) || 993) && (tls || !saved!.tls);
     const [msg, setMsg] = useState<{ tone: "success" | "danger" | "warning"; text: string } | null>(null);
+    // The mailbox reaches another system with its password: changing and testing it needs ai_studio.ai_keys.manage here.
+    const noManage = useHere(projectId).why("ai_studio.ai_keys.manage");
 
     async function run(fn: () => Promise<void>) {
         setBusy(true);
@@ -235,7 +241,7 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
                 For codes and sign-in links sent by email. Add the step “Use an emailed code or link”: while the test runs, we wait for the newest email to that address and type its
                 code or open its link. Use a mailbox only for testing.
             </p>
-            <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
+            <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }} disabled={Boolean(noManage)}>
                 <legend className="t-meta">Where emails arrive</legend>
                 <label className="row" style={{ minHeight: 44 }}>
                     <input type="radio" name="mailbox-kind" checked={kind === "inbound"} onChange={() => setKind("inbound")} /> Forward them to the platform (simplest)
@@ -284,9 +290,9 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
                 <Button
                     variant="primary"
                     icon={KeyRound}
-                    tip={kind === "inbound" && mailbox?.kind === "inbound" ? "Makes a new private address and shows it once. The old address stops working." : undefined}
+                    tip={noManage ?? (kind === "inbound" && mailbox?.kind === "inbound" ? "Makes a new private address and shows it once. The old address stops working." : undefined)}
                     loading={busy}
-                    disabled={busy || (kind === "imap" && (!host.trim() || !user.trim() || (!password && !keepsPassword)))}
+                    disabled={busy || Boolean(noManage) || (kind === "imap" && (!host.trim() || !user.trim() || (!password && !keepsPassword)))}
                     onClick={() =>
                         run(async () => {
                             const r = await api<{ inboundPath?: string }>(`/projects/${projectId}/mailbox`, {
@@ -301,7 +307,7 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
                 >
                     {kind === "inbound" ? (mailbox?.kind === "inbound" ? "Make a new address" : "Make a forwarding address") : "Save the mailbox"}
                 </Button>
-                {mailbox && (
+                {mailbox && !noManage && (
                     <Button
                         variant="ghost"
                         disabled={busy}
@@ -315,7 +321,7 @@ function MailboxCard({ projectId, mailbox, reload }: { projectId: string; mailbo
                         Test the mailbox
                     </Button>
                 )}
-                {mailbox && (
+                {mailbox && !noManage && (
                     <Button variant="ghost" icon={Trash2} disabled={busy} onClick={() => run(async () => { await api(`/projects/${projectId}/mailbox`, { method: "DELETE" }); setAddress(""); setMsg({ tone: "success", text: "Removed. Email steps will say there is no test mailbox." }); })}>
                         Remove
                     </Button>

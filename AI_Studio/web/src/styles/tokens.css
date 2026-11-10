@@ -97,6 +97,10 @@
     /* Code blocks keep a dark ink surface in both themes. */
     --code-bg: var(--ink-950);
     --code-text: var(--ink-100);
+    /* Syntax colours on the code surface (always dark): strings, numbers, names. */
+    --code-string: #e2c88c;
+    --code-number: #f39a89;
+    --code-title: #86c6df;
 
     /* ── Type ── */
     --font-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;

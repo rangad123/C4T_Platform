@@ -93,9 +93,14 @@ export function hasScreenshotStep(spec: TestSpec): boolean {
 const MISSING = /A snapshot doesn't exist at/i;
 const DIFFERENT = /(\d+) pixels? \(ratio [\d.]+ of all image pixels\) (?:are|is) different|Expected an image \d+px by \d+px, received \d+px by \d+px/i;
 
-/** The run failed only because baselines did not exist yet (and Playwright has just written them). */
+/**
+ * The run wrote baselines that did not exist yet (the first visual run). Older Playwright versions fail such a run with "A snapshot doesn't
+ * exist at ..."; newer ones (with --update-snapshots=missing) write the baseline and pass. Either way the baselines are new and the test
+ * still has to be checked against them.
+ */
 export function isMissingBaseline(run: ScriptRun): boolean {
-    return run.status !== "passed" && MISSING.test(run.error ?? "") && (run.newBaselines?.length ?? 0) > 0;
+    if ((run.newBaselines?.length ?? 0) === 0) return false;
+    return run.status === "passed" || MISSING.test(run.error ?? "");
 }
 
 /**

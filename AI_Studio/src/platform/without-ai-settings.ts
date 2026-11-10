@@ -61,7 +61,7 @@ export function withoutAiView(config: Config): Record<WithoutAiSaving, SwitchVie
     return { deterministicRepair: one("deterministicRepair"), explorationReuse: one("explorationReuse") };
 }
 
-const Choice = z.boolean({ invalid_type_error: "Each switch is true, false or null" }).nullable().optional();
+const Choice = z.boolean({ error: "Each switch is true, false or null" }).nullable().optional();
 const Body = z.object({ deterministicRepair: Choice, explorationReuse: Choice }).strict();
 
 export function registerWithoutAiRoutes(ctx: RouteCtx): void {

@@ -47,7 +47,7 @@ export const ManifestSchema = z
     .object({
         name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,48}$/, "name must be 1-49 letters, digits, spaces, dots, dashes or underscores, starting with a letter or digit"),
         version: z.string().min(1).max(30),
-        apiVersion: z.literal(PLUGIN_API_VERSION, { errorMap: () => ({ message: `apiVersion must be ${PLUGIN_API_VERSION}` }) }),
+        apiVersion: z.literal(PLUGIN_API_VERSION, { error: () => `apiVersion must be ${PLUGIN_API_VERSION}` }),
         description: z.string().max(300).default(""),
         adapters: z
             .array(z.object({ id: z.string().regex(ADAPTER_ID, "an adapter id is 2-31 lower-case letters, digits or dashes, starting with a letter"), label: z.string().min(1).max(80) }).strict())

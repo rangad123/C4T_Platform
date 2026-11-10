@@ -14,7 +14,7 @@ export const KEEP_LATEST_RUNS = { min: 1, max: 50, default: 5 } as const;
 export const MAX_ARTIFACT_MB = { min: 10, max: 1_000_000 } as const;
 
 const days = (b: { min: number; max: number }, what: string) =>
-    z.number({ invalid_type_error: `${what} must be a number` }).int(`${what} must be a whole number`).min(b.min, `${what} must be at least ${b.min}`).max(b.max, `${what} can be at most ${b.max}`);
+    z.number({ error: `${what} must be a number` }).int(`${what} must be a whole number`).min(b.min, `${what} must be at least ${b.min}`).max(b.max, `${what} can be at most ${b.max}`);
 
 export const RetentionPolicySchema = z
     .object({

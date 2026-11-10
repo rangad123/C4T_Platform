@@ -49,7 +49,7 @@ import type { RouteCtx } from "./types.js";
 
 const Text = (max: number, what: string) =>
     z
-        .string({ invalid_type_error: `${what} must be text` })
+        .string({ error: (iss) => (iss.input === undefined ? `${what} is required` : `${what} must be text`) })
         .transform(clean)
         .pipe(z.string().max(max, `${what} can be at most ${max} characters`));
 const Ref = Text(MAX_REF, "The reference").pipe(z.string().refine((s) => s === "" || REF_PATTERN.test(s), "A reference uses letters, digits and . _ # -, like REQ-12"));
@@ -60,8 +60,8 @@ const Fields = {
     title: Title,
     description: Text(MAX_TEXT, "The description"),
     acceptanceCriteria: Text(MAX_TEXT, "The acceptance criteria"),
-    priority: z.enum(REQUIREMENT_PRIORITIES, { errorMap: () => ({ message: "The priority is critical, high, medium or low" }) }),
-    status: z.enum(REQUIREMENT_STATUSES, { errorMap: () => ({ message: "The status is draft, active or retired" }) }),
+    priority: z.enum(REQUIREMENT_PRIORITIES, { error: () => "The priority is critical, high, medium or low" }),
+    status: z.enum(REQUIREMENT_STATUSES, { error: () => "The status is draft, active or retired" }),
 };
 const NewRequirement = z.object({ ...Fields, ref: Fields.ref.optional(), description: Fields.description.default(""), acceptanceCriteria: Fields.acceptanceCriteria.default(""), priority: Fields.priority.default("medium"), status: Fields.status.default("active") });
 const Patch = z.object(Fields).partial().refine((p) => Object.keys(p).length > 0, "Nothing to change");

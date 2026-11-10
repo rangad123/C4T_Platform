@@ -7,7 +7,8 @@ import { describeApiError, friendlyError } from "../../lib/labels";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { useProjectAiReady } from "../aiconfig/aiconfig";
-import { useCan, type Permission } from "../auth/permissions";
+import { type Permission } from "../auth/permissions";
+import { useHere } from "../auth/project-access";
 import { Modal } from "../code/Modal";
 import { AUTOMATION_HINT, AUTOMATION_WORDS, type CaseList, type ManualCase } from "../manual/manual";
 import type { RequirementList } from "../requirements/requirements";
@@ -183,9 +184,9 @@ function Outcome({ state, form, projectId, onClose, inList }: { state: Extract<S
  * they run once approved.
  */
 export function GenerateScriptsCard({ projectId, caseIds, onDone }: { projectId: string; /** The cases chosen in the list; none = all. */ caseIds?: string[]; /** After scripts were made (the list shows its new links). */ onDone?: () => void }) {
-    const can = useCan();
     const aiReady = useProjectAiReady(projectId);
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
+    const can = useHere(projectId, project).may;
     const form = scriptFormOf(project.data);
     const block = generateScriptsBlock(project.data, aiReady);
     const { state, setState, error, check, write } = useGenerateScripts(projectId, onDone);

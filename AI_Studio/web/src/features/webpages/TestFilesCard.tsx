@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { Button, Callout, FilePicker, Skeleton } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
+import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
 import { formatSize, uploadTestFile, type TestFilesAnswer } from "./webpages";
 import "./webpages.css";
@@ -15,6 +16,10 @@ export function TestFilesCard({ projectId }: { projectId: string }) {
     const [busy, setBusy] = useState("");
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
+    // Adding a file needs tests.write in this project, removing one tests.delete.
+    const here = useHere(projectId);
+    const noWrite = here.why("ai_studio.tests.write");
+    const mayDelete = here.may("ai_studio.tests.delete");
 
     async function add() {
         if (!file) return;
@@ -93,9 +98,9 @@ export function TestFilesCard({ projectId }: { projectId: string }) {
                                     {formatSize(f.size)}, {f.usedBy.length ? `used by ${f.usedBy.join(", ")}` : "not used by a test yet"}
                                 </span>
                             </span>
-                            <Button size="sm" variant="ghost" icon={Trash2} loading={busy === `rm:${f.name}`} disabled={busy !== "" || f.usedBy.length > 0} onClick={() => void remove(f.name)} aria-label={`Remove ${f.name}`} tip={f.usedBy.length ? "Used by a test: change its steps first." : undefined}>
+                            {mayDelete && <Button size="sm" variant="ghost" icon={Trash2} loading={busy === `rm:${f.name}`} disabled={busy !== "" || f.usedBy.length > 0} onClick={() => void remove(f.name)} aria-label={`Remove ${f.name}`} tip={f.usedBy.length ? "Used by a test: change its steps first." : undefined}>
                                 Remove
-                            </Button>
+                            </Button>}
                         </li>
                     ))}
                 </ul>
@@ -105,7 +110,7 @@ export function TestFilesCard({ projectId }: { projectId: string }) {
                     {d.missing.map((m) => `${m.name} (${m.usedBy.join(", ")})`).join("; ")}. Add files with these names, or those steps fail.
                 </Callout>
             )}
-            <div className="field">
+            {noWrite ? <p className="t-meta">{noWrite}</p> : <div className="field">
                 <label htmlFor="wp-file">Add a file</label>
                 <div className="row wrap">
                     <FilePicker id="wp-file" accept={d.limits.types.map((t) => `.${t}`).join(",")} file={file} onChange={setFile} label="Choose a file" />
@@ -114,7 +119,7 @@ export function TestFilesCard({ projectId }: { projectId: string }) {
                     </Button>
                 </div>
                 <p className="hint">Spaces in the name become dashes. A file with the same name is replaced. Never use real personal data.</p>
-            </div>
+            </div>}
             {error && <Callout tone="danger">{error}</Callout>}
             {notice && (
                 <Callout tone="success">

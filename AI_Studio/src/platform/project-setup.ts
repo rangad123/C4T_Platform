@@ -62,7 +62,7 @@ export function codeEnginesFor(platforms: readonly ProjectPlatform[]): CodeEngin
 }
 
 export const PlatformsSchema = z
-    .array(z.string(), { invalid_type_error: "Platforms are a list, such as [\"web\", \"android\"]." })
+    .array(z.string(), { error: "Platforms are a list, such as [\"web\", \"android\"]." })
     .max(PLATFORMS.length * 2)
     .superRefine((list, ctx) => {
         const unknown = list.find((x) => !(PLATFORMS as readonly string[]).includes(x));
@@ -73,7 +73,7 @@ export const PlatformsSchema = z
     .transform((list) => ordered(PLATFORMS, list as ProjectPlatform[]));
 
 export const TestingModesSchema = z
-    .array(z.string(), { invalid_type_error: "Testing modes are a list, such as [\"agent\", \"code\"]." })
+    .array(z.string(), { error: "Testing modes are a list, such as [\"agent\", \"code\"]." })
     .max(TESTING_MODES.length * 2)
     .superRefine((list, ctx) => {
         const unknown = list.find((x) => !(TESTING_MODES as readonly string[]).includes(x));

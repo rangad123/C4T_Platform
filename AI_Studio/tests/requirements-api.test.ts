@@ -126,6 +126,11 @@ describe("requirements", () => {
         expect(dup.status).toBe(409);
         expect(dup.body.error).toMatch(/req-7 is already a requirement/);
         expect((await call("POST", reqs(A), { title: "" })).status).toBe(400);
+        // A missing title says it is required, not that it must be text.
+        const untitled = await call("POST", reqs(A), { priority: "high" });
+        expect(untitled.status).toBe(400);
+        expect(JSON.stringify(untitled.body)).toContain("The title is required");
+        expect(JSON.stringify(untitled.body)).not.toContain("must be text");
         expect((await call("POST", reqs(A), { ref: "bad ref!", title: "x" })).status).toBe(400);
         expect((await call("POST", reqs(A), { title: "x", status: "done" })).status).toBe(400);
     });

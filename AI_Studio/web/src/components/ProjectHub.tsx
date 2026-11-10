@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { projectShape, type ProjectDetail } from "../api";
 import { ProjectTabs, type PlaceKey } from "../pages/ProjectOverview";
 import { EmbeddedContext } from "../lib/embedded";
-import { useDocumentTitle, useFetch, useProjectChanged } from "../lib/hooks";
+import { useDocumentTitle, useFetch, useProjectChanged, type Fetched } from "../lib/hooks";
 import { routes } from "../lib/router";
 import { usePage } from "./Shell";
 import { Callout } from "./ui";
 import { PlaceHead, ProjectHead } from "./ProjectKind";
 import { Tooltip } from "./Tooltip";
+import { ProjectAccessProvider } from "../features/auth/project-access";
 
 export interface HubSection {
     key: string;
@@ -37,7 +38,7 @@ export function ProjectHub({ id, place, title, subtitle, sections, current, href
         nav.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ inline: "center", block: "nearest" });
     }, [active.key]);
     return (
-        <>
+        <ProjectAccessProvider projectId={id} project={project.data}>
             <ProjectHead project={project.data} failed={project.error ? title : undefined} />
             <ProjectTabs id={id} active={place} count={project.data?.test_count} caseCount={project.data?.case_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
             {project.data?.archived_at && <ArchivedNote id={id} />}
@@ -57,25 +58,26 @@ export function ProjectHub({ id, place, title, subtitle, sections, current, href
                     {active.render()}
                 </div>
             </EmbeddedContext.Provider>
-        </>
+        </ProjectAccessProvider>
     );
 }
 
 /** A project place that is one page, not a hub of sections (Requirements, Test suites, Agent runs): the project's header, the tab bar, the place's title, the page. */
-export function ProjectPlace({ id, place, title, subtitle, actions, children }: { id: string; place: PlaceKey; title: string; subtitle: ReactNode; actions?: ReactNode; children: ReactNode }) {
-    const project = useFetch<ProjectDetail>(`/projects/${id}`);
+export function ProjectPlace({ id, place, title, subtitle, actions, children, project: given }: { id: string; place: PlaceKey; title: string; subtitle: ReactNode; actions?: ReactNode; children: ReactNode; /** The page's own read of the project, when it has one (then it is not read twice). */ project?: Fetched<ProjectDetail> }) {
+    const own = useFetch<ProjectDetail>(given ? null : `/projects/${id}`);
+    const project = given ?? own;
     useProjectChanged(id, project.reload);
     const name = project.data?.name;
     useDocumentTitle(name ? `${title} · ${name}` : title);
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: title }], nav: "projects" });
     return (
-        <>
+        <ProjectAccessProvider projectId={id} project={project.data}>
             <ProjectHead project={project.data} failed={project.error ? title : undefined} />
             <ProjectTabs id={id} active={place} count={project.data?.test_count} caseCount={project.data?.case_count} modes={project.data ? projectShape(project.data).testingModes : undefined} />
             {project.data?.archived_at && <ArchivedNote id={id} />}
             <PlaceHead title={title} subtitle={subtitle} actions={actions} />
             <div className="stack">{children}</div>
-        </>
+        </ProjectAccessProvider>
     );
 }
 

@@ -8,7 +8,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         include: [
+            "tests/project-permissions-unit.test.ts",
             "tests/net-guard-ranges-unit.test.ts",
+            "tests/visual-baseline-unit.test.ts",
             "tests/alert-email-merge-unit.test.ts",
             "tests/web-audit-words-unit.test.ts",
             "tests/deploy-tested-commit-unit.test.ts",
