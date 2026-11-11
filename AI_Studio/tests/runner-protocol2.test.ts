@@ -149,7 +149,7 @@ afterAll(async () => {
 describe("protocol 2 with the real agent", () => {
     it("live steps and the failure screenshot arrive before the result, and a reconnect with Last-Event-ID replays them", async () => {
         const p = await project("Live events");
-        const { secret } = personalRunner(platform, { label: "live", replace: true });
+        const { secret } = personalRunner(platform, { label: "Live laptop", replace: true });
         const a = realAgent(secret, "Live laptop");
         try {
             await until("the agent to say hello", () => Boolean(svc().store.runnerOf(OPEN_OWNER_ID)?.online));
@@ -230,7 +230,7 @@ describe("protocol 2 with the real agent", () => {
 
     it("an agent whose newer protocol is refused says hello again with protocol 1, and still completes a run (as protocol 1)", async () => {
         const p = await project("Protocol one");
-        const { secret } = personalRunner(platform, { label: "old", replace: true });
+        const { secret } = personalRunner(platform, { label: "Old platform", replace: true });
         let refusedOnce = false;
         const fetchImpl: typeof fetch = async (input, init) => {
             // A platform that speaks only protocol 1 and refuses anything else (today's platform answers a mismatch with 409).

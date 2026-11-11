@@ -131,7 +131,7 @@ afterAll(async () => {
 describe("a failure trace from a runner", () => {
     it("from the real agent program: the stored trace holds the fill and the sign-in, with the password and token hidden in every part", async () => {
         const projectId = (await admin("POST", "/api/projects", { name: "Trace secrets" })).body.id as string;
-        const made = { status: 201, body: { secret: personalRunner(platform, { label: "trace", replace: true }).secret } };
+        const made = { status: 201, body: { secret: personalRunner(platform, { label: "trace agent", replace: true }).secret } };
         expect(made.status).toBe(201);
         const { log, lines } = memoryLogger();
         agent = new Agent({ config: { baseUrl: BASE, token: made.body.secret, name: "trace agent", concurrency: 1, workDir: agentWork, allowInsecure: false, cacheBytes: 64 * 1024 * 1024, tokenSource: "env" }, log, heartbeatMs: 500, backoff: { baseMs: 100, maxMs: 500 } });
