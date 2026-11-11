@@ -3,11 +3,12 @@ import { useState, type ReactNode } from "react";
 import { ApiError, api } from "../../api";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton, PageHeader } from "../../components/ui";
+import { plural } from "../../lib/format";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
 import { go, routes, useRoute } from "../../lib/router";
 import { COMMON_ROLES, STRATEGIES, type Strategy } from "../objects/objects";
-import { folderPath, folderTree, KIND_LABEL, orgParam, plural, type ItemDetail, type ItemKind, type LibraryAnswer, type LibraryFolder } from "./libraries";
+import { folderPath, folderTree, KIND_LABEL, orgParam, type ItemDetail, type ItemKind, type LibraryAnswer, type LibraryFolder } from "./libraries";
 import "./libraries.css";
 
 type Note = { tone: "success" | "danger"; text: string } | null;

@@ -21,6 +21,10 @@ import type { JobOptions } from "../src/platform/repo.js";
 import { ScheduleStore } from "../src/platform/schedule-store.js";
 import { SecretBox } from "../src/platform/secrets.js";
 import { TriggerStore } from "../src/platform/trigger-store.js";
+import { getRunbookServices } from "../src/platform/runbook-runner.js";
+import { getScheduleServices } from "../src/platform/schedule-services.js";
+import { TestSpecSchema } from "../src/engine/spec/schema.js";
+import { RunbookDefinition } from "../src/engine/runbook/schema.js";
 import { defaultCaps } from "./fixtures/fake-agent.js";
 
 let platform: Platform;
@@ -182,5 +186,53 @@ describe("who a run belongs to", () => {
         platform.db.run("INSERT INTO activity (at, actor_kind, actor_id, actor_name, action, path, project_id, status) VALUES (?,?,?,?,?,?,?,?)", record.createdAt, "open", null, "Open access", "POST /api/projects/:id/triggers", `/api/projects/${other}/triggers`, other, 201);
         expect(triggers.backfillOwners()).toBe(1);
         expect(triggers.get(record.id)!.createdBy).toBe(OPEN_OWNER_ID);
+    });
+
+    it("a runbook linked to a schedule runs as the run's owner: the Run now clicker's runner, with their code tests (round 47)", async () => {
+        const at = new Date().toISOString();
+        for (const [id, name] of [["u-maker", "Maker"], ["u-clicker", "Clicker"]]) {
+            platform.db.run("INSERT INTO users (id, email, name, created_at, role, status) VALUES (?,?,?,?,?,?)", id, `${id}@people.example`, name, at, "owner", "active");
+            const { record } = svc().store.createPersonalToken({ ownerId: id, label: name, createdBy: "test" });
+            svc().store.upsertAgent(record, { name: `${id}-pc`, version: "1", capabilities: defaultCaps({ runnerSwitches: true }), concurrency: 1 });
+        }
+        const pid = platform.repo.createProject({ name: "Runbook owner" }).id as string;
+        platform.repo.createApplication(pid, "https://app.example", {});
+        svc().store.setRunner(pid, { runOn: "agent", agentId: null });
+        const spec = TestSpecSchema.parse({ testId: "API-001", title: "Health", kind: "api", category: "API", priority: "high", steps: [{ action: "request", method: "GET", path: "/health" }, { action: "assertResponse", check: "status", expected: 200 }] });
+        const testId = platform.repo.insertTest({ projectId: pid, suiteId: platform.repo.getOrCreateSuite(pid, "API", "api"), jobId: null, spec, framework: "playwright-api", validationStatus: "VALIDATED" });
+        platform.db.run("INSERT INTO custom_tests (test_case_id, project_id, origin, since) VALUES (?,?,?,?)", testId, pid, "written", at);
+        const runbooks = getRunbookServices(platform);
+        const rb = runbooks.store.create(pid, RunbookDefinition.parse({ version: 1, name: "Nightly", steps: [{ id: "tests", type: "run", title: "Run every test", scope: "all", retries: 0 }] }));
+        const schedules = getScheduleServices(platform);
+        const s = schedules.store.create({ projectId: pid, name: "Nightly", kind: "validate", cadence: { type: "daily", time: "03:00" }, createdBy: "u-maker" });
+        runbooks.store.setScheduleLink(s.id, rb.id);
+        writeHeartbeat(platform.db);
+        const jobOf = async (runId: string) => {
+            for (let i = 0; i < 200; i++) {
+                const step = runbooks.store.runSteps(runId).find((x) => x.jobId);
+                if (step) return platform.repo.getJob(step.jobId!)!;
+                const run = runbooks.store.getRun(runId)!;
+                if (run.status !== "running") throw new Error(`The run ended: ${run.reason}`);
+                await new Promise((r) => setTimeout(r, 20));
+            }
+            throw new Error("no job");
+        };
+        const finish = async (runId: string, jobId: string) => {
+            runbooks.cancel(runId);
+            platform.db.run("UPDATE generation_jobs SET status = 'FAILED', error = 'Cancelled' WHERE id = ?", jobId);
+            await runbooks.flush();
+        };
+        try {
+            for (const [clicker, owner] of [["u-clicker", "u-clicker"], [undefined, "u-maker"]] as const) {
+                const started = await schedules.runNow(s.id, clicker);
+                if (!("runbookRunId" in started)) throw new Error("not a runbook start");
+                const job = await jobOf(started.runbookRunId);
+                expect(job.options.startedBy).toMatchObject({ kind: "schedule", id: s.id, ownerId: owner });
+                expect(job.options.testIds).toEqual([testId]);
+                await finish(started.runbookRunId, job.id);
+            }
+        } finally {
+            platform.db.run("DELETE FROM users WHERE id IN ('u-maker', 'u-clicker')");
+        }
     });
 });

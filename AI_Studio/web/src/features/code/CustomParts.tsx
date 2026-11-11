@@ -4,8 +4,11 @@ import { useState } from "react";
 import { Badge, Button, Callout, LinkButton } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { routes } from "../../lib/router";
-import { ORIGIN_LABEL, capi, errorText, shortCommit, type CustomInfo } from "./code";
-import { Modal } from "./Modal";
+import { ORIGIN_LABEL, shortCommit, type CustomInfo } from "./code";
+import { Modal } from "../../components/Modal";
+import { api } from "../../api";
+import { describeApiError } from "../../lib/labels";
+
 
 /** The origin of a code test in words, as a small badge. */
 export function OriginBadge({ custom }: { custom: CustomInfo }) {
@@ -27,11 +30,11 @@ export function CustomCallout({ testId, projectId, custom, onChanged }: { testId
         setBusy(true);
         setError("");
         try {
-            await capi(`/tests/${testId}/restore-generated`, { method: "POST", body: { confirm: true } });
+            await api(`/tests/${testId}/restore-generated`, { method: "POST", body: { confirm: true } });
             setConfirm(false);
             onChanged();
         } catch (e) {
-            setError(errorText(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -43,12 +46,12 @@ export function CustomCallout({ testId, projectId, custom, onChanged }: { testId
         setChecking(true);
         setCheck(null);
         try {
-            const repos = await capi<RepoRow[]>(`/projects/${projectId}/git-imports`);
+            const repos = await api<RepoRow[]>(`/projects/${projectId}/git-imports`);
             const repo = repos.find((r) => r.host === g.host && r.path === g.path && r.ref === g.ref) ?? repos.find((r) => r.host === g.host && r.path === g.path);
             if (!repo) throw new Error("This repository is no longer linked. Import it again from Tests, More actions, Import from Git.");
-            setCheck({ ok: true, res: await capi<CheckResult>(`/projects/${projectId}/git-imports/${repo.id}/check`, { method: "POST" }) });
+            setCheck({ ok: true, res: await api<CheckResult>(`/projects/${projectId}/git-imports/${repo.id}/check`, { method: "POST" }) });
         } catch (e) {
-            setCheck({ ok: false, text: errorText(e) });
+            setCheck({ ok: false, text: describeApiError(e) });
         } finally {
             setChecking(false);
         }

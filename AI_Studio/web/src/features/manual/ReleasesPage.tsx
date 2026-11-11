@@ -5,10 +5,10 @@ import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, PageHeader } from "../../components/ui";
 import { plural, relativeTime } from "../../lib/format";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
-import { apiMessage, DECISION_BADGE, type ReleaseSummary, type ReleaseView } from "./manual";
+import { DECISION_BADGE, type ReleaseSummary, type ReleaseView } from "./manual";
 import { BadgeKey } from "../../components/Tooltip";
 import "./manual.css";
 
@@ -123,7 +123,7 @@ function NewRelease({ projectId, onCancel }: { projectId: string; onCancel: () =
             const made = await api<ReleaseView>(`/projects/${projectId}/releases`, { method: "POST", body: { name: name.trim(), notes: notes.trim() } });
             go(routes.release(projectId, made.id));
         } catch (err) {
-            setError(apiMessage(err));
+            setError(describeApiError(err));
             setBusy(false);
         }
     }

@@ -5,7 +5,7 @@ import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, ErrorState, ListSkeleton, PageHeader } from "../../components/ui";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
-import { relativeTime } from "../../lib/format";
+import { plural, relativeTime } from "../../lib/format";
 import { routes, type SettingsSection } from "../../lib/router";
 import "./integrations.css";
 
@@ -173,7 +173,6 @@ const STATUS: Record<Connection["status"], { tone: "success" | "danger" | "neutr
 };
 
 const projectLink = (e: Entry, id: string) => (e.where.scripts ? routes.scripts(id) : routes.projectSettings(id, e.where.section));
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const errorText = (e: unknown) => (e instanceof ApiError ? e.message : describeApiError(e));
 
 /** Integrations: every system AI Studio connects to, set up once for an organisation where that makes sense, and which projects use it. */

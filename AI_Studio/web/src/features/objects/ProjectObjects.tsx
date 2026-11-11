@@ -1,6 +1,6 @@
 import { Download, Plus, Puzzle, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import { api, ApiError, getKey, type ProjectDetail } from "../../api";
+import { api, downloadFrom, type ProjectDetail } from "../../api";
 import { useHere } from "../auth/project-access";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton, PageHeader } from "../../components/ui";
@@ -63,15 +63,7 @@ export function ProjectObjects({ id }: { id: string }) {
     async function exportFile() {
         setError("");
         try {
-            const res = await fetch(`/api/projects/${id}/objects/export`, { headers: getKey() ? { "x-api-key": getKey() } : {} });
-            // The server's own words for a refusal (a missing permission, a project that is gone), not a general sentence.
-            if (!res.ok) throw new ApiError(res.status, ((await res.json().catch(() => null)) as { error?: string } | null)?.error || "The export could not be created");
-            const url = URL.createObjectURL(new Blob([await res.text()], { type: "application/json" }));
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "object-repository.json";
-            a.click();
-            URL.revokeObjectURL(url);
+            await downloadFrom(`/projects/${id}/objects/export`, "object-repository.json");
         } catch (err) {
             setError(describeApiError(err));
         }

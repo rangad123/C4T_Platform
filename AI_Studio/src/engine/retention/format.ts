@@ -54,14 +54,3 @@ export function previewSentence(plan: Pick<PrunePlan, "files" | "bytes" | "byRea
     const head = plan.byReason.age + plan.byReason["age-failed"] === plan.files && policy.maxArtifactMB == null ? ` older than ${policy.keepDays === policy.keepFailedDays ? `${policy.keepDays} days` : `${policy.keepDays} days (${policy.keepFailedDays} for failed runs)`}` : "";
     return `This would remove ${plural(plan.files, "file")} (${formatBytes(plan.bytes)})${head || why}.`;
 }
-
-/** One line per rule that kept old files, for the preview. */
-export const KEEP_TEXT: Record<string, string> = {
-    kind: "approved baselines and other files that are never removed",
-    "no-run": "files that belong to no run",
-    "latest-runs": "files of the latest runs of each test",
-    failure: "files of tests that are failing now",
-    visual: "screenshots waiting to be accepted as the new baseline",
-    issue: "files of the run an issue was filed from",
-    release: "files of the runs a release was based on",
-};

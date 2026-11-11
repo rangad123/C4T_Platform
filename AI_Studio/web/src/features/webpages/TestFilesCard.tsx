@@ -2,11 +2,11 @@ import { FileUp, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../api";
 import { Button, Callout, FilePicker, Skeleton } from "../../components/ui";
-import { plural } from "../../lib/format";
+import { formatBytes, plural } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
-import { formatSize, uploadTestFile, type TestFilesAnswer } from "./webpages";
+import { uploadTestFile, type TestFilesAnswer } from "./webpages";
 import "./webpages.css";
 
 /** Settings, Test data: the small files that "Upload a test file" steps put into file fields. Add, see which tests use each, remove. */
@@ -82,7 +82,7 @@ export function TestFilesCard({ projectId }: { projectId: string }) {
         <section className="card card-pad stack-sm" data-testid="test-files" aria-label="Test files">
             {head}
             <p className="t-secondary">
-                Files that steps such as <em>Upload "photo.png" to the "Avatar" field</em> put into a file field. Each run gets a fresh copy. At most {plural(d.limits.files, "file")} of {formatSize(d.limits.fileBytes)} each.
+                Files that steps such as <em>Upload "photo.png" to the "Avatar" field</em> put into a file field. Each run gets a fresh copy. At most {plural(d.limits.files, "file")} of {formatBytes(d.limits.fileBytes)} each.
             </p>
             {d.files.length === 0 ? (
                 <p className="t-secondary" data-testid="test-files-empty">
@@ -95,7 +95,7 @@ export function TestFilesCard({ projectId }: { projectId: string }) {
                             <span className="wp-main">
                                 <code>{f.name}</code>
                                 <span className="t-meta">
-                                    {formatSize(f.size)}, {f.usedBy.length ? `used by ${f.usedBy.join(", ")}` : "not used by a test yet"}
+                                    {formatBytes(f.size)}, {f.usedBy.length ? `used by ${f.usedBy.join(", ")}` : "not used by a test yet"}
                                 </span>
                             </span>
                             {mayDelete && <Button size="sm" variant="ghost" icon={Trash2} loading={busy === `rm:${f.name}`} disabled={busy !== "" || f.usedBy.length > 0} onClick={() => void remove(f.name)} aria-label={`Remove ${f.name}`} tip={f.usedBy.length ? "Used by a test: change its steps first." : undefined}>

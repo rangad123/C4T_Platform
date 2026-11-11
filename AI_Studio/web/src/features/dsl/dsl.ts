@@ -2,9 +2,8 @@
  * Types, wording and calls for text tests (a test written as one line per step). The grammar itself lives on the platform
  * (src/engine/dsl): this file only talks to it, so the editor never carries a second copy of the rules.
  */
-import { capi, CodeError, errorText, type Diagnostic } from "../code/code";
-
-export { errorText };
+import { api } from "../../api";
+import type { Diagnostic } from "../code/code";
 
 export interface DslDiagnostic {
     line: number;
@@ -64,18 +63,8 @@ export interface Reference {
     notes: string[];
 }
 
-/** A refusal that carries the problems found, line by line. */
-export class DslError extends Error {
-    constructor(
-        message: string,
-        readonly status: number,
-        readonly diagnostics: DslDiagnostic[] = [],
-    ) {
-        super(message);
-    }
-}
-
-const asDiagnostics = (v: unknown): DslDiagnostic[] =>
+/** The problems a refusal (422) lists, line by line. */
+export const dslDiagnostics = (v: unknown): DslDiagnostic[] =>
     Array.isArray(v)
         ? v
               .filter((d): d is Record<string, unknown> => !!d && typeof d === "object" && typeof (d as { message?: unknown }).message === "string" && typeof (d as { line?: unknown }).line === "number")
@@ -89,16 +78,7 @@ const asDiagnostics = (v: unknown): DslDiagnostic[] =>
               }))
         : [];
 
-export async function dapi<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
-    try {
-        return await capi<T>(path, init);
-    } catch (e) {
-        if (e instanceof CodeError) throw new DslError(e.message, e.status, asDiagnostics(e.body.diagnostics));
-        throw e;
-    }
-}
-
-export const parseText = (text: string) => dapi<ParseAnswer>("/dsl/parse", { method: "POST", body: { text } });
+export const parseText = (text: string) => api<ParseAnswer>("/dsl/parse", { method: "POST", body: { text } });
 
 /** The editor's marker form of a problem. The suggestion goes into the same message so it shows on the line too. */
 export const asMarker = (d: DslDiagnostic): Diagnostic => ({ severity: d.severity, line: d.line, column: d.column, message: d.suggestion ? `${d.message} ${d.suggestion}` : d.message });

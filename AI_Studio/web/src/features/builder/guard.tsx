@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../../components/ui";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 
 /**
  * Leaving with unsaved changes asks first: a link inside the app opens a dialog, closing the tab shows the browser's own warning.

@@ -87,9 +87,6 @@ const clean = (s: string | undefined, max: number): string | undefined => {
     return t === "" ? undefined : t.slice(0, max);
 };
 
-/** The placeholder `{{name}}` of a parameter, with the same spacing rules the substitution uses. */
-export const placeholderPattern = (name: string): RegExp => new RegExp(`\\{\\{\\s*${name}\\s*\\}\\}`);
-
 /** Plain-language form of the first zod problem. */
 function firstIssue(e: z.ZodError): string {
     const i = e.issues[0]!;

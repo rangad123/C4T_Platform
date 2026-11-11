@@ -1,25 +1,18 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type Job } from "../../api";
+import { Modal } from "../../components/Modal";
 import { Button, Callout } from "../../components/ui";
 import { describeApiError } from "../../lib/labels";
 import { announceRunsChanged, stopLabel, stopQuestion, type RunAnswer } from "./runs";
 import "./runs.css";
 
-/** A real modal dialog: keyboard stays inside, Escape closes it. It says what stopping does before it does it. */
+/** It says what stopping does before it does it. The safe choice (keep running) comes first and has the focus. */
 export function StopDialog({ job, onClose, onConfirmed }: { job: Pick<Job, "jobId" | "projectId" | "mode"> & { planOnly?: boolean }; onClose: () => void; onConfirmed: () => void }) {
-    const ref = useRef<HTMLDialogElement>(null);
     const [counts, setCounts] = useState<RunAnswer["counts"] | undefined>();
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-
-    useEffect(() => {
-        const d = ref.current;
-        if (d && !d.open) d.showModal();
-        // The safe choice (keep running) comes first and has the focus.
-        d?.querySelector<HTMLButtonElement>("button")?.focus();
-    }, []);
 
     // How many results are already recorded, read now: the dialog only promises what the platform shows.
     useEffect(() => {
@@ -48,23 +41,24 @@ export function StopDialog({ job, onClose, onConfirmed }: { job: Pick<Job, "jobI
     }
 
     return (
-        <dialog ref={ref} className="run-dialog" aria-labelledby="run-stop-title" onClose={onClose} onCancel={onClose}>
-            <div className="inner">
-                <h2 className="t-section" id="run-stop-title">
-                    {q.title}
-                </h2>
-                <p className="t-secondary" data-testid="stop-body" aria-busy={loading}>
-                    {loading ? "Checking what has finished…" : q.body}
-                </p>
-                {error && <Callout tone="danger">{error}</Callout>}
-                <div className="foot">
+        <Modal
+            title={q.title}
+            titleId="run-stop-title"
+            onClose={onClose}
+            foot={
+                <>
                     <Button onClick={onClose}>Keep running</Button>
                     <Button variant="danger" icon={X} loading={busy} disabled={loading} onClick={() => void stop()}>
                         {stopLabel(job.mode)}
                     </Button>
-                </div>
-            </div>
-        </dialog>
+                </>
+            }
+        >
+            <p className="t-secondary" data-testid="stop-body" aria-busy={loading}>
+                {loading ? "Checking what has finished…" : q.body}
+            </p>
+            {error && <Callout tone="danger">{error}</Callout>}
+        </Modal>
     );
 }
 

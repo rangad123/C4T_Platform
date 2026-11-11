@@ -1,8 +1,7 @@
 import { FolderArchive } from "lucide-react";
 import { useState } from "react";
-import { getKey } from "../../api";
+import { downloadFrom } from "../../api";
 import { Button } from "../../components/ui";
-import { downloadBlob } from "../../lib/format";
 import { describeApiError } from "../../lib/labels";
 
 /**
@@ -17,9 +16,7 @@ export function RunnableDownload({ testId, testKey, phone = false }: { testId: s
         setBusy(true);
         setError("");
         try {
-            const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/download`, { headers: getKey() ? { "x-api-key": getKey() } : {} });
-            if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error);
-            downloadBlob(await res.blob(), `${testKey}.zip`);
+            await downloadFrom(`/tests/${encodeURIComponent(testId)}/download`, `${testKey}.zip`);
         } catch (e) {
             setError(`The download did not work: ${describeApiError(e)}. Try again.`);
         } finally {

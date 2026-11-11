@@ -2,9 +2,12 @@ import { Code2, PencilLine } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, Button, Callout, LinkButton, Skeleton } from "../../components/ui";
 import { go, routes } from "../../lib/router";
-import { CodeError, capi, errorText, type CustomInfo } from "./code";
+import { type CustomInfo } from "./code";
 import { announceTestChanged } from "../workbench/changed";
-import { Modal } from "./Modal";
+import { Modal } from "../../components/Modal";
+import { api } from "../../api";
+import { describeApiError } from "../../lib/labels";
+
 
 interface Offer {
     allowed: boolean;
@@ -24,9 +27,9 @@ export function TakeOverDialog({ testId, onClose }: { testId: string; onClose: (
         let gone = false;
         setOffer(null);
         setLoadError("");
-        capi<Offer>(`/tests/${testId}/take-over`)
+        api<Offer>(`/tests/${testId}/take-over`)
             .then((o) => !gone && setOffer(o))
-            .catch((e) => !gone && setLoadError(errorText(e)));
+            .catch((e) => !gone && setLoadError(describeApiError(e)));
         return () => {
             gone = true;
         };
@@ -36,13 +39,13 @@ export function TakeOverDialog({ testId, onClose }: { testId: string; onClose: (
         setBusy(true);
         setError("");
         try {
-            await capi(`/tests/${testId}/take-over`, { method: "POST", body: { confirm: true } });
+            await api(`/tests/${testId}/take-over`, { method: "POST", body: { confirm: true } });
             // The page that shows this test (the workbench) asks again: it may already be on the Code tab.
             announceTestChanged(testId);
             onClose();
             go(routes.code(testId));
         } catch (e) {
-            setError(e instanceof CodeError ? e.message : errorText(e));
+            setError(describeApiError(e));
             setBusy(false);
         }
     }

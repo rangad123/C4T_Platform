@@ -2,7 +2,9 @@ import { Save } from "lucide-react";
 import { useState } from "react";
 import { Button, Callout } from "../../components/ui";
 import { routes } from "../../lib/router";
-import { errorText, recApi } from "./recorder";
+import { api } from "../../api";
+import { describeApiError } from "../../lib/labels";
+
 
 export interface Saved {
     testId: string;
@@ -60,9 +62,9 @@ export function SaveForm({ rid, projectId, canSave, saved, onSaved, onAgain }: {
         setBusy(true);
         try {
             const body = { title: t, ...(category.trim() ? { category: category.trim() } : {}) };
-            onSaved(await recApi<Saved>(`/recordings/${rid}/save`, { method: "POST", body }));
+            onSaved(await api<Saved>(`/recordings/${rid}/save`, { method: "POST", body }));
         } catch (err) {
-            setError(errorText(err));
+            setError(describeApiError(err));
         } finally {
             setBusy(false);
         }

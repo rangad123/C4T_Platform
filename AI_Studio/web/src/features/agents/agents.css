@@ -45,9 +45,6 @@
 
 .ag-runs-on { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
 .ag-runs-on svg { color: var(--text-muted); flex: none; }
-dialog.ag-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-card); background: var(--surface-raised); color: var(--text-primary); overflow: auto; }
-.ag-dialog .inner { display: grid; gap: 16px; padding: 20px; }
-.ag-dialog .foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 
 /* Runner updates (updates.tsx) */
 .ag-update-line.is-warning { color: var(--status-warning-fg); }

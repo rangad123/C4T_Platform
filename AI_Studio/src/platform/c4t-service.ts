@@ -17,6 +17,7 @@ import type { FastifyRequest } from "fastify";
 import type { Platform } from "./bootstrap.js";
 import { HttpError } from "./http-error.js";
 import type { ProjectAccessStore } from "./project-access-store.js";
+import { C4T_SUBJECT_PREFIX } from "./user-store.js";
 
 export const C4T_SERVICE_UNREACHABLE = "Crowd4Test could not be reached. Try again in a minute.";
 export const C4T_SERVICE_OFF = "This needs the connection to Crowd4Test, which is not set up on this server.";
@@ -240,4 +241,31 @@ export function c4tServiceOf(p: Platform): C4tService | undefined {
     }
     services.set(p, svc);
     return svc ?? undefined;
+}
+
+export const OWNER_UNCONFIRMED = "Not started: Crowd4Test could not confirm that the person this run belongs to may still run tests. It is tried again at the next run.";
+export const OWNER_NOT_ACTIVE = "Not started: the person this run belongs to no longer has an active Crowd4Test account.";
+export const OWNER_MAY_NOT_RUN = "Not started: the person this run belongs to may no longer run tests on Crowd4Test.";
+
+/**
+ * Before a schedule or deploy trigger starts a run in the name of a Crowd4Test account (nobody signed in brings Crowd4Test's answer
+ * along), asks Crowd4Test whether the account is still active: its people search answers active accounts only. Whether it may run
+ * tests is what it held at its latest arrival (AgentStore.ownerMayRun reads the same). Throws a plain HttpError when the run must not
+ * start, also when Crowd4Test cannot answer; returns for anyone else (a person made here, nobody).
+ */
+export async function assertC4tOwnerMayRun(p: Platform, ownerId: string | null | undefined): Promise<void> {
+    if (!ownerId) return;
+    const u = p.db.get<{ sso_subject: string | null; email: string; c4t_runs_tests: number | null }>("SELECT sso_subject, email, c4t_runs_tests FROM users WHERE id = ? AND role IS NOT NULL", ownerId);
+    if (!u?.sso_subject?.startsWith(C4T_SUBJECT_PREFIX)) return;
+    if (u.c4t_runs_tests !== null && Number(u.c4t_runs_tests) === 0) throw new HttpError(403, OWNER_MAY_NOT_RUN);
+    const svc = c4tServiceOf(p);
+    if (!svc) throw new HttpError(503, OWNER_UNCONFIRMED);
+    const c4tId = u.sso_subject.slice(C4T_SUBJECT_PREFIX.length);
+    let found: C4tPerson[];
+    try {
+        found = await svc.searchPeople(u.email);
+    } catch {
+        throw new HttpError(503, OWNER_UNCONFIRMED);
+    }
+    if (!found.some((x) => x.id === c4tId)) throw new HttpError(403, OWNER_NOT_ACTIVE);
 }

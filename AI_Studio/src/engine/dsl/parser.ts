@@ -6,7 +6,7 @@
  */
 import { PRIORITIES, TEST_TYPES, TestSpecSchema, type TestSpec } from "../spec/schema.js";
 import { editDistance, tokenize, type Token } from "./lexer.js";
-import { HEADER_ALIASES, HEADER_KEYS, PHRASES, type HeaderKey, type PhraseDef } from "./grammar.js";
+import { HEADER_ALIASES, HEADER_KEYS, type HeaderKey, type PhraseDef } from "./grammar.js";
 import { buildStep, Furthest, matchAll, nearestPhrase, splitPopup } from "./match.js";
 
 export const DSL_LIMITS = { lines: 500, bytes: 50 * 1024, diagnostics: 50, lineLength: 25_000, title: [3, 160], category: 80, description: 2000, listItems: 20, listItemLength: 500, tag: 40, data: 30, dataValue: 500 } as const;
@@ -362,6 +362,3 @@ function explain(toks: Token[], fx: Furthest, lineNo: number, col: (o: number) =
     if (!suggestion && fx.phrase) suggestion = `For example: ${oneLine(fx.phrase.example, 140)}`;
     add(lineNo, c1, c2, message, suggestion);
 }
-
-/** All the phrases, for tests and for the reference list. */
-export const PHRASE_COUNT = PHRASES.length;

@@ -160,21 +160,6 @@ export function loadComplete(target: CompleteTarget, bundle: Extract<Bundle, { o
     return { ok: true, target, manifest, packPath };
 }
 
-/** What the info route says about each target: is it there, and about how large is the download. */
-export function completeInfo(bundle: Bundle, dir: string = completeDir()): { targets: Record<CompleteTarget, { available: boolean; bytes?: number; nodeVersion?: string; reason?: string }> } {
-    const targets = {} as Record<CompleteTarget, { available: boolean; bytes?: number; nodeVersion?: string; reason?: string }>;
-    for (const t of COMPLETE_TARGETS) {
-        if (!bundle.ok) {
-            targets[t] = { available: false, reason: bundle.reason };
-            continue;
-        }
-        const b = loadComplete(t, bundle, dir);
-        // The size the person will see: the big part plus room for the zip's own bookkeeping and the small per-download files.
-        targets[t] = b.ok ? { available: true, bytes: b.manifest.packBytes + b.manifest.files.length * 120 + 2 * 1024 * 1024, nodeVersion: b.manifest.nodeVersion } : { available: false, reason: b.reason };
-    }
-    return { targets };
-}
-
 // ── the zip ─────────────────────────────────────────────────────────────────
 
 export const completeFolder = (slug: string, target: CompleteTarget): string => `runner-${slug}-${target}`;

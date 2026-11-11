@@ -122,9 +122,6 @@ export const DesktopTargetSchema = z
 
 export type DesktopTarget = z.infer<typeof DesktopTargetSchema>;
 
-/** The start-up wait with its default applied. */
-export const startTimeoutOf = (t: Pick<DesktopTarget, "startTimeoutMs">): number => t.startTimeoutMs ?? DESKTOP_STARTUP_DEFAULT_MS;
-
 // ── the locator vocabulary ──────────────────────────────────────────────────
 
 /** UI Automation control types a locator may name (`role`). The helper maps each to the real ControlType; nothing else is ever evaluated. */

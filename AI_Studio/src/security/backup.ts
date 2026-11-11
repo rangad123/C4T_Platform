@@ -33,8 +33,6 @@ import { redactEvidence, redactText } from "./findings/redact.js";
 import { forgetNotificationSettings, notificationSettings, saveNotificationSettings } from "./notify.js";
 import { SECURITY_LIMITS as L, securityStoreFor, TESTING_TYPES } from "./store.js";
 
-export const SECURITY_BACKUP_ENTRY = "security.json";
-
 /** Caps on what one project's security document may hold (export keeps the newest within them; restore refuses more). */
 export const SECURITY_BACKUP_LIMITS = {
     applications: L.applicationsPerProject,

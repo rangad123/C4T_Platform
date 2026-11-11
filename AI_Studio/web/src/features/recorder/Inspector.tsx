@@ -1,7 +1,9 @@
 import { Check, Copy, Crosshair, ScanSearch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Callout } from "../../components/ui";
-import { CHECKS, candidateWords, errorText, pickedCandidates, recApi, type AssertCheck, type Recording } from "./recorder";
+import { CHECKS, candidateWords, pickedCandidates, type AssertCheck, type Recording } from "./recorder";
+import { api } from "../../api";
+import { describeApiError } from "../../lib/labels";
 
 /** The toolbar for picking elements and adding checks, and the panel that describes the element just picked. */
 export function Inspector({ rec, onChanged }: { rec: Recording; onChanged: (r: Recording) => void }) {
@@ -18,9 +20,9 @@ export function Inspector({ rec, onChanged }: { rec: Recording; onChanged: (r: R
         setBusy(true);
         setError("");
         try {
-            onChanged(await recApi<Recording>(`/recordings/${rec.id}/inspect`, { method: "POST", body }));
+            onChanged(await api<Recording>(`/recordings/${rec.id}/inspect`, { method: "POST", body }));
         } catch (e) {
-            setError(errorText(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(false);
         }

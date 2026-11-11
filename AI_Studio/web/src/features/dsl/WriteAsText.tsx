@@ -1,24 +1,12 @@
-import { FileText } from "lucide-react";
 import { useState } from "react";
 import { Button, Callout } from "../../components/ui";
 import { go, routes } from "../../lib/router";
-import { Modal } from "../code/Modal";
-import { dapi, DslError, errorText, starterText, type CreateTextAnswer, type DslDiagnostic, type ParseAnswer } from "./dsl";
+import { Modal } from "../../components/Modal";
+import { dslDiagnostics, starterText, type CreateTextAnswer, type DslDiagnostic, type ParseAnswer } from "./dsl";
 import { TextView } from "./TextView";
 import "./dsl.css";
-
-/** "Write as text" on the Tests page: a test as one line per step, started from a short example, created through the platform's own import. */
-export function WriteTextButton({ projectId }: { projectId: string }) {
-    const [open, setOpen] = useState(false);
-    return (
-        <>
-            <Button icon={FileText} onClick={() => setOpen(true)}>
-                Write as text
-            </Button>
-            {open && <WriteTextDialog projectId={projectId} onClose={() => setOpen(false)} />}
-        </>
-    );
-}
+import { api, ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
 
 export function WriteTextDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
     const [kind, setKind] = useState<"web" | "api">("web");
@@ -42,14 +30,15 @@ export function WriteTextDialog({ projectId, onClose }: { projectId: string; onC
         setError("");
         const sent = text;
         try {
-            const r = await dapi<CreateTextAnswer>(`/projects/${projectId}/dsl-tests`, { method: "POST", body: { text: sent } });
+            const r = await api<CreateTextAnswer>(`/projects/${projectId}/dsl-tests`, { method: "POST", body: { text: sent } });
             onClose();
             go(routes.test(r.testId));
         } catch (e) {
-            if (e instanceof DslError && e.status === 422 && e.diagnostics.length) {
-                setProblems({ forText: sent, items: e.diagnostics });
+            const items = e instanceof ApiError && e.status === 422 ? dslDiagnostics(e.body.diagnostics) : [];
+            if (items.length) {
+                setProblems({ forText: sent, items });
                 setError("The test was not created. Fix the problems listed below and try again. Your text is still here.");
-            } else setError(errorText(e));
+            } else setError(describeApiError(e));
             setBusy(false);
         }
     }

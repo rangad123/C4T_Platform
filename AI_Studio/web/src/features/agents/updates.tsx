@@ -34,6 +34,8 @@ export function updateSentence(u: RunnerUpdateView, current: string | undefined,
         return undefined;
     }
     const latest = versionWords(u.latest);
+    // Nothing published to update from (an unsigned download, for one): only a new download brings the newer version.
+    if (u.published === false) return { tone: "info", text: `Download the runner again from Settings to get version ${latest}.` };
     if (!u.can) return { tone: "warning", text: `This platform runs runner version ${latest}. This runner cannot update itself (it was started from the project folder or from an older download). Set up this computer again from Settings to get updates.` };
     if (u.state === "preparing") return { tone: "info", text: `Updating to version ${latest}: downloading and checking. It takes no new tests until it has restarted.` };
     if (u.state === "ready") return { tone: "info", text: `Updating to version ${latest}: waiting for its running tests to finish, then it restarts.` };
@@ -73,7 +75,7 @@ export function RunnerUpdates({ name, update: u, version, online, onChanged }: {
                     This platform offers no automatic update: {u.unpublished}
                 </p>
             )}
-            {u.can && u.outOfDate && !working && u.state !== "needs-manual" && (
+            {u.can && u.published !== false && u.outOfDate && !working && u.state !== "needs-manual" && (
                 <div>
                     <Button size="sm" icon={RefreshCw} loading={busy} disabled={u.requested} onClick={() => void now()} tip="It downloads that version, checks it, and restarts between tests." aria-label={u.requested ? `Update asked for ${name}` : `Update ${name} to version ${versionWords(u.latest)}`}>
                         {u.requested ? "Update asked for" : "Update now"}

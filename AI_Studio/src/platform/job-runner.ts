@@ -16,6 +16,7 @@ import { applyFrameworkSettings } from "./framework-settings-store.js";
 import { applyDeviceFarm } from "./device-farm-run.js";
 import { applyExecutorPolicy, customRunInputs } from "./custom-run.js";
 import { assertAllowedTarget } from "./net-guard.js";
+import { guardedFetch } from "./guarded-fetch.js";
 import { isLoadSpec } from "../engine/performance/load.js";
 import { loadTargetProblem } from "./load-guard.js";
 import { prepareEnvironmentRun } from "./environment-run.js";
@@ -244,7 +245,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         } catch {
             /* an unreadable switch keeps cleanup on: leaving records behind is the worse mistake */
         }
-        const cleanup: CleanupRequest = { enabled: cleanupEnabled, guard: assertAllowedTarget };
+        const cleanup: CleanupRequest = { enabled: cleanupEnabled, guard: assertAllowedTarget, fetch: guardedFetch };
         /** DELETE operations the application description knows plus the ones this project's tests spell out: what records created by a POST can be removed with. */
         const projectDeleteOps = (apis: Parameters<typeof deleteOperationsOf>[0]) => mergeOperations(deleteOperationsOf(apis), ...repo.listTests(job.projectId).map((t) => deleteOperationsOfSpec(view(t.spec))));
         ctx.emit({

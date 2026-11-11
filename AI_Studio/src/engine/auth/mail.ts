@@ -259,5 +259,3 @@ export function answerFrom(m: MailMessage, q: Pick<MailQuery, "use" | "after" | 
 
 /** Is this message addressed to `to` (exact address, case-insensitive)? */
 export const isAddressedTo = (m: MailMessage, to: string): boolean => m.to.includes(to.trim().toLowerCase());
-
-export const EMAIL_ADDRESS = /^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$/;

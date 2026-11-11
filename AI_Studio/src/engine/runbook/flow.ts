@@ -8,7 +8,6 @@ import type { Condition, RunbookDefinition, Step } from "./schema.js";
 
 export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped" | "stopped" | "timed_out";
 export type RunStatus = "running" | "passed" | "failed" | "stopped" | "timed_out" | "cancelled" | "interrupted";
-export const FINISHED_RUN_STATUSES: RunStatus[] = ["passed", "failed", "stopped", "timed_out", "cancelled", "interrupted"];
 
 export type Next = { kind: "goto"; index: number } | { kind: "stop" } | { kind: "end" };
 

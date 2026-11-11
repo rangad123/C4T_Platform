@@ -223,4 +223,3 @@ export function gateEntries(entries: ReadonlyArray<{ entry: GateEntry; test: Fam
 export const ignoredNote = (count: number): string => `(${n(count, "quarantined test")} ignored)`;
 /** "2 quarantined tests are not counted" for the dashboard and overview. */
 export const notCountedText = (count: number): string => `${n(count, "quarantined test")} ${count === 1 ? "is" : "are"} not counted`;
-export const QUARANTINE_ENDED = "Quarantine ended; this test counts again.";

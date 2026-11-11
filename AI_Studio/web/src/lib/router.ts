@@ -111,8 +111,6 @@ export const routes = {
     agentRun: (id: string, runId: string) => `#/projects/${id}/agent/${runId}`,
     /** The project's settings, one section open. */
     projectSettings: (id: string, section?: SettingsSection) => place(id, "settings", "general", section),
-    /** Where tests run: every run goes to its starter's own runner, set up once in Settings (round 45: no project runners). */
-    runners: (_id?: string) => RUNNER_SETTINGS,
     /** The old Setup place: each section is a Settings section of the same name; its Runners section is Your runner in Settings. */
     setup: (id: string, section?: SetupSection) => (section === "runners" ? RUNNER_SETTINGS : place(id, "settings", "general", section)),
     /** The old Library place: each section moved (`libraryHome`). */
@@ -156,7 +154,6 @@ export const routes = {
     develop: "#/develop",
     /** The person's runner: the "Your runner" section of Settings (round 45 removed the Runners pages; old links land here). */
     allRunners: RUNNER_SETTINGS,
-    runner: (_id?: string) => RUNNER_SETTINGS,
     /** Integrations: every system the projects connect to, set up once for an organisation, and which projects use each. */
     integrations: "#/integrations",
     /** An old link (the Folders place of round 34): it lands on Reusable libraries (lib/aliases.ts). */

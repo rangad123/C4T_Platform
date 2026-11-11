@@ -4,7 +4,7 @@ import { api } from "../../api";
 import { Button, Callout } from "../../components/ui";
 import { stepSentence } from "../../lib/labels";
 import type { Step } from "../builder/builder";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 import { blockError, type Block } from "./blocks";
 import "./blocks.css";
 

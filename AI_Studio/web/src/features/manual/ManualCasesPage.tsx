@@ -1,18 +1,19 @@
 import { ChevronRight, ClipboardList, Download, ExternalLink, PenLine, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { api, getKey, projectKind, type ProjectDetail, type TestSummary } from "../../api";
+import { api, downloadFrom, projectKind, type ProjectDetail, type TestSummary } from "../../api";
 import { ProjectPlace } from "../../components/ProjectHub";
 import { BadgeKey } from "../../components/Tooltip";
 import { Badge, Button, Callout, Disclosure, EmptyState, ErrorState, ListSkeleton, Menu, MenuItem, StatusBadge, statusKey } from "../../components/ui";
-import { downloadBlob, plural } from "../../lib/format";
+import { plural } from "../../lib/format";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, routes, type CasesSection } from "../../lib/router";
 import { useHere } from "../auth/project-access";
 import type { RequirementLink, RequirementList } from "../requirements/requirements";
-import { apiMessage, AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
+import { AUTOMATION_HINT, AUTOMATION_WORDS, MAX_STEPS, PRIORITIES, PRIORITY_LABEL, type Automation, type CaseInput, type CaseList, type ImportResult, type ManualCase, type Priority } from "./manual";
 import "./manual.css";
 import { GenerateScriptsCard } from "../authoring/GenerateScriptsCard";
+
 
 const EMPTY: CaseInput = { title: "", area: "", priority: "medium", requirement: "", steps: [{ action: "", expected: "" }], linkedTestIds: [], automation: "manual", requirementId: null };
 const FILTERS: CasesSection[] = ["all", "automated", "manual"];
@@ -83,7 +84,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             close();
             await reloadCounted();
         } catch (e) {
-            setNotice({ tone: "danger", text: apiMessage(e) });
+            setNotice({ tone: "danger", text: describeApiError(e) });
         }
     }
 
@@ -101,7 +102,7 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
             });
             await reloadCounted();
         } catch (e) {
-            setNotice({ tone: "danger", text: `Nothing was imported. ${apiMessage(e)}` });
+            setNotice({ tone: "danger", text: `Nothing was imported. ${describeApiError(e)}` });
         } finally {
             if (fileRef.current) fileRef.current.value = "";
         }
@@ -109,11 +110,9 @@ export function TestCaseList({ id, filter, open }: { id: string; filter: CasesSe
 
     async function exportAs(format: "csv" | "json") {
         try {
-            const res = await fetch(`/api/projects/${id}/manual-cases/export?format=${format}`, { headers: getKey() ? { "x-api-key": getKey() } : {} });
-            if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error);
-            downloadBlob(await res.blob(), `test-cases.${format}`);
+            await downloadFrom(`/projects/${id}/manual-cases/export?format=${format}`, `test-cases.${format}`);
         } catch (e) {
-            setNotice({ tone: "danger", text: `Download failed. ${apiMessage(e)}` });
+            setNotice({ tone: "danger", text: `Download failed. ${describeApiError(e)}` });
         }
     }
 
@@ -517,7 +516,7 @@ function CaseForm({
             const saved = await api<ManualCase>(caseId ? `/projects/${projectId}/manual-cases/${caseId}` : `/projects/${projectId}/manual-cases`, { method: caseId ? "PUT" : "POST", body });
             await onSaved(saved);
         } catch (err) {
-            setError(apiMessage(err));
+            setError(describeApiError(err));
             setBusy(false);
         }
     }

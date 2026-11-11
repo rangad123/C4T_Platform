@@ -6,7 +6,7 @@
  * shown. Everything that comes from the page is untrusted text: lengths are capped, control characters are removed, nothing in it is ever executed.
  */
 import { LIVE_ACTIONS, LIVE_IMAGE_MAX_BYTES, LiveActionWire, type LiveElementWire, type LiveSnapshotWire } from "../../agent-protocol/schema.js";
-import { SECRET_PLACEHOLDERS, type RecLocator, type RecStep, type SecretKind } from "./model.js";
+import type { RecLocator, RecStep, SecretKind } from "./model.js";
 import { parseCands, rankCandidates } from "./rank.js";
 
 export { LIVE_ACTIONS, LIVE_IMAGE_MAX_BYTES };
@@ -127,9 +127,6 @@ export function decideFill(value: string, field: SecretKind | ""): FillDecision 
     const placeholder = field === "otp" ? "{{credentials.totp}}" : "{{credentials.password}}";
     return { ok: false, status: 422, error: `This field holds a ${field === "otp" ? "one-time code" : "password"}, so it can only be filled with ${placeholder}, which is taken from the project's stored sign-in details. A real value is never accepted here.` };
 }
-
-/** The stand-in a recorded step carries for a field of this kind. */
-export const placeholderFor = (kind: SecretKind): string => SECRET_PLACEHOLDERS[kind];
 
 // ── text from the page ──────────────────────────────────────────────────────
 

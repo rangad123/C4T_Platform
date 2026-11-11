@@ -8,8 +8,9 @@ import { normalizeUrl } from "../../lib/url";
 import { viewerIsRemote } from "../../lib/viewer";
 import { usePolled, type RunnerChoice } from "../agents/agents";
 import type { Environment } from "../environments/environments";
-import { RUNNER_SETTINGS_HREF } from "../runners/my-runner";
-import { RecError, activeSessionId, agentRecordProblem, errorText, recApi, rememberSession, rememberedSession, type RecorderAgent, type Recording } from "./recorder";
+import { activeSessionId, agentRecordProblem, rememberSession, rememberedSession, type RecorderAgent, type Recording } from "./recorder";
+import { api, ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
 
 /** The first screen: where to start, whether to show the window, and a warning about typing real data. */
 export function StartForm({ projectId, initialUrl, onStarted, onResume }: { projectId: string; initialUrl?: string; onStarted: (r: Recording) => void; onResume: (rid: string) => void }) {
@@ -74,21 +75,21 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
         if (chosen?.production && !confirmProduction) return setProblem({ tone: "warning", title: "Confirm before recording on a live site", text: "Tick the box under the environment to say you know what you click is really done there." });
         setBusy(true);
         try {
-            const rec = await recApi<Recording>(`/projects/${projectId}/recordings`, { method: "POST", body: { url: address, headed: headedNow, ...(environment ? { environment, ...(chosen?.production ? { confirmProduction: true } : {}) } : {}), ...(runOn === "agent" && agent ? { on: "agent", agentId: agent.id } : {}) } });
+            const rec = await api<Recording>(`/projects/${projectId}/recordings`, { method: "POST", body: { url: address, headed: headedNow, ...(environment ? { environment, ...(chosen?.production ? { confirmProduction: true } : {}) } : {}), ...(runOn === "agent" && agent ? { on: "agent", agentId: agent.id } : {}) } });
             rememberSession(projectId, rec.id);
             onStarted(rec);
         } catch (err) {
-            const details = err instanceof RecError ? (err.body?.details as { code?: unknown; link?: unknown } | undefined) : undefined;
-            if (err instanceof RecError && err.status === 409 && typeof details?.code === "string" && details.code.startsWith("RUNNER_")) {
+            const details = err instanceof ApiError ? (err.body?.details as { code?: unknown; link?: unknown } | undefined) : undefined;
+            if (err instanceof ApiError && err.status === 409 && typeof details?.code === "string" && details.code.startsWith("RUNNER_")) {
                 // The person's runner is not set up, is offline, or may not record this: the server's sentence, with a link to Settings.
-                setProblem({ tone: "warning", text: err.message, link: typeof details.link === "string" && details.link.startsWith("#/") ? details.link : RUNNER_SETTINGS_HREF });
-            } else if (err instanceof RecError && err.status === 409) {
+                setProblem({ tone: "warning", text: err.message, link: typeof details.link === "string" && details.link.startsWith("#/") ? details.link : routes.allRunners });
+            } else if (err instanceof ApiError && err.status === 409) {
                 const id = activeSessionId(err) ?? rememberedSession(projectId);
                 setActive({ id, text: id ? err.message : `${err.message} It was not started from this browser tab, so we can’t open it from here. Stop it on the computer that runs the platform, then start again.` });
-            } else if (err instanceof RecError && err.status === 422) {
+            } else if (err instanceof ApiError && err.status === 422) {
                 setProblem({ tone: "warning", title: "We can’t open the browser window", text: err.message });
             } else {
-                setProblem({ tone: "danger", text: errorText(err) });
+                setProblem({ tone: "danger", text: describeApiError(err) });
             }
         } finally {
             setBusy(false);

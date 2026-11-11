@@ -161,7 +161,7 @@ export async function runEnvironmentJob(ctx: EngineContext, req: EnvironmentRunR
             for (const { t } of runnable) collector.add(t.spec, byId.get(t.spec.testId)?.created);
             // Whatever the tests created on this environment is removed from this environment, with its credentials; the result of a test never changes.
             try {
-                const finished = await finishCleanup(ctx, collector, { enabled: req.cleanup!.enabled, apiBaseUrl: env.apiBaseUrl ?? env.baseUrl, credentials: { apiToken: c?.apiToken, apiAuthHeader: c?.apiAuthHeader }, guard: req.cleanup!.guard, environment: target.name });
+                const finished = await finishCleanup(ctx, collector, { enabled: req.cleanup!.enabled, apiBaseUrl: env.apiBaseUrl ?? env.baseUrl, credentials: { apiToken: c?.apiToken, apiAuthHeader: c?.apiAuthHeader }, guard: req.cleanup!.guard, fetch: req.cleanup!.fetch, environment: target.name });
                 if (finished.length) await sink.saveCleanup?.(finished);
             } catch (err) {
                 ctx.emit({ stage: "validation", kind: "cleanup_failed", level: "warn", message: `Records the tests created could not be removed: ${err instanceof Error ? err.message : String(err)}` });

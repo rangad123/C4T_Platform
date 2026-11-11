@@ -86,14 +86,10 @@ export const SCAN_PROFILES: Record<ScanIntensity, ScanProfile> = {
     },
 };
 
-export const SCAN_PROFILE_IDS = SCAN_INTENSITIES;
-
 export const rank = (p: ScanIntensity): number => SCAN_INTENSITIES.indexOf(p);
 
 /** True when `allowed` is this level or a gentler one. */
 export const atMost = (allowed: ScanIntensity, p: ScanIntensity): boolean => rank(p) <= rank(allowed);
-
-export const isScanIntensity = (v: unknown): v is ScanIntensity => typeof v === "string" && (SCAN_INTENSITIES as readonly string[]).includes(v);
 
 /** Why this profile may not be used for this application right now, or undefined when it may. Plain sentences, never codes. */
 export function profileRefusal(profile: ScanIntensity, environment: string, hasApproval: boolean): string | undefined {

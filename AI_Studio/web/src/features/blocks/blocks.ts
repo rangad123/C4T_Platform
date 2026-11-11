@@ -1,5 +1,6 @@
 /** Types and wording for reusable steps (the API lives in src/platform/routes/blocks.ts). */
 import { ApiError } from "../../api";
+import { plural } from "../../lib/format";
 import { describeApiError } from "../../lib/labels";
 import type { Catalog, Step } from "../builder/builder";
 import type { Placeholders } from "../builder/Fields";
@@ -61,8 +62,6 @@ export const KIND_CHOICES: Array<{ id: BlockKind; label: string; help: string }>
     { id: "api", label: "API tests", help: "Requests to your API and checks of the answers." },
     { id: "any", label: "Any test", help: "Steps that suit both, such as waiting, or other reusable steps." },
 ];
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export const usedByText = (count: number): string => (count === 0 ? "Not used by any test yet" : `Used by ${plural(count, "test")}`);
 

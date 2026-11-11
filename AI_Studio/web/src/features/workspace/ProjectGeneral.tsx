@@ -2,7 +2,7 @@ import { Archive, ArchiveRestore, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError, MODE_WORDS, PLATFORM_WORDS, api, projectShape, type AppDetails, type Platform, type ProjectDetail, type TestingMode } from "../../api";
 import { Button, Callout, ErrorState, LinkButton, Skeleton } from "../../components/ui";
-import { formatBytes } from "../storage/storage";
+import { formatBytes } from "../../lib/format";
 import { ProjectAgentsPanel } from "../testing-agents/ProjectAgentsPanel";
 import { announceProjectChanged, useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";

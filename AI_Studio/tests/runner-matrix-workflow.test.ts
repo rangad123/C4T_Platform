@@ -105,6 +105,12 @@ describe("the runner tests in the main CI workflow", () => {
         for (const f of ["agent-platform-unit", "runner-refused-unit", "runner-update-unit", "runner-installer-kit", "record-agent-unit", "live-session-fake-agent", "installer-mac-unit", "agent-program-unit", "agent-platform", "runner-stop-file-unit", "smoke-runner-unit", "runner-matrix-workflow", "credential-store-unit", "runner-protocol2-unit", "run-live-unit", "environment-accounts-unit", "approval-deps", "runner-sessions-personal", "runner-only-mode", "runner-enroll", "runner-personal", "runner-protocol2", "runner-address-guard", "runner-review-fixes", "trace-scrub-unit", "runner-resources-unit", "runner-untrusted-unit", "runner-access-isolation", "runner-trace-secrets", "runner-restart", "runner-handover", "runner-owner-unit"]) expect(step.run, f).toContain(`tests/${f}.test.ts`);
         expect(step.env?.TAQWRIGHT_HOME).toBe("/nonexistent-taqwright");
     });
+
+    it("runs the whole fast tier, away from any real phone", () => {
+        const step = (ci.jobs.quality.steps as Step[]).find((s) => s.name === "Fast tests")!;
+        expect(step?.run).toBe("npm run test:fast");
+        expect(step.env?.TAQWRIGHT_HOME).toBe("/nonexistent-taqwright");
+    });
 });
 
 describe("the deploy workflow's signing steps", () => {

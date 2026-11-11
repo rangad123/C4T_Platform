@@ -81,7 +81,7 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
         const runner = svc.runnerStatus(projectId);
         const settings = store().get(projectId);
         const chosen = runner.agentId ? svc.store.getAgent(runner.agentId) : undefined;
-        const onlineNames = svc.eligibleAgents(projectId, undefined, { ownerId: ownerIdOfActor(currentActor()) }).map((a) => a.name);
+        const onlineNames = svc.eligibleAgents(projectId, { ownerId: ownerIdOfActor(currentActor()) }).map((a) => a.name);
         return {
             settings,
             effective: effectiveSettings(settings, { onAgent: runner.runOn === "agent", platformWorkers: ctx.p.config.CONCURRENCY }),

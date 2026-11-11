@@ -4,10 +4,10 @@ import { api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { BadgeKey, FieldHelp } from "../../components/Tooltip";
 import { relativeTime } from "../../lib/format";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, useRoute } from "../../lib/router";
 import { SecurityLayout } from "./SecurityChrome";
-import { SEC, sec, securityError, useApps, when } from "./security";
+import { SEC, sec, useApps, when } from "./security";
 
 /** One event of the project's security trail (GET /projects/:id/activity, CORE: src/security/store.ts `listAudit`). */
 export interface ActivityEvent {
@@ -100,7 +100,7 @@ export function ActivityPage({ id }: { id: string }) {
             setEvents((prev) => [...(prev ?? []), ...list.filter((x) => !(prev ?? []).some((p) => p.id === x.id))]);
             setMore(list.length >= PAGE);
         } catch (e) {
-            setMoreError(securityError(e));
+            setMoreError(describeApiError(e));
         } finally {
             setLoadingMore(false);
         }

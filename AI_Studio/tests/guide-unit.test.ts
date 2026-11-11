@@ -129,7 +129,7 @@ describe("place help covers every place in the router", () => {
         [routes.run("p1", "j1"), "run-detail"],
         [routes.schedule("p1"), "runs-schedules"],
         // Round 45: every runner link is Your runner in Settings.
-        [routes.runners("p1"), "settings"],
+        [routes.allRunners, "settings"],
         ["#/runners", "runners-global"],
         [routes.objects("p1"), "library-elements"],
         [routes.blocks("p1"), "library-steps"],

@@ -11,10 +11,11 @@ import type { RunnerChoice } from "../agents/agents";
 import { PRODUCTION_WARNING, type Environment } from "../environments/environments";
 import { announceRunsChanged, planSentence, useActiveRun } from "./runs";
 import { DISPATCH_OFF, NO_NEEDS, NO_RUN_PERMISSION, NO_RUNNER_TITLE, RUNS_OFF_HERE, RUNS_OFF_TIP, executionModeOf, codeScriptsNotice, type RunNeeds } from "./runs-here";
-import { RUNNER_SETTINGS_HREF, runnerProblem, runsOnSentence, useMyRunner } from "../runners/my-runner";
+import { runnerProblem, runsOnSentence, useMyRunner } from "../runners/my-runner";
 import { RunStartError } from "../runners/RunnerRefusal";
 import { resetSentence, type ResetAnswer } from "../webpages/webpages";
 import "./runs.css";
+import { routes } from "../../lib/router";
 
 type What = "failing" | "group" | "selected" | "all" | "notrun" | "test" | "fixed";
 
@@ -190,7 +191,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     const needs: RunNeeds = useMemo(() => {
         if (scope === "fixed") return NO_NEEDS;
         const picked = scope === "test" ? (test ? [test] : []) : tests.filter((t) => runnable.includes(t.id));
-        return { web: picked.some((t) => t.kind === "web" || t.kind === "api"), mobile: picked.some((t) => t.kind === "mobile"), code: picked.some((t) => Boolean(t.custom)) };
+        return { code: picked.some((t) => Boolean(t.custom)) };
     }, [scope, test, tests, runnable]);
 
     // Where it runs: in runners mode always on the starter's own runner (the platform decides; nothing is chosen here), with the
@@ -296,7 +297,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                     )}
                     {!off && noRunner && (
                         <div data-testid="no-runner">
-                            <Callout tone="warning" title={NO_RUNNER_TITLE} actions={<LinkButton size="sm" variant="primary" href={RUNNER_SETTINGS_HREF}>Open Your runner in Settings</LinkButton>}>
+                            <Callout tone="warning" title={NO_RUNNER_TITLE} actions={<LinkButton size="sm" variant="primary" href={routes.allRunners}>Open Your runner in Settings</LinkButton>}>
                                 {runnerProblem(me.data)}
                             </Callout>
                         </div>
@@ -355,7 +356,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                         )}
                         {codeToOwn && (
                             <div data-testid="code-on-own">
-                                <Callout tone="warning" actions={<a href={RUNNER_SETTINGS_HREF}>Switch code scripts off in Settings</a>}>
+                                <Callout tone="warning" actions={<a href={routes.allRunners}>Switch code scripts off in Settings</a>}>
                                     {codeScriptsNotice(authors)}
                                 </Callout>
                             </div>

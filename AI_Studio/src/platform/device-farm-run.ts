@@ -23,15 +23,6 @@ export function farmStoreFor(repo: Repo, config: Pick<Config, "dataDir" | "SECRE
     return new DeviceFarmStore(repo.db, new SecretBox(config.dataDir, config.SECRET_KEY));
 }
 
-/** True when the project's phone tests run on a farm (so this computer needs no Android tools for them). */
-export function projectUsesFarm(repo: Repo, config: Pick<Config, "dataDir" | "SECRET_KEY">, projectId: string): boolean {
-    try {
-        return farmStoreFor(repo, config).plan(projectId) !== undefined;
-    } catch {
-        return false;
-    }
-}
-
 export function applyDeviceFarm(ctx: EngineContext, repo: Repo, config: Config, job: Pick<JobRow, "id" | "projectId">): void {
     let store: DeviceFarmStore;
     let choice: ReturnType<DeviceFarmStore["choice"]>;

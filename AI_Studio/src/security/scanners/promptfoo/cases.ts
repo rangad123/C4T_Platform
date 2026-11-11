@@ -118,12 +118,3 @@ export function casesFor(profile: "passive" | "conservative-active" | "advanced"
     void profile;
     return [...control, ...rest].slice(0, Math.max(1, limit));
 }
-
-/** The categories the platform will report an AI finding under, in report order. */
-export const AI_CASE_CATEGORIES: Record<AiCaseCategory, string> = {
-    control: "Evaluation harness control",
-    "prompt-injection": "Prompt-injection resistance",
-    "sensitive-disclosure": "Sensitive-information disclosure",
-    "excessive-agency": "Excessive agency",
-    "unsafe-tool-use": "Unsafe tool use",
-};

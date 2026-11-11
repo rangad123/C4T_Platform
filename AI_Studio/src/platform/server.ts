@@ -269,7 +269,7 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     // Registered before any route, so it also sees every route as it is added (the route-to-role table test reads that list).
     // Trigger, runner, stream-ticket and health routes keep their own credentials exactly as before.
     const access = installAccessControl(app, p);
-    // The runner a person chose for one run (`runnerId` in a run-start body), read before any route checks its body (run-request.ts).
+    // `runnerId` in a run-start body is accepted and ignored, removed before any route checks its body (run-request.ts).
     installRunnerChoice(app);
 
     const repo = p.repo;

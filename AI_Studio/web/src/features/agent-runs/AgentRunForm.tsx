@@ -2,8 +2,8 @@ import { Bot } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../api";
 import { Button, Callout, Disclosure } from "../../components/ui";
-import { apiMessage } from "../manual/manual";
 import type { AgentRun, AgentRunList } from "./agent-runs";
+import { describeApiError } from "../../lib/labels";
 
 /** Start an agent run: the objective in plain words, where it starts, and the limits. The token limit shows only to people who may see AI usage. */
 export function AgentRunForm({ projectId, list, seesUsage, onStarted }: { projectId: string; list: AgentRunList; seesUsage: boolean; onStarted: (r: AgentRun) => void }) {
@@ -36,7 +36,7 @@ export function AgentRunForm({ projectId, list, seesUsage, onStarted }: { projec
             });
             onStarted(run);
         } catch (err) {
-            setError(apiMessage(err));
+            setError(describeApiError(err));
             setBusy(false);
         }
     }

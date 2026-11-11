@@ -53,7 +53,6 @@ export const VARIANTS: Record<VariantId, VariantDef> = {
     tablet: { id: "tablet", label: "Tablet", description: "A tablet-sized screen (820 × 1180) with touch.", browser: "chromium", device: "Galaxy Tab S4", viewport: { width: 820, height: 1180 } },
 };
 
-export const isExtraVariant = (v: string): v is ExtraVariantId => (EXTRA_VARIANT_IDS as readonly string[]).includes(v);
 export const variantLabel = (v: string): string => (v in VARIANTS ? VARIANTS[v as VariantId].label : v);
 
 /** Keep the requested variants that exist, once each, in the canonical order. */

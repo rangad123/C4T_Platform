@@ -1,34 +1,17 @@
 import { ChevronRight, Pencil, Play, Plus, ShieldCheck, Trash2, Undo2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../api";
+import { Modal } from "../../components/Modal";
 import { Button, Callout, Disclosure, EmptyState, ErrorState, LinkButton, ListSkeleton, Skeleton } from "../../components/ui";
 import { BadgeKey, FieldHelp, HelpTip } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { relativeTime } from "../../lib/format";
 import { normalizeUrl } from "../../lib/url";
 import { go, useRoute } from "../../lib/router";
 import { ApiDocumentPanel, SignInChoice, SignInPanel, signInLabel } from "./ApplicationExtras";
 import { AuthTag, SecurityLayout, StateTag, authKey, canApprove, canRun, stateKey, useRole } from "./SecurityChrome";
-import {
-    AUTH_WORDS,
-    ENVIRONMENT_ORDER,
-    ENVIRONMENT_WORDS,
-    SEC,
-    authStateOf,
-    isRunning,
-    sec,
-    securityError,
-    when,
-    listOf,
-    oneOf,
-    type AppAnswer,
-    type AppRow,
-    type AssessmentRow,
-    type SecurityAuthorization,
-    type SecurityEnvironment,
-    type SensitiveWorkflow,
-} from "./security";
+import { AUTH_WORDS, ENVIRONMENT_ORDER, ENVIRONMENT_WORDS, SEC, authStateOf, isRunning, sec, when, listOf, oneOf, type AppAnswer, type AppRow, type AssessmentRow, type SecurityAuthorization, type SecurityEnvironment, type SensitiveWorkflow } from "./security";
 
 // ── the list ─────────────────────────────────────────────────────────────────
 
@@ -191,7 +174,7 @@ export function ApplicationForm({ id, app, onDone }: { id: string; app?: AppRow;
             if (onDone) onDone(saved);
             else go(sec.application(id, saved.id, { authorize: true }));
         } catch (err) {
-            setProblem(securityError(err));
+            setProblem(describeApiError(err));
             setBusy(false);
         }
     }
@@ -542,14 +525,8 @@ export function ApplicationDetail({ id, appId }: { id: string; appId: string }) 
 }
 
 function DeleteApp({ id, app, onClose }: { id: string; app: AppRow; onClose: () => void }) {
-    const ref = useRef<HTMLDialogElement>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-    useEffect(() => {
-        const d = ref.current;
-        if (d && !d.open) d.showModal();
-        d?.querySelector<HTMLButtonElement>("button")?.focus();
-    }, []);
     async function del() {
         setBusy(true);
         setError("");
@@ -557,26 +534,27 @@ function DeleteApp({ id, app, onClose }: { id: string; app: AppRow; onClose: () 
             await api(`${SEC}/applications/${app.id}`, { method: "DELETE" });
             go(sec.applications(id));
         } catch (e) {
-            setError(securityError(e));
+            setError(describeApiError(e));
             setBusy(false);
         }
     }
     return (
-        <dialog ref={ref} className="sec-dialog" aria-labelledby="sa-del-title" onClose={onClose} onCancel={onClose}>
-            <div className="inner">
-                <h2 className="t-section" id="sa-del-title">
-                    Delete {app.name}?
-                </h2>
-                <p className="t-secondary">The application, its authorizations, its assessments and its findings are removed for good. Reports already downloaded are not affected.</p>
-                {error && <Callout tone="danger">{error}</Callout>}
-                <div className="foot">
+        <Modal
+            title={`Delete ${app.name}?`}
+            titleId="sa-del-title"
+            onClose={onClose}
+            foot={
+                <>
                     <Button onClick={onClose}>Keep it</Button>
                     <Button variant="danger" icon={Trash2} loading={busy} onClick={() => void del()}>
                         Delete application
                     </Button>
-                </div>
-            </div>
-        </dialog>
+                </>
+            }
+        >
+            <p className="t-secondary">The application, its authorizations, its assessments and its findings are removed for good. Reports already downloaded are not affected.</p>
+            {error && <Callout tone="danger">{error}</Callout>}
+        </Modal>
     );
 }
 
@@ -697,7 +675,7 @@ function AuthorizationForm({ app, statement: given, previous, onCancel, onDone }
             });
             onDone();
         } catch (err) {
-            setProblem(securityError(err));
+            setProblem(describeApiError(err));
             setBusy(false);
         }
     }
@@ -785,14 +763,6 @@ function Revoke({ auth, onDone }: { auth: SecurityAuthorization; onDone: () => v
     const [asking, setAsking] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-    const ref = useRef<HTMLDialogElement>(null);
-    useEffect(() => {
-        const d = ref.current;
-        if (asking && d && !d.open) {
-            d.showModal();
-            d.querySelector<HTMLButtonElement>("button")?.focus();
-        }
-    }, [asking]);
     async function revoke() {
         setBusy(true);
         setError("");
@@ -801,7 +771,7 @@ function Revoke({ auth, onDone }: { auth: SecurityAuthorization; onDone: () => v
             setAsking(false);
             onDone();
         } catch (e) {
-            setError(securityError(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -812,21 +782,22 @@ function Revoke({ auth, onDone }: { auth: SecurityAuthorization; onDone: () => v
                 Withdraw authorization
             </Button>
             {asking && (
-                <dialog ref={ref} className="sec-dialog" aria-labelledby="sa-revoke-title" onClose={() => setAsking(false)} onCancel={() => setAsking(false)}>
-                    <div className="inner">
-                        <h2 className="t-section" id="sa-revoke-title">
-                            Withdraw the authorization?
-                        </h2>
-                        <p className="t-secondary">No new assessment can start until a new authorization is recorded, and an assessment of this application that is running now is asked to stop. Findings and reports are kept.</p>
-                        {error && <Callout tone="danger">{error}</Callout>}
-                        <div className="foot">
+                <Modal
+                    title="Withdraw the authorization?"
+                    titleId="sa-revoke-title"
+                    onClose={() => setAsking(false)}
+                    foot={
+                        <>
                             <Button onClick={() => setAsking(false)}>Keep it</Button>
                             <Button variant="danger" icon={Undo2} loading={busy} onClick={() => void revoke()}>
                                 Withdraw
                             </Button>
-                        </div>
-                    </div>
-                </dialog>
+                        </>
+                    }
+                >
+                    <p className="t-secondary">No new assessment can start until a new authorization is recorded, and an assessment of this application that is running now is asked to stop. Findings and reports are kept.</p>
+                    {error && <Callout tone="danger">{error}</Callout>}
+                </Modal>
             )}
         </>
     );

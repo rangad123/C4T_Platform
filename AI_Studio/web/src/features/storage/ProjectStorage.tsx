@@ -1,8 +1,9 @@
 import { Archive, Download, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError, csrfHeader, getKey } from "../../api";
+import { Modal } from "../../components/Modal";
 import { Badge, Button, Callout, FilePicker, Skeleton } from "../../components/ui";
-import { downloadBlob, plural, relativeTime } from "../../lib/format";
+import { downloadBlob, formatBytes, plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
@@ -10,7 +11,7 @@ import { useCan } from "../auth/permissions";
 import { useHere } from "../auth/project-access";
 import { UsageBar } from "./StorageSettings";
 import { FieldHelp } from "../../components/Tooltip";
-import { formatBytes, logLine, type Preview, type ProjectStorage as ProjectStorageData, type RestoreResult, type RetentionState } from "./storage";
+import { logLine, type Preview, type ProjectStorage as ProjectStorageData, type RestoreResult, type RetentionState } from "./storage";
 import "./storage.css";
 
 interface Form {
@@ -361,35 +362,35 @@ const KEPT: Record<string, string> = {
     release: "the runs a release was based on",
 };
 
-/** A real modal dialog: the keyboard stays inside it and Escape closes it. It recalculates what will go, so the number is current. */
+/** Asks before removing. It recalculates what will go, so the number is current. */
 function ConfirmRemove({ projectId, preview, onCancel, onConfirm }: { projectId: string; preview?: Preview; onCancel: () => void; onConfirm: () => void }) {
-    const ref = useRef<HTMLDialogElement>(null);
     const [fresh, setFresh] = useState<Preview | null>(preview ?? null);
     /** Why the count could not be worked out now: said instead of a check that never ends (Cancel stays). */
     const [failed, setFailed] = useState<string | null>(null);
     useEffect(() => {
-        const d = ref.current;
-        if (d && !d.open) d.showModal();
         void api<Preview>(`/projects/${projectId}/retention/preview`, { method: "POST" }).then(setFresh, (e) => setFailed(describeApiError(e)));
     }, [projectId]);
     return (
-        <dialog ref={ref} className="st-dialog" aria-labelledby="st-confirm-title" onClose={onCancel} onCancel={onCancel}>
-            <div className="inner">
-                <h2 className="t-section" id="st-confirm-title">Remove old files?</h2>
-                {fresh ? <p>{fresh.sentence}</p> : !failed && <p>Checking what would be removed.</p>}
-                {failed && (
-                    <Callout tone="danger" title="Could not check what would be removed">
-                        {failed}
-                    </Callout>
-                )}
-                <p className="t-secondary">This deletes the files from the disk and cannot be undone. Test results and history stay.</p>
-                <div className="foot">
+        <Modal
+            title="Remove old files?"
+            titleId="st-confirm-title"
+            onClose={onCancel}
+            foot={
+                <>
                     <Button onClick={onCancel}>Cancel</Button>
                     <Button variant="danger" icon={Trash2} onClick={onConfirm} disabled={!fresh || fresh.files === 0}>
                         {fresh && fresh.files > 0 ? `Remove ${plural(fresh.files, "file")} (${formatBytes(fresh.bytes)})` : "Nothing to remove"}
                     </Button>
-                </div>
-            </div>
-        </dialog>
+                </>
+            }
+        >
+            {fresh ? <p>{fresh.sentence}</p> : !failed && <p>Checking what would be removed.</p>}
+            {failed && (
+                <Callout tone="danger" title="Could not check what would be removed">
+                    {failed}
+                </Callout>
+            )}
+            <p className="t-secondary">This deletes the files from the disk and cannot be undone. Test results and history stay.</p>
+        </Modal>
     );
 }

@@ -7,6 +7,7 @@ import { changesData } from "../../engine/environments/env.js";
 import { blockView } from "../block-store.js";
 import { CleanupStore, type LedgerRow } from "../cleanup-store.js";
 import { environmentStore } from "../environment-run.js";
+import { guardedFetch } from "../guarded-fetch.js";
 import { HttpError } from "../http-error.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import type { RouteCtx } from "./types.js";
@@ -95,7 +96,7 @@ export function registerCleanupRoutes(ctx: RouteCtx): void {
                     failedAgain++;
                     continue;
                 }
-                const r = await deleteRecord({ apiBaseUrl: row.origin, deletePath: row.deletePath!, headers: creds.headers, guard: assertAllowedTarget });
+                const r = await deleteRecord({ apiBaseUrl: row.origin, deletePath: row.deletePath!, headers: creds.headers, guard: assertAllowedTarget, fetch: guardedFetch });
                 s.update(row.id, r.status, r.reason);
                 if (r.status === "failed") failedAgain++;
                 else removed++;

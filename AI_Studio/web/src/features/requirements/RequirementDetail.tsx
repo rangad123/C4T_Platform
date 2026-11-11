@@ -5,12 +5,13 @@ import { ProjectPlace } from "../../components/ProjectHub";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton } from "../../components/ui";
 import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
 import { useHere } from "../auth/project-access";
-import { apiMessage, type CaseList } from "../manual/manual";
+import { type CaseList } from "../manual/manual";
 import { RequirementForm } from "./RequirementForm";
 import { COVERAGE_HINT, COVERAGE_TONE, COVERAGE_WORDS, PRIORITY_WORDS, RESULT_TONE, RESULT_WORDS, SOURCE_WORDS, STATUS_HINT, STATUS_WORDS, type LinkedTest, type RequirementDetailData } from "./requirements";
+
 
 /** One requirement: what it says, the test cases that cover it with their latest result, and linking more. */
 export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
@@ -32,7 +33,7 @@ export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
             await api(`/projects/${id}/requirements/${rid}?confirm=1`, { method: "DELETE" });
             go(routes.requirements(id));
         } catch (e) {
-            setNotice({ tone: "danger", text: apiMessage(e) });
+            setNotice({ tone: "danger", text: describeApiError(e) });
             setConfirming(false);
         }
     }
@@ -43,7 +44,7 @@ export function RequirementDetail({ id, rid }: { id: string; rid: string }) {
             setNotice({ tone: "success", text: `“${t.title}” no longer covers this requirement.` });
             await r.reload();
         } catch (e) {
-            setNotice({ tone: "danger", text: apiMessage(e) });
+            setNotice({ tone: "danger", text: describeApiError(e) });
         }
     }
 
@@ -254,7 +255,7 @@ function LinkPicker({ projectId, rid, linked, onCancel, onLinked }: { projectId:
             const r = await api<{ added: number }>(`/projects/${projectId}/requirements/${rid}/tests`, { method: "POST", body });
             await onLinked(r.added);
         } catch (e) {
-            setError(apiMessage(e));
+            setError(describeApiError(e));
             setBusy(false);
         }
     }

@@ -2,7 +2,7 @@
  * Frames, test files and popups: the small shared pieces the generator, the live interpreter, the recorder and the platform use, so
  * they agree on how a frame is found, where a test file is placed and how a popup is followed. See docs/features/frames-uploads-popups.md.
  */
-import { MAX_FRAME_DEPTH, TEST_FILE_NAME, type FrameRef, type Step, type TestSpec } from "../spec/schema.js";
+import { TEST_FILE_NAME, type FrameRef, type Step, type TestSpec } from "../spec/schema.js";
 
 /** CSS string contents for an attribute selector (the schema already refuses line breaks in a frame's name). */
 const cssString = (v: string): string => v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -43,9 +43,6 @@ export function describeFrame(f: { name?: string | null; title?: string | null; 
     }
     return undefined;
 }
-
-/** A frame chain longer than the platform follows is cut to its outermost part. */
-export const capFrames = (chain: FrameRef[]): FrameRef[] | undefined => (chain.length ? chain.slice(0, MAX_FRAME_DEPTH) : undefined);
 
 // ── test files ──────────────────────────────────────────────────────────
 

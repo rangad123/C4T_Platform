@@ -3,8 +3,9 @@ import { Badge } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { ranOnSentence, type RanOn, type RunnerChoice } from "./agents";
 import { RUNS_OFF_HERE, useExecutionMode, useRunsHere } from "../runs/runs-here";
-import { RUNNER_SETTINGS_HREF, runnerProblem, runsOnSentence, useMyRunner } from "../runners/my-runner";
+import { runnerProblem, runsOnSentence, useMyRunner } from "../runners/my-runner";
 import "./agents.css";
+import { routes } from "../../lib/router";
 
 /**
  * One quiet line saying where this project's tests run. With `ranOn` (the answer of a run just finished) it says where that run happened
@@ -34,7 +35,7 @@ export function RunsOnLine({ projectId, ranOn }: { projectId: string; ranOn?: Ra
         <p className="ag-runs-on t-secondary" data-testid="runs-on">
             <Cable size={16} aria-hidden />
             <span>{text}.</span>
-            {link && <a href={RUNNER_SETTINGS_HREF}>{link}</a>}
+            {link && <a href={routes.allRunners}>{link}</a>}
         </p>
     );
 }

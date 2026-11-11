@@ -1,22 +1,23 @@
 import { Bot, CircleCheck, CircleX, Code2, Download, FilePen, GitCompare, History, RotateCcw, ShieldOff, Wrench, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { artifactUrl } from "../../api";
+import { artifactUrl, api } from "../../api";
 import { Badge, Button, Callout, EmptyState, ErrorState, ListSkeleton, Skeleton } from "../../components/ui";
 import { BadgeKey, Tooltip } from "../../components/Tooltip";
 import { duration, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
-import { bapi, errorText } from "../builder/builder";
+import { friendlyError, describeApiError } from "../../lib/labels";
+import { bapi } from "../builder/builder";
 import { StepDiffView } from "../builder/History";
 import { diffSteps } from "../builder/stepdiff";
-import { capi, lineDiff, type VersionRow } from "../code/code";
-import { Modal } from "../code/Modal";
+import { lineDiff, type VersionRow } from "../code/code";
+import { Modal } from "../../components/Modal";
 import { DiffView } from "../code/VersionHistory";
 import type { Suggestion } from "../healing/healing";
 import { originOf } from "../provenance/provenance";
 import { HISTORY_WORDS, type TestQuarantine } from "../quarantine/quarantine";
 import { buildHistory, comparePair, type Detail, type HistoryEntry, type HistoryKind, type SpecVersionRow } from "./test-model";
 import { restoreSpecVersion, type SpecVersionBody } from "./restore";
+
 
 /** A run of this test in its history (test-model.ts: anything but passed counts as did not pass, findings included). */
 const RUN_PASSED = "This run of the test passed: every step and check worked.";
@@ -84,8 +85,8 @@ export function HistoryTab({ test: t, versions, versionsState, refreshKey, unsav
         setCompare({ key, state: "loading" });
         const load = pair.family === "steps"
             ? Promise.all([bapi<SpecVersionBody>(`/tests/${t.id}/spec-versions/${pair.from}`), bapi<SpecVersionBody>(`/tests/${t.id}/spec-versions/${pair.to}`)]).then(([a, b]) => ({ steps: diffSteps(a.spec, b.spec) }))
-            : Promise.all([capi<{ content: string }>(`/tests/${t.id}/script-versions/${pair.from}`), capi<{ content: string }>(`/tests/${t.id}/script-versions/${pair.to}`)]).then(([a, b]) => ({ lines: lineDiff(a.content, b.content) }));
-        load.then((r) => !gone && setCompare({ key, state: "ready", ...r })).catch((e) => !gone && setCompare({ key, state: "error", error: errorText(e) }));
+            : Promise.all([api<{ content: string }>(`/tests/${t.id}/script-versions/${pair.from}`), api<{ content: string }>(`/tests/${t.id}/script-versions/${pair.to}`)]).then(([a, b]) => ({ lines: lineDiff(a.content, b.content) }));
+        load.then((r) => !gone && setCompare({ key, state: "ready", ...r })).catch((e) => !gone && setCompare({ key, state: "error", error: describeApiError(e) }));
         return () => {
             gone = true;
         };
@@ -108,14 +109,14 @@ export function HistoryTab({ test: t, versions, versionsState, refreshKey, unsav
                 setDone({ family, from: n, changed: r.changed, jobId: r.jobId, note: r.note });
                 onRestored({ family, from: n, changed: r.changed, jobId: r.jobId, note: r.note });
             } else {
-                const r = await capi<{ jobId?: string | null; note?: string }>(`/tests/${t.id}/script-versions/${n}/restore`, { method: "POST" });
+                const r = await api<{ jobId?: string | null; note?: string }>(`/tests/${t.id}/script-versions/${n}/restore`, { method: "POST" });
                 setDone({ family, from: n, changed: true, jobId: r.jobId ?? null, note: r.note });
                 onRestored({ family, from: n, changed: true, jobId: r.jobId ?? null, note: r.note });
             }
             setRestoring(null);
             setPicked([]);
         } catch (e) {
-            setRestoreError(errorText(e));
+            setRestoreError(describeApiError(e));
         } finally {
             setBusy(false);
         }

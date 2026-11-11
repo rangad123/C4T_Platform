@@ -29,6 +29,9 @@ function findBash(): string | undefined {
     return undefined;
 }
 const BASH = findBash();
+/** The start scripts refuse a Node.js older than 24, and these tests use this computer's own Node.js as the download's, so on an older one
+ * they can only show the "too old" message: they run on Node.js 24 (as CI does) and are skipped, for that reason, on anything older. */
+const NODE_24 = Number(process.versions.node.split(".")[0]) >= 24;
 const PROXY = "http://maya:Pr0xyPass9@proxy.example:8080";
 
 const STAND_IN = `import fs from "node:fs";
@@ -88,7 +91,7 @@ describe("start-runner.cmd", () => {
         expect(START_SH).toMatch(/\n {8}75\)\n/);
     });
 
-    it.skipIf(process.platform !== "win32")("restarts the runner at once on exit code 75 and swaps in the Node.js the update staged", () => {
+    it.skipIf(process.platform !== "win32" || !NODE_24)("restarts the runner at once on exit code 75 and swaps in the Node.js the update staged", () => {
         const kit = kitFolder("cmd-swap");
         linkNode(path.join(kit, "node", "node.exe"));
         fs.writeFileSync(path.join(kit, "node", "which.txt"), "old");
@@ -109,7 +112,7 @@ describe("start-runner.cmd", () => {
         expect(r.out).not.toContain("never-printed-token");
     });
 
-    it.skipIf(process.platform !== "win32")("gives npm the company certificate store and runner.json's proxy, for npm only, without printing it", () => {
+    it.skipIf(process.platform !== "win32" || !NODE_24)("gives npm the company certificate store and runner.json's proxy, for npm only, without printing it", () => {
         const kit = kitFolder("cmd-npm", { proxy: PROXY });
         linkNode(path.join(kit, "node", "node.exe"));
         fs.writeFileSync(path.join(kit, "node", "npm.cmd"), "@echo off\r\nnode npm-stand-in.cjs %*\r\n");
@@ -123,7 +126,7 @@ describe("start-runner.cmd", () => {
         expect(r.code).toBe(0);
     });
 
-    it.skipIf(process.platform !== "win32")("leaves a proxy variable that is already set alone", () => {
+    it.skipIf(process.platform !== "win32" || !NODE_24)("leaves a proxy variable that is already set alone", () => {
         const kit = kitFolder("cmd-npm-env", { proxy: PROXY });
         linkNode(path.join(kit, "node", "node.exe"));
         fs.writeFileSync(path.join(kit, "node", "npm.cmd"), "@echo off\r\nnode npm-stand-in.cjs %*\r\n");
@@ -133,7 +136,7 @@ describe("start-runner.cmd", () => {
 });
 
 describe("start-runner.sh (Git Bash)", () => {
-    it.skipIf(!BASH)("restarts the runner at once on exit code 75 and swaps in the Node.js the update staged", () => {
+    it.skipIf(!BASH || !NODE_24)("restarts the runner at once on exit code 75 and swaps in the Node.js the update staged", () => {
         const kit = kitFolder("sh-swap");
         shim(path.join(kit, "node", "bin", "node"));
         fs.writeFileSync(path.join(kit, "node", "which.txt"), "old");
@@ -148,7 +151,7 @@ describe("start-runner.sh (Git Bash)", () => {
         expect(fs.readFileSync(path.join(kit, ".update", "node-previous", "which.txt"), "utf8")).toBe("old");
     });
 
-    it.skipIf(!BASH)("gives npm the company certificate store and runner.json's proxy, for npm only, without printing it", () => {
+    it.skipIf(!BASH || !NODE_24)("gives npm the company certificate store and runner.json's proxy, for npm only, without printing it", () => {
         const kit = kitFolder("sh-npm", { proxy: PROXY });
         shim(path.join(kit, "node", "bin", "node"));
         fs.writeFileSync(path.join(kit, "node", "bin", "npm"), `#!/bin/sh\nexec node npm-stand-in.cjs "$@"\n`, { mode: 0o755 });

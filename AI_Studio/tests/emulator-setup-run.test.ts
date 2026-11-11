@@ -76,7 +76,9 @@ describe.skipIf(WIN)("setup-emulator.sh under sh", () => {
             fs.writeFileSync(path.join(bin, "node"), `#!/bin/sh\necho ${nodeMajor}\n`, { mode: 0o755 });
             fs.writeFileSync(path.join(bin, "npx"), `#!/bin/sh\necho "stand-in npx $*"\nexit ${npxExit}\n`, { mode: 0o755 });
         }
-        const r = spawnSync("/bin/sh", [script], { env: { PATH: npxExit === null ? "/usr/bin:/bin" : `${bin}:/usr/bin:/bin` }, encoding: "utf8", timeout: 30_000 });
+        // PATH is only the stand-in folder (empty when Node.js is "missing"): the script needs nothing but shell builtins, and /usr/bin
+        // may hold a real Node.js, which would answer for the stand-in.
+        const r = spawnSync("/bin/sh", [script], { env: { PATH: bin }, encoding: "utf8", timeout: 30_000 });
         fs.rmSync(dir, { recursive: true, force: true });
         return { code: r.status, out: `${r.stdout}${r.stderr}` };
     };

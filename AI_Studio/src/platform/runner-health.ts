@@ -5,7 +5,7 @@
  */
 import { permissionsOf, sideOf, type Actor } from "./auth/actor.js";
 import type { ProjectScope } from "./auth/project-scope.js";
-import type { AgentRecord, AgentStore, AgentTokenRecord } from "./agent-store.js";
+import type { AgentRecord, AgentStore } from "./agent-store.js";
 import { ONLINE_MS } from "./agent-store.js";
 import { redactCredentials } from "../engine/net/company-network.js";
 
@@ -19,9 +19,6 @@ export function isPlatformAdmin(actor: Actor): boolean {
     const side = sideOf(actor);
     return side === "admin" || (side === "local" && permissionsOf(actor).has("ai_studio.platform.settings"));
 }
-
-/** A person's runner is changed (renamed, switched, removed) by that person; platform admins may remove it (its switches stay the owner's). */
-export const canManagePersonal = (actor: Actor, t: Pick<AgentTokenRecord, "ownerId">): boolean => (actor.kind === "user" && Boolean(actor.id) && actor.id === t.ownerId) || isPlatformAdmin(actor);
 
 /** May this actor see every person's runner (GET /api/admin/runners) and remove one? Platform admins, and people who manage runners everywhere. */
 export function seesEveryRunner(scope: Pick<ProjectScope, "allowed">, actor: Actor): boolean {
@@ -68,6 +65,3 @@ export function checkView(a: AgentRecord | undefined) {
     const c = a?.capabilities.check;
     return c ? { at: c.at, items: c.items.map((i) => ({ ...i, title: redactCredentials(i.title), ...(i.fix ? { fix: redactCredentials(i.fix) } : {}) })) } : undefined;
 }
-
-/** The name builder A's download route uses (routes/runner-kits.ts): the same rule as mayHaveRunner. */
-export const canAddPersonal = mayHaveRunner;

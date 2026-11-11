@@ -113,7 +113,7 @@ Steps marked (P2) need a protocol-2 agent. A protocol-1 agent does the same work
 For each: what happens, the words people see, and how the platform reconciles it. "Before this round" means at `e344261`.
 
 ### No runner online
-- **At Run:** the job gate answers 409 with a sentence and nothing is queued (`agent-services.ts:522`, `NO_AGENT_MESSAGE`). A chosen runner that is offline gets a 409 naming it; one the person may not use, a 404. *Built.*
+- **At Run:** the job gate answers 409 with a sentence and nothing is queued (`agent-services.ts`). A chosen runner that is offline gets a 409 naming it; one the person may not use, a 404. *Built.*
 - **After the job was queued** (the runner went away): the executor counts how long no capable runner has been online. After 90 s it fails the task: "No runner agent that can run these tests is connected. …" (`agent-services.ts:771-781`). The job ends `FAILED`. *Built.* In `runners` mode the sentence is "No runner that can run these tests is online. Start the runner, or add one on the Runners page." Rejected by every runner that could take it: the task fails at once with their reasons. *Built.*
 - **A schedule's run with no runner:** the schedule records it as skipped with the reason (`scheduler.ts:229-240`). "Run now" on a schedule is refused (409) while runs cannot start, instead of queuing a job nothing runs (`schedule-services.ts`). *Built.*
 

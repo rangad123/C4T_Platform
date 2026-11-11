@@ -4,10 +4,10 @@ import { api, artifactUrl, type ProjectDetail } from "../../api";
 import { Badge, Button, Callout, ErrorState, LinkButton, ListSkeleton } from "../../components/ui";
 import { plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { apiMessage } from "../manual/manual";
 import { APPROVAL_WORDS, CATEGORY_WORDS, isActive, runBadge, type AgentApproval, type AgentRunDetail as Detail, type AgentRunStep } from "./agent-runs";
+
 
 /** One agent run: while it goes, the latest picture, its steps, Stop and any approval it waits for; afterwards, the result. */
 export function AgentRunDetail({ projectId, runId }: { projectId: string; runId: string }) {
@@ -26,7 +26,7 @@ export function AgentRunDetail({ projectId, runId }: { projectId: string; runId:
             await api(`/projects/${projectId}/agent-runs/${runId}${path}`, { method: "POST", ...(body ? { body } : {}) });
             await run.reload();
         } catch (e) {
-            setError(apiMessage(e));
+            setError(describeApiError(e));
         } finally {
             setBusy("");
         }

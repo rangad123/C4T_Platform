@@ -156,7 +156,8 @@ deleted environment, test or channel referenced by a step makes **that step** fa
 - **By a schedule:** link the schedule (the Start automatically disclosure, `PUT …/schedules/:sid/runbook`, or
   `runbookId` when creating or changing a schedule). A due tick starts a runbook run instead of a plain job; its jobs are
   labelled as scheduled. If a runbook (or any job) is running, the tick is skipped with a plain reason and tried again,
-  exactly like an active job. "Run now" on the schedule starts the runbook too.
+  exactly like an active job. "Run now" on the schedule starts the runbook too, on the clicker's own runner; a due tick runs on the
+  schedule maker's. Either way the run's owner decides which tests it can take (their runner's code scripts, phone, iOS device).
 - **By a deploy token:** link the token (`PUT …/triggers/:tid/runbook`, or `runbookId` when creating the token). The
   pipeline's `POST /api/triggers/<token>/run` then answers `202 { "kind": "runbook", "runId", "runbook", "state":
   "running", "commit", "environment" }`; `GET /api/triggers/<token>/status/<runId>` returns `{ kind: "runbook", state,

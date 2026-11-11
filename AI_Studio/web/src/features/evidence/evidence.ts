@@ -62,8 +62,3 @@ export const isNearFailure = (step: number, failedStep?: number) => failedStep !
 
 export const LINE_TYPE: Record<string, string> = { error: "Error", pageerror: "Uncaught exception", warning: "Warning", log: "Log", info: "Info", debug: "Debug" };
 
-export function sizeText(bytes?: number): string {
-    if (bytes === undefined) return "";
-    if (bytes < 1024) return `${bytes} B`;
-    return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}

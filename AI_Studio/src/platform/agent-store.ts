@@ -442,7 +442,6 @@ const toAgent = (r: Record<string, any>): AgentRecord => ({
 });
 
 export type TaskStatus = "queued" | "running" | "done" | "failed" | "cancelled";
-export const FINAL_TASK_STATUSES: TaskStatus[] = ["done", "failed", "cancelled"];
 
 export interface TaskRecord {
     id: string;
@@ -637,10 +636,6 @@ export class AgentStore {
         return this.db.all(`SELECT * FROM agent_tokens WHERE kind = 'personal' AND owner_id = ? ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`, ownerId).map(toToken);
     }
 
-    countLivePersonalOf(ownerId: string): number {
-        return Number(this.db.get("SELECT COUNT(*) AS n FROM agent_tokens WHERE kind = 'personal' AND owner_id = ? AND revoked_at IS NULL", ownerId)?.n ?? 0);
-    }
-
     /** Retire every live credential of this person except `keepId` (one runner per person). Returns how many were retired. */
     retireOtherPersonal(ownerId: string, keepId: string | null): number {
         const at = new Date(this.clock()).toISOString();
@@ -665,28 +660,27 @@ export class AgentStore {
         return this.db.all(`SELECT * FROM agent_tokens WHERE kind = 'personal' AND revoked_at IS NULL ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`).map(toToken);
     }
 
-    /** The owner's switches. Only what is given changes. False when the runner is retired or unknown. */
+    /**
+     * The owner's switches. Only what is given changes. A personal credential's switches change on every live credential of its owner at
+     * once (a person who still has two computers from before round 45 would otherwise switch only one). False when the runner is retired or unknown.
+     */
     setTokenSwitches(id: string, s: { allowCodeScripts?: boolean; allowPrivateTargets?: boolean; allowRealPhone?: boolean }): boolean {
         if (s.allowCodeScripts === undefined && s.allowPrivateTargets === undefined && s.allowRealPhone === undefined) return Boolean(this.db.get("SELECT 1 AS x FROM agent_tokens WHERE id = ? AND revoked_at IS NULL", id));
         const bit = (v: boolean | undefined) => (v === undefined ? null : v ? 1 : 0);
         const r = this.db.run(
-            "UPDATE agent_tokens SET allow_code_scripts = COALESCE(?, allow_code_scripts), allow_private_targets = COALESCE(?, allow_private_targets), allow_real_phone = COALESCE(?, allow_real_phone) WHERE id = ? AND revoked_at IS NULL",
+            "UPDATE agent_tokens SET allow_code_scripts = COALESCE(?, allow_code_scripts), allow_private_targets = COALESCE(?, allow_private_targets), allow_real_phone = COALESCE(?, allow_real_phone) WHERE revoked_at IS NULL AND (id = ? OR (kind = 'personal' AND owner_id = (SELECT owner_id FROM agent_tokens WHERE id = ? AND kind = 'personal' AND revoked_at IS NULL)))",
             bit(s.allowCodeScripts),
             bit(s.allowPrivateTargets),
             bit(s.allowRealPhone),
             id,
+            id,
         );
-        return Number(r.changes) === 1;
+        return Number(r.changes) > 0;
     }
 
     /** Bind a credential to the computer that first used it (a no-op once bound). */
     bindMachine(id: string, machineId: string): void {
         this.db.run("UPDATE agent_tokens SET machine_id = ? WHERE id = ? AND machine_id IS NULL", machineId, id);
-    }
-
-    /** Was this credential made by trading an enrollment code? Only such a runner always sends its install id. */
-    isEnrolled(tokenId: string): boolean {
-        return Boolean(this.db.get("SELECT 1 AS x FROM runner_enrollments WHERE token_id = ?", tokenId));
     }
 
     /**
@@ -783,7 +777,7 @@ export class AgentStore {
         this.db.run("UPDATE runner_enrollments SET expires_ms = ? WHERE id = ? AND used_ms IS NULL", this.clock() - 1, id);
     }
 
-    /** Codes never used, a day past their life, are removed. A used code keeps its row: it says the runner was enrolled (isEnrolled). */
+    /** Codes never used, a day past their life, are removed. A used code keeps its row (its status: connected or used). */
     pruneEnrollments(): number {
         return Number(this.db.run("DELETE FROM runner_enrollments WHERE used_ms IS NULL AND expires_ms < ?", this.clock() - 24 * 60 * 60_000).changes);
     }
@@ -894,14 +888,14 @@ export class AgentStore {
     /**
      * May this person still run this project's tests (a personal runner takes their runs only while they may)? Read from what this server
      * keeps: the person exists and is active, the project is in their reach (all projects, or a membership row), and for an account made
-     * here their role there includes running tests. A Crowd4Test account's permissions come with each request and are not kept here, so for
-     * them this checks their status and reach (as of their latest arrival or membership change); running was checked when the run was started.
+     * here their role there includes running tests. A Crowd4Test account's permissions come with each request; for them this checks their
+     * status, reach and whether they held ai_studio.tests.run, as of their latest arrival or membership change (auth/crowd4test.ts personFor).
      */
     ownerMayRun(ownerId: string, projectId: string): boolean {
         // The open server acts as one person, with every project, while it is open (no accounts, no access key).
         if (ownerId === OPEN_OWNER_ID) return this.openMode() && Boolean(this.db.get("SELECT 1 AS x FROM projects WHERE id = ?", projectId));
-        const u = this.db.get<{ status: string | null; role: string | null; project_access: string | null; c4t_role: string | null; organization_id: string | null }>(
-            "SELECT status, role, project_access, c4t_role, organization_id FROM users WHERE id = ? AND role IS NOT NULL",
+        const u = this.db.get<{ status: string | null; role: string | null; project_access: string | null; c4t_role: string | null; organization_id: string | null; c4t_runs_tests: number | null }>(
+            "SELECT status, role, project_access, c4t_role, organization_id, c4t_runs_tests FROM users WHERE id = ? AND role IS NOT NULL",
             ownerId,
         );
         if (!u || u.status !== "active") return false;
@@ -910,6 +904,8 @@ export class AgentStore {
         const c4t = u.c4t_role !== null && u.c4t_role !== undefined;
         // A customer stays inside their organisation, whatever else they were given.
         if (c4t && u.c4t_role === "CUSTOMER" && (!u.organization_id || project.o !== u.organization_id)) return false;
+        // Unknown (null: not arrived since this was kept) counts as yes, as before it was kept.
+        if (c4t && u.c4t_runs_tests !== null && Number(u.c4t_runs_tests) === 0) return false;
         if (u.project_access !== "only") return c4t || runsTests(u.role);
         const member = this.db.get<{ role: string }>("SELECT role FROM user_projects WHERE user_id = ? AND project_id = ?", ownerId, projectId);
         if (!member) return false;

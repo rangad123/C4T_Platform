@@ -3,19 +3,23 @@ import { parseSpecText } from "../../engine/api/openapi.js";
 import { diffOpenApi, renderDiffMarkdown } from "../../engine/contracts/diff.js";
 import { apiChanges } from "../drift-store.js";
 import { HttpError } from "../http-error.js";
+import { guardedFetch, refusedRedirect } from "../guarded-fetch.js";
 import { assertAllowedTarget } from "../net-guard.js";
 import type { RouteCtx } from "./types.js";
 
 /** One side of a comparison: the document itself (text or already-parsed object) or an address to download it from. */
 const SideSchema = z.union([z.string().min(2).max(3_000_000), z.record(z.string(), z.unknown())]);
 
-async function resolve(side: z.infer<typeof SideSchema>, which: string): Promise<Record<string, any>> {
+export async function resolve(side: z.infer<typeof SideSchema>, which: string): Promise<Record<string, any>> {
     if (typeof side !== "string") return side;
     const text = side.trim();
     if (/^https?:\/\//i.test(text)) {
         await assertAllowedTarget(text);
-        const res = await fetch(text, { signal: AbortSignal.timeout(20_000), redirect: "manual" }).catch(() => undefined);
-        if (!res || !res.ok) throw new HttpError(422, `Could not download the ${which} description${res ? ` (HTTP ${res.status})` : ""}.`);
+        // Connects only to the address that was checked (a name that resolves privately later is refused too) and follows no redirect.
+        let status: number | undefined;
+        const res = await guardedFetch(text, { signal: AbortSignal.timeout(20_000) }).catch((e: unknown) => void (status = refusedRedirect(e)));
+        status ??= res?.status;
+        if (!res || !res.ok) throw new HttpError(422, `Could not download the ${which} description${status ? ` (HTTP ${status})` : ""}.`);
         return parse((await res.text()).slice(0, 5_000_000), which);
     }
     return parse(text, which);

@@ -12,12 +12,12 @@ import { GitImportDialog } from "../features/code/GitImportDialog";
 import { useHere } from "../features/auth/project-access";
 import { HandWrittenBadge } from "../features/code/TakeOver";
 import { CompatBadge } from "../features/variants/CompatBadge";
-import { api, getKey, projectKind, type ProjectDetail, type TestSummary, type ValidationStatus } from "../api";
+import { api, downloadFrom, projectKind, type ProjectDetail, type TestSummary, type ValidationStatus } from "../api";
 import { usePage } from "../components/Shell";
 import { Button, Callout, EmptyState, ErrorState, ListSkeleton, Menu, MenuItem, PageHeader, SeverityBadge, StatusBadge, Badge, severityKey, statusKey } from "../components/ui";
 import { BadgeKey, Tooltip } from "../components/Tooltip";
 import { help } from "../lib/help";
-import { downloadBlob, plural } from "../lib/format";
+import { plural } from "../lib/format";
 import { useDocumentTitle, useFetch, useOnFinish } from "../lib/hooks";
 import { KIND_LABEL, PRIORITY_LABEL, cleanReason, describeApiError, friendlyError, isActive, typeLabel } from "../lib/labels";
 import { go, routes, useRoute } from "../lib/router";
@@ -60,7 +60,6 @@ interface RequirementLink {
     kind: "automated" | "manual";
     testId: string;
 }
-const authHeaders = (): Record<string, string> => (getKey() ? { "x-api-key": getKey() } : {});
 
 export function ProjectTests({ id }: { id: string }) {
     const route = useRoute();
@@ -143,15 +142,12 @@ export function ProjectTests({ id }: { id: string }) {
     const runnersOnly = useExecutionMode() === "runners";
     const reloadAll = () => void Promise.all([tests.reload(), project.reload(), reviews.reload()]);
 
-    async function fetchFile(path: string, filename: string, type?: string) {
+    async function fetchFile(path: string, filename: string) {
         try {
-            const res = await fetch(`/api${path}`, { headers: authHeaders() });
-            if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error);
-            downloadBlob(await res.blob(), filename);
+            await downloadFrom(path, filename);
         } catch (e) {
             setNotice({ tone: "danger", text: `Download failed: ${describeApiError(e)}` });
         }
-        void type;
     }
 
     const exportItems: ExportItem[] = [

@@ -743,6 +743,8 @@ describe("the bar", () => {
         await menu.focus();
         await page.keyboard.press("Enter");
         await pwExpect(dialog()).toBeVisible();
+        // The panel reads the project and the runners first (about 40 ms); twelve Tabs take about as long, so wait for its controls.
+        await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeVisible();
         // Everything in the panel is reachable by Tab, in reading order, and the focus can be seen.
         const order: string[] = [];
         for (let i = 0; i < 12; i++) {

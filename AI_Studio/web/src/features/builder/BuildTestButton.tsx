@@ -3,9 +3,10 @@ import { useState } from "react";
 import { Button, Callout } from "../../components/ui";
 import { FieldHelp } from "../../components/Tooltip";
 import { go, routes } from "../../lib/router";
-import { Modal } from "../code/Modal";
-import { bapi, errorText } from "./builder";
+import { Modal } from "../../components/Modal";
+import { bapi } from "./builder";
 import "./builder.css";
+import { describeApiError } from "../../lib/labels";
 
 /** "Build a test" on the Tests page: name it, pick the kind, and the step editor opens with the first step already in place. */
 export function BuildTestButton({ projectId }: { projectId: string }) {
@@ -40,7 +41,7 @@ export function BuildTestDialog({ projectId, onClose }: { projectId: string; onC
             onClose();
             go(routes.builder(r.testId));
         } catch (e) {
-            setError(errorText(e));
+            setError(describeApiError(e));
             setBusy(false);
         }
     }

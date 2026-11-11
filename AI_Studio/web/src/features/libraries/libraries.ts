@@ -65,4 +65,3 @@ export function folderTree(folders: LibraryFolder[]): Array<LibraryFolder & { de
     return out;
 }
 
-export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;

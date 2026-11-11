@@ -288,15 +288,18 @@ export function signedOutText(message: string): string {
     return bare ? "You are signed out, or the access key was not accepted. Reload the page to sign in again." : message;
 }
 
-/** API errors from user actions → a sentence for the user. */
+/** API errors from user actions → a sentence for the user: the reason of the first rejected field, else the server's own sentence. */
 export function describeApiError(e: unknown): string {
     if (e instanceof Error) {
         const status = (e as { status?: number }).status;
         if (status === 0) return "We couldn’t reach the platform server. Check that it is running and try again.";
         if (status === 409) return e.message.startsWith("Job ") ? "A run is already in progress for this project. Wait for it to finish or stop it first." : e.message;
         if (status === 401) return signedOutText(e.message);
+        if (status === 403 && (!e.message || /^forbidden$/i.test(e.message))) return "Your role in this project does not allow this. Ask a project owner.";
         if (status === 400 && /private|loopback/i.test(e.message)) return "This server is configured to block private or local addresses.";
-        return e.message;
+        const issues = (e as { details?: unknown }).details;
+        if (Array.isArray(issues) && typeof (issues[0] as { message?: unknown } | undefined)?.message === "string") return (issues[0] as { message: string }).message;
+        return e.message || "Something went wrong. Try again.";
     }
     return String(e);
 }
@@ -442,9 +445,6 @@ export function stepSentence(s: any): string {
     }
     return s.description || s.action;
 }
-
-/** Status icon semantics for a step given the latest run. */
-export type StepState = "passed" | "failed" | "unknown";
 
 // ── Words that need one sentence of explanation ─────────────────────────────
 

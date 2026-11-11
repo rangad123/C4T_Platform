@@ -4,10 +4,11 @@ import { Badge, Button, Callout, EmptyState, LinkButton, PageHeader } from "../.
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { go, routes, useRoute } from "../../lib/router";
 import { Code2 } from "lucide-react";
-import { capi, starterTemplate, type Diagnostic, type SaveResult } from "./code";
+import { starterTemplate, type Diagnostic, type SaveResult } from "./code";
 import { Workbench } from "./Workbench";
 import { useRunPolicy } from "./policy";
 import "./code.css";
+import { api } from "../../api";
 
 /** The editor of an existing test is the Code tab of the test workbench (features/workbench/CodeTab.tsx). */
 
@@ -24,7 +25,7 @@ export function NewCodePage({ id }: { id: string }) {
 
     const save = useCallback(
         async (content: string): Promise<SaveResult> => {
-            const res = await capi<{ testId: string; version: number; diagnostics: Diagnostic[]; jobId: string | null; note?: string }>(`/projects/${id}/custom-tests`, {
+            const res = await api<{ testId: string; version: number; diagnostics: Diagnostic[]; jobId: string | null; note?: string }>(`/projects/${id}/custom-tests`, {
                 method: "POST",
                 body: { title, kind, content, ...(category ? { category } : {}) },
             });

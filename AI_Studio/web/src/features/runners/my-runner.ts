@@ -5,10 +5,8 @@
 import { ApiError, csrfHeader, getKey } from "../../api.js";
 import { useFetch, type Fetched } from "../../lib/hooks.js";
 import { signedOutText } from "../../lib/labels.js";
+import { routes } from "../../lib/router.js";
 import type { RunnerCheck, RunnerUpdateView } from "../agents/agents.js";
-
-/** Where the person sets up and looks after their runner: the "Your runner" section of Settings. */
-export const RUNNER_SETTINGS_HREF = "#/settings#runner";
 
 export type RunnerState = "online" | "busy" | "offline";
 
@@ -56,10 +54,7 @@ export interface AdminRunnerRow {
     lastSeenAt: string | null;
     version?: string | null;
     ownerName?: string | null;
-    owner?: string | { id?: string; name?: string | null } | null;
 }
-
-export const ownerOf = (r: AdminRunnerRow): string => (typeof r.owner === "string" ? r.owner : (r.ownerName ?? r.owner?.name ?? "Someone"));
 
 /** The person's runner, polled while the page is shown (a runner that comes online unlocks Run within seconds). */
 export function useMyRunner(pollMs = 15_000, on = true): Fetched<MyRunnerAnswer> {
@@ -72,7 +67,6 @@ export function useMyRunner(pollMs = 15_000, on = true): Fetched<MyRunnerAnswer>
 export const RUNNER_NOT_SET_UP = "Set up your runner in Settings to run tests.";
 export const RUNNER_OFFLINE = "Your runner is offline. Start it on your computer, then try again.";
 export const RUNNER_CODE_OFF = "Code scripts are switched off on your runner. Switch them on in Settings to run this test.";
-export const RUNNER_REFUSAL_CODES = new Set(["RUNNER_NOT_SET_UP", "RUNNER_OFFLINE", "RUNNER_CANNOT_RUN"]);
 
 /** The code a refusal carries (in its details, or at the top of the answer). */
 export function refusalCode(e: unknown): string | null {
@@ -86,14 +80,14 @@ export function refusalLink(e: unknown): string | null {
     if (!(e instanceof ApiError)) return null;
     const link = (e.details as { link?: unknown } | undefined)?.link;
     if (typeof link === "string" && /^#\//.test(link)) return link;
-    return isRunnerRefusal(e) ? RUNNER_SETTINGS_HREF : null;
+    return isRunnerRefusal(e) ? routes.allRunners : null;
 }
 
 /** A refusal that Settings fixes: the person's runner is not set up, is offline, or may not run this. The message is the server's own. */
 export function isRunnerRefusal(e: unknown): boolean {
     if (!(e instanceof ApiError) || e.status !== 409) return false;
     const code = refusalCode(e);
-    if (code) return RUNNER_REFUSAL_CODES.has(code) || code.startsWith("RUNNER_");
+    if (code) return code.startsWith("RUNNER_");
     return /\byour runner\b/i.test(e.message);
 }
 

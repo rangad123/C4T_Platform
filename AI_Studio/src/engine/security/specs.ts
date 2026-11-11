@@ -121,10 +121,6 @@ export function generateSecuritySpecs(model: AppModel, opts: SecurityGenOptions 
     }));
 }
 
-/** True for a spec the platform generated as a passive security check. */
-export const isSecurityCheckSpec = (spec: Pick<TestSpec, "source" | "steps">) =>
-    spec.source.origin === "security-check" || spec.steps.some((s) => s.action === "assertResponse" && isSecurityCheck(s.check));
-
 /**
  * When `run` failed *because a security check found a problem* (the failing step is one of the security
  * asserts and its error is the check's own message) return that message; otherwise undefined: a

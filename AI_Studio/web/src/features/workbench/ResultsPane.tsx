@@ -19,7 +19,7 @@ import { RelatedErrors } from "../sentry/RelatedErrors";
 import { RunStrip } from "../runs/RunStrip";
 import { prunedNote } from "../storage/storage";
 import { CompatibilityMatrix } from "../variants/CompatibilityMatrix";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 import "./workbench.css";
 import type { Detail } from "./test-model";
 

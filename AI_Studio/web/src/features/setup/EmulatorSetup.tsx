@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { getKey } from "../../api";
+import { ApiError, downloadFrom } from "../../api";
 import { Button, Callout } from "../../components/ui";
-import { downloadBlob } from "../../lib/format";
 
 /** Which setup script to offer first, from the browser's platform (just the default; both buttons are always shown). */
 function guessOs(): "windows" | "unix" {
@@ -22,12 +21,9 @@ export function EmulatorSetup() {
         setBusy(os);
         setError(null);
         try {
-            const res = await fetch(`/api/mobile/emulator-setup?os=${os}`, { headers: { ...(getKey() ? { "x-api-key": getKey() } : {}) } });
-            if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? "You do not have access to download this." : "The setup script could not be downloaded.");
-            const name = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? (os === "windows" ? "setup-emulator.cmd" : "setup-emulator.sh");
-            downloadBlob(await res.blob(), decodeURIComponent(name));
+            await downloadFrom(`/mobile/emulator-setup?os=${os}`, os === "windows" ? "setup-emulator.cmd" : "setup-emulator.sh");
         } catch (e) {
-            setError(e instanceof Error ? e.message : "The setup script could not be downloaded.");
+            setError(e instanceof ApiError && (e.status === 401 || e.status === 403) ? "You do not have access to download this." : "The setup script could not be downloaded.");
         } finally {
             setBusy(null);
         }

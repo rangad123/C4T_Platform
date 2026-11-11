@@ -54,6 +54,8 @@ test is made: the recorder, the step editor, the text format and the generated s
 - If it fails (another status, a timeout after 30 seconds, an address that is refused) the run **stops before any test starts**: the job fails
   with "The test data reset failed: POST /test/reset answered 500; 204 was expected. No test was run, so no result changed." Test statuses and
   history are untouched. The last outcome is shown under the form.
+- The request connects only to the address that was checked (a name that resolves to a private address when connecting is refused too,
+  with `BLOCK_PRIVATE_TARGETS`), and a redirect is not followed.
 - An exploration and a test built from a sentence do not reset (they make their own data).
 
 ## How it works

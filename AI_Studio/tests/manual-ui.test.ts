@@ -276,7 +276,8 @@ describe("Releases tab", () => {
         await pwExpect(page.getByText(XSS_TITLE, { exact: true }).first()).toBeVisible();
         expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
         const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download report" }).click()]);
-        expect(download.suggestedFilename()).toBe("sign-off-2-4.html");
+        // Saved under the server's own name (downloadFrom, like every download), which names the project too.
+        expect(download.suggestedFilename()).toBe("signoff-atlas-shop-2-4.html");
         const html = fs.readFileSync((await download.path())!, "utf8");
         expect(html).toContain("Approved");
         expect(html).toContain("Dana Lee");

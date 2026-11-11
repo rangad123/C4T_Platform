@@ -1,7 +1,7 @@
 import { Globe } from "lucide-react";
 import { ApiError, api, uploadApk, uploadIpa, type AppDetails, type Platform } from "../../api";
 import { FilePicker } from "../../components/ui";
-import { formatBytes } from "../storage/storage";
+import { formatBytes } from "../../lib/format";
 
 /**
  * The app a project tests, by its platform (round 37): the address of a web application, an Android app as an .apk or its Google

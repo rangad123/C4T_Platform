@@ -36,6 +36,7 @@ import { activeJobOf, OverlapError, runnableTestIds, type RunbookStart } from ".
 import type { Schedule } from "./schedule-store.js";
 import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
 import { currentActor } from "./auth/actor.js";
+import { jobOwnerId, ownerIdOfActor } from "./agent-store.js";
 
 /** The longest one step may take, and the longest a whole run may take. Tests inject small values. */
 export const STEP_CAP_MS = 30 * 60_000;
@@ -54,7 +55,7 @@ export interface RunbookServiceOptions {
     staleMs?: number;
 }
 
-export type StartedBy = { kind: "manual" } | { kind: "schedule"; scheduleId: string } | { kind: "deploy"; tokenId: string; commit?: string; environment?: string; label?: string };
+export type StartedBy = { kind: "manual" } | { kind: "schedule"; scheduleId: string; /** Whose runner runs it: a "Run now" clicker, else the schedule's maker. */ ownerId?: string | null } | { kind: "deploy"; tokenId: string; commit?: string; environment?: string; label?: string };
 
 /** A second runbook run for a project that already has one going. */
 export class RunbookOverlapError extends OverlapError {
@@ -152,8 +153,9 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
     const capText = (ms: number) => duration(ms);
 
     /** Tests a "run tests" step stands for, or the reason it stands for none. */
-    async function selectTests(projectId: string, step: RunStepT): Promise<{ ids: string[]; problem?: string }> {
-        const runnable = new Set(await runnableTestIds(repo, projectId, step.environment ? "environment" : "validate"));
+    async function selectTests(projectId: string, step: RunStepT, ownerId: string | null): Promise<{ ids: string[]; problem?: string }> {
+        // The run's owner decides what their runner may take (code tests, a phone, an iOS device), as for any run of theirs.
+        const runnable = new Set(await runnableTestIds(repo, projectId, step.environment ? "environment" : "validate", ownerId));
         let pool = repo.listTests(projectId);
         const scope = step.scope;
         if (scope !== "all") {
@@ -184,24 +186,31 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
         for (const extra of [config.openApiUrl, config.apiBaseUrl]) if (typeof extra === "string" && extra) await assertAllowedTarget(extra);
     }
 
+    /**
+     * Whose runner runs the run's steps (round 45): who started it (by hand, or "Run now" on its schedule), else the schedule's or deploy
+     * trigger's creator (a run resumed after a restart, when what was kept in memory is gone).
+     */
+    function starterOf(run: RunbookRun): JobOptions["startedBy"] {
+        const starter = starters.get(run.id);
+        if (starter) return starter;
+        if (run.trigger === "schedule") {
+            const owner = run.triggerRef ? (repo.db.get<{ created_by: string | null }>("SELECT created_by FROM schedules WHERE id = ?", run.triggerRef)?.created_by ?? null) : null;
+            return { kind: "schedule", id: run.triggerRef ?? null, ownerId: owner };
+        }
+        if (run.trigger === "deploy") {
+            const owner = run.triggerRef ? (repo.db.get<{ created_by: string | null }>("SELECT created_by FROM trigger_tokens WHERE id = ?", run.triggerRef)?.created_by ?? null) : null;
+            return { kind: "trigger", id: run.triggerRef ?? null, ownerId: owner };
+        }
+        return undefined;
+    }
+
     function labelOptions(run: RunbookRun, options: JobOptions): JobOptions {
         options.runbookRunId = run.id;
-        // Whose runner runs the step (round 45): the schedule's or deploy trigger's creator, or the person who started the runbook.
-        if (run.trigger === "schedule") {
-            options.trigger = "schedule";
-            if (run.triggerRef) options.scheduleId = run.triggerRef;
-            const owner = run.triggerRef ? (repo.db.get<{ created_by: string | null }>("SELECT created_by FROM schedules WHERE id = ?", run.triggerRef)?.created_by ?? null) : null;
-            options.startedBy = { kind: "schedule", id: run.triggerRef ?? null, ownerId: owner };
-        } else if (run.trigger === "deploy") {
-            options.trigger = "deploy";
-            options.deploy = deployInfo.get(run.id) ?? {};
-            const owner = run.triggerRef ? (repo.db.get<{ created_by: string | null }>("SELECT created_by FROM trigger_tokens WHERE id = ?", run.triggerRef)?.created_by ?? null) : null;
-            options.startedBy = { kind: "trigger", id: run.triggerRef ?? null, ownerId: owner };
-        } else {
-            options.trigger = "manual";
-            const starter = starters.get(run.id);
-            if (starter) options.startedBy = starter;
-        }
+        options.trigger = run.trigger === "schedule" ? "schedule" : run.trigger === "deploy" ? "deploy" : "manual";
+        if (run.trigger === "schedule" && run.triggerRef) options.scheduleId = run.triggerRef;
+        if (run.trigger === "deploy") options.deploy = deployInfo.get(run.id) ?? {};
+        const starter = starterOf(run);
+        if (starter) options.startedBy = starter;
         return options;
     }
     /** Who started a runbook by hand (kept in memory for its jobs' owner; a run resumed after a restart is attributed by the request that resumes it). */
@@ -273,7 +282,7 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
             const app = repo.getLatestApplicationPublic(run.projectId);
             if (!app) throw new StepProblem("This project has no application yet. Run an analysis or import tests first.");
             await assertAppTargets({ url: app.url as string, config: app.config as Record<string, any> });
-            const { ids, problem } = await selectTests(run.projectId, step);
+            const { ids, problem } = await selectTests(run.projectId, step, jobOwnerId({ startedBy: starterOf(run) }));
             if (problem) throw new StepProblem(problem);
             let options: JobOptions;
             if (step.environment) {
@@ -568,6 +577,7 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
                 const a = currentActor();
                 if (a.kind === "user" || a.kind === "open" || a.kind === "key") starters.set(run.id, { kind: a.kind, id: a.id ?? null });
             }
+            if (by.kind === "schedule" && by.ownerId !== undefined) starters.set(run.id, { kind: "schedule", id: by.scheduleId, ownerId: by.ownerId });
             if (by.kind === "deploy") deployInfo.set(run.id, { ...(by.commit ? { commit: by.commit } : {}), ...(by.environment ? { environment: by.environment } : {}), ...(by.label ? { label: by.label } : {}) });
             launch(run);
             return run;
@@ -576,7 +586,8 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
         async startForSchedule(s) {
             const runbookId = store.scheduleLink(s.id);
             if (!runbookId) return undefined;
-            const run = await services.start(runbookId, { kind: "schedule", scheduleId: s.id });
+            // "Run now" passes the clicker as createdBy (schedule-services.ts runNow): their runner runs it, not the maker's.
+            const run = await services.start(runbookId, { kind: "schedule", scheduleId: s.id, ownerId: s.createdBy ?? null });
             return { runbookRunId: run.id, runbookName: run.runbookName };
         },
 
@@ -626,7 +637,7 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
             const out: string[] = [];
             for (const [i, s] of def.steps.entries()) {
                 if (s.type !== "run") continue;
-                const { problem } = await selectTests(projectId, s);
+                const { problem } = await selectTests(projectId, s, ownerIdOfActor(currentActor()));
                 if (problem) out.push(`Step ${i + 1}: ${problem}`);
             }
             return out;

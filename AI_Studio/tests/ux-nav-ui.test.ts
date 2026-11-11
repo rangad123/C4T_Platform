@@ -344,7 +344,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
     });
 
     it("a project's runners (round 45): the old link opens Your runner in Settings, with no project sections", async () => {
-        await visit(routes.runners(P()));
+        await visit(`#/projects/${P()}/runners`);
         await pwExpect(page.getByTestId("your-runner")).toBeVisible();
         await pwExpect(page.getByRole("heading", { name: "Your runner", exact: true })).toBeVisible();
         await pwExpect(page.getByRole("navigation", { name: "Project sections" })).toHaveCount(0);
@@ -368,7 +368,7 @@ describe("the project's places, in the order of the testing lifecycle", () => {
 
     it("an empty project: every place still loads and says what to do, no error", async () => {
         const e = empty.projectId;
-        for (const h of [routes.project(e), routes.requirements(e), routes.cases(e), routes.cases(e, "manual"), routes.suites(e), routes.scripts(e), routes.scripts(e, "steps"), routes.agentRuns(e), routes.runs(e), routes.runs(e, "releases"), routes.projectSettings(e), routes.runners(e)]) {
+        for (const h of [routes.project(e), routes.requirements(e), routes.cases(e), routes.cases(e, "manual"), routes.suites(e), routes.scripts(e), routes.scripts(e, "steps"), routes.agentRuns(e), routes.runs(e), routes.runs(e, "releases"), routes.projectSettings(e), `#/projects/${e}/runners`]) {
             await visit(h);
             await page.waitForTimeout(400);
             await pwExpect(page.locator('.content [role="alert"]'), h).toHaveCount(0);
@@ -607,7 +607,7 @@ describe("old links keep working", () => {
         expect(routes.releases(p)).toBe("#/projects/p1/runs?section=releases");
         expect(routes.compliance(p)).toBe("#/projects/p1/runs?section=compliance");
         expect(routes.manualCases(p)).toBe("#/projects/p1/tests?section=manual");
-        expect(routes.runners(p)).toBe("#/settings#runner");
+        expect(routes.allRunners).toBe("#/settings#runner");
         // No helper of `routes` builds a link that the alias table would move again.
         const sample = (k: string, f: unknown): string[] => (typeof f === "string" ? [f] : k === "writeCode" ? [routes.writeCode(p, { title: "x", kind: "web" })] : k === "guideTopic" ? [routes.guideTopic("x")] : [(f as (a: string, b?: string) => string)(p), (f as (a: string, b: string) => string)(p, "x")]);
         // Round 37: `routes.folders` is kept on purpose as the old link of the Folders place; it lands on Reusable libraries.
@@ -666,7 +666,6 @@ describe("every route builder opens a page without an error", () => {
             runs: RUNS.map((k) => routes.runs(P(), k)),
             run: [routes.run(P(), jobId)],
             schedule: [routes.schedule(P()), routes.schedule(P(), "run-1")],
-            runners: [routes.runners(P())],
             requirements: [routes.requirements(P())],
             requirement: [routes.requirement(P(), requirementId)],
             cases: CASES.map((k) => routes.cases(P(), k)),
@@ -697,7 +696,6 @@ describe("every route builder opens a page without an error", () => {
             develop: [routes.develop],
             createProject: [routes.createProject],
             allRunners: [routes.allRunners],
-            runner: [routes.runner("r1")],
             folders: [routes.folders],
             integrations: [routes.integrations],
             libraries: [routes.libraries],

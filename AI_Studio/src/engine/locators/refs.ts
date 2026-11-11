@@ -140,11 +140,6 @@ export function useRefsAt(spec: TestSpec, names: ReadonlyMap<number, string>): T
     return mapLocators(spec, (_l, i) => (names.has(i) ? ({ ref: names.get(i)! } as unknown as Locator) : _l));
 }
 
-/** The spec with one step's locator replaced (healing, "make shared"). */
-export function withLocatorAt(spec: TestSpec, stepIndex: number, locator: Locator): TestSpec {
-    return mapLocators(spec, (l, i) => (i === stepIndex ? locator : l));
-}
-
 /** Builds the lookup table `resolveSpecRefs` needs from stored elements. */
 export function indexOf(elements: Iterable<{ name: string; kind: ElementKind; locator: Locator; alternatives?: Locator[] }>): ObjectIndex {
     const m = new Map<string, ObjectEntry>();

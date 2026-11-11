@@ -1,6 +1,7 @@
 /** Types, wording and data hooks for the test recorder (the API shapes are fixed in .scratch/briefs/RECORDER-API-SHAPES.md). */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { csrfHeader, getKey } from "../../api";
+import { api, ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
 import type { Agent } from "../agents/agents";
 
 export interface RecLocator {
@@ -80,52 +81,9 @@ export function agentRecordProblem(a: RecorderAgent, headed: boolean): string | 
 /** The agent a recording runs on, or undefined when it runs on this server. */
 export const agentOf = (r: Recording | undefined) => (r?.runner?.kind === "agent" ? r.runner : undefined);
 
-/** An answer the platform gave that was not a success, with the body kept (the 409 carries the running session). */
-export class RecError extends Error {
-    constructor(
-        readonly status: number,
-        message: string,
-        readonly body: Record<string, unknown> | undefined,
-    ) {
-        super(message);
-    }
-}
-
-/** Like the shared api() helper, but keeps the whole error body: the "already recording" answer names the session. */
-export async function recApi<T = Recording>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
-    let res: Response;
-    try {
-        res = await fetch(`/api${path}`, {
-            method: init?.method ?? "GET",
-            headers: { ...(init?.body !== undefined ? { "content-type": "application/json" } : {}), ...(getKey() ? { "x-api-key": getKey() } : {}), ...csrfHeader(init?.method) },
-            body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
-        });
-    } catch {
-        throw new RecError(0, "We couldn’t reach the platform server. Check that it is running and try again.", undefined);
-    }
-    const text = await res.text();
-    let data: unknown = text;
-    if (text.startsWith("{") || text.startsWith("[")) {
-        try {
-            data = JSON.parse(text);
-        } catch {
-            /* keep the text */
-        }
-    }
-    if (!res.ok) {
-        const body = data && typeof data === "object" ? (data as Record<string, unknown>) : undefined;
-        const message = typeof body?.error === "string" && body.error ? body.error : res.statusText || "Something went wrong. Try again.";
-        throw new RecError(res.status, message, body);
-    }
-    return data as T;
-}
-
-export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
 /** The id of the session already running, when the 409 answer names it. */
-export function activeSessionId(e: RecError): string | undefined {
+export function activeSessionId(e: ApiError): string | undefined {
     const b = e.body;
-    if (!b) return undefined;
     const rec = b.recording as { id?: unknown } | undefined;
     const details = b.details as { recordingId?: unknown } | undefined;
     for (const v of [b.recordingId, details?.recordingId, b.id, b.activeRecordingId, b.sessionId, rec?.id]) if (typeof v === "string" && v) return v;
@@ -231,7 +189,7 @@ const POLL_MS = 1000;
 
 export interface Session {
     rec: Recording | undefined;
-    error: RecError | undefined;
+    error: ApiError | undefined;
     loading: boolean;
     /** Put in an answer a change returned (it is newer than any poll that was already on its way). */
     apply: (r: Recording) => void;
@@ -243,7 +201,7 @@ export interface Session {
  * the tab is hidden and refreshes at once when it is shown again.
  */
 export function useSession(rid: string | null): Session {
-    const [state, setState] = useState<{ rec?: Recording; error?: RecError; loading: boolean }>({ loading: rid !== null });
+    const [state, setState] = useState<{ rec?: Recording; error?: ApiError; loading: boolean }>({ loading: rid !== null });
     const seq = useRef(0);
     const runRef = useRef<() => Promise<void>>();
     const statusRef = useRef<Recording["status"]>();
@@ -261,7 +219,7 @@ export function useSession(rid: string | null): Session {
             clearTimeout(timer);
             const mine = seq.current;
             try {
-                const next = await recApi<Recording>(`/recordings/${rid}`);
+                const next = await api<Recording>(`/recordings/${rid}`);
                 if (cancelled) return;
                 if (seq.current === mine) {
                     statusRef.current = next.status;
@@ -269,7 +227,7 @@ export function useSession(rid: string | null): Session {
                 }
             } catch (e) {
                 if (cancelled) return;
-                const err = e instanceof RecError ? e : new RecError(0, errorText(e), undefined);
+                const err = e instanceof ApiError ? e : new ApiError(0, describeApiError(e));
                 setState((s) => (s.rec ? s : { error: err, loading: false }));
                 // A missing session never comes back; anything else may be a hiccup, keep trying.
                 if (err.status === 404) return;

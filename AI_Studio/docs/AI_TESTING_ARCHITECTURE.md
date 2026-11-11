@@ -491,7 +491,7 @@ built UI in a real browser through the whole journey (welcome → bad URL → an
 tests → test detail → code → run again → import) and fails on any browser console error. Bugs this found:
 a stale tests list after an analysis finished, and `localhost` defaulting to `https`. Long areas page 50 tests at a time (counts still cover the whole area; search covers all of it). The UI tests run on Chromium, Firefox and WebKit (`npm run test:ui:browsers`; all pass on the three). `tests/ui-flows.test.ts` covers an API-key-protected server (key screen, wrong key, remembered key) and the visual-review loop (diff shown → *Accept new screenshot* → passes).
 
-Dependencies: `lucide-react` (ISC), `highlight.js` (BSD-3-Clause).
+Dependencies: `lucide-react` (ISC); code is coloured with the editor's own `@lezer/highlight` and `@codemirror/lang-javascript` (MIT).
 
 ## 11–12. Third-party repositories and licenses
 

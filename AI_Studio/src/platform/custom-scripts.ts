@@ -8,7 +8,6 @@
  *  - saving never runs the script by itself: a validation job is queued the normal way, which the run policy gates
  *    (platform/custom-policy.ts). When it cannot run, the test stays "Not validated" and the answer says why.
  */
-import path from "node:path";
 import { checkScript, describeErrors, guardAvailable, type Diagnostic } from "../engine/custom/guard.js";
 import { isHelperName, MAX_HELPER_BYTES } from "../engine/custom/helpers.js";
 import { defaultAdapterFor, hasAdapter, renderWithAdapter } from "../engine/frameworks/index.js";
@@ -323,6 +322,3 @@ function locateImport(content: string, name: string): { line: number; column: nu
     }
     return { line: 1, column: 1 };
 }
-
-/** A path safe to show to a person: only the file name. */
-export const shortName = (p: string): string => path.basename(p);

@@ -175,6 +175,9 @@ let versionB: string;
 let rows: ActivityRow[];
 let updates: RunnerUpdates;
 let db: Db;
+/** "Update automatically" off (0) or back to absent (on), as the earlier release's file could leave it: no route sets it any more. */
+const setAuto = (on: Db, agentId: string, auto: boolean) =>
+    on.run("INSERT INTO runner_update_settings (agent_id, auto, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET auto = excluded.auto", agentId, auto ? null : 0, new Date().toISOString());
 
 beforeEach(() => {
     platformDir = fresh("platform");
@@ -220,14 +223,14 @@ describe("the platform's side", () => {
         const upgraded = new Db(path.join(dir, "platform.db"));
         try {
             const first = new RunnerUpdates({ db: upgraded, dataDir: dir });
-            first.setAuto("old2", false);
+            setAuto(upgraded, "old2", false);
             const rows = upgraded.all<{ agent_id: string; auto: number | null; requested_at: number | null; reported: string | null }>("SELECT agent_id, auto, requested_at, reported FROM runner_update_settings ORDER BY agent_id");
             expect(rows).toEqual([
                 { agent_id: "old1", auto: 0, requested_at: 1234, reported: "updated|x" },
                 { agent_id: "old2", auto: 0, requested_at: null, reported: null },
             ]);
             // A restart does not import again over what changed since; the file is left for a rollback and not rewritten.
-            first.setAuto("old1", true);
+            setAuto(upgraded, "old1", true);
             new RunnerUpdates({ db: upgraded, dataDir: dir });
             expect(upgraded.get<{ auto: number | null }>("SELECT auto FROM runner_update_settings WHERE agent_id = 'old1'")!.auto).toBeNull(); // back on: absent, as in the file
             expect(JSON.parse(fs.readFileSync(path.join(dir, "runner-updates.json"), "utf8")).agents.old1.auto).toBe(false);
@@ -267,7 +270,7 @@ describe("the platform's side", () => {
         const kit = writeKit(bundleA, versionA);
         const { u } = runnerOn(kit);
         const agent = { id: "a2", name: "Maya", projectId: "p1", node: process.version, capabilities: caps(u, versionA) };
-        updates.setAuto("a2", false);
+        setAuto(db, "a2", false);
         expect(updates.wanted(agent)).toBeUndefined();
         expect(updates.publicView(agent)).toMatchObject({ can: true, auto: false, outOfDate: true, latest: versionB, requested: false });
         updates.request("a2");
@@ -286,7 +289,7 @@ describe("the platform's side", () => {
         expect(updates.wanted({ ...agent, capabilities: failed })).toBeUndefined();
         expect(updates.publicView({ ...agent, capabilities: failed })).toMatchObject({ state: "failed", error: "The file runner.mjs arrived damaged." });
         // Back on: automatic again. An "updated" report is one more row.
-        updates.setAuto("a2", true);
+        setAuto(db, "a2", true);
         updates.observe(agent, { ...agent.capabilities, kitVersion: versionB, update: { can: true, state: "updated", from: versionA, to: versionB, at: new Date(Date.now() + 1000).toISOString() } });
         expect(rows.map((r) => r.action)).toEqual(["runner-update-failed", "runner-updated"]);
         expect(rows[1]!.detail).toBe(`Runner “Maya” updated itself from ${versionA} to ${versionB}.`);

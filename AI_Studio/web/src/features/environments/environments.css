@@ -10,9 +10,6 @@
 .env-strip > li { border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 8px 12px; display: grid; gap: 4px; min-width: 150px; background: var(--surface-raised); }
 .env-strip > li.production { border-color: var(--status-error-line); }
 .env-strip .why { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; max-width: 360px; }
-.env-picker { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.env-picker select.input { width: auto; min-width: 150px; height: 36px; }
-.env-picker .check { padding: 6px 10px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .data-table th, .data-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-default); overflow-wrap: anywhere; }
 .data-table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: var(--radius-sm); }

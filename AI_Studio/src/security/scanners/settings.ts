@@ -120,11 +120,3 @@ export function scannerSettingsPublic(s: ScannerSettings): Record<string, unknow
         promptfoo: { pathSet: Boolean(s.promptfoo.path) },
     };
 }
-
-/** The default settings, used by tests and by the standalone worker when no config is at hand. */
-export const defaultScannerSettings = (): ScannerSettings => scannerSettings({});
-
-/** Only used by tests that need an enabled scanner without touching the environment. */
-export function withEnabled(base: ScannerSettings, ...ids: ScannerId[]): ScannerSettings {
-    return { ...base, enabled: [...new Set([...base.enabled, ...ids])] };
-}

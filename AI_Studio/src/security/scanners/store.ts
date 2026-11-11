@@ -197,8 +197,6 @@ export function listRuns(db: Db, projectId: string, limit = 100): ScanRun[] {
     return db.all<Row>("SELECT * FROM security_scan_runs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?", projectId, limit).map(rowOf);
 }
 
-export const isFinishedRun = (state: ScanRunState): boolean => FINISHED_RUN_STATES.includes(state);
-
 /** The scanners this project allows. Empty means none: a tool switched on platform-wide still may not scan this client's targets. */
 export function projectScanners(db: Db, projectId: string): ScannerId[] {
     ensureScannerTables(db);

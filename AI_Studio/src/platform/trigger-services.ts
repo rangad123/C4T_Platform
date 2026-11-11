@@ -12,6 +12,7 @@ import { deliver, type DeliveryOptions } from "./alerts.js";
 import { HttpError } from "./http-error.js";
 import { assertRunTarget } from "./agent-services.js";
 import { assertAllowedTarget } from "./net-guard.js";
+import { assertC4tOwnerMayRun } from "./c4t-service.js";
 import { ignoredNote } from "../engine/quarantine/rules.js";
 import { passRate } from "../engine/summary/pass-rate.js";
 import { gateJob } from "./quarantine-service.js";
@@ -156,6 +157,8 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
             const wait = store.waitMs(token, minGap);
             if (wait > 0) throw new RateLimited(Math.ceil(wait / 1000));
             const input = TriggerRunBody.parse(rawInput ?? {});
+            // The run is the token maker's, with nobody signed in: a Crowd4Test maker is asked about first (c4t-service.ts).
+            await assertC4tOwnerMayRun(p, token.createdBy);
 
             const app = repo.getLatestApplicationPublic(token.projectId);
             if (!app) throw new HttpError(409, "This project has no application yet. Run an analysis or import tests first.");

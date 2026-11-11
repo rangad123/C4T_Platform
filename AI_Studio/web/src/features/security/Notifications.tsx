@@ -5,10 +5,10 @@ import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, Skeleton, t
 import { BadgeKey, HelpTip, keyEntries } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
 import { NOTIFY_REASON } from "../../lib/help";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { SecurityLayout, canRun, useRole } from "./SecurityChrome";
-import { SEC, securityError, when } from "./security";
+import { SEC, when } from "./security";
 
 /**
  * Messages when an assessment ends (OPS: src/security/notify.ts, routes/notifications.ts). They go through the project's own alert
@@ -67,7 +67,7 @@ export function NotificationsPage({ id }: { id: string }) {
             await f.reload();
             setSaved("Saved. The next assessment that ends uses these settings.");
         } catch (e) {
-            setProblem(securityError(e));
+            setProblem(describeApiError(e));
         } finally {
             setBusy(false);
         }

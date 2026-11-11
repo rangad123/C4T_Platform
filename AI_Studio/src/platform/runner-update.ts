@@ -349,10 +349,6 @@ export class RunnerUpdates {
         return { size: l.packSize, body: Readable.from(body(), { objectMode: false }) };
     }
 
-    setAuto(agentId: string, auto: boolean): void {
-        this.patch(agentId, { auto: auto ? undefined : false });
-    }
-
     request(agentId: string): void {
         this.patch(agentId, { requestedAt: this.clock() });
     }

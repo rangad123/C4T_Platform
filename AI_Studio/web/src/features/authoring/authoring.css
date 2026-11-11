@@ -1,13 +1,10 @@
 /* Write a test in plain words. Uses the app's design tokens only. */
-dialog.write-test { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-card); background: var(--surface-raised); color: var(--text-primary); overflow: auto; }
-dialog.write-test::backdrop { background: rgba(10, 20, 20, 0.5); }
-.write-test .inner { display: grid; gap: 16px; padding: 20px; }
+dialog.write-test { width: min(640px, calc(100vw - 32px)); }
 .write-test textarea.input { min-height: 132px; line-height: 1.5; }
 .write-test .counter { text-align: right; }
 .write-test .examples { display: grid; gap: 6px; }
 .write-test .examples .chips { flex-direction: column; align-items: stretch; }
 .write-test .examples .chip { height: auto; min-height: 32px; padding: 6px 12px; text-align: left; font-weight: 500; }
-.write-test .foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .plain-origin { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-sunken); }
 .plain-origin q { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; quotes: "“" "”"; }
 

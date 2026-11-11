@@ -9,7 +9,7 @@
  *    (a link or a folder is skipped), one by one; a file that cannot be removed is logged and skipped, never fatal;
  *  - the artifact row stays, marked pruned, and so do the execution rows: run history, trends and flaky detection do not change.
  */
-import { prunedMessage, formatBytes, previewSentence } from "../engine/retention/format.js";
+import { formatBytes, previewSentence } from "../engine/retention/format.js";
 import type { RetentionPolicy } from "../engine/retention/policy.js";
 import { planPrune, type PrunePlan, type RetentionArtifact, type RetentionExecution } from "../engine/retention/rules.js";
 import type { Platform } from "./bootstrap.js";
@@ -216,9 +216,4 @@ export async function runScheduledRetention(p: Platform, now = Date.now()): Prom
         }
     }
     return out;
-}
-
-/** The note for a removed file, for the artifact route. */
-export function removedNote(row: Row): string {
-    return prunedMessage(String(row.kind), String(row.pruned_at));
 }

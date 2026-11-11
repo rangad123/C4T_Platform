@@ -20,6 +20,12 @@ Access is permission-based (decision D-20). The full model is in [../product-res
   - Testers never see AI cost or usage: the server removes cost and token figures from everything a tester receives.
   - Testers cannot create projects, manage members, manage AI keys or change platform settings.
 - A grant or withdrawal in the admin panel applies within 30 seconds. Suspended or deactivated accounts are refused with the reason Crowd4Test gives.
+- Schedules and deploy triggers run in their maker's name with nobody signed in. Before each such run AI Studio asks Crowd4Test whether the
+  maker's account is still active (the people service, `C4T_SERVICE_TOKEN`); whether they may run tests is what they held when they last
+  arrived. An account that is no longer active gets no more runs from its next scheduled or triggered run on, until Crowd4Test lets
+  them in again. Someone who keeps an active account but loses AI Studio or "run tests" is stopped only once they next open AI Studio
+  (the people service does not say what a person may do), so take them out of the project here too. If Crowd4Test cannot answer, the
+  run is not started and the schedule says why.
 - People who sign in with Crowd4Test cannot make personal API tokens: a token would keep working after the account was suspended. Scripts and runners use the access key and runner tokens.
 
 ## How it works
@@ -27,7 +33,7 @@ Access is permission-based (decision D-20). The full model is in [../product-res
 1. **One cookie for both sites.** crowd4test.com writes `c4t_access` and a small marker, `c4t_shared`, for `.crowd4test.com`, so the browser also sends them to aistudio.crowd4test.com (`AUTH_COOKIE_DOMAIN` in `C4T_Platform/web`). The refresh cookie, `c4t_refresh`, stays on crowd4test.com alone.
 2. **AI Studio checks every cookie with the Crowd4Test API.** It calls `GET /v1/auth/me`, the same check every crowd4test.com page makes. It never trusts the cookie by itself. A cookie's answer is reused for 30 seconds, so a page that makes many calls costs one check.
 3. **Renewing stays on crowd4test.com.** The access cookie lasts 15 minutes. When it has run out but the `c4t_shared` marker remains, AI Studio answers *renew*.
-   - The page then requests `crowd4test.com/app/ai-studio/refresh` in the background, which renews the session, and retries the call.
+   - The page then requests `crowd4test.com/app/ai-studio/refresh` in the background, which renews the session, and retries the call. Every call and every download goes through `api()` or `downloadFrom()` in `web/src/api.ts`, so every page renews the same way.
    - AI Studio never spends the refresh token itself. The API treats a refresh token used twice as stolen and ends the session, and crowd4test.com already guards against that for its own renewals.
 4. **Changes need AI Studio's own page.** Every crowd4test.com subdomain receives the cookie, so a change (anything other than reading) must also carry the `x-requested-with: ai-studio` header and come from AI Studio's own address. Another site's script cannot add that header without AI Studio agreeing first, and it never agrees.
 5. **Old host-only cookies are cleaned up.** Browsers that signed in before the domain was set hold host-only copies of the cookies. On their next visit, crowd4test.com re-scopes those copies to the domain and expires the host-only ones, so a later sign-out removes everything. Nobody has to sign in again (`C4T_Platform/web/src/lib/auth/shared-session.ts`).
@@ -56,7 +62,7 @@ The code is in `src/platform/auth/crowd4test.ts` and `src/platform/auth/access.t
   PORT=4100
   ```
 - `C4T_API_ORIGIN` is how this server reaches the Crowd4Test API, which is the loopback address when both run on one machine. The Crowd4Test API already uses port 4000 there, so give AI Studio another port.
-- Optional: `C4T_SERVICE_TOKEN`, the same value as `AI_STUDIO_SERVICE_TOKEN` in the Crowd4Test API's `.env` (at least 32 characters). With it, AI Studio asks Crowd4Test's service endpoints (`/v1/ai-studio/*`, `src/platform/c4t-service.ts`) for:
+- `C4T_SERVICE_TOKEN`, the same value as `AI_STUDIO_SERVICE_TOKEN` in the Crowd4Test API's `.env` (at least 32 characters). Without it, schedules and deploy triggers made by Crowd4Test accounts do not run (AI Studio cannot confirm their account is still active). With it, AI Studio asks Crowd4Test's service endpoints (`/v1/ai-studio/*`, `src/platform/c4t-service.ts`) for:
   - organisation names and statuses (Projects, and `GET /api/organizations`), and whether an organisation staff create a project in exists and is active;
   - the Crowd4Test projects of an organisation, for linking one to an AI Studio project (a reference only: it grants nobody access);
   - the people search on a project's Members page, so people who never opened AI Studio can be added.

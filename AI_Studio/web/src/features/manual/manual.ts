@@ -1,5 +1,4 @@
 /** Types of the manual-cases and releases API, and the small pure helpers the pages use. */
-import { ApiError } from "../../api";
 import type { Tone } from "../../lib/labels";
 
 export type Priority = "critical" | "high" | "medium" | "low";
@@ -193,16 +192,6 @@ export function auditSentence(e: Pick<AuditEntry, "kind" | "by" | "override">): 
 export function signedSentence(v: Pick<ReleaseView, "decision" | "signedBy" | "signedAt">, fmt: (iso: string) => string): string {
     if (!v.decision || !v.signedBy || !v.signedAt) return "";
     return `${v.decision === "approved" ? "Approved" : "Rejected"} by ${v.signedBy}, ${fmt(v.signedAt)}`;
-}
-
-/** The first thing wrong with a request, in words: the reason of a rejected field, or the server's own sentence. */
-export function apiMessage(e: unknown): string {
-    if (e instanceof ApiError) {
-        const issues = e.details;
-        if (Array.isArray(issues) && issues[0] && typeof (issues[0] as { message?: unknown }).message === "string") return (issues[0] as { message: string }).message;
-        return e.message;
-    }
-    return e instanceof Error ? e.message : String(e);
 }
 
 const NAME_KEY = "aitp.manual.name";

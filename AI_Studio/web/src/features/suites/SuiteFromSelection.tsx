@@ -5,7 +5,7 @@ import { Button, Callout } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { describeApiError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 import type { Suite } from "./suites";
 
 /**

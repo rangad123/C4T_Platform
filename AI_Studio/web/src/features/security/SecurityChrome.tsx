@@ -1,6 +1,7 @@
 import { OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type ProjectDetail } from "../../api";
+import { Modal } from "../../components/Modal";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, EmptyState, LinkButton, PageHeader, Skeleton, toneIcon } from "../../components/ui";
 import { keyEntries } from "../../components/Tooltip";
@@ -8,26 +9,9 @@ import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { help } from "../../lib/help";
 import { routes } from "../../lib/router";
 import { useAuth } from "../auth/auth";
-import {
-    AUTH_WORDS,
-    CATEGORY_WORDS,
-    SEC,
-    SEVERITY_WORDS,
-    STATE_WORDS,
-    VALIDATION_WORDS,
-    includesSecurity,
-    saveTestingType,
-    sec,
-    securityError,
-    useSecurityStatus,
-    useTestingType,
-    type AssessmentState,
-    type AuthorizationState,
-    type FindingCategory,
-    type Severity,
-    type ValidationState,
-} from "./security";
+import { AUTH_WORDS, CATEGORY_WORDS, SEC, SEVERITY_WORDS, STATE_WORDS, VALIDATION_WORDS, includesSecurity, saveTestingType, sec, useSecurityStatus, useTestingType, type AssessmentState, type AuthorizationState, type FindingCategory, type Severity, type ValidationState } from "./security";
 import "./security.css";
+import { describeApiError } from "../../lib/labels";
 
 export type SecurityTab = "overview" | "applications" | "new" | "assessments" | "findings" | "reports" | "activity" | "notifications";
 
@@ -134,7 +118,7 @@ function TurnOn({ id }: { id: string }) {
         try {
             await saveTestingType(id, "both");
         } catch (e) {
-            setError(securityError(e));
+            setError(describeApiError(e));
             setBusy(false);
         }
     }
@@ -175,14 +159,6 @@ export function EmergencyStop({ projectId, onStopped }: { projectId: string; onS
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [done, setDone] = useState("");
-    const ref = useRef<HTMLDialogElement>(null);
-    useEffect(() => {
-        const d = ref.current;
-        if (open && d && !d.open) {
-            d.showModal();
-            d.querySelector<HTMLButtonElement>("button")?.focus();
-        }
-    }, [open]);
     async function stop() {
         setBusy(true);
         setError("");
@@ -193,7 +169,7 @@ export function EmergencyStop({ projectId, onStopped }: { projectId: string; onS
             setOpen(false);
             onStopped?.();
         } catch (e) {
-            setError(securityError(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -209,21 +185,22 @@ export function EmergencyStop({ projectId, onStopped }: { projectId: string; onS
                 </span>
             )}
             {open && (
-                <dialog ref={ref} className="sec-dialog" aria-labelledby="sec-stop-title" onClose={() => setOpen(false)} onCancel={() => setOpen(false)}>
-                    <div className="inner">
-                        <h2 className="t-section" id="sec-stop-title">
-                            Stop every running assessment?
-                        </h2>
-                        <p className="t-secondary">Every assessment of this project that is running now stops within seconds and sends no more requests. What each one found before the stop is kept. Nothing else changes.</p>
-                        {error && <Callout tone="danger">{error}</Callout>}
-                        <div className="foot">
+                <Modal
+                    title="Stop every running assessment?"
+                    titleId="sec-stop-title"
+                    onClose={() => setOpen(false)}
+                    foot={
+                        <>
                             <Button onClick={() => setOpen(false)}>Keep running</Button>
                             <Button variant="danger" icon={OctagonX} loading={busy} onClick={() => void stop()}>
                                 Stop them all
                             </Button>
-                        </div>
-                    </div>
-                </dialog>
+                        </>
+                    }
+                >
+                    <p className="t-secondary">Every assessment of this project that is running now stops within seconds and sends no more requests. What each one found before the stop is kept. Nothing else changes.</p>
+                    {error && <Callout tone="danger">{error}</Callout>}
+                </Modal>
             )}
         </>
     );

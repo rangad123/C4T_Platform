@@ -123,9 +123,6 @@ export function readAuthScreen(snap: ScreenSnapshot): AuthScreen {
     return { kind: "none" };
 }
 
-/** Is this a screen the sign-in helper should handle? */
-export const asksToSignIn = (snap: ScreenSnapshot): boolean => readAuthScreen(snap).kind !== "none";
-
 // ── signing in ──────────────────────────────────────────────────────────────
 
 export interface SignInStep {

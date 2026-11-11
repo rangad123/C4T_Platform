@@ -5,15 +5,17 @@ import { Button, Callout } from "../../components/ui";
 import { StepDiffView } from "../builder/History";
 import type { StepDiff } from "../builder/stepdiff";
 import { diffStats, lineDiff } from "../code/code";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 import { DiffView } from "../code/VersionHistory";
 import { TakeOverDialog } from "../code/TakeOver";
 import { UnsavedBar } from "../workbench/UnsavedBar";
 import { changesWord } from "../workbench/test-model";
-import { dapi, DslError, errorText, fileNameFor, type DslDiagnostic, type ParseAnswer, type SaveTextAnswer } from "./dsl";
+import { dslDiagnostics, fileNameFor, type DslDiagnostic, type ParseAnswer, type SaveTextAnswer } from "./dsl";
 import { TextView } from "./TextView";
 import type { TextDraft } from "./useTextDraft";
 import "./dsl.css";
+import { api, ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
 
 interface Props {
     testId: string;
@@ -71,14 +73,15 @@ export function TextMode({ testId, title, draft, editable, editReason, carriesUn
         setSaveError("");
         const sent = draft.text;
         try {
-            const r = await dapi<SaveTextAnswer>(`/tests/${testId}/dsl`, { method: "PUT", body: { text: sent, ...(run ? {} : { run: false }) } });
+            const r = await api<SaveTextAnswer>(`/tests/${testId}/dsl`, { method: "PUT", body: { text: sent, ...(run ? {} : { run: false }) } });
             setProblems(undefined);
             await onSaved(r);
         } catch (e) {
-            if (e instanceof DslError && e.status === 422) {
-                setProblems({ forText: sent, items: e.diagnostics });
-                setSaveError(e.diagnostics.length ? "The text was not saved. Fix the problems listed below and save again. Your text is still here." : `The text was not saved. ${e.message}`);
-            } else setSaveError(errorText(e));
+            if (e instanceof ApiError && e.status === 422) {
+                const items = dslDiagnostics(e.body.diagnostics);
+                setProblems({ forText: sent, items });
+                setSaveError(items.length ? "The text was not saved. Fix the problems listed below and save again. Your text is still here." : `The text was not saved. ${e.message}`);
+            } else setSaveError(describeApiError(e));
         } finally {
             setSaving("");
         }

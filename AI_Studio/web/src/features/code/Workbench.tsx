@@ -1,10 +1,14 @@
 import { CircleAlert, History, RotateCcw, ShieldCheck, TriangleAlert, WrapText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Badge, Button, Callout, Disclosure } from "../../components/ui";
-import { CodeError, NOT_ENABLED_TEXT, NOT_ENABLED_TITLE, errorText, type CodeConfig, type Diagnostic, type SaveResult } from "./code";
+import { NOT_ENABLED_TEXT, NOT_ENABLED_TITLE, asDiagnostics, type CodeConfig, type Diagnostic, type SaveResult } from "./code";
 import { LazyEditor, type EditorHandle } from "./LazyEditor";
-import { Modal } from "./Modal";
+import { Modal } from "../../components/Modal";
+import "./code.css";
 import { RunStatus } from "./RunStatus";
+import { ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
+
 
 interface Props {
     /** The text the server has now. A change of `baselineKey` replaces the editor's text with it (after a restore or a reload). */
@@ -83,8 +87,8 @@ export function Workbench(p: Props) {
                 setCheckState("done");
             } catch (e) {
                 // A busy answer (429) is not worth a message: the next pause in typing checks again.
-                setCheckState(e instanceof CodeError && e.status === 429 ? "idle" : "failed");
-                if (e instanceof CodeError && e.status === 429) lastChecked.current = undefined;
+                setCheckState(e instanceof ApiError && e.status === 429 ? "idle" : "failed");
+                if (e instanceof ApiError && e.status === 429) lastChecked.current = undefined;
             } finally {
                 inflight.current = false;
             }
@@ -137,12 +141,12 @@ export function Workbench(p: Props) {
             setSaved({ res, at: Date.now() });
             p.onSaved?.(res, text);
         } catch (e) {
-            if (e instanceof CodeError && e.status === 422) {
-                const d = e.diagnostics;
+            if (e instanceof ApiError && e.status === 422) {
+                const d = asDiagnostics(e.body.diagnostics ?? e.details);
                 setDiags(d);
                 setCheckState("done");
                 setSaveError(d.length ? "Not saved. Fix the problems listed below and save again. Your text is still here." : `Not saved. ${e.message}`);
-            } else setSaveError(errorText(e));
+            } else setSaveError(describeApiError(e));
         } finally {
             setSaving(false);
         }

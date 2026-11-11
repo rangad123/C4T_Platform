@@ -23,6 +23,10 @@ import { adbPath } from "../src/engine/mobile/toolchain.js";
 
 const PORT = 6990; // not 6910: runner-complete-kit-unit uses that one, and the fast tier runs both at once
 const REPO = `http://127.0.0.1:${PORT}/android/repository/`;
+/** The runner setting tests fetch for this computer itself: adbPath looks for adb.exe only on Windows, so a pretend "win32" fetch elsewhere
+ * unpacks an adb.exe that is never found. */
+const HOST = process.platform;
+const HOST_ADB = HOST === "win32" ? "adb.exe" : "adb";
 
 /** A small stand-in for Google's platform-tools archive for one system. */
 function archive(hostOs: "windows" | "macosx" | "linux", extra: Record<string, Uint8Array> = {}, drop: string[] = []): Buffer {
@@ -283,7 +287,7 @@ describe("the runner's setting, report and retries", { timeout: 60_000 }, () => 
         const workDir = fresh();
         const e = env();
         let changes = 0;
-        const s = new PhoneToolsSetup({ policy: "auto", env: e, log, workDir, platform: "win32", arch: "x64", onChange: () => changes++ });
+        const s = new PhoneToolsSetup({ policy: "auto", env: e, log, workDir, platform: HOST, arch: "x64", onChange: () => changes++ });
         s.prepare();
         expect(requests).toEqual([]);
         expect(s.report()).toEqual({ state: "can-fetch", note: "The runner gets the Android phone tools from Google when a phone session arrives." });
@@ -294,7 +298,7 @@ describe("the runner's setting, report and retries", { timeout: 60_000 }, () => 
         expect(requests.filter((r) => r.endsWith(".zip"))).toHaveLength(1);
         expect(changes).toBeGreaterThanOrEqual(2);
         expect(e.ANDROID_HOME).toBe(path.join(workDir, "phone-tools"));
-        expect(adbPath(e)).toBe(path.join(workDir, "phone-tools", "platform-tools", "adb.exe"));
+        expect(adbPath(e)).toBe(path.join(workDir, "phone-tools", "platform-tools", HOST_ADB));
         expect(s.report()).toEqual({ state: "ready", version: "35.0.2" });
         expect(notes[0]).toMatch(/This computer has no Android phone tools \(adb\)\. The runner gets them from Google .*license/);
         expect(notes.filter((l) => l.startsWith("To use a phone on USB"))).toHaveLength(USB_DEBUGGING_STEPS.length);
@@ -305,7 +309,7 @@ describe("the runner's setting, report and retries", { timeout: 60_000 }, () => 
         // a restart of the runner uses the tools from its folder at once
         requests = [];
         const e2 = env();
-        const s2 = new PhoneToolsSetup({ policy: "auto", env: e2, log, workDir, platform: "win32" });
+        const s2 = new PhoneToolsSetup({ policy: "auto", env: e2, log, workDir, platform: HOST, arch: "x64" });
         s2.prepare();
         expect(e2.ANDROID_HOME).toBe(path.join(workDir, "phone-tools"));
         expect(s2.report()).toEqual({ state: "ready", version: "35.0.2" });
@@ -328,7 +332,7 @@ describe("the runner's setting, report and retries", { timeout: 60_000 }, () => 
         serveStandard();
         const { log, lines } = memoryLogger();
         const e = env();
-        const s = new PhoneToolsSetup({ policy: "now", env: e, log, workDir: fresh(), platform: "win32" });
+        const s = new PhoneToolsSetup({ policy: "now", env: e, log, workDir: fresh(), platform: HOST, arch: "x64" });
         s.prepare();
         expect(s.report()?.state).toBe("fetching");
         for (let i = 0; i < 100 && s.report()?.state !== "ready"; i++) await new Promise((r) => setTimeout(r, 50));
@@ -340,7 +344,7 @@ describe("the runner's setting, report and retries", { timeout: 60_000 }, () => 
         served = { list: "", files: new Map(), status: 500 };
         const { log } = memoryLogger();
         let now = 1_000_000;
-        const s = new PhoneToolsSetup({ policy: "auto", env: env(), log, workDir: fresh(), platform: "win32", now: () => now });
+        const s = new PhoneToolsSetup({ policy: "auto", env: env(), log, workDir: fresh(), platform: HOST, arch: "x64", now: () => now });
         expect(await s.ensure(() => undefined)).toMatchObject({ ok: false, reason: expect.stringContaining("answered with an error (500)") });
         expect(s.report()).toMatchObject({ state: "failed", note: expect.stringContaining("(500)") });
         expect(await s.ensure(() => undefined)).toMatchObject({ ok: false, reason: expect.stringContaining("tries again in a few minutes") });

@@ -5,32 +5,11 @@ import { Badge, Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleto
 import { BadgeKey, FieldHelp, HelpTip } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
 import { help } from "../../lib/help";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { go, useRoute } from "../../lib/router";
 import { FindingList, findingKey } from "./Overview";
 import { SecurityLayout, SeverityTag, ValidationTag, canRun, categoryLabel, useRole } from "./SecurityChrome";
-import {
-    CATEGORY_ORDER,
-    CATEGORY_WORDS,
-    CONFIDENCE_WORDS,
-    OPEN_VALIDATION,
-    SEC,
-    SEVERITY_ORDER,
-    SEVERITY_WORDS,
-    VALIDATION_ORDER,
-    VALIDATION_WORDS,
-    sec,
-    securityError,
-    oneOf,
-    useApps,
-    when,
-    type Confidence,
-    type FindingCategory,
-    type HistoryRow,
-    type SecurityFinding,
-    type Severity,
-    type ValidationState,
-} from "./security";
+import { CATEGORY_ORDER, CATEGORY_WORDS, CONFIDENCE_WORDS, OPEN_VALIDATION, SEC, SEVERITY_ORDER, SEVERITY_WORDS, VALIDATION_ORDER, VALIDATION_WORDS, sec, oneOf, useApps, when, type Confidence, type FindingCategory, type HistoryRow, type SecurityFinding, type Severity, type ValidationState } from "./security";
 
 /** The filters the findings route takes (FIND), in the order the page shows them. Kept in the address so a filtered list can be shared. */
 const FILTER_KEYS = ["application", "severity", "category", "validation", "from", "to", "location", "q"] as const;
@@ -321,7 +300,7 @@ function ValidationPanel({ finding, canChange, isOwner, onSaved }: { finding: Fi
             setSaved(to === finding.validation ? "Note added to the history." : `Saved as ${VALIDATION_WORDS[to].label.toLowerCase()}.`);
             onSaved();
         } catch (err) {
-            setProblem(securityError(err));
+            setProblem(describeApiError(err));
         } finally {
             setBusy(false);
         }
@@ -443,7 +422,7 @@ export function NewFindingPage({ id }: { id: string }) {
             });
             go(sec.finding(id, oneOf<SecurityFinding>(answer, "finding")!.id));
         } catch (err) {
-            setProblem(securityError(err));
+            setProblem(describeApiError(err));
             setBusy(false);
         }
     }

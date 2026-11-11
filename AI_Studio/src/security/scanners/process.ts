@@ -250,12 +250,6 @@ export async function withSecureTempDir(prefix: string): Promise<SecureTempDir> 
     };
 }
 
-/** True when `child` is inside `parent` (used to prove an artifact was written where it should be, and nowhere else). */
-export function insideDir(child: string, parent: string): boolean {
-    const rel = path.relative(path.resolve(parent), path.resolve(child));
-    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
-}
-
 /** Does this path exist as a readable file? Used by every adapter before it reports a tool as installed. */
 export function isExecutableFile(file: string): boolean {
     try {

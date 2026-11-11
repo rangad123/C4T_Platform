@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { CodeViewer } from "../../components/CodeViewer";
 import { ScriptPreview } from "../../components/ScriptPreview";
 import { Callout, Disclosure, ErrorState, Skeleton } from "../../components/ui";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { useRoute } from "../../lib/router";
-import { capi, errorText, fetchScriptText, type Diagnostic, type SaveResult } from "../code/code";
+import { fetchScriptText, type Diagnostic, type SaveResult } from "../code/code";
 import { CustomCallout } from "../code/CustomParts";
 import { EditScriptButton } from "../code/TakeOver";
 import { VersionHistory } from "../code/VersionHistory";
@@ -13,6 +13,7 @@ import { useRunPolicy } from "../code/policy";
 import "../code/code.css";
 import { RunnableDownload } from "../portable/RunnableDownload";
 import type { Detail } from "./test-model";
+import { api } from "../../api";
 
 /**
  * The Code tab. A generated test shows its script read-only (the test first, the platform's setup folded) and the one-way door:
@@ -112,7 +113,7 @@ function CustomCode({ test: t, reload }: { test: Detail; reload: () => Promise<v
         setLoadError("");
         fetchScriptText(id)
             .then((text) => !gone && setScript({ text, key: again }))
-            .catch((e) => !gone && setLoadError(errorText(e)));
+            .catch((e) => !gone && setLoadError(describeApiError(e)));
         return () => {
             gone = true;
         };
@@ -120,14 +121,14 @@ function CustomCode({ test: t, reload }: { test: Detail; reload: () => Promise<v
 
     const save = useCallback(
         async (content: string, note: string) => {
-            const res = await capi<SaveResult>(`/tests/${id}/script`, { method: "PUT", body: { content, ...(note ? { note } : {}) } });
+            const res = await api<SaveResult>(`/tests/${id}/script`, { method: "PUT", body: { content, ...(note ? { note } : {}) } });
             setHistoryKey((k) => k + 1);
             void reload();
             return res;
         },
         [id], // eslint-disable-line react-hooks/exhaustive-deps
     );
-    const check = useCallback(async (content: string): Promise<Diagnostic[]> => (await capi<{ diagnostics: Diagnostic[] }>(`/tests/${id}/script/check`, { method: "POST", body: { content } })).diagnostics ?? [], [id]);
+    const check = useCallback(async (content: string): Promise<Diagnostic[]> => (await api<{ diagnostics: Diagnostic[] }>(`/tests/${id}/script/check`, { method: "POST", body: { content } })).diagnostics ?? [], [id]);
 
     if (loadError) return <ErrorState error={friendlyError(loadError)} onRetry={() => setAgain((n) => n + 1)} />;
     if (!script) {

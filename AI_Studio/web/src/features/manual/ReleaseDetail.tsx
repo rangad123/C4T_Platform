@@ -1,12 +1,12 @@
 import { CircleCheck, CircleX, Download, ExternalLink, ListChecks, RefreshCw, TriangleAlert, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, getKey, projectKind, type ProjectDetail, type ProjectKind } from "../../api";
+import { api, downloadFrom, projectKind, type ProjectDetail, type ProjectKind } from "../../api";
 import { usePage } from "../../components/Shell";
 import { Badge, Button, Callout, Disclosure, ErrorState, LinkButton, Metric, PageHeader, Ribbon, RibbonLegend, Skeleton } from "../../components/ui";
-import { downloadBlob, plural, relativeTime } from "../../lib/format";
+import { plural, relativeTime } from "../../lib/format";
 import { externalHref } from "../../lib/url";
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
-import { friendlyError, plainWords } from "../../lib/labels";
+import { friendlyError, plainWords, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
 import { STATE_HELP, ticksFor } from "../dashboard/dashboard";
@@ -14,24 +14,7 @@ import { help } from "../../lib/help";
 import { BadgeKey, Tooltip } from "../../components/Tooltip";
 import type { Integration } from "../integrations/types";
 import { DecisionDialog, type Decision } from "./DecisionDialog";
-import {
-    apiMessage,
-    auditSentence,
-    DECISION_BADGE,
-    groupByArea,
-    manualTicks,
-    PRIORITY_LABEL,
-    READINESS_TONE,
-    RESULT_LABEL,
-    RESULTS,
-    saveName,
-    savedName,
-    signedSentence,
-    type AuditEntry,
-    type ReleaseView,
-    type Result,
-    type ViewItem,
-} from "./manual";
+import { auditSentence, DECISION_BADGE, groupByArea, manualTicks, PRIORITY_LABEL, READINESS_TONE, RESULT_LABEL, RESULTS, saveName, savedName, signedSentence, type AuditEntry, type ReleaseView, type Result, type ViewItem } from "./manual";
 import "./manual.css";
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -77,7 +60,7 @@ export function ReleaseDetail({ id, releaseId }: { id: string; releaseId: string
         try {
             setView(await api<ReleaseView>(`/projects/${id}/releases/${releaseId}/refresh`, { method: "POST" }));
         } catch (e) {
-            setError(apiMessage(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -86,11 +69,9 @@ export function ReleaseDetail({ id, releaseId }: { id: string; releaseId: string
     async function downloadReport() {
         setError("");
         try {
-            const res = await fetch(`/api/projects/${id}/releases/${releaseId}/report?format=html`, { headers: getKey() ? { "x-api-key": getKey() } : {} });
-            if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error);
-            downloadBlob(await res.blob(), `sign-off-${v!.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.html`);
+            await downloadFrom(`/projects/${id}/releases/${releaseId}/report?format=html`, `sign-off-${v!.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.html`);
         } catch (e) {
-            setError(`Download failed. ${apiMessage(e)}`);
+            setError(`Download failed. ${describeApiError(e)}`);
         }
     }
 
@@ -246,7 +227,7 @@ function Checklist({ v, projectId, name, setName, setView, trackers }: { v: Rele
             const updated = await api<ReleaseView>(`/projects/${projectId}/releases/${v.id}/results/${item.id}`, { method: "PUT", body: { ...patch, ...(name.trim() ? { by: name.trim() } : {}) } });
             setView(updated);
         } catch (e) {
-            setError(`Could not save the result for “${item.title}”. ${apiMessage(e)}`);
+            setError(`Could not save the result for “${item.title}”. ${describeApiError(e)}`);
         } finally {
             setPending((p) => {
                 const { [item.id]: _gone, ...rest } = p;
@@ -388,7 +369,7 @@ function CheckItem({ item, shown, locked, trackers, releaseId, projectId, onSave
             await api(`/projects/${projectId}/releases/${releaseId}/results/${item.id}/issue`, { method: "POST", body: { integrationId: tracker.id } });
             onChanged(await api<ReleaseView>(`/projects/${projectId}/releases/${releaseId}`));
         } catch (e) {
-            setIssueError(`The issue was not created. ${apiMessage(e)}`);
+            setIssueError(`The issue was not created. ${describeApiError(e)}`);
         } finally {
             setFiling(false);
         }

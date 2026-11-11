@@ -22,6 +22,8 @@ export interface CleanupRequest {
     enabled: boolean;
     /** Outbound guard for every DELETE (the platform passes assertAllowedTarget). */
     guard?: (url: string) => Promise<void>;
+    /** The fetch that sends each DELETE (the platform passes guardedFetch, which connects only to a checked address); default: fetch. */
+    fetch?: typeof fetch;
 }
 
 /** Credentials a run's scripts send (the same two variables the script reads: API_TOKEN, API_AUTH_HEADER). */
@@ -53,6 +55,7 @@ export async function deleteRecord(args: {
     headers: Record<string, string>;
     /** The outbound guard (the platform passes `assertAllowedTarget`). */
     guard?: (url: string) => Promise<void>;
+    fetch?: typeof fetch;
     timeoutMs?: number;
 }): Promise<DeleteOutcome> {
     try {
@@ -62,7 +65,7 @@ export async function deleteRecord(args: {
         if (url.origin !== base.origin) return { status: "failed", reason: "The recorded address is outside the application, so it was not touched." };
         if (args.guard) await args.guard(url.href);
         const timeoutMs = args.timeoutMs ?? DELETE_TIMEOUT_MS;
-        const res = await fetch(url, { method: "DELETE", headers: args.headers, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
+        const res = await (args.fetch ?? fetch)(url, { method: "DELETE", headers: args.headers, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
         // The answer's body is never read: it is not needed, and only ids and paths are kept.
         await res.body?.cancel().catch(() => undefined);
         if (res.status >= 200 && res.status < 300) return { status: "removed" };
@@ -73,7 +76,10 @@ export async function deleteRecord(args: {
     } catch (e) {
         const name = e instanceof Error ? e.name : "";
         if (name === "TimeoutError" || name === "AbortError") return { status: "failed", reason: `No answer within ${Math.round((args.timeoutMs ?? DELETE_TIMEOUT_MS) / 1000)} seconds.` };
-        const code = (e as { cause?: { code?: string } })?.cause?.code;
+        const cause = (e as { cause?: { code?: string; status?: unknown } })?.cause;
+        // guardedFetch refuses a redirect instead of answering it.
+        if (typeof cause?.status === "number") return { status: "failed", reason: `The application answered with a redirect (HTTP ${cause.status}); redirects are not followed.` };
+        const code = cause?.code;
         // Messages of guard errors are our own plain sentences; network errors are described by their code, never by their text.
         if (e && typeof e === "object" && "status" in e) return { status: "failed", reason: e instanceof Error ? e.message : "The address is not allowed." };
         return { status: "failed", reason: `Could not reach the application${code ? ` (${code})` : ""}.` };
@@ -112,6 +118,7 @@ export interface FinishArgs {
     apiBaseUrl: string;
     credentials?: CleanupCredentials;
     guard?: (url: string) => Promise<void>;
+    fetch?: typeof fetch;
     environment?: string;
     timeoutMs?: number;
 }
@@ -140,7 +147,7 @@ export async function finishCleanup(ctx: EngineContext, collector: CleanupCollec
             item.reason = "Cleanup is switched off for this project, so the record stays in the application.";
             continue;
         }
-        const r = await deleteRecord({ apiBaseUrl: args.apiBaseUrl, deletePath: item.deletePath!, headers, guard: args.guard, timeoutMs: args.timeoutMs });
+        const r = await deleteRecord({ apiBaseUrl: args.apiBaseUrl, deletePath: item.deletePath!, headers, guard: args.guard, fetch: args.fetch, timeoutMs: args.timeoutMs });
         item.status = r.status;
         if (r.reason) item.reason = r.reason;
     }

@@ -1,15 +1,16 @@
 import { Check, ChevronRight, FileText, Play, RotateCcw, ShieldCheck, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { api } from "../../api";
+import { Modal } from "../../components/Modal";
 import { Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, Metric, Skeleton } from "../../components/ui";
 import { BadgeKey, HelpTip } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
 import { help } from "../../lib/help";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { duration, relativeTime } from "../../lib/format";
 import { go, useRoute } from "../../lib/router";
 import { AuthTag, SecurityLayout, StateTag, canRun, stateKey, useRole } from "./SecurityChrome";
-import { AUTH_WORDS, SEC, STATE_WORDS, STEPS, authStateOf, isRunning, listOf, oneOf, sec, securityError, useApps, useAssessments, useSecurityStatus, when, type AppRow, type AssessmentRow, type AssessmentState, type SecurityAssessment, type SecurityAuthorization } from "./security";
+import { AUTH_WORDS, SEC, STATE_WORDS, STEPS, authStateOf, isRunning, listOf, oneOf, sec, useApps, useAssessments, useSecurityStatus, when, type AppRow, type AssessmentRow, type AssessmentState, type SecurityAssessment, type SecurityAuthorization } from "./security";
 
 // ── new assessment ───────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ export function NewAssessmentPage({ id }: { id: string }) {
             const answer = await api<unknown>(`${SEC}/applications/${chosen.id}/assessments`, { method: "POST", body: retestOf ? { retestOf } : {} });
             go(sec.assessment(id, oneOf<SecurityAssessment>(answer, "assessment")!.id));
         } catch (e) {
-            setProblem(securityError(e));
+            setProblem(describeApiError(e));
             setBusy(false);
         }
     }
@@ -373,14 +374,6 @@ function CancelAssessment({ aid, onDone }: { aid: string; onDone: () => void }) 
     const [requested, setRequested] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-    const ref = useRef<HTMLDialogElement>(null);
-    useEffect(() => {
-        const d = ref.current;
-        if (asking && d && !d.open) {
-            d.showModal();
-            d.querySelector<HTMLButtonElement>("button")?.focus();
-        }
-    }, [asking]);
     async function cancel() {
         setBusy(true);
         setError("");
@@ -390,7 +383,7 @@ function CancelAssessment({ aid, onDone }: { aid: string; onDone: () => void }) 
             setRequested(true);
             onDone();
         } catch (e) {
-            setError(securityError(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -401,21 +394,22 @@ function CancelAssessment({ aid, onDone }: { aid: string; onDone: () => void }) 
                 {requested ? "Stopping…" : "Stop assessment"}
             </Button>
             {asking && (
-                <dialog ref={ref} className="sec-dialog" aria-labelledby="as-cancel-title" onClose={() => setAsking(false)} onCancel={() => setAsking(false)}>
-                    <div className="inner">
-                        <h2 className="t-section" id="as-cancel-title">
-                            Stop this assessment?
-                        </h2>
-                        <p className="t-secondary">It stops within seconds and sends no more requests. What it found until now is kept.</p>
-                        {error && <Callout tone="danger">{error}</Callout>}
-                        <div className="foot">
+                <Modal
+                    title="Stop this assessment?"
+                    titleId="as-cancel-title"
+                    onClose={() => setAsking(false)}
+                    foot={
+                        <>
                             <Button onClick={() => setAsking(false)}>Keep running</Button>
                             <Button variant="danger" icon={X} loading={busy} onClick={() => void cancel()}>
                                 Stop assessment
                             </Button>
-                        </div>
-                    </div>
-                </dialog>
+                        </>
+                    }
+                >
+                    <p className="t-secondary">It stops within seconds and sends no more requests. What it found until now is kept.</p>
+                    {error && <Callout tone="danger">{error}</Callout>}
+                </Modal>
             )}
         </>
     );

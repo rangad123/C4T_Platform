@@ -6,7 +6,7 @@
  * text" and why, and the platform refuses to save the text view of such a test, so a save can never lose data silently.
  */
 import { isLocatorRef, StoredStepSchema, describeStep, type Step, type TestSpec } from "../spec/schema.js";
-import { compileTemplate, FRAME_LEAD, HEADER_KEYS, HTTP_METHODS, PHRASES, RESERVED_ROLE_WORDS, slotsOf, type El, type PhraseDef } from "./grammar.js";
+import { compileTemplate, FRAME_LEAD, HTTP_METHODS, PHRASES, RESERVED_ROLE_WORDS, slotsOf, type El, type PhraseDef } from "./grammar.js";
 import { quote } from "./lexer.js";
 import { parseDsl, readStepLine } from "./parser.js";
 
@@ -304,6 +304,3 @@ export function printSpec(spec: TestSpec): PrintResult {
 }
 
 const oneLine = (s: string, n = 70) => (s.replace(/\s+/g, " ").length > n ? `${s.replace(/\s+/g, " ").slice(0, n - 1)}…` : s.replace(/\s+/g, " "));
-
-/** The header lines the printer knows (exported for the reference and the tests). */
-export const PRINTED_HEADERS = HEADER_KEYS;

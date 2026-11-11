@@ -1,15 +1,9 @@
 /** Flaky-test quarantine: the shapes the API returns and the few words the screens share. */
-export { apiMessage, saveName, savedName } from "../manual/manual";
+export { saveName, savedName } from "../manual/manual";
 
 export const MAX_REASON = 300;
 export const MAX_DAYS = 60;
 export const DEFAULT_DAYS = 14;
-
-export interface QuarantineBrief {
-    reason: string;
-    since: string;
-    expiresAt: string;
-}
 
 export interface ReleaseHint {
     suggest: boolean;

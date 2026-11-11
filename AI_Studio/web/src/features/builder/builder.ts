@@ -5,7 +5,7 @@
  * The canonical spec (src/engine/spec/schema.ts) stays the source of truth. A step travels as plain JSON and the editor only touches
  * the fields it shows, so anything it does not know about stays exactly as it was.
  */
-import { CodeError, capi } from "../code/code.js";
+import { api, ApiError } from "../../api.js";
 
 // ── types ───────────────────────────────────────────────────────────────────
 
@@ -436,13 +436,12 @@ export class BuilderError extends Error {
 
 export async function bapi<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
     try {
-        return await capi<T>(path, init);
+        return await api<T>(path, init);
     } catch (e) {
-        if (e instanceof CodeError) {
+        if (e instanceof ApiError) {
             const diags = Array.isArray(e.body.diagnostics) ? (e.body.diagnostics as Diag[]) : [];
             throw new BuilderError(e.message, e.status, diags);
         }
         throw e;
     }
 }
-export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));

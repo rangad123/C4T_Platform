@@ -1,0 +1,7 @@
+/* The one modal dialog (components/Modal.tsx). A dialog's own width goes in its feature stylesheet. */
+/* Single-class base, so a feature's dialog.x-dialog width wins whatever the stylesheet order. */
+.dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-card); background: var(--surface-raised); color: var(--text-primary); overflow: auto; }
+dialog.dialog.is-wide { width: min(820px, calc(100vw - 32px)); }
+dialog.dialog::backdrop { background: var(--scrim); }
+.dialog .inner { display: grid; gap: 16px; padding: 20px; }
+.dialog .foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }

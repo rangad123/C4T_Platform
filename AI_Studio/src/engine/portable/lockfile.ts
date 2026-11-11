@@ -137,12 +137,6 @@ function lowerBound(alt: string): [number, number, number] | undefined {
     return [Number(m[2]), n(m[3]), n(m[4])];
 }
 
-export function parseVersion(v: string): [number, number, number] {
-    const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v);
-    if (!m) throw new Error(`Not a version: ${v}`);
-    return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
 export function compareVersions(a: readonly number[], b: readonly number[]): number {
     for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) - (b[i] ?? 0);
     return 0;

@@ -1,7 +1,7 @@
 import { FileJson, FileText, FileUp, FolderArchive, GitBranch, ListChecks } from "lucide-react";
 import { useRef, type ReactNode } from "react";
 import { Button } from "../../components/ui";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 
 /** One choice in a dialog: what it does in a line, and the button that does it. */
 function Choice({ icon: Icon, title, text, children }: { icon: typeof FileUp; title: string; text: string; children: ReactNode }) {

@@ -552,7 +552,7 @@ describe("The editor", () => {
         await editorReady();
         const warning = page.locator(".callout", { hasText: "Code tests cannot run yet" });
         await pwExpect(warning).toBeVisible();
-        await pwExpect(warning).toContainText("--allow-custom-scripts");
+        await pwExpect(warning).toContainText("switch on Run code scripts");
         await pwExpect(warning).toContainText("ALLOW_CUSTOM_SCRIPTS=true");
         await shot("not-enabled-light-1280");
     });

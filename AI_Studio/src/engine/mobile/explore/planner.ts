@@ -133,6 +133,3 @@ export function ideaScenarios(plan: PhonePlan): Scenario[] {
         requirements: [],
     }));
 }
-
-/** A scenario id that belongs to a phone idea (web plans never use the M- prefix). */
-export const isPhoneIdeaId = (id: string): boolean => /^M-\d+$/.test(id);

@@ -296,7 +296,7 @@ describe("the real platform with real agents", () => {
 
     it("an agent without the flag: hand-written tests are refused before a job exists, generated ones run", async () => {
         pid = (await admin("POST", "/api/projects", { name: "Custom on agents" })).body.id;
-        const tok1 = personalRunner(platform, { label: "plain", replace: true, codeScripts: false }).secret;
+        const tok1 = personalRunner(platform, { label: "plain agent", replace: true, codeScripts: false }).secret;
         const imp = await admin("POST", `/api/projects/${pid}/specs`, {
             baseUrl: APP,
             validate: false,
@@ -334,7 +334,7 @@ describe("the real platform with real agents", () => {
     }, 240_000);
 
     it("an agent with the flag runs the hand-written test, with its helper, and the platform stores the result like any other", async () => {
-        const tok2 = personalRunner(platform, { label: "flagged", replace: true }).secret;
+        const tok2 = personalRunner(platform, { label: "flagged agent", replace: true }).secret;
         expect((await admin("PUT", `/api/projects/${pid}/helpers/open-shop`, { content: helper("real-agent-helper") })).status).toBe(200);
         const flagged = startAgent(BASE, path.join(tmp, "pf-flagged"), { allowCustomScripts: true }, tok2);
         try {

@@ -48,29 +48,11 @@ let second: Seed;
 const ids: Record<string, string> = {};
 const consoleErrors: string[] = [];
 
-/** What the runner answers say when the front stands in for an online runner that has no phone. */
-const runnerStandIn = { on: false };
-
 async function front(req: http.IncomingMessage, res: http.ServerResponse) {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
     const raw = Buffer.concat(chunks);
-    const url = new URL(req.url ?? "/", BASE);
     const method = req.method ?? "GET";
-    const json = (data: unknown) => void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(data));
-    if (runnerStandIn.on && method === "GET") {
-        if (/^\/api\/projects\/[^/]+\/agents$/.test(url.pathname)) {
-            return json([
-                {
-                    id: "a1", name: "Maya’s laptop", version: "1.0.0", tokenId: "t1", os: "win32", arch: "x64", node: "v24", online: true, lastSeenAt: new Date().toISOString(), firstSeenAt: new Date().toISOString(), activeTasks: 0, concurrency: 1,
-                    capabilities: { browsers: ["chromium"], android: { adb: true, devices: [], avds: [], state: "none", summary: "Android: no devices connected" } },
-                },
-            ]);
-        }
-        if (/^\/api\/projects\/[^/]+\/runner$/.test(url.pathname)) {
-            return json({ runOn: "agent", agentId: "a1", status: "Runs on Maya’s laptop (online).", canRunWeb: true, canRunMobile: false, phones: { canRun: false, text: "Phone tests can’t run: it has no Android phone connected and no emulator set up." }, unavailableReason: null });
-        }
-    }
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string" && !["host", "connection", "content-length"].includes(k)) headers[k] = v;
     const upstream = await fetch(`http://127.0.0.1:${PLATFORM_PORT}${req.url}`, { method, headers, body: method === "GET" || method === "HEAD" ? undefined : new Uint8Array(raw) });
@@ -603,19 +585,7 @@ describe("honest numbers on screen", () => {
         expect(sentence).toMatch(/^Release 1.4: /);
         expect(sentence).not.toMatch(/Release Release/);
     });
-
-    it("the runner card and the phone setting say the same thing, in the platform's words", async () => {
-        runnerStandIn.on = true;
-        try {
-            await visit(`#/projects/${shop.projectId}/runners`);
-            await pwExpect(page.getByTestId("runner-phones")).toHaveText("Phone tests can’t run: it has no Android phone connected and no emulator set up.");
-            await pwExpect(page.getByTestId("agent-capabilities")).toContainText("Android: no devices connected");
-            await pwExpect(page.getByText("Phone tests cannot run")).toBeVisible();
-            await pwExpect(page.getByText("Phone tests can run")).toHaveCount(0);
-        } finally {
-            runnerStandIn.on = false;
-        }
-    });
+    // The per-project runner card this checked was removed with the one-runner-per-person change: nothing shows the phone sentence now.
 });
 
 describe("the decided vocabulary, on the screens a tester reaches", () => {

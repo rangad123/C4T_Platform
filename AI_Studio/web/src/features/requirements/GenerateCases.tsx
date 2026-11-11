@@ -5,9 +5,9 @@ import { Button, Callout, LinkButton } from "../../components/ui";
 import { plural } from "../../lib/format";
 import { routes } from "../../lib/router";
 import { useProjectAiReady } from "../aiconfig/aiconfig";
-import { apiMessage } from "../manual/manual";
 import "../manual/manual.css";
 import type { GenerateCasesResult } from "./requirements";
+import { describeApiError } from "../../lib/labels";
 
 /** Requirements sent in one request (the server's limit). */
 export const MAX_GENERATE = 50;
@@ -36,7 +36,7 @@ export function useGenerateCases(projectId: string, initiallyChoosing: boolean, 
             await onDone();
         } catch (e) {
             const modelMissing = e instanceof ApiError && (e.details as { modelMissing?: boolean } | undefined)?.modelMissing === true;
-            setState({ step: "error", text: apiMessage(e), modelMissing });
+            setState({ step: "error", text: describeApiError(e), modelMissing });
         }
     }
 

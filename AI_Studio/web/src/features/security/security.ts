@@ -6,9 +6,9 @@
  * server does not send is simply not shown.
  */
 import { useEffect, useState } from "react";
-import { api, ApiError, csrfHeader, getKey } from "../../api";
+import { api, ApiError } from "../../api";
 import { useFetch } from "../../lib/hooks";
-import { signedOutText, type Tone } from "../../lib/labels";
+import type { Tone } from "../../lib/labels";
 import type {
     AssessmentState,
     Confidence,
@@ -357,39 +357,3 @@ export async function applyPendingTestingType(projectId: string): Promise<void> 
 // ── small helpers ─────────────────────────────────────────────────────────────
 
 export const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : "");
-
-/** Turn an error from a security route into a sentence (a role refusal says which role is needed). */
-export function securityError(e: unknown): string {
-    if (e instanceof ApiError) {
-        if (e.status === 0) return "We couldn’t reach the platform server. Check that it is running and try again.";
-        if (e.status === 403) return e.message && !/^forbidden$/i.test(e.message) ? e.message : "Your role in this project does not allow this. Ask a project owner.";
-        if (e.status === 401) return signedOutText(e.message);
-        return e.message || "Something went wrong. Try again.";
-    }
-    return e instanceof Error ? e.message : String(e);
-}
-
-/** A download of a report or CSV: fetched with the same headers as every request, then saved under the server's file name. */
-export async function downloadFrom(path: string, fallbackName: string): Promise<void> {
-    let res: Response;
-    try {
-        res = await fetch(`/api${path}`, { headers: { ...(getKey() ? { "x-api-key": getKey() } : {}), ...csrfHeader("GET") } });
-    } catch {
-        throw new ApiError(0, "Could not reach the platform server");
-    }
-    if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new ApiError(res.status, data.error || res.statusText);
-    }
-    const cd = res.headers.get("content-disposition") ?? "";
-    const name = /filename="?([^";]+)"?/i.exec(cd)?.[1] ?? fallbackName;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-}

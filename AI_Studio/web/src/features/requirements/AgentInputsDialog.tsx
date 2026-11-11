@@ -1,7 +1,7 @@
 import { ListChecks } from "lucide-react";
 import { Button } from "../../components/ui";
 import { go } from "../../lib/router";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 import { agentInputsHref, type MissingInput } from "./AgentInputs";
 
 /**

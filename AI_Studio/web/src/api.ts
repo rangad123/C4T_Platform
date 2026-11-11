@@ -306,9 +306,23 @@ export class ApiError extends Error {
         readonly status: number,
         message: string,
         readonly details?: unknown,
+        /** The whole refusal (a 422 carries `diagnostics`, a 409 from the recorder names the session already running). */
+        readonly body: Record<string, unknown> = {},
     ) {
         super(message);
     }
+}
+
+/** A refused request: an expired Crowd4Test session is renewed and the request sent once more (`again`); signed out there, sign in there. */
+async function refused<T>(res: Response, data: unknown, again: (() => Promise<T>) | undefined): Promise<T> {
+    const body = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const c4t = crowd4testOf(body.details);
+    if (c4t?.crowd4test === "renew" && again) {
+        await renewCrowd4Test(c4t.refreshUrl);
+        return again();
+    }
+    if (c4t && (c4t.crowd4test === "sign-in" || c4t.crowd4test === "renew")) crowd4testSignIn(c4t.signInUrl);
+    throw new ApiError(res.status, (typeof body.error === "string" && body.error) || res.statusText, body.details, body);
 }
 
 export async function api<T = any>(path: string, init?: { method?: string; body?: unknown }, renewed = false): Promise<T> {
@@ -325,17 +339,28 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
     }
     const text = await res.text();
     const data = text && (text.startsWith("{") || text.startsWith("[")) ? JSON.parse(text) : text;
-    if (!res.ok) {
-        // Signed in with Crowd4Test: an expired session is renewed and the call made once more; signed out there, sign in there.
-        const c4t = crowd4testOf(data?.details);
-        if (c4t?.crowd4test === "renew" && !renewed) {
-            await renewCrowd4Test(c4t.refreshUrl);
-            return api<T>(path, init, true);
-        }
-        if (c4t && (c4t.crowd4test === "sign-in" || c4t.crowd4test === "renew")) crowd4testSignIn(c4t.signInUrl);
-        throw new ApiError(res.status, (data && data.error) || res.statusText, data?.details);
-    }
+    if (!res.ok) return refused(res, data, renewed ? undefined : () => api<T>(path, init, true));
     return data as T;
+}
+
+/** A download (a report, an export, a zip): sent like every request, then saved under the server's file name, else `fallbackName`. */
+export async function downloadFrom(path: string, fallbackName: string, renewed = false): Promise<void> {
+    let res: Response;
+    try {
+        res = await fetch(`/api${path}`, { headers: { ...(getKey() ? { "x-api-key": getKey() } : {}), ...csrfHeader("GET") } });
+    } catch {
+        throw new ApiError(0, "Could not reach the platform server");
+    }
+    if (!res.ok) return refused(res, await res.json().catch(() => ({})), renewed ? undefined : () => downloadFrom(path, fallbackName, true));
+    const name = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get("content-disposition") ?? "")?.[1];
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name ? decodeURIComponent(name) : fallbackName;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Send an Android app file as the raw request body (it can be large, so it is not wrapped in JSON). */

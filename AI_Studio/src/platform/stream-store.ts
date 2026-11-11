@@ -65,5 +65,5 @@ export function projectHead(db: Db, projectId: string): number {
 
 /** The most recent jobs of a project with just enough to notice a change cheaply. */
 export function recentJobStates(db: Db, projectId: string, limit: number): Array<{ id: string; status: string; updatedAt: string }> {
-    return db.all("SELECT id, status, updated_at FROM generation_jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?", projectId, limit).map((r) => ({ id: String(r.id), status: String(r.status), updatedAt: String(r.updated_at) }));
+    return db.all(`SELECT id, status, updated_at FROM generation_jobs WHERE project_id = ? ORDER BY created_at DESC, ${db.dialect.insertionOrder()} DESC LIMIT ?`, projectId, limit).map((r) => ({ id: String(r.id), status: String(r.status), updatedAt: String(r.updated_at) }));
 }

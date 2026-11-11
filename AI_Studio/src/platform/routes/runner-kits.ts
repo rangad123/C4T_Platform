@@ -6,7 +6,7 @@ import { actorLabel, currentActor, type Actor } from "../auth/actor.js";
 import { runnerUpdatesFor } from "../runner-update.js";
 import { RateLimiter } from "../agent-routing.js";
 import { HttpError } from "../http-error.js";
-import { canAddPersonal } from "../runner-health.js";
+import { mayHaveRunner } from "../runner-health.js";
 import { buildInstallerZip, installerFileName, loadInstaller, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
 import { buildKitZip, decideAddress, DownloadRequest, kitFileName, loadBundle, NODE_MIN_MAJOR, type Bundle } from "../runner-kit.js";
 import { buildCompleteZip, completeFileName, loadComplete, MAX_COMPLETE_AT_ONCE, targetOf, type CompleteBuild, type CompleteTarget } from "../runner-kit-complete.js";
@@ -82,7 +82,7 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
         if (actor.kind === "open") return actor.id ?? OPEN_OWNER_ID;
         if (actor.kind === "key") throw new HttpError(403, KEY_CANNOT_DOWNLOAD);
         if (actor.kind !== "user" || !actor.id) throw new HttpError(403, KEY_CANNOT_DOWNLOAD);
-        if (!canAddPersonal(control.projects, actor)) throw new HttpError(403, CANNOT_DOWNLOAD);
+        if (!mayHaveRunner(control.projects, actor)) throw new HttpError(403, CANNOT_DOWNLOAD);
         return actor.id;
     };
 

@@ -1,7 +1,9 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout } from "../../components/ui";
-import { RecError, errorText, recApi } from "./recorder";
+import { api, ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
+
 
 interface LiveElement {
     index: number;
@@ -57,16 +59,16 @@ export function LiveView({ rid, running }: { rid: string; running: boolean }) {
         const tick = async () => {
             let wait = LIVE_VIEW_GAP_MS;
             try {
-                const s = await recApi<LiveSnapshot>(`/recordings/${rid}/snapshot?image=1`);
+                const s = await api<LiveSnapshot>(`/recordings/${rid}/snapshot?image=1`);
                 if (!alive.current) return;
                 setSnap(s);
                 setAt(Date.now());
                 setProblem("");
             } catch (e) {
                 if (!alive.current) return;
-                setProblem(errorText(e));
+                setProblem(describeApiError(e));
                 // A refusal (an old agent, a session that ended) will not change by asking again; a lost connection might.
-                if (e instanceof RecError && e.status >= 400 && e.status < 500) return;
+                if (e instanceof ApiError && e.status >= 400 && e.status < 500) return;
                 wait = 4000;
             }
             if (alive.current) timer = window.setTimeout(() => void tick(), wait);

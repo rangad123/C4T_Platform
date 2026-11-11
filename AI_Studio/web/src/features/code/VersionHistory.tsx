@@ -1,14 +1,16 @@
 import { GitCompare, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Callout, ErrorState, ListSkeleton, Skeleton } from "../../components/ui";
-import { relativeTime } from "../../lib/format";
-import { friendlyError } from "../../lib/labels";
+import { formatBytes, relativeTime } from "../../lib/format";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { useFetch } from "../../lib/hooks";
-import { VERSION_KIND_LABEL, capi, diffStats, errorText, lineDiff, type DiffRow, type SaveResult, type VersionRow } from "./code";
-import { Modal } from "./Modal";
+import { VERSION_KIND_LABEL, diffStats, lineDiff, type DiffRow, type SaveResult, type VersionRow } from "./code";
+import { Modal } from "../../components/Modal";
+import "./code.css";
 import { RunStatus } from "./RunStatus";
+import { api } from "../../api";
 
-const kb = (n: number) => (n < 1024 ? `${n} bytes` : `${(n / 1024).toFixed(1)} KB`);
+
 
 /** Side by side on a wide screen, stacked on a phone. Added and removed lines carry a symbol and a word for screen readers, not only colour. */
 export function DiffView({ rows, leftLabel, rightLabel }: { rows: DiffRow[]; leftLabel: string; rightLabel: string }) {
@@ -90,9 +92,9 @@ export function VersionHistory({ testId, refreshKey, dirty, onRestored }: { test
         let gone = false;
         setLoadingDiff(true);
         setDiffError("");
-        Promise.all(need.map((v) => capi<{ version: number; content: string }>(`/tests/${testId}/script-versions/${v}`)))
+        Promise.all(need.map((v) => api<{ version: number; content: string }>(`/tests/${testId}/script-versions/${v}`)))
             .then((rows) => !gone && setContents((c) => ({ ...c, ...Object.fromEntries(rows.map((r) => [r.version, r.content])) })))
-            .catch((e) => !gone && setDiffError(errorText(e)))
+            .catch((e) => !gone && setDiffError(describeApiError(e)))
             .finally(() => !gone && setLoadingDiff(false));
         return () => {
             gone = true;
@@ -110,13 +112,13 @@ export function VersionHistory({ testId, refreshKey, dirty, onRestored }: { test
         setBusy(true);
         setRestoreError("");
         try {
-            const res = await capi<SaveResult>(`/tests/${testId}/script-versions/${restoring.version}/restore`, { method: "POST" });
+            const res = await api<SaveResult>(`/tests/${testId}/script-versions/${restoring.version}/restore`, { method: "POST" });
             setRestored({ res, from: restoring.version });
             setRestoring(null);
             setPicked([]);
             onRestored();
         } catch (e) {
-            setRestoreError(errorText(e));
+            setRestoreError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -148,7 +150,7 @@ export function VersionHistory({ testId, refreshKey, dirty, onRestored }: { test
                                 <Badge tone={v.kind === "generated" ? "neutral" : v.kind === "restored" ? "info" : "brand"}>{VERSION_KIND_LABEL[v.kind]}</Badge>
                                 {v.version === latest && <Badge tone="success">Current</Badge>}
                                 <span className="t-meta">
-                                    {relativeTime(v.createdAt)}, {kb(v.bytes)}
+                                    {relativeTime(v.createdAt)}, {formatBytes(v.bytes)}
                                     {v.by ? `, by ${v.by}` : ""}
                                 </span>
                                 {v.note && <span className="code-version-note">{v.note}</span>}

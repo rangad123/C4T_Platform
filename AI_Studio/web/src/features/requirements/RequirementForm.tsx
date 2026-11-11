@@ -2,8 +2,9 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api } from "../../api";
 import { Button, Callout } from "../../components/ui";
-import { apiMessage } from "../manual/manual";
 import { PRIORITIES, PRIORITY_WORDS, STATUS_HINT, STATUS_WORDS, STATUSES, type Requirement, type RequirementPriority, type RequirementStatus } from "./requirements";
+import { describeApiError } from "../../lib/labels";
+
 
 type Fields = Pick<Requirement, "ref" | "title" | "description" | "acceptanceCriteria" | "priority" | "status">;
 const EMPTY: Fields = { ref: "", title: "", description: "", acceptanceCriteria: "", priority: "medium", status: "active" };
@@ -26,7 +27,7 @@ export function RequirementForm({ projectId, initial, onCancel, onSaved }: { pro
             const saved = await api<Requirement>(initial ? `/projects/${projectId}/requirements/${initial.id}` : `/projects/${projectId}/requirements`, { method: initial ? "PATCH" : "POST", body });
             await onSaved(saved);
         } catch (err) {
-            setError(apiMessage(err));
+            setError(describeApiError(err));
             setBusy(false);
         }
     }

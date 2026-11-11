@@ -1,7 +1,9 @@
 import { BadgeCheck, Globe, Keyboard, KeyRound, Link2, ListChecks, MousePointerClick, Pencil, Replace, SquareCheck, Square, TextCursorInput, Trash2, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button } from "../../components/ui";
-import { RecError, candidateWords, errorText, locatorWords, recApi, sameLocator, type RecStep, type Recording, type StepKind } from "./recorder";
+import { candidateWords, locatorWords, sameLocator, type RecStep, type Recording, type StepKind } from "./recorder";
+import { api, ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
 
 const ICON: Record<StepKind, LucideIcon> = {
     goto: Globe,
@@ -63,8 +65,8 @@ function StepRow({ rid, step, editable, canShare, onChanged, onShareUnavailable 
             onChanged(rec);
         } catch (e) {
             failed?.();
-            if (e instanceof RecError && e.status === 404 && panel === "share") onShareUnavailable();
-            else setError(errorText(e));
+            if (e instanceof ApiError && e.status === 404 && panel === "share") onShareUnavailable();
+            else setError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -130,7 +132,7 @@ function StepRow({ rid, step, editable, canShare, onChanged, onShareUnavailable 
                                 Use as shared element
                             </Button>
                         )}
-                        <Button size="sm" variant="ghost" className="btn-danger" icon={Trash2} aria-label={`Delete step ${n}`} tip="Removes this step from the recording at once." loading={busy && panel === null} onClick={() => void run(() => recApi<Recording>(base, { method: "DELETE" }))}>
+                        <Button size="sm" variant="ghost" className="btn-danger" icon={Trash2} aria-label={`Delete step ${n}`} tip="Removes this step from the recording at once." loading={busy && panel === null} onClick={() => void run(() => api<Recording>(base, { method: "DELETE" }))}>
                             Delete
                         </Button>
                     </div>
@@ -151,7 +153,7 @@ function StepRow({ rid, step, editable, canShare, onChanged, onShareUnavailable 
                                         onChange={() => {
                                             if (i === 0) return;
                                             setChosen(i);
-                                            void run(() => recApi<Recording>(base, { method: "PATCH", body: { locator: a.locator } }), undefined, () => setChosen(0));
+                                            void run(() => api<Recording>(base, { method: "PATCH", body: { locator: a.locator } }), undefined, () => setChosen(0));
                                         }}
                                     />
                                     <span>
@@ -171,7 +173,7 @@ function StepRow({ rid, step, editable, canShare, onChanged, onShareUnavailable 
                         onSubmit={(e) => {
                             e.preventDefault();
                             const body = step.kind === "assert" ? { assert: { check: step.assert!.check, expected: step.assert!.check === "count" && /^\d+$/.test(value.trim()) ? Number(value) : value } } : { value };
-                            void run(() => recApi<Recording>(base, { method: "PATCH", body }));
+                            void run(() => api<Recording>(base, { method: "PATCH", body }));
                         }}
                     >
                         <div className="field">
@@ -196,7 +198,7 @@ function StepRow({ rid, step, editable, canShare, onChanged, onShareUnavailable 
                         onSubmit={(e) => {
                             e.preventDefault();
                             if (!name.trim()) return setError("Give the element a name, for example Add to cart button.");
-                            void run(() => recApi<Recording>(`${base}/share`, { method: "POST", body: { name: name.trim() } }));
+                            void run(() => api<Recording>(`${base}/share`, { method: "POST", body: { name: name.trim() } }));
                         }}
                     >
                         <div className="field">

@@ -153,10 +153,12 @@ export class ProjectAccessStore {
     // ── Crowd4Test accounts and organizations ──
 
     /** What Crowd4Test said about a person at their latest arrival (their kind, and a customer's organisation). */
-    recordCrowd4TestAccount(userId: string, c4tRole: string, organizationId: string | null): void {
+    /** `runsTests`: whether the account holds ai_studio.tests.run (read by AgentStore.ownerMayRun); left as it was when not given. */
+    recordCrowd4TestAccount(userId: string, c4tRole: string, organizationId: string | null, runsTests?: boolean): void {
+        const runs = runsTests === undefined ? null : runsTests ? 1 : 0;
         this.db.run(
-            "UPDATE users SET c4t_role = ?, organization_id = ? WHERE id = ? AND (c4t_role IS DISTINCT FROM ? OR organization_id IS DISTINCT FROM ?)",
-            c4tRole, organizationId, userId, c4tRole, organizationId,
+            "UPDATE users SET c4t_role = ?, organization_id = ?, c4t_runs_tests = COALESCE(?, c4t_runs_tests) WHERE id = ? AND (c4t_role IS DISTINCT FROM ? OR organization_id IS DISTINCT FROM ? OR c4t_runs_tests IS DISTINCT FROM COALESCE(?, c4t_runs_tests))",
+            c4tRole, organizationId, runs, userId, c4tRole, organizationId, runs,
         );
     }
 

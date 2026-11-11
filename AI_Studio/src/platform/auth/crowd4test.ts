@@ -181,11 +181,16 @@ export const sideOfC4t = (r: Exclude<C4tRole, "USER">): Exclude<Side, "local"> =
 export function personFor(users: UserStore, access: ProjectAccessStore, u: C4tUser, onOrganization?: (id: string) => void): Linked {
     const ceiling = ROLE_CEILING[u.role];
     if (!ceiling || u.role === "USER") return { refused: "Finish setting up your Crowd4Test account first, then open AI Studio again." };
-    if (u.status !== "ACTIVE") return { refused: "Your Crowd4Test account is not active." };
     const permissions = permissionsForC4t(u.role, u.permissions ?? []);
-    // Checked before a person is made: an account without AI Studio leaves nothing behind here.
-    if (!permissions.has("ai_studio.access")) return { refused: NO_AI_STUDIO };
     const subject = subjectOf(u);
+    // Checked before a person is made: an account without AI Studio leaves nothing behind here. A person already here stops running
+    // tests in their name (schedules, deploy triggers, their runner: AgentStore.ownerMayRun) until Crowd4Test lets them in again; their
+    // status here is left alone, so being let in again on Crowd4Test is enough (a person turned off here stays an owner's decision).
+    const cutOff = u.status !== "ACTIVE" ? "Your Crowd4Test account is not active." : !permissions.has("ai_studio.access") ? NO_AI_STUDIO : undefined;
+    if (cutOff) {
+        users.db.run("UPDATE users SET c4t_runs_tests = 0 WHERE sso_subject = ? AND role IS NOT NULL AND c4t_runs_tests IS DISTINCT FROM 0", subject);
+        return { refused: cutOff };
+    }
     const email = normEmail(u.email);
     let joined = false;
 
@@ -224,6 +229,6 @@ export function personFor(users: UserStore, access: ProjectAccessStore, u: C4tUs
         // Its name and status come from Crowd4Test's service, in the background (c4t-service.ts), when that is configured.
         onOrganization?.(u.organisationId);
     }
-    access.recordCrowd4TestAccount(person.id, u.role, organizationId ?? null);
+    access.recordCrowd4TestAccount(person.id, u.role, organizationId ?? null, permissions.has("ai_studio.tests.run"));
     return { person: { ...person, name, role }, role, joined, permissions, side: sideOfC4t(u.role), ...(organizationId ? { organizationId } : {}) };
 }

@@ -1,12 +1,12 @@
 import { Download, FileText, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api } from "../../api";
+import { api, downloadFrom } from "../../api";
 import { Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, Skeleton } from "../../components/ui";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { useFetch } from "../../lib/hooks";
 import { go, useRoute } from "../../lib/router";
 import { SecurityLayout } from "./SecurityChrome";
-import { SEC, STATE_WORDS, downloadFrom, isRunning, sec, securityError, useApps, useAssessments, when, type AssessmentRow } from "./security";
+import { SEC, STATE_WORDS, isRunning, sec, useApps, useAssessments, when, type AssessmentRow } from "./security";
 
 /**
  * Reports: the whole project or one assessment, read here as HTML (in a sandboxed frame: the report runs no script) and downloaded as
@@ -36,7 +36,7 @@ export function ReportsPage({ id }: { id: string }) {
         setHtml(undefined);
         api<string>(`${base}?format=html`)
             .then((t) => !gone && setHtml(typeof t === "string" ? t : JSON.stringify(t)))
-            .catch((e) => !gone && setError(securityError(e)))
+            .catch((e) => !gone && setError(describeApiError(e)))
             .finally(() => !gone && setLoading(false));
         return () => {
             gone = true;
@@ -49,7 +49,7 @@ export function ReportsPage({ id }: { id: string }) {
         try {
             await downloadFrom(`${base}?format=${format}`, `security-report${chosen ? `-${chosen}` : ""}.${format}`);
         } catch (e) {
-            setDlError(securityError(e));
+            setDlError(describeApiError(e));
         } finally {
             setBusy("");
         }

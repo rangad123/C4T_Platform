@@ -8,16 +8,18 @@
  *   DELETE /api/v1/security/applications/:appId/api-document          { deleted }
  */
 import { KeyRound, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { api } from "../../api";
+import { Modal } from "../../components/Modal";
 import { Button, Callout, Disclosure, FilePicker, Skeleton } from "../../components/ui";
 import { BadgeKey, FieldHelp, HelpTip, keyEntries } from "../../components/Tooltip";
+import { formatBytes } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { API_OPERATION, SIGN_IN_STATE } from "../../lib/help";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { canRun, useRole } from "./SecurityChrome";
-import { SEC, securityError, when, type ApiDocumentSummary, type AppRow } from "./security";
+import { SEC, when, type ApiDocumentSummary, type AppRow } from "./security";
 
 // ── the saved sign-in ─────────────────────────────────────────────────────────
 
@@ -131,7 +133,7 @@ export function SignInPanel({ projectId, app, onChanged }: { projectId: string; 
             await s.reload();
             onChanged();
         } catch (e) {
-            setProblem(securityError(e));
+            setProblem(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -210,7 +212,6 @@ interface DocAnswer {
 export const MAX_API_DOCUMENT = 2 * 1024 * 1024;
 /** Operations the page lists (the count says how many there are). */
 const SHOWN_OPERATIONS = 300;
-const size = (n: number) => (n < 1024 ? `${n} bytes` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
 /**
  * On the application's page: the uploaded OpenAPI or Swagger document (JSON or YAML, at most 2 MB). The page shows what the server read
@@ -228,7 +229,7 @@ export function ApiDocumentPanel({ app, onChanged }: { app: AppRow; onChanged: (
 
     async function upload() {
         if (!file) return setProblem("Choose the API document first.");
-        if (file.size > MAX_API_DOCUMENT) return setProblem(`This file is ${size(file.size)}; an API document can be at most 2 MB.`);
+        if (file.size > MAX_API_DOCUMENT) return setProblem(`This file is ${formatBytes(file.size)}; an API document can be at most 2 MB.`);
         setBusy(true);
         setProblem("");
         try {
@@ -238,7 +239,7 @@ export function ApiDocumentPanel({ app, onChanged }: { app: AppRow; onChanged: (
             await doc.reload();
             onChanged();
         } catch (e) {
-            setProblem(securityError(e));
+            setProblem(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -263,7 +264,7 @@ export function ApiDocumentPanel({ app, onChanged }: { app: AppRow; onChanged: (
                     <dl className="kv" data-testid="sa-apidoc-summary">
                         <dt>File</dt>
                         <dd>
-                            <span className="sec-loc">{d.fileName}</span> ({d.format.toUpperCase()}, {size(d.sizeBytes)})
+                            <span className="sec-loc">{d.fileName}</span> ({d.format.toUpperCase()}, {formatBytes(d.sizeBytes)})
                         </dd>
                         {(d.title || d.version) && (
                             <>
@@ -340,14 +341,8 @@ export function ApiDocumentPanel({ app, onChanged }: { app: AppRow; onChanged: (
 }
 
 function RemoveDocument({ app, fileName, onClose, onDone }: { app: AppRow; fileName: string; onClose: () => void; onDone: () => void }) {
-    const ref = useRef<HTMLDialogElement>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
-    useEffect(() => {
-        const d = ref.current;
-        if (d && !d.open) d.showModal();
-        d?.querySelector<HTMLButtonElement>("button")?.focus();
-    }, []);
     async function remove() {
         setBusy(true);
         setError("");
@@ -355,25 +350,26 @@ function RemoveDocument({ app, fileName, onClose, onDone }: { app: AppRow; fileN
             await api(`${SEC}/applications/${app.id}/api-document`, { method: "DELETE" });
             onDone();
         } catch (e) {
-            setError(securityError(e));
+            setError(describeApiError(e));
             setBusy(false);
         }
     }
     return (
-        <dialog ref={ref} className="sec-dialog" aria-labelledby="sa-doc-del" onClose={onClose} onCancel={onClose}>
-            <div className="inner">
-                <h2 className="t-section" id="sa-doc-del">
-                    Remove the API document?
-                </h2>
-                <p className="t-secondary">“{fileName}” is removed from {app.name}. Later assessments list no operations from a document; finished assessments and their reports keep what they saw.</p>
-                {error && <Callout tone="danger">{error}</Callout>}
-                <div className="foot">
+        <Modal
+            title="Remove the API document?"
+            titleId="sa-doc-del"
+            onClose={onClose}
+            foot={
+                <>
                     <Button onClick={onClose}>Keep it</Button>
                     <Button variant="danger" icon={Trash2} loading={busy} onClick={() => void remove()}>
                         Remove
                     </Button>
-                </div>
-            </div>
-        </dialog>
+                </>
+            }
+        >
+            <p className="t-secondary">“{fileName}” is removed from {app.name}. Later assessments list no operations from a document; finished assessments and their reports keep what they saw.</p>
+            {error && <Callout tone="danger">{error}</Callout>}
+        </Modal>
     );
 }

@@ -247,9 +247,6 @@ export function describeDeviations(settings: FrameworkSettings, eff: EffectiveSe
     return out;
 }
 
-/** True when nothing differs from today's behaviour (then no wrapper is installed and nothing is said). */
-export const hasDeviations = (settings: FrameworkSettings, eff: EffectiveSettings): boolean => describeDeviations(settings, eff).length > 0;
-
 /** A one-line summary of a change for the log: which fields moved. */
 export function describeChange(before: FrameworkSettings, after: FrameworkSettings): string {
     const parts: string[] = [];

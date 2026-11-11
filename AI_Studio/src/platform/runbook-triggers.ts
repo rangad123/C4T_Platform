@@ -7,6 +7,7 @@ import type { Platform } from "./bootstrap.js";
 import { getRunbookServices, RunbookOverlapError } from "./runbook-runner.js";
 import { OverlapError } from "./scheduler.js";
 import { HttpError } from "./http-error.js";
+import { assertC4tOwnerMayRun } from "./c4t-service.js";
 import { RateLimited, TriggerRunBody, getTriggerServices } from "./trigger-services.js";
 
 export interface RunbookTriggerStarted {
@@ -34,6 +35,7 @@ export async function startRunbookForToken(p: Platform, presented: string, rawIn
     const ignored: string[] = [];
     if (input.url) ignored.push("url ignored: a runbook runs against the project’s own address or the environments it names");
     if (input.callbackUrl) ignored.push("callbackUrl ignored: ask for the result with the status route instead");
+    await assertC4tOwnerMayRun(p, token.createdBy);
 
     let run;
     try {

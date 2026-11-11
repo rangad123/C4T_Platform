@@ -295,21 +295,6 @@ export function environmentResultsForProject(db: Db, projectId: string, environm
     return out;
 }
 
-/** The newest result per (test, environment), as counts per environment: what the tests list shows without loading every test. */
-export function environmentBriefForProject(db: Db, projectId: string): Map<string, Record<string, EnvStatus>> {
-    const rows = db.all<Row>(
-        `SELECT e.test_case_id AS test, e.environment AS env, e.status FROM test_executions e JOIN test_cases t ON t.id = e.test_case_id WHERE t.project_id = ? AND e.environment IS NOT NULL ORDER BY e.started_at DESC, ${db.dialect.insertionOrder("e")} DESC`,
-        projectId,
-    );
-    const out = new Map<string, Record<string, EnvStatus>>();
-    for (const r of rows) {
-        const per = out.get(r.test) ?? {};
-        if (!(r.env in per)) per[r.env] = r.status;
-        out.set(r.test, per);
-    }
-    return out;
-}
-
 // ── schedules that run against an environment ───────────────────────────────
 
 export interface ScheduleEnvironment {

@@ -25,8 +25,6 @@ export type LlmErrorClass =
     | "paused"
     | "unknown";
 
-export const LLM_ERROR_CLASSES: readonly LlmErrorClass[] = ["rate_limited", "overloaded", "server", "timeout", "network", "auth", "credit", "model", "refused", "bad_output", "bad_request", "paused", "unknown"];
-
 interface ClassRule {
     /** A short label for lists ("Rate limited"). */
     label: string;

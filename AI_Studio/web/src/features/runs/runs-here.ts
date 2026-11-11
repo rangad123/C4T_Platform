@@ -1,7 +1,6 @@
 import type { PlatformConfig } from "../../api.js";
 import { useConfig, type Fetched } from "../../lib/hooks.js";
 import { runnerProblem, useMyRunner, type MyRunnerAnswer, type RunnerMine } from "../runners/my-runner.js";
-export { RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_HREF } from "../runners/my-runner.js";
 
 /** Said before a click wherever a run or an exploration would start, while tests are switched off on this server (no worker). */
 export const RUNS_OFF_HERE = "Tests are switched off on this server, so no run starts here.";
@@ -46,11 +45,9 @@ export const NO_RUNNER_TITLE = "Your runner can’t take runs right now";
 
 /** What a run needs from the runner that takes it. */
 export interface RunNeeds {
-    web: boolean;
-    mobile: boolean;
     code: boolean;
 }
-export const NO_NEEDS: RunNeeds = { web: false, mobile: false, code: false };
+export const NO_NEEDS: RunNeeds = { code: false };
 
 export interface RunReadiness {
     mode: ExecutionMode;
@@ -68,7 +65,7 @@ export interface RunReadiness {
  * Can this person start a run now? Local mode: when the server can run tests (as before). Runners mode: when the platform hands runs
  * out and the person's own runner is set up and connected (every run goes to its starter's runner; a busy one makes the run wait).
  */
-export function useRunReadiness(_projectId?: string): RunReadiness {
+export function useRunReadiness(): RunReadiness {
     const config = useConfig();
     const mode = executionModeOf(config);
     const me = useMyRunner(15_000, mode === "runners");

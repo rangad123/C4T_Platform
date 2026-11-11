@@ -15,6 +15,7 @@ import type { Db } from "./db.js";
 import type { Repo } from "./repo.js";
 import { HttpError } from "./http-error.js";
 import { assertAllowedTarget } from "./net-guard.js";
+import { guardedFetch, refusedRedirect } from "./guarded-fetch.js";
 import type { SecretBox } from "./secrets.js";
 import type { ArtifactStore } from "./storage.js";
 import { localPathOf } from "./object-store.js";
@@ -318,7 +319,8 @@ export async function sendResetRequest(hook: ResetHookSecret, appBase: string, s
     await assertAllowedTarget(target.toString());
     const timeout = AbortSignal.timeout(RESET_LIMITS.timeoutMs);
     try {
-        const res = await fetch(target, { method: hook.method, headers: hook.headers, redirect: "manual", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+        // Connects only to the address that was checked (DNS rebinding is refused when the connection is made), and follows no redirect.
+        const res = await guardedFetch(target, { method: hook.method, headers: hook.headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
         // The body is not read into any message: a test endpoint may echo what it was sent.
         await res.body?.cancel().catch(() => undefined);
         const ms = Date.now() - started;
@@ -328,6 +330,8 @@ export async function sendResetRequest(hook: ResetHookSecret, appBase: string, s
     } catch (e) {
         const ms = Date.now() - started;
         if (signal?.aborted) throw e;
+        const redirected = refusedRedirect(e);
+        if (redirected) return { ok: false, status: redirected, ms, message: `${resetSummary(hook)} answered ${redirected} (a redirect is not followed); ${hook.expectedStatus} was expected.` };
         const why = timeout.aborted ? `no answer within ${RESET_LIMITS.timeoutMs / 1000} seconds` : `it could not be sent (${e instanceof Error ? e.message.slice(0, 120) : "network error"})`;
         return { ok: false, ms, message: `${resetSummary(hook)} failed: ${why}.` };
     }

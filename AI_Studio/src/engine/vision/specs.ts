@@ -16,7 +16,6 @@ export interface VisionGenOptions {
 }
 
 export const isVisionStep = (s: Step | undefined): boolean => s?.action === "assert" && s.check === "looksRight";
-export const hasVisionStep = (spec: TestSpec): boolean => spec.steps.some(isVisionStep);
 
 /** Generated checks look at the most important pages only: every screenshot is a paid model call. */
 export function generateVisionSpecs(model: AppModel, opts: VisionGenOptions): DraftSpec[] {

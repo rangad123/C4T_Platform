@@ -46,7 +46,6 @@ CREATE INDEX idx_shared_integration_links_project ON shared_integration_links(pr
 
 export const SHARED_KINDS = ["jira", "github", "notion", "sentry", "slack", "teams", "webhook"] as const;
 export type SharedKind = (typeof SHARED_KINDS)[number];
-export const TRACKER_SHARED: readonly SharedKind[] = ["jira", "github", "notion"];
 export const ALERT_SHARED: readonly SharedKind[] = ["slack", "teams", "webhook"];
 export const isAlertKind = (k: string): boolean => (ALERT_SHARED as readonly string[]).includes(k);
 /** Alert channels a project may have (routes/schedules.ts keeps the same number). */

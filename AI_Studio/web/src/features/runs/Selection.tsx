@@ -32,18 +32,6 @@ export function SelectToggle({ selection }: { selection: TestSelection }) {
     );
 }
 
-/** One row of the list while choosing: a checkbox (with the test's name) beside the row, which stays a link. */
-export function SelectableRow({ id, title, selection, children }: { id: string; title: string; selection: TestSelection; children: ReactNode }) {
-    return (
-        <div className="run-pick-row">
-            <label className="run-pick">
-                <input type="checkbox" checked={selection.picked.has(id)} onChange={() => selection.toggle(id)} aria-label={`Select ${title}`} />
-            </label>
-            <div className="grow">{children}</div>
-        </div>
-    );
-}
-
 /** "3 tests selected": what is chosen, quick ways to choose more, and the Run control for exactly these tests. */
 export function SelectionBar({ selection, shownIds, run }: { selection: TestSelection; shownIds: string[]; run: ReactNode }) {
     const n = selection.picked.size;

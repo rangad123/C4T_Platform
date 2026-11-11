@@ -1,5 +1,8 @@
 /** The UI's plain-language layer: URL entry, status wording, errors, steps, time. */
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { codeSpans } from "../web/src/components/code-spans.js";
 import { duration, plural, relativeTime } from "../web/src/lib/format.js";
 import { cleanReason, friendlyError, friendlyJobErrors, jobLabel, phaseText, progressPercent, stepSentence, VALIDATION } from "../web/src/lib/labels.js";
 import { normalizeUrl } from "../web/src/lib/url.js";
@@ -88,6 +91,9 @@ describe("format", () => {
         expect(duration(450)).toBe("450 ms");
         expect(duration(3200)).toBe("3.2 s");
         expect(duration(125_000)).toBe("2 min 5 s");
+        expect(duration(59_600)).toBe("1 min 0 s");
+        expect(duration(119_700)).toBe("2 min 0 s");
+        expect(duration(9_960)).toBe("10 s");
         expect(plural(1, "test")).toBe("1 test");
         expect(plural(2, "test")).toBe("2 tests");
     });
@@ -106,5 +112,21 @@ describe("cleanReason", () => {
 describe("cleanReason (assertion phrasing)", () => {
     it("does not leave a dangling 'failed'", () => {
         expect(cleanReason("Error: expect(page).toHaveScreenshot(expected) failed")).toBe("the result didn’t match what the test expected");
+    });
+});
+
+describe("codeSpans (CodeViewer colours)", () => {
+    it("colours code with the editor's parser and keeps it as escaped text", () => {
+        const code = 'const a = "<img src=x onerror=alert(1)>"; // note\nawait page.goto("/");\n';
+        const html = renderToStaticMarkup(createElement("code", null, codeSpans(code, "typescript")));
+        expect(html).toContain('<span class="tok-keyword">const</span>');
+        expect(html).toContain('class="tok-comment">// note</span>');
+        expect(html).toContain("&lt;img");
+        expect(html).not.toContain("<img");
+        const text = html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
+        expect(text).toBe(code);
+        const json = renderToStaticMarkup(createElement("code", null, codeSpans('{"a": 1, "b": true}', "json")));
+        expect(json).toContain('<span class="tok-number">1</span>');
+        expect(json).toContain('<span class="tok-bool">true</span>');
     });
 });

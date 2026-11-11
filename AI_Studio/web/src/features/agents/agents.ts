@@ -116,26 +116,7 @@ export function browserSentence(b: WebBrowserUsed, where: string): string {
     return `${browserName(b)}, the browser that comes with the test tools`;
 }
 
-export const OS_LABEL: Record<Agent["os"], string> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
-const BROWSER_LABEL = { chromium: "Chromium", firefox: "Firefox", webkit: "WebKit" } as const;
 const POLL_MS = 5000;
-
-const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/** "Chromium, Firefox, WebKit. Android: 2 devices, 1 emulator." */
-export function capabilitySummary(c: Agent["capabilities"]): string {
-    const browsers = c.browsers.length ? c.browsers.map((b) => BROWSER_LABEL[b]).join(", ") : "No browsers installed";
-    let android = "";
-    if (c.android) {
-        const d = c.android.devices;
-        if (c.android.summary) return `${browsers}. ${c.android.summary}.`;
-        const emulators = d.filter((x) => x.emulator).length;
-        if (!c.android.adb) android = "Android: adb not found";
-        else if (d.length === 0) android = "Android: no devices connected";
-        else android = `Android: ${count(d.length, "device")}${emulators ? `, ${count(emulators, "emulator")}` : ""}`;
-    }
-    return `${browsers}.${android ? ` ${android}.` : ""}`;
-}
 
 /** What adb calls a state, in words a person would use. */
 export function deviceState(state: string): string {

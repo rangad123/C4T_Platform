@@ -1,23 +1,9 @@
-import { Code2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "../../components/ui";
 import { FieldHelp } from "../../components/Tooltip";
 import { go, routes } from "../../lib/router";
-import { Modal } from "./Modal";
+import { Modal } from "../../components/Modal";
 import "./code.css";
-
-/** "Write code" on the Tests page: ask for a title, the kind and a category, then open the editor with a starter script. */
-export function WriteCodeButton({ projectId }: { projectId: string }) {
-    const [open, setOpen] = useState(false);
-    return (
-        <>
-            <Button icon={Code2} onClick={() => setOpen(true)}>
-                Write code
-            </Button>
-            {open && <WriteCodeDialog projectId={projectId} onClose={() => setOpen(false)} />}
-        </>
-    );
-}
 
 export function WriteCodeDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
     const [title, setTitle] = useState("");

@@ -295,6 +295,7 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 53: a runner task's phases and attempts, and its live events (schema lives in agent-store.ts; existing tasks get their phase from their status, every existing runner speaks protocol 1 until its next hello) */ RUNNER_LIFECYCLE_MIGRATION,
     /* 54: what an approved test version depends on (shared steps, helpers, elements), so a change there holds it back (schema lives in approval-deps.ts; existing approved versions have no record and get one the first time a run checks them) */ APPROVAL_DEPS_MIGRATION,
     /* 55: one runner per person: who made each deploy trigger token, so its runs go to that person's runner (trigger-store.ts; existing tokens have none: null, and their runs are refused with a sentence) */ `ALTER TABLE trigger_tokens ADD COLUMN created_by TEXT;`,
+    /* 56: whether a Crowd4Test account held ai_studio.tests.run at its latest arrival, so a schedule or trigger stops running in its name once it lost it (project-access-store.ts; existing people have none: null, which counts as yes until they arrive again) */ `ALTER TABLE users ADD COLUMN c4t_runs_tests INTEGER;`,
 ];
 
 /** Slots that were reserved before their SQL existed: the slot number and a table only that slot creates. */

@@ -9,7 +9,6 @@ import {
     daysLeft,
     DEFAULT_DAYS,
     evidenceText,
-    MAX_BY,
     MAX_DAYS,
     MAX_REASON,
     suggestRelease,
@@ -160,8 +159,6 @@ export function testView(repo: Repo, store: QuarantineStore, test: TestRow, nowM
         history,
     };
 }
-
-export const clipBy = (s: string): string => s.trim().slice(0, MAX_BY);
 
 // ── jobs ───────────────────────────────────────────────────────────────────
 

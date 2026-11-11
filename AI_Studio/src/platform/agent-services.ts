@@ -28,7 +28,7 @@ import { scrubTraceFile, traceSecretsOfRun } from "../engine/evidence/trace-scru
 import { agentDesktopProblem, assertHostDesktop, desktopApps } from "./desktop-guard.js";
 import { desktopUnavailableReason, lastProbe, probeDesktop } from "../engine/desktop/probe.js";
 import type { Platform } from "./bootstrap.js";
-import { AgentStore, jobOwnerId, MAX_OFFERS, NEVER_ACCEPTED, OPEN_OWNER_ID, ownerIdOfActor, refusalsOf, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type RunnerSetting, type SweepChange, type TaskFile, type TaskRecord } from "./agent-store.js";
+import { AgentStore, jobOwnerId, MAX_OFFERS, NEVER_ACCEPTED, OPEN_OWNER_ID, ownerIdOfActor, refusalsOf, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type SweepChange, type TaskFile, type TaskRecord } from "./agent-store.js";
 import { currentActor } from "./auth/actor.js";
 import { crowd4testFromConfig } from "./auth/crowd4test.js";
 import { isPrivateHost } from "./net-guard.js";
@@ -44,7 +44,6 @@ import { assertAllowedTarget } from "./net-guard.js";
 import type { JobOptions, JobRow } from "./repo.js";
 import { SecretBox } from "./secrets.js";
 
-export const NO_AGENT_MESSAGE = "Your runner is not connected. Start it on your computer, or switch the project back to running here.";
 /** A step of a runbook started by hand, resumed after a restart: its starter is not known here, so no runner may take it. */
 export const RUNBOOK_STARTER_UNKNOWN = "This runbook was started before the platform restarted, and who started it is not known any more. Start it again to run it on your computer.";
 export { KEY_HAS_NO_RUNNER, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_LINK, runnerRefusal, SCHEDULE_HAS_NO_OWNER, TEAM_RUNNER_REFUSED, TRIGGER_HAS_NO_OWNER, type RunnerRefusalCode };
@@ -257,7 +256,7 @@ export class AgentService {
         if (body.machineId) {
             if (token.machineId && token.machineId !== body.machineId) throw new MachineRefused(token);
             if (!token.machineId) this.store.bindMachine(token.id, body.machineId);
-        } else if (token.machineId && (token.kind === "personal" || this.store.isEnrolled(token.id))) throw new MachineRefused(token);
+        } else if (token.machineId && token.kind === "personal") throw new MachineRefused(token);
         const other = this.store.agentsOfToken(token.id).find((a) => a.name !== body.name && (!body.machineId || a.machineId !== body.machineId) && this.clock() - a.lastSeenMs <= ONLINE_MS);
         if (other) throw new HttpError(409, `This runner's credential is already used by “${other.name}”, which is online. Set up each computer from Settings.`);
         const agent = this.store.upsertAgent(token, body);
@@ -909,7 +908,7 @@ export class AgentService {
      * project's tests), online, as a list of at most one. `who` absent: the person asking now (a page's view of their own runner); nobody's
      * run (no owner): none.
      */
-    eligibleAgents(projectId: string, _setting?: RunnerSetting, who: RunContext = { ownerId: ownerIdOfActor(currentActor()) }): Array<AgentRecord & { online: boolean; activeTasks: number }> {
+    eligibleAgents(projectId: string, who: RunContext = { ownerId: ownerIdOfActor(currentActor()) }): Array<AgentRecord & { online: boolean; activeTasks: number }> {
         const own = who?.ownerId ? this.ownRunner(who.ownerId, projectId) : undefined;
         return own?.agent && own.online ? [{ ...own.agent, online: true, activeTasks: this.store.runningCount(own.agent.id) }] : [];
     }
@@ -1471,7 +1470,7 @@ class RemoteExecutor implements ScriptExecutor {
                 // A runner that said no (protocol 2 reject) is not counted: the task is never offered to it again.
                 const refused = new Set(refusalsOf(t).map((r) => r.agentId));
                 // The same rules as offering (migration 51): the job's owner's own computers count, and code scripts only where they may run.
-                const capable = svc.eligibleAgents(projectId, undefined, svc.jobContext(jobId)).some((a) => !refused.has(a.id) && !capabilityProblem(adapter, a.capabilities) && (!needsCustom || svc.mayRunCodeScripts(a)));
+                const capable = svc.eligibleAgents(projectId, svc.jobContext(jobId)).some((a) => !refused.has(a.id) && !capabilityProblem(adapter, a.capabilities) && (!needsCustom || svc.mayRunCodeScripts(a)));
                 if (capable) noAgentSince = undefined;
                 else if (refusalsOf(t).length > 0) {
                     // Every runner that could take it said no: the run fails now, with their reasons (each is also in the run's events).
@@ -1698,11 +1697,6 @@ export function getAgentServices(p: Platform, opts?: { clock?: () => number; lim
         return undefined;
     });
     return svc;
-}
-
-/** Forget a platform (tests that close their database). */
-export function forgetAgentServices(p: Platform): void {
-    installed.delete(p);
 }
 
 /** Where a job ran, for job objects. Undefined when this process has no agent services or the job is of a kind that runs no scripts. */

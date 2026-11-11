@@ -1,4 +1,5 @@
 /** Storage and backup: shapes the API answers with, and the small pure helpers the screens use. */
+import { formatBytes } from "../../lib/format.js";
 
 export const KINDS = ["screenshot", "video", "trace", "evidence", "report", "apk", "baseline", "script", "other"] as const;
 export type StorageKind = (typeof KINDS)[number];
@@ -101,20 +102,6 @@ export interface RestoreResult {
     needsSecrets: Array<{ kind: string; label: string; detail?: string }>;
     notes: string[];
     message: string;
-}
-
-const UNITS = ["bytes", "KB", "MB", "GB", "TB"];
-/** "812 KB", "1.8 GB": the same wording the server uses. */
-export function formatBytes(n: number): string {
-    if (!Number.isFinite(n) || n <= 0) return "0 bytes";
-    let v = n;
-    let u = 0;
-    while (v >= 1024 && u < UNITS.length - 1) {
-        v /= 1024;
-        u++;
-    }
-    if (u === 0) return `${Math.round(v)} ${v === 1 ? "byte" : "bytes"}`;
-    return `${u >= 2 && v < 100 ? v.toFixed(1).replace(/\.0$/, "") : Math.round(v)} ${UNITS[u]}`;
 }
 
 export interface BarSegment {

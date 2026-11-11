@@ -2,15 +2,16 @@ import { Check, Copy, Eye, FilePlus2, Pencil, Puzzle, Trash2 } from "lucide-reac
 import { useCallback, useState } from "react";
 import { usePage } from "../../components/Shell";
 import { Button, Callout, EmptyState, ErrorState, LinkButton, ListSkeleton, PageHeader } from "../../components/ui";
-import { relativeTime } from "../../lib/format";
+import { formatBytes, relativeTime } from "../../lib/format";
 import { useConfig, useDocumentTitle, useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { useHere } from "../auth/project-access";
-import { CodeError, capi, errorText, helperNameProblem, helperStarter, type ConfigWithCode, type SaveResult } from "./code";
-import { Modal } from "./Modal";
+import { helperNameProblem, helperStarter, type ConfigWithCode, type SaveResult } from "./code";
+import { Modal } from "../../components/Modal";
 import { Workbench } from "./Workbench";
 import "./code.css";
+import { api, ApiError } from "../../api";
 
 interface Helper {
     name: string;
@@ -19,7 +20,6 @@ interface Helper {
     usedBy: number;
 }
 const MAX_HELPERS = 20;
-const kb = (n: number) => (n < 1024 ? `${n} bytes` : `${(n / 1024).toFixed(1)} KB`);
 const importLine = (name: string) => `import { x } from "./helpers/${name}";`;
 
 /** Tests that block a delete, in whatever shape the platform lists them. */
@@ -64,10 +64,10 @@ export function HelpersPage({ id }: { id: string }) {
         setOpenError("");
         setNotice("");
         try {
-            const r = await capi<string | { content: string }>(`/projects/${id}/helpers/${name}`);
+            const r = await api<string | { content: string }>(`/projects/${id}/helpers/${name}`);
             setEditing({ name, initial: typeof r === "string" ? r : r.content, key: Date.now(), fresh: false });
         } catch (e) {
-            setOpenError(errorText(e));
+            setOpenError(describeApiError(e));
         } finally {
             setOpening("");
         }
@@ -76,7 +76,7 @@ export function HelpersPage({ id }: { id: string }) {
     const save = useCallback(
         async (content: string): Promise<SaveResult> => {
             const name = editing!.name;
-            const res = await capi<{ diagnostics?: SaveResult["diagnostics"] }>(`/projects/${id}/helpers/${name}`, { method: "PUT", body: { content } });
+            const res = await api<{ diagnostics?: SaveResult["diagnostics"] }>(`/projects/${id}/helpers/${name}`, { method: "PUT", body: { content } });
             void helpers.reload();
             return { diagnostics: res?.diagnostics ?? [] };
         },
@@ -88,13 +88,13 @@ export function HelpersPage({ id }: { id: string }) {
         setDelBusy(true);
         setDelError(null);
         try {
-            await capi(`/projects/${id}/helpers/${deleting.name}`, { method: "DELETE" });
+            await api(`/projects/${id}/helpers/${deleting.name}`, { method: "DELETE" });
             if (editing?.name === deleting.name) setEditing(null);
             setNotice(`The helper “${deleting.name}” is deleted.`);
             setDeleting(null);
             void helpers.reload();
         } catch (e) {
-            setDelError({ text: errorText(e), tests: e instanceof CodeError ? blockingTests(e.body) : [] });
+            setDelError({ text: describeApiError(e), tests: e instanceof ApiError ? blockingTests(e.body) : [] });
         } finally {
             setDelBusy(false);
         }
@@ -159,7 +159,7 @@ export function HelpersPage({ id }: { id: string }) {
                                     <span className="code-helper-main">
                                         <span className="t-card">{h.name}</span>
                                         <span className="t-meta">
-                                            {kb(h.bytes)}, used by {h.usedBy} {h.usedBy === 1 ? "test" : "tests"}, changed {relativeTime(h.updatedAt)}
+                                            {formatBytes(h.bytes)}, used by {h.usedBy} {h.usedBy === 1 ? "test" : "tests"}, changed {relativeTime(h.updatedAt)}
                                         </span>
                                     </span>
                                     {/* Reading a helper needs only access: someone who may not change it opens it to read (View). */}

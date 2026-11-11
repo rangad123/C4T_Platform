@@ -110,10 +110,10 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         if (!c || c.projectId !== projectId) throw new HttpError(404, "Alert channel not found");
         return c;
     };
-    /** Refuse a schedule that could never run, with the reason in plain words. */
+    /** Refuse a schedule that could never run, with the reason in plain words (as its maker's runs: their runner, their code tests). */
     const assertRunnable = async (projectId: string, kind: Schedule["kind"]) => {
         if (!repo.getLatestApplicationPublic(projectId)) throw new HttpError(409, "This project has no application yet. Run an analysis first.");
-        if (kind === "validate" && (await runnableTestIds(repo, projectId)).length === 0) throw new HttpError(409, "This project has no tests that can be run yet.");
+        if (kind === "validate" && (await runnableTestIds(repo, projectId, "validate", ownerIdOfActor(currentActor()))).length === 0) throw new HttpError(409, "This project has no tests that can be run yet.");
     };
     /** The schedule's public shape plus the environment it runs against (kept by the environments feature). */
     const runbooks = getRunbookServices(p).store;

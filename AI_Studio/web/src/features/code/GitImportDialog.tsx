@@ -2,13 +2,14 @@ import { GitBranch, RefreshCw, Search, Unlink } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, Callout, ErrorState, ListSkeleton } from "../../components/ui";
 import { FieldHelp } from "../../components/Tooltip";
-import { relativeTime } from "../../lib/format";
+import { formatBytes, plural, relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
-import { friendlyError } from "../../lib/labels";
+import { friendlyError, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { capi, errorText, gitUrlProblem, shortCommit } from "./code";
-import { Modal } from "./Modal";
+import { gitUrlProblem, shortCommit } from "./code";
+import { Modal } from "../../components/Modal";
 import "./code.css";
+import { api } from "../../api";
 
 interface PreviewFile { path: string; title: string; bytes: number; tests: number; problems: string[] }
 interface Skipped { path: string; reason: string; editedHere?: boolean }
@@ -16,8 +17,6 @@ interface Preview { commit: string; files: PreviewFile[]; skipped: Skipped[] }
 interface Imported { commit: string; imported: Array<{ testId: string; path: string; created: boolean }>; skipped: Skipped[]; jobId: string | null; note?: string }
 interface Repo { id: string; host: string; path: string; ref: string; commit: string; importedAt: string; tests: number }
 
-const kb = (n: number) => (n < 1024 ? `${n} bytes` : `${(n / 1024).toFixed(1)} KB`);
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
  * Import code tests from a Git repository. The access token is write-only: it lives in this component's state while the
@@ -57,10 +56,10 @@ export function GitImportDialog({ projectId, onClose, onImported }: { projectId:
         setError("");
         setResult(null);
         try {
-            setPreview(await capi<Preview>(`/projects/${projectId}/git-imports`, { method: "POST", body: body(true) }));
+            setPreview(await api<Preview>(`/projects/${projectId}/git-imports`, { method: "POST", body: body(true) }));
         } catch (e) {
             setPreview(null);
-            setError(errorText(e));
+            setError(describeApiError(e));
         } finally {
             setBusy("");
         }
@@ -70,14 +69,14 @@ export function GitImportDialog({ projectId, onClose, onImported }: { projectId:
         setBusy("import");
         setError("");
         try {
-            const r = await capi<Imported>(`/projects/${projectId}/git-imports`, { method: "POST", body: body(false) });
+            const r = await api<Imported>(`/projects/${projectId}/git-imports`, { method: "POST", body: body(false) });
             setResult(r);
             setPreview(null);
             setToken(""); // used once; nothing keeps it
             onImported();
             void repos.reload();
         } catch (e) {
-            setError(errorText(e));
+            setError(describeApiError(e));
         } finally {
             setBusy("");
         }
@@ -163,7 +162,7 @@ export function GitImportDialog({ projectId, onClose, onImported }: { projectId:
                                         <span className="t-meta code-path">{f.path}</span>
                                     </span>
                                     <span className="t-meta">
-                                        {plural(f.tests, "test", "tests")}, {kb(f.bytes)}
+                                        {plural(f.tests, "test", "tests")}, {formatBytes(f.bytes)}
                                     </span>
                                     {f.problems.length > 0 ? (
                                         <span className="code-git-problems">
@@ -250,13 +249,13 @@ function RepoItem({ projectId, repo, onChanged }: { projectId: string; repo: Rep
         setState("check");
         setNote(null);
         try {
-            const r = await capi<{ upToDate: boolean; newCommit?: string; changed: Array<{ testId: string; path: string; editedHere?: boolean }> }>(`${base}/check`, { method: "POST" });
+            const r = await api<{ upToDate: boolean; newCommit?: string; changed: Array<{ testId: string; path: string; editedHere?: boolean }> }>(`${base}/check`, { method: "POST" });
             const edited = r.changed.filter((c) => c.editedHere).length;
             // A script edited here since the last import is kept by a refresh: say so before anyone presses it.
             const keep = edited ? ` ${plural(edited, "test was", "tests were")} edited here, so a refresh leaves ${edited === 1 ? "it" : "them"} as ${edited === 1 ? "it is" : "they are"}.` : "";
             setNote(r.upToDate ? { tone: "success", text: "Up to date with the repository." } : { tone: "warning", text: `${r.newCommit ? `A newer commit ${shortCommit(r.newCommit)} exists. ` : ""}${plural(r.changed.length, "test differs", "tests differ")}${r.changed.length ? `: ${r.changed.map((c) => c.path).join(", ")}` : ""}. Refresh to update them.${keep}` });
         } catch (e) {
-            setNote({ tone: "danger", text: errorText(e) });
+            setNote({ tone: "danger", text: describeApiError(e) });
         } finally {
             setState("");
         }
@@ -265,14 +264,14 @@ function RepoItem({ projectId, repo, onChanged }: { projectId: string; repo: Rep
         setState("refresh");
         setNote(null);
         try {
-            const r = await capi<Imported>(`${base}/refresh`, { method: "POST", body: token ? { token } : {} });
+            const r = await api<Imported>(`${base}/refresh`, { method: "POST", body: token ? { token } : {} });
             setToken("");
             setAsking("");
             const kept = r.skipped.filter((s) => s.editedHere).length;
             setNote({ tone: "success", text: `Refreshed: ${plural(r.imported.filter((i) => !i.created).length, "test", "tests")} updated, ${plural(r.imported.filter((i) => i.created).length, "test", "tests")} created. ${kept ? `${plural(kept, "test", "tests")} edited here ${kept === 1 ? "was" : "were"} left as ${kept === 1 ? "it is" : "they are"}. ` : ""}${r.jobId ? "We are running them now." : ""}` });
             onChanged();
         } catch (e) {
-            setNote({ tone: "danger", text: errorText(e) });
+            setNote({ tone: "danger", text: describeApiError(e) });
         } finally {
             setState("");
         }
@@ -281,10 +280,10 @@ function RepoItem({ projectId, repo, onChanged }: { projectId: string; repo: Rep
         setState("remove");
         setNote(null);
         try {
-            await capi(base, { method: "DELETE" });
+            await api(base, { method: "DELETE" });
             onChanged();
         } catch (e) {
-            setNote({ tone: "danger", text: errorText(e) });
+            setNote({ tone: "danger", text: describeApiError(e) });
             setState("");
         }
     }

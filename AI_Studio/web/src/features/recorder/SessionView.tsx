@@ -7,8 +7,11 @@ import { Inspector } from "./Inspector";
 import { LiveView } from "./LiveView";
 import { SaveForm, type Saved } from "./SaveForm";
 import { StepList } from "./StepList";
-import { RecError, STATUS_WORD, agentOf, clock, errorText, recApi, rememberSession, useSession, type Recording } from "./recorder";
+import { STATUS_WORD, agentOf, clock, rememberSession, useSession, type Recording } from "./recorder";
 import { DiscardDialog } from "./DiscardDialog";
+import { api, ApiError } from "../../api";
+import { describeApiError } from "../../lib/labels";
+
 
 /** One recording session: the status bar, the growing step list, the inspector and, once stopped, the save form. */
 export function SessionView({ rid, projectId, onReset }: { rid: string; projectId: string; onReset: (lastUrl?: string) => void }) {
@@ -53,7 +56,7 @@ export function SessionView({ rid, projectId, onReset }: { rid: string; projectI
         try {
             apply(await fn());
         } catch (e) {
-            setActionError(errorText(e));
+            setActionError(describeApiError(e));
         } finally {
             setBusy(false);
         }
@@ -61,7 +64,7 @@ export function SessionView({ rid, projectId, onReset }: { rid: string; projectI
 
     if (loading) return <ListSkeleton rows={4} />;
     if (!rec) {
-        const gone = error instanceof RecError && error.status === 404;
+        const gone = error instanceof ApiError && error.status === 404;
         return (
             <Callout
                 tone="danger"
@@ -115,7 +118,7 @@ export function SessionView({ rid, projectId, onReset }: { rid: string; projectI
                 {rec.status !== "saved" && (
                     <div className="rec-bar-acts">
                         {live && (
-                            <Button variant="primary" icon={Square} loading={busy} tip="Stops the recording browser. You can still change the steps, then save them as a test." onClick={() => void act(() => recApi<Recording>(`/recordings/${rid}/stop`, { method: "POST" }))}>
+                            <Button variant="primary" icon={Square} loading={busy} tip="Stops the recording browser. You can still change the steps, then save them as a test." onClick={() => void act(() => api<Recording>(`/recordings/${rid}/stop`, { method: "POST" }))}>
                                 Stop recording
                             </Button>
                         )}
@@ -205,7 +208,7 @@ export function SessionView({ rid, projectId, onReset }: { rid: string; projectI
                     again={discard === "again"}
                     onClose={() => setDiscard(null)}
                     onConfirm={async () => {
-                        await recApi(`/recordings/${rid}`, { method: "DELETE" });
+                        await api(`/recordings/${rid}`, { method: "DELETE" });
                         rememberSession(projectId, null);
                         onReset(rec.startUrl);
                     }}

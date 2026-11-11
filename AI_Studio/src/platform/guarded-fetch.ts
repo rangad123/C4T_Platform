@@ -55,6 +55,12 @@ function bodyOf(body: unknown): Buffer | undefined {
     throw new TypeError("This request body is not supported here.");
 }
 
+/** The status of the redirect a guardedFetch call refused, else undefined. */
+export const refusedRedirect = (e: unknown): number | undefined => {
+    const s = (e as { cause?: { status?: unknown } } | null)?.cause?.status;
+    return typeof s === "number" ? s : undefined;
+};
+
 /** A `fetch` that follows no redirect and, with BLOCK_PRIVATE_TARGETS on, connects only to public addresses. */
 export const guardedFetch: typeof fetch = async (input, init) => {
     let url: URL;

@@ -1,17 +1,20 @@
-import hljs from "highlight.js/lib/core";
-import json from "highlight.js/lib/languages/json";
-import typescript from "highlight.js/lib/languages/typescript";
 import { Check, Copy, Download } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { downloadBlob } from "../lib/format";
 import { Button } from "./ui";
 
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("json", json);
-
-/** Syntax-highlighted, scrollable code with copy/download. Renders escaped text — highlight.js output is safe HTML. */
+/** Syntax-highlighted, scrollable code with copy/download. */
 export function CodeViewer({ code, language = "typescript", filename, label, fullCode }: { code: string; language?: "typescript" | "json"; filename?: string; label?: string; /** What Copy and Download give when only part of the script is shown (the test body, with the setup code folded away). */ fullCode?: string }) {
-    const html = useMemo(() => hljs.highlight(code, { language }).value, [code, language]);
+    // Plain text first; the colours arrive with the parser (a lazy chunk, like the editor).
+    const [highlighted, setHighlighted] = useState<ReactNode[] | null>(null);
+    useEffect(() => {
+        let live = true;
+        setHighlighted(null);
+        void import("./code-spans").then((m) => live && setHighlighted(m.codeSpans(code, language)));
+        return () => {
+            live = false;
+        };
+    }, [code, language]);
     /** "done" after a copy; "failed" when the clipboard refused (said on the button, never "Copied"). */
     const [copied, setCopied] = useState<"done" | "failed" | null>(null);
     return (
@@ -41,7 +44,7 @@ export function CodeViewer({ code, language = "typescript", filename, label, ful
                 )}
             </div>
             <pre className="code" tabIndex={0}>
-                <code dangerouslySetInnerHTML={{ __html: html }} />
+                <code>{highlighted ?? code}</code>
             </pre>
         </div>
     );

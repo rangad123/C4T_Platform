@@ -5,8 +5,9 @@ import { CollapsedSetting } from "../../components/ProjectHub";
 import { Button, Callout } from "../../components/ui";
 import { go, routes, useRoute } from "../../lib/router";
 import { canRun, useRole } from "./SecurityChrome";
-import { TESTING_TYPES, getPendingTestingType, includesSecurity, saveTestingType, sec, securityError, setPendingTestingType, useSecurityStatus, useTestingType, type TestingType } from "./security";
+import { TESTING_TYPES, getPendingTestingType, includesSecurity, saveTestingType, sec, setPendingTestingType, useSecurityStatus, useTestingType, type TestingType } from "./security";
 import "./security.css";
+import { describeApiError } from "../../lib/labels";
 
 /** Functional testing / Security assessment / Both, as three labelled radio cards. */
 export function TestingTypeChoice({ value, onChange, name = "testing-type", disabled, legend = "What kind of testing is this project for?" }: { value: TestingType; onChange: (t: TestingType) => void; name?: string; disabled?: boolean; legend?: string }) {
@@ -68,13 +69,13 @@ function NewSecurityProject() {
                 await saveTestingType(id, "security");
             } catch (err) {
                 // The project exists; say so plainly and let the person set the type in Settings.
-                setProblem(`The project was made, but its testing type was not saved: ${securityError(err)} Set it under Settings.`);
+                setProblem(`The project was made, but its testing type was not saved: ${describeApiError(err)} Set it under Settings.`);
                 setBusy(false);
                 return;
             }
             go(sec.newApplication(id));
         } catch (err) {
-            setProblem(securityError(err));
+            setProblem(describeApiError(err));
             setBusy(false);
         }
     }
@@ -129,7 +130,7 @@ export function TestingTypeSetting({ id }: { id: string }) {
             setSaved(includesSecurity(current) ? "Saved. The Security assessment section is on for this project." : "Saved. The Security assessment section is hidden for this project; its applications and findings are kept.");
             setValue(undefined);
         } catch (e) {
-            setError(securityError(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(false);
         }

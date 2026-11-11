@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { Badge, Button, Disclosure, Skeleton } from "../../components/ui";
-import { duration } from "../../lib/format";
+import { duration, formatBytes } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { HelpTip, Tooltip } from "../../components/Tooltip";
-import { LINE_TYPE, isFailed, isNearFailure, requestName, requestResult, sizeText, whenText, type EvidenceAnswer, type EvidenceLine, type EvidenceRequest } from "./evidence";
+import { LINE_TYPE, isFailed, isNearFailure, requestName, requestResult, whenText, type EvidenceAnswer, type EvidenceLine, type EvidenceRequest } from "./evidence";
 import "./evidence.css";
 
 const FIRST_ROWS = 100;
@@ -118,7 +118,7 @@ function RequestTable({ rows, failedStep, label }: { rows: EvidenceRequest[]; fa
                             </td>
                             <td className="evidence-num">
                                 {r.ms !== undefined ? duration(r.ms) : "–"}
-                                {r.size !== undefined && r.size > 0 && <span className="t-meta evidence-when">{sizeText(r.size)}</span>}
+                                {r.size !== undefined && r.size > 0 && <span className="t-meta evidence-when">{formatBytes(r.size)}</span>}
                             </td>
                         </tr>
                     );

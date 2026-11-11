@@ -8,6 +8,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         include: [
+            "tests/c4t-owner-cutoff-unit.test.ts",
+            "tests/rebinding-guard-unit.test.ts",
             "tests/project-permissions-unit.test.ts",
             "tests/net-guard-ranges-unit.test.ts",
             "tests/visual-baseline-unit.test.ts",

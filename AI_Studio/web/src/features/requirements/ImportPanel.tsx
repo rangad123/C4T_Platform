@@ -6,8 +6,9 @@ import { Badge, Button, Callout, FilePicker } from "../../components/ui";
 import { plural, toBase64 } from "../../lib/format";
 import { useConfig } from "../../lib/hooks";
 import { useHere } from "../auth/project-access";
-import { apiMessage } from "../manual/manual";
 import { IMPORT_ACCEPT, type ImportPreview } from "./requirements";
+import { describeApiError } from "../../lib/labels";
+
 
 /**
  * Import requirements from pasted text or a document (.txt, .md, .docx, .pdf). The platform reads them first and shows what it
@@ -37,7 +38,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
             setPreview(r);
             setPicked(new Set(r.candidates.filter((c) => !c.exists).map((c) => c.ref)));
         } catch (e) {
-            setError(apiMessage(e));
+            setError(describeApiError(e));
         } finally {
             setBusy(null);
         }
@@ -52,7 +53,7 @@ export function ImportPanel({ projectId, onCancel, onImported }: { projectId: st
             const r = await api<{ created: number; duplicates: string[] }>(`/projects/${projectId}/requirements/import`, { method: "POST", body: { requirements, source: preview.usedAi ? "ai" : "imported" } });
             await onImported(`Imported ${plural(r.created, "requirement")}.${r.duplicates.length ? ` ${plural(r.duplicates.length, "reference")} already existed and ${r.duplicates.length === 1 ? "was" : "were"} left out: ${r.duplicates.slice(0, 5).join(", ")}${r.duplicates.length > 5 ? "…" : ""}.` : ""}`);
         } catch (e) {
-            setError(`Nothing was imported. ${apiMessage(e)}`);
+            setError(`Nothing was imported. ${describeApiError(e)}`);
             setBusy(null);
         }
     }

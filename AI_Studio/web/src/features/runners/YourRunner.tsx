@@ -9,7 +9,6 @@ import { friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { boldScripts } from "../agents/bold";
 import { RunnerCheckDetails, RunnerCheckNote } from "../agents/check";
-import { NEEDS_MANUAL_UPDATE } from "../agents/agents";
 import { RunnerUpdates } from "../agents/updates";
 import { RunnerSwitches } from "./RunnerSwitches";
 import { UnsignedNotice } from "./UnsignedNotice";
@@ -22,10 +21,8 @@ import {
     downloadMyRunner,
     guessSystem,
     OS_WORDS,
-    ownerOf,
     refineArch,
     sizeWords,
-    RUNNER_SETTINGS_HREF,
     saveBlob,
     startSteps,
     systemAvailable,
@@ -43,15 +40,14 @@ import "../agents/agents.css";
 const POLL_MS = 3000;
 const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 
-/** The system a runner reported, as offlineSteps() takes it. */
-const nodeOs = (os: string | null | undefined): "win32" | "darwin" | "linux" | null => {
+/** The system a runner reported (Node's name for it), as offlineSteps() and OS_WORDS take it. */
+const nodeOs = (os: string | null | undefined): RunnerOs | null => {
     const o = (os ?? "").toLowerCase();
-    if (o === "win32" || o === "windows") return "win32";
-    if (o === "darwin" || o === "mac" || o === "macos") return "darwin";
+    if (o === "win32" || o === "windows") return "windows";
+    if (o === "darwin" || o === "mac" || o === "macos") return "mac";
     if (o === "linux") return "linux";
     return null;
 };
-const SYSTEM_WORDS: Record<string, string> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
 
 /**
  * "Your runner" in Settings (`#/settings#runner`; docs/features/runner-settings.md). A runner is the program on your computer that runs
@@ -129,25 +125,19 @@ function RunnerDetails({ runner: r, onChanged, onSetUpAgain }: { runner: RunnerM
     };
     const os = nodeOs(r.os);
     const u = r.update;
-    const needsUpdate = Boolean(u && (u.state === "needs-manual" || (u.outOfDate && !u.can)));
     return (
         <div className="stack-sm" data-testid="runner-details">
             {note && <Callout tone={note.tone}>{note.text}</Callout>}
             {r.status === "offline" && (
                 <Callout tone="warning" title="Your runner is offline">
                     <div className="stack-sm" data-testid="runner-offline-help">
-                        <p>Nothing has been heard from it {r.lastSeenAt ? `since ${relativeTime(r.lastSeenAt)}` : "yet"}. It runs only while its computer is on, signed in and online. Runs you start wait a short while for it.</p>
+                        <p>Nothing has been heard from it {r.lastSeenAt ? `since ${relativeTime(r.lastSeenAt)}` : "yet"}. It runs only while its computer is on, signed in and online. Runs can’t start until it is back online. Schedules wait for it.</p>
                         <ul className="ag-steps">
                             {offlineSteps(os).map((step) => (
                                 <li key={step}>{step}</li>
                             ))}
                         </ul>
                     </div>
-                </Callout>
-            )}
-            {needsUpdate && (
-                <Callout tone="warning" title="Your runner needs an update">
-                    <span data-testid="runner-needs-update">{u?.state === "needs-manual" ? NEEDS_MANUAL_UPDATE : "This runner cannot update itself. Choose Set up a different computer below and download the runner again on this computer."}</span>
                 </Callout>
             )}
             <div className="ag-facts" data-testid="runner-facts">
@@ -161,7 +151,7 @@ function RunnerDetails({ runner: r, onChanged, onSetUpAgain }: { runner: RunnerM
                 )}
                 {os && (
                     <span>
-                        System <b>{SYSTEM_WORDS[os]}</b>
+                        System <b>{OS_WORDS[os]}</b>
                     </span>
                 )}
                 {r.arch && (
@@ -393,19 +383,19 @@ function WaitForComputer({ made, onConnected, onAgain }: { made: { os: RunnerOs 
 
 /** People who manage runners: every person's runner, with Remove (GET /api/admin/runners, POST /api/admin/runners/:id/retire). */
 function EveryonesRunners({ mineId }: { mineId: string | null }) {
-    const list = useFetch<{ runners: AdminRunnerRow[] } | AdminRunnerRow[]>("/admin/runners", () => 30_000);
+    const list = useFetch<{ runners: AdminRunnerRow[] }>("/admin/runners", () => 30_000);
     const [confirm, setConfirm] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [note, setNote] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
     // A server that does not have the list (or refuses it) shows nothing here.
     if (!list.data) return null;
-    const rows = (Array.isArray(list.data) ? list.data : (list.data.runners ?? [])).filter((r) => r.status !== "retired");
+    const rows = list.data.runners;
     const retire = async (r: AdminRunnerRow) => {
         setBusy(true);
         setNote(null);
         try {
             await api(`/admin/runners/${encodeURIComponent(r.id)}/retire`, { method: "POST" });
-            setNote({ tone: "success", text: `${ownerOf(r)}’s runner ${r.name} was removed. It can no longer connect.` });
+            setNote({ tone: "success", text: `${r.ownerName ?? "Someone"}’s runner ${r.name} was removed. It can no longer connect.` });
             setConfirm(null);
             await list.reload();
         } catch (e) {
@@ -433,7 +423,7 @@ function EveryonesRunners({ mineId }: { mineId: string | null }) {
                                 <li key={r.id} className="list-row" data-runner={r.id}>
                                     <span className="main">
                                         <span className="title truncate">
-                                            {ownerOf(r)}: {r.name}
+                                            {r.ownerName ?? "Someone"}: {r.name}
                                         </span>
                                         <span className="meta">
                                             {r.lastSeenAt ? `Last seen ${relativeTime(r.lastSeenAt)}` : "Never connected"}
@@ -449,12 +439,12 @@ function EveryonesRunners({ mineId }: { mineId: string | null }) {
                                                 <Button size="sm" onClick={() => setConfirm(null)}>
                                                     Keep
                                                 </Button>
-                                                <Button size="sm" variant="danger" loading={busy} onClick={() => void retire(r)} aria-label={`Remove ${ownerOf(r)}’s runner ${r.name}`}>
+                                                <Button size="sm" variant="danger" loading={busy} onClick={() => void retire(r)} aria-label={`Remove ${r.ownerName ?? "Someone"}’s runner ${r.name}`}>
                                                     Remove
                                                 </Button>
                                             </>
                                         ) : (
-                                            <Button size="sm" variant="ghost" onClick={() => setConfirm(r.id)} aria-label={`Remove ${ownerOf(r)}’s runner ${r.name}…`}>
+                                            <Button size="sm" variant="ghost" onClick={() => setConfirm(r.id)} aria-label={`Remove ${r.ownerName ?? "Someone"}’s runner ${r.name}…`}>
                                                 Remove
                                             </Button>
                                         ))}
@@ -480,7 +470,7 @@ export function YourRunnerCard() {
                 </h2>
                 <span className="spacer" />
                 {r && <Badge tone={STATUS_WORDS[r.status].tone}>{STATUS_WORDS[r.status].label}</Badge>}
-                <a href={RUNNER_SETTINGS_HREF}>{r ? "Open Your runner" : "Set up your runner"}</a>
+                <a href={routes.allRunners}>{r ? "Open Your runner" : "Set up your runner"}</a>
             </div>
             {!me.data ? (
                 me.error ? <ErrorState error={friendlyError(me.error.message)} onRetry={me.reload} /> : <Skeleton h={40} />

@@ -20,7 +20,6 @@
  * An administrator who wants a category that is blocked here has to change this file and say why in the review. That is the point.
  */
 import type { ScanIntensity } from "../contract.js";
-import { SCAN_INTENSITIES } from "../contract.js";
 import type { Severity } from "../../contract.js";
 
 /** Template tags refused at every profile. A template carrying any of them is not selected, whatever its directory. */
@@ -96,6 +95,3 @@ export const rateFor = (profile: ScanIntensity, applicationRps: number, ceiling:
     const byProfile = profile === "passive" ? 2 : profile === "conservative-active" ? 5 : 10;
     return Math.max(1, Math.min(byProfile, applicationRps || 1, ceiling));
 };
-
-/** Every profile name, for settings pages and tests. */
-export const ALL_INTENSITIES = SCAN_INTENSITIES;

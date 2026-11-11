@@ -27,8 +27,8 @@ every few seconds and has these states:
 | Not set up | What a runner is, the system (Windows, Mac, Linux) and processor guessed from the browser, and **Download the runner**. |
 | Waiting for the computer | Where the zip was saved, the steps for that system, the unsigned-download notice, and "Waiting for the computer to connect" until `GET /api/me/runner/enrollments/:id` says connected. An expired code offers **Download again**. |
 | Connected (online or busy) | Name, computer, system, processor, version, when last heard from, the run it is on (linked), its network sentence, updates, the computer check, the switches, **Rename**, **Set up a different computer**, **Remove this computer**. |
-| Offline | The same, with how to bring it back on that system. |
-| Needs an update | The update sentence and **Update now** (`POST /api/me/runner/update`), or, when it cannot update itself, to download again. |
+| Offline | The same, with how to bring it back on that system: runs can’t start until it is back online; schedules wait for it. |
+| Needs an update | The update sentence (said once, in the updates line) and **Update now** (`POST /api/me/runner/update`). When it cannot update itself, or the platform publishes no update (`published: false`), the sentence says to download the runner again from Settings and there is no **Update now**. |
 
 - **The download.** `POST /api/me/runner/download` with `{ os, arch }` answers the zip with a personal one-time code inside
   (the installer on Windows and Mac, plain files on Linux). The browser saves it; the page never reads inside it. The server's
@@ -36,7 +36,8 @@ every few seconds and has these states:
   server's access key). `GET /api/me/runner/download/info` says which systems can be downloaded; when it says `mayDownload: false`,
   its `refusal` sentence is shown instead of the button.
 - **The switches** (`PATCH /api/me/runner` `{ switches }`): Run code scripts (on), Test private and local addresses (off), Use my
-  connected phone (off). The server enforces each when it hands out work, and the runner checks again.
+  connected phone (off). The server enforces each when it hands out work, and the runner checks again. A person who still has more than
+  one computer from before round 45 changes the switches of all of them at once.
 - **Rename** is `PATCH /api/me/runner` `{ name }`; **Remove this computer** is `POST /api/me/runner/retire`.
 - **Everyone's runners** (people who manage runners, and platform admins): owner, name, status, last seen and version from
   `GET /api/admin/runners`, with **Remove** (`POST /api/admin/runners/:id/retire`).

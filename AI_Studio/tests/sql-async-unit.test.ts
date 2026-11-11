@@ -233,8 +233,8 @@ describe("the microtask rule", () => {
             await t.run("INSERT INTO t (name) VALUES ('x')");
         });
         expect(names(db)).toEqual(["x"]);
-        expect(warn).toHaveBeenCalledOnce();
-        expect(String(warn.mock.calls[0]![0])).toMatch(/awaited something other than the database/);
+        // Only this rule's warning counts: under the parallel fast tier, other code in this worker may warn in the same moment.
+        expect(warn.mock.calls.filter((c) => /awaited something other than the database/.test(String(c[0])))).toHaveLength(1);
     });
 });
 

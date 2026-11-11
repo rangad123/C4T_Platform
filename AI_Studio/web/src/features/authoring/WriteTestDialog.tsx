@@ -1,6 +1,7 @@
 import { useProjectAiReady } from "../aiconfig/aiconfig";
 import { PencilLine } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Modal } from "../../components/Modal";
 import { api, type Job, type TestSummary } from "../../api";
 import { JobProgress } from "../../components/JobProgress";
 import { Button, Callout, LinkButton } from "../../components/ui";
@@ -29,7 +30,6 @@ interface Props {
  * it and Escape closes it. The work goes on in the background if it is closed; the finished test shows up in the list.
  */
 export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, onDone }: Props) {
-    const ref = useRef<HTMLDialogElement>(null);
     const area = useRef<HTMLTextAreaElement>(null);
     const config = useConfig();
     const aiReady = useProjectAiReady(projectId);
@@ -41,12 +41,6 @@ export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, 
     const [jobId, setJobId] = useState<string | null>(null);
     const [job, setJob] = useState<Job | null>(null);
     const [built, setBuilt] = useState<TestSummary[] | null>(null);
-
-    useEffect(() => {
-        const d = ref.current;
-        if (d && !d.open) d.showModal();
-        area.current?.focus();
-    }, []);
 
     // Follow the job until it ends, then look up the test it made.
     useEffect(() => {
@@ -116,95 +110,89 @@ export function WriteTestDialog({ projectId, rewrite, busy, onClose, onStarted, 
     const title = rewrite ? "Change the description" : "Write a test";
 
     return (
-        <dialog ref={ref} className="write-test" aria-labelledby="write-test-title" onClose={onClose}>
-            <div className="inner">
-                <div className="row">
-                    <PencilLine size={18} aria-hidden />
-                    <h2 className="t-section" id="write-test-title">{title}</h2>
-                </div>
-
-                {!jobId && (
-                    <form className="stack-sm" onSubmit={submit}>
-                        <p className="t-secondary">
-                            {rewrite
-                                ? "Change the words and we’ll build the same test again, keep its history, and run it."
-                                : "Describe what the test should do, in your own words. We open the application in a real browser, do it step by step, keep the steps that work, and run the finished test."}
-                        </p>
-                        <p className="t-meta" data-testid="ai-note">
-                            Uses the AI model. It decides each step from what it sees on the page, then saves the test and runs it. You can edit or delete the test afterwards.
-                        </p>
-                        {modelMissing && (
-                            <Callout tone="warning" title="The AI model isn’t set up yet" actions={<LinkButton size="sm" href={routes.settings}>Open settings</LinkButton>}>
-                                Writing a test from a sentence needs access to an AI model. Add your API key in the server settings, then come back.
-                            </Callout>
-                        )}
-                        {busy && !modelMissing && <Callout tone="info" title="Another job is running for this project">You can write a test when it has finished.</Callout>}
+        <Modal title={title} titleId="write-test-title" icon={PencilLine} className="write-test" onClose={onClose}>
+            {!jobId && (
+                <form className="stack-sm" onSubmit={submit}>
+                    <p className="t-secondary">
+                        {rewrite
+                            ? "Change the words and we’ll build the same test again, keep its history, and run it."
+                            : "Describe what the test should do, in your own words. We open the application in a real browser, do it step by step, keep the steps that work, and run the finished test."}
+                    </p>
+                    <p className="t-meta" data-testid="ai-note">
+                        Uses the AI model. It decides each step from what it sees on the page, then saves the test and runs it. You can edit or delete the test afterwards.
+                    </p>
+                    {modelMissing && (
+                        <Callout tone="warning" title="The AI model isn’t set up yet" actions={<LinkButton size="sm" href={routes.settings}>Open settings</LinkButton>}>
+                            Writing a test from a sentence needs access to an AI model. Add your API key in the server settings, then come back.
+                        </Callout>
+                    )}
+                    {busy && !modelMissing && <Callout tone="info" title="Another job is running for this project">You can write a test when it has finished.</Callout>}
+                    <div className="field">
+                        <label htmlFor="plain-description">Describe what the test should do</label>
+                        <textarea
+                            id="plain-description"
+                            ref={area}
+                            data-autofocus
+                            className="input"
+                            value={text}
+                            maxLength={MAX_LENGTH}
+                            placeholder={EXAMPLES.join("\n")}
+                            aria-describedby="plain-help plain-count"
+                            aria-invalid={error ? true : undefined}
+                            onChange={(e) => setText(e.target.value)}
+                        />
+                        <div className="row">
+                            <span id="plain-help" className="t-meta" style={{ flex: 1 }}>Say what to check at the end, for example “check that the total shows $20”. We never enter payment details.</span>
+                            <span id="plain-count" className="t-meta counter">{text.length} of {MAX_LENGTH}</span>
+                        </div>
+                    </div>
+                    {!rewrite && !text && (
+                        <div className="examples">
+                            <span className="t-meta" id="plain-examples">Or start from an example</span>
+                            <div className="chips" role="group" aria-labelledby="plain-examples">
+                                {EXAMPLES.map((ex) => (
+                                    <button type="button" className="chip" key={ex} onClick={() => { setText(ex); area.current?.focus(); }}>{ex}</button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {buildable.length > 0 && (
                         <div className="field">
-                            <label htmlFor="plain-description">Describe what the test should do</label>
-                            <textarea
-                                id="plain-description"
-                                ref={area}
-                                className="input"
-                                value={text}
-                                maxLength={MAX_LENGTH}
-                                placeholder={EXAMPLES.join("\n")}
-                                aria-describedby="plain-help plain-count"
-                                aria-invalid={error ? true : undefined}
-                                onChange={(e) => setText(e.target.value)}
-                            />
-                            <div className="row">
-                                <span id="plain-help" className="t-meta" style={{ flex: 1 }}>Say what to check at the end, for example “check that the total shows $20”. We never enter payment details.</span>
-                                <span id="plain-count" className="t-meta counter">{text.length} of {MAX_LENGTH}</span>
-                            </div>
+                            <label htmlFor="plain-environment">Build it on</label>
+                            <select id="plain-environment" className="input" value={environment} onChange={(e) => setEnvironment(e.target.value)}>
+                                <option value="">The project’s address</option>
+                                {buildable.map((e) => (
+                                    <option key={e.id} value={e.name}>{e.name}</option>
+                                ))}
+                            </select>
                         </div>
-                        {!rewrite && !text && (
-                            <div className="examples">
-                                <span className="t-meta" id="plain-examples">Or start from an example</span>
-                                <div className="chips" role="group" aria-labelledby="plain-examples">
-                                    {EXAMPLES.map((ex) => (
-                                        <button type="button" className="chip" key={ex} onClick={() => { setText(ex); area.current?.focus(); }}>{ex}</button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                        {buildable.length > 0 && (
-                            <div className="field">
-                                <label htmlFor="plain-environment">Build it on</label>
-                                <select id="plain-environment" className="input" value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-                                    <option value="">The project’s address</option>
-                                    {buildable.map((e) => (
-                                        <option key={e.id} value={e.name}>{e.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-                        {error && <Callout tone="danger" title="We couldn’t start the test">{error}</Callout>}
-                        <div className="foot">
-                            <Button type="button" variant="ghost" onClick={() => ref.current?.close()}>Cancel</Button>
-                            <Button type="submit" variant="primary" loading={starting} disabled={!canSubmit}>{rewrite ? "Rebuild and run test" : "Create and run test"}</Button>
-                        </div>
-                    </form>
-                )}
-
-                {jobId && !finished && (
-                    <div className="stack-sm">
-                        {job ? <JobProgress job={job} onChanged={() => undefined} /> : <p className="t-secondary" role="status">Starting…</p>}
-                        <p className="t-meta">You can close this window. The test appears in the list when it’s ready.</p>
-                        <div className="foot"><Button type="button" variant="ghost" onClick={() => ref.current?.close()}>Close</Button></div>
+                    )}
+                    {error && <Callout tone="danger" title="We couldn’t start the test">{error}</Callout>}
+                    <div className="foot">
+                        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+                        <Button type="submit" variant="primary" loading={starting} disabled={!canSubmit}>{rewrite ? "Rebuild and run test" : "Create and run test"}</Button>
                     </div>
-                )}
+                </form>
+            )}
 
-                {finished && job && (
-                    <div className="stack-sm" aria-live="polite">
-                        <Outcome job={job} test={test} rewrite={rewrite?.testId} />
-                        <div className="foot">
-                            {!rewrite && <Button type="button" onClick={again}>Write another test</Button>}
-                            <Button type="button" variant={test || rewrite ? "ghost" : "primary"} onClick={() => ref.current?.close()}>Close</Button>
-                        </div>
+            {jobId && !finished && (
+                <div className="stack-sm">
+                    {job ? <JobProgress job={job} onChanged={() => undefined} /> : <p className="t-secondary" role="status">Starting…</p>}
+                    <p className="t-meta">You can close this window. The test appears in the list when it’s ready.</p>
+                    <div className="foot"><Button type="button" variant="ghost" onClick={onClose}>Close</Button></div>
+                </div>
+            )}
+
+            {finished && job && (
+                <div className="stack-sm" aria-live="polite">
+                    <Outcome job={job} test={test} rewrite={rewrite?.testId} />
+                    <div className="foot">
+                        {!rewrite && <Button type="button" onClick={again}>Write another test</Button>}
+                        <Button type="button" variant={test || rewrite ? "ghost" : "primary"} onClick={onClose}>Close</Button>
                     </div>
-                )}
-            </div>
-        </dialog>
+                </div>
+            )}
+        </Modal>
     );
 }
 

@@ -13,6 +13,7 @@ import { SecretBox } from "./secrets.js";
 import { saveRunSummary, summarizeJob, type RunSummary } from "./trends.js";
 import { getAgentServices } from "./agent-services.js";
 import { getTriggerServices } from "./trigger-services.js";
+import { assertC4tOwnerMayRun } from "./c4t-service.js";
 import { refuseUnlessRunsStart, startSuiteForSchedule } from "./suite-run.js";
 
 export interface ScheduleServiceOptions {
@@ -71,7 +72,9 @@ export function getScheduleServices(p: Platform, opts: ScheduleServiceOptions = 
         return (await getRunbookServices(p).startForSchedule(s)) ?? (await startSuiteForSchedule(p, s)) ?? plainStart(s);
     };
     // The daily retention pass (old evidence files) rides on the scheduler's tick; it only acts on projects that switched retention on.
-    const scheduler = new Scheduler({ store, repo: p.repo, startRun, clock: opts.clock, tickMs: p.config.SCHEDULER_TICK_MS, onTick: (now) => {
+    // A due schedule runs in its maker's name with nobody signed in: a Crowd4Test maker is asked about first (c4t-service.ts).
+    const startDue = async (s: Schedule) => (await assertC4tOwnerMayRun(p, s.createdBy), startRun(s));
+    const scheduler = new Scheduler({ store, repo: p.repo, startRun: startDue, clock: opts.clock, tickMs: p.config.SCHEDULER_TICK_MS, onTick: (now) => {
         void new QuarantineStore(p.db, () => now).sweep(now);
         void getAgentServices(p).maintain().catch((err) => console.error("[agents] housekeeping failed:", err));
     }, afterPass: (nowMs) => runScheduledRetention(p, nowMs) });

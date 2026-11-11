@@ -79,6 +79,13 @@ const finishJob = (jobId: string) => platform.db.run("UPDATE generation_jobs SET
 beforeAll(async () => {
     process.env.AGENT_POLL_SECONDS = "1";
     c4t = http.createServer((req, res) => {
+        // The people service (c4t-service.ts): a schedule's tick asks it whether its maker is still active. Tess and Tom are.
+        if (req.url?.startsWith("/v1/ai-studio/people")) {
+            const q = new URL(req.url, "http://x").searchParams.get("q") ?? "";
+            const id = q.split("@")[0]!;
+            res.writeHead(200, { "content-type": "application/json" });
+            return res.end(JSON.stringify({ data: ["tess", "tom"].includes(id) ? [{ id, name: id, email: q, kind: "TESTER", organisationId: null }] : [] }));
+        }
         const auth = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
         res.writeHead(ACCOUNTS[auth] ? 200 : 401, { "content-type": "application/json" });
         res.end(JSON.stringify(ACCOUNTS[auth] ?? { error: { message: "Invalid access token" } }));
@@ -86,7 +93,7 @@ beforeAll(async () => {
     await new Promise<void>((r) => c4t.listen(C4T_PORT, "127.0.0.1", r));
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-review-fixes-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: tmp, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: "review-fixes-secret-key-0123456789", C4T_API_ORIGIN: `http://127.0.0.1:${C4T_PORT}`, C4T_SITE_URL: "https://crowd4test.example" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: tmp, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: "review-fixes-secret-key-0123456789", C4T_API_ORIGIN: `http://127.0.0.1:${C4T_PORT}`, C4T_SITE_URL: "https://crowd4test.example", C4T_SERVICE_TOKEN: "review-fixes-service-token-0123456789abcdef" }));
     app = await buildServer(platform);
     await app.listen({ port: PORT, host: "127.0.0.1" });
     projectId = (await asKey("POST", "/api/projects", { name: "Shared shop" })).body.id as string;

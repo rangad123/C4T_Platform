@@ -1,6 +1,7 @@
 import type { Job, ProjectDetail } from "../../api";
 import { CollapsedSetting, ProjectHub, type HubSection } from "../../components/ProjectHub";
 import { MobileAppPanel } from "../../components/MobileAppPanel";
+import { formatBytes } from "../../lib/format";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, isActive } from "../../lib/labels";
 import { routes, useRoute, type SettingsSection } from "../../lib/router";
@@ -16,7 +17,7 @@ import { settingsSentence, type FrameworkSettingsAnswer } from "../frameworks/fr
 import { IssueTrackerPanel } from "../integrations/IssueTrackerPanel";
 import { AlertsPanel } from "../schedules/AlertsPanel";
 import { ProjectStorage } from "../storage/ProjectStorage";
-import { formatBytes, type ProjectStorage as ProjectStorageData } from "../storage/storage";
+import { type ProjectStorage as ProjectStorageData } from "../storage/storage";
 import { TestingTypeSetting } from "../security/TestingType";
 import { ProjectAiSettings } from "../aiconfig/ProjectAiSettings";
 import { MembersPanel } from "../workspace/MembersPanel";

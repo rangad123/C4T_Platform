@@ -4,12 +4,12 @@ import { createPortal } from "react-dom";
 import { ScriptPreview } from "../../components/ScriptPreview";
 import { Badge, Button, Callout, Disclosure, EmptyState, ErrorState, LinkButton, Skeleton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
-import { cleanReason, friendlyError, stepSentence } from "../../lib/labels";
+import { cleanReason, friendlyError, stepSentence, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
 import { BlockPalette } from "../blocks/BlockPalette";
 import type { Block, BlockList } from "../blocks/blocks";
 import { SaveAsBlockDialog } from "../blocks/SaveAsBlockDialog";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 import type { DslDiagnostic, Extras, ParsedSpec, SaveTextAnswer } from "../dsl/dsl";
 import { TextMode } from "../dsl/TextMode";
 import { useTextDraft } from "../dsl/useTextDraft";
@@ -18,34 +18,7 @@ import { UnsavedBar } from "../workbench/UnsavedBar";
 import { diffSteps, canon as canonOf } from "./stepdiff";
 import { StepDiffView } from "./History";
 import { StepShare } from "../objects/StepShare";
-import {
-    ACTION_LABEL,
-    BuilderError,
-    EDITABLE_ACTIONS,
-    PALETTE,
-    bapi,
-    duplicateAt,
-    errorText,
-    insertAt,
-    isDirty,
-    moveTo,
-    newKey,
-    problemsFor,
-    removeAt,
-    replaceAt,
-    specFrom,
-    stepsOf,
-    toItems,
-    type Diag,
-    type Draft,
-    type Item,
-    type Kind,
-    type PaletteItem,
-    type PreviewAnswer,
-    type SaveAnswer,
-    type SpecAnswer,
-    type Step,
-} from "./builder";
+import { ACTION_LABEL, BuilderError, EDITABLE_ACTIONS, PALETTE, bapi, duplicateAt, insertAt, isDirty, moveTo, newKey, problemsFor, removeAt, replaceAt, specFrom, stepsOf, toItems, type Diag, type Draft, type Item, type Kind, type PaletteItem, type PreviewAnswer, type SaveAnswer, type SpecAnswer, type Step } from "./builder";
 import { MapField, TextField } from "./Fields";
 import { useLeaveGuard } from "./guard";
 import { StepForm } from "./StepForm";
@@ -191,7 +164,7 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
             } catch (e) {
                 if (n !== seq.current) return;
                 setPreviewState("error");
-                setPreviewError(errorText(e));
+                setPreviewError(describeApiError(e));
             }
         }, delay);
         return () => clearTimeout(timer);
@@ -390,7 +363,7 @@ function Editor({ id, data, embed, onRetry, onExtracted, onShared, justSaved, on
             if (e instanceof BuilderError) {
                 if (e.diagnostics.length) setDiags(e.diagnostics);
                 setSaveError(e.message);
-            } else setSaveError(errorText(e));
+            } else setSaveError(describeApiError(e));
         } finally {
             setSaving("");
         }

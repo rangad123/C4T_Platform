@@ -31,7 +31,8 @@ application, so it fits before a release or in a pull request.
   `--json report.json` and `--markdown report.md` write the report. Exit codes: 0 gate passed, 1 gate failed, 2 usage or
   infrastructure error (unreadable file, download failed, bad flag).
 - **API:** `POST /api/projects/:id/api-diff` with `{ "old": <text, object or address>, "new": <…> }` returns
-  `{ breaking, nonBreaking, summary, markdown }`. Addresses go through the same private-address guard as other targets.
+  `{ breaking, nonBreaking, summary, markdown }`. Addresses go through the same private-address guard as other targets, checked again when the connection is made (DNS
+  rebinding), and a redirect is not followed.
 
 ## What counts as breaking
 | Side | Breaking | Not breaking |

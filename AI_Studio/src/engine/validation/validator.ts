@@ -121,7 +121,7 @@ export interface ValidationDeps {
      * Test-data cleanup: set it and the scripts only write down the records they create; after the last test the platform removes them
      * (or, with enabled=false, only lists them). Unset: scripts clean up after themselves, as a downloaded script does.
      */
-    cleanup?: { enabled: boolean; /** Outbound guard for every DELETE (the platform passes assertAllowedTarget). */ guard?: (url: string) => Promise<void>; /** Set by validateBatch. */ collect?: (testId: string, run: ScriptRun) => void };
+    cleanup?: { enabled: boolean; /** Outbound guard for every DELETE (the platform passes assertAllowedTarget). */ guard?: (url: string) => Promise<void>; fetch?: typeof fetch; /** Set by validateBatch. */ collect?: (testId: string, run: ScriptRun) => void };
     /** Shared helper modules the hand-written tests of this batch import (./helpers/<name>). */
     helpers?: Array<{ name: string; content: string }>;
 }
@@ -424,7 +424,7 @@ export async function validateBatch(
     // Cleanup never changes a test's result and never fails the job: it is reported in the ledger and as a plain job event.
     if (collector && deps.cleanup) {
         try {
-            const finished = await finishCleanup(ctx, collector, { enabled: deps.cleanup.enabled, apiBaseUrl: deps.env.apiBaseUrl ?? deps.env.baseUrl, credentials: { apiToken: deps.env.apiToken, apiAuthHeader: deps.env.apiAuthHeader }, guard: deps.cleanup.guard });
+            const finished = await finishCleanup(ctx, collector, { enabled: deps.cleanup.enabled, apiBaseUrl: deps.env.apiBaseUrl ?? deps.env.baseUrl, credentials: { apiToken: deps.env.apiToken, apiAuthHeader: deps.env.apiAuthHeader }, guard: deps.cleanup.guard, fetch: deps.cleanup.fetch });
             if (finished.length) await hooks.onCleanup?.(finished);
         } catch (err) {
             ctx.emit({ stage: "validation", kind: "cleanup_failed", level: "warn", message: `Records the tests created could not be removed: ${err instanceof Error ? err.message : String(err)}` });

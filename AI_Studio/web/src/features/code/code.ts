@@ -3,7 +3,7 @@
  * The API shapes are fixed in .scratch/briefs/CODE-API-SHAPES.md. Nothing here imports CodeMirror, so every page that
  * touches this file stays light: the editor itself is a separate, lazily loaded module.
  */
-import { csrfHeader, getKey } from "../../api.js";
+import { ApiError, getKey } from "../../api.js";
 import type { PlatformConfig } from "../../api.js";
 
 export interface Diagnostic {
@@ -61,64 +61,19 @@ export function gitUrlProblem(raw: string): string {
 
 export const shortCommit = (c: string) => c.slice(0, 7);
 
-// ── API with access to the answer body ──────────────────────────────────────
-
-/** Like `api`, but keeps the whole answer body: a 422 carries the problems found in `diagnostics`. */
-export class CodeError extends Error {
-    constructor(
-        readonly status: number,
-        message: string,
-        readonly body: Record<string, unknown> = {},
-    ) {
-        super(message);
-    }
-    get diagnostics(): Diagnostic[] {
-        return asDiagnostics(this.body.diagnostics ?? this.body.details);
-    }
-}
-
+/** The problems a 422 lists (`diagnostics`, or `details` from older routes). */
 export function asDiagnostics(v: unknown): Diagnostic[] {
     if (!Array.isArray(v)) return [];
     return v.filter((d): d is Diagnostic => !!d && typeof d === "object" && typeof (d as Diagnostic).message === "string" && typeof (d as Diagnostic).line === "number");
 }
 
-export async function capi<T = any>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
-    let res: Response;
-    try {
-        res = await fetch(`/api${path}`, {
-            method: init?.method ?? "GET",
-            headers: { ...(init?.body !== undefined ? { "content-type": "application/json" } : {}), ...(getKey() ? { "x-api-key": getKey() } : {}), ...csrfHeader(init?.method) },
-            body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
-        });
-    } catch {
-        throw new CodeError(0, "We couldn’t reach the platform server. Check that it is running and try again.");
-    }
-    const text = await res.text();
-    let data: unknown = text;
-    if (text && (text.startsWith("{") || text.startsWith("["))) {
-        try {
-            data = JSON.parse(text);
-        } catch {
-            /* keep the text */
-        }
-    }
-    if (!res.ok) {
-        const body = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-        const message = typeof body.error === "string" && body.error ? body.error : res.statusText || "Something went wrong.";
-        throw new CodeError(res.status, message, body);
-    }
-    return data as T;
-}
-
 /** The script as plain text (the script route answers text/plain, not JSON). */
 export async function fetchScriptText(testId: string): Promise<string> {
     const res = await fetch(`/api/tests/${testId}/script`, { headers: getKey() ? { "x-api-key": getKey() } : {} }).catch(() => null);
-    if (!res) throw new CodeError(0, "We couldn’t reach the platform server. Check that it is running and try again.");
-    if (!res.ok) throw new CodeError(res.status, res.status === 404 ? "This test has no script yet." : res.statusText);
+    if (!res) throw new ApiError(0, "We couldn’t reach the platform server. Check that it is running and try again.");
+    if (!res.ok) throw new ApiError(res.status, res.status === 404 ? "This test has no script yet." : res.statusText);
     return res.text();
 }
-
-export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 // ── What the platform can run ───────────────────────────────────────────────
 

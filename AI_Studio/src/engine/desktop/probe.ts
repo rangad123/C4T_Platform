@@ -85,11 +85,6 @@ export async function probeDesktop(opts: DesktopProbeOptions = {}): Promise<Desk
 /** The last answer without waiting (undefined before the first probe). Used where a synchronous check is needed. */
 export const lastProbe = (): DesktopProbeResult | undefined => shared?.value;
 
-/** Forget the cached answer (tests). */
-export const resetDesktopProbe = (): void => {
-    shared = undefined;
-};
-
 /** Why desktop tests cannot run here, in plain words, or undefined when they can. */
 export function desktopUnavailableReason(platform: NodeJS.Platform, p: DesktopProbeResult | undefined): string | undefined {
     if (platform !== "win32") return "Windows desktop tests can only run on a Windows computer.";

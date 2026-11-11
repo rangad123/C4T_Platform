@@ -9,7 +9,7 @@ import { routes } from "../../lib/router";
 import { useProjectAiReady } from "../aiconfig/aiconfig";
 import { type Permission } from "../auth/permissions";
 import { useHere } from "../auth/project-access";
-import { Modal } from "../code/Modal";
+import { Modal } from "../../components/Modal";
 import { AUTOMATION_HINT, AUTOMATION_WORDS, type CaseList, type ManualCase } from "../manual/manual";
 import type { RequirementList } from "../requirements/requirements";
 import "../manual/manual.css";

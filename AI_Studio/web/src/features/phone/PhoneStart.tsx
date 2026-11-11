@@ -2,6 +2,7 @@ import { useProjectAiReady } from "../aiconfig/aiconfig";
 import { Smartphone, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type ProjectDetail } from "../../api";
+import { Modal } from "../../components/Modal";
 import { Button, Callout, Disclosure, ErrorState, LinkButton, Skeleton } from "../../components/ui";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
@@ -29,15 +30,15 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
-    useEffect(() => {
-        // The control that opened the panel gets the focus back when it closes (the panel is removed from the page, so the browser cannot do it).
-        const opener = document.activeElement as HTMLElement | null;
-        const d = ref.current;
-        if (d && !d.open) d.showModal();
-        return () => {
+    // The control that opened the panel gets the focus back when it closes (the panel is removed from the page, so the browser cannot do it).
+    // Read while rendering: the dialog's own effect runs first and may already have moved the focus inside.
+    const [opener] = useState(() => document.activeElement as HTMLElement | null);
+    useEffect(
+        () => () => {
             if (opener && opener !== document.body && opener.isConnected) opener.focus();
-        };
-    }, []);
+        },
+        [opener],
+    );
 
     const loading = project.loading || runner.loading || agents.loading || !config;
 
@@ -176,15 +177,9 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     );
 
     return (
-        <dialog ref={ref} className="run-dialog ph-dialog" aria-labelledby="ph-title" onClose={onClose} onCancel={onClose} data-testid="phone-start">
-            <div className="inner">
-                <div className="row">
-                    <Smartphone size={20} aria-hidden />
-                    <h2 className="t-section" id="ph-title">{PHONE_TITLE}</h2>
-                </div>
-                {body}
-            </div>
-        </dialog>
+        <Modal title={PHONE_TITLE} titleId="ph-title" icon={Smartphone} className="ph-dialog" testId="phone-start" dialogRef={ref} onClose={onClose}>
+            {body}
+        </Modal>
     );
 }
 

@@ -5,7 +5,7 @@ import { Callout, ErrorState, LinkButton, Skeleton } from "../../components/ui";
 import { useConfig, useDocumentTitle, useFetch } from "../../lib/hooks";
 import { describeApiError, frameworkLabel, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
-import { bapi, errorText } from "../builder/builder";
+import { bapi } from "../builder/builder";
 import type { RanOn } from "../agents/agents";
 import { CodeTab } from "./CodeTab";
 import { HistoryTab, type Restored } from "./HistoryTab";
@@ -198,7 +198,7 @@ export function Workbench({ id, tab }: { id: string; tab: Tab }) {
             setHistoryKey((k) => k + 1);
             if (r.jobId) void followRun(r.jobId);
         } catch (e) {
-            setActionError(errorText(e));
+            setActionError(describeApiError(e));
         } finally {
             setUndoing(false);
         }

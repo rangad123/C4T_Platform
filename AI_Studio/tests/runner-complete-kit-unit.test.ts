@@ -216,6 +216,9 @@ function findBash(): string | undefined {
     return undefined;
 }
 const BASH = findBash();
+/** The start scripts refuse a Node.js older than 24, and these tests use this computer's own Node.js as the download's, so on an older one
+ * they can only show the "too old" message: they run on Node.js 24 (as CI does) and are skipped, for that reason, on anything older. */
+const NODE_24 = Number(process.versions.node.split(".")[0]) >= 24;
 const SYSTEM_TAR = process.platform === "win32" ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "/usr/bin/tar";
 const fwd = (p: string) => p.replaceAll("\\", "/");
 /** C:\x\y -> /c/x/y for Git Bash. */
@@ -613,7 +616,7 @@ describe("the start scripts with a complete download", () => {
         expect(START_SH.indexOf("node/bin/node")).toBeLessThan(START_SH.indexOf("find_node; then"));
     });
 
-    it.skipIf(process.platform !== "win32" || !fs.existsSync(SYSTEM_TAR))("start-runner.cmd, unzipped with Windows' own tar, runs the runner with the Node.js inside, with no Node.js or npm on the PATH", async () => {
+    it.skipIf(process.platform !== "win32" || !NODE_24 || !fs.existsSync(SYSTEM_TAR))("start-runner.cmd, unzipped with Windows' own tar, runs the runner with the Node.js inside, with no Node.js or npm on the PATH", async () => {
         const r = await complete("windows", "x64");
         const kit = unpackWithSystemTar(r.buf, "cmd");
         expect(fs.existsSync(path.join(kit, "node", "node.exe"))).toBe(true);
@@ -634,7 +637,7 @@ describe("the start scripts with a complete download", () => {
         expect(res.code).toBe(0);
     });
 
-    it.skipIf(!BASH)("start-runner.sh, under Git Bash, makes node/bin/node executable again and runs the runner with it, with no Node.js on the PATH", async () => {
+    it.skipIf(!BASH || !NODE_24)("start-runner.sh, under Git Bash, makes node/bin/node executable again and runs the runner with it, with no Node.js on the PATH", async () => {
         const r = await complete("linux", "x64");
         const kit = unpackWithFflate(r.buf, "sh");
         const nodeBin = path.join(kit, "node", "bin", "node");
@@ -651,7 +654,7 @@ describe("the start scripts with a complete download", () => {
         expect(res.code).toBe(0);
     });
 
-    it.skipIf(process.platform !== "win32")("a Node.js inside the download that does not start (another processor) falls back to the one on the computer; npm is still skipped", async () => {
+    it.skipIf(process.platform !== "win32" || !NODE_24)("a Node.js inside the download that does not start (another processor) falls back to the one on the computer; npm is still skipped", async () => {
         const r = await complete("windows", "x64");
         const kit = unpackWithFflate(r.buf, "wrong");
         fs.writeFileSync(path.join(kit, "runner.mjs"), STAND_IN_RUNNER);
@@ -664,7 +667,7 @@ describe("the start scripts with a complete download", () => {
         expect(res.code).toBe(0);
     });
 
-    it.skipIf(!BASH)("a complete download whose node_modules is missing says it is incomplete instead of trying npm", async () => {
+    it.skipIf(!BASH || !NODE_24)("a complete download whose node_modules is missing says it is incomplete instead of trying npm", async () => {
         const r = await complete("linux", "x64");
         const kit = unpackWithFflate(r.buf, "half");
         fs.writeFileSync(path.join(kit, "node", "bin", "node"), `#!/bin/sh\nexec "${msys(process.execPath)}" "$@"\n`);

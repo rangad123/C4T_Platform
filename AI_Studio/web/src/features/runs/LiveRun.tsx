@@ -7,7 +7,7 @@ import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { mergeEvents, type JobStream } from "../../lib/stream";
 import { Elapsed, RelTime } from "./RunTime";
-import { RUNNER_SETTINGS_HREF, useMyRunner } from "../runners/my-runner";
+import { useMyRunner } from "../runners/my-runner";
 import { currentLine, foldLiveRun, isRunnerEvent, liveShotUrl, PHASE_STEP_WORD, PHASE_STEPS, phaseEnded, phaseSentence, runnerIdOf, runPhase, shotCaption, type LiveRun, type TaskPhase } from "./live-run";
 import "./runs.css";
 
@@ -311,7 +311,7 @@ export function LiveRunPanel({ projectId, job, active, live, loaded, planned, an
                         <dt>Runner</dt>
                         <dd>
                             {mine ? (
-                                <a href={RUNNER_SETTINGS_HREF} data-testid="run-live-runner">
+                                <a href={routes.allRunners} data-testid="run-live-runner">
                                     {runner}
                                     <ChevronRight size={14} aria-hidden />
                                 </a>

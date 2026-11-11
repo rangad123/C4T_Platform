@@ -28,7 +28,7 @@ import { buildServer } from "../src/platform/server.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
 import { defaultCaps, FakeAgent, viaFetch } from "./fixtures/fake-agent.js";
-import { guessSystem, ownerOf, startSteps, systemAvailable, type RunnerMine } from "../web/src/features/runners/my-runner.js";
+import { guessSystem, startSteps, systemAvailable, type RunnerMine } from "../web/src/features/runners/my-runner.js";
 import { offlineSteps } from "../web/src/features/runners/runners.js";
 import { resolveAlias } from "../web/src/lib/aliases.js";
 
@@ -58,8 +58,7 @@ describe("the rules (no browser)", () => {
         expect(startSteps("mac").steps.join(" ")).toContain("AI Testing Runner");
         expect(startSteps("linux").command).toBe("sh start-runner.sh");
         expect(startSteps("windows", "files").steps.join(" ")).toContain("start-runner.cmd");
-        expect(offlineSteps("win32")[0]).toContain("notification area");
-        expect(ownerOf({ id: "1", name: "Laptop", status: "online", lastSeenAt: null, owner: { name: "Ana" } })).toBe("Ana");
+        expect(offlineSteps("windows")[0]).toContain("notification area");
     });
 
     it("sends every old runner link to Your runner in Settings", () => {
@@ -358,7 +357,8 @@ describe("offline and updates", () => {
         await visit();
         const help = section().getByTestId("runner-offline-help");
         await pwExpect(help).toContainText("It runs only while its computer is on, signed in and online.");
-        await pwExpect(help).toContainText(offlineSteps("win32")[0]!);
+        await pwExpect(help).toContainText(offlineSteps("windows")[0]!);
+        await pwExpect(help).toContainText("Runs can’t start until it is back online. Schedules wait for it.");
     }, 60_000);
 
     it("a newer version offers Update now; one it cannot install says to download again", async () => {
@@ -372,8 +372,15 @@ describe("offline and updates", () => {
 
         fake.mine = runnerOf({ update: { can: true, auto: true, latest: "2.2.0", outOfDate: true, requested: false, state: "needs-manual" } });
         await visit();
-        await pwExpect(section().getByTestId("runner-needs-update")).toContainText("Download the runner again from Settings");
+        await pwExpect(section().getByTestId("agent-update-status")).toContainText("Download the runner again from Settings");
         await pwExpect(section().getByRole("button", { name: /Update Priya’s laptop/ })).toHaveCount(0);
+
+        // Nothing published to update from (the live site's unsigned download): no Update now, no promise that it updates itself.
+        fake.mine = runnerOf({ update: { can: true, auto: true, latest: "2.2.0", outOfDate: true, requested: false, state: "idle", published: false, unpublished: "the runner download here is not signed." } });
+        await visit();
+        await pwExpect(section().getByTestId("agent-update-status")).toHaveText("Download the runner again from Settings to get version 2.2.0.");
+        await pwExpect(section().getByRole("button", { name: /Update Priya’s laptop/ })).toHaveCount(0);
+        await pwExpect(section()).not.toContainText("It updates between tests");
     }, 60_000);
 });
 
@@ -381,7 +388,7 @@ describe("everyone's runners (admins)", () => {
     it("lists every person's runner and removes one", async () => {
         fake.mine = runnerOf();
         fake.admin = [
-            { id: "tok-mine", name: "Priya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), version: "2.1.0", owner: { id: "u1", name: "Priya" } },
+            { id: "tok-mine", name: "Priya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), version: "2.1.0", ownerName: "Priya" },
             { id: "tok-ana", name: "Ana’s Mac", status: "offline", lastSeenAt: new Date(Date.now() - 86_400_000).toISOString(), version: "2.0.0", ownerName: "Ana" },
         ];
         fake.canSeeEveryone = true;

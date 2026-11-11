@@ -627,8 +627,3 @@ export function draftRunNote(db: Db, testIds: readonly string[]): string | undef
     const approved = store.approved(drafts[0]!);
     return approved ? `The run uses approved version ${approved.version}, not this draft. A draft runs once a Project Admin approves it.` : "The run leaves this test out: it has no approved version yet. A draft runs once a Project Admin approves it.";
 }
-
-/** The version a test runs, for code outside a run job (suites, schedules, previews): the latest approved, or none (it waits). */
-export function versionToRun(db: Db, testId: string): TestVersion | undefined {
-    return new ReviewStore(db).approved(testId);
-}

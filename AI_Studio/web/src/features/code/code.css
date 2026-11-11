@@ -73,12 +73,6 @@
 .code-repo-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .code-repo-ask { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-sunken); }
 
-/* Dialogs */
-dialog.code-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-card); background: var(--surface-raised); color: var(--text-primary); overflow: auto; }
-dialog.code-dialog.is-wide { width: min(820px, calc(100vw - 32px)); }
-dialog.code-dialog::backdrop { background: var(--scrim); }
-.code-dialog .inner { display: grid; gap: 16px; padding: 20px; }
-.code-dialog .foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 
 @media (max-width: 720px) {
     .code-git-grid { grid-template-columns: minmax(0, 1fr); }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Badge } from "../../components/ui";
-import { cleanReason } from "../../lib/labels";
+import { cleanReason, describeApiError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { capi, errorText } from "./code";
+import { api } from "../../api";
+
 
 type Phase = { kind: "queued" } | { kind: "running" } | { kind: "passed" } | { kind: "failed"; reason: string } | { kind: "broken"; reason: string } | { kind: "held"; reason: string };
 
@@ -19,10 +20,10 @@ export function RunStatus({ testId, jobId, note }: { testId: string; jobId: stri
         setPhase({ kind: "queued" });
         const tick = async () => {
             try {
-                const job = await capi<{ status: string; error: string | null }>(`/test-generation/${jobId}`);
+                const job = await api<{ status: string; error: string | null }>(`/test-generation/${jobId}`);
                 if (cancelled) return;
                 if (FINAL.includes(job.status)) {
-                    const t = await capi<{ validationStatus: string; validationReason: string | null }>(`/tests/${testId}`);
+                    const t = await api<{ validationStatus: string; validationReason: string | null }>(`/tests/${testId}`);
                     if (cancelled) return;
                     if (job.status === "FAILED" && /^Nothing ran: /.test(job.error ?? "")) setPhase({ kind: "held", reason: job.error! });
                     else if (job.status === "FAILED" && job.error) setPhase({ kind: "broken", reason: job.error ?? "The run could not finish." });
@@ -33,7 +34,7 @@ export function RunStatus({ testId, jobId, note }: { testId: string; jobId: stri
                 setPhase({ kind: job.status === "QUEUED" ? "queued" : "running" });
             } catch (e) {
                 if (cancelled) return;
-                setPhase({ kind: "broken", reason: errorText(e) });
+                setPhase({ kind: "broken", reason: describeApiError(e) });
                 return;
             }
             timer = window.setTimeout(() => void tick(), 1500);

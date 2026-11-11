@@ -89,7 +89,6 @@ export const Condition = z.discriminatedUnion("check", [
     z.object({ check: z.literal("readiness") }).strict(),
 ]);
 export type Condition = z.infer<typeof Condition>;
-export const CONDITION_CHECKS = ["passRate", "noFailures", "noHighSeverity", "noApiBreakingChange", "readiness"] as const;
 
 export const ConditionStep = z.object({ ...base, type: z.literal("condition"), condition: Condition }).strict();
 

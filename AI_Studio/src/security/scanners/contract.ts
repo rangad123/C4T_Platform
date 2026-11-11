@@ -63,8 +63,6 @@ export interface ScannerAvailability {
     tookMs?: number;
 }
 
-export const isUsable = (a: ScannerAvailability): boolean => a.state === "available";
-
 /** How an adapter can be driven. An adapter that cannot do something says so here rather than throwing later. */
 export interface ScannerCapabilities {
     progress: boolean;
@@ -162,8 +160,6 @@ export class ScannerError extends Error {
         this.name = "ScannerError";
     }
 }
-
-export const isScannerError = (e: unknown): e is ScannerError => e instanceof ScannerError;
 
 /** A finding as an external tool reports it, before the platform's wording, category mapping and redaction. */
 export interface ScannerFinding {
@@ -278,9 +274,4 @@ export interface ScannerAdapter {
      * Throws `ScannerError` with a code from `SCANNER_ERROR_CODES`, never a raw tool error.
      */
     start(target: ScanTarget, profile: ScanIntensity, options: StartOptions): Promise<ScanHandle>;
-}
-
-/** The adapter's own view of one tool's exit: the plain words the platform shows, plus the tool's own text for the log. */
-export function toolFailed(scanner: ScannerId, what: string, detail: string): ScannerError {
-    return new ScannerError("tool_failed", scanner, `The ${what} could not be finished by the scanner.`, detail);
 }

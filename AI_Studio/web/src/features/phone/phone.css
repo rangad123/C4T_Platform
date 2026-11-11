@@ -2,7 +2,6 @@
 
 /* ── the start panel ── */
 dialog.ph-dialog { width: min(560px, calc(100vw - 32px)); }
-.ph-dialog .foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 /* On a short screen the panel scrolls: the two buttons stay in reach. */
 .ph-dialog form .foot { position: sticky; bottom: 0; padding: 12px 0 0; background: var(--surface-raised); border-top: 1px solid var(--border-default); }
 .ph-dialog .foot .btn { min-height: 44px; }

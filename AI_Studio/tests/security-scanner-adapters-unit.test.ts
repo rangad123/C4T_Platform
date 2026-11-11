@@ -335,7 +335,9 @@ describe("finding the scanner an administrator installed", () => {
     // spawn a file with no extension on Windows, so accepting the bare name first made every run fail with a bare `spawn ... ENOENT`.
     writeFileSync(path.join(dir, "demo"), "#!/bin/sh\nexit 0\n", "utf8");
     writeFileSync(path.join(dir, "demo.cmd"), "@echo off\r\n", "utf8");
-    writeFileSync(path.join(dir, "solo.exe"), "MZ", "utf8");
+    // A plain executable is `solo.exe` on Windows and a bare `solo` elsewhere (a bare name never matches `solo.exe` off Windows).
+    const SOLO = process.platform === "win32" ? "solo.exe" : "solo";
+    writeFileSync(path.join(dir, SOLO), "MZ", "utf8");
 
     it("on Windows picks the form Windows can actually execute, not the shell script beside it", () => {
         const found = resolveExecutable("demo", undefined, [dir]);
@@ -343,7 +345,7 @@ describe("finding the scanner an administrator installed", () => {
     });
 
     it("finds a plain executable, and reports nothing at all rather than a wrong guess", () => {
-        expect(resolveExecutable("solo", undefined, [dir])).toBe(path.join(dir, "solo.exe"));
+        expect(resolveExecutable("solo", undefined, [dir])).toBe(path.join(dir, SOLO));
         expect(resolveExecutable("freit-not-installed-anywhere", undefined, [dir])).toBeUndefined();
     });
 

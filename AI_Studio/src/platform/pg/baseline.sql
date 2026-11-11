@@ -1,7 +1,7 @@
 -- AI Studio: PostgreSQL baseline schema (POSTGRES_S3_MIGRATION.md §5.3).
 --
--- Equal to SQLite migration slots 1-55 plus the schema changes made outside them (§1.3: addActorColumns,
--- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 55;
+-- Equal to SQLite migration slots 1-56 plus the schema changes made outside them (§1.3: addActorColumns,
+-- addCacheColumns, ensureScannerTables). A PostgreSQL database starts here and records schema_version 56;
 -- later slots are written in the portable subset. tests/pg-baseline-unit.test.ts compares this file with a fresh SQLite database,
 -- so a new SQLite migration without a change here fails the fast tier.
 --
@@ -28,6 +28,7 @@ CREATE TABLE users (
     project_access TEXT NOT NULL DEFAULT 'all',
     c4t_role TEXT,
     organization_id TEXT,
+    c4t_runs_tests BIGINT,
     UNIQUE (email)
 );
 

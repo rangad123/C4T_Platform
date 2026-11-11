@@ -18,10 +18,26 @@ export function relativeTime(iso: string | null | undefined, now = Date.now()): 
 export function duration(ms: number | null | undefined): string {
     if (ms === null || ms === undefined) return "—";
     if (ms < 1000) return `${ms} ms`;
-    const s = ms / 1000;
-    if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)} s`;
-    const m = Math.floor(s / 60);
-    return `${m} min ${Math.round(s - m * 60)} s`;
+    // Round before choosing the unit, so 9.96 s is "10 s" and 59.6 s is "1 min 0 s".
+    const tenths = Math.round(ms / 100) / 10;
+    if (tenths < 10) return `${tenths.toFixed(1)} s`;
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s} s`;
+    return `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+
+const UNITS = ["bytes", "KB", "MB", "GB", "TB"];
+/** "812 KB", "1.8 GB": the same wording the server uses. */
+export function formatBytes(n: number): string {
+    if (!Number.isFinite(n) || n <= 0) return "0 bytes";
+    let v = n;
+    let u = 0;
+    while (v >= 1024 && u < UNITS.length - 1) {
+        v /= 1024;
+        u++;
+    }
+    if (u === 0) return `${Math.round(v)} ${v === 1 ? "byte" : "bytes"}`;
+    return `${u >= 2 && v < 100 ? v.toFixed(1).replace(/\.0$/, "") : Math.round(v)} ${UNITS[u]}`;
 }
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
