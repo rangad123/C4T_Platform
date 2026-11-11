@@ -602,7 +602,8 @@ export class AgentService {
         if (t.status !== "running") throw new HttpError(410, "The platform no longer expects events for this task.");
         if (isRecordAdapter(t.adapterId) || isDeviceAdapter(t.adapterId)) throw new HttpError(409, "Recordings and phone sessions send no live run events.");
         const secrets = this.secretsOf(t);
-        const name = this.store.getAgent(t.agentId!)?.name ?? "agent";
+        const ag = t.agentId ? this.store.getAgent(t.agentId) : undefined;
+        const name = (ag ? this.runnerName(ag) : undefined) ?? "agent";
         let stored = 0;
         let duplicates = 0;
         const lines: string[] = [];
@@ -660,13 +661,13 @@ export class AgentService {
         if (!t || (t.phase === before.phase && t.attempt === before.attempt)) return;
         const agent = t.agentId ? this.store.getAgent(t.agentId) : undefined;
         this.noteRanOn(t, agent);
-        this.emitTask(t, "runner_phase", "info", phaseSentence(t.phase, agent?.name), { phase: t.phase, attempt: t.attempt, ...(agent ? { agentId: agent.id } : {}) });
+        this.emitTask(t, "runner_phase", "info", phaseSentence(t.phase, agent ? this.runnerName(agent) : undefined), { phase: t.phase, attempt: t.attempt, ...(agent ? { agentId: agent.id } : {}) });
     }
 
     private noteRanOn(t: TaskRecord, agent: AgentRecord | undefined): void {
         try {
             const prev = this.store.ranOnOf(t.jobId);
-            const who = agent ? { agentId: agent.id, tokenId: agent.tokenId, name: agent.name } : { agentId: prev?.agentId, tokenId: prev?.tokenId, name: prev?.name };
+            const who = agent ? { agentId: agent.id, tokenId: agent.tokenId, name: this.runnerName(agent) } : { agentId: prev?.agentId, tokenId: prev?.tokenId, name: prev?.name };
             this.store.setRanOn(t.jobId, { ...who, taskId: t.id, attempt: t.attempt, phase: t.phase, at: new Date(this.clock()).toISOString() });
         } catch {
             /* the job may be gone */
@@ -866,7 +867,8 @@ export class AgentService {
     private surfaceProgress(t: TaskRecord, lines: string[] | undefined): void {
         if (!lines?.length) return;
         try {
-            const name = this.store.getAgent(t.agentId!)?.name ?? "agent";
+            const ag = t.agentId ? this.store.getAgent(t.agentId) : undefined;
+            const name = (ag ? this.runnerName(ag) : undefined) ?? "agent";
             const secrets = this.secretsOf(t);
             for (const line of lines) {
                 const text = scrubSecrets(line, secrets).replace(/\s+/g, " ").trim();
@@ -1101,13 +1103,23 @@ export class AgentService {
         const stored = this.store.ranOnOf(job.id);
         if (!latest && !stored && job.options.runOn !== "agent") return { kind: "platform" };
         const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
-        const agentId = latest?.agentId ?? [...tasks].reverse().find((t) => t.agentId)?.agentId ?? str(stored?.agentId) ?? (!stored && job.options.runOn === "agent" ? this.store.getRunner(job.projectId).agentId : null);
-        const agent = agentId ? this.store.getAgent(agentId) : undefined;
+        const agentId = latest?.agentId ?? [...tasks].reverse().find((t) => t.agentId)?.agentId ?? str(stored?.agentId) ?? null;
+        const agent = (agentId ? this.store.getAgent(agentId) : undefined) ?? (str(stored?.agentId) ? this.store.getAgent(str(stored?.agentId)!) : undefined);
         const browser = this.browserOfJob(job.id);
         const phase = (latest?.phase ?? str(stored?.phase)) as TaskPhase | undefined;
         const attempt = latest?.attempt ?? (typeof stored?.attempt === "number" ? stored.attempt : undefined);
         const runnerId = agent?.tokenId ?? str(stored?.tokenId);
-        return { kind: "agent", agentId: agentId ?? "", name: agent?.name ?? str(stored?.name) ?? "A runner agent", ...(browser ? { browser } : {}), ...(runnerId ? { runnerId } : {}), ...(phase ? { phase } : {}), ...(attempt ? { attempt } : {}) };
+        // Named as Settings names the runner (its name there, else what the computer calls itself); the stored name once the rows are gone.
+        const byToken = !agent && runnerId ? this.store.agentsOfToken(runnerId)[0] : undefined;
+        const known = agent ?? byToken;
+        const name = (known ? this.runnerName(known) : undefined) ?? str(stored?.name) ?? (runnerId ? str(this.store.getToken(runnerId)?.label) : undefined) ?? "A runner agent";
+        return { kind: "agent", agentId: agentId ?? known?.id ?? "", name, ...(browser ? { browser } : {}), ...(runnerId ? { runnerId } : {}), ...(phase ? { phase } : {}), ...(attempt ? { attempt } : {}) };
+    }
+
+    /** A runner's name as Settings shows it: the name its person gave it, else what the computer calls itself (GET /api/me/runner). */
+    runnerName(agent: Pick<AgentRecord, "tokenId" | "name">): string | undefined {
+        const label = this.store.getToken(agent.tokenId)?.label?.trim();
+        return label || agent.name?.trim() || undefined;
     }
 
     /** The browser the runner said its web tests used (the job's latest `agent_browser` event; see collect). Kept with the job's events, so it outlives the task. */
@@ -1473,7 +1485,7 @@ class RemoteExecutor implements ScriptExecutor {
                 if (!announced) {
                     announced = true;
                     const a = t.agentId ? svc.store.getAgent(t.agentId) : undefined;
-                    emit(`Running on the runner agent “${a?.name ?? "agent"}”.`, "info", "agent_task_started");
+                    emit(`Running on the runner “${(a ? svc.runnerName(a) : undefined) ?? "agent"}”.`, "info", "agent_task_started");
                 }
                 for (const line of t.log.slice(logSeen)) (env.mobile ?? env.ios)?.log?.(scrubSecrets(line, secrets));
                 logSeen = t.log.length;

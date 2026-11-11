@@ -364,6 +364,26 @@ export async function signUpFirstOwner(base, apiKey, password) {
     return body.token;
 }
 
+/** How long a runner may take to get a browser for web tests ready (it may download Chromium once, the first time it starts). */
+export const BROWSER_READY_MS = 10 * 60_000;
+
+/** The platform's refusal while the runner is still getting its browser: wait and ask again. Any other answer is final. */
+export const isBrowserNotReady = (r) => r.status === 409 && /no browser ready|downloading (Chromium|a browser)/i.test(String(r.message ?? ""));
+
+/**
+ * Start a test's run once the runner can take it. A runner that is still downloading its browser is refused up front (409, "Your runner
+ * cannot run web tests: it has no browser ready (The runner is downloading Chromium ...)"); that is correct, so this asks again every few
+ * seconds until the browser is ready, at most BROWSER_READY_MS, and then answers with the last refusal (which the step reports as it is).
+ */
+export async function startWhenBrowserReady(api, testId, { waitMs = BROWSER_READY_MS, everyMs = 5000, sleepFn = sleep } = {}) {
+    const end = Date.now() + waitMs;
+    for (;;) {
+        const r = await api("POST", `/api/tests/${testId}/validate`);
+        if (!isBrowserNotReady(r) || Date.now() + everyMs > end) return r;
+        await sleepFn(everyMs);
+    }
+}
+
 /** A complete download can be a few hundred MB: it is written to the file as it arrives, never held in memory. Larger than this is refused. */
 export const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 
@@ -729,7 +749,7 @@ export async function runSmoke(opts, deps = {}) {
         for (let i = 0; i < testIds.length; i++) {
             const spec = specs[i];
             await step(`Run the ${spec.kind === "web" ? "web" : "API"} test`, async () => {
-                const run = await api("POST", `/api/tests/${testIds[i]}/validate`);
+                const run = await startWhenBrowserReady(api, testIds[i]);
                 if (run.status !== 202) throw new Error(`The run did not start (${run.status}): ${run.message}`);
                 const job = await until(`the ${spec.kind} test to finish`, async () => {
                     const j = (await api("GET", `/api/test-generation/${run.json.jobId}`)).json;

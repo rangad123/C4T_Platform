@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 import { afterAll, describe, expect, it } from "vitest";
 // @ts-expect-error plain JavaScript script (no type declarations)
-import { Children, hostTarget, interpretKitAnswer, kitRequestBody, parseArgs, pathWithoutNode, plainCredentialsIn, platformEnv, redact, renderReport, runnerEnv, runSmoke, startCommand, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
+import { Children, hostTarget, interpretKitAnswer, isBrowserNotReady, startWhenBrowserReady, kitRequestBody, parseArgs, pathWithoutNode, plainCredentialsIn, platformEnv, redact, renderReport, runnerEnv, runSmoke, startCommand, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
 
 const WIN = process.platform === "win32";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-smoke-unit-"));
@@ -96,6 +96,28 @@ describe("decisions", () => {
         expect(interpretKitAnswer("installer", win, { status: 200, kind: "files", note: "The Windows installer was not built." }).skip).toMatch(/sent plain files instead\. The Windows installer was not built\./);
         expect(interpretKitAnswer("installer", win, { status: 200, kind: "installer" })).toEqual({ ok: true });
         expect(interpretKitAnswer("files", linux, { status: 200, kind: "files" })).toEqual({ ok: true });
+    });
+
+    it("waits while the runner is still getting its browser, then starts the run; any other refusal is final", async () => {
+        const downloading = { status: 409, message: "Your runner cannot run web tests: it has no browser ready (The runner is downloading Chromium for web tests)." };
+        expect(isBrowserNotReady(downloading)).toBe(true);
+        expect(isBrowserNotReady({ status: 409, message: "Your runner is offline. Start it on your computer, then try again." })).toBe(false);
+        expect(isBrowserNotReady({ status: 202, message: "" })).toBe(false);
+        const answers = [downloading, downloading, { status: 202, message: "", json: { jobId: "j1" } }];
+        const asked: string[] = [];
+        const waits: number[] = [];
+        const api = async (method: string, url: string) => (asked.push(`${method} ${url}`), answers.shift()!);
+        const r = await startWhenBrowserReady(api, "t1", { waitMs: 60_000, everyMs: 10, sleepFn: async (ms: number) => void waits.push(ms) });
+        expect(r.status).toBe(202);
+        expect(asked).toEqual(["POST /api/tests/t1/validate", "POST /api/tests/t1/validate", "POST /api/tests/t1/validate"]);
+        expect(waits).toEqual([10, 10]);
+        // Never ready within the allowance: the last refusal comes back, and the step reports its sentence.
+        const never = await startWhenBrowserReady(async () => downloading, "t1", { waitMs: 30, everyMs: 10, sleepFn: async (ms: number) => void (await new Promise((res) => setTimeout(res, ms))) });
+        expect(never).toEqual(downloading);
+        // A different refusal is not waited on.
+        let n = 0;
+        const offline = await startWhenBrowserReady(async () => (n++, { status: 409, message: "Your runner is offline." }), "t1", { waitMs: 60_000, everyMs: 10, sleepFn: async () => undefined });
+        expect([offline.status, n]).toEqual([409, 1]);
     });
 
     it("starts each download the way its README says", () => {

@@ -189,6 +189,28 @@ describe("one runner per person", () => {
         expect((await as("t-tess", "PATCH", "/api/me/runner", { switches: { nonsense: true } })).status).toBe(400);
     });
 
+    it("a run done by the person's runner names it exactly as Settings does", async () => {
+        // Renamed in Settings: the run says that name, not the computer's own.
+        expect((await as("t-tom", "PATCH", "/api/me/runner", { name: "Tom's laptop" })).body.runner.name).toBe("Tom's laptop");
+        const job = await platform.repo.createJob(projectId, appId, { ...options({ kind: "user", id: ids["t-tom"]! }) });
+        const running = svc()
+            .executorFor({ projectId, jobId: job.id })
+            .execute("playwright-api", { scratchDir: path.join(tmp, "scratch"), scripts: [{ testId: "API-001", filename: "API-001.spec.ts", content: "// script" }] }, { run: { baseUrl: "https://app.example", headless: true } }, { workers: 1 });
+        const offer = await tom.agent!.next(10_000);
+        expect(offer?.jobId).toBe(job.id);
+        await tom.agent!.answer(offer!, { runs: [{ testId: "API-001", status: "passed", durationMs: 5, failedStepIndex: -1, steps: [], artifacts: [], responses: [] }] });
+        await running;
+        const settings = (await as("t-tom", "GET", "/api/me/runner")).body.runner;
+        const ranOn = svc().ranOn(platform.repo.getJob(job.id)!);
+        expect(settings.name).toBe("Tom's laptop");
+        expect(ranOn).toMatchObject({ kind: "agent", name: settings.name, runnerId: tom.runnerId });
+        expect((await as("t-tom", "GET", `/api/test-generation/${job.id}`)).body.ranOn).toMatchObject({ name: settings.name });
+        // After the day's task prune, from what was kept with the job.
+        platform.db.run("DELETE FROM agent_tasks WHERE job_id = ?", job.id);
+        expect(svc().ranOn(platform.repo.getJob(job.id)!)).toMatchObject({ name: settings.name });
+        platform.repo.setJobStatus(job.id, "COMPLETED");
+    });
+
     it("offline: a person's run is refused up front; a schedule's waits for the computer", async () => {
         platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE token_id = ?", Date.now() - 10 * 60_000, tess.runnerId);
         expect((await as("t-tess", "GET", "/api/me/runner")).body.runner.status).toBe("offline");
