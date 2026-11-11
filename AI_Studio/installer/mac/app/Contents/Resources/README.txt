@@ -29,7 +29,7 @@ Stopping and removing
         sh "AI Testing Runner.app/Contents/Resources/runner-setup.sh" --uninstall
     That stops only the runner this app started and deletes only the folder it created. A Node.js you already had, and the shared browser
     cache, are never touched.
-  - To take this runner's access away, revoke its token in the platform (Setup, Runners).
+  - To take this runner's access away, open Settings, Your runner in the platform and choose Remove this computer.
 
 For administrators
   sh "AI Testing Runner.app/Contents/Resources/runner-setup.sh" --check      what would be downloaded; changes nothing (exit 0 or 10)

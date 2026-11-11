@@ -4,7 +4,7 @@ import type { Job, TestSummary } from "../../api";
 import { LinkButton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
-import type { Agent } from "../agents/agents";
+import { useMyRunner } from "../runners/my-runner";
 import { RunMenu } from "../runs/RunMenu";
 import "./onboarding.css";
 
@@ -41,11 +41,11 @@ export function NextSteps({
     explores?: boolean;
 }) {
     const jobs = useFetch<Job[]>(`/projects/${projectId}/jobs`);
-    const agents = useFetch<Agent[]>(`/projects/${projectId}/agents`);
+    const me = useMyRunner(0);
     const model = useFetch<{ authentication?: { required?: boolean } } | null>(`/projects/${projectId}/application-model`);
 
     // Until the facts are in, show nothing rather than a list that then changes under the person's eyes.
-    if (jobs.loading || agents.loading || model.loading || scheduleCount === undefined) return null;
+    if (jobs.loading || me.loading || model.loading || scheduleCount === undefined) return null;
 
     const ranAgain = (jobs.data ?? []).some((j) => j.mode === "validate" && ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status));
     const needsSignIn = explores && model.data?.authentication?.required === true;
@@ -85,10 +85,10 @@ export function NextSteps({
     }
     steps.push({
         key: "runner",
-        done: (agents.data ?? []).length > 0,
-        title: "Run tests on your own computer",
-        text: (agents.data ?? []).length > 0 ? "A runner is connected." : "Connect a runner to run tests inside your network or on a phone. Optional.",
-        action: <LinkButton href={routes.runners(projectId)}>Connect a runner</LinkButton>,
+        done: Boolean(me.data?.runner),
+        title: "Set up your runner",
+        text: me.data?.runner ? "Your runner is set up." : "A runner is the program on your computer that runs your tests. Set it up once in Settings.",
+        action: <LinkButton href={routes.allRunners}>Set up your runner</LinkButton>,
     });
 
     // Everything that applies is done: the list has nothing left to say.

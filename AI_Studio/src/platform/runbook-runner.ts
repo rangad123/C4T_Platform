@@ -35,6 +35,7 @@ import { getScheduleServices } from "./schedule-services.js";
 import { activeJobOf, OverlapError, runnableTestIds, type RunbookStart } from "./scheduler.js";
 import type { Schedule } from "./schedule-store.js";
 import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
+import { currentActor } from "./auth/actor.js";
 
 /** The longest one step may take, and the longest a whole run may take. Tests inject small values. */
 export const STEP_CAP_MS = 30 * 60_000;
@@ -185,15 +186,26 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
 
     function labelOptions(run: RunbookRun, options: JobOptions): JobOptions {
         options.runbookRunId = run.id;
+        // Whose runner runs the step (round 45): the schedule's or deploy trigger's creator, or the person who started the runbook.
         if (run.trigger === "schedule") {
             options.trigger = "schedule";
             if (run.triggerRef) options.scheduleId = run.triggerRef;
+            const owner = run.triggerRef ? (repo.db.get<{ created_by: string | null }>("SELECT created_by FROM schedules WHERE id = ?", run.triggerRef)?.created_by ?? null) : null;
+            options.startedBy = { kind: "schedule", id: run.triggerRef ?? null, ownerId: owner };
         } else if (run.trigger === "deploy") {
             options.trigger = "deploy";
             options.deploy = deployInfo.get(run.id) ?? {};
-        } else options.trigger = "manual";
+            const owner = run.triggerRef ? (repo.db.get<{ created_by: string | null }>("SELECT created_by FROM trigger_tokens WHERE id = ?", run.triggerRef)?.created_by ?? null) : null;
+            options.startedBy = { kind: "trigger", id: run.triggerRef ?? null, ownerId: owner };
+        } else {
+            options.trigger = "manual";
+            const starter = starters.get(run.id);
+            if (starter) options.startedBy = starter;
+        }
         return options;
     }
+    /** Who started a runbook by hand (kept in memory for its jobs' owner; a run resumed after a restart is attributed by the request that resumes it). */
+    const starters = new Map<string, NonNullable<JobOptions["startedBy"]>>();
     /** What a deploy trigger said about the deploy, kept in memory for the labels of this run's jobs. */
     const deployInfo = new Map<string, { commit?: string; environment?: string; label?: string }>();
 
@@ -551,6 +563,10 @@ export function getRunbookServices(p: Platform, opts: RunbookServiceOptions = {}
             } catch (e) {
                 if (e instanceof RunbookBusy) throw new RunbookOverlapError(e.activeRunId, "another runbook");
                 throw e;
+            }
+            if (by.kind === "manual") {
+                const a = currentActor();
+                if (a.kind === "user" || a.kind === "open" || a.kind === "key") starters.set(run.id, { kind: a.kind, id: a.id ?? null });
             }
             if (by.kind === "deploy") deployInfo.set(run.id, { ...(by.commit ? { commit: by.commit } : {}), ...(by.environment ? { environment: by.environment } : {}), ...(by.label ? { label: by.label } : {}) });
             launch(run);

@@ -20,11 +20,12 @@ import type { ScriptRun } from "../engine/validation/runner.js";
 import type { Platform } from "./bootstrap.js";
 import { CustomScriptStore } from "./custom-script-store.js";
 import { HttpError } from "./http-error.js";
+import { runnerRefusal } from "./runner-only.js";
 import type { JobOptions, Repo } from "./repo.js";
-import { chosenRunnerOf, getAgentServices, ownerOfNewJob, type RunContext } from "./agent-services.js";
+import { getAgentServices, jobOwnerId, ownerOfNewJob, type RunContext } from "./agent-services.js";
 
-export const CUSTOM_REFUSAL = "This project has code tests. Start your runner agent with --allow-custom-scripts, or set ALLOW_CUSTOM_SCRIPTS=true on the server.";
-const AGENT_REFUSAL = "This project has code tests, and none of its connected runner agents was started with --allow-custom-scripts. Start the agent with that option, or set ALLOW_CUSTOM_SCRIPTS=true on the server and run the project on the platform.";
+export const CUSTOM_REFUSAL = "This project has code tests, and no runner is set up for this run. Set up your runner in Settings (with code scripts switched on), or set ALLOW_CUSTOM_SCRIPTS=true on the server.";
+const AGENT_REFUSAL = "This project has code tests, and code scripts are switched off on your runner. Switch them on for your runner in Settings.";
 const HOST_REFUSAL = "This project has code tests, and this server does not run them. Set ALLOW_CUSTOM_SCRIPTS=true on the server, or run the project on a runner agent started with --allow-custom-scripts.";
 
 export interface PolicyInput {
@@ -59,8 +60,9 @@ export function customPolicyFor(p: Pick<Platform, "config" | "db" | "repo"> & Pa
         hostAllowed: p.config?.ALLOW_CUSTOM_SCRIPTS === true,
         ...(p.config?.customScriptsReason ? { hostNote: p.config.customScriptsReason } : {}),
         runsOnAgent,
-        // The same rule as offering (agent-services.ts mayRunCodeScripts): the runner's switch and its own flag, never a shared machine; a person's own computers count for their runs.
-        agents: runsOnAgent ? svc.eligibleAgents(projectId, undefined, who).map((a) => ({ customScripts: svc.mayRunCodeScripts(a) })) : [],
+        // The same rule as offering (agent-services.ts mayRunCodeScripts): the owner's switch for their runner, as it last reported itself,
+        // online or not (an offline runner is the job gate's refusal, or a schedule's wait, never a silent drop of its code tests).
+        agents: runsOnAgent ? svc.lastKnownRunner(projectId, who).map((a) => ({ customScripts: svc.mayRunCodeScripts(a) })) : [],
     });
 }
 
@@ -74,24 +76,25 @@ export function customIdsOfJob(repo: Repo, options: JobOptions): string[] {
 /** Checked by `Repo.createJob`: a plain 409 when the job includes code tests that may not run. */
 export function customGate(p: Platform, projectId: string, options: JobOptions): void {
     if (customIdsOfJob(p.repo, options).length === 0) return;
-    const d = customPolicyFor(p, projectId, { ownerId: ownerOfNewJob(options), runnerId: chosenRunnerOf(options) });
-    if (!d.allowed) throw new HttpError(409, d.message);
+    const d = customPolicyFor(p, projectId, { ownerId: ownerOfNewJob(options) });
+    // On a runner the refusal is about the person's own runner, so it carries the code that links to Settings.
+    if (!d.allowed) throw getAgentServices(p).routesToAgent(projectId) ? runnerRefusal("RUNNER_CANNOT_RUN", d.message) : new HttpError(409, d.message);
 }
 
 /** Install the gate (and the lookup schedules and runbooks use) on the platform's repository. */
 export function installCustomGate(p: Platform): void {
     p.repo.customGate = async (projectId, options) => customGate(p, projectId, options);
-    p.repo.customPolicy = async (projectId) => customPolicyFor(p, projectId);
+    p.repo.customPolicy = async (projectId, ownerId) => customPolicyFor(p, projectId, { ownerId: ownerId ?? null });
 }
 
 /**
  * For automated runs (schedules, triggers, runbooks): the tests among `ids` that may run, the hand-written ones left out when they may
  * not, and a plain sentence saying so (undefined when nothing was left out).
  */
-export async function splitCustom(repo: Repo, projectId: string, ids: readonly string[]): Promise<{ ids: string[]; skipped: string[]; note?: string }> {
+export async function splitCustom(repo: Repo, projectId: string, ids: readonly string[], ownerId?: string | null): Promise<{ ids: string[]; skipped: string[]; note?: string }> {
     const customIds = new CustomScriptStore(repo.db).customAmong(ids);
     if (customIds.length === 0 || !repo.customPolicy) return { ids: [...ids], skipped: [] };
-    const d = await repo.customPolicy(projectId);
+    const d = await repo.customPolicy(projectId, ownerId);
     if (d.allowed) return { ids: [...ids], skipped: [] };
     const drop = new Set(customIds);
     return {
@@ -140,9 +143,9 @@ export function withCustomPolicy(inner: ScriptExecutor, hostAllowed: boolean, ne
 }
 
 /** The plain sentence for a run that left code tests out because they may not run (undefined when none were left out). */
-export async function customSkippedNote(repo: Repo, projectId: string): Promise<string | undefined> {
+export async function customSkippedNote(repo: Repo, projectId: string, ownerId?: string | null): Promise<string | undefined> {
     if (!repo.customPolicy) return undefined;
-    const d = await repo.customPolicy(projectId);
+    const d = await repo.customPolicy(projectId, ownerId);
     if (d.allowed) return undefined;
     const n = new CustomScriptStore(repo.db).countInProject(projectId);
     return n > 0 ? `${n} code test${n === 1 ? " was" : "s were"} not run. ${d.message}` : undefined;
@@ -151,7 +154,9 @@ export async function customSkippedNote(repo: Repo, projectId: string): Promise<
 /** Writes that sentence onto a job (an event), when there is one. Never throws. */
 export async function noteCustomSkipped(repo: Repo, jobId: string, projectId: string): Promise<void> {
     try {
-        const message = await customSkippedNote(repo, projectId);
+        // The job's owner (whose runner runs it): their runner's code-scripts switch decides.
+        const job = repo.getJob(jobId);
+        const message = await customSkippedNote(repo, projectId, job ? jobOwnerId(job.options) : null);
         if (message) repo.addEvent(jobId, { stage: "validation", kind: "custom_skipped", level: "warn", message });
     } catch {
         /* a note is a convenience */

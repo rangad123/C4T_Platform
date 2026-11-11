@@ -1,9 +1,8 @@
 /**
- * Round 40: a task belongs to the runner that claimed it, for every route of protocol 2 too. Another runner of the same project, a runner of
- * another project, and the claiming runner itself once its access is revoked get nothing: no offer, and "not found" for accept, reject,
+ * Round 40: a task belongs to the runner that claimed it, for every route of protocol 2 too. Another person's runner (round 45: every runner
+ * is one person's), and the claiming runner itself once it is removed get nothing: no offer, and "not found" for accept, reject,
  * heartbeat, live events, download, upload and result. The run's live pictures (runner-files) are served only for a task of that run of that
- * project, and only as an image. (Claim eligibility of personal and team runners is in runner-personal.test.ts; the protocol-1 routes for
- * other runners in agent-platform.test.ts.) No browser, no port: everything through the server's inject.
+ * project, and only as an image. (Claim eligibility is in runner-personal.test.ts.) No browser, no port: everything through the server's inject.
  */
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -15,6 +14,8 @@ import { loadConfig } from "../src/config.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { UserStore } from "../src/platform/user-store.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { defaultCaps, FakeAgent, passedRun, viaInject } from "./fixtures/fake-agent.js";
 
 const KEY = "isolation-admin-key-3b8e51";
@@ -38,17 +39,19 @@ async function project(name: string): Promise<{ id: string; appId: string }> {
     svc().store.setRunner(id, { runOn: "agent", agentId: null });
     return { id, appId };
 }
-async function runner(projectId: string, name: string): Promise<{ agent: FakeAgent; tokenId: string }> {
-    const res = await asKey("POST", `/api/projects/${projectId}/agent-tokens`, { label: name });
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    const made = res.body;
+/** A person (an account of this server) and their own runner. */
+const people = new Map<string, string>();
+async function runner(name: string): Promise<{ agent: FakeAgent; tokenId: string; ownerId: string }> {
+    const ownerId = people.get(name) ?? new UserStore(platform.db).create({ email: `${name.replace(/\W/g, "")}@people.example`, name, role: "editor" }).id;
+    people.set(name, ownerId);
+    const made = personalRunner(platform, { ownerId, label: name });
     const agent = new FakeAgent(viaInject(app), made.secret, { name, capabilities: defaultCaps() });
     expect((await agent.hello({ protocol: 2 })).status).toBe(200);
-    return { agent, tokenId: made.token.id };
+    return { agent, tokenId: made.id, ownerId };
 }
-function queue(p: { id: string; appId: string }): { taskId: string; jobId: string } {
+function queue(p: { id: string; appId: string }, owner: string): { taskId: string; jobId: string } {
     const jobId = randomUUID();
-    const options = { maxPages: 1, maxDepth: 1, maxScenarios: 1, targets: ["web"], allowMutatingApiTests: false, mode: "validate", testIds: [], startedBy: { kind: "user", id: "someone" } };
+    const options = { maxPages: 1, maxDepth: 1, maxScenarios: 1, targets: ["web"], allowMutatingApiTests: false, mode: "validate", testIds: [], startedBy: { kind: "user", id: owner } };
     const t = new Date().toISOString();
     platform.db.run("INSERT INTO generation_jobs (id, project_id, application_id, status, options_json, progress_json, counters_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", jobId, p.id, p.appId, "VALIDATING", JSON.stringify(options), "{}", "{}", t, t);
     const taskId = randomUUID();
@@ -73,7 +76,6 @@ async function everyRoute(who: FakeAgent, taskId: string, attemptId: string): Pr
 
 beforeAll(async () => {
     process.env.AGENT_POLL_SECONDS = "1";
-    process.env.AGENT_MAX_TOKENS = "5"; // two runners in one project
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-isolation-"));
     platform = bootstrap(loadConfig({ DATA_DIR: tmp, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: "isolation-test-secret-key-0123456789" }));
@@ -90,16 +92,15 @@ afterAll(async () => {
 });
 
 describe("a task is its claiming runner's alone (protocol 2)", () => {
-    it("another runner of the project and a runner of another project get no offer and 'not found' on every task route", async () => {
+    it("another person's runner, in this project or elsewhere, gets no offer and 'not found' on every task route", async () => {
         const a = await project("Isolation A");
-        const b = await project("Isolation B");
-        const owner = await runner(a.id, "owner");
-        const { taskId } = queue(a);
+        const owner = await runner("owner");
+        const { taskId } = queue(a, owner.ownerId);
         const offer = (await owner.agent.poll(1)).offer!;
         expect(offer.taskId).toBe(taskId);
         expect(offer.attemptId).toBeTruthy();
-        const mate = await runner(a.id, "mate");
-        const stranger = await runner(b.id, "stranger");
+        const mate = await runner("mate");
+        const stranger = await runner("stranger");
         for (const other of [mate, stranger]) {
             expect((await other.agent.poll(1)).status).toBe(204);
             expect(await everyRoute(other.agent, taskId, offer.attemptId!)).toEqual({ accept: 404, reject: 404, heartbeat: 404, events: 404, download: 404, upload: 404, result: 404 });
@@ -110,14 +111,14 @@ describe("a task is its claiming runner's alone (protocol 2)", () => {
         expect((await owner.agent.result(taskId, { ok: true, runs: [passedRun("t1")], attemptId: offer.attemptId })).status).toBe(200);
     });
 
-    it("a runner whose access is revoked while it holds a task can no longer touch it, or get another", async () => {
+    it("a runner removed while it holds a task can no longer touch it, or get another", async () => {
         const a = await project("Isolation revoked");
-        const owner = await runner(a.id, "soon revoked");
-        const { taskId } = queue(a);
+        const owner = await runner("soon revoked");
+        const { taskId } = queue(a, owner.ownerId);
         const offer = (await owner.agent.poll(1)).offer!;
         expect((await json(owner.agent, `/api/agent/tasks/${taskId}/accept`, { attemptId: offer.attemptId })).status).toBe(200);
-        expect((await asKey("DELETE", `/api/projects/${a.id}/agent-tokens/${owner.tokenId}`)).status).toBe(200);
-        queue(a);
+        expect(svc().store.retireToken(owner.tokenId)).toBe(true);
+        queue(a, owner.ownerId);
         expect((await owner.agent.poll(1)).status).toBe(404);
         const after = await everyRoute(owner.agent, taskId, offer.attemptId!);
         // Every route refuses the revoked credential (404 for a credential the platform no longer knows; never a 2xx).
@@ -128,9 +129,9 @@ describe("a task is its claiming runner's alone (protocol 2)", () => {
     it("live pictures (runner-files): only a task of that run of that project, only images", async () => {
         const a = await project("Pictures A");
         const b = await project("Pictures B");
-        const owner = await runner(a.id, "pictures");
-        const { taskId, jobId } = queue(a);
-        const other = queue(a); // another run of the same project
+        const owner = await runner("pictures");
+        const { taskId, jobId } = queue(a, owner.ownerId);
+        const other = queue(a, owner.ownerId); // another run of the same project
         const offer = (await owner.agent.poll(1)).offer!;
         expect((await json(owner.agent, `/api/agent/tasks/${taskId}/accept`, { attemptId: offer.attemptId })).status).toBe(200);
         expect((await owner.agent.upload(taskId, "live-1-t1.png", PNG, { "x-attempt-id": offer.attemptId! })).status).toBe(200);

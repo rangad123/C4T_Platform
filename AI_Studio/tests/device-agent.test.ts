@@ -19,6 +19,8 @@ import type { DeviceSession, ScreenSnapshot } from "../src/engine/mobile/device/
 import { deviceOptions, openDeviceSession } from "../src/platform/agent-device.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, viaFetch } from "./fixtures/fake-agent.js";
 
@@ -88,7 +90,8 @@ async function newProject(name: string): Promise<string> {
 
 /** The real agent program for a project, with its phone. */
 async function realAgent(projectId: string, env: NodeJS.ProcessEnv, name = "Maya's laptop") {
-    const token = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: name })).body.secret as string;
+    // Round 45: the open server's own runner (setting it up again retires the one before).
+    const token = personalRunner(platform, { label: name, replace: true, realPhone: true }).secret;
     const { log, lines } = memoryLogger();
     const agent = new Agent({
         config: { baseUrl: BASE, token, name, concurrency: 1, workDir: fs.mkdtempSync(path.join(work, "agent-")), allowInsecure: false, cacheBytes: 64 * 1024 * 1024, tokenSource: "env" },
@@ -117,16 +120,15 @@ const by = (s: ScreenSnapshot, f: (e: ScreenSnapshot["elements"][number]) => boo
     if (!e) throw new Error(`not on the screen: ${texts(s).join(" | ")}`);
     return e;
 };
-const host = (projectId: string, over: Record<string, unknown> = {}) => ({ agents: getAgentServices(platform), projectId, ...over });
+const host = (projectId: string, over: Record<string, unknown> = {}) => ({ agents: getAgentServices(platform), projectId, startedBy: OPEN_OWNER_ID, ...over });
 
 beforeAll(async () => {
-    // Several runners in one project here; the one-runner default is covered in runner-limit-unit.test.ts.
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "30", AGENT_WATCH_MS: "100", AGENT_MAX_TOKENS: "25" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-devagent-"));
     work = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-devagent-work-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     Object.assign(deviceOptions, { remote: { lostContactMs: 20_000, claimWaitMs: 6_000, startWaitMs: 40_000, commandWaitMs: 20_000, settleMs: 8_000 } });
@@ -284,9 +286,10 @@ describe("the real agent program drives the fake phone for the platform", { time
 });
 
 describe("agents that cannot or should not host a phone", { timeout: 60_000 }, () => {
-    const connect = async (projectId: string, name: string, caps: Record<string, unknown>) => {
-        const secret = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: name })).body.secret as string;
-        const agent = new FakeAgent(viaFetch(BASE), secret, { name, capabilities: defaultCaps(caps as never) });
+    /** The open server's runner (or, with `ownerId`, another person's computer, which never hosts the open server's sessions). */
+    const connect = async (_projectId: string, name: string, caps: Record<string, unknown>, ownerId?: string) => {
+        const secret = personalRunner(platform, { label: name, realPhone: true, ...(ownerId ? { ownerId } : { replace: true }) }).secret;
+        const agent = new FakeAgent(viaFetch(BASE), secret, { name, capabilities: defaultCaps({ runnerSwitches: true, ...caps } as never) });
         expect((await agent.hello()).status).toBe(200);
         return { agent, secret };
     };
@@ -300,7 +303,7 @@ describe("agents that cannot or should not host a phone", { timeout: 60_000 }, (
         // even if a device task is queued for it by some other route, the platform does not hand it over
         const svc = getAgentServices(platform);
         const { startDeviceTask } = await import("../src/platform/agent-device.js");
-        const driver = await startDeviceTask(svc, { projectId, agent: svc.store.getAgent(old.agent.agentId)!, appPackage: SHOP, timeouts: { claimWaitMs: 1500 } });
+        const driver = await startDeviceTask(svc, { projectId, agent: svc.store.getAgent(old.agent.agentId)!, appPackage: SHOP, timeouts: { claimWaitMs: 1500 }, startedBy: OPEN_OWNER_ID });
         expect(await old.agent.next(2500)).toBeUndefined();
         expect(driver.state.status).toMatch(/queued|failed/);
         await driver.close();
@@ -309,10 +312,10 @@ describe("agents that cannot or should not host a phone", { timeout: 60_000 }, (
     it("another agent of the project never sees a task made for this one; only the owner may push or be answered", async () => {
         const projectId = await newProject("Two agents");
         const a = await connect(projectId, "Agent A", { android, deviceSession: true });
-        const b = await connect(projectId, "Agent B", { android, deviceSession: true });
+        const b = await connect(projectId, "Agent B", { android, deviceSession: true }, "someone-else");
         const svc = getAgentServices(platform);
         const { startDeviceTask } = await import("../src/platform/agent-device.js");
-        const driver = await startDeviceTask(svc, { projectId, agent: svc.store.getAgent(a.agent.agentId)!, appPackage: SHOP, credentials: { username: "u", password: PASS } });
+        const driver = await startDeviceTask(svc, { projectId, agent: svc.store.getAgent(a.agent.agentId)!, appPackage: SHOP, credentials: { username: "u", password: PASS }, startedBy: OPEN_OWNER_ID });
         expect(await b.agent.next(1500)).toBeUndefined();
         const offer = (await a.agent.next(10_000)) as TaskOffer;
         expect(offer).toMatchObject({ kind: "device", adapterId: `device:${a.agent.agentId}`, device: { appPackage: SHOP, credentials: { password: PASS } } });
@@ -344,10 +347,10 @@ describe("agents that cannot or should not host a phone", { timeout: 60_000 }, (
         const a = await connect(projectId, "Agent R", { android, deviceSession: true });
         const svc = getAgentServices(platform);
         const { startDeviceTask } = await import("../src/platform/agent-device.js");
-        const driver = await startDeviceTask(svc, { projectId, agent: svc.store.getAgent(a.agent.agentId)!, appPackage: SHOP });
+        const driver = await startDeviceTask(svc, { projectId, agent: svc.store.getAgent(a.agent.agentId)!, appPackage: SHOP, startedBy: OPEN_OWNER_ID });
         const offer = (await a.agent.next(10_000)) as TaskOffer;
-        const tokenId = (await admin("GET", `/api/projects/${projectId}/agent-tokens`)).body.find((t: { revokedAt: unknown }) => !t.revokedAt).id as string;
-        expect((await admin("DELETE", `/api/projects/${projectId}/agent-tokens/${tokenId}`)).status).toBe(200);
+        // "Remove this computer" (Settings): the credential stops working at once.
+        expect(svc.store.retireOtherPersonal(OPEN_OWNER_ID, null)).toBeGreaterThan(0);
         const r = await a.agent.send("POST", `/api/agent/tasks/${offer.taskId}/device`, { headers: { authorization: `Bearer ${a.secret}`, "content-type": "application/json" }, body: JSON.stringify({ status: "ready" }) });
         expect(r.status).toBe(404);
         // the platform side: nothing is heard from the agent any more, so the session ends in words (the claim and contact limits are short in tests)

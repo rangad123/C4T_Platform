@@ -1,6 +1,7 @@
 /**
  * The COMPLETE runner download, platform side: a zip that already holds its own Node.js and every pinned package for one system and
- * processor, so the first start downloads nothing (see docs/features/runner-complete-kit.md).
+ * processor, so the first start downloads nothing (see docs/features/runner-complete-kit.md). Since round 45 it is not a choice: the one
+ * download of a system (routes/runner-kits.ts) is built this way, with the installer inside, whenever this server has built it.
  *
  * `npm run build:runner -- --complete` writes dist/runner-complete/<target>/: pack.bin (every file already compressed, one after another)
  * and manifest.json (each file's path, mode, sizes, CRC-32, SHA-256 and offset, and the SHA-256 of the whole pack). A download is a zip
@@ -235,8 +236,10 @@ export interface BuildCompleteInput {
     build: Extract<CompleteBuild, { ok: true }>;
     /** The installer program for this system, when the server has one: put next to the start scripts as the double-click alternative. */
     installer?: Extract<InstallerPart, { ok: true }>;
-    runnerName: string;
-    projectName: string;
+    /** Left out: the runner uses the computer's own name (round 45). */
+    runnerName?: string;
+    /** @deprecated Shown in the README only when given. */
+    projectName?: string;
     projectSlug: string;
     platformUrl: string;
     /** The single-use enrollment code (aite_...), written as runner.enroll; every download carries one (round 39). See runner-kit.ts kitCredentialFile. */
@@ -281,7 +284,7 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     // The runner programs: exactly the prebuilt bytes.
     for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) small(name, i.bundle.files.get(name)!);
     // What belongs to this download.
-    small("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.runnerName, kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
+    small("runner.json", text(`${JSON.stringify({ url: i.platformUrl, ...(i.runnerName ? { name: i.runnerName } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
     const credential = kitCredentialFile(i);
     small(credential.name, text(credential.text), 0o600);
     small("start-runner.cmd", text(withLineEnding(START_CMD, "\r\n")), 0o755);
@@ -292,8 +295,8 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     if (i.installer) for (const f of i.installer.files) small(f.name, f.data, f.mode);
     const readmeText = readme({
         platform: win ? "windows" : "unix",
-        projectName: i.projectName,
-        runnerName: i.runnerName,
+        ...(i.projectName ? { projectName: i.projectName } : {}),
+        ...(i.runnerName ? { runnerName: i.runnerName } : {}),
         platformUrl: i.platformUrl,
         kitVersion,
         complete: { target, words: TARGET_WORDS[target], nodeVersion: manifest.nodeVersion, installer: Boolean(i.installer) },

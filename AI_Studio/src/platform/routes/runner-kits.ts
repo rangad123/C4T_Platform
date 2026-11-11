@@ -1,51 +1,68 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { z } from "zod";
 import { getAgentServices } from "../agent-services.js";
-import type { EnrollmentRecord } from "../agent-store.js";
-import { actorOf } from "../auth/access.js";
-import { actorLabel, currentActor } from "../auth/actor.js";
-import { enrollmentMakerOf } from "./runners.js";
+import { OPEN_OWNER_ID, type EnrollmentRecord } from "../agent-store.js";
+import { accessControlOf, actorOf } from "../auth/access.js";
+import { actorLabel, currentActor, type Actor } from "../auth/actor.js";
 import { runnerUpdatesFor } from "../runner-update.js";
 import { RateLimiter } from "../agent-routing.js";
-import { CustomScriptStore } from "../custom-script-store.js";
 import { HttpError } from "../http-error.js";
-import { assertMayAddRunner } from "../runner-health.js";
-import { buildInstallerZip, installerFileName, installerInfo, loadInstaller, type KitKind } from "../runner-installer.js";
-import { buildKitZip, decideAddress, kitFileName, KitRequest, loadBundle, maxTokensFrom, NODE_MIN_MAJOR, projectSlugOf, runnerLimitMessage } from "../runner-kit.js";
-import { buildCompleteZip, completeFileName, completeInfo, loadComplete, MAX_COMPLETE_AT_ONCE, targetOf } from "../runner-kit-complete.js";
+import { canAddPersonal } from "../runner-health.js";
+import { buildInstallerZip, installerFileName, loadInstaller, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
+import { buildKitZip, decideAddress, DownloadRequest, kitFileName, loadBundle, NODE_MIN_MAJOR, type Bundle } from "../runner-kit.js";
+import { buildCompleteZip, completeFileName, loadComplete, MAX_COMPLETE_AT_ONCE, targetOf, type CompleteBuild, type CompleteTarget } from "../runner-kit-complete.js";
 import type { RouteCtx } from "./types.js";
 
 /**
- * Runner kit routes: a zip the tester downloads and double-clicks, so a runner needs no checkout of the repository.
+ * The runner download (round 45: one runner per person, set up once in Settings):
  *
- *   GET  /api/projects/:id/runner-kits/info   can a kit be built here, and which address would it connect to
- *   POST /api/projects/:id/runner-kits        { name, platform, kind? } -> the zip with a single-use enrollment code (runner.enroll) for a team
- *                                             runner registered from the project; the runner trades it for its credential at first contact
- *   POST /api/runners/kits                    { runner: "personal" | "team", organizationId?, projectIds?, name, platform, kind?, ... } -> the
- *                                             same zip from the Runners page: this person's own computer, or a team runner (round 39)
+ *   GET  /api/me/runner/download/info   which systems can be downloaded here, and which address the runner would connect to
+ *   POST /api/me/runner/download        { os: "windows" | "mac" | "linux", arch: "x64" | "arm64" } -> the zip with this person's one-time code
  *
- * No download carries a runner credential (round 39). The answer names the code's record (x-runner-enrollment-id, x-runner-enrollment-expires);
- * GET /api/runners/enrollments/:id says when the runner has connected.
+ * One download per system, nothing to choose: Windows gets the setup program, a Mac the app, Linux the plain files with the start scripts.
+ * Each one also carries its own Node.js and every test tool (the complete build, runner-kit-complete.ts) when this server has built it for
+ * that system and processor; then the installer is put inside it. A server without the installer for a system sends the plain files and
+ * says so (x-runner-kit-note). The runner is named after the computer (runner.json holds no name).
  *
- * `kind` is "installer" (the setup program on Windows, the app on a Mac; see runner-installer.ts) or "files" (the plain zip with the start
- * scripts). Without it Windows gets the installer and Mac/Linux the plain files. An installer that was not built on this server falls back
- * to the plain files, and the answer says so in x-runner-kit-kind and x-runner-kit-note.
+ * The zip holds a single-use code (runner.enroll), never a credential: the runner trades it once at /api/agent/enroll for this person's one
+ * runner credential, which retires every older one of theirs (agent-store.ts). The answer names the code's record (x-runner-enrollment-id,
+ * x-runner-enrollment-expires); GET /api/me/runner/enrollments/:id says when the runner has connected. The code is stored only as its
+ * hash, so the zip holds the only copy and is never cached.
  *
- * `complete: true` with `arch` ("x64" | "arm64", and `os` "mac" | "linux" for platform "unix") is the complete download: its own Node.js
- * and every package for that system and processor (runner-kit-complete.ts), streamed with its length, x-runner-kit-kind: complete and
- * x-runner-kit-target. Without that build on the server it is a 503 with the build command (no fallback: the person chose it for its size
- * and the panel offers the other ways). The info answer gains `complete.targets` (available, approximate bytes, Node.js version).
- *
- * Both are ordinary API-key routes (the server's hook protects everything outside the agent-protocol routes). The code is stored only as its
- * hash, so the zip holds the only copy and is never cached; once traded, the runner appears on the Runners page and is retired there.
+ * Who may download: a signed-in person who may run tests in at least one project (the runner is theirs), and the open server (no access key,
+ * nobody signed up yet), which acts as one person (OPEN_OWNER_ID). The shared access key is nobody's computer and is refused.
  */
+export const KEY_CANNOT_DOWNLOAD = "Sign in with your own account to set up your runner.";
+export const CANNOT_DOWNLOAD = "Setting up a runner needs permission to run tests in at least one project.";
+
+/** What a system's one download is made of on this server. */
+interface Plan {
+    kind: KitKind;
+    /** The installer for Windows or a Mac, when it is built here. */
+    installer?: Extract<InstallerPart, { ok: true }>;
+    /** The complete build (own Node.js and test tools) for this system and processor, when it is built here and current. */
+    complete?: Extract<CompleteBuild, { ok: true }>;
+    /** Why the download is not the installer, for Windows and Mac. */
+    note?: string;
+}
+
+function planFor(req: DownloadRequest, bundle: Extract<Bundle, { ok: true }>, installers: LoadedInstaller | undefined, completes: (t: CompleteTarget) => CompleteBuild): Plan {
+    const target = targetOf(req.os, req.arch);
+    const build = completes(target);
+    const complete = build.ok ? build : undefined;
+    if (req.os === "linux") return { kind: "files", ...(complete ? { complete } : {}) };
+    const part = installers ? (req.os === "windows" ? installers.windows : installers.mac) : undefined;
+    if (part?.ok) return { kind: "installer", installer: part, ...(complete ? { complete } : {}) };
+    return { kind: "files", ...(complete ? { complete } : {}), note: `${part && !part.ok ? part.reason : ""} The plain files were sent instead.`.trim() };
+}
+
 export function registerRunnerKitRoutes(ctx: RouteCtx): void {
     const { app, p } = ctx;
     const svc = getAgentServices(p);
-    // A few downloads a minute for a project is plenty for a person; the limit stops a script from filling the token list.
+    const control = accessControlOf(app);
+    // A few downloads a minute is plenty for a person; the limit stops a script from filling the code table.
     const perMinute = Math.max(1, Number(process.env.RUNNER_KIT_RATE_PER_MINUTE) || 5);
     const limiter = new RateLimiter(perMinute, 60_000);
-    // Complete downloads streaming right now (each is 50 to 70 MB read from disk); see MAX_COMPLETE_AT_ONCE.
+    // Downloads with their own Node.js streaming right now (each is 50 to 70 MB read from disk); see MAX_COMPLETE_AT_ONCE.
     let completeStreaming = 0;
 
     const addressOf = (req: { protocol: string; headers: { host?: string | undefined } }) => decideAddress({ publicUrl: p.config.PUBLIC_URL, protocol: req.protocol, host: req.headers.host });
@@ -56,30 +73,45 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
         return n === undefined ? {} : { updateSequence: n };
     };
 
-    /** What the download panels need to know: is a kit built here, which address it connects to, the installer and complete builds. */
-    const kitInfo = (req: FastifyRequest) => {
-        const bundle = loadBundle();
-        const address = addressOf(req);
-        return {
-            available: bundle.ok,
-            ...(bundle.ok ? { kitVersion: bundle.manifest.kitVersion } : { reason: bundle.reason }),
-            platformUrl: address.platformUrl,
-            urlOk: address.urlOk,
-            ...(address.urlWarning ? { urlWarning: address.urlWarning } : {}),
-            nodeMin: NODE_MIN_MAJOR,
-            installer: installerInfo(),
-            complete: completeInfo(bundle),
-        };
+    /** Whose runner a download makes: the signed-in person, or the open server's one person. The access key and the rest are refused. */
+    const ownerOf = (actor: Actor): string => {
+        if (actor.kind === "open") return actor.id ?? OPEN_OWNER_ID;
+        if (actor.kind === "key") throw new HttpError(403, KEY_CANNOT_DOWNLOAD);
+        if (actor.kind !== "user" || !actor.id) throw new HttpError(403, KEY_CANNOT_DOWNLOAD);
+        if (!canAddPersonal(control.projects, actor)) throw new HttpError(403, CANNOT_DOWNLOAD);
+        return actor.id;
     };
 
-    // The Runners page's "Add this computer" and "Add a team runner" (round 39): the same answer, with no project and no per-project limit.
-    app.get("/api/runners/kits/info", async (req) => ({ ...kitInfo(req), maxRunners: null, activeRunners: null }));
-
-    app.get("/api/projects/:id/runner-kits/info", async (req) => {
-        const { id } = req.params as { id: string };
-        ctx.project(id);
+    app.get("/api/me/runner/download/info", async (req) => {
+        const actor = actorOf(req) ?? currentActor();
         const bundle = loadBundle();
         const address = addressOf(req);
+        const installers = bundle.ok ? loadInstaller() : undefined;
+        const systems = (["windows", "mac", "linux"] as const).flatMap((os) =>
+            (["x64", "arm64"] as const).map((arch) => {
+                if (!bundle.ok) return { os, arch, available: false, kind: "files" as KitKind, ownNode: false, reason: bundle.reason };
+                const plan = planFor({ os, arch }, bundle, installers, (t) => loadComplete(t, bundle));
+                return {
+                    os,
+                    arch,
+                    available: address.urlOk,
+                    kind: plan.kind,
+                    // Carries its own Node.js and test tools: nothing to install first, nothing downloaded at the first start.
+                    ownNode: Boolean(plan.complete),
+                    ...(plan.complete ? { bytes: plan.complete.manifest.packBytes + plan.complete.manifest.files.length * 120 + 2 * 1024 * 1024 } : {}),
+                    ...(plan.note ? { note: plan.note } : {}),
+                    ...(!address.urlOk && address.urlWarning ? { reason: address.urlWarning } : {}),
+                };
+            }),
+        );
+        let mayDownload = true;
+        let refusal: string | undefined;
+        try {
+            ownerOf(actor);
+        } catch (e) {
+            mayDownload = false;
+            refusal = e instanceof HttpError ? e.message : CANNOT_DOWNLOAD;
+        }
         return {
             available: bundle.ok,
             ...(bundle.ok ? { kitVersion: bundle.manifest.kitVersion } : { reason: bundle.reason }),
@@ -87,92 +119,65 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
             urlOk: address.urlOk,
             ...(address.urlWarning ? { urlWarning: address.urlWarning } : {}),
             nodeMin: NODE_MIN_MAJOR,
-            installer: installerInfo(),
-            complete: completeInfo(bundle),
-            // One runner per project by default: the UI hides "Add a runner" and says to remove the current one once this many exist.
-            maxRunners: maxTokensFrom(),
-            activeRunners: svc.store.countActiveTokens(id),
+            mayDownload,
+            ...(refusal ? { refusal } : {}),
+            systems,
         };
     });
 
-    app.post("/api/projects/:id/runner-kits", async (req, reply) => {
-        const { id } = req.params as { id: string };
-        const project = ctx.project(id);
-        // A team runner registered from the project: the same rule as registering a runner on the Runners page.
-        assertMayAddRunner(app, req, svc.store, (project.organization_id as string | null) ?? null);
-        const parsed = KitRequest.safeParse(req.body ?? {});
-        if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "The runner name or system is not valid.");
-        const request = parsed.data;
-        if (!limiter.take(id)) throw new HttpError(429, "Too many runner kits were downloaded just now. Wait a minute and try again.");
-        const max = maxTokensFrom();
-        if (svc.store.countActiveTokens(id) >= max) throw new HttpError(409, runnerLimitMessage(max));
-        const prepared = prepare(req, request);
-        // The download carries a single-use enrollment code, never a runner credential (round 39): the runner trades it at first contact.
+    app.post("/api/me/runner/download", async (req, reply) => {
         const actor = actorOf(req) ?? currentActor();
-        const enrollment = svc.store.createEnrollment({ kind: "team", organizationId: (project.organization_id as string | null) ?? null, projectId: id, label: request.name, createdBy: actorLabel(actor), createdById: actor.id ?? null });
-        return sendKit(req, reply, { ...prepared, request, enrollment, projectName: String(project.name), slug: projectSlugOf(String(project.name)), auditProject: id });
-    });
-
-    // A kit from the Runners page (round 39): for this person's own computer, or a team runner of an organisation, with no project needed.
-    const RunnerKitBody = z.object({ runner: z.enum(["personal", "team"]), organizationId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/).nullable().optional(), projectIds: z.array(z.string().trim().min(1).max(64)).max(50).optional() }).passthrough();
-    app.post("/api/runners/kits", async (req, reply) => {
-        const outer = RunnerKitBody.safeParse(req.body ?? {});
-        if (!outer.success) throw new HttpError(400, "Say whose runner this is: runner is personal or team.");
-        const { runner, organizationId, projectIds, ...rest } = outer.data;
-        const parsed = KitRequest.safeParse(rest);
-        if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "The runner name or system is not valid.");
+        const ownerId = ownerOf(actor);
+        const parsed = DownloadRequest.safeParse(req.body ?? {});
+        if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "Choose the system (windows, mac or linux) and the processor (x64 or arm64).");
         const request = parsed.data;
-        const actor = actorOf(req) ?? currentActor();
-        if (!limiter.take(`runners:${actor.id ?? actor.kind}`)) throw new HttpError(429, "Too many runner kits were downloaded just now. Wait a minute and try again.");
-        const make = enrollmentMakerOf(app);
-        if (!make) throw new HttpError(503, "Runner downloads are not available on this server.");
-        const prepared = prepare(req, request);
-        const enrollment = make(req, { kind: runner, label: request.name, ...(organizationId !== undefined ? { organizationId } : {}), ...(projectIds ? { projectIds } : {}) });
-        return sendKit(req, reply, { ...prepared, request, enrollment, projectName: runner === "personal" ? "your own runs" : "your team", slug: runner === "personal" ? "my-computer" : "team", auditProject: null });
-    });
-
-    /** What every download needs before a code is made: the runner bundle, the address it connects to, and the complete build when asked for. */
-    function prepare(req: FastifyRequest, request: KitRequest) {
+        if (!limiter.take(`me:${ownerId}`)) throw new HttpError(429, "Too many runner downloads were made just now. Wait a minute and try again.");
         const bundle = loadBundle();
         if (!bundle.ok) throw new HttpError(503, bundle.reason);
         const address = addressOf(req);
         if (!address.platformUrl) throw new HttpError(409, address.urlWarning ?? "The platform could not tell which address it is reached at. Set PUBLIC_URL.");
-        if (!request.complete) return { bundle, platformUrl: address.platformUrl };
-        const target = targetOf(request.platform === "windows" ? "windows" : request.os === "linux" ? "linux" : "mac", request.arch!);
-        const build = loadComplete(target, bundle);
-        if (!build.ok) throw new HttpError(503, build.reason);
-        if (completeStreaming >= MAX_COMPLETE_AT_ONCE) throw new HttpError(429, "Several complete runner downloads are running right now. Try again in a minute.");
-        return { bundle, platformUrl: address.platformUrl, complete: { target, build } };
-    }
+        const plan = planFor(request, bundle, loadInstaller(), (t) => loadComplete(t, bundle));
+        if (plan.complete && completeStreaming >= MAX_COMPLETE_AT_ONCE) throw new HttpError(429, "Several runner downloads are being sent right now. Try again in a minute.");
+        // The download carries a single-use code, never a runner credential: the runner trades it at first contact.
+        const enrollment = svc.store.createPersonalEnrollment({ ownerId, createdBy: actorLabel(actor) });
+        control.users.addActivity({ actorKind: actor.kind, actorId: actor.id ?? null, actorName: actor.name, action: "runner-download", detail: `The runner was downloaded for ${request.os} ${request.arch}.`, projectId: null });
+        return send(req, reply, { request, plan, bundle, platformUrl: address.platformUrl, enrollment });
+    });
 
-    /** The zip with runner.enroll: streamed for the complete download, else built in memory. A kit that cannot be built uses up its code. */
-    function sendKit(
+    /** The zip with runner.enroll: streamed when it carries its own Node.js, else built in memory. A zip that cannot be built uses up its code. */
+    function send(
         req: FastifyRequest,
         reply: FastifyReply,
-        k: ReturnType<typeof prepare> & { request: KitRequest; enrollment: { code: string; record: EnrollmentRecord }; projectName: string; slug: string; auditProject: string | null },
+        k: { request: DownloadRequest; plan: Plan; bundle: Extract<Bundle, { ok: true }>; platformUrl: string; enrollment: { code: string; record: EnrollmentRecord } },
     ) {
-        const { bundle, request, enrollment, slug } = k;
-        const expires = new Date(enrollment.record.expiresMs).toISOString();
-        const audit = (what: string) => {
-            if (k.auditProject) new CustomScriptStore(ctx.repo.db).audit(k.auditProject, null, "runner-kit-downloaded", `Runner kit downloaded for “${request.name}” (${what}); enrollment code …${enrollment.record.hint}`);
-            // The code itself is never logged: only the id of its record.
-            req.log.info({ audit: "runner-kit-downloaded", projectId: k.auditProject, enrollmentId: enrollment.record.id, kind: what }, "runner kit downloaded");
+        const { request, plan, bundle, enrollment } = k;
+        const slug = "my-computer";
+        const platform = request.os === "windows" ? "windows" : "unix";
+        const common = {
+            "x-runner-enrollment-id": enrollment.record.id,
+            "x-runner-enrollment-expires": new Date(enrollment.record.expiresMs).toISOString(),
+            "x-runner-kit-kind": plan.kind,
+            "cache-control": "no-store",
+            "access-control-expose-headers": "x-runner-enrollment-id, x-runner-enrollment-expires, content-disposition, x-runner-kit-kind, x-runner-kit-note, x-runner-kit-target, content-length",
         };
-        const common = { "x-runner-enrollment-id": enrollment.record.id, "x-runner-enrollment-expires": expires, "cache-control": "no-store" };
-        const expose = "x-runner-enrollment-id, x-runner-enrollment-expires, content-disposition, x-runner-kit-kind, x-runner-kit-note, x-runner-kit-target, content-length";
-        if (k.complete) {
-            const { target, build } = k.complete;
-            // The installer program goes in too when this server has one for that system: the double-click alternative to the start script.
-            const installers = target.startsWith("linux") ? undefined : loadInstaller();
-            const part = installers ? (target.startsWith("win") ? installers.windows : installers.mac) : undefined;
-            let zip: ReturnType<typeof buildCompleteZip>;
+        const logged = (what: string) => req.log.info({ audit: "runner-downloaded", enrollmentId: enrollment.record.id, kind: what }, "runner downloaded");
+        const failed = (): never => {
+            // Nothing was handed out, so the code must not stay usable.
+            svc.store.expireEnrollment(enrollment.record.id);
+            throw new HttpError(500, "The runner download could not be built. Try again.");
+        };
+        // Header values are single-line ASCII; the sentence is plain English without quotes or line breaks.
+        if (plan.note) reply.header("x-runner-kit-note", plan.note.replace(/[^ -~]/g, " "));
+        if (plan.complete) {
+            const target = plan.complete.target;
+            let zip: ReturnType<typeof buildCompleteZip> | undefined;
             try {
-                zip = buildCompleteZip({ bundle, build, ...(part?.ok ? { installer: part } : {}), runnerName: request.name, projectName: k.projectName, projectSlug: slug, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() });
+                zip = buildCompleteZip({ bundle, build: plan.complete, ...(plan.installer ? { installer: plan.installer } : {}), projectSlug: slug, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() });
             } catch {
-                svc.store.expireEnrollment(enrollment.record.id);
-                throw new HttpError(500, "The runner kit could not be built. Try again.");
+                failed();
             }
-            audit(`${target}, complete`);
+            const stream = zip!.stream;
+            logged(`${target}, ${plan.kind}, own Node.js`);
             completeStreaming++;
             let released = false;
             const release = (): void => {
@@ -181,43 +186,29 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
                     completeStreaming--;
                 }
             };
-            zip.stream.once("close", release);
-            zip.stream.once("end", release);
-            zip.stream.once("error", release);
+            stream.once("close", release);
+            stream.once("end", release);
+            stream.once("error", release);
             return reply
                 .headers(common)
                 .header("content-type", "application/zip")
-                .header("content-length", String(zip.bytes))
+                .header("content-length", String(zip!.bytes))
                 .header("content-disposition", `attachment; filename="${completeFileName(slug, target)}"`)
-                .header("x-runner-kit-kind", "complete")
                 .header("x-runner-kit-target", target)
-                .header("access-control-expose-headers", expose)
-                .send(zip.stream);
+                .send(stream);
         }
-        // Installer or plain files? An installer that is not available here becomes the plain files kit, and the answer says so.
-        const wanted: KitKind = request.kind ?? (request.platform === "windows" ? "installer" : "files");
-        const installers = wanted === "installer" ? loadInstaller() : undefined;
-        const part = installers ? (request.platform === "windows" ? installers.windows : installers.mac) : undefined;
-        const kind: KitKind = part?.ok ? "installer" : "files";
-        const fallbackNote = wanted === "installer" && !part?.ok ? `${part && !part.ok ? part.reason : ""} A plain files kit was made instead.`.trim() : undefined;
-        let zip: Uint8Array;
+        let zip: Uint8Array | undefined;
         try {
-            const common2 = { bundle, projectName: k.projectName, projectSlug: slug, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() };
-            zip = part?.ok ? buildInstallerZip({ ...common2, part, platform: request.platform, runnerName: request.name }) : buildKitZip({ ...common2, request });
+            const base = { bundle, projectSlug: slug, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() };
+            zip = plan.installer ? buildInstallerZip({ ...base, part: plan.installer, platform }) : buildKitZip({ ...base, request: { platform } });
         } catch {
-            // Nothing was handed out, so the code must not stay usable.
-            svc.store.expireEnrollment(enrollment.record.id);
-            throw new HttpError(500, "The runner kit could not be built. Try again.");
+            failed();
         }
-        audit(`${request.platform}, ${kind === "installer" ? "installer" : "plain files"}`);
-        // Header values are single-line ASCII; the sentence is plain English without quotes or line breaks.
-        if (fallbackNote) reply.header("x-runner-kit-note", fallbackNote.replace(/[^ -~]/g, " "));
+        logged(`${request.os} ${request.arch}, ${plan.kind}`);
         return reply
             .headers(common)
             .header("content-type", "application/zip")
-            .header("content-disposition", `attachment; filename="${kind === "installer" ? installerFileName(slug, request.platform) : kitFileName(slug, request.platform)}"`)
-            .header("x-runner-kit-kind", kind)
-            .header("access-control-expose-headers", expose)
-            .send(Buffer.from(zip));
+            .header("content-disposition", `attachment; filename="${plan.installer ? installerFileName(slug, platform) : kitFileName(slug, platform)}"`)
+            .send(Buffer.from(zip!));
     }
 }

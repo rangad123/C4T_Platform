@@ -226,8 +226,8 @@ goto fail
 
 :revoked
 echo.
-echo The platform no longer accepts this runner. It was removed, its code was already used or has expired, or the project was deleted.
-echo Make a new download on the Runners page of the platform.
+echo The platform no longer accepts this runner. It was removed, another computer was set up in its place, or its code was already used or has expired.
+echo Set up your runner again from Settings, Your runner in the platform.
 goto fail
 
 :versions
@@ -616,8 +616,8 @@ while :; do
             ;;
         3)
             echo
-            echo "The platform no longer accepts this runner. It was removed, its code was already used or has expired, or the project was deleted."
-            echo "Make a new download on the Runners page of the platform."
+            echo "The platform no longer accepts this runner. It was removed, another computer was set up in its place, or its code was already used or has expired."
+            echo "Set up your runner again from Settings, Your runner in the platform."
             fail 3
             ;;
         4)
@@ -660,8 +660,10 @@ exec sh "$(dirname "$0")/start-runner.sh"
 
 export interface ReadmeInput {
     platform: KitPlatform;
-    projectName: string;
-    runnerName: string;
+    /** @deprecated Downloads are for a person's own computer (round 45); a line is shown only when given. */
+    projectName?: string;
+    /** Left out: the runner uses the computer's own name. */
+    runnerName?: string;
     platformUrl: string;
     kitVersion: string;
     /** Set for the complete download: it carries its own Node.js and packages (see runner-kit-complete.ts). */
@@ -680,42 +682,47 @@ export function readme(i: ReadmeInput): string {
     const firstStart = c
         ? "Nothing is installed: this download already holds Node.js and the test tools."
         : "The first start installs the test tools, which takes a few minutes and needs the internet.";
-    const installerLine = c?.installer
+    // Windows and Mac (round 45): the installer leads when the download has it; the start script is the way without installing anything.
+    const scriptStart = win
+        ? `double-click start-runner.cmd. Windows may ask you to confirm because the file came from the internet: choose More info, then Run anyway. ${firstStart}`
+        : `${UNIX_START.replace(/^Open/, "open")}
+   ${firstStart}`;
+    const start = c?.installer
         ? win
-            ? `\n   Or double-click AITestingRunnerSetup.exe instead: it copies the runner to your own folder, keeps it running in the background with an icon next to the clock, and can start it when you sign in. It downloads nothing either.`
-            : `\n   Or double-click "AI Testing Runner" instead: it copies the runner to your own folder and can start it when you sign in. It downloads nothing either.`
-        : "";
-    const start = win
-        ? `Double-click start-runner.cmd. Windows may ask you to confirm because the file came from the internet: choose More info, then Run anyway. ${firstStart}${installerLine}
+            ? `Double-click AITestingRunnerSetup.exe. Windows may say "Windows protected your PC" because the installer is not signed yet: choose More info, then Run anyway. Choose Install and start: it copies the runner to your own folder, keeps it running in the background with an icon next to the clock, and can start it when you sign in. ${firstStart}
+   Or, to run it without installing, ${scriptStart}`
+            : `Double-click "AI Testing Runner". macOS may say it could not verify the app, because it is not signed yet: on macOS 15 and newer choose Done, then System Settings, Privacy & Security, Open Anyway; on older versions right-click the app and choose Open. It copies the runner to your own folder and can start it when you sign in. ${firstStart}
+   Or, to run it without installing, ${scriptStart}`
+        : win
+          ? `Double-click start-runner.cmd. Windows may ask you to confirm because the file came from the internet: choose More info, then Run anyway. ${firstStart}
    ${c ? "This download is for Windows only." : `On a Mac or Linux computer this folder also holds start-runner.sh and start-runner.command: ${UNIX_START.replace(/\n/g, "\n   ")}`}`
-        : `${UNIX_START}
-   ${firstStart}${installerLine}
+          : `${UNIX_START}
+   ${firstStart}
    ${c ? `This download is for ${c.words} only.` : "On Windows, double-click start-runner.cmd instead."}`;
     const node = c
         ? `This download is for ${c.words}. It holds Node.js ${c.nodeVersion} in the node folder and every test tool in node_modules, so it needs nothing else and changes nothing on the computer. If the window says that Node.js does not start, this is the download for another kind of computer: download the right one from the platform.`
         : `You need Node.js ${NODE_MIN_MAJOR} or newer. The start script looks for it in the usual places and says which one it uses. It offers to install it if it is missing.
 If it says it cannot find Node.js but you have it, open a terminal (Terminal on a Mac, Command Prompt on Windows) and run  node --version  there. If that works, run the start script from that same window.`;
-    return `AI Testing Platform runner "${i.runnerName}"
-Project: ${i.projectName}
-Platform: ${i.platformUrl}
+    return `AI Testing Platform runner${i.runnerName ? ` "${i.runnerName}"` : ""}
+${i.projectName ? `Project: ${i.projectName}\n` : ""}Platform: ${i.platformUrl}
 Kit version: ${i.kitVersion}${c ? `\nDownload: complete, for ${c.words} (${c.target})` : ""}
 
 1. Unzip this folder on the computer where your application can be reached.
 2. ${start}
 3. Leave the window open. It says "Connected to the platform" when the runner is ready.
-4. In the platform, open the Runners page. This runner shows as online.
-5. The file runner.enroll in this folder is a one-time code. The runner trades it for its own access the first time it starts, keeps that access in this computer's credential store and deletes the file. The code works once, and only for 30 minutes after the download was made: if it has expired, make a new download on the Runners page.
+4. In the platform, open Settings, Your runner. It shows this computer as connected, under the computer's own name. From then on your runs, schedules and sessions use it by themselves.
+5. The file runner.enroll in this folder is a one-time code. The runner trades it for its own access the first time it starts, keeps that access in this computer's credential store and deletes the file. The code works once, and only for 30 minutes after the download was made: if it has expired, download the runner again from Settings, Your runner.
 
 ${node}
 If the runner does not connect: ${win ? "double-click check-computer.cmd" : "run  sh check-computer.sh  in the same Terminal window (or double-click check-computer.command)"}. It checks this computer (Node.js, the runner's files, the browser, the proxy and certificates, the platform and the token, disk space, the clock) and says what to fix. It changes nothing and never shows the token.
 Web tests need a browser. The runner uses Google Chrome or Microsoft Edge when this computer has one, and otherwise downloads a browser once, the first time it starts. It says which one it uses.
 
-Updates: when the platform is updated, the runner downloads its new version itself, checks every file, waits for its running tests to finish and starts again ("The runner updated itself"). It keeps the previous version: run  node runner.mjs --rollback  in this folder to go back. It installs only an update signed by the platform's publisher; when it cannot check the signature it keeps running and the Runners page says to download the new version. Automatic updates can be turned off for this runner on the Runners page.
+Updates: when the platform is updated, the runner downloads its new version itself, checks every file, waits for its running tests to finish and starts again ("The runner updated itself"). It keeps the previous version: run  node runner.mjs --rollback  in this folder to go back. It installs only an update signed by the platform's publisher; when it cannot check the signature it keeps running and Settings, Your runner says to download the new version.
 
 Company network: the runner finds a proxy set in Windows or in the HTTPS_PROXY variable by itself and trusts this computer's certificate store. If it still cannot connect, add lines to runner.json: "proxy": "http://proxy.example:8080" (with a user name and password if the proxy needs them: "http://user:password@proxy.example:8080"; the password is never shown or sent to the platform), "noProxy": "intranet.example,.corp.example" (addresses reached without the proxy), "caFile": "company-root.pem" (your company's certificate file, in this folder) and "proxyTests": true (tests go through the proxy too). The same settings can be given when starting the runner: --proxy http://proxy.example:8080 and --ca-file company-root.pem.
 
 To stop the runner, close the window or press Ctrl+C.
-To take this runner's access away, open the Runners page in the platform and remove it. The runner then stops with a message saying so. To remove it from this computer, run  node runner.mjs --forget-credential  in this folder (it deletes the saved access), then delete the folder.
+To take this runner's access away, open Settings, Your runner in the platform and choose Remove this computer. The runner then stops with a message saying so. Setting up another computer does the same for this one: each person has one runner. To remove it from this computer, run  node runner.mjs --forget-credential  in this folder (it deletes the saved access), then delete the folder.
 Android tests also need the Android tools on this computer, and iOS tests a Mac with Xcode. See the platform's runner guide.
 `;
 }

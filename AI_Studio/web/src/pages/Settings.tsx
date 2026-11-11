@@ -14,6 +14,8 @@ import { PeopleSettings } from "../features/auth/PeopleSettings";
 import { QualityPanel } from "../features/eval/QualityPanel";
 import { frameworkLabel } from "../lib/labels";
 import { useConfig, useDocumentTitle } from "../lib/hooks";
+import { YourRunnerSection } from "../features/runners/YourRunner";
+import { MobileTooling } from "../features/workspace/GlobalPages";
 
 const PROVIDER_NAME: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", google: "Google", "openai-compatible": "custom or OpenRouter endpoint" };
 
@@ -25,11 +27,17 @@ export function Settings() {
     const can = useCan();
     // A person limited to some projects: the platform-wide panels (AI usage across projects, storage, evaluation) are not theirs.
     const limited = auth.state?.projectAccess === "only";
+    // Someone who may run tests but not change the platform sees their runner, the read-only AI model and Test formats cards, and their account.
+    const platform = can("ai_studio.platform.settings") || can("ai_studio.usage.view");
+    const runs = can("ai_studio.tests.run") || can("ai_studio.runners.manage");
 
     return (
         <div style={{ maxWidth: 720 }}>
-            <PageHeader title="Settings" subtitle="How this platform is set up." />
+            <PageHeader title="Settings" subtitle={runs ? "Your runner, and how this platform is set up." : "How this platform is set up."} />
             <div className="stack">
+                {/* Your runner (round 45): one per person, set up once here and used for every run they start (features/runners/YourRunner.tsx). */}
+                {runs && <YourRunnerSection />}
+
                 <section className="card card-pad stack-sm">
                     <div className="row">
                         <h2 className="t-section">AI model</h2>
@@ -69,10 +77,12 @@ export function Settings() {
                 {/* People and access: the first owner, your account, people, activity, single sign-on (features/auth). */}
                 <PeopleSettings />
 
-                {/* Mobile testing (the Android emulator on this computer) moved to Runners → Mobile tooling: it is about the machines. */}
+                {/* The Android emulator on the platform's own computer (it was on the Runners page until round 45). */}
+                {platform && !limited && <MobileTooling />}
 
-                {!limited && <UsagePanel />}
+                {platform && !limited && <UsagePanel />}
 
+                {/* Read-only: shown to anyone who opens Settings, as before round 45. */}
                 <section className="card card-pad stack-sm">
                     <h2 className="t-section">Test formats</h2>
                     <p className="t-secondary">Every test is stored in a framework-independent form, then turned into a script for each format.</p>
@@ -94,9 +104,9 @@ export function Settings() {
                     </ul>
                 </section>
 
-                {!limited && <StorageSettings />}
+                {platform && !limited && <StorageSettings />}
 
-                {!limited && <QualityPanel />}
+                {platform && !limited && <QualityPanel />}
             </div>
         </div>
     );

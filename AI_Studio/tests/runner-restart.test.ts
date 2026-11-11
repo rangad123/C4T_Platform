@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TaskOffer } from "../src/agent-protocol/schema.js";
 import { Db } from "../src/platform/db.js";
+import { AgentStore } from "../src/platform/agent-store.js";
+import { UserStore } from "../src/platform/user-store.js";
 import { HANDED_OVER } from "../src/platform/runner-handover.js";
 import { FakeAgent, passedRun, viaFetch } from "./fixtures/fake-agent.js";
 
@@ -88,7 +90,7 @@ async function stopPlatform(signal: "SIGTERM" | "SIGKILL"): Promise<{ code: numb
 }
 
 const call = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": RUN_AS, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const text = await res.text();
     return { status: res.status, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : text } as { status: number; body: any };
 };
@@ -128,15 +130,33 @@ function keepBeating(agent: FakeAgent, offer: TaskOffer, attemptId?: string) {
 
 let projectId = "";
 let token = "";
+/** Round 45: runs started with the shared key have no owner, so the test acts as a person (an owner here) whose runner takes them. */
+let RUN_AS = KEY;
+let ownerId = "";
+/** The person's runner, written straight into the platform's database (the platform runs in another process); setting one up retires the one before. */
+const runnerOfPerson = (label: string): string =>
+    withDb((db) => {
+        const store = new AgentStore(db);
+        store.retireOtherPersonal(ownerId, null);
+        const made = store.createPersonalToken({ ownerId, label, createdBy: "test" });
+        store.setTokenSwitches(made.record.id, { allowPrivateTargets: true });
+        return made.secret;
+    });
 let tests: Array<{ id: string; testId: string }> = [];
 
 beforeAll(async () => {
     await startPlatform();
     projectId = (await call("POST", "/api/projects", { name: "Restarts" })).body.id;
-    token = (await call("POST", `/api/projects/${projectId}/agent-tokens`, { label: "restart-pc" })).body.secret;
     const r = await call("POST", `/api/projects/${projectId}/specs`, { baseUrl: "https://shop.example.test", validate: false, specs: ["Health answers", "Items are listed"].map((title) => ({ title, kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/health" }, { action: "assertResponse", check: "status", expected: 200 }] })) });
     expect(r.status).toBe(202);
     tests = r.body.tests;
+    // After the import (made with the key, so the tests are approved): the person who starts the runs, and their runner.
+    withDb((db) => {
+        const users = new UserStore(db);
+        ownerId = users.create({ email: "restart-owner@people.example", name: "Restart owner", role: "owner" }).id;
+        RUN_AS = users.createToken(ownerId, { name: "test", role: "owner" }).token;
+    });
+    token = runnerOfPerson("restart-pc");
 }, 180_000);
 
 afterAll(async () => {
@@ -144,7 +164,7 @@ afterAll(async () => {
     fs.rmSync(root, { recursive: true, force: true });
 });
 
-const newToken = async (label: string) => (await call("POST", `/api/projects/${projectId}/agent-tokens`, { label })).body.secret as string;
+const newToken = async (label: string) => runnerOfPerson(label);
 const startRun = async () => {
     const r = await call("POST", `/api/projects/${projectId}/runs`, { testIds: tests.map((t) => t.id) });
     expect(r.status).toBe(202);

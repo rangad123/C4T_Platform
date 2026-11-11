@@ -13,6 +13,7 @@
  *    and nothing of that attempt is written after it (the job's closed write queue and the engine's fenced sink, also on their own).
  * No browser, no model, no network.
  */
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,9 @@ import { DEFAULT_JOB_OPTIONS, type JobRow } from "../src/platform/repo.js";
 import { getRunbookServices } from "../src/platform/runbook-runner.js";
 import { HANDED_OVER, handOver, LEASE_LOST, whenParked } from "../src/platform/runner-handover.js";
 import { buildServer } from "../src/platform/server.js";
+import { runAs } from "../src/platform/auth/actor.js";
+import { UserStore } from "../src/platform/user-store.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import type { ObjectStore } from "../src/platform/object-store.js";
 import { defaultCaps, failedRun, FakeAgent, passedRun, viaInject } from "./fixtures/fake-agent.js";
 
@@ -59,17 +63,21 @@ const call = async (method: string, url: string, body?: unknown) => {
 const svc = () => getAgentServices(platform);
 const kinds = (jobId: string) => platform.repo.listEvents(jobId, 0, 5000).map((e) => String(e.kind));
 
-/** A project whose tests run on its own fake runner. */
+/** Whose runs a project's jobs are here (round 45: each run goes to its owner's own runner): one person per project. */
+const ownerOf = new Map<string, string>();
+/** A project whose tests run on its own fake runner (its person's computer). */
 async function setup(name: string, concurrency = 2) {
     const projectId = (await call("POST", "/api/projects", { name })).body.id as string;
-    const token = (await call("POST", `/api/projects/${projectId}/agent-tokens`, { label: `${name} pc` })).body.secret as string;
+    const ownerId = new UserStore(platform.db).create({ email: `${randomUUID()}@people.example`, name, role: "editor" }).id;
+    ownerOf.set(projectId, ownerId);
+    const token = personalRunner(platform, { ownerId, label: `${name} pc` }).secret;
     const agent = new FakeAgent(viaInject(server), token, { name: `${name} pc`, capabilities: defaultCaps(), concurrency });
     expect((await agent.hello()).status).toBe(200);
     svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
     return { projectId, agent };
 }
 const jobFor = (projectId: string, over: Partial<typeof DEFAULT_JOB_OPTIONS> = {}): Promise<JobRow> =>
-    platform.repo.createJob(projectId, platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined), { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], ...over });
+    platform.repo.createJob(projectId, platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined), { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy: { kind: "user", id: ownerOf.get(projectId) ?? null }, ...over });
 const runEnv = (over: Partial<ExecutionEnv["run"]> = {}): ExecutionEnv => ({ run: { baseUrl: APP, apiBaseUrl: APP, credentials: { username: "demo", password: PASSWORD }, headless: true, ...over } });
 const batchOf = (scripts: ExecutionBatch["scripts"], helpers?: ExecutionBatch["helpers"]): ExecutionBatch => ({ scratchDir: path.join(dataDir, "scratch"), scripts, ...(helpers ? { helpers } : {}) });
 const newTaskOf = (jobId: string, before: ReadonlySet<string>) => svc().store.tasksOfJob(jobId).find((t) => !before.has(t.id));
@@ -286,7 +294,8 @@ describe("a run sequence stopped by a deploy", () => {
         const rb = getRunbookServices(platform, { pollMs: 50 });
         const made = await call("POST", `/api/projects/${projectId}/runbooks`, { version: 1, name: "Nightly", steps: [{ id: "r", type: "run", scope: "all" }, { id: "w", type: "wait", seconds: 1 }] });
         expect(made.status, JSON.stringify(made.body)).toBe(201);
-        const run = await rb.start(made.body.id, { kind: "manual" });
+        // Started by the project's person (round 45: the step's job goes to their runner).
+        const run = await runAs({ kind: "user", id: ownerOf.get(projectId)!, name: "Owner", role: "editor" }, () => rb.start(made.body.id, { kind: "manual" }));
         const jobId = await until("the step's job", () => rb.store.runSteps(run.id)[0]?.jobId ?? undefined);
         const job = platform.repo.getJob(jobId)!;
         expect(job.options.runOn).toBe("agent");

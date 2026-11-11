@@ -4,7 +4,7 @@ import { api } from "../../api";
 export type Role = "owner" | "editor" | "viewer";
 export const ROLE_WORDS: Record<Role, string> = { owner: "Owner", editor: "Editor", viewer: "Viewer" };
 export const ROLE_HELP: Record<Role, string> = {
-    owner: "Everything, including people, runner tokens, alert and tracker connections, storage and backups.",
+    owner: "Everything, including people, alert and tracker connections, storage and backups.",
     editor: "Create, change and run tests and projects.",
     viewer: "Look at everything and download reports. Cannot change anything.",
 };

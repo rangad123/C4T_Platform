@@ -71,7 +71,7 @@ export async function main(argv: string[], io: MainIo): Promise<number> {
             if (cfg.enroll?.file) await fsp.rm(cfg.enroll.file, { force: true }).catch(() => undefined);
             delete cfg.enroll;
         } else if (!cfg.enroll) {
-            io.err("ai-test-agent: This runner has no credential yet. Add this computer with --enroll <code> (make the code on the Runners page), or give a token with AITP_AGENT_TOKEN, --token-file or --token.");
+            io.err("ai-test-agent: This runner has no credential yet. Download the runner from Settings, Your runner in the platform and start it from that download, or add this computer with --enroll <code>.");
             io.err("Run ai-test-agent --help for the options.");
             return EXIT.usage;
         }

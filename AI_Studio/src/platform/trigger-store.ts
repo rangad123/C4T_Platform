@@ -4,6 +4,7 @@
  * The tables are part of migration slot 12 (see healing-store.ts).
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { OPEN_OWNER_ID } from "./agent-store.js";
 import type { Db } from "./db.js";
 import type { SecretBox } from "./secrets.js";
 
@@ -65,6 +66,8 @@ export interface TriggerToken {
     lastUsedAt: string | null;
     lastRunAt: number | null;
     revokedAt: string | null;
+    /** Who made it (migration 55), whose runner runs its runs; null for a token made before (its runs are refused with a sentence). */
+    createdBy: string | null;
 }
 
 const toToken = (r: Record<string, any>): TriggerToken => ({
@@ -77,6 +80,7 @@ const toToken = (r: Record<string, any>): TriggerToken => ({
     lastUsedAt: r.last_used_at,
     lastRunAt: r.last_run_at,
     revokedAt: r.revoked_at,
+    createdBy: r.created_by ?? null,
 });
 
 export interface TriggerRunRow {
@@ -97,14 +101,37 @@ export class TriggerStore {
     ) {}
 
     /** The only moment the plaintext token exists on the server side: it is returned here and never kept. */
-    create(projectId: string, input: { label?: string; allowUrl?: boolean }): { token: string; record: TriggerToken } {
+    create(projectId: string, input: { label?: string; allowUrl?: boolean; createdBy?: string | null }): { token: string; record: TriggerToken } {
         const token = newToken();
         const id = randomUUID();
         this.db.run(
-            "INSERT INTO trigger_tokens (id, project_id, label, token_hash, hint, allow_url, created_at) VALUES (?,?,?,?,?,?,?)",
-            id, projectId, input.label?.trim() || null, hashToken(token), token.slice(-4), input.allowUrl ? 1 : 0, new Date(this.clock()).toISOString(),
+            "INSERT INTO trigger_tokens (id, project_id, label, token_hash, hint, allow_url, created_at, created_by) VALUES (?,?,?,?,?,?,?,?)",
+            id, projectId, input.label?.trim() || null, hashToken(token), token.slice(-4), input.allowUrl ? 1 : 0, new Date(this.clock()).toISOString(), input.createdBy ?? null,
         );
         return { token, record: this.get(id)! };
+    }
+
+    /**
+     * Round 45: a token made before migration 55 gets its creator from the Activity log, only where certain: the one successful
+     * "POST .../triggers" of its project within 10 seconds of its creation, by a person or the open server, with no other token of the
+     * project made in that window. Everything else stays without an owner (its runs are refused with a sentence). Returns how many.
+     */
+    backfillOwners(): number {
+        const WINDOW_MS = 10_000;
+        let n = 0;
+        for (const t of this.db.all<{ id: string; project_id: string; created_at: string }>("SELECT id, project_id, created_at FROM trigger_tokens WHERE created_by IS NULL")) {
+            const made = Date.parse(t.created_at);
+            if (!Number.isFinite(made)) continue;
+            const near = (at: string) => Math.abs(Date.parse(at) - made) <= WINDOW_MS;
+            const creates = this.db.all<{ at: string; actor_kind: string; actor_id: string | null }>("SELECT at, actor_kind, actor_id FROM activity WHERE action = 'POST /api/projects/:id/triggers' AND project_id = ? AND status < 400", t.project_id).filter((r) => near(r.at));
+            const siblings = this.db.all<{ created_at: string }>("SELECT created_at FROM trigger_tokens WHERE project_id = ?", t.project_id).filter((r) => near(r.created_at));
+            if (creates.length !== 1 || siblings.length !== 1) continue;
+            const c = creates[0]!;
+            const owner = c.actor_kind === "user" ? c.actor_id : c.actor_kind === "open" ? OPEN_OWNER_ID : null;
+            if (!owner || (owner !== OPEN_OWNER_ID && !this.db.get("SELECT 1 AS x FROM users WHERE id = ?", owner))) continue;
+            n += Number(this.db.run("UPDATE trigger_tokens SET created_by = ? WHERE id = ? AND created_by IS NULL", owner, t.id).changes);
+        }
+        return n;
     }
 
     get(id: string): TriggerToken | undefined {

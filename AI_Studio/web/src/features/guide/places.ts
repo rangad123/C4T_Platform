@@ -360,12 +360,12 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         topic: "release-signoff",
     },
     "setup-runners": {
-        title: "Runners",
-        what: "The computers that run your tests, and which one is used. The platform server is one; a computer of your own can be another.",
+        title: "Your runner",
+        what: "A runner is the program on your computer that runs your tests. You set it up once in Settings; every run you start then goes to it.",
         canDo: [
-            { text: "Use a computer of your own so tests can reach your private pages.", button: "Read about runners", to: { topic: "runners", search: "runner" } },
-            { text: "See which runner is online and ready.", button: "Read how runners are chosen", to: { topic: "runners", search: "which computer runs my tests" } },
-            { text: "Pick where a run goes with the Run button on Test scripts.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "Run"] },
+            { text: "Download the runner for your computer and start it once.", button: "Read about your runner", to: { topic: "runners", search: "runner" }, ui: ["Download the runner"] },
+            { text: "Open Your runner to see whether it is online, and what it may run.", button: "Read about your runner", to: { topic: "runners" }, ui: ["Your runner"] },
+            { text: "Run tests with the Run button on Test scripts.", button: "Open Test scripts", to: here("tests"), ui: ["Test scripts", "Run"] },
         ],
         words: ["runner", "run"],
         next: [{ text: "Add an environment such as staging, if you test more than one address.", button: "Open Environments", to: here("setup", "environments"), ui: ["Environments"] }],
@@ -392,7 +392,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
             { text: "Use another framework only if your team asks for it.", button: "Read about plug-ins", to: { topic: "plug-ins", search: "plug-in" } },
         ],
         words: ["frameworks", "plug-in"],
-        next: [{ text: "Go back to Runners to check where tests run.", button: "Open Runners", to: here("setup", "runners"), ui: ["Runners"] }],
+        next: [{ text: "Set up your runner in Settings, so your runs have somewhere to go.", button: "Open Your runner", to: here("setup", "runners"), ui: ["Your runner"] }],
         topic: "framework-settings",
     },
     "setup-mobile": {
@@ -523,8 +523,9 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
     },
     settings: {
         title: "Settings",
-        what: "How this whole platform is set up: the AI model, the people who use it and what kinds of tests are allowed. It affects every project.",
+        what: "Your runner, and how this whole platform is set up: the AI model, the people who use it and what kinds of tests are allowed.",
         canDo: [
+            { text: "Use Your runner to set up the program on your computer that runs your tests.", button: "Read about your runner", to: { topic: "runners" }, ui: ["Your runner"] },
             { text: "Check that the AI model is connected.", button: "Read about the AI model", to: { topic: "settings-page", search: "AI model settings" } },
             { text: "Let colleagues in with their own accounts and roles.", button: "Read about people and access", to: { topic: "people-and-access", search: "people" } },
             { text: "Read which kinds of tests can run here.", button: "Read about settings", to: { topic: "settings-page", search: "settings" } },
@@ -620,17 +621,15 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         topic: "first-steps",
     },
     "runners-global": {
-        title: "Runners",
-        what: "Every computer that runs your tests: its health, its phones and browsers, and the projects that use it. Also the Android emulator on this computer.",
+        title: "Your runner",
+        what: "A runner is the program on your computer that runs your tests. It is set up once in Settings, under Your runner.",
         canDo: [
-            { text: "Choose Add this computer to run your own tests on the computer you are using. Runner managers can also choose Add a team runner and give it to their organisation's projects.", button: "Read about runners", to: { topic: "runners" }, ui: ["Add this computer"] },
-            { text: "Use Runners for a project to add a runner for one project, get its kit, and set where its tests run.", button: "Read about runners", to: { topic: "runners", search: "runner" }, ui: ["Runners for a project"] },
-            { text: "Open a runner to see its current work, the phones in use, recent failures and the projects that use it, and to rename or retire it.", button: "Read about runners", to: { topic: "runners" } },
-            { text: "Set up an Android emulator to test phone apps.", button: "Read about phones and emulators", to: { topic: "phones-and-emulators" } },
+            { text: "Choose Download the runner, start it on your computer, and wait until it says Online.", button: "Read about your runner", to: { topic: "runners" }, ui: ["Download the runner"] },
+            { text: "Choose Set up a different computer to move to another computer, or Remove this computer.", button: "Read about your runner", to: { topic: "runners", search: "runner" }, ui: ["Set up a different computer", "Remove this computer"] },
             { text: "Check that a computer is ready to run tests.", button: "Read about checking a computer", to: { topic: "doctor" } },
         ],
         words: ["runner", "run"],
-        next: [{ text: "After a runner is set up, run tests on it from the project.", button: "Read about runs", to: { topic: "runs-page" } }],
+        next: [{ text: "Once your runner is online, run tests from the project.", button: "Read about runs", to: { topic: "runs-page" } }],
         topic: "runners",
     },
     integrations: {
@@ -800,7 +799,7 @@ export const PLACES: Record<PlaceId, PlaceHelp> = {
         what: "The project, its one platform and testing mode, its app, who works on it, what tests use, and who is told.",
         canDo: [
             { text: "Set the addresses tests run against.", button: "Open environments", to: here("setup", "environments") },
-            { text: "Set up the computers that run this project's tests.", button: "Open runners", to: here("setup", "runners") },
+            { text: "Set up your runner, the program on your computer that runs your tests.", button: "Open Your runner", to: here("setup", "runners") },
             { text: "Set who is told when a run finds something.", button: "Open alerts", to: here("setup", "alerts") },
         ],
         words: ["environment", "runner"],

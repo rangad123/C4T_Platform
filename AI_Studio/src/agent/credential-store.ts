@@ -60,7 +60,7 @@ export async function loadCredential(dir: string, deps?: StoreDeps): Promise<str
         if (!text.startsWith("dpapi:")) return null;
         const c = dpapiCommands().unprotect(text.slice("dpapi:".length));
         const out = await run(c.cmd, c.args, c.stdin);
-        if (out.code !== 0) throw new CredentialStoreError("The runner could not read its credential (Windows data protection refused). It works only for the Windows account that added this computer. Add this computer again on the Runners page.");
+        if (out.code !== 0) throw new CredentialStoreError("The runner could not read its credential (Windows data protection refused). It works only for the Windows account that added this computer. Add this computer again in Settings, Your runner.");
         const token = out.stdout.trim();
         return TOKEN_SHAPE.test(token) ? token : null;
     }
@@ -84,7 +84,7 @@ export async function saveCredential(dir: string, token: string, deps?: StoreDep
         const c = dpapiCommands().protect(token);
         const out = await run(c.cmd, c.args, c.stdin);
         const blob = out.stdout.trim();
-        if (out.code !== 0 || !/^[A-Za-z0-9+/=]{16,}$/.test(blob)) throw new CredentialStoreError("The runner could not protect its credential with Windows data protection. Start it again; if that does not help, add this computer again on the Runners page.");
+        if (out.code !== 0 || !/^[A-Za-z0-9+/=]{16,}$/.test(blob)) throw new CredentialStoreError("The runner could not protect its credential with Windows data protection. Start it again; if that does not help, add this computer again in Settings, Your runner.");
         content = `dpapi:${blob}`;
     }
     await writePrivate(path.join(dir, CREDENTIAL_FILE), `${content}\n`);

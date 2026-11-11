@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { androidSummary } from "../src/platform/agent-routing.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, viaInject } from "./fixtures/fake-agent.js";
 
@@ -19,7 +20,6 @@ let server: Awaited<ReturnType<typeof buildServer>>;
 let dir: string;
 
 beforeAll(async () => {
-    process.env.AGENT_MAX_TOKENS = "25"; // this file gives one project several runners
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-ux-agent-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dir }));
     server = await buildServer(platform);
@@ -41,7 +41,7 @@ const phone = (state: string, emulator = false) => ({ serial: `s-${Math.random()
 /** A project with one online agent that reports `android`, set to run there; returns the agents list and the runner status. */
 async function withAgent(name: string, android: Android | undefined) {
     const project = (await call("POST", "/api/projects", { name })).body.id as string;
-    const token = (await call("POST", `/api/projects/${project}/agent-tokens`, { label: name })).body.secret as string;
+    const token = personalRunner(platform, { label: name, replace: true }).secret;
     const agent = new FakeAgent(viaInject(server), token, { name, capabilities: defaultCaps({ ...(android ? { android } : {}) }) });
     expect((await agent.hello()).status).toBe(200);
     const set = await call("PUT", `/api/projects/${project}/runner`, { runOn: "agent", agentId: null });

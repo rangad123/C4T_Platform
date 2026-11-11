@@ -29,6 +29,7 @@ import { WindowsAdapter } from "../src/engine/frameworks/windows.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 
@@ -363,7 +364,7 @@ d("through the platform on this computer (runOn = platform)", () => {
         process.env.DESKTOP_ALLOWED_APPS = EXE;
         for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
         dataDir = fs.mkdtempSync(path.join(tmp, "data-"));
-        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
         server = await buildServer(platform);
         await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
         worker = new Worker(platform, 150);
@@ -492,7 +493,7 @@ d("through the real agent program against the real platform", () => {
         delete process.env.BLOCK_PRIVATE_TARGETS;
         dataDir = fs.mkdtempSync(path.join(tmp, "adata-"));
         agentWork = fs.mkdtempSync(path.join(tmp, "awork-"));
-        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(AGENT_PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(AGENT_PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
         server = await buildServer(platform);
         await server.listen({ port: AGENT_PLATFORM_PORT, host: "127.0.0.1" });
         worker = new Worker(platform, 150);
@@ -510,7 +511,7 @@ d("through the real agent program against the real platform", () => {
     }, 90_000);
 
     it("an agent without an allow-list shows as able to run desktop apps but is refused any application", async () => {
-        const made = await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "desktop" });
+        const made = { status: 201, body: { secret: personalRunner(platform, { label: "desktop", replace: true }).secret } };
         token = made.body.secret;
         const logger = memoryLogger();
         lines = logger.lines;

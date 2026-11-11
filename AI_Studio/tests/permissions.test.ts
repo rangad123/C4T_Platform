@@ -239,7 +239,7 @@ describe("each permission is what stands between a route and its answer", () => 
         "ai_studio.agent.run": () => ["POST", "/api/recordings/no-such-recording/act", {}],
         "ai_studio.reports.export": () => ["GET", `/api/projects/${PA}/junit`],
         "ai_studio.tests.delete": () => ["DELETE", `/api/projects/${PA}/test-data/no-such-set`],
-        "ai_studio.runners.manage": () => ["GET", `/api/projects/${PA}/agent-tokens`],
+        "ai_studio.runners.manage": () => ["GET", "/api/admin/runners"],
         "ai_studio.ai_keys.manage": () => ["POST", `/api/projects/${PA}/integrations`, {}],
         "ai_studio.usage.view": () => ["GET", `/api/usage?projectId=${PA}`],
         "ai_studio.security.use": () => ["PUT", `/api/v1/security/projects/${PA}/testing-type`, {}],

@@ -1,7 +1,7 @@
 /**
  * Runner agents: the tables behind them (migration slot 19) and the store that reads and writes them.
  *
- *  agent_tokens   one credential per agent installation, belonging to exactly one project. Only the SHA-256 hash is kept
+ *  agent_tokens   runner credentials (round 45: one live credential per person, kind "personal"). Only the SHA-256 hash is kept
  *                 (a token is 32 random bytes, so there is nothing to guess); the hint is the last 4 characters.
  *  agents         the registry: what each connected agent said about itself, and when it was last seen.
  *  runner_settings where a project's tests run ("platform" or "agent"), kept here and not in `projects`.
@@ -10,6 +10,10 @@
  *  agent_task_files  files a task refers to: baselines/APK the agent downloads ("in"), artifacts it uploaded ("out").
  *
  * Every state change that two parties could race for (claiming a task, finishing it) is a single conditional UPDATE.
+ *
+ * Round 45 (one runner per person, set up in Settings): only kind "personal" credentials are made, connect and take work, and only their
+ * owner's tasks. Team, shared and project rows (and runner_access, runner_settings.agent_id and .allow_personal) are kept as they are and
+ * no longer read; such a credential is refused at every runner route (agent-services.ts authenticate). No table or column was dropped.
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { AGENT_TOKEN_PREFIX, ENROLLMENT_CODE_PREFIX, FINAL_TASK_PHASES, type AgentPhase, type Capabilities, type TaskPhase } from "../agent-protocol/schema.js";
@@ -223,28 +227,25 @@ CREATE INDEX idx_runner_enrollments_creator ON runner_enrollments(created_by_id)
 `;
 
 /**
- * May this runner serve that project? A person's own computer is never given to projects (it follows its owner). A team runner of an
- * organisation serves that organisation's projects. A runner of no organisation made from a project (a project without an organisation)
- * serves only that project. Only a runner of no organisation and no project is a Crowd4Test shared machine, which may serve any project.
+ * The person a job belongs to, whose runner takes it (round 45: every run is on its owner's own computer): who started it (a person, or
+ * their own API token), the creator of the schedule or deploy trigger that did, or the open server (OPEN_OWNER_ID). Else null: the server's
+ * shared access key, or a schedule or trigger with no recorded creator.
  */
-export function runnerMayServe(t: Pick<AgentTokenRecord, "kind" | "organizationId" | "projectId">, projectId: string, projectOrg: string | null): boolean {
-    if (t.kind === "personal") return false;
-    if (t.organizationId !== null) return t.organizationId === projectOrg;
-    if (t.projectId !== null) return t.projectId === projectId;
-    return true;
-}
-
-/** The person a job belongs to: who started it, or the creator of the schedule that did (round 39 contract with the scheduler). Else null. */
 export function jobOwnerId(options: { startedBy?: unknown }): string | null {
     const s = options.startedBy as { kind?: string; id?: string | null; ownerId?: string | null } | undefined;
     if (!s || typeof s !== "object") return null;
     if (s.kind === "user") return typeof s.id === "string" ? s.id : null;
-    if (s.kind === "schedule") return typeof s.ownerId === "string" ? s.ownerId : null;
+    if (s.kind === "open") return OPEN_OWNER_ID;
+    if (s.kind === "schedule" || s.kind === "trigger") return typeof s.ownerId === "string" ? s.ownerId : null;
     return null;
 }
 
-/** A Crowd4Test shared machine: a team runner of no organisation and no project. */
-export const isSharedToken = (t: Pick<AgentTokenRecord, "kind" | "organizationId" | "projectId">): boolean => t.kind === "team" && t.organizationId === null && t.projectId === null;
+/** The owner a person acting now stands for: a person (session or own API token) by their id, the open server as OPEN_OWNER_ID; else null. */
+export function ownerIdOfActor(actor: { kind: string; id?: string | undefined }): string | null {
+    if (actor.kind === "user") return actor.id ? actor.id : null;
+    if (actor.kind === "open") return OPEN_OWNER_ID;
+    return null;
+}
 
 /**
  * Migration 51's columns, added again where a table was rebuilt after it ran (slot 42's late repair rebuilds agent_tokens and agents on a
@@ -270,6 +271,9 @@ export function repairPersonalRunnerColumns(raw: { exec(sql: string): void }, co
     raw.exec("CREATE INDEX IF NOT EXISTS idx_agent_tokens_owner ON agent_tokens(owner_id); CREATE INDEX IF NOT EXISTS idx_agent_tokens_previous ON agent_tokens(previous_hash);");
 }
 
+/** The owner of everything done on a server in open mode (no accounts): the open server acts as one person. */
+export const OPEN_OWNER_ID = "open";
+
 /** Enrollment codes: what the website makes, the agent trades once for its credential (POST /api/agent/enroll). */
 export { ENROLLMENT_CODE_PREFIX };
 export const ENROLLMENT_TTL_MS = 30 * 60_000;
@@ -278,10 +282,6 @@ export const newEnrollmentCode = (): string => ENROLLMENT_CODE_PREFIX + randomBy
 export const ROTATION_GRACE_MS = 24 * 60 * 60_000;
 /** A credential older than this is asked to rotate (the hello answer says `rotate: true`). */
 export const ROTATE_AFTER_MS = 30 * 24 * 60 * 60_000;
-/** Active personal runners one person may have. */
-export const MAX_PERSONAL_RUNNERS = 5;
-/** At most this many working runners per organisation (and as many of Crowd4Test's own). */
-export const MAX_RUNNERS_PER_ORGANIZATION = 50;
 
 export interface EnrollmentRecord {
     id: string;
@@ -312,8 +312,8 @@ const toEnrollment = (r: Record<string, any>): EnrollmentRecord => {
 };
 
 export type RedeemOutcome =
-    | { ok: true; secret: string; token: AgentTokenRecord; enrollment: EnrollmentRecord; again?: true }
-    | { ok: false; reason: "unknown" | "expired" | "used" | "personal-cap" | "runner-cap" | "project-cap" | "maker" };
+    | { ok: true; secret: string; token: AgentTokenRecord; enrollment: EnrollmentRecord; again?: true; retired?: number }
+    | { ok: false; reason: "unknown" | "expired" | "used" | "team" };
 
 /**
  * Migration slot 53: a runner task's phases and attempts, and its live events (protocol 2; docs/features/runner-protocol-2.md).
@@ -359,24 +359,24 @@ export const ONLINE_MS = 45_000;
 
 export interface AgentTokenRecord {
     id: string;
-    /** The project the runner was registered from (it has access to it from the start); null when registered on the Runners page. */
+    /** Rows from before round 45 only: the project a team runner was registered from. Null for a person's runner; no longer read for routing. */
     projectId: string | null;
-    /** The owner: an organisation, or null for Crowd4Test's shared machines (and installs without organisations). */
+    /** Rows from before round 45 only: a team runner's organisation. Null for a person's runner; no longer read. */
     organizationId: string | null;
     label: string | null;
     hint: string;
     createdAt: string;
     lastUsedAt: string | null;
     revokedAt: string | null;
-    /** "team": a machine of an organisation (or Crowd4Test's shared one), given to projects; "personal": one person's own computer (migration 51). */
+    /** "personal": one person's own computer, the only kind made and accepted since round 45; "team": a row from before, refused at every runner route. */
     kind: "team" | "personal";
-    /** The person a personal runner belongs to; null for a team runner. */
+    /** The person the runner belongs to (OPEN_OWNER_ID on an open server); null only for a team row from before round 45. */
     ownerId: string | null;
-    /** Code scripts may go to it (personal: its owner's switch, on by default; team: the admin's switch, off by default, beside --allow-custom-scripts). */
+    /** Code scripts may go to it: its owner's switch, on by default. */
     allowCodeScripts: boolean;
-    /** Runs against private and local addresses may go to it (team: always, as before; personal: its owner's switch, off by default). */
+    /** Runs against private and local addresses may go to it: its owner's switch, off by default. */
     allowPrivateTargets: boolean;
-    /** Phone work may use a real phone plugged into it (personal: the owner's switch, off by default; team: 0 by default). */
+    /** Phone work may use a real phone plugged into it: its owner's switch, off by default. */
     allowRealPhone: boolean;
     /** The install id of the computer the credential is bound to (null until a runner that sends one connects). */
     machineId: string | null;
@@ -407,7 +407,7 @@ const toToken = (r: Record<string, any>): AgentTokenRecord => ({
 
 export interface AgentRecord {
     id: string;
-    /** The project its token was registered from, or null (see AgentTokenRecord.projectId). Which projects it serves is runner_access. */
+    /** The project its token was registered from, or null (see AgentTokenRecord.projectId); no longer read for routing. */
     projectId: string | null;
     tokenId: string;
     name: string;
@@ -606,6 +606,8 @@ const TERMINAL_JOB_SQL = "('COMPLETED','PARTIALLY_COMPLETED','FAILED')";
 export class AgentStore {
     /** EXECUTION_MODE=runners (set once by runner-only.ts): `getRunner` answers "on a runner" for every project, without rewriting what is stored. */
     runnersOnly = false;
+    /** Is the server open (no accounts, no access key, no Crowd4Test sign-in)? Set by agent-services.ts; only then may OPEN_OWNER_ID's runner take runs. */
+    openMode: () => boolean = () => false;
 
     constructor(
         private readonly db: Db,
@@ -614,29 +616,7 @@ export class AgentStore {
 
     // ── tokens ──────────────────────────────────────────────────────────────
 
-    /** The only moment the plaintext token exists on the server side: it is returned here and never kept. */
-    createToken(projectId: string, label?: string, createdBy?: string): { secret: string; record: AgentTokenRecord } {
-        const secret = newAgentToken();
-        const id = randomUUID();
-        const at = new Date(this.clock()).toISOString();
-        this.db.tx(() => {
-            // Registered from a project: it belongs to the project's organisation and may run that project's tests.
-            const org = this.db.get<{ o: string | null }>("SELECT organization_id AS o FROM projects WHERE id = ?", projectId)?.o ?? null;
-            this.db.run("INSERT INTO agent_tokens (id, project_id, organization_id, label, token_hash, hint, created_at, created_by) VALUES (?,?,?,?,?,?,?,?)", id, projectId, org, label?.trim() || null, hashToken(secret), secret.slice(-4), at, createdBy ?? null);
-            this.db.run("INSERT INTO runner_access (token_id, project_id, granted_by, granted_at) VALUES (?,?,?,?)", id, projectId, "Registered from the project", at);
-        });
-        return { secret, record: this.getToken(id)! };
-    }
-
-    /** A runner registered on the Runners page: it belongs to an organisation (or to Crowd4Test) and serves no project until given access. */
-    createRunnerToken(o: { organizationId: string | null; label: string; createdBy: string }): { secret: string; record: AgentTokenRecord } {
-        const secret = newAgentToken();
-        const id = randomUUID();
-        this.db.run("INSERT INTO agent_tokens (id, project_id, organization_id, label, token_hash, hint, created_at, created_by) VALUES (?,?,?,?,?,?,?,?)", id, null, o.organizationId, o.label.trim() || null, hashToken(secret), secret.slice(-4), new Date(this.clock()).toISOString(), o.createdBy);
-        return { secret, record: this.getToken(id)! };
-    }
-
-    /** One person's own computer (migration 51): it serves no project through runner_access; what it may take follows its owner. */
+    /** One person's own computer: what it may take follows its owner (their runs, in projects they may still run tests in). */
     createPersonalToken(o: { ownerId: string; label: string; createdBy: string; machineId?: string }): { secret: string; record: AgentTokenRecord } {
         const secret = newAgentToken();
         const id = randomUUID();
@@ -661,7 +641,31 @@ export class AgentStore {
         return Number(this.db.get("SELECT COUNT(*) AS n FROM agent_tokens WHERE kind = 'personal' AND owner_id = ? AND revoked_at IS NULL", ownerId)?.n ?? 0);
     }
 
-    /** The owner's (or, for a team runner, an admin's) switches. Only what is given changes. False when the runner is retired or unknown. */
+    /** Retire every live credential of this person except `keepId` (one runner per person). Returns how many were retired. */
+    retireOtherPersonal(ownerId: string, keepId: string | null): number {
+        const at = new Date(this.clock()).toISOString();
+        return Number(this.db.run("UPDATE agent_tokens SET revoked_at = ? WHERE kind = 'personal' AND owner_id = ? AND revoked_at IS NULL AND id IS DISTINCT FROM ?", at, ownerId, keepId).changes);
+    }
+
+    /**
+     * The person's runner: their newest live credential that a computer has connected with (else their newest live one), with that computer
+     * as it last reported itself and whether it is online. Undefined: not set up. A person who had several computers before round 45 keeps
+     * them working until they set one up again; the one they used last is the one shown.
+     */
+    runnerOf(ownerId: string): { token: AgentTokenRecord; agent: AgentRecord | undefined; online: boolean } | undefined {
+        const live = this.personalTokensOf(ownerId).filter((t) => !t.revokedAt);
+        if (live.length === 0) return undefined;
+        const withAgent = live.map((t) => ({ token: t, agent: this.agentsOfToken(t.id)[0] })).sort((a, b) => (b.agent?.lastSeenMs ?? -1) - (a.agent?.lastSeenMs ?? -1));
+        const best = withAgent.find((x) => x.agent) ?? withAgent[0]!;
+        return { ...best, online: Boolean(best.agent) && this.clock() - best.agent!.lastSeenMs <= ONLINE_MS };
+    }
+
+    /** Every live person's runner, for the admins' list (one row per live credential, newest first). */
+    allPersonalTokens(): AgentTokenRecord[] {
+        return this.db.all(`SELECT * FROM agent_tokens WHERE kind = 'personal' AND revoked_at IS NULL ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`).map(toToken);
+    }
+
+    /** The owner's switches. Only what is given changes. False when the runner is retired or unknown. */
     setTokenSwitches(id: string, s: { allowCodeScripts?: boolean; allowPrivateTargets?: boolean; allowRealPhone?: boolean }): boolean {
         if (s.allowCodeScripts === undefined && s.allowPrivateTargets === undefined && s.allowRealPhone === undefined) return Boolean(this.db.get("SELECT 1 AS x FROM agent_tokens WHERE id = ? AND revoked_at IS NULL", id));
         const bit = (v: boolean | undefined) => (v === undefined ? null : v ? 1 : 0);
@@ -717,15 +721,17 @@ export class AgentStore {
 
     // ── enrollment codes ────────────────────────────────────────────────────
 
-    /** A single-use code for "this person's computer" or a team runner. The plaintext is returned here once and never kept. */
-    createEnrollment(o: { kind: "personal" | "team"; ownerId?: string | null; organizationId?: string | null; projectId?: string | null; projectIds?: string[]; label?: string | null; createdBy: string; createdById?: string | null }): { code: string; record: EnrollmentRecord } {
+    /**
+     * One person's runner (round 45: the only kind made now). A single-use code for the download from Settings; trading it makes the
+     * person's one runner credential and retires every older one of theirs (redeemEnrollment). The plaintext is returned here once and never kept.
+     */
+    createPersonalEnrollment(o: { ownerId: string; createdBy: string; label?: string | null }): { code: string; record: EnrollmentRecord } {
         const code = newEnrollmentCode();
         const id = randomUUID();
         const now = this.clock();
         this.db.run(
             "INSERT INTO runner_enrollments (id, code_hash, hint, kind, owner_id, organization_id, project_id, project_ids_json, label, created_by, created_by_id, created_at, expires_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            id, hashToken(code), code.slice(-4), o.kind, o.kind === "personal" ? (o.ownerId ?? null) : null, o.kind === "team" ? (o.organizationId ?? null) : null, o.kind === "team" ? (o.projectId ?? null) : null,
-            JSON.stringify(o.kind === "team" ? [...new Set([...(o.projectId ? [o.projectId] : []), ...(o.projectIds ?? [])])] : []), o.label?.trim() || null, o.createdBy, o.createdById ?? null, new Date(now).toISOString(), now + ENROLLMENT_TTL_MS,
+            id, hashToken(code), code.slice(-4), "personal", o.ownerId, null, null, "[]", o.label?.trim() || null, o.createdBy, o.ownerId, new Date(now).toISOString(), now + ENROLLMENT_TTL_MS,
         );
         return { code, record: this.getEnrollment(id)! };
     }
@@ -735,17 +741,12 @@ export class AgentStore {
         return r ? toEnrollment(r) : undefined;
     }
 
-    /** Codes made and not yet used or expired, for a project's per-project runner limit. */
-    countOpenEnrollments(projectId: string): number {
-        return Number(this.db.get("SELECT COUNT(*) AS n FROM runner_enrollments WHERE project_id = ? AND used_ms IS NULL AND expires_ms > ?", projectId, this.clock())?.n ?? 0);
-    }
-
     /**
-     * Trade a code for a runner credential, once. In one transaction: the code is checked (constant time, single use, not expired), the runner
-     * is made (personal for its owner, or team with the organisation and the projects the code names that still exist), bound to the computer's
-     * install id, and the code is marked used. Limits are checked again here: several codes may have been made at once.
+     * Trade a code for a runner credential, once. In one transaction: the code is checked (constant time, single use, not expired), the
+     * person's runner is made and bound to the computer's install id, every older credential of that person is retired (one runner per
+     * person), and the code is marked used.
      */
-    redeemEnrollment(code: string, machine: { name: string; machineId?: string }, limits: { maxPersonal: number; maxPerOrganization: number; maxPerProject: number }): RedeemOutcome {
+    redeemEnrollment(code: string, machine: { name: string; machineId?: string }): RedeemOutcome {
         const hash = hashToken(code);
         return this.db.tx((): RedeemOutcome => {
             const r = this.db.get("SELECT * FROM runner_enrollments WHERE code_hash = ?", hash);
@@ -765,32 +766,15 @@ export class AgentStore {
                 return { ok: true, secret, token: this.getToken(e.tokenId!)!, enrollment: e, again: true };
             }
             if (this.clock() >= e.expiresMs) return { ok: false, reason: "expired" };
+            // Round 45: only a person's own runner is made. A team code made before (a project's kit, the Runners page) no longer works.
+            if (e.kind !== "personal") return { ok: false, reason: "team" };
+            if (!e.ownerId) return { ok: false, reason: "unknown" };
             const label = e.label ?? machine.name;
-            let made: { secret: string; record: AgentTokenRecord };
-            if (e.kind === "personal") {
-                if (!e.ownerId) return { ok: false, reason: "unknown" };
-                if (this.countLivePersonalOf(e.ownerId) >= limits.maxPersonal) return { ok: false, reason: "personal-cap" };
-                made = this.createPersonalToken({ ownerId: e.ownerId, label, createdBy: e.createdBy ?? "Enrollment code", ...(machine.machineId ? { machineId: machine.machineId } : {}) });
-            } else {
-                // A team code is good only while the person who made it may still manage runners for its organisation.
-                if (e.createdById && !this.makerMayManage(e.createdById, e.organizationId)) return { ok: false, reason: "maker" };
-                if (this.countLiveRunnersOf(e.organizationId) >= limits.maxPerOrganization) return { ok: false, reason: "runner-cap" };
-                if (e.projectId && this.countActiveTokens(e.projectId) >= limits.maxPerProject) return { ok: false, reason: "project-cap" };
-                const home = e.projectId && this.db.get("SELECT 1 AS x FROM projects WHERE id = ?", e.projectId) ? e.projectId : null;
-                made = this.createRunnerToken({ organizationId: e.organizationId, label, createdBy: e.createdBy ?? "Enrollment code" });
-                // Registered from the project the code was made for (inside this transaction; createToken opens its own).
-                if (home) {
-                    this.db.run("UPDATE agent_tokens SET project_id = ? WHERE id = ?", home, made.record.id);
-                    this.db.run("INSERT INTO runner_access (token_id, project_id, granted_by, granted_at) VALUES (?,?,?,?)", made.record.id, home, "Registered from the project", new Date(this.clock()).toISOString());
-                }
-                for (const pid of e.projectIds) {
-                    const p = this.db.get<{ o: string | null }>("SELECT organization_id AS o FROM projects WHERE id = ?", pid);
-                    if (p && runnerMayServe(this.getToken(made.record.id)!, pid, p.o ?? null)) this.grantAccess(made.record.id, pid, e.createdBy ?? "Enrollment code");
-                }
-                if (machine.machineId) this.bindMachine(made.record.id, machine.machineId);
-            }
+            // One runner per person: setting up a computer (this one again, or a new one) retires every credential they had before.
+            const retired = this.retireOtherPersonal(e.ownerId, null);
+            const made = this.createPersonalToken({ ownerId: e.ownerId, label, createdBy: e.createdBy ?? "Enrollment code", ...(machine.machineId ? { machineId: machine.machineId } : {}) });
             this.db.run("UPDATE runner_enrollments SET used_ms = ?, token_id = ? WHERE id = ?", this.clock(), made.record.id, e.id);
-            return { ok: true, secret: made.secret, token: this.getToken(made.record.id)!, enrollment: this.getEnrollment(e.id)! };
+            return { ok: true, secret: made.secret, token: this.getToken(made.record.id)!, enrollment: this.getEnrollment(e.id)!, retired };
         });
     }
 
@@ -804,18 +788,6 @@ export class AgentStore {
         return Number(this.db.run("DELETE FROM runner_enrollments WHERE used_ms IS NULL AND expires_ms < ?", this.clock() - 24 * 60 * 60_000).changes);
     }
 
-    /** The runners a project may use (its own and those it was given access to), retired ones included. */
-    listTokens(projectId: string): AgentTokenRecord[] {
-        return this.db
-            .all(`SELECT t.* FROM agent_tokens t JOIN runner_access a ON a.token_id = t.id WHERE a.project_id = ? ORDER BY t.created_at DESC, ${this.db.dialect.insertionOrder("t")} DESC`, projectId)
-            .map(toToken);
-    }
-
-    /** Every runner (registration), retired ones included: the Runners page narrows it to what a person may see. */
-    allTokens(): AgentTokenRecord[] {
-        return this.db.all(`SELECT * FROM agent_tokens ORDER BY created_at DESC, ${this.db.dialect.insertionOrder()} DESC`).map(toToken);
-    }
-
     renameToken(id: string, label: string): boolean {
         return Number(this.db.run("UPDATE agent_tokens SET label = ? WHERE id = ? AND revoked_at IS NULL", label.trim() || null, id).changes) === 1;
     }
@@ -827,56 +799,9 @@ export class AgentStore {
 
     // ── which projects a runner serves ──────────────────────────────────────
 
-    projectsOf(tokenId: string): Array<{ projectId: string; grantedBy: string | null; grantedAt: string }> {
-        return this.db
-            .all<{ project_id: string; granted_by: string | null; granted_at: string }>("SELECT project_id, granted_by, granted_at FROM runner_access WHERE token_id = ? ORDER BY granted_at", tokenId)
-            .map((r) => ({ projectId: r.project_id, grantedBy: r.granted_by, grantedAt: r.granted_at }));
-    }
-
-    hasAccess(tokenId: string, projectId: string): boolean {
-        return Boolean(this.db.get("SELECT 1 AS x FROM runner_access WHERE token_id = ? AND project_id = ?", tokenId, projectId));
-    }
-
-    /** Whether this agent (through its token) may run the project's tests. */
-    agentServes(agentId: string, projectId: string): boolean {
-        return Boolean(this.db.get("SELECT 1 AS x FROM agents g JOIN runner_access a ON a.token_id = g.token_id WHERE g.id = ? AND a.project_id = ?", agentId, projectId));
-    }
-
-    grantAccess(tokenId: string, projectId: string, grantedBy: string): boolean {
-        if (this.hasAccess(tokenId, projectId)) return false;
-        this.db.run("INSERT INTO runner_access (token_id, project_id, granted_by, granted_at) VALUES (?,?,?,?)", tokenId, projectId, grantedBy, new Date(this.clock()).toISOString());
-        return true;
-    }
-
-    /** The project stops using the runner. A project that pinned it goes back to "any runner it may use". Queued work stays queued for others. */
-    removeAccess(tokenId: string, projectId: string): boolean {
-        return this.db.tx(() => {
-            const n = Number(this.db.run("DELETE FROM runner_access WHERE token_id = ? AND project_id = ?", tokenId, projectId).changes);
-            if (n === 1) this.db.run("UPDATE runner_settings SET agent_id = NULL WHERE project_id = ? AND agent_id IN (SELECT id FROM agents WHERE token_id = ?)", projectId, tokenId);
-            return n === 1;
-        });
-    }
-
     /** Whether a token still works: a retired runner's open poll stops at once (routes/agents.ts). */
     tokenLive(id: string): boolean {
         return Boolean(this.db.get("SELECT 1 AS x FROM agent_tokens WHERE id = ? AND revoked_at IS NULL", id));
-    }
-
-    /** Runners of an organisation that still work (NULL: Crowd4Test's shared machines, or an install without organisations). */
-    countLiveRunnersOf(organizationId: string | null): number {
-        // Team runners only: a person's own computers have no organisation either, and count against their owner's own cap (MAX_PERSONAL_RUNNERS).
-        const r = organizationId === null ? this.db.get("SELECT COUNT(*) AS n FROM agent_tokens WHERE revoked_at IS NULL AND organization_id IS NULL AND kind = 'team'") : this.db.get("SELECT COUNT(*) AS n FROM agent_tokens WHERE revoked_at IS NULL AND organization_id = ? AND kind = 'team'", organizationId);
-        return Number(r?.n ?? 0);
-    }
-
-    /** Tokens of the project that still work (the runner kit download refuses to make more past a limit). */
-    countActiveTokens(projectId: string): number {
-        return Number(this.db.get("SELECT COUNT(*) AS n FROM agent_tokens WHERE project_id = ? AND revoked_at IS NULL", projectId)?.n ?? 0);
-    }
-
-    /** Revoking keeps the row; the token stops working at once. */
-    revokeToken(projectId: string, id: string): boolean {
-        return Number(this.db.run("UPDATE agent_tokens SET revoked_at = ? WHERE id = ? AND project_id = ? AND revoked_at IS NULL", new Date(this.clock()).toISOString(), id, projectId).changes) === 1;
     }
 
     /**
@@ -946,18 +871,10 @@ export class AgentStore {
         else this.db.run("UPDATE agents SET last_seen_ms = ? WHERE id = ?", this.clock(), id);
     }
 
-    /** The agents a project may use (through runner_access), online first, then most recently seen. `activeTasks` counts every project's work on it. */
-    listAgents(projectId: string): Array<AgentRecord & { online: boolean; activeTasks: number }> {
-        const now = this.clock();
-        const rows = this.db.all("SELECT g.* FROM agents g JOIN runner_access a ON a.token_id = g.token_id WHERE a.project_id = ?", projectId).map(toAgent);
-        const counts = new Map(
-            this.db
-                .all<{ agent_id: string; n: number }>("SELECT agent_id, COUNT(*) AS n FROM agent_tasks WHERE status = 'running' AND agent_id IN (SELECT g.id FROM agents g JOIN runner_access a ON a.token_id = g.token_id WHERE a.project_id = ?) GROUP BY agent_id", projectId)
-                .map((r) => [r.agent_id, Number(r.n)]),
-        );
-        return rows
-            .map((a) => ({ ...a, online: now - a.lastSeenMs <= ONLINE_MS, activeTasks: counts.get(a.id) ?? 0 }))
-            .sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeenMs - a.lastSeenMs);
+    /** The oldest running task of a computer (its job and project), for "Running now" in Settings. Never the payload. */
+    runningTaskOf(agentId: string): { jobId: string; projectId: string; adapterId: string } | undefined {
+        const r = this.db.get<{ job_id: string; project_id: string; adapter_id: string }>("SELECT job_id, project_id, adapter_id FROM agent_tasks WHERE agent_id = ? AND status = 'running' ORDER BY claimed_ms LIMIT 1", agentId);
+        return r ? { jobId: r.job_id, projectId: r.project_id, adapterId: r.adapter_id } : undefined;
     }
 
     runningCount(agentId: string): number {
@@ -968,22 +885,10 @@ export class AgentStore {
 
     getRunner(projectId: string): RunnerSetting {
         const r = this.db.get<{ run_on: string; agent_id: string | null }>("SELECT run_on, agent_id FROM runner_settings WHERE project_id = ?", projectId);
-        // Runners only: the effective setting is "on a runner"; a pinned runner still applies (a stored "platform" row has no pin).
-        if (this.runnersOnly) return { runOn: "agent", agentId: r?.run_on === "agent" ? r.agent_id : null, runnersOnly: true };
-        return r ? { runOn: r.run_on === "agent" ? "agent" : "platform", agentId: r.agent_id } : { runOn: "platform", agentId: null };
-    }
-
-    /** "Allow people's own computers" (migration 51): on unless the project switched it off; a project with no row counts as on. */
-    allowsPersonal(projectId: string): boolean {
-        const r = this.db.get<{ a: number | null }>("SELECT allow_personal AS a FROM runner_settings WHERE project_id = ?", projectId);
-        return r ? Number(r.a ?? 1) === 1 : true;
-    }
-
-    setAllowPersonal(projectId: string, on: boolean): void {
-        this.db.run(
-            "INSERT INTO runner_settings (project_id, run_on, agent_id, updated_at, allow_personal) VALUES (?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET allow_personal = excluded.allow_personal, updated_at = excluded.updated_at",
-            projectId, "platform", null, new Date(this.clock()).toISOString(), on ? 1 : 0,
-        );
+        // Runners only: the effective setting is "on a runner". Round 45: a project pins no runner (agent_id is no longer read): every
+        // run goes to its owner's own runner.
+        if (this.runnersOnly) return { runOn: "agent", agentId: null, runnersOnly: true };
+        return r ? { runOn: r.run_on === "agent" ? "agent" : "platform", agentId: null } : { runOn: "platform", agentId: null };
     }
 
     /**
@@ -993,6 +898,8 @@ export class AgentStore {
      * them this checks their status and reach (as of their latest arrival or membership change); running was checked when the run was started.
      */
     ownerMayRun(ownerId: string, projectId: string): boolean {
+        // The open server acts as one person, with every project, while it is open (no accounts, no access key).
+        if (ownerId === OPEN_OWNER_ID) return this.openMode() && Boolean(this.db.get("SELECT 1 AS x FROM projects WHERE id = ?", projectId));
         const u = this.db.get<{ status: string | null; role: string | null; project_access: string | null; c4t_role: string | null; organization_id: string | null }>(
             "SELECT status, role, project_access, c4t_role, organization_id FROM users WHERE id = ? AND role IS NOT NULL",
             ownerId,
@@ -1007,26 +914,6 @@ export class AgentStore {
         const member = this.db.get<{ role: string }>("SELECT role FROM user_projects WHERE user_id = ? AND project_id = ?", ownerId, projectId);
         if (!member) return false;
         return c4t || (runsTests(member.role) && runsTests(u.role));
-    }
-
-    /**
-     * May the person who made a team enrollment code still manage this organisation's runners (canManageRunner, from what this server keeps)?
-     * Active, and: a Crowd4Test admin; a Crowd4Test customer of that organisation (their permissions come with each request and are not kept,
-     * so "manage runners" itself was checked when the code was made); never a Crowd4Test tester; an account made here with a role that
-     * manages runners and reach over every project.
-     */
-    makerMayManage(makerId: string, organizationId: string | null): boolean {
-        const u = this.db.get<{ status: string | null; role: string | null; project_access: string | null; c4t_role: string | null; organization_id: string | null }>(
-            "SELECT status, role, project_access, c4t_role, organization_id FROM users WHERE id = ? AND role IS NOT NULL",
-            makerId,
-        );
-        if (!u || u.status !== "active") return false;
-        if (u.c4t_role !== null && u.c4t_role !== undefined) {
-            if (u.c4t_role === "ADMIN" || u.c4t_role === "SUB_ADMIN") return true;
-            return u.c4t_role === "CUSTOMER" && Boolean(u.organization_id) && u.organization_id === organizationId;
-        }
-        const role = u.role;
-        return u.project_access !== "only" && (role === "owner" || role === "editor" || role === "viewer") && ROLE_PERMISSIONS[role].has("ai_studio.runners.manage");
     }
 
     setRunner(projectId: string, s: RunnerSetting): void {
@@ -1064,17 +951,6 @@ export class AgentStore {
         return this.db.all(`SELECT * FROM agent_tasks WHERE project_id = ? AND status = 'queued' ORDER BY created_ms, ${this.db.dialect.insertionOrder()} LIMIT ?`, projectId, limit).map(toTask);
     }
 
-    /** Queued tasks of every project this token may serve, oldest first: the FIFO a shared runner picks from. */
-    queuedFor(tokenId: string, limit = 50): TaskRecord[] {
-        return this.db
-            .all(
-                `SELECT t.* FROM agent_tasks t JOIN runner_access a ON a.project_id = t.project_id AND a.token_id = ? JOIN agent_tokens k ON k.id = a.token_id AND k.revoked_at IS NULL WHERE t.status = 'queued' ORDER BY t.created_ms, ${this.db.dialect.insertionOrder("t")} LIMIT ?`,
-                tokenId,
-                limit,
-            )
-            .map(toTask);
-    }
-
     /**
      * The oldest queued tasks of every project, without their payloads: a personal runner's candidates (its owner's runs, wherever they are;
      * agent-services.ts filters them by the job's owner and the project's switch before it claims one).
@@ -1094,20 +970,20 @@ export class AgentStore {
     }
 
     /**
-     * Take a queued task for an agent of a project its token may serve, holding the device it needs, in one transaction: of two claims
-     * (or two tasks wanting the same phone, from any projects) exactly one wins; the other task stays queued. A team runner may serve the
-     * projects in runner_access; a personal runner serves no project by access, so only its token being live and personal is checked here:
-     * a personal runner claims only a task of its owner (agent_tasks.owner_id), in a project that does not switch people's own computers off,
-     * while its owner is active and still reaches the project. offerTo checks the same first, for its reasons; this is the guard.
+     * Take a queued task for an agent, holding the device it needs, in one transaction: of two claims (or two tasks wanting the same phone)
+     * exactly one wins; the other task stays queued. Round 45: only a person's own runner takes work, and only its owner's tasks
+     * (agent_tasks.owner_id), while its credential is live and its owner is active and still reaches the project (for the open server: while
+     * it is open). offerTo checks the same first, for its reasons; this is the guard.
      */
     claimFor(taskId: string, agent: { id: string; tokenId: string }, leaseMs: number, device?: DeviceNeed): TaskRecord | undefined {
         return this.db.tx(() => {
             this.releaseDevices();
             if (device && this.deviceHeld(agent.id, device)) return undefined;
             const now = this.clock();
+            const open = this.openMode() ? 1 : 0;
             const r = this.db.get(
-                "UPDATE agent_tasks SET status = 'running', agent_id = ?, claimed_ms = ?, lease_until = ?, last_beat_ms = ?, offers = offers + 1 WHERE id = ? AND status = 'queued' AND (project_id IN (SELECT a.project_id FROM runner_access a JOIN agent_tokens k ON k.id = a.token_id AND k.revoked_at IS NULL AND k.kind = 'team' WHERE a.token_id = ?) OR EXISTS (SELECT 1 FROM agent_tokens k JOIN users u ON u.id = k.owner_id WHERE k.id = ? AND k.revoked_at IS NULL AND k.kind = 'personal' AND k.owner_id = agent_tasks.owner_id AND u.status = 'active' AND u.role IS NOT NULL AND (u.project_access IS DISTINCT FROM 'only' OR EXISTS (SELECT 1 FROM user_projects m WHERE m.user_id = u.id AND m.project_id = agent_tasks.project_id)) AND NOT EXISTS (SELECT 1 FROM runner_settings s WHERE s.project_id = agent_tasks.project_id AND s.allow_personal = 0))) RETURNING *",
-                agent.id, now, now + leaseMs, now, taskId, agent.tokenId, agent.tokenId,
+                "UPDATE agent_tasks SET status = 'running', agent_id = ?, claimed_ms = ?, lease_until = ?, last_beat_ms = ?, offers = offers + 1 WHERE id = ? AND status = 'queued' AND EXISTS (SELECT 1 FROM agent_tokens k WHERE k.id = ? AND k.revoked_at IS NULL AND k.kind = 'personal' AND k.owner_id = agent_tasks.owner_id AND ((k.owner_id = ? AND ? = 1) OR EXISTS (SELECT 1 FROM users u WHERE u.id = k.owner_id AND u.status = 'active' AND u.role IS NOT NULL AND (u.project_access IS DISTINCT FROM 'only' OR EXISTS (SELECT 1 FROM user_projects m WHERE m.user_id = u.id AND m.project_id = agent_tasks.project_id))))) RETURNING *",
+                agent.id, now, now + leaseMs, now, taskId, agent.tokenId, OPEN_OWNER_ID, open,
             );
             if (!r) return undefined;
             if (device) this.db.run("INSERT INTO device_reservations (agent_id, family, device, task_id, project_id, reserved_ms) VALUES (?,?,?,?,?,?)", agent.id, device.family, device.device, taskId, r.project_id, now);

@@ -1,56 +1,50 @@
-# Runner enrollment, personal runners and credentials
+# Runner enrollment and credentials
 
-Built in round 39. Migration slot 51 (`PERSONAL_RUNNERS_MIGRATION` in `src/platform/agent-store.ts`).
+Built in round 39 (migration slot 51, `PERSONAL_RUNNERS_MIGRATION` in `src/platform/agent-store.ts`); one runner per person since round 45.
 
-## Two kinds of runner
+## One runner per person (round 45)
 
-- **Team runner**: a machine of an organisation, or a Crowd4Test shared machine (no organisation and no project). Given to projects on the
-  Runners page. Managed by people with "manage runners", as before. Every runner that existed before this change is a team runner.
-- **Personal runner** ("this person's computer"): owned by one person. Anyone who may run tests in at least one project can add their own
-  computer, Crowd4Test testers included. At most 5 active personal runners per person.
+A runner is the program on your computer that runs your tests. Each person has one, set up once in **Settings, Your runner**, and from
+then on every run, schedule, deploy trigger and session that person starts uses it by itself; nothing asks which runner to use. Team
+runners, Crowd4Test's shared runner, per-project runner tokens and kits, and the project switch "Allow people's own computers" are gone.
 
-A personal runner takes **only runs its owner starts** (and runs of schedules its owner made), only in projects the owner can still open,
-and only where the project allows people's own computers. It is never given to a project, never a project's pinned runner, and nobody
-but its owner (and platform admins) sees it. The rule is checked when a task is offered and again inside the claim itself
-(`agent_tasks.owner_id`, set when the task is queued).
+A runner that was installed with a team, shared or project credential is refused at every runner request with HTTP 401 and the sentence
+"This runner was set up for a team or a project, and those runners are no longer used. Set up your own runner from Settings in AI
+Studio." A team enrollment code gets HTTP 410 with the same sentence at `/api/agent/enroll`. The runner shows the sentence ("The platform
+no longer accepts this runner. ...") and stops with exit code 3 ("access removed"); it never asks again. A retired personal credential gets
+404 and the same exit. A personal runner installed before round 45 keeps working unchanged: the wire format (`/api/agent/*`, hello's
+`projectId` string, `runner.kind` "personal") did not change.
 
-A runner made from a project that has no organisation serves only that project. Only Crowd4Test staff (or, on a server without
-Crowd4Test sign-in, people who reach every project) can make a shared runner.
+The runner's switches (code scripts on, private addresses off, a real phone off by default) are the owner's, in Settings. They reach the
+runner in the hello answer (`runner: { id, kind, customScripts, privateTargets }`) as before.
 
-## Switches
+## The download and its one-time code
 
-| Switch | Personal runner | Team runner |
-|---|---|---|
-| Code scripts (hand-written, imported, Git) | On by default; the owner can switch it off | Off by default: only with `--allow-custom-scripts`, or the admin's switch. Never on a Crowd4Test shared runner |
-| Private and local addresses (localhost, LAN, 169.254.x) | Off by default; the owner can allow them | Allowed, as before |
-| A connected real phone | Off by default (emulators only) | Not used by this switch |
+No download carries a runner credential. The download from Settings holds a single-use code (`aite_` + 32 random bytes) in
+`runner.enroll` (mode 0600), stored on the platform only as a SHA-256 hash, valid 30 minutes:
 
-Project setting **Allow people's own computers** (`PUT /api/projects/:id/runner { allowPersonal }`, needs project settings): on by default.
-When on, the project's test accounts (passwords, authenticator secrets, API tokens, saved sign-ins) reach the owner's computer for their runs.
-
-The switches are sent to the runner in the hello answer (`runner: { id, kind, customScripts, privateTargets }`). A runner that understands
-them reports `capabilities.runnerSwitches: true`; code scripts go only to such a runner when they depend on a switch. With private addresses
-off, every test the runner starts gets `BLOCK_PRIVATE_TARGETS=true` (the check generated scripts make on every step). Code scripts can
-still reach any address on their own; that is a limit, not a guarantee.
-
-## Enrollment codes
-
-No download carries a runner credential. The website makes a single-use code (`aite_` + 32 random bytes), stored only as a SHA-256 hash,
-valid 30 minutes:
-
-- `POST /api/runners/enroll` `{ kind: "personal" | "team", label?, organizationId?, projectIds? }` → `{ id, kind, code, expiresAt }`
-- `GET /api/runners/enrollments/:id` → `{ status: "waiting" | "used" | "expired", runnerId }` (its maker only)
-- `POST /api/runners/kits` and `POST /api/projects/:id/runner-kits`: the download, with the code in `runner.enroll` (mode 0600) and the
-  headers `x-runner-enrollment-id`, `x-runner-enrollment-expires`. `GET /api/runners/kits/info` answers like the project's kit info.
+- `GET /api/me/runner/download/info` -> `{ available, kitVersion?, reason?, platformUrl, urlOk, urlWarning?, nodeMin, mayDownload, refusal?, systems }`,
+  where `systems` lists each `os` (windows, mac, linux) and `arch` (x64, arm64) with `kind` ("installer" or "files"), `ownNode` (it carries
+  its own Node.js), `bytes?`, `note?` and `available`.
+- `POST /api/me/runner/download` `{ os, arch }` (nothing else) -> the zip, with `x-runner-enrollment-id`, `x-runner-enrollment-expires`,
+  `x-runner-kit-kind`, `x-runner-kit-note` (Windows or Mac fell back to the plain files), `x-runner-kit-target` (it carries its own Node.js).
+  One download per system: Windows the setup program, a Mac the app, Linux the plain files; each with its own Node.js and test tools when
+  the server built that target (`runner-complete-kit.md`), the installer then inside it. `runner.json` holds no name: the runner is named
+  after the computer, and the person can rename it in Settings.
+- Who may download: a signed-in person who may run tests in at least one project, and the open server (no access key, nobody signed up),
+  which acts as one person (owner id "open"). The shared access key is refused with 403 "Sign in with your own account to set up your
+  runner." A few downloads a minute per person (`RUNNER_KIT_RATE_PER_MINUTE`, default 5).
+- `GET /api/me/runner/enrollments/:id` -> `{ status: "waiting" | "connected" | "expired" | "used" }` (its owner only).
 
 The runner trades the code at first contact: `POST /api/agent/enroll` `{ code, name, machineId }` (no Authorization header; limited per
-address and per code) → `{ token, runnerId, kind }`. A used, expired or unknown code gets a sentence saying to make a new one on the Runners
-page. If the answer is lost, the same computer (same install id) may ask again with the same code while the code is valid and the first
-credential was never used; it gets a fresh credential and the first one stops working. Anyone else gets "already used".
+address and per code) -> `{ token, runnerId, kind }`. That makes the person's one runner credential and retires every older credential of
+theirs, so setting up a new computer (or the same one again) replaces the previous one. A used, expired or unknown code gets a sentence
+saying to download the runner again. If the answer is lost, the same computer (same install id) may ask again with the same code while the
+code is valid and the first credential was never used.
 
 Agent command line: `--enroll <code>`, `--enroll-file <file>` (deleted once used), `--forget-credential` (for uninstalling). With no token
-argument the runner uses the credential it keeps. `--token`, `--token-file` and `AITP_AGENT_TOKEN` keep working for development and older
-installs.
+argument the runner uses the credential it keeps. `--token`, `--token-file` and `AITP_AGENT_TOKEN` keep working for development but are no
+longer in the help text.
 
 ## Where the credential is kept
 
@@ -77,15 +71,7 @@ commands are unit-tested (`tests/credential-store-unit.test.ts`); they have not 
   again with the old one replaces an unused new one, so a lost answer never locks the runner out. The hello answer says `rotate: true`
   when the credential is 30 days old; a runner keeping its credential in the store rotates then, and checks once a day while connected.
 
-## Choosing the runner for one run
+## Existing data
 
-`GET /api/projects/:id/runner-choices` (needs running tests there) lists the caller's own computers first, then the project's team runners,
-with `online`, `busy`, `machine`, `canRunWeb`, `canRunMobile`, `codeScripts`, `problem`, plus `allowPersonal` and `defaultRunnerId`.
-A run-start route that receives `runnerId` sends the run only to that runner; a runner the person may not use answers 404, one that
-cannot take the run now a 409 with the reason. Without `runnerId` the project's setting applies as before.
-
-## Existing data after the migration
-
-Every existing runner becomes a team runner with today's rules (code scripts off unless started with `--allow-custom-scripts`, private
-addresses allowed, no install id until a newer runner connects). Existing tasks have no owner, so no personal runner takes them. Every
-project allows people's own computers. Old kits keep working with their `runner.token`.
+Round 39 made every runner that existed before it a team runner; round 45 refuses those at hello (above). Personal runners keep their
+credential, install id and switches. Tasks keep their owner (`agent_tasks.owner_id`), and a task goes only to its owner's runner.

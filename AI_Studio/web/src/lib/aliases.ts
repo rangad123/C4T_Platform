@@ -17,7 +17,7 @@ interface Alias {
 
 export const ROUTE_ALIASES: Alias[] = [
     { old: "schedule", to: (id, _x, q) => routes.schedule(id, q.get("run") ?? undefined) },
-    { old: "runners", to: (id) => routes.runners(id) },
+    { old: "runners", to: () => routes.allRunners },
     { old: "objects", to: (id) => routes.objects(id) },
     { old: "blocks", to: (id, _x, q) => routes.blocks(id, q.get("edit") ?? undefined) },
     { old: "helpers", to: (id) => routes.helpers(id) },
@@ -50,18 +50,15 @@ export function resolveAlias(parts: string[], query: URLSearchParams): string | 
     if (a === "tests" && id && c === "builder") return routes.testTab(id, "steps");
     // Round 38: the Text tab is the DSL tab; its route stays `text` and `dsl` opens it too.
     if (a === "tests" && id && c === "dsl") return withQuery(routes.testTab(id, "text"), query);
+    // Round 45: the Runners pages are gone; every runner link (the list, one runner, `?add=computer`) lands on Your runner in Settings.
+    if (a === "runners") return routes.allRunners;
+    if (a === "settings" && query.get("section") === "runners") return routes.allRunners;
     if (a !== "projects" || !id || !c) return null;
     // Round 38: the runnable tests are the Test scripts list; the Test cases place holds the written cases. An old link to the tests
     // with a query about running (a status, weak checks, quarantine, a way of starting a test, Git) opens the scripts list with it.
     if (c === "tests" && !d && RUNNABLE_QUERY.some((k) => query.has(k))) return withQuery(routes.tests(id), query);
-    // Round 37: a project's runners moved out of its Settings to the Runners page.
-    if (c === "settings" && query.get("section") === "runners") {
-        const rest = new URLSearchParams(query);
-        rest.delete("section");
-        rest.delete("project");
-        const extra = rest.toString();
-        return extra ? `${routes.runners(id)}&${extra}` : routes.runners(id);
-    }
+    // Round 37 moved a project's runners to the Runners page; round 45 to Your runner in Settings.
+    if (c === "settings" && query.get("section") === "runners") return routes.allRunners;
     // Round 25 replaced three places: Setup became Settings, and the sections of Library and Release moved to Test scripts,
     // Settings, Test cases and Runs. The old route helpers already point at the new homes (lib/router.ts). Any other query (the
     // welcome page's `start=phone`) is kept.

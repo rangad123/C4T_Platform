@@ -1,15 +1,17 @@
 /**
  * The complete runner download, end to end on this Windows laptop, against a REAL platform:
  *   - built with `buildComplete` from this checkout's REAL node_modules (every package the runner pins, copied), with a stand-in for
- *     nodejs.org serving a small fake Node.js zip (port 6913);
- *   - downloaded through the platform's own route over real HTTP (streamed, with its length), unzipped with Windows' own tar.exe;
+ *     nodejs.org serving a small fake Node.js zip (port 8819);
+ *   - downloaded as a person's own runner (POST /api/me/runner/download, round 45: the Windows download carries its own Node.js when the
+ *     server built it) over real HTTP (streamed, with its length), unzipped with Windows' own tar.exe;
  *   - started with start-runner.cmd and NO Node.js and no npm on the PATH. The node.exe inside is replaced by a hard link to this computer's
  *     Node.js (the fake archive's is not a program), so every package the runner loads comes from the download's own node_modules;
- *   - the runner connects, runs a real API test and real web tests from a validation job, and ends with the plain revoked message.
+ *   - the runner trades the download's one-time code, shows in Settings, runs a real API test and real web tests the person starts, and ends
+ *     with the plain message when the computer is removed in Settings.
  * Also: Playwright's test runner and Taqwright load from the copied node_modules with the bundled Node.js.
  *
  * Browser-launching: node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/runner-complete-kit.test.ts
- * Ports: platform 6912, stand-in nodejs.org 6913, fixture application 6914.
+ * Ports: platform 8818, stand-in nodejs.org 8819, fixture application 8801 (shared with runner-kit.test.ts; the lock runs one file at a time).
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -22,7 +24,9 @@ import { zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { buildServer } from "../src/platform/server.js";
+import { allowPrivateAddresses, downloadRunner, myOnlineRunner, personToken, retireMyRunner } from "./fixtures/runner-person.js";
 import { Worker } from "../src/platform/worker.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
@@ -30,9 +34,9 @@ import { buildRunner } from "../scripts/build-runner.mjs";
 import { buildComplete } from "../scripts/build-runner-complete.mjs";
 
 const REPO = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PLATFORM_PORT = 6912;
-const DIST_PORT = 6913;
-const APP_PORT = 6914;
+const PLATFORM_PORT = 8818;
+const DIST_PORT = 8819;
+const APP_PORT = 8801;
 const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "complete-e2e-admin-key-71c3d9";
@@ -52,8 +56,13 @@ const children: ChildProcess[] = [];
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** The person whose runner this is (an owner with their own API token, made in beforeAll). */
+let person = { id: "", token: "" };
+let stopBeat: (() => void) | undefined;
+/** The runner takes the computer's own name (the download names none). */
+const NAME = os.hostname().trim().slice(0, 64) || "agent";
 const admin = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": API_KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const res = await fetch(`${BASE}${url}`, { method, headers: { authorization: `Bearer ${person.token}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const buf = Buffer.from(await res.arrayBuffer());
     const text = buf.toString("utf8");
     return { status: res.status, headers: res.headers, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; headers: Headers; buf: Buffer; text: string; body: any };
@@ -99,12 +108,11 @@ const pathWithoutNode = () => {
 
 let kitZip: Buffer;
 let projectId: string;
-let tokenId: string;
 
 beforeAll(async () => {
     if (!ON_WINDOWS) return;
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "5" });
-    for (const k of ["BLOCK_PRIVATE_TARGETS", "AGENT_MAX_TOKENS", "RUNNER_KIT_RATE_PER_MINUTE", "RUNNER_INSTALLER_DIR"]) delete process.env[k];
+    for (const k of ["BLOCK_PRIVATE_TARGETS", "RUNNER_KIT_RATE_PER_MINUTE"]) delete process.env[k];
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-complete-e2e-"));
 
@@ -131,19 +139,25 @@ beforeAll(async () => {
     await buildComplete({ root: REPO, bundleDir, outDir: completeDir, cacheDir: path.join(tmp, "cache"), targets: ["win-x64"], env: { AITP_NODE_DIST_URL: `http://127.0.0.1:${DIST_PORT}` }, version: VERSION });
     process.env.RUNNER_KIT_DIR = bundleDir;
     process.env.RUNNER_COMPLETE_DIR = completeDir;
+    // No installer built here: the download is the start scripts with their own Node.js.
+    process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "no-installer");
 
-    platform = bootstrap(loadConfig({ DATA_DIR: path.join(tmp, "data"), API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: path.join(tmp, "data"), API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0", EXECUTION_MODE: "runners" }));
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
     worker.start();
+    // EXECUTION_MODE=runners takes runs only while the part that hands them to runners is alive.
+    stopBeat = startHeartbeat(platform.db);
+    person = personToken(server);
 
     projectId = (await admin("POST", "/api/projects", { name: "Complete shop" })).body.id;
-    const r = await admin("POST", `/api/projects/${projectId}/runner-kits`, { name: "complete runner", platform: "windows", complete: true, arch: "x64" });
+    expect((await admin("PUT", `/api/projects/${projectId}/review-policy`, { aiGenerated: false, edits: false, healing: false })).status).toBe(200);
+    const r = await downloadRunner(BASE, person.token, "windows", "x64");
     if (r.status !== 200) throw new Error(`download failed: ${r.status} ${r.text.slice(0, 300)}`);
+    expect(r.headers.get("x-runner-kit-target")).toBe("win-x64");
     expect(Number(r.headers.get("content-length"))).toBe(r.buf.length);
     kitZip = r.buf;
-    tokenId = r.headers.get("x-runner-token-id")!;
 }, 300_000);
 
 afterAll(async () => {
@@ -153,6 +167,7 @@ afterAll(async () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
     }
+    stopBeat?.();
     await worker?.stop();
     await server?.close();
     platform?.db.close();
@@ -209,7 +224,7 @@ describe.skipIf(!ON_WINDOWS || !fs.existsSync(SYSTEM_TAR))("the complete downloa
         expect(where.stdout.trim().toLowerCase().startsWith(kit.toLowerCase())).toBe(true);
     });
 
-    it("start-runner.cmd with no Node.js and no npm on the PATH connects, runs real tests, and ends plainly when the token is revoked", async () => {
+    it("start-runner.cmd with no Node.js and no npm on the PATH trades its code, runs real tests, and ends plainly when the computer is removed", async () => {
         const kit = unpack("run");
         const run = launch("cmd.exe", ["/d", "/c", ".\\start-runner.cmd"], kit, {
             PATH: pathWithoutNode(),
@@ -218,7 +233,7 @@ describe.skipIf(!ON_WINDOWS || !fs.existsSync(SYSTEM_TAR))("the complete downloa
             // The runner finds Playwright's browsers where this computer keeps them.
             PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(process.env.LOCALAPPDATA ?? "", "ms-playwright"),
         });
-        await until("the runner from the complete download to be online", async () => ((await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ online: boolean }>).find((a) => a.online), 120_000).catch((e) => {
+        await until("the runner from the complete download to be online", () => myOnlineRunner(BASE, person.token), 120_000).catch((e) => {
             throw new Error(`${e.message}\n--- script output ---\n${output(run)}`);
         });
         const text = output(run);
@@ -233,7 +248,8 @@ describe.skipIf(!ON_WINDOWS || !fs.existsSync(SYSTEM_TAR))("the complete downloa
         ];
         const imp = await admin("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, validate: false, specs });
         expect(imp.status, imp.text).toBe(202);
-        expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
+        // No runner is chosen: the run goes to the person's own runner. The fixture is on this computer: private addresses on.
+        expect(await allowPrivateAddresses(BASE, person.token)).toBe(200);
         for (const t of imp.body.tests as Array<{ id: string }>) {
             const started = await admin("POST", `/api/tests/${t.id}/validate`);
             expect(started.status, started.text).toBe(202);
@@ -241,14 +257,14 @@ describe.skipIf(!ON_WINDOWS || !fs.existsSync(SYSTEM_TAR))("the complete downloa
                 const j = (await admin("GET", `/api/test-generation/${started.body.jobId}`)).body;
                 return ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status) ? j : undefined;
             }, 180_000);
-            expect(job.ranOn).toMatchObject({ kind: "agent", name: "complete runner" });
+            expect(job.ranOn).toMatchObject({ kind: "agent", name: NAME });
             const exec = ((await admin("GET", `/api/tests/${t.id}/executions`)).body as Array<{ status: string; error?: string }>)[0]!;
             expect(exec.status, `${exec.error ?? ""}\n--- runner ---\n${output(run).slice(-3000)}`).toBe("passed");
         }
 
-        expect((await admin("DELETE", `/api/projects/${projectId}/agent-tokens/${tokenId}`)).status).toBe(200);
+        expect(await retireMyRunner(BASE, person.token)).toBe(200);
         const code = await Promise.race([run.exited, sleep(60_000).then(() => "timeout")]);
         expect(code, output(run)).toBe(1);
-        expect(output(run)).toMatch(/no longer accepts this runner's token/);
+        expect(output(run)).toMatch(/no longer accepts this runner/);
     }, 600_000);
 });

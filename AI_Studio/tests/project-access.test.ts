@@ -272,7 +272,7 @@ describe("roles per project, tokens and sessions", () => {
         // Owner chosen in Alpha but only an editor on the platform: editor counts, so an owner-only route is refused.
         const eli = person("eli@example.com", "editor", { mode: "only", projects: [{ projectId: A.project, role: "owner" }] });
         expect((await call("PUT", `/api/projects/${A.project}/retention`, bearer(eli.token), { enabled: false })).status).toBe(403);
-        expect((await call("GET", `/api/projects/${A.project}/agent-tokens`, bearer(eli.token))).status).toBe(403);
+        expect((await call("GET", "/api/admin/runners", bearer(eli.token))).status).toBe(403);
     });
 
     it("limits a personal token the same way as its person, and a token's own lower role still counts", async () => {

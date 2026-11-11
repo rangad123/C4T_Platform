@@ -4,9 +4,8 @@ A **runner agent** (a runner) is a small program on a tester's own computer, a t
 
 ## What it does for a user
 
-- On the **Runners** page a person adds a computer. **Add this computer** makes a personal runner (anyone who may run tests in some project, at most 5 each); **Add a team runner** makes a runner of an organisation that is given to projects (needs "manage runners"). The download carries a single-use enrollment code, not a credential (`runner-enrollment.md`, `runner-personal.md`).
-- Each project chooses **where its tests run**: on the platform or on runners, a default runner, and whether people's own computers may run its tests. On a platform started with `EXECUTION_MODE=runners` (the hosted platform) every project runs on runners and the platform runs no test code itself (`runner-only-mode.md`).
-- On runners, every run that executes scripts goes to a runner: a run started by a person, a schedule, a deploy trigger, a runbook, a cross-browser check or a named environment. A person can pick the runner for one run (`runnerId`). The results, screenshots, traces, evidence and visual baselines are stored and shown exactly as for a local run, and a protocol-2 runner sends live progress while it runs (`run-live-view.md`). The run says where it ran (`ranOn` on the job).
+- Each person has **one runner**, set up once in **Settings, Your runner**: download, install, it connects (`runner-enrollment.md`, `runner-settings.md`). The download carries a single-use enrollment code, not a credential. Setting up another computer replaces the previous one. Team runners, shared runners and per-project runners were removed in round 45.
+- Every run that executes scripts goes to its starter's runner: a run started by a person, and a schedule, deploy trigger or API-key run on its creator's runner. Nothing asks which runner to use. On a platform started with `EXECUTION_MODE=runners` (the hosted platform) the platform runs no test code itself (`runner-only-mode.md`). The results, screenshots, traces, evidence and visual baselines are stored and shown exactly as for a local run, and a protocol-2 runner sends live progress while it runs (`run-live-view.md`). The run says where it ran (`ranOn` on the job, "Ran on NAME").
 - The application only has to be reachable **from the runner's network**. A staging site on a private address, a service on `localhost`, a phone on the tester's desk all work, where the runner allows private addresses (see "Addresses").
 
 ### What still runs on the platform
@@ -15,42 +14,27 @@ Only **script execution** moves. Analysis (discovery, planning, generating tests
 
 ### Refusals
 
-A run is refused up front with a plain 409 when it cannot run where the project runs:
+A run is refused up front with a plain 409 when the starter's runner cannot take it: not set up, offline, or unable to run these tests (the answer says what is missing, for example no browser, no Android tools, private addresses or code scripts switched off). This applies to every way a job is created, because the check sits in job creation itself (`Repo.createJob`). A queued scheduled run whose creator's computer is off waits, and fails at the queue limit with "<Name>'s computer was off when this schedule ran."
 
-- No runner the person may use is online: "No runner agent is connected for this project. …" (in `runners` mode: "No runner is online for this project, and tests run only on runners here. Start the runner on your computer, or add one on the Runners page.").
-- A runner is online but cannot run the tests, and the answer says what is missing: "The connected runner agent “maya-laptop” can't run API tests: it has no browsers installed (run `npx playwright install` on that machine)." Web and API tests need an installed browser; Android tests need `adb` and a connected phone or an emulator.
-- A runner chosen for this run that the person may not use answers 404; one that cannot take it now, a 409 with the reason.
+## The routes
 
-This applies to every way a job is created, because the check sits in job creation itself (`Repo.createJob`). A schedule or trigger that cannot start reports the same words. The setting cannot be changed while a run is in progress.
-
-## The setting and the admin routes
-
-People use these through the website, with the permission named; the API key works as for every other admin route.
-
-| Route | Permission | What |
+| Route | Who | What |
 |---|---|---|
-| `GET /api/runners`, `GET /api/runners/:runnerId` | read (narrowed by the handler) | runners the caller may see, with `kind`, `mine`, `settings`, `machine`, current work; `canAddPersonal`, `canAddTeam` |
-| `POST /api/runners/enroll` `{ kind, label?, organizationId?, projectIds? }` | decided by kind in the handler | a single-use code `{ id, kind, code, expiresAt }` |
-| `POST /api/runners/kits`, `POST /api/projects/:id/runner-kits` | decided by kind / manage runners | the download, with the code in `runner.enroll` and the headers `x-runner-enrollment-id`, `x-runner-enrollment-expires` |
-| `GET /api/runners/enrollments/:enrollmentId` | its maker | `{ status: "waiting" \| "used" \| "expired", runnerId }` |
-| `PATCH /api/runners/:runnerId` | its owner (personal) or a runner manager (team) | rename; switches `codeScripts`, `privateAddresses`, `realPhone` |
-| `POST /api/runners/:runnerId/retire` | the same | retire: its credential stops working |
-| `PUT` / `DELETE /api/projects/:id/runner-access/:runnerId` | manage runners | give a team runner to a project, or take it away |
-| `GET /api/projects/:id/runner-choices` | run tests | the runners this person may use for one run of this project |
-| `GET /api/projects/:id/agent-tokens`, `POST` `{label?}`, `DELETE …/:tid` | manage runners | credentials made directly (for scripts and development): `POST` answers 201 `{token, secret}`, the secret (`aitg_` plus 32 random bytes) shown **once** |
-| `GET /api/projects/:id/agents` | read | name, version, os, capabilities, online (seen in the last 45 s), last seen, running tasks |
-| `GET /api/projects/:id/runner` | read | `{runOn, agentId, status, canRunWeb, canRunMobile, unavailableReason, …}` |
-| `PUT /api/projects/:id/runner` `{runOn?, agentId?, allowPersonal?}` | project settings | where the project runs (`platform` is refused in `runners` mode), its default runner, and "Allow people's own computers"; 409 when a job is running or no runner is online |
+| `GET /api/me/runner` | a person who may run tests somewhere | `{ runner: null \| { id, name, status, lastSeenAt, os, arch, hostname?, version?, update, check?, network?, switches, currentRun? } }` |
+| `GET /api/me/runner/download/info`, `POST /api/me/runner/download` `{ os, arch }` | the same (never the shared access key) | which systems can be downloaded; the download with the code in `runner.enroll` (`runner-enrollment.md`) |
+| `GET /api/me/runner/enrollments/:id` | its owner | `{ status: "waiting" \| "connected" \| "expired" \| "used" }` |
+| `PATCH /api/me/runner` `{ name?, switches? }`, `POST /api/me/runner/retire`, `POST /api/me/runner/update` | its owner | rename and the owner's switches; Remove this computer; Update now |
+| `GET /api/admin/runners`, `POST /api/admin/runners/:id/retire` | platform admins (`ai_studio.runners.manage`) | every person's runner; retire one |
 | `GET /api/config` | — | also `agentProtocol` and `executionMode` |
 
-The setting lives in its own table (`runner_settings`), not in `projects`. Job objects carry `ranOn: {kind: "platform"} | {kind: "agent", agentId, name, runnerId?, phase?, attempt?}` for validation, variant and environment runs.
+Up-front refusals when a run starts (409, linked to Settings): `RUNNER_NOT_SET_UP` "Set up your runner in Settings to run tests.", `RUNNER_OFFLINE` "Your runner is offline. Start it on your computer, then try again.", and what the runner cannot do (phone tests, private addresses off, code scripts off). A `runnerId` sent by an older page is ignored. Job objects carry `ranOn: {kind: "platform"} | {kind: "agent", agentId, name, runnerId?, phase?, attempt?}`.
 
 ## The protocol in plain words
 
 The wire contract is `src/agent-protocol/schema.ts`. The agent always connects **out**; the platform never connects to the agent. Every request carries `Authorization: Bearer aitg_...`.
 
 1. **hello**: the agent says who it is (name, version, operating system, what it can run, how many tasks at once). The platform registers or refreshes it and answers with the intervals and the largest file it takes.
-2. **poll**: the agent asks for work, saying how many slots are free. The platform holds the request for up to 25 seconds ("long poll") and answers with a **task** or "nothing". One poll at a time per agent (a newer one replaces the older). A task is offered only if the agent can run it, is allowed (the project may name one agent), and has a free slot. Tasks queue first in, first out per project.
+2. **poll**: the agent asks for work, saying how many slots are free. The platform holds the request for up to 25 seconds ("long poll") and answers with a **task** or "nothing". One poll at a time per agent (a newer one replaces the older). A task is offered only to its owner's runner, and only if the runner can run it and has a free slot. Tasks queue first in, first out per project.
 3. **download**: baselines for visual tests and the app file for mobile tests are files the task names; the agent fetches them (checking the hash) before running.
 4. **run**: the agent runs the scripts with the same code the platform uses locally, so a remote run behaves like a local one.
 5. **heartbeat**: every ~10 seconds the agent reports progress and a few log lines and extends its lease. The answer says `cancel: true` when the run was cancelled.
@@ -101,7 +85,7 @@ The full threat model is `docs/runner-implementation/SECURITY_DESIGN.md`. In sho
 
 ### Private and local addresses on the runner's network
 
-A runner may refuse private and local addresses: loopback (`localhost`, `127.x`, `::1`), the computer's own network (`10.x`, `172.16-31.x`, `192.168.x`, `fc00::/7`) and link-local addresses (`169.254.x`, `fe80::`). A person's own computer refuses them by default and its owner can allow them on the Runners page; a team runner allows them. The platform tells the runner in the hello answer (`runner.privateTargets`) and, when the switch changes, in a heartbeat (`config.privateTargets`, applied to the next task). `BLOCK_PRIVATE_TARGETS=true` in the runner's own environment refuses them whatever the platform says. An older platform that says nothing keeps the old behaviour (allowed).
+A runner may refuse private and local addresses: loopback (`localhost`, `127.x`, `::1`), the computer's own network (`10.x`, `172.16-31.x`, `192.168.x`, `fc00::/7`) and link-local addresses (`169.254.x`, `fe80::`). A runner refuses them by default and its owner can allow them in Settings, Your runner (`#/settings#runner`). The platform tells the runner in the hello answer (`runner.privateTargets`) and, when the switch changes, in a heartbeat (`config.privateTargets`, applied to the next task). `BLOCK_PRIVATE_TARGETS=true` in the runner's own environment refuses them whatever the platform says. An older platform that says nothing keeps the old behaviour (allowed).
 
 When they are refused (`src/agent/address-guard.ts`):
 
@@ -119,7 +103,7 @@ What the guard does **not** cover:
 
 ## Where the code is
 
-- `src/platform/agent-store.ts`: tables (migrations 19, 42, 51, 53) and the store; `agent-routing.ts`: route matcher, capability check, wire form, path and secret helpers, protocol negotiation; `agent-services.ts`: credentials, enrollment, registry, queue and offers, `RemoteExecutor`, job gate; `routes/agents.ts`: admin and protocol routes; `routes/runners.ts`, `routes/runner-kits.ts`: the Runners page, enrollment codes and downloads; `runner-only.ts`: `EXECUTION_MODE=runners`.
+- `src/platform/agent-store.ts`: tables (migrations 19, 42, 51, 53) and the store; `agent-routing.ts`: route matcher, capability check, wire form, path and secret helpers, protocol negotiation; `agent-services.ts`: credentials, enrollment, registry, queue and offers, `RemoteExecutor`, job gate; `routes/agents.ts`: admin and protocol routes; `routes/runners.ts`: Settings, Your runner (`/api/me/runner*`) and the admins' "Everyone's runners" list (`/api/admin/runners*`); `routes/runner-kits.ts`: the download; `runner-only.ts`: `EXECUTION_MODE=runners`.
 - Hooks in shared files: `Repo.createJob` (`jobGate`), `setExecutorResolver` in `bootstrap`, the API-key hook and `/api/config` in `server.ts`, the scheduler tick (housekeeping), and `validate-only.ts` (mobile plan and browser skip for remote runs).
 - Settings you can change with environment variables (mostly for tests): `AGENT_POLL_SECONDS`, `AGENT_HEARTBEAT_SECONDS`, `AGENT_LEASE_SECONDS`, `AGENT_ACCEPT_SECONDS`, `AGENT_MAX_FILE_BYTES`, `AGENT_TASK_MAX_BYTES`, `AGENT_TASK_MAX_FILES`, `AGENT_NO_AGENT_GRACE_SECONDS`, `EXECUTION_MODE`, `DISPATCH_CONCURRENCY`.
 

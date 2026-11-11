@@ -243,35 +243,32 @@ describe("2. a compression bomb in an import", () => {
 });
 
 describe("4 and 5. runner tokens", () => {
-    it("a retired runner's open poll receives nothing more", async () => {
+    it("a removed runner's open poll receives nothing more", async () => {
         const pid = await newProject("t-ann", "Runner shop");
         const svc = getAgentServices(platform);
-        const { record } = svc.store.createToken(pid, "r");
+        const ann = await personOf("t-ann");
+        const { record } = svc.store.createPersonalToken({ ownerId: ann, label: "r", createdBy: "test" });
         const caps = { os: "linux", arch: "x64", node: "24", browsers: ["chromium"], record: false } as never;
         const agent = svc.store.upsertAgent(record, { name: "m", version: "1", capabilities: caps, concurrency: 5 });
         const task = (n: number) => {
             const offer = TaskOffer.parse({ taskId: `11111111-1111-4111-8111-11111111111${n}`, jobId: `22222222-2222-4222-8222-22222222222${n}`, adapterId: "playwright", leaseSeconds: 60, workers: 1, scripts: [], env: { baseUrl: "http://x.example", headless: true, credentials: { username: "u", password: "project-secret" } } });
-            svc.store.enqueue({ id: offer.taskId, projectId: pid, jobId: offer.jobId, adapterId: "playwright", payloadEnc: svc.encrypt(offer), files: [] });
+            svc.store.enqueue({ id: offer.taskId, projectId: pid, jobId: offer.jobId, adapterId: "playwright", payloadEnc: svc.encrypt(offer), files: [], ownerId: ann });
         };
         task(1);
         // Before retiring, the runner is offered work: what follows is the retirement, not something else.
         expect(svc.offerTo(svc.store.getAgent(agent.id)!, 1)?.env.credentials).toBeDefined();
         task(2);
-        expect((await as("t-ann", "POST", `/api/runners/${record.id}/retire`, {})).status).toBe(200);
+        expect((await as("t-ann", "POST", "/api/me/runner/retire", {})).status).toBe(200);
         // What the open poll's loop asks on its next turn: it does not authenticate again.
         expect(svc.offerTo(svc.store.getAgent(agent.id)!, 1)).toBeUndefined();
-        expect(svc.store.queuedFor(record.id)).toEqual([]);
         expect(svc.store.claimFor("11111111-1111-4111-8111-111111111112", agent, 60_000)).toBeUndefined();
         expect(svc.store.tokenLive(record.id)).toBe(false);
     });
 
-    it("a tester cannot make a runner token, by either route", async () => {
+    it("a project's runner tokens and kits can no longer be made, by anyone (round 45: one runner per person, from Settings)", async () => {
         const pid = await newProject("t-ann", "Tester shop");
-        await addMember(pid, "t-tom");
-        expect((await as("t-tom", "POST", `/api/projects/${pid}/agent-tokens`, { label: "mine" })).status).toBe(403);
-        expect((await as("t-tom", "POST", `/api/projects/${pid}/runner-kits`, { name: "mine", platform: "unix" })).status).toBe(403);
-        // The customer of the organisation still can.
-        expect((await as("t-ann", "POST", `/api/projects/${pid}/agent-tokens`, { label: "ours" })).status).toBe(201);
+        expect((await as("t-ann", "POST", `/api/projects/${pid}/agent-tokens`, { label: "ours" })).status).toBe(404);
+        expect((await as("t-ann", "POST", `/api/projects/${pid}/runner-kits`, { name: "ours", platform: "unix" })).status).toBe(404);
     });
 });
 
@@ -288,29 +285,20 @@ describe("6. AI configurations across organisations", () => {
 });
 
 describe("7. deleting a project", () => {
-    it("needs permission to delete tests, and retires the project's own runner token", async () => {
+    it("needs permission to delete tests", async () => {
         const pid = await newProject("t-dan", "Delete shop");
         expect((await as("t-dan", "POST", `/api/projects/${pid}/archive`, {})).status).toBe(200);
         const refused = await as("t-dan", "DELETE", `/api/projects/${pid}`, { name: "Delete shop" });
         expect(refused.status).toBe(403);
         expect(refused.text).toMatch(/delete tests/);
-        const svc = getAgentServices(platform);
-        const { record } = svc.store.createToken(pid, "own");
         await addMember(pid, "t-ann", true);
         expect((await as("t-ann", "DELETE", `/api/projects/${pid}`, { name: "Delete shop" })).status).toBe(200);
-        expect(svc.store.tokenLive(record.id)).toBe(false);
     });
 });
 
 describe("8. caps", () => {
-    it("runners, folders, AI configurations and comments stop at their limit with a plain 409", async () => {
+    it("folders, AI configurations and comments stop at their limit with a plain 409", async () => {
         const pid = await newProject("t-zed", "Capped shop");
-        const svc = getAgentServices(platform);
-        for (let i = 0; i < 50; i++) svc.store.createRunnerToken({ organizationId: "org-z", label: `r${i}`, createdBy: "test" });
-        const r = await as("t-zed", "POST", "/api/runners", { name: "one more" });
-        expect(r.status).toBe(409);
-        expect(r.text).toMatch(/50 runners/);
-        expect((await as("t-zed", "POST", `/api/projects/${pid}/agent-tokens`, { label: "one more" })).status).toBe(409);
 
         const folders = new FolderStore(platform.db);
         for (let i = 0; i < 200; i++) folders.create({ organizationId: "org-z", name: `f${i}`, createdBy: "test" });
@@ -339,7 +327,7 @@ describe("8. caps", () => {
     it("polling sweeps expired leases at most every few seconds, not on every turn", async () => {
         const pid = await newProject("t-ann", "Sweep shop");
         const svc = getAgentServices(platform);
-        const { record } = svc.store.createToken(pid, "sweeper");
+        const { record } = svc.store.createPersonalToken({ ownerId: await personOf("t-ann"), label: "sweeper", createdBy: "test" });
         const agent = svc.store.upsertAgent(record, { name: "s", version: "1", capabilities: { os: "linux", arch: "x64", node: "24", browsers: ["chromium"], record: false } as never, concurrency: 1 });
         const sweep = vi.spyOn(svc.store, "sweep");
         for (let i = 0; i < 8; i++) svc.offerTo(svc.store.getAgent(agent.id)!, 1);

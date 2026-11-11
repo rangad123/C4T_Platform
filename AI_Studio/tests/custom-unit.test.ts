@@ -259,11 +259,12 @@ describe("run policy: the decision table", () => {
     it.each(table)("host %s, on an agent %s, agents %j", (hostAllowed, runsOnAgent, agents, allowed) => {
         const d = customRunDecision({ hostAllowed, runsOnAgent, agents });
         expect(d.allowed).toBe(allowed);
-        if (!d.allowed) expect(d.message).toMatch(/--allow-custom-scripts|ALLOW_CUSTOM_SCRIPTS/);
+        // Round 45: on a runner the sentence names the owner's switch in Settings; on the server, ALLOW_CUSTOM_SCRIPTS.
+        if (!d.allowed) expect(d.message).toMatch(/switched (on|off)|ALLOW_CUSTOM_SCRIPTS/);
     });
 
     it("names what to switch on, as the contract says", () => {
-        expect(CUSTOM_REFUSAL).toBe("This project has code tests. Start your runner agent with --allow-custom-scripts, or set ALLOW_CUSTOM_SCRIPTS=true on the server.");
+        expect(CUSTOM_REFUSAL).toBe("This project has code tests, and no runner is set up for this run. Set up your runner in Settings (with code scripts switched on), or set ALLOW_CUSTOM_SCRIPTS=true on the server.");
         const d = customRunDecision({ hostAllowed: false, runsOnAgent: true, agents: [] });
         expect(!d.allowed && d.message).toBe(CUSTOM_REFUSAL);
     });

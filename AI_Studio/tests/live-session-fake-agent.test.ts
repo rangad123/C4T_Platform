@@ -13,6 +13,7 @@ import { TOO_OLD_TO_DRIVE } from "../src/platform/agent-record.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { recorderOptions } from "../src/platform/routes/recorder.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, viaFetch } from "./fixtures/fake-agent.js";
 
@@ -67,7 +68,8 @@ async function newProject(name: string) {
     return id;
 }
 async function connect(projectId: string, name: string, caps = defaultCaps({ record: true, recordHeaded: true, liveSession: true })) {
-    const secret = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: name })).body.secret as string;
+    void projectId;
+    const secret = personalRunner(platform, { label: name }).secret;
     const agent = new FakeAgent(viaFetch(BASE), secret, { name, capabilities: caps });
     expect((await agent.hello()).status).toBe(200);
     return agent;
@@ -87,7 +89,8 @@ beforeAll(async () => {
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     Object.assign(recorderOptions, { remote: { lostContactMs: 20_000, claimWaitMs: 5_000, settleMs: 500, liveWaitMs: 1_500 } });
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-liveagent-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    // No API_KEY: the server is open and acts as one person, whose runners these are (round 45).
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
 }, 60_000);

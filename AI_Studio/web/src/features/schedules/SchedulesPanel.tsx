@@ -69,7 +69,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                         </div>
                     ) : runnersOnly && data.schedules.length > 0 ? (
                         <p className="t-meta" style={{ padding: "12px 20px 0" }} data-testid="schedules-fire">
-                            Schedules start their runs on time. Each run goes to a runner of this project that is online then, or to a computer of the person who made the schedule. When none is online, the schedule says so below.
+                            Schedules start their runs on time. Each run goes to the runner of the person who made the schedule, so that computer needs to be on then. When it is off, the run waits a while, then fails and says so below.
                         </p>
                     ) : null}
                     {data.schedules.length === 0 && !adding ? (

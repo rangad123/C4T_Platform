@@ -26,7 +26,7 @@ import { ROUTE_ALIASES, resolveAlias } from "../web/src/lib/aliases.js";
 import { LIBRARY_SECTIONS, RELEASE_SECTIONS, SETUP_SECTIONS, routes } from "../web/src/lib/router.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
-const PORT = 6450;
+const PORT = 8786;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 let dataDir = "";
@@ -43,7 +43,6 @@ let caseId = "";
 let requirementId = "";
 let agentRunId = "";
 let suiteId = "";
-let runnerId = "";
 const consoleErrors: string[] = [];
 
 const api = async (method: string, url: string, payload?: unknown) => {
@@ -59,7 +58,7 @@ beforeAll(async () => {
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
 
-    shop = seedProject(platform, "Atlas shop", "http://127.0.0.1:6459");
+    shop = seedProject(platform, "Atlas shop", "http://127.0.0.1:8787");
     for (const k of ["alpha", "beta", "gamma"]) addTest(platform, shop, k);
     await seedRun(platform, shop, { alpha: "pass", beta: "pass", gamma: "fail" }, { daysAgo: 1 });
     // A project with nothing in it: every place must still say what to do.
@@ -73,11 +72,10 @@ beforeAll(async () => {
     // One written test case, so the link that opens one case has something to open (round 38).
     caseId = (await api("POST", `/api/projects/${shop.projectId}/manual-cases`, { title: "Check the printed receipt", steps: [{ action: "Print the receipt", expected: "It shows the order number" }] })).body.id;
     const agentRuns = new AgentRunStore(platform.sql);
-    const agentRun = await agentRuns.create({ projectId: shop.projectId, objective: "A shopper can open the shop", startAddress: "http://127.0.0.1:6459/", limits: { maxSteps: 5, maxMinutes: 1, maxTokens: 1_000, approvalSeconds: 60 }, startedBy: { id: null, name: "Test" } });
+    const agentRun = await agentRuns.create({ projectId: shop.projectId, objective: "A shopper can open the shop", startAddress: "http://127.0.0.1:8787/", limits: { maxSteps: 5, maxMinutes: 1, maxTokens: 1_000, approvalSeconds: 60 }, startedBy: { id: null, name: "Test" } });
     await agentRuns.finish(agentRun.id, { state: "finished", verdict: "inconclusive", reasoning: "Nothing was checked." });
     agentRunId = agentRun.id;
     suiteId = (await api("POST", `/api/projects/${shop.projectId}/test-suites`, { name: "Checkout suite" })).body.id;
-    runnerId = (await api("POST", "/api/runners", { name: "Lab laptop" })).body.runner.id;
 
     browser = await chromium.launch();
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -345,17 +343,11 @@ describe("the project's places, in the order of the testing lifecycle", () => {
         }
     });
 
-    it("a project's runners (on the Runners page since round 37): connected runners first, Add a runner is one click away, and the folder way is tucked under Advanced", async () => {
+    it("a project's runners (round 45): the old link opens Your runner in Settings, with no project sections", async () => {
         await visit(routes.runners(P()));
-        await pwExpect(page.getByRole("heading", { name: "Runners for Atlas shop" })).toBeVisible();
+        await pwExpect(page.getByTestId("your-runner")).toBeVisible();
+        await pwExpect(page.getByRole("heading", { name: "Your runner", exact: true })).toBeVisible();
         await pwExpect(page.getByRole("navigation", { name: "Project sections" })).toHaveCount(0);
-        const order = await page.locator(".content h2, .content summary .t-section").allTextContents();
-        expect(order.indexOf("Connected runners")).toBeGreaterThanOrEqual(0);
-        expect(order.indexOf("Connected runners")).toBeLessThan(order.indexOf("Advanced: start a runner from the project folder"));
-        // The guided panel opens on request, the old steps stay closed.
-        await pwExpect(page.getByRole("button", { name: "Add a runner", exact: true })).toBeVisible();
-        await pwExpect(page.locator("details.ag-add")).not.toHaveAttribute("open", "");
-        await pwExpect(page.getByText("Nothing runs until one of them is online.", { exact: false })).toBeVisible();
         await shot("setup-light-1280");
     });
 
@@ -392,8 +384,8 @@ describe("sidebar and the Projects page", () => {
         const side = page.getByRole("complementary", { name: "Main navigation" });
         await pwExpect(side.getByRole("link", { name: "Security assessment", exact: true })).toHaveCount(0);
         expect(await side.locator(".nav-label").allTextContents()).toEqual(["Workspace", "Operations", "System"]);
-        expect(await side.locator("a.nav-item").allTextContents()).toEqual(["Dashboard", "Projects", "Agents", "Test development", "Reusable libraries", "Runners", "Integrations", "Settings"]);
-        expect(await side.locator("a.nav-item").evaluateAll((els) => els.map((e) => e.getAttribute("href")))).toEqual([routes.dashboard, routes.home, routes.agents, routes.develop, routes.libraries, routes.allRunners, routes.integrations, routes.settings]);
+        expect(await side.locator("a.nav-item").allTextContents()).toEqual(["Dashboard", "Projects", "Agents", "Test development", "Reusable libraries", "Integrations", "Settings"]);
+        expect(await side.locator("a.nav-item").evaluateAll((els) => els.map((e) => e.getAttribute("href")))).toEqual([routes.dashboard, routes.home, routes.agents, routes.develop, routes.libraries, routes.integrations, routes.settings]);
         await pwExpect(side.getByRole("button", { name: /Help/ })).toBeVisible();
         await pwExpect(side.getByRole("link", { name: /New project/ })).toHaveCount(0);
         const add = page.locator(".page-head").getByRole("link", { name: "New project", exact: true });
@@ -411,7 +403,7 @@ describe("sidebar and the Projects page", () => {
 
     it("each global place opens with its own title, and the open one is marked in the sidebar", async () => {
         const side = page.getByRole("complementary", { name: "Main navigation" });
-        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.agents, "Agents", "Agents"], [routes.develop, "Test development", "Test development"], [routes.libraries, "Reusable libraries", "Reusable libraries"], [routes.projectFolders, "Project folders", "Projects"], [routes.allRunners, "Runners", "Runners"], [routes.settings, "Settings", "Settings"]] as const) {
+        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.agents, "Agents", "Agents"], [routes.develop, "Test development", "Test development"], [routes.libraries, "Reusable libraries", "Reusable libraries"], [routes.projectFolders, "Project folders", "Projects"], [routes.allRunners, "Settings", "Settings"], [routes.settings, "Settings", "Settings"]] as const) {
             await visit(h);
             await pwExpect(page.locator("h1"), h).toHaveText(title);
             await pwExpect(side.locator('a.nav-item[aria-current="page"]'), h).toHaveText(nav);
@@ -422,13 +414,11 @@ describe("sidebar and the Projects page", () => {
         await pwExpect(page.getByTestId("profile-account")).toBeVisible();
     });
 
-    it("the emulator panel moved from Settings to Runners, as Mobile tooling on this computer", async () => {
-        await visit(routes.allRunners);
+    it("the emulator panel is in Settings, as Mobile tooling on this computer (round 45: no Runners page)", async () => {
+        await visit(routes.settings);
         const tooling = page.getByTestId("mobile-tooling");
         await pwExpect(tooling.getByRole("heading", { name: "Mobile tooling on this computer", exact: true })).toBeVisible();
-        await visit(routes.settings);
         await pwExpect(page.getByRole("heading", { name: "Mobile testing", exact: true })).toHaveCount(0);
-        await pwExpect(page.getByTestId("mobile-tooling")).toHaveCount(0);
     });
 
     it("the Projects page still offers New project with only one project, and the empty welcome page is the new-project page", async () => {
@@ -563,7 +553,7 @@ describe("old links keep working", () => {
         // Single pages of the rounds before 16.
         ["schedule", at("schedule"), at("runs?section=schedules"), "Schedules"],
         ["schedule with a run", at("schedule?run=r1"), at("runs?section=schedules&run=r1"), "Schedules"],
-        ["runners", at("runners"), () => `#/runners?project=${P()}`],
+        ["runners", at("runners"), () => "#/settings#runner"],
         ["objects", at("objects"), at("scripts?section=elements"), "Shared elements"],
         ["blocks", at("blocks"), at("scripts?section=steps"), "Reusable steps"],
         ["blocks to edit", at("blocks?edit=Sign%20in"), at("scripts?section=steps&edit=Sign+in"), "Reusable steps"],
@@ -573,10 +563,10 @@ describe("old links keep working", () => {
         ["manual cases", at("manual-cases"), at("tests?section=manual"), "Manual"],
         ["compliance", at("compliance"), at("runs?section=compliance"), "Compliance"],
         // The places of rounds 16 to 24: Setup became Settings, Library and Release were split up (round 25).
-        // Round 37: the project's runners moved to the Runners page, so the bare Setup link opens Settings.
+        // Round 45: a project's runners became each person's own runner, in Settings; the bare Setup link opens the project's Settings.
         ["setup", at("setup"), at("settings"), "General"],
-        ["setup > runners", at("setup?section=runners"), () => `#/runners?project=${P()}`],
-        ["settings > runners", at("settings?section=runners"), () => `#/runners?project=${P()}`],
+        ["setup > runners", at("setup?section=runners"), () => "#/settings#runner"],
+        ["settings > runners", at("settings?section=runners"), () => "#/settings#runner"],
         ...(["environments", "frameworks", "mobile", "alerts", "issues", "storage"] as const).map((k): [string, () => string, () => string, string?] => [`setup > ${k}`, at(`setup?section=${k}`), at(`settings?section=${k}`), SECTION_NAME[k]]),
         ["setup with an unknown section", at("setup?section=nothing"), at("settings"), "General"],
         ["setup keeps another query (the welcome page's start=phone)", at("setup?section=mobile&start=phone"), at("settings?section=mobile&start=phone"), "Mobile app"],
@@ -604,7 +594,7 @@ describe("old links keep working", () => {
     it("the old route helpers return the new homes directly, not an old link that redirects again", () => {
         const p = "p1";
         expect(routes.setup(p)).toBe("#/projects/p1/settings");
-        for (const k of SETUP_SECTIONS) expect(routes.setup(p, k), k).toBe(k === "runners" ? "#/runners?project=p1" : `#/projects/p1/settings?section=${k}`);
+        for (const k of SETUP_SECTIONS) expect(routes.setup(p, k), k).toBe(k === "runners" ? "#/settings#runner" : `#/projects/p1/settings?section=${k}`);
         expect(routes.library(p)).toBe("#/projects/p1/scripts?section=steps");
         expect(routes.library(p, "elements")).toBe("#/projects/p1/scripts?section=elements");
         expect(routes.library(p, "helpers")).toBe("#/projects/p1/scripts?section=helpers");
@@ -617,7 +607,7 @@ describe("old links keep working", () => {
         expect(routes.releases(p)).toBe("#/projects/p1/runs?section=releases");
         expect(routes.compliance(p)).toBe("#/projects/p1/runs?section=compliance");
         expect(routes.manualCases(p)).toBe("#/projects/p1/tests?section=manual");
-        expect(routes.runners(p)).toBe("#/runners?project=p1");
+        expect(routes.runners(p)).toBe("#/settings#runner");
         // No helper of `routes` builds a link that the alias table would move again.
         const sample = (k: string, f: unknown): string[] => (typeof f === "string" ? [f] : k === "writeCode" ? [routes.writeCode(p, { title: "x", kind: "web" })] : k === "guideTopic" ? [routes.guideTopic("x")] : [(f as (a: string, b?: string) => string)(p), (f as (a: string, b: string) => string)(p, "x")]);
         // Round 37: `routes.folders` is kept on purpose as the old link of the Folders place; it lands on Reusable libraries.
@@ -635,16 +625,16 @@ describe("old links keep working", () => {
         expect(ROUTE_ALIASES.map((a) => a.old).sort()).toEqual(["blocks", "compliance", "helpers", "manual-cases", "objects", "releases", "runners", "schedule"]);
         for (const a of ROUTE_ALIASES) {
             const to = a.to("p1", a.extra ? "x" : undefined, new URLSearchParams());
-            const [path, qs] = to.replace(/^#\//, "").split("?");
+            const [path, qs] = to.replace(/^#\//, "").split("#")[0]!.split("?");
             expect(resolveAlias(path!.split("/"), new URLSearchParams(qs ?? "")), `${a.old} must not redirect again`).toBeNull();
         }
         // The three retired places: every section of each lands on a current place, which does not redirect again.
         for (const [place, list] of [["setup", SETUP_SECTIONS], ["library", LIBRARY_SECTIONS], ["release", RELEASE_SECTIONS]] as const) {
             for (const k of [undefined, ...list]) {
                 const to = resolveAlias(["projects", "p1", place], new URLSearchParams(k ? { section: k } : {}));
-                // Round 37: the old Setup > Runners lands on the Runners page, open on the project.
-                expect(to, `${place} ${k}`).toMatch(place === "setup" && k === "runners" ? /^#\/runners\?project=p1$/ : /^#\/projects\/p1\/(tests|scripts|runs|settings)(\?|$)/);
-                const [path, qs] = to!.replace(/^#\//, "").split("?");
+                // Round 45: the old Setup > Runners lands on Your runner in Settings.
+                expect(to, `${place} ${k}`).toMatch(place === "setup" && k === "runners" ? /^#\/settings#runner$/ : /^#\/projects\/p1\/(tests|scripts|runs|settings)(\?|$)/);
+                const [path, qs] = to!.replace(/^#\//, "").split("#")[0]!.split("?");
                 expect(resolveAlias(path!.split("/"), new URLSearchParams(qs ?? "")), `${place} ${k} must not redirect again`).toBeNull();
             }
         }
@@ -669,7 +659,7 @@ describe("every route builder opens a page without an error", () => {
         const testId = [...shop.tests.values()][0]!;
         const samples: Record<string, string[]> = {
             home: ["#/"],
-            newProject: [routes.newProject(), routes.newProject({ project: P() }), routes.newProject({ url: "http://127.0.0.1:6459" })],
+            newProject: [routes.newProject(), routes.newProject({ project: P() }), routes.newProject({ url: "http://127.0.0.1:8787" })],
             project: [routes.project(P())],
             tests: [routes.tests(P())],
             newTest: [routes.newTest(P(), "describe"), routes.newTest(P(), "build")],
@@ -707,7 +697,7 @@ describe("every route builder opens a page without an error", () => {
             develop: [routes.develop],
             createProject: [routes.createProject],
             allRunners: [routes.allRunners],
-            runner: [routes.runner(runnerId)],
+            runner: [routes.runner("r1")],
             folders: [routes.folders],
             integrations: [routes.integrations],
             libraries: [routes.libraries],

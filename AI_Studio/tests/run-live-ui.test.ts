@@ -6,13 +6,13 @@
  * final report. A protocol-1 runner (text lines only) is said to be one. Axe in light and dark, no sideways scroll at phone width.
  *
  * The runner is a FAKE AGENT speaking the real protocol (hello, poll, accept, events, file upload, heartbeat, result: protocol 2,
- * and protocol 1 for the old one); the platform, its worker, the job pipeline and the stream are real. Only the list of runner
- * choices is stood in for with a browser route, so the runner is "yours" whoever the open platform takes the viewer to be.
+ * and protocol 1 for the old one); the platform, its worker, the job pipeline and the stream are real. The runner is the open
+ * server's one person's own runner, so GET /api/me/runner names it and the run page marks it "Your computer".
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/run-live-ui.test.ts
- * Ports: platform 8140, the app under test 8141.
+ * Ports: platform 8784, the app under test 8785.
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -25,14 +25,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
+import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { defaultCaps, failedRun, FakeAgent, passedRun, viaFetch } from "./fixtures/fake-agent.js";
 
-const PORT = 8140;
-const APP_PORT = 8141;
+const PORT = 8784;
+const APP_PORT = 8785;
 const BASE = `http://127.0.0.1:${PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 
@@ -136,11 +137,12 @@ beforeAll(async () => {
     addTest(1, "Sign in");
     addTest(2, "Checkout");
     addTest(3, "Profile");
-    const made = await call("POST", `/api/projects/${projectId}/agent-tokens`, { label: "maya-laptop" });
-    expect(made.status, JSON.stringify(made.body)).toBe(201);
-    runnerId = made.body.token.id;
-    secret = made.body.secret;
-    maya = new LiveAgent(viaFetch(BASE), made.body.secret, { name: "maya-laptop", capabilities: defaultCaps({ browsers: ["chromium"] }) });
+    // The open server acts as one person; this is that person's own runner (round 45), allowed to test the local stand-in app.
+    const made = getAgentServices(platform).store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: "maya-laptop", createdBy: OPEN_OWNER_ID });
+    getAgentServices(platform).store.setTokenSwitches(made.record.id, { allowPrivateTargets: true });
+    runnerId = made.record.id;
+    secret = made.secret;
+    maya = new LiveAgent(viaFetch(BASE), made.secret, { name: "maya-laptop", capabilities: defaultCaps({ browsers: ["chromium"] }) });
     const hi = await maya.hello({ protocols: [1, 2] });
     expect(hi.status, hi.text).toBe(200);
     expect(hi.json.protocol).toBe(2);
@@ -158,10 +160,6 @@ beforeAll(async () => {
         if (m.type() === "error" && !/Failed to load resource/.test(m.text())) consoleErrors.push(m.text());
     });
     page.on("pageerror", (e) => consoleErrors.push(String(e)));
-    // Which runners this viewer may choose (GET /runner-choices): stood in for, so the runner is theirs.
-    await page.route("**/api/projects/*/runner-choices", (route) =>
-        route.fulfill({ json: { runners: [{ id: runnerId, name: "maya-laptop", kind: "personal", mine: true, online: true, busy: true, machine: { os: "linux", arch: "x64" }, canRunWeb: true, canRunMobile: false, codeScripts: true, problem: null }], allowPersonal: true, defaultRunnerId: null } }),
-    );
 }, 180_000);
 
 afterAll(async () => {
@@ -211,7 +209,7 @@ describe("a run on a runner, live", () => {
         await visit(`#/projects/${projectId}/runs/${jobId}`);
         await pwExpect(panel().getByRole("heading", { name: "Progress on the runner" })).toBeVisible({ timeout: 20_000 });
         await pwExpect(panel().getByText("Your computer", { exact: true })).toBeVisible();
-        await pwExpect(panel().getByTestId("run-live-runner")).toHaveAttribute("href", `#/runners/${runnerId}`);
+        await pwExpect(panel().getByTestId("run-live-runner")).toHaveAttribute("href", "#/settings#runner");
         await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("maya-laptop accepted the run.");
         // Nothing below is a page load: the same document follows the run.
         await page.evaluate(() => ((window as unknown as { __same: number }).__same = 1));

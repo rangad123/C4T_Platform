@@ -8,6 +8,7 @@ import { normalizeUrl } from "../../lib/url";
 import { viewerIsRemote } from "../../lib/viewer";
 import { usePolled, type RunnerChoice } from "../agents/agents";
 import type { Environment } from "../environments/environments";
+import { RUNNER_SETTINGS_HREF } from "../runners/my-runner";
 import { RecError, activeSessionId, agentRecordProblem, errorText, recApi, rememberSession, rememberedSession, type RecorderAgent, type Recording } from "./recorder";
 
 /** The first screen: where to start, whether to show the window, and a warning about typing real data. */
@@ -23,7 +24,7 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
     const [confirmProduction, setConfirmProduction] = useState(false);
     const [urlError, setUrlError] = useState("");
     const [busy, setBusy] = useState(false);
-    const [problem, setProblem] = useState<{ tone: "warning" | "danger"; title?: string; text: string } | null>(null);
+    const [problem, setProblem] = useState<{ tone: "warning" | "danger"; title?: string; text: string; link?: string } | null>(null);
     const [active, setActive] = useState<{ id?: string; text: string } | null>(null);
 
     // Prefill with the project's own address, unless the person already typed or came back with one.
@@ -77,7 +78,11 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
             rememberSession(projectId, rec.id);
             onStarted(rec);
         } catch (err) {
-            if (err instanceof RecError && err.status === 409) {
+            const details = err instanceof RecError ? (err.body?.details as { code?: unknown; link?: unknown } | undefined) : undefined;
+            if (err instanceof RecError && err.status === 409 && typeof details?.code === "string" && details.code.startsWith("RUNNER_")) {
+                // The person's runner is not set up, is offline, or may not record this: the server's sentence, with a link to Settings.
+                setProblem({ tone: "warning", text: err.message, link: typeof details.link === "string" && details.link.startsWith("#/") ? details.link : RUNNER_SETTINGS_HREF });
+            } else if (err instanceof RecError && err.status === 409) {
                 const id = activeSessionId(err) ?? rememberedSession(projectId);
                 setActive({ id, text: id ? err.message : `${err.message} It was not started from this browser tab, so we can’t open it from here. Stop it on the computer that runs the platform, then start again.` });
             } else if (err instanceof RecError && err.status === 422) {
@@ -115,7 +120,7 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
                 </Callout>
             )}
             {problem && (
-                <Callout tone={problem.tone} title={problem.title}>
+                <Callout tone={problem.tone} title={problem.title} actions={problem.link ? <a href={problem.link}>Open Your runner in Settings</a> : undefined}>
                     {problem.text}
                 </Callout>
             )}
@@ -125,13 +130,13 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
                     tone="warning"
                     title="This opens the browser on the platform’s computer, not on yours"
                     actions={
-                        <Button type="button" size="sm" onClick={() => (location.hash = routes.runners(projectId))}>
-                            Add a runner on your computer
+                        <Button type="button" size="sm" onClick={() => (location.hash = routes.allRunners)}>
+                            Set up your runner
                         </Button>
                     }
                 >
                     You are using the platform from another computer. A recording window would appear on the computer that runs the platform, where you cannot click in it.
-                    {offered ? " Choose A runner under Record on, to record on a computer that has one." : " To record on your own computer, add a runner on it, then come back and choose it here."}
+                    {offered ? " Choose A runner under Record on, to record on a computer that has one." : " To record on your own computer, set up your runner in Settings, then come back and choose it here."}
                 </Callout>
             )}
 

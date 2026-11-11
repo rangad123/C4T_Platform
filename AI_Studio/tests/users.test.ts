@@ -195,7 +195,7 @@ describe("a platform with an access key and people", () => {
         // Editor: works on tests and projects, not on people or runner tokens.
         expect((await eve.call("PUT", `/api/projects/${projectId}/helpers/util`, { content: "export const greet = () => 'hi';\n" })).status).toBeLessThan(300);
         expect((await eve.call("GET", "/api/users")).status).toBe(403);
-        expect((await eve.call("POST", `/api/projects/${projectId}/agent-tokens`, { name: "laptop" })).status).toBe(403);
+        expect((await eve.call("GET", "/api/admin/runners")).status).toBe(403);
         expect((await eve.call("GET", "/api/activity")).status).toBe(403);
         // The helper's audit row says who saved it.
         const audit = platform.db.all("SELECT actor FROM custom_audit WHERE project_id = ?", projectId);

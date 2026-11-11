@@ -9,7 +9,9 @@ import { describeApiError, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
 import type { Environment } from "../environments/environments";
 import { PRODUCTION_WARNING } from "../environments/environments";
-import { ADD_THIS_COMPUTER_HREF, NO_RUNNER_ONLINE, NO_RUNNER_PERSONAL_HINT, NO_RUNNER_TEAM_HINT, useRunReadiness } from "../runs/runs-here";
+import { NO_RUNNER_TITLE, RUNNER_SETTINGS_HREF, useRunReadiness } from "../runs/runs-here";
+import { refusalLink } from "../runners/my-runner";
+import { RunStartError } from "../runners/RunnerRefusal";
 import { VARIANT_UI, variantLabel, type VariantId } from "../variants/variants";
 import { moved, runResult, settingsSentence, type Suite, type SuiteDetailData, type SuiteSettings, type SuiteTest } from "./suites";
 
@@ -65,24 +67,28 @@ function SuiteHeader({ projectId, d, canWrite, canRunPerm, onChanged }: { projec
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [busy, setBusy] = useState<"run" | "copy" | "delete" | null>(null);
     const [error, setError] = useState("");
+    // A run refused because of the person's runner: the server's sentence, with a link to Settings.
+    const [runError, setRunError] = useState<unknown>(null);
     const [started, setStarted] = useState<{ jobId: string; testCount: number; skipped: Array<{ testId: string; reason: string }> } | null>(null);
 
-    // Runners mode: a suite's run goes to a runner, so Run waits until one this person may use here is online (the server checks again).
+    // Runners mode: a suite's run goes to the person's own runner, so Run waits until it is set up and online (the server checks again).
     const ready = useRunReadiness(projectId);
     const runnersOnly = ready.mode === "runners";
     const noRunner = runnersOnly && d.canRun.ok && !ready.loading && !ready.ready;
-    const runBlock = !d.canRun.ok ? (runnersOnly ? d.canRun.reason ?? "Runs can’t start right now." : "Tests do not run on this server.") : !canRunPerm ? "Running tests needs permission to run tests in this project." : d.tests.length === 0 ? "Add tests to the suite first." : noRunner ? NO_RUNNER_ONLINE : runnersOnly && ready.loading ? "Looking for runners…" : null;
+    const runBlock = !d.canRun.ok ? (runnersOnly ? d.canRun.reason ?? "Runs can’t start right now." : "Tests do not run on this server.") : !canRunPerm ? "Running tests needs permission to run tests in this project." : d.tests.length === 0 ? "Add tests to the suite first." : noRunner ? ready.reason : runnersOnly && ready.loading ? "Looking for your runner…" : null;
 
     async function run() {
         setBusy("run");
         setError("");
+        setRunError(null);
         setStarted(null);
         try {
             const r = await api<{ jobId: string; testCount: number; skipped: Array<{ testId: string; reason: string }> }>(`${base}/run`, { method: "POST", body: {} });
             setStarted(r);
             await onChanged();
         } catch (e) {
-            setError(describeApiError(e));
+            if (refusalLink(e)) setRunError(e);
+            else setError(describeApiError(e));
         } finally {
             setBusy(null);
         }
@@ -154,8 +160,8 @@ function SuiteHeader({ projectId, d, canWrite, canRunPerm, onChanged }: { projec
                 )}
                 {noRunner && canRunPerm && d.tests.length > 0 && (
                     <div data-testid="suite-no-runner">
-                        <Callout tone="warning" title="No runner you can use is online" actions={<>{ready.choices?.allowPersonal && <a href={ADD_THIS_COMPUTER_HREF}>Add this computer</a>} <a href={routes.runners(projectId)}>See this project’s runners</a></>}>
-                            {NO_RUNNER_ONLINE} {ready.choices?.allowPersonal ? NO_RUNNER_PERSONAL_HINT : NO_RUNNER_TEAM_HINT}
+                        <Callout tone="warning" title={NO_RUNNER_TITLE} actions={<a href={RUNNER_SETTINGS_HREF}>Open Your runner in Settings</a>}>
+                            {ready.reason}
                         </Callout>
                     </div>
                 )}
@@ -172,6 +178,7 @@ function SuiteHeader({ projectId, d, canWrite, canRunPerm, onChanged }: { projec
                     </Callout>
                 )}
                 {error && <Callout tone="danger">{error}</Callout>}
+                {runError !== null && <RunStartError error={runError} />}
             </div>
         </section>
     );
@@ -521,7 +528,7 @@ function SettingsCard({ projectId, d, canWrite, onChanged }: { projectId: string
                 </fieldset>
                 <p className="t-meta">
                     {d.where ? `Where tests run: ${d.where} ` : ""}
-                    <a href={routes.runners(projectId)}>Change where tests run</a> on the Runners page; it applies to every run of the project.
+                    Every run goes to the runner of the person who starts it: <a href={RUNNER_SETTINGS_HREF}>Your runner in Settings</a>.
                 </p>
                 {error && <Callout tone="danger">{error}</Callout>}
                 {saved && !changed && <Callout tone="success">Saved. The next run uses these settings.</Callout>}

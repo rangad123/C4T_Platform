@@ -2,15 +2,18 @@
 //   node scripts/smoke-runner.mjs [--kit files|installer|complete] [--port 6950] [--no-node-on-path] [--out <dir>] ...
 //   node scripts/smoke-runner.mjs --help
 //
-// 1. Starts the sample app (examples/sample-app) and the platform (src/main.ts) on a new temporary data folder with a new access key.
+// 1. Starts the sample app (examples/sample-app) and the platform (src/main.ts, EXECUTION_MODE=runners: it never runs a test itself) on a
+//    new temporary data folder with a new access key, and signs up its first person (an owner) the way the setup page does.
 // 2. Creates a project with one web test and one API test, imported through the API (no AI, no model key).
-// 3. Downloads a runner through the platform's own route (plain files, the installer, or the complete download), unpacks it with the
-//    computer's own unzip tool (Windows' tar.exe, macOS' ditto, unzip on Linux) into a folder with a space and brackets in its name, and
-//    starts it the way the README says (start-runner.cmd, sh start-runner.sh, or the installer's --silent switch).
-// 4. Waits for the runner to be online, sends the project's runs to it, runs both tests and checks they passed ON THE RUNNER.
+// 3. Downloads that person's runner the way Settings, Your runner does (POST /api/me/runner/download with this computer's system and
+//    processor: the installer on Windows and a Mac, the plain files on Linux, with its own Node.js when the platform built it), unpacks it
+//    with the computer's own unzip tool (Windows' tar.exe, macOS' ditto, unzip on Linux) into a folder with a space and brackets in its
+//    name, and starts it the way the README says (the installer's --silent switch, or start-runner.cmd / sh start-runner.sh).
+// 4. Waits for the person's runner to be connected, runs both tests as that person and checks they passed ON THE RUNNER.
 // 5. With --lifecycle (installer only): stops the runner the way a person does (Windows: --stop; Mac: the window's Ctrl-C), starts it
 //    again (it now uses the credential it saved, the one-time code is used up) and waits for it to be online again.
-// 6. Revokes the runner's access and checks the runner ends with the plain "no longer accepts this runner" message. With --lifecycle,
+// 6. Removes the computer (Settings, Your runner, Remove this computer) and checks the runner ends with the plain "no longer accepts this
+//    runner" message. With --lifecycle,
 //    uninstalls with the installer's own --uninstall and checks that nothing is left: no install folder, no sign-in start.
 // 6. Stops what it started: only its own child processes, by the handles it holds (a Windows process tree by the id of the child it
 //    started, a Unix process group it created). Never anything by name or by port. Deletes its temporary folder.
@@ -32,11 +35,13 @@ export const DEFAULT_PORT = 6950;
 /** Kept per child process (the end of what it printed); older output is dropped so a chatty run cannot fill the memory. */
 export const MAX_OUTPUT_CHARS = 4 * 1024 * 1024;
 
-export const HELP = `Runner smoke check: start the platform and a sample app, download a runner, start it like a tester, run a web and an API test on it.
+export const HELP = `Runner smoke check: start the platform and a sample app, download your runner from Settings, start it like a person, run a web and an API test on it.
 
   node scripts/smoke-runner.mjs [options]
 
-  --kit files|installer|complete   which download to use (default files). complete is skipped plainly when this platform has not built it.
+  --kit files|installer|complete   how to start this computer's one download (default files): files with its start script, installer with
+                                   the installer (Windows and Mac), complete with the start script and the Node.js inside the download.
+                                   Skipped plainly when the download cannot be started that way here.
   --port <n>                       the platform's port (default ${DEFAULT_PORT}); the sample app uses the next one
   --no-node-on-path                start the runner with no Node.js on the PATH (only with --kit complete)
   --link-node-modules              use this checkout's node_modules instead of npm install (only with --kit files; no internet needed)
@@ -45,7 +50,6 @@ export const HELP = `Runner smoke check: start the platform and a sample app, do
   --installer-dir <dir>            an installer build somewhere else (RUNNER_INSTALLER_DIR)
   --online-timeout <seconds>       how long the runner may take to come online (default 900, or 180 with --link-node-modules)
   --test-timeout <seconds>         how long one test may take (default 300)
-  --name <text>                    the runner's name (default "Smoke runner")
   --out <dir>                      where the report and logs go (default .scratch/smoke-runner/<time>)
   --lifecycle                      (installer only) also stop, start again, uninstall, and check nothing is left
   --keep                           keep the temporary folder (its path is printed)
@@ -66,7 +70,7 @@ const intArg = (name, raw, min, max) => {
 
 /** Reads the command line. Throws UsageError with a plain sentence for anything it does not understand. */
 export function parseArgs(argv) {
-    const o = { kit: "files", port: DEFAULT_PORT, noNodeOnPath: false, linkNodeModules: false, buildRunner: false, keep: false, help: false, name: "Smoke runner", testTimeout: 300 };
+    const o = { kit: "files", port: DEFAULT_PORT, noNodeOnPath: false, linkNodeModules: false, buildRunner: false, keep: false, help: false, testTimeout: 300 };
     const value = (i, flag) => {
         const v = argv[i + 1];
         if (v === undefined || v.startsWith("--")) throw new UsageError(`${flag} needs a value.`);
@@ -88,14 +92,6 @@ export function parseArgs(argv) {
             case "--test-timeout":
                 o.testTimeout = intArg("--test-timeout", value(i++, a), 10, 3600);
                 break;
-            case "--name": {
-                const n = value(i++, a).trim();
-                // The platform's own rule for a runner name (src/platform/runner-kit.ts KitRequest).
-                // eslint-disable-next-line no-control-regex
-                if (!n || n.length > 60 || /[\u0000-\u001f\u007f/\\:*?"<>|]/.test(n)) throw new UsageError("--name must be 1 to 60 characters, without / \\ : * ? \" < > |.");
-                o.name = n;
-                break;
-            }
             case "--out":
                 o.out = path.resolve(value(i++, a));
                 break;
@@ -160,28 +156,22 @@ export function pathWithoutNode(value, { platform = process.platform, exists = f
     return { value: kept.join(sep), removed, essential };
 }
 
-/** What the platform is asked for. `complete`, `arch` and (Mac or Linux) `os` are the complete download's fields (runner-kit-complete.ts). */
-export function kitRequestBody(kit, target, name) {
-    if (kit === "complete") return { name, platform: target.kitPlatform, complete: true, arch: target.arch, ...(target.kitPlatform === "unix" ? { os: target.system } : {}) };
-    return { name, platform: target.kitPlatform, kind: kit === "installer" ? "installer" : "files" };
+/** What the platform is asked for (round 45): this computer's system and processor, nothing else. The kit only decides how it is started. */
+export function kitRequestBody(target) {
+    return { os: target.system, arch: target.arch };
 }
 
 /**
- * Decides what a download answer means: go on, a plain skip (the platform does not offer this download, or did not build it), or a failure.
- * `answer` is { status, kind (x-runner-kit-kind), note (x-runner-kit-note), message (the server's own sentence) }.
+ * Decides what a download answer means: go on, a plain skip (this download cannot be started the asked way here), or a failure.
+ * `answer` is { status, kind (x-runner-kit-kind), note (x-runner-kit-note), target (x-runner-kit-target), message (the server's own sentence) }.
  */
 export function interpretKitAnswer(kit, target, answer) {
     const { status, kind, note, message = "" } = answer;
-    if (kit === "installer" && target.system === "linux") return { skip: "There is no installer for Linux (the Mac app is for macOS). Use --kit files or --kit complete." };
-    if (kit === "complete") {
-        // Before the complete download existed, the route refused the unknown fields; that is "not offered here", not a failure.
-        // (Only that answer: any other 400 is a wrong request and fails.)
-        if (status === 400 && /unrecognized key/i.test(message)) return { skip: `This platform does not offer the complete download yet (it answered: ${message})` };
-        if (status === 503) return { skip: `The complete download for ${target.id} has not been built on this platform: ${message || "no reason given"}` };
-    }
-    if (status === 503 && kit !== "complete") return { fail: `The platform has no runner download: ${message}` };
+    if (kit === "installer" && target.system === "linux") return { skip: "There is no installer for Linux (the Mac app is for macOS): the Linux download is the plain files. Use --kit files or --kit complete." };
+    if (status === 503) return { fail: `The platform has no runner download: ${message}` };
     if (status !== 200) return { fail: `The download was refused (${status}): ${message || "no reason given"}` };
     if (kit === "installer" && kind && kind !== "installer") return { skip: `This platform has no installer for ${target.label}, it sent plain files instead. ${note ?? ""}`.trim() };
+    if (kit === "complete" && !answer.target) return { skip: `The download for ${target.id} does not carry its own Node.js: the complete build for it was not made on this platform (npm run build:runner -- --complete --targets ${target.id}).` };
     return { ok: true };
 }
 
@@ -327,11 +317,12 @@ async function until(what, probe, ms, every = 1000) {
     }
 }
 
-function client(base, apiKey) {
+/** Requests as one caller: `auth` is the headers that say who (the access key, or a person's own API token). */
+function client(base, auth) {
     return async (method, url, body) => {
         const res = await fetch(`${base}${url}`, {
             method,
-            headers: { "x-api-key": apiKey, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+            headers: { ...auth, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
             body: body !== undefined ? JSON.stringify(body) : undefined,
             signal: AbortSignal.timeout(120_000),
         });
@@ -347,13 +338,39 @@ function client(base, apiKey) {
     };
 }
 
+/** The value of one cookie from a Set-Cookie answer. */
+const cookieOf = (headers, name) => {
+    const all = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [headers.get("set-cookie") ?? ""];
+    for (const c of all) {
+        const m = new RegExp(`(?:^|,\\s*)${name}=([^;]*)`).exec(c);
+        if (m) return m[1];
+    }
+    return undefined;
+};
+
+/**
+ * The first person on a new platform, the way the setup page makes them (the access key, then name, email and password), and their own
+ * API token for the rest of the check (made from the signed-in session, as the Settings page does). Returns the token.
+ */
+export async function signUpFirstOwner(base, apiKey, password) {
+    const setup = await fetch(`${base}/api/auth/setup`, { method: "POST", headers: { "x-api-key": apiKey, "content-type": "application/json" }, body: JSON.stringify({ email: "smoke-owner@example.com", name: "Smoke owner", password }), signal: AbortSignal.timeout(60_000) });
+    if (setup.status !== 201) throw new Error(`Could not sign up the first person (${setup.status}): ${(await setup.text()).slice(0, 300)}`);
+    const session = cookieOf(setup.headers, "aitp_session");
+    const csrf = cookieOf(setup.headers, "aitp_csrf");
+    if (!session || !csrf) throw new Error("Signing up did not start a session.");
+    const made = await fetch(`${base}/api/me/tokens`, { method: "POST", headers: { cookie: `aitp_session=${session}; aitp_csrf=${csrf}`, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify({ name: "Runner smoke check" }), signal: AbortSignal.timeout(60_000) });
+    const body = await made.json().catch(() => ({}));
+    if (made.status !== 201 || !body.token) throw new Error(`Could not make the person's API token (${made.status}): ${body.error ?? body.message ?? ""}`);
+    return body.token;
+}
+
 /** A complete download can be a few hundred MB: it is written to the file as it arrives, never held in memory. Larger than this is refused. */
 export const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 
-async function downloadKit(base, apiKey, projectId, body, file) {
-    const res = await fetch(`${base}/api/projects/${projectId}/runner-kits`, {
+async function downloadKit(base, auth, body, file) {
+    const res = await fetch(`${base}/api/me/runner/download`, {
         method: "POST",
-        headers: { "x-api-key": apiKey, "content-type": "application/json" },
+        headers: { ...auth, "content-type": "application/json" },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(900_000),
     });
@@ -392,6 +409,8 @@ export function platformEnv(base, s) {
         HOST: "127.0.0.1",
         PORT: String(s.port),
         PUBLIC_URL: `http://127.0.0.1:${s.port}`,
+        // The hosted platform's mode: tests run only on runners, so a test that passed here passed on the runner.
+        EXECUTION_MODE: "runners",
         LLM_PROVIDER: "anthropic",
         ANTHROPIC_API_KEY: "",
         OPENAI_API_KEY: "",
@@ -544,7 +563,8 @@ export async function runSmoke(opts, deps = {}) {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const outDir = opts.out ?? path.join(REPO, ".scratch", "smoke-runner", `${opts.kit}-${stamp}`);
     const apiKey = `smoke-${randomBytes(18).toString("hex")}`;
-    const secrets = [apiKey];
+    const password = `Smoke-${randomBytes(12).toString("hex")}-Pw`;
+    const secrets = [apiKey, password];
     const report = { tool: "smoke-runner", format: 1, verdict: "failed", kit: opts.kit, noNodeOnPath: opts.noNodeOnPath, linkNodeModules: opts.linkNodeModules, target, node: process.version, startedAt: new Date(started).toISOString(), steps: [], tests: [], notes: [], outDir };
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-smoke-"));
     const links = [];
@@ -584,7 +604,20 @@ export async function runSmoke(opts, deps = {}) {
             platform = await startPlatform({ children, port: opts.port, env, apiKey });
             return platform.base;
         });
-        const api = client(platform.base, apiKey);
+        let auth;
+        await step("Sign up the first person (an owner), as the setup page does", async () => {
+            const token = await signUpFirstOwner(platform.base, apiKey, password);
+            secrets.push(token);
+            auth = { authorization: `Bearer ${token}` };
+            return "with their own API token for the rest of the check";
+        });
+        // Everything from here on is that person: the download is theirs, and so are the runs (each run goes to its starter's runner).
+        const api = client(platform.base, auth);
+        /** The person's runner as Settings shows it (GET /api/me/runner), when it is connected. */
+        const myRunner = async () => {
+            const r = (await api("GET", "/api/me/runner")).json?.runner;
+            return r && (r.status === "online" || r.status === "busy") ? r : undefined;
+        };
 
         let projectId;
         let testIds = [];
@@ -601,17 +634,16 @@ export async function runSmoke(opts, deps = {}) {
         });
 
         let tokenId;
+        let runnerName;
         let zipFile;
         await step(`Download the runner (${KIT_WORDS[opts.kit]})`, async () => {
             const downloads = path.join(tmp, "Downloads");
             fs.mkdirSync(downloads, { recursive: true });
-            const res = await downloadKit(platform.base, apiKey, projectId, kitRequestBody(opts.kit, target, opts.name), path.join(downloads, "download.part"));
-            const decision = interpretKitAnswer(opts.kit, target, { status: res.status, kind: res.headers.get("x-runner-kit-kind") ?? undefined, note: res.headers.get("x-runner-kit-note") ?? undefined, message: res.message });
+            const res = await downloadKit(platform.base, auth, kitRequestBody(target), path.join(downloads, "download.part"));
+            const decision = interpretKitAnswer(opts.kit, target, { status: res.status, kind: res.headers.get("x-runner-kit-kind") ?? undefined, note: res.headers.get("x-runner-kit-note") ?? undefined, target: res.headers.get("x-runner-kit-target") ?? undefined, message: res.message });
             if (decision.skip) throw new Skip(decision.skip);
             if (decision.fail) throw new Error(decision.fail);
-            // A download from round 39 on holds a one-time code, and the runner's access is made when the runner trades it: then the access
-            // is found from the runner once it is online.
-            tokenId = res.headers.get("x-runner-token-id") ?? undefined;
+            // The download holds the person's one-time code; their runner is made when the runner trades it, and found once it is connected.
             const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "runner.zip";
             if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName)) throw new Error(`Unexpected file name ${fileName}`);
             zipFile = path.join(downloads, fileName);
@@ -633,6 +665,8 @@ export async function runSmoke(opts, deps = {}) {
                 const own = ["node.exe", path.join("bin", "node")].some((f) => fs.existsSync(path.join(kitDir, "node", f)));
                 if (!own) throw new Error("The complete download has no Node.js of its own (no node folder with node.exe or bin/node).");
             }
+            // Windows and a Mac get the installer; its start scripts are there only when the download carries its own Node.js.
+            if (opts.kit !== "installer" && !fs.existsSync(path.join(kitDir, target.system === "windows" ? "start-runner.cmd" : "start-runner.sh"))) throw new Skip(`The download for ${target.label} is the installer and has no start script here (the platform built no complete download for ${target.id}). Use --kit installer.`);
             if (opts.linkNodeModules) {
                 const link = path.join(kitDir, "node_modules");
                 fs.symlinkSync(path.join(REPO, "node_modules"), link, WIN ? "junction" : "dir");
@@ -664,18 +698,16 @@ export async function runSmoke(opts, deps = {}) {
             const t0 = Date.now();
             await until("the runner to be online", async () => {
                 if (!Children.running(runner)) throw new Error(`The runner stopped before it was online (code ${runner.code}${runner.error ? `, ${runner.error}` : ""}).\n${tail(runner.output)}`);
-                const list = await api("GET", `/api/projects/${projectId}/agents`);
-                return Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online);
+                return myRunner();
             }, opts.onlineTimeout * 1000, 2000).catch((e) => {
                 throw new Error(`${e.message}${Children.running(runner) ? `\nLast lines from the runner window:\n${tail(runner.output)}` : ""}`);
             });
             const nodeLine = /^.*(Using (the )?Node\.js[^\r\n]*)$/m.exec(runner.output)?.[1];
-            if (!tokenId) {
-                const list = await api("GET", `/api/projects/${projectId}/agents`);
-                tokenId = (Array.isArray(list.json) ? list.json.find((a) => a.name === opts.name && a.online) : undefined)?.tokenId;
-                if (!tokenId) throw new Error("The runner is online, but the platform did not say which access it uses (tokenId).");
-            }
-            return `after ${fmtMs(Date.now() - t0)}${nodeLine ? `; ${nodeLine.trim()}` : ""}`;
+            const mine = await myRunner();
+            tokenId = mine?.id;
+            runnerName = mine?.name;
+            if (!tokenId || !runnerName) throw new Error("The runner is connected, but Settings does not show it (GET /api/me/runner has no id or name).");
+            return `as "${runnerName}" after ${fmtMs(Date.now() - t0)}${nodeLine ? `; ${nodeLine.trim()}` : ""}`;
         });
 
         if (opts.kit === "complete") {
@@ -684,12 +716,6 @@ export async function runSmoke(opts, deps = {}) {
                 return undefined;
             });
         }
-
-        await step("Send the project's runs to the runner", async () => {
-            const r = await api("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" });
-            if (r.status !== 200) throw new Error(`The platform refused (${r.status}): ${r.message}`);
-            return undefined;
-        });
 
         for (let i = 0; i < testIds.length; i++) {
             const spec = specs[i];
@@ -706,7 +732,7 @@ export async function runSmoke(opts, deps = {}) {
                 const browser = b && typeof b === "object" ? `${b.name ?? "browser"} ${b.version ?? ""} (${b.source ?? "unknown source"})`.replace(/\s+/g, " ") : undefined;
                 const status = exec?.status ?? `no result (job ${job.status})`;
                 report.tests.push({ title: spec.title, kind: spec.kind, status, where, ...(browser ? { browser } : {}), jobStatus: job.status, ...(exec?.error ? { error: redact(String(exec.error).slice(0, 500), secrets) } : {}) });
-                if (job.ranOn?.kind !== "agent" || job.ranOn.name !== opts.name) throw new Error(`It ${where}, not on the runner "${opts.name}".`);
+                if (job.ranOn?.kind !== "agent" || job.ranOn.name !== runnerName) throw new Error(`It ${where}, not on the runner "${runnerName}".`);
                 if (status !== "passed") throw new Error(`It ended ${status}${exec?.error ? `: ${String(exec.error).slice(0, 300)}` : ""}.`);
                 return where;
             });
@@ -726,8 +752,7 @@ export async function runSmoke(opts, deps = {}) {
                 } else process.kill(-runner.child.pid, "SIGINT");
                 await Promise.race([runner.exited, sleep(60_000)]);
                 if (Children.running(runner)) throw new Error(`The runner was still running a minute after it was asked to stop.\n${tail(runner.output)}`);
-                const list = await api("GET", `/api/projects/${projectId}/agents`);
-                return `ended with code ${runner.code}${Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online) ? " (the platform still shows it online until its last poll times out)" : ""}`;
+                return `ended with code ${runner.code}${(await myRunner()) ? " (the platform still shows it online until its last poll times out)" : ""}`;
             });
             await step("Start it again (its saved credential, no new code)", async () => {
                 if (fs.existsSync(path.join(installDir, "app", "runner.enroll")) || fs.existsSync(path.join(installDir, "runner", "runner.enroll"))) throw new Error("The one-time code is still in the install folder after the runner used it.");
@@ -735,8 +760,7 @@ export async function runSmoke(opts, deps = {}) {
                 const t0 = Date.now();
                 await until("the runner to be online again", async () => {
                     if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
-                    const list = await api("GET", `/api/projects/${projectId}/agents`);
-                    return Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online && a.tokenId === tokenId);
+                    return (await myRunner())?.id === tokenId;
                 }, opts.onlineTimeout * 1000, 2000);
                 return `online again after ${fmtMs(Date.now() - t0)}, with the same access`;
             });
@@ -768,8 +792,7 @@ export async function runSmoke(opts, deps = {}) {
                     runner = children.start(name, cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
                     await until("the runner to be online again", async () => {
                         if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
-                        const list = await api("GET", `/api/projects/${projectId}/agents`);
-                        return Array.isArray(list.json) && list.json.some((a) => a.name === opts.name && a.online && a.tokenId === tokenId);
+                        return (await myRunner())?.id === tokenId;
                     }, opts.onlineTimeout * 1000, 2000);
                 };
                 await step("Renew its credential (made due now) and start it again", async () => {
@@ -798,12 +821,12 @@ export async function runSmoke(opts, deps = {}) {
             }
         }
 
-        await step("Revoke the runner's access and check it stops with a plain message", async () => {
-            const r = await api("DELETE", `/api/projects/${projectId}/agent-tokens/${tokenId}`);
-            if (r.status !== 200) throw new Error(`Revoking failed (${r.status}): ${r.message}`);
+        await step("Remove this computer (Settings, Your runner) and check the runner stops with a plain message", async () => {
+            const r = await api("POST", "/api/me/runner/retire");
+            if (r.status !== 200) throw new Error(`Removing the computer failed (${r.status}): ${r.message}`);
             await Promise.race([runner.exited, sleep(120_000)]);
             if (Children.running(runner)) throw new Error(`The runner was still running 2 minutes after its access was revoked.\n${tail(runner.output)}`);
-            if (!/no longer accepts this runner/i.test(runner.output)) throw new Error(`The runner stopped (code ${runner.code}) without the plain "no longer accepts this runner's token" message.\n${tail(runner.output)}`);
+            if (!/no longer accepts this runner/i.test(runner.output)) throw new Error(`The runner stopped (code ${runner.code}) without the plain "no longer accepts this runner" message.\n${tail(runner.output)}`);
             return `ended with code ${runner.code}`;
         });
 

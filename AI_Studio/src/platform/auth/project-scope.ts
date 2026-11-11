@@ -119,7 +119,6 @@ export const EXPLICIT_SCOPES: Record<string, Scope["kind"]> = {
     "PATCH /api/libraries/items/:itemId": "none",
     "PUT /api/libraries/items/:itemId/content": "none",
     "DELETE /api/libraries/items/:itemId": "none",
-    // Registering, renaming and retiring a runner: the handlers limit them to the runner's owner side (routes/runners.ts).
     "POST /api/ai-configurations": "none",
     "PATCH /api/ai-configurations/:configId": "none",
     "DELETE /api/ai-configurations/:configId": "none",
@@ -129,14 +128,16 @@ export const EXPLICIT_SCOPES: Record<string, Scope["kind"]> = {
     "PATCH /api/shared-integrations/:sid": "none",
     "DELETE /api/shared-integrations/:sid": "none",
     "POST /api/shared-integrations/:sid/test": "none",
-    "POST /api/runners": "none",
-    // Round 39: enrollment codes and kits from the Runners page; the handlers decide by kind and check every project named (routes/runners.ts).
-    "POST /api/runners/enroll": "none",
-    "POST /api/runners/kits": "none",
-    "GET /api/runners/kits/info": "none",
-    "GET /api/runners/enrollments/:enrollmentId": "none",
-    "PATCH /api/runners/:runnerId": "none",
-    "POST /api/runners/:runnerId/retire": "none",
+    // Round 45: the person's own runner, and the admins' list of everyone's (routes/runners.ts, routes/runner-kits.ts); no project in the path.
+    "GET /api/me/runner": "none",
+    "PATCH /api/me/runner": "none",
+    "POST /api/me/runner/retire": "none",
+    "POST /api/me/runner/update": "none",
+    "GET /api/me/runner/enrollments/:enrollmentId": "none",
+    "POST /api/me/runner/download": "none",
+    "GET /api/me/runner/download/info": "none",
+    "GET /api/admin/runners": "none",
+    "POST /api/admin/runners/:runnerId/retire": "none",
     // ── lists narrowed to the allowed projects by their handlers ──
     "GET /api/projects": "list",
     "GET /api/dashboard": "list",
@@ -150,9 +151,6 @@ export const EXPLICIT_SCOPES: Record<string, Scope["kind"]> = {
     "GET /api/libraries/items/:itemId/versions/:version": "list",
     "GET /api/ai-configurations": "list",
     "GET /api/shared-integrations": "list",
-    "GET /api/runners": "list",
-    "GET /api/runners/summary": "list",
-    "GET /api/runners/:runnerId": "list",
     // ── the project in the query ──
     "GET /api/usage": "query",
     // ── a stream path in the body ──

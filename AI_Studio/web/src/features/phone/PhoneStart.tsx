@@ -68,7 +68,7 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
         setError("");
         try {
             // The platform runs a project's phone work where the project runs, so choosing another place is saved first, and said so below.
-            if (changesRunner) await api(`/projects/${projectId}/runner`, { method: "PUT", body: chosen === "platform" ? { runOn: "platform" } : { runOn: "agent", agentId: chosen } });
+            if (changesRunner) await api(`/projects/${projectId}/runner`, { method: "PUT", body: chosen === "platform" ? { runOn: "platform" } : { runOn: "agent" } });
             await api(`/projects/${projectId}/test-generation`, { method: "POST", body: startBody({ username, password }) });
             onClose();
             go(routes.project(projectId));
@@ -127,11 +127,11 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
                         </span>
                     </label>
                 ))}
-                {changesRunner && <p className="t-meta" data-testid="phone-runner-change">Phone tests for this project will run there from now on. You can change it on the Runners page.</p>}
+                {changesRunner && <p className="t-meta" data-testid="phone-runner-change">Phone tests for this project will run there from now on. Each person’s runs go to their own runner, set up in Settings.</p>}
             </fieldset>
             {!anyWhere && (
                 <div id="ph-nowhere">
-                    <Callout tone="warning" title={NO_WHERE_TITLE} actions={<LinkButton href={routes.runners(projectId)}>Open Runners</LinkButton>}>
+                    <Callout tone="warning" title={NO_WHERE_TITLE} actions={<LinkButton href={routes.allRunners}>Open Your runner in Settings</LinkButton>}>
                         {NO_WHERE_BODY}
                     </Callout>
                 </div>

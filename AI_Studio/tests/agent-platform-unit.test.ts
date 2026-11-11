@@ -11,7 +11,7 @@ import { AGENT_TOKEN_PREFIX, Capabilities, TaskOffer, WireRunEnv, type Capabilit
 import { loadConfig } from "../src/config.js";
 import { listAdapters, getAdapter } from "../src/engine/frameworks/index.js";
 import type { RunEnv } from "../src/engine/validation/runner.js";
-import { AgentStore, hashToken, MAX_OFFERS, newAgentToken, ONLINE_MS, QUEUE_MAX_MS, TASK_KEEP_MS } from "../src/platform/agent-store.js";
+import { AgentStore, hashToken, MAX_OFFERS, newAgentToken, ONLINE_MS, OPEN_OWNER_ID, QUEUE_MAX_MS, TASK_KEEP_MS } from "../src/platform/agent-store.js";
 import { agentRouteOf, anchoredPath, bearerToken, capabilityProblem, envSecrets, isAgentRoute, RateLimiter, scrubSecrets, toWireEnv } from "../src/platform/agent-routing.js";
 import { agentLimits, ledgerFromAgent } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -34,7 +34,11 @@ beforeAll(() => {
     projectId = platform.repo.createProject({ name: "Agents" }).id as string;
     otherProject = platform.repo.createProject({ name: "Others" }).id as string;
     store = new AgentStore(platform.db, clock);
+    // A platform with no accounts and no access key is open: its runs and its runner belong to OPEN_OWNER_ID (round 45).
+    store.openMode = () => true;
 });
+/** Round 45: a person's own runner is the only kind; these tests use the open server's. */
+const personalToken = (label?: string) => store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: label ?? "", createdBy: "test" });
 afterAll(() => {
     platform.db.close();
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -46,7 +50,7 @@ describe("agent tokens", () => {
         expect(a.startsWith(AGENT_TOKEN_PREFIX)).toBe(true);
         expect(a.length).toBe(AGENT_TOKEN_PREFIX.length + 43);
         expect(newAgentToken()).not.toBe(a);
-        const { secret, record } = store.createToken(projectId, "  Maya's laptop ");
+        const { secret, record } = personalToken("  Maya's laptop ");
         expect(record.label).toBe("Maya's laptop");
         expect(record.hint).toBe(secret.slice(-4));
         const raw = JSON.stringify(platform.db.all("SELECT * FROM agent_tokens"));
@@ -54,24 +58,21 @@ describe("agent tokens", () => {
         expect(raw).toContain(hashToken(secret));
     });
 
-    it("are found by the presented token only; unknown and revoked look the same; each belongs to one project", () => {
-        const { secret, record } = store.createToken(projectId);
+    it("are found by the presented token only; unknown and retired look the same; each belongs to one person", () => {
+        const { secret, record } = personalToken();
         expect(store.findToken(secret)?.id).toBe(record.id);
-        expect(store.findToken(secret)?.projectId).toBe(projectId);
+        expect(store.findToken(secret)?.ownerId).toBe(OPEN_OWNER_ID);
         expect(store.findToken(secret + "x")).toBeUndefined();
         expect(store.findToken("aitg_" + "A".repeat(43))).toBeUndefined();
-        // another project cannot revoke it
-        expect(store.revokeToken(otherProject, record.id)).toBe(false);
-        expect(store.findToken(secret)).toBeDefined();
-        expect(store.revokeToken(projectId, record.id)).toBe(true);
+        expect(store.retireToken(record.id)).toBe(true);
         expect(store.findToken(secret)).toBeUndefined();
-        expect(store.revokeToken(projectId, record.id)).toBe(false);
-        // the row stays, marked revoked
-        expect(store.listTokens(projectId).find((t) => t.id === record.id)?.revokedAt).toBeTruthy();
+        expect(store.retireToken(record.id)).toBe(false);
+        // the row stays, marked retired
+        expect(store.getToken(record.id)?.revokedAt).toBeTruthy();
     });
 
     it("last_used_at is written at most every 30 seconds", () => {
-        const { record } = store.createToken(projectId);
+        const { record } = personalToken();
         store.touchToken(record.id);
         const first = store.getToken(record.id)!.lastUsedAt;
         expect(first).toBeTruthy();
@@ -156,11 +157,11 @@ describe("the six agent routes: exact, anchored match", () => {
 describe("the task state machine", () => {
     const newTask = (over: { project?: string; job?: string; adapter?: string } = {}) => {
         const id = crypto.randomUUID();
-        store.enqueue({ id, projectId: over.project ?? projectId, jobId: over.job ?? "job-" + id, adapterId: over.adapter ?? "playwright", payloadEnc: "enc", files: [] });
+        store.enqueue({ id, projectId: over.project ?? projectId, jobId: over.job ?? "job-" + id, adapterId: over.adapter ?? "playwright", payloadEnc: "enc", files: [], ownerId: OPEN_OWNER_ID });
         return id;
     };
-    const agentFor = (name: string, project = projectId) => {
-        const { record } = store.createToken(project, name);
+    const agentFor = (name: string) => {
+        const { record } = personalToken(name);
         return { token: record, agent: store.upsertAgent(record, hello(name)) };
     };
     const LEASE = 60_000;
@@ -303,26 +304,26 @@ describe("the task state machine", () => {
     });
 
     it("the registry: hello creates or refreshes one agent per token and name; online means seen in the last 45 seconds", () => {
-        const { record } = store.createToken(projectId, "reg");
+        const owner = "registry-owner";
+        const { record } = store.createPersonalToken({ ownerId: owner, label: "reg", createdBy: "test" });
         const one = store.upsertAgent(record, hello("same"));
         const again = store.upsertAgent(record, { ...hello("same", caps({ browsers: ["chromium", "firefox"] })), version: "2.0.0" });
         expect(again.id).toBe(one.id);
         expect(again.version).toBe("2.0.0");
         expect(again.capabilities.browsers).toEqual(["chromium", "firefox"]);
-        const row = store.listAgents(projectId).find((x) => x.id === one.id)!;
-        expect(row.online).toBe(true);
+        expect(store.runnerOf(owner)).toMatchObject({ online: true, agent: { id: one.id } });
         now += ONLINE_MS + 1;
-        expect(store.listAgents(projectId).find((x) => x.id === one.id)!.online).toBe(false);
+        expect(store.runnerOf(owner)!.online).toBe(false);
         store.touchAgent(one.id);
-        expect(store.listAgents(projectId).find((x) => x.id === one.id)!.online).toBe(true);
-        // never listed for another project
-        expect(store.listAgents(otherProject).some((x) => x.id === one.id)).toBe(false);
+        expect(store.runnerOf(owner)!.online).toBe(true);
+        // never anyone else's
+        expect(store.runnerOf("someone-else")).toBeUndefined();
     });
 
-    it("the runner setting defaults to the platform and is kept per project", () => {
+    it("the runner setting defaults to the platform and is kept per project; a pinned runner is no longer read (round 45)", () => {
         expect(store.getRunner(projectId)).toEqual({ runOn: "platform", agentId: null });
         store.setRunner(projectId, { runOn: "agent", agentId: "abc" });
-        expect(store.getRunner(projectId)).toEqual({ runOn: "agent", agentId: "abc" });
+        expect(store.getRunner(projectId)).toEqual({ runOn: "agent", agentId: null });
         expect(store.getRunner(otherProject).runOn).toBe("platform");
         store.setRunner(projectId, { runOn: "platform", agentId: "abc" });
         expect(store.getRunner(projectId)).toEqual({ runOn: "platform", agentId: null });

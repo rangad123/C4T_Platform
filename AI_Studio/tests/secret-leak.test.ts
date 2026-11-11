@@ -13,6 +13,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { hashPassword } from "../src/platform/auth/password.js";
@@ -305,8 +306,8 @@ describe("secrets never leave the encrypted store", () => {
         const imp = await call("POST", `/api/projects/${small}/specs`, { baseUrl: BASE, validate: false, credentials: { username: "agent@example.com", password: SECRETS.agentPassword, apiToken: SECRETS.agentApiToken }, specs: [{ title: "About page answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/about" }, { action: "assertResponse", check: "status", expected: 200 }] }] });
         expect(imp.status).toBe(202);
         const testId = imp.body.tests[0].id as string;
-        const made = await server.inject({ method: "POST", url: `/api/projects/${small}/agent-tokens`, payload: { label: "audit" } });
-        const secret = (JSON.parse(made.body) as { secret: string }).secret;
+        // Round 45: the open server's own runner (this platform has no API_KEY and, so far, no accounts).
+        const { secret } = personalRunner(platform, { label: "audit" });
         (SECRETS as Record<string, string>).agentToken = secret; // shown once, in the answer above, and never again
         const agent = new FakeAgent(viaInject(server), secret, { name: "audit-agent", capabilities: defaultCaps() });
         expect((await agent.hello()).status).toBe(200);
@@ -326,7 +327,7 @@ describe("secrets never leave the encrypted store", () => {
         testIds.push(testId);
         await call("GET", `/api/test-generation/${started.body.jobId}/events`);
         await call("GET", `/api/projects/${small}/agents`);
-        await call("GET", `/api/projects/${small}/agent-tokens`);
+        await call("GET", "/api/me/runner");
         await call("GET", `/api/projects/${small}/runner`);
         await call("GET", `/api/projects/${small}/cleanup`);
         // the run really stored the (scrubbed) failure

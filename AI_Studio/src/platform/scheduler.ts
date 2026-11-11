@@ -39,12 +39,12 @@ export async function activeJobOf(repo: Repo, projectId: string): Promise<{ id: 
  * Every test of the project that this machine can execute (mobile tests only with an app and an emulator). Used by the AUTOMATED
  * starters (schedules, deploy triggers): load checks are left out, because a person has to start those on purpose.
  */
-export async function runnableTestIds(repo: Repo, projectId: string, shape: RunShape = "validate"): Promise<string[]> {
+export async function runnableTestIds(repo: Repo, projectId: string, shape: RunShape = "validate", ownerId?: string | null): Promise<string[]> {
     const config = (repo.getLatestApplicationPublic(projectId)?.config ?? {}) as Record<string, any>;
     // A project whose phone tests run on a device farm needs no phone here (device-farms.md).
-    const mobileOk = Boolean(config.mobile) && (farmChosen(repo.db, projectId) || (agentCanRunMobile(projectId) ?? !localPhoneRunsProblem()));
+    const mobileOk = Boolean(config.mobile) && (farmChosen(repo.db, projectId) || (agentCanRunMobile(projectId, ownerId) ?? !localPhoneRunsProblem()));
     // iOS tests run only on a runner agent on a Mac, and only for a project that has an iOS app set up.
-    const iosOk = Boolean(config.mobile?.iosBundleId) && agentCanRunIos(projectId) === true;
+    const iosOk = Boolean(config.mobile?.iosBundleId) && agentCanRunIos(projectId, ownerId) === true;
     // Frameworks the project switched off (Runners, Frameworks) are left out of every automated run.
     const switchedOff = new FrameworkSettingsStore(repo.db).get(projectId).enabled;
     // A load check inside reusable steps is still a load check.
@@ -60,7 +60,7 @@ export async function runnableTestIds(repo: Repo, projectId: string, shape: RunS
         })
         .map((t) => t.id);
     // Hand-written tests are left out of automated runs where they may not run (the rest still runs; the job says so, see noteCustomSkipped).
-    return (await splitCustom(repo, projectId, ids)).ids;
+    return (await splitCustom(repo, projectId, ids, ownerId)).ids;
 }
 
 /**
@@ -81,7 +81,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
     let options: JobOptions;
     let dropped: AgentSwitch[] = [];
     if (s.kind === "validate") {
-        let testIds = await runnableTestIds(repo, s.projectId);
+        let testIds = await runnableTestIds(repo, s.projectId, "validate", s.createdBy ?? null);
         if (testIds.length === 0) throw new Error("This project has no tests that can be run yet.");
         options = { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds, retryFailures: s.retryFailures };
         // A schedule can run against a named environment instead (results are kept for that environment).
@@ -92,7 +92,7 @@ export async function startScheduledJob(repo: Repo, s: Schedule): Promise<JobRow
             if (env.production && !target.confirmProduction) throw new Error(`“${env.name}” is a production environment and this schedule was not confirmed for it. Edit the schedule and confirm.`);
             await assertEnvironmentTargets(env);
             // A run against an environment leaves plug-in tests out altogether (the gate refuses them there).
-            testIds = await runnableTestIds(repo, s.projectId, "environment");
+            testIds = await runnableTestIds(repo, s.projectId, "environment", s.createdBy ?? null);
             if (testIds.length === 0) throw new Error("This project has no tests that can be run against an environment yet.");
             options = { ...DEFAULT_JOB_OPTIONS, mode: "environment", testIds, environment: env.name, ...(env.production ? { confirmProduction: true } : {}) };
         }

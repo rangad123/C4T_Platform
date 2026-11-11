@@ -1,8 +1,9 @@
-# The runner on real machines: GitHub's hosted Windows, macOS and Linux computers each build the runner download, install it with the
-# real installer without questions, start it, check that it connects to a platform started in the same job, run a web test and an API
-# test on it end to end, stop it, start it again, take its access away, uninstall it and check that nothing is left
-# (AI_Studio/scripts/smoke-runner.mjs --kit installer --lifecycle). The plain files download and the complete download (no Node.js on the
-# PATH) are checked too. What this proves and what it cannot: AI_Studio/docs/features/real-machine-checks.md.
+# The runner on real machines: GitHub's hosted Windows, macOS and Linux computers each build the runner download, sign up a person on a
+# platform started in the same job, download that person's runner the way Settings does (one download per system: the installer on
+# Windows and a Mac, the plain files on Linux, with its own Node.js because the complete build is made below), install it with the real
+# installer without questions, check that it connects, run a web test and an API test on it end to end, stop it, start it again, remove
+# the computer, uninstall it and check that nothing is left (AI_Studio/scripts/smoke-runner.mjs --kit installer --lifecycle). The same
+# download started with its start script, and with no Node.js on the PATH (its own Node.js), is checked too. What this proves and what it cannot: AI_Studio/docs/features/real-machine-checks.md.
 #
 # GitHub's Windows machines run Windows Server 2022 and 2025, not Windows 10 or 11 desktop, and nobody is signed in at a screen: a manual
 # pass on a real Windows 11 PC and a real Mac is still needed (AI_Studio/docs/runner-implementation/MANUAL_VERIFICATION.md).
@@ -113,7 +114,7 @@ jobs:
       - name: Installer, unattended, with stop, restart, uninstall
         if: matrix.installer
         run: node scripts/smoke-runner.mjs --kit installer --lifecycle --port 6952 --out smoke-report/installer
-      - name: Plain files
+      - name: The download started with its start script
         if: success() || failure()
         run: node scripts/smoke-runner.mjs --kit files --port 6950 --out smoke-report/files
       # The proof that the complete download needs nothing: the runner is started with a PATH that holds no Node.js and no npm.

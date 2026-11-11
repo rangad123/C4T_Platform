@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { OPEN_OWNER_ID } from "./agent-store.js";
 import { z } from "zod";
 import type { Db, Row } from "./db.js";
 
@@ -109,6 +110,40 @@ export class ScheduleStore {
             t,
         );
         return this.get(id)!;
+    }
+
+    /**
+     * Round 45: a schedule with no recorded creator (made before migration 52) gets one from the Activity log, only where that is certain
+     * (a person, or the open server as OPEN_OWNER_ID).
+     * The latest successful change to it (PATCH .../schedules/<id>) by a person names them (a later change by anyone else, or none: not
+     * certain). Without a change: the one successful "POST .../schedules" in its project within 10 seconds of its creation, by a person,
+     * when no other schedule of the project was made in that window. Everything else stays without an owner and is refused at its next fire.
+     * Idempotent; returns how many were attributed.
+     */
+    backfillOwners(): number {
+        const WINDOW_MS = 10_000;
+        let n = 0;
+        const orphans = this.db.all<{ id: string; project_id: string; created_at: string }>("SELECT id, project_id, created_at FROM schedules WHERE created_by IS NULL");
+        for (const o of orphans) {
+            let owner: string | null = null;
+            const edit = this.db.get<{ actor_kind: string; actor_id: string | null }>(
+                "SELECT actor_kind, actor_id FROM activity WHERE action = 'PATCH /api/projects/:id/schedules/:sid' AND path = ? AND status < 400 ORDER BY id DESC LIMIT 1",
+                `/api/projects/${o.project_id}/schedules/${o.id}`,
+            );
+            const ownerOfRow = (r: { actor_kind: string; actor_id: string | null }): string | null => (r.actor_kind === "user" ? r.actor_id : r.actor_kind === "open" ? OPEN_OWNER_ID : null);
+            if (edit) owner = ownerOfRow(edit);
+            else {
+                const made = Date.parse(o.created_at);
+                const near = (at: string) => Math.abs(Date.parse(at) - made) <= WINDOW_MS;
+                const creates = this.db
+                    .all<{ at: string; actor_kind: string; actor_id: string | null }>("SELECT at, actor_kind, actor_id FROM activity WHERE action = 'POST /api/projects/:id/schedules' AND project_id = ? AND status < 400", o.project_id)
+                    .filter((r) => near(r.at));
+                const siblings = this.db.all<{ created_at: string }>("SELECT created_at FROM schedules WHERE project_id = ?", o.project_id).filter((r) => near(r.created_at));
+                if (Number.isFinite(made) && creates.length === 1 && siblings.length === 1) owner = ownerOfRow(creates[0]!);
+            }
+            if (owner && (owner === OPEN_OWNER_ID || this.db.get("SELECT 1 AS x FROM users WHERE id = ?", owner))) n += Number(this.db.run("UPDATE schedules SET created_by = ? WHERE id = ? AND created_by IS NULL", owner, o.id).changes);
+        }
+        return n;
     }
 
     get(id: string): Schedule | undefined {

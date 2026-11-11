@@ -30,7 +30,8 @@ const screenText = files.filter((f) => !f.p.includes("/features/guide/")).map((f
 
 /** A route from an address such as `#/projects/p1/runs?section=trends`. */
 function route(href: string) {
-    const [pathPart, qs] = href.replace(/^#/, "").split("?");
+    // A place inside a page (`#/settings#runner`) is not part of the route, as in lib/router.ts.
+    const [pathPart, qs] = href.replace(/^#/, "").split("#")[0]!.split("?");
     return { parts: pathPart!.split("/").filter(Boolean), query: new URLSearchParams(qs ?? "") };
 }
 
@@ -127,8 +128,9 @@ describe("place help covers every place in the router", () => {
         [routes.runs("p1"), "runs-runs"],
         [routes.run("p1", "j1"), "run-detail"],
         [routes.schedule("p1"), "runs-schedules"],
-        // Round 37: a project's runners are on the Runners page.
-        [routes.runners("p1"), "runners-global"],
+        // Round 45: every runner link is Your runner in Settings.
+        [routes.runners("p1"), "settings"],
+        ["#/runners", "runners-global"],
         [routes.objects("p1"), "library-elements"],
         [routes.blocks("p1"), "library-steps"],
         [routes.blocks("p1", "Sign in"), "library-steps-edit"],
@@ -311,7 +313,7 @@ describe("WhereTo opens the right place", () => {
 
     it("opens a place's first section for an unknown one, and the sections the router lists", () => {
         expect(whereToHref({ place: "setup", section: "nope" }, P)).toBe(routes.setup(P));
-        for (const s of SETUP_SECTIONS) expect(placeOf(route(whereToHref({ place: "setup", section: s }, P)!))).toBe(s === "runners" ? "runners-global" : `setup-${s}`);
+        for (const s of SETUP_SECTIONS) expect(placeOf(route(whereToHref({ place: "setup", section: s }, P)!))).toBe(s === "runners" ? "settings" : `setup-${s}`);
         // Releases and compliance moved from the Release place into Runs (round 25); they keep the help they had there.
         for (const s of RUNS_SECTIONS) expect(placeOf(route(whereToHref({ place: "runs", section: s }, P)!))).toBe(s === "releases" || s === "compliance" ? `release-${s}` : `runs-${s}`);
         for (const s of LIBRARY_SECTIONS) expect(placeOf(route(whereToHref({ place: "library", section: s }, P)!))).toBe(`library-${s}`);
@@ -367,12 +369,12 @@ describe("the tour", () => {
 
     it("covers what the brief asks for in each chapter", () => {
         const of = (c: string) => TOUR_STEPS.filter((s) => s.chapter === c).map((s) => s.target ?? s.id);
-        expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-develop", "nav-libraries", "nav-runners", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-runs", "tab-settings"]));
+        expect(of("around")).toEqual(expect.arrayContaining(["nav-dashboard", "nav-projects", "nav-agents", "nav-develop", "nav-libraries", "nav-settings", "nav-help", "nav-account", "tab-overview", "tab-requirements", "tab-tests", "tab-scripts", "tab-suites", "tab-runs", "tab-settings"]));
         expect(of("making")).toEqual(expect.arrayContaining(["new-test", "wb-steps", "wb-text", "wb-code", "wb-history", "wb-edit", "scripts-steps", "scripts-elements", "settings-data"]));
         // Round 38: the New test script menu no longer records, so its tour has one card fewer (the menu, describe, build, code, import).
         expect(TOUR_STEPS.filter((s) => s.target === "new-test").length).toBeGreaterThanOrEqual(5);
         expect(of("running")).toEqual(expect.arrayContaining(["run", "run-strip", "runs-runs", "run-tests", "last-run", "runs-schedules", "runs-trends"]));
-        expect(of("release")).toEqual(expect.arrayContaining(["runs-releases", "release-signoff", "tests-manual", "runs-compliance", "project-runners", "add-runner", "settings-environments", "settings-alerts", "settings-issues", "mobile-app", "settings-storage", "testing-type"]));
+        expect(of("release")).toEqual(expect.arrayContaining(["runs-releases", "release-signoff", "tests-manual", "runs-compliance", "your-runner", "settings-environments", "settings-alerts", "settings-issues", "mobile-app", "settings-storage", "testing-type"]));
         expect(of("phones")).toEqual(expect.arrayContaining(["settings-mobile", "explore-phone", "explorer-view"]));
         expect(of("security")).toEqual(expect.arrayContaining(["sec-projects", "sec-applications", "sec-new", "sec-assessments", "sec-stop", "sec-findings", "sec-downloads", "sec-activity", "sec-notifications"]));
         expect(of("help")).toEqual(expect.arrayContaining(["help", "guide-wants", "tips", "guide-tour"]));
@@ -413,7 +415,7 @@ describe("the tour", () => {
         expect(none.filter((id) => id === "no-project").length).toBe(1);
         // Only steps that need nothing remain, plus that one card.
         for (const id of none) if (id !== "no-project") expect(TOUR_STEPS.find((s) => s.id === id)!.needs ?? [], id).toEqual([]);
-        expect(none).toEqual(["nav-dashboard", "projects", "nav-agents", "nav-develop", "nav-libraries", "nav-runners", "nav-integrations", "nav-settings", "nav-help", "no-project", "help", "guide", "tips", "again"]);
+        expect(none).toEqual(["nav-dashboard", "projects", "nav-agents", "nav-develop", "nav-libraries", "nav-integrations", "nav-settings", "nav-help", "no-project", "help", "guide", "tips", "again"]);
         // A signed-in person adds their sidebar step even without a project. Round 37: Security assessment is not in the sidebar.
         expect(ids({ module: true, account: true })).toEqual(expect.arrayContaining(["account"]));
         expect(TOUR_STEPS.map((s) => s.id)).not.toContain("nav-security");
@@ -470,9 +472,9 @@ describe("the tour", () => {
         }
         expect(pageHref({ kind: "runs", section: "schedules" }, WEB)).toBe(routes.runs("p1", "schedules"));
         expect(pageHref({ kind: "setup", section: "runners" }, WEB)).toBe(routes.setup("p1", "runners"));
-        // Round 37: a project's runners are on the Runners page.
-        expect(pageHref({ kind: "runners" }, WEB)).toBe("#/runners?project=p1");
-        expect(routes.setup("p1", "runners")).toBe("#/runners?project=p1");
+        // Round 45: a person's runner is Your runner in Settings.
+        expect(pageHref({ kind: "runners" }, WEB)).toBe("#/settings#runner");
+        expect(routes.setup("p1", "runners")).toBe("#/settings#runner");
         expect(pageHref({ kind: "test", tab: "history" }, WEB)).toBe(routes.testTab("t1", "history"));
         expect(pageHref({ kind: "failing" }, WEB)).toBe(routes.testTab("t1", "steps"));
         expect(pageHref({ kind: "failing" }, ALL)).toBe(routes.testTab("t2", "steps"));

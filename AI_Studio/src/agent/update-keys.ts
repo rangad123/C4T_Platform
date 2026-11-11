@@ -11,7 +11,7 @@
  * repository secret RUNNER_UPDATE_SIGNING_KEY, then delete the file. To change keys, add the new public key here first, deploy, let the
  * runners update, then sign with the new key and remove the old line.
  *
- * Empty: this build installs no update by itself; a person downloads each new version (the Runners page says so).
+ * Empty: this build installs no update by itself; a person downloads each new version (Settings, Your runner says so).
  */
 export const PINNED_UPDATE_KEYS: readonly string[] = [];
 

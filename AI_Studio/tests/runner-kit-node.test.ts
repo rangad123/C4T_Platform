@@ -1,8 +1,9 @@
 /**
  * The runner kit's start scripts find Node.js, against a REAL platform: each unzipped kit is started the way a tester starts it, on a
  * computer where `node` is NOT on the PATH of the window and Node.js lives where nvm, Volta, Homebrew, fnm or nvm-windows put it. The
- * script must say which Node.js it uses ("Using Node.js v26.0.0 from ..."), connect to the platform with the token inside its zip, show
- * up as online and run a real API test. A Node.js that is too old is reported as too old (with its version and place), and with no
+ * script must say which Node.js it uses ("Using Node.js v26.0.0 from ..."), trade the one-time code inside the person's download
+ * (POST /api/me/runner/download, round 45) for their runner credential, show up as connected in Settings and run a real API test the
+ * person starts. A Node.js that is too old is reported as too old (with its version and place), and with no
  * Node.js at all the message lists where the script looked; neither starts a runner.
  *
  * "Fake" Node.js installs: on Unix a small shim that answers --version with the version it claims and otherwise runs this computer's
@@ -13,7 +14,7 @@
  * platform in tests/runner-kit-node-unit.test.ts.
  *
  * Run with  node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/runner-kit-node.test.ts
- * (it starts no browser, but the machine is small). Ports: platform 6570, fixture application 6571.
+ * (it starts no browser, but the machine is small). Ports: platform 8807, fixture application 8808.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -25,14 +26,16 @@ import { unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { buildServer } from "../src/platform/server.js";
+import { allowPrivateAddresses, downloadRunner, myOnlineRunner, personToken, retireMyRunner } from "./fixtures/runner-person.js";
 import { Worker } from "../src/platform/worker.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
 
 const REPO = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PLATFORM_PORT = 6570;
-const APP_PORT = 6571;
+const PLATFORM_PORT = 8807;
+const APP_PORT = 8808;
 const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "kit-node-admin-key-5b21e9c4a7";
@@ -62,15 +65,36 @@ async function until<T>(what: string, probe: () => Promise<T | undefined | false
     }
 }
 
+/** The person whose runner this is: an owner with their own API token (made in beforeAll). */
+let person = { id: "", token: "" };
+let stopBeat: (() => void) | undefined;
+/** The runner takes the computer's own name (the download names none). */
+const NAME = os.hostname().trim().slice(0, 64) || "agent";
 const admin = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": API_KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const res = await fetch(`${BASE}${url}`, { method, headers: { authorization: `Bearer ${person.token}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const buf = Buffer.from(await res.arrayBuffer());
     const text = buf.toString("utf8");
     return { status: res.status, headers: res.headers, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; headers: Headers; buf: Buffer; text: string; body: any };
 };
-const newProject = async (name: string) => (await admin("POST", "/api/projects", { name })).body.id as string;
-const download = (projectId: string, name: string, platformName: "windows" | "unix") => admin("POST", `/api/projects/${projectId}/runner-kits`, { name, platform: platformName, kind: "files" });
-const onlineAgents = async (projectId: string) => ((await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ name: string; online: boolean }>).filter((a) => a.online);
+/** A project whose imported tests run at once (no approval step: this file is about finding Node.js). */
+const newProject = async (name: string) => {
+    const id = (await admin("POST", "/api/projects", { name })).body.id as string;
+    expect((await admin("PUT", `/api/projects/${id}/review-policy`, { aiGenerated: false, edits: false, healing: false })).status).toBe(200);
+    return id;
+};
+/**
+ * The person's download: plain files (no installer or complete build here), all three start scripts inside. One runner per person: the
+ * one the last test left (stopped, maybe still shown online for a while) is removed first, so "online" always means this download's runner.
+ */
+const download = async (_projectId: string, _label: string, platformName: "windows" | "unix") => {
+    await retireMyRunner(BASE, person.token);
+    return downloadRunner(BASE, person.token, platformName === "windows" ? "windows" : "linux");
+};
+/** The person's runner while it is connected (as a one-element list, so "none" reads as empty). */
+const onlineAgents = async (_projectId?: string) => {
+    const r = await myOnlineRunner(BASE, person.token);
+    return r ? [r] : [];
+};
 
 /** Unzip a kit into  <tmp>/<n>/Maya Singh/runner (1)  (spaces and brackets on purpose) and give it this repository's node_modules (a junction). */
 let counter = 0;
@@ -145,24 +169,28 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 beforeAll(async () => {
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "5" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
-    delete process.env.AGENT_MAX_TOKENS;
-    delete process.env.RUNNER_KIT_RATE_PER_MINUTE;
+    process.env.RUNNER_KIT_RATE_PER_MINUTE = "100";
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-kit-node-api-"));
     const bundleDir = path.join(tmp, "dist-runner");
     await buildRunner({ outDir: bundleDir });
     process.env.RUNNER_KIT_DIR = bundleDir;
+    process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "no-installer");
+    process.env.RUNNER_COMPLETE_DIR = path.join(tmp, "no-complete");
     appServer = http.createServer((req, res) => {
         if (req.url === "/api/health") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: "ok" }));
         res.writeHead(200, { "content-type": "text/html" }).end("<!doctype html><html lang=\"en\"><head><title>Fixture</title></head><body><main><h1>Fixture</h1></main></body></html>");
     });
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-kit-node-data-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0", EXECUTION_MODE: "runners" }));
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
     worker.start();
+    // EXECUTION_MODE=runners takes runs only while the part that hands them to runners is alive.
+    stopBeat = startHeartbeat(platform.db);
+    person = personToken(server);
 }, 180_000);
 
 afterAll(async () => {
@@ -172,6 +200,7 @@ afterAll(async () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
     }
+    stopBeat?.();
     await worker?.stop();
     await server?.close();
     platform?.db.close();
@@ -212,14 +241,15 @@ async function runApiTest(projectId: string, runnerName: string): Promise<void> 
     });
     expect(imp.status, imp.text).toBe(202);
     const id = (imp.body.tests as Array<{ id: string }>)[0]!.id;
-    expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
+    // No runner is chosen: the run goes to the person's own runner. The fixture application is on this computer: private addresses on.
+    expect(await allowPrivateAddresses(BASE, person.token)).toBe(200);
     const started = await admin("POST", `/api/tests/${id}/validate`);
     expect(started.status, started.text).toBe(202);
     const job = await until("the job to finish", async () => {
         const j = (await admin("GET", `/api/test-generation/${started.body.jobId}`)).body;
         return ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status) ? j : undefined;
     }, 150_000);
-    expect(job.ranOn).toMatchObject({ kind: "agent", name: runnerName });
+    expect(job.ranOn, JSON.stringify({ status: job.status, error: job.error })).toMatchObject({ kind: "agent", name: runnerName });
     expect(((await admin("GET", `/api/tests/${id}/executions`)).body as Array<{ status: string }>)[0]).toMatchObject({ status: "passed" });
 }
 
@@ -230,7 +260,7 @@ const gone = async (projectId: string) => (await onlineAgents(projectId)).length
 describe.skipIf(!BASH)("start-runner.sh finds a Node.js that is not on the PATH", () => {
     const env = (home: string, extra: Record<string, string> = {}) => ({ PATH: TOOLS, Path: TOOLS, HOME: fwd(home), TMPDIR: fwd(os.tmpdir()), AITP_KIT_SKIP_INSTALL: "1", AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1", ...extra });
 
-    it("nvm: says which Node.js it uses, connects, runs an API test, and ends with a plain message when the token is revoked", async () => {
+    it("nvm: says which Node.js it uses, connects, runs an API test, and ends with a plain message when the computer is removed", async () => {
         const p = await newProject("Kit sh nvm");
         const dl = await download(p, "nvm runner", "unix");
         const kit = unpack(dl.buf);
@@ -242,10 +272,10 @@ describe.skipIf(!BASH)("start-runner.sh finds a Node.js that is not on the PATH"
         // Only the start script's Node.js messages: the runner's own capability line may say a phone tool "was not found".
         expect(text).not.toMatch(/Node\.js[^\n]*(not installed|was not found|too old)/);
         expect(text).toContain("Connected to the platform");
-        await runApiTest(p, "nvm runner");
-        expect((await admin("DELETE", `/api/projects/${p}/agent-tokens/${dl.headers.get("x-runner-token-id")}`)).status).toBe(200);
+        await runApiTest(p, NAME);
+        expect(await retireMyRunner(BASE, person.token)).toBe(200);
         expect(await Promise.race([run.exited, sleep(60_000).then(() => "timeout")]), output(run)).toBe(3);
-        expect(output(run)).toMatch(/no longer accepts this runner's token/);
+        expect(output(run)).toMatch(/no longer accepts this runner/);
     }, 400_000);
 
     it("Volta: finds ~/.volta/bin/node and connects", async () => {
@@ -353,7 +383,7 @@ function realNodeExe(file: string): string {
 const startCmd = (kit: string, env: Record<string, string | undefined>) => launch(path.join(SYS32, "cmd.exe"), ["/d", "/c", ".\\start-runner.cmd"], kit, env);
 
 describe.skipIf(!WIN)("start-runner.cmd finds a Node.js that is not on the PATH", () => {
-    it("Program Files (x86): says which Node.js it uses, connects, runs an API test, and ends with a plain message when the token is revoked", async () => {
+    it("Program Files (x86): says which Node.js it uses, connects, runs an API test, and ends with a plain message when the computer is removed", async () => {
         const p = await newProject("Kit cmd x86");
         const dl = await download(p, "x86 runner", "windows");
         const kit = unpack(dl.buf);
@@ -368,10 +398,10 @@ describe.skipIf(!WIN)("start-runner.cmd finds a Node.js that is not on the PATH"
         // Only the start script's Node.js messages: the runner's own capability line may say a phone tool "was not found".
         expect(text).not.toMatch(/Node\.js[^\n]*(not installed|was not found|too old)/);
         expect(text).toContain("Connected to the platform");
-        await runApiTest(p, "x86 runner");
-        expect((await admin("DELETE", `/api/projects/${p}/agent-tokens/${dl.headers.get("x-runner-token-id")}`)).status).toBe(200);
+        await runApiTest(p, NAME);
+        expect(await retireMyRunner(BASE, person.token)).toBe(200);
         expect(await Promise.race([run.exited, sleep(60_000).then(() => "timeout")]), output(run)).toBe(1);
-        expect(output(run)).toMatch(/no longer accepts this runner's token/);
+        expect(output(run)).toMatch(/no longer accepts this runner/);
     }, 400_000);
 
     it("Volta, nvm-windows and fnm layouts all connect", async () => {

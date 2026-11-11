@@ -68,23 +68,23 @@ export type ParsedArgs =
 export const USAGE = `ai-test-agent: runs tests for the AI Testing Platform on this computer.
 
 Usage:
-  ai-test-agent --url <platform address> --token <aitg_...> [options]
+  ai-test-agent --url <platform address> --enroll <aite_...> [options]
+  (a download from Settings, Your runner needs neither: its start script or installer passes them)
 
-The agent connects out to the platform (it never opens a port), receives test runs for one project, runs them next to
-your application and devices, and sends the results back.
+The runner is the program on your computer that runs your tests. Each person has one, set up once in Settings. It
+connects out to the platform (it never opens a port), receives the runs you start, runs them next to your application
+and devices, and sends the results back.
 
 Options:
   --url <address>        Platform address, e.g. https://tests.example.com        (env AITP_URL)
-  --token <token>        Agent token from the project's Agents page              (env AITP_AGENT_TOKEN)
-  --token-file <file>    Read the token from a file (first line)                 (env AITP_AGENT_TOKEN_FILE)
-  --enroll <code>        Add this computer with a single-use code from the Runners page (aite_...).
+  --enroll <code>        Add this computer with a single-use code from Settings, Your runner (aite_...).
                          The runner trades it for its own credential, keeps that in this computer's
                          store (Windows data protection, the macOS Keychain, or a file only you can
-                         read on Linux) and needs no token afterwards        (env AITP_ENROLL_CODE)
+                         read on Linux) and needs no code afterwards         (env AITP_ENROLL_CODE)
   --enroll-file <file>   The same code read from a file, deleted once used (a download's runner.enroll)
                                                                                  (env AITP_AGENT_ENROLL_FILE)
   --forget-credential    Delete the credential this runner keeps, then exit (for uninstalling)
-  --name <label>         Name shown on the Agents page, default: this computer   (env AITP_AGENT_NAME)
+  --name <label>         Name shown in Settings, default: this computer's name   (env AITP_AGENT_NAME)
   --concurrency <1-8>    Runs at the same time, default 1                        (env AITP_AGENT_CONCURRENCY)
   --work-dir <folder>    Where runs and the file cache live, default .agent-work (env AITP_AGENT_WORK_DIR)
   --cache-mb <number>    Size limit of the file cache, default 2048              (env AITP_AGENT_CACHE_MB)
@@ -255,7 +255,7 @@ export function parseAgentArgs(argv: string[], env: NodeJS.ProcessEnv = process.
     const enrollCode = values.enroll ?? env.AITP_ENROLL_CODE;
     const enrollFile = values["enroll-file"] ?? env.AITP_AGENT_ENROLL_FILE;
     if (!token && enrollCode !== undefined && enrollCode.trim()) {
-        if (!ENROLL_SHAPE.test(enrollCode.trim())) return { kind: "error", message: `That is not an enrollment code (they start with ${ENROLLMENT_CODE_PREFIX}). Copy it again from the Runners page.` };
+        if (!ENROLL_SHAPE.test(enrollCode.trim())) return { kind: "error", message: `That is not an enrollment code (they start with ${ENROLLMENT_CODE_PREFIX}). Copy it again from Settings, Your runner.` };
         enroll = { code: enrollCode.trim(), explicit: true };
     } else if (!token && enrollFile) {
         let code = "";
@@ -264,10 +264,10 @@ export function parseAgentArgs(argv: string[], env: NodeJS.ProcessEnv = process.
         } catch {
             /* the file was used and deleted already: the stored credential counts (main.ts) */
         }
-        if (code && !ENROLL_SHAPE.test(code)) return { kind: "error", message: `The enrollment file does not hold an enrollment code. Download the runner again from the Runners page.` };
+        if (code && !ENROLL_SHAPE.test(code)) return { kind: "error", message: `The enrollment file does not hold an enrollment code. Download the runner again from Settings, Your runner.` };
         if (code) enroll = { code, file: path.resolve(enrollFile), explicit: false };
     }
-    if (token && !TOKEN_SHAPE.test(token)) return { kind: "error", message: `That is not an agent token (they start with ${AGENT_TOKEN_PREFIX}). Copy it again from the project's Agents page.` };
+    if (token && !TOKEN_SHAPE.test(token)) return { kind: "error", message: `That is not an agent token (they start with ${AGENT_TOKEN_PREFIX}). Set up the runner from Settings, Your runner instead.` };
     if (!token) {
         token = "";
         tokenSource = "store";

@@ -115,13 +115,15 @@ describe("sign-in details on an environment", () => {
     });
 });
 
-describe("hand-written scripts and shared runners", () => {
-    it("are never offered to a runner of no organisation, even one that allows them; an organisation's runner gets them", async () => {
+describe("hand-written scripts and runners that are no longer used", () => {
+    it("a team or shared runner left in the database is offered nothing, even one that allows code scripts; the owner's own runner gets them", async () => {
         const fs = await import("node:fs");
         const os = await import("node:os");
         const path = await import("node:path");
+        const { randomUUID } = await import("node:crypto");
         const { bootstrap } = await import("../src/platform/bootstrap.js");
         const { getAgentServices } = await import("../src/platform/agent-services.js");
+        const { hashToken, newAgentToken, OPEN_OWNER_ID } = await import("../src/platform/agent-store.js");
         const { TaskOffer } = await import("../src/agent-protocol/schema.js");
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-b33-shared-"));
         const p = bootstrap(loadConfig({ DATA_DIR: dir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", SECRET_KEY: "b33-shared-runner-secret-key-0123456789" }));
@@ -129,26 +131,22 @@ describe("hand-written scripts and shared runners", () => {
             const projectId = p.repo.createProject({ name: "Shop" }).id as string;
             const svc = getAgentServices(p);
             const app = p.repo.createApplication(projectId, "http://x.example/", {});
-            const jobId = (await p.repo.createJob(projectId, app as never, { mode: "validate", testIds: [] } as never)).id;
-            const caps = { os: "linux", arch: "x64", node: "24", browsers: ["chromium"], record: false, customScripts: true } as never;
-            const enqueue = (taskId: string, custom: boolean) => {
-                const offer = TaskOffer.parse({ taskId, jobId, adapterId: "playwright", leaseSeconds: 60, workers: 1, scripts: [{ testId: "WEB-001", filename: "web-001.spec.ts", content: "//", custom }], env: { baseUrl: "http://x.example", headless: true } });
-                svc.store.enqueue({ id: taskId, projectId, jobId: offer.jobId, adapterId: "playwright", payloadEnc: svc.encrypt(offer), files: [] });
-            };
-            p.db.run("INSERT INTO organizations (id, synced_at) VALUES ('org-a', ?)", new Date().toISOString());
-            const runner = (organizationId: string | null) => {
-                const { record } = svc.store.createRunnerToken({ organizationId, label: organizationId ?? "shared", createdBy: "test" });
-                svc.store.grantAccess(record.id, projectId, "test");
-                return svc.store.upsertAgent(record, { name: organizationId ?? "shared", version: "1", capabilities: caps, concurrency: 1 });
-            };
-            enqueue("11111111-1111-4111-8111-111111111111", true);
-            const shared = runner(null);
-            expect(svc.offerTo(shared, 1)).toBeUndefined();
-            const own = runner("org-a");
-            expect(svc.offerTo(own, 1)?.taskId).toBe("11111111-1111-4111-8111-111111111111");
-            // Generated scripts still go to the shared runner.
-            enqueue("33333333-3333-4333-8333-333333333333", false);
-            expect(svc.offerTo(shared, 1)?.taskId).toBe("33333333-3333-4333-8333-333333333333");
+            const jobId = (await p.repo.createJob(projectId, app as never, { mode: "validate", testIds: [], startedBy: { kind: "open", id: null } } as never)).id;
+            const caps = { os: "linux", arch: "x64", node: "24", browsers: ["chromium"], record: false, customScripts: true, runnerSwitches: true } as never;
+            const offer = TaskOffer.parse({ taskId: "11111111-1111-4111-8111-111111111111", jobId, adapterId: "playwright", leaseSeconds: 60, workers: 1, scripts: [{ testId: "WEB-001", filename: "web-001.spec.ts", content: "//", custom: true }], env: { baseUrl: "http://x.example", headless: true } });
+            svc.store.enqueue({ id: offer.taskId, projectId, jobId, adapterId: "playwright", payloadEnc: svc.encrypt(offer), files: [] });
+            // A team runner of the project (as rounds 34-44 made them), with every switch on: it is offered nothing.
+            const secret = newAgentToken();
+            const teamId = randomUUID();
+            p.db.run("INSERT INTO agent_tokens (id, project_id, label, token_hash, hint, created_at, kind, allow_code_scripts) VALUES (?,?,?,?,?,?,?,?)", teamId, projectId, "Lab", hashToken(secret), secret.slice(-4), new Date().toISOString(), "team", 1);
+            const team = svc.store.upsertAgent(svc.store.getToken(teamId)!, { name: "lab", version: "1", capabilities: caps, concurrency: 1 });
+            expect(svc.offerTo(team, 1)).toBeUndefined();
+            expect(svc.store.claimFor(offer.taskId, team, 60_000)).toBeUndefined();
+            expect(() => svc.authenticate(`Bearer ${secret}`)).toThrow(/Set up your own runner from Settings/);
+            // The open server's own runner, code scripts on: it gets the task.
+            const { record } = svc.store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: "mine", createdBy: "test" });
+            const own = svc.store.upsertAgent(record, { name: "mine", version: "1", capabilities: caps, concurrency: 1 });
+            expect(svc.offerTo(own, 1)?.taskId).toBe(offer.taskId);
         } finally {
             p.db.close();
             fs.rmSync(dir, { recursive: true, force: true });
@@ -161,23 +159,6 @@ describe("what an agent run keeps out of the model", () => {
         const { secretsOf } = await import("../src/platform/agent-run.js");
         const out = secretsOf({ password: "pw-123456", apiAuthHeader: "X-Api-Key: header-secret-9876", oauth2: { clientSecret: "client-secret-5555" } }, []);
         expect(out).toEqual(expect.arrayContaining(["pw-123456", "X-Api-Key: header-secret-9876", "header-secret-9876", "client-secret-5555"]));
-    });
-});
-
-describe("a shared runner seen by a customer", () => {
-    it("shows only their projects' queue and no phone serials", async () => {
-        const { runnerView } = await import("../src/platform/runner-health.js");
-        const now = Date.now();
-        const agent = { id: "a1", tokenId: "t1", name: "lab", version: "1", lastSeenMs: now, firstSeenMs: now, concurrency: 1, capabilities: { browsers: ["chromium"], android: { adb: true, devices: [{ serial: "SERIAL-123", model: "Pixel 8", state: "device", emulator: false }], avds: [] } } };
-        const store = { agentsOfToken: () => [agent], projectsOf: () => [{ projectId: "mine", grantedBy: "x", grantedAt: "" }, { projectId: "theirs", grantedBy: "x", grantedAt: "" }] } as never;
-        const task = (id: string, projectId: string) => ({ id, projectId, status: "queued", adapterId: "playwright", agentId: null, createdMs: now - 1000, claimedMs: null, finishedMs: null, error: null, done: 0, total: 1 });
-        const actor = { kind: "user", id: "u1", name: "Cat", role: "owner", side: "customer", organizationId: "org-a" } as never;
-        const reach = { actor, visible: new Map([["mine", "owner"]]), projects: new Map([["mine", { name: "Mine", organizationId: "org-a" }], ["theirs", { name: "Theirs", organizationId: "org-b" }]]), organizations: new Map(), now };
-        const token = { id: "t1", kind: "team", ownerId: null, projectId: null, organizationId: null, label: "Shared", hint: "abcd", createdAt: "", revokedAt: null } as never;
-        const v = runnerView(store, reach as never, token, { tasks: [task("q1", "mine"), task("q2", "theirs"), task("q3", "theirs")] as never, reservations: [] }, { allowed: () => reach.visible } as never, (a) => ({ capabilities: a.capabilities }));
-        expect(v.queue.waiting).toBe(1);
-        expect(JSON.stringify(v)).not.toContain("SERIAL-123");
-        expect(v.devices[0]).toMatchObject({ family: "android", name: "Pixel 8" });
     });
 });
 

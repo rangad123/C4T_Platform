@@ -12,7 +12,7 @@
  *  An infrastructure failure (the agent stopped answering, the phone went away, a limit) is thrown as DeviceSessionError and is never a test verdict.
  */
 import { randomUUID } from "node:crypto";
-import { ON_SERVER_REFUSED } from "./runner-only.js";
+import { ON_SERVER_REFUSED, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, runnerRefusal } from "./runner-only.js";
 import { DeviceCommand, DEVICE_MAX_ELEMENTS, DEVICE_MAX_IMAGE_B64, TaskOffer, type DevicePush, type DeviceResultWire, type DeviceSnapshotWire, type ResultRequest } from "../agent-protocol/schema.js";
 import { parseAction } from "../engine/mobile/device/actions.js";
 import { DeviceSessionError } from "../engine/mobile/device/errors.js";
@@ -84,7 +84,7 @@ export function hostDeviceProblem(agent: Pick<SessionHost, "name" | "capabilitie
     const why = deviceProblem(agent);
     if (why || !agent.personal) return why;
     if (agent.capabilities.runnerSwitches !== true) return `${agent.name} can't be used to explore a phone: its runner program is too old to keep your own phone out of it. Update the runner.`;
-    if (agent.allowRealPhone !== true && !agent.capabilities.android?.avds?.length) return `${agent.name} has no emulator, and “Use my connected phone” is off for it. Set up an emulator on it, or turn that on for it on the Runners page.`;
+    if (agent.allowRealPhone !== true && !agent.capabilities.android?.avds?.length) return `${agent.name} has no emulator, and “Use my connected phone” is off for it. Set up an emulator on it, or turn that on for your runner in Settings.`;
     return undefined;
 }
 
@@ -96,8 +96,8 @@ export function localDeviceProblem(env: NodeJS.ProcessEnv = process.env): string
 /**
  * Where does a phone session run? Pure: the decision table.
  *  - `on` absent: the agent when the project's runner setting is "agent", else this computer (today's behaviour for tests);
- *  - `on: "platform"`: this computer; `on: "agent"`: an online agent of the project that can host a session (the one named, or the one the project is pinned to,
- *    or the least busy of the online ones), otherwise a plain refusal naming what is missing.
+ *  - `on: "platform"`: this computer; `on: "agent"`: the caller's own runner if it can host a session (round 45), otherwise a plain refusal
+ *    naming what is missing.
  */
 export function chooseDeviceHost(input: { on?: "platform" | "agent"; agentId?: string; runnerId?: string | null; runner: RunnerSetting; agents: SessionHost[]; localProblem?: string; caller?: string | null }): DeviceHostChoice {
     const agents = visibleHosts(input.agents, input.caller);
@@ -108,19 +108,19 @@ export function chooseDeviceHost(input: { on?: "platform" | "agent"; agentId?: s
         if (input.localProblem) throw new HttpError(409, input.localProblem);
         return { kind: "platform" };
     }
-    // The runner chosen for this run (an agent_tokens id) names its latest machine; one this caller may not use is "not found".
-    const chosen = input.runnerId ? (agents.find((a) => a.tokenId === input.runnerId)?.id ?? "") : undefined;
-    const wanted = input.agentId ?? chosen ?? input.runner.agentId ?? undefined;
+    // Round 45: the caller's own runner (`runnerId` is accepted and ignored). A named machine must be one of theirs, else "not found".
+    const wanted = input.agentId ?? undefined;
     if (wanted) {
         const agent = agents.find((a) => a.id === wanted);
-        if (!agent) throw new HttpError(404, "That runner agent does not belong to this project.");
-        if (!agent.online) throw new HttpError(409, `${agent.name} is offline. Start it, or use another agent or the platform.`);
+        if (!agent) throw new HttpError(404, "That runner is not yours. Phone sessions open on your own runner.");
+        if (!agent.online) throw runnerRefusal("RUNNER_OFFLINE", RUNNER_OFFLINE);
         const why = hostDeviceProblem(agent);
         if (why) throw new HttpError(422, why);
         return { kind: "agent", agent };
     }
     const online = agents.filter((a) => a.online);
-    if (online.length === 0) throw new HttpError(409, input.runner.runnersOnly ? "No runner is online for this project. Start one that has a phone." : "No runner agent is online for this project. Start one, or explore on the platform instead.");
+    if (agents.length === 0) throw runnerRefusal("RUNNER_NOT_SET_UP", RUNNER_NOT_SET_UP);
+    if (online.length === 0) throw runnerRefusal("RUNNER_OFFLINE", input.runner.runnersOnly ? RUNNER_OFFLINE : `${RUNNER_OFFLINE} Or explore on the platform instead.`);
     const capable = online.filter((a) => !hostDeviceProblem(a));
     if (capable.length === 0) throw new HttpError(422, hostDeviceProblem(online[0]!)!);
     capable.sort((a, b) => (a.activeTasks ?? 0) - (b.activeTasks ?? 0));

@@ -2,13 +2,13 @@
  * UX-A run control in a real browser against a real platform and worker: the Run panel (what, where, how, and one sentence of what
  * will happen), the run strip with a live list, an honest Stop, the Run page, choosing tests in the list, the production confirmation,
  * the test page, the keyboard path, phone width and axe in both colour schemes. Real API tests run (Playwright test runner) against a
- * local fixture; only the list of runners is stood in for with a browser route (no runner agent is started here).
+ * local fixture; only the project's runner answer is stood in for with a browser route (no runner agent is started here).
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/runs-ui.test.ts
  * Screenshots go to .scratch/ux-a/shots (light and dark, 1280 and 390).
- * Ports: platform 6411, fixture app 6412.
+ * Ports: platform 8789, fixture app 8790.
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -25,8 +25,8 @@ import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { planSentence, ranSentence, runCountsLine, runningLine, stopQuestion, stoppedLine } from "../web/src/features/runs/run-text.js";
 
-const PORT = 6411;
-const APP_PORT = 6412;
+const PORT = 8789;
+const APP_PORT = 8790;
 const BASE = `http://127.0.0.1:${PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const SHOTS = path.join(REPO_ROOT, ".scratch", "ux-a", "shots");
@@ -160,20 +160,7 @@ beforeAll(async () => {
             ],
         }),
     );
-    // The runners this person may use (GET /runner-choices), stood in for in the same way: the Run panel lists these.
-    await page.route("**/api/projects/*/runner-choices", (route) =>
-        route.fulfill({
-            json: {
-                allowPersonal: true,
-                defaultRunnerId: null,
-                runners: [
-                    { id: "tok-1", name: "Maya's laptop", kind: "team", mine: false, online: true, busy: false, machine: { os: "darwin", arch: "arm64" }, canRunWeb: true, canRunMobile: false, codeScripts: false, problem: null },
-                    { id: "tok-2", name: "Old desktop", kind: "team", mine: false, online: false, busy: false, machine: { os: "win32", arch: "x64" }, canRunWeb: true, canRunMobile: false, codeScripts: false, problem: null },
-                ],
-            },
-        }),
-    );
-    // A run start with a runner picked: the browser's runnerId is noted and the run goes on to the real platform without it (no runner here).
+    // A run start that names a runner (round 45: none should): the browser's runnerId is noted and the run goes on without it.
     await page.route("**/api/projects/*/runs", async (route) => {
         const body = route.request().method() === "POST" ? (route.request().postDataJSON() as Record<string, unknown> | null) : null;
         if (!body || !("runnerId" in body)) return route.continue();
@@ -296,31 +283,24 @@ describe("the Run panel", () => {
         await page.setViewportSize({ width: 1280, height: 900 });
     }, 180_000);
 
-    it("shows where it can run, and a runner picked here is for this run only", async () => {
+    it("says where it runs, offers no runner to pick, and sends no runner with the run (round 45)", async () => {
         await testsPage();
         await page.getByRole("button", { name: "Run", exact: true }).click();
-        // The project runs on this server: a run can't be sent to a runner on its own, and the panel says where to change that.
-        await pwExpect(panel().getByRole("radio", { name: "This server" })).toBeChecked();
-        await pwExpect(panel().getByRole("radio", { name: /Maya's laptop/ })).toBeDisabled();
-        await pwExpect(panel().getByText("Team · online", { exact: true })).toBeVisible();
-        await pwExpect(panel().getByTestId("project-on-server")).toHaveText("This project runs its tests on this server. To use a runner, choose “On a runner” on the Runners page first.");
+        // Local mode, the project runs on this server.
+        await pwExpect(panel().getByTestId("run-where")).toHaveText("Runs on this server.");
+        await pwExpect(panel().getByRole("radio", { name: "This server" })).toHaveCount(0);
+        await pwExpect(panel().getByRole("radio", { name: /Maya's laptop/ })).toHaveCount(0);
         await page.keyboard.press("Escape");
 
-        // The project runs on its runners: "This server" is not offered, and the runner picked is sent with this run only.
+        // The project runs on a runner: the panel says so in the platform's words, and the run carries no runner.
         runner.runOn = "agent";
         await testsPage();
         await page.getByRole("button", { name: "Run", exact: true }).click();
-        await pwExpect(panel().getByRole("radio", { name: "This server" })).toHaveCount(0);
-        await pwExpect(panel().getByRole("radio", { name: /Maya's laptop/ })).toBeEnabled();
-        await pwExpect(panel().getByRole("radio", { name: /Old desktop/ })).toBeDisabled();
-        await pwExpect(panel().getByText("Team · offline", { exact: true })).toBeVisible();
-        await panel().getByRole("radio", { name: /Maya's laptop/ }).check();
-        await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 1 test on Maya's laptop. Results replace the last results of these tests.");
-        await pwExpect(panel().getByText("Only this run goes there. Where the project runs its tests does not change.")).toBeVisible();
-        // Starting sends the runner with the run (runnerId) and changes nothing about the project.
+        await pwExpect(panel().getByTestId("run-where")).toHaveText("Runs on Maya's laptop (online).");
+        await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 1 test on the project’s runner. Results replace the last results of these tests.");
         await panel().getByRole("button", { name: "Start run" }).click();
         await pwExpect(strip()).toBeVisible({ timeout: 30_000 });
-        expect(runnerIds).toEqual(["tok-1"]);
+        expect(runnerIds).toEqual([]);
         expect(runner.puts).toEqual([]);
         await pwExpect(page.getByRole("region", { name: "Run finished" })).toBeVisible({ timeout: 90_000 });
         // Back to this server for the rest of the file.

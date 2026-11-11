@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { DEFAULT_FRAMEWORK_SETTINGS } from "../src/engine/frameworks/settings.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner, runOwner, testPerson } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -27,6 +28,7 @@ const APP_PORT = 5951;
 const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "ak-admin-key-7d21c9e4";
+let RUN_AS = API_KEY;
 const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
@@ -36,12 +38,17 @@ let worker: Worker | undefined;
 let dataDir: string;
 let appServer: http.Server;
 
-const call = async (method: string, url: string, body?: unknown, headers: Record<string, string> = { "x-api-key": API_KEY }) => {
+const call = async (method: string, url: string, body?: unknown, headers: Record<string, string> = { "x-api-key": RUN_AS }) => {
     const res = await fetch(`${BASE}${url}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const text = await res.text();
     return { status: res.status, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; text: string; body: any };
 };
-const newProject = async (name: string) => (await call("POST", "/api/projects", { name })).body.id as string;
+// The test acts as a person (round 45), whose changes would wait for approval: these tests are about running them.
+const newProject = async (name: string) => {
+    const id = (await call("POST", "/api/projects", { name })).body.id as string;
+    await call("PUT", `/api/projects/${id}/review-policy`, { edits: false });
+    return id;
+};
 const putSettings = (projectId: string, settings: unknown, by?: string) => call("PUT", `/api/projects/${projectId}/framework-settings`, { settings, ...(by ? { by } : {}) });
 const getSettings = async (projectId: string) => (await call("GET", `/api/projects/${projectId}/framework-settings`)).body;
 
@@ -71,6 +78,8 @@ beforeAll(async () => {
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-fwset-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    // Round 45: runs started with the shared key have no owner, so the test acts as a person whose runner takes them.
+    RUN_AS = testPerson(platform).token;
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
 }, 60_000);
@@ -184,7 +193,7 @@ describe("the API", () => {
     it("is refused with a 409 while a job of the project is running", async () => {
         const id = await newProject("Busy");
         const app = platform.repo.createApplication(id, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
-        const job = await platform.repo.createJob(id, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
+        const job = await platform.repo.createJob(id, app, { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "validate", testIds: [] });
         const busy = await putSettings(id, { web: { testTimeoutSeconds: 90 } });
         expect(busy.status).toBe(409);
         expect(busy.body.error).toMatch(/running|job/i);
@@ -230,7 +239,7 @@ describe("frameworks a project switched off, on this server", () => {
 
     it("a run with both leaves the API test out, says so, and really runs the web test in Chromium with the project's limit", async () => {
         const appId = platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
-        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [ids.web!, ids.api!] });
+        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "validate", testIds: [ids.web!, ids.api!] });
         const done = await jobDone(job.id);
         expect(done.status).toBe("COMPLETED");
         const events = await eventsOf(job.id);
@@ -256,11 +265,11 @@ describe("frameworks a project switched off, on this server", () => {
         const id = await newProject("Analysis");
         const appId = platform.repo.createApplication(id, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
         await putSettings(id, { enabled: { "playwright-api": false } });
-        const job = await platform.repo.createJob(id, appId, { ...DEFAULT_JOB_OPTIONS, mode: "generate" });
+        const job = await platform.repo.createJob(id, appId, { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "generate" });
         expect(job.options.targets).toEqual(["web"]);
         platform.repo.setJobStatus(job.id, "FAILED", "test over");
         await putSettings(id, { enabled: { playwright: false } });
-        await expect(platform.repo.createJob(id, appId, { ...DEFAULT_JOB_OPTIONS, mode: "generate" })).rejects.toThrow("Web tests are turned off for this project");
+        await expect(platform.repo.createJob(id, appId, { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "generate" })).rejects.toThrow("Web tests are turned off for this project");
     });
 });
 
@@ -283,7 +292,7 @@ describe("tasks for a runner agent", () => {
 
     beforeAll(async () => {
         projectId = await newProject("On an agent");
-        const token = (await call("POST", `/api/projects/${projectId}/agent-tokens`, { label: "maya" })).body.secret as string;
+        const token = personalRunner(platform, { label: "maya", replace: true }).secret;
         phone = new FakeAgent(viaFetch(BASE), token, { name: "Maya's laptop", capabilities: defaultCaps({ android: { adb: true, devices: [], avds: ["Pixel_6", "Pixel_7"] } }), concurrency: 1 });
         expect((await phone.hello()).status).toBe(200);
         const imp = await call("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, validate: false, mobile: { appPackage: "com.example.shop" }, specs: [WEB, API, MOBILE] });

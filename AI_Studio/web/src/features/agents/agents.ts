@@ -39,18 +39,6 @@ export interface RunnerCheck {
     items: Array<{ id: string; status: "ok" | "missing" | "optional"; title: string; fix?: string }>;
 }
 
-export interface AgentToken {
-    id: string;
-    label: string | null;
-    /** A fingerprint such as "aitg_…x7Qd". The token itself is shown once, when it is made. */
-    hint: string;
-    createdAt: string;
-    lastUsedAt: string | null;
-    revokedAt: string | null;
-    /** Given to this project from outside it (a runner of the organisation or a shared machine): the access list above manages it. */
-    shared?: boolean;
-}
-
 export interface AndroidDevice {
     serial: string;
     model?: string;
@@ -165,13 +153,8 @@ export function phoneToolsSentence(p: NonNullable<Agent["capabilities"]["phoneTo
     return p.note ?? "The runner can't get the Android phone tools on this computer.";
 }
 
-/** The command to run on the machine. Pass the token while it is on screen, otherwise a placeholder is shown. */
-export function agentCommand(origin: string, token?: string): string {
-    return `node bin/ai-test-agent.mjs --url ${origin} --token ${token ?? "<your token>"}`;
-}
-
 /** What a runner whose update could not be checked shows, on its page, in the list and on its row. */
-export const NEEDS_MANUAL_UPDATE = "An update is available but couldn't be checked on this computer. Download the new version from Add this computer.";
+export const NEEDS_MANUAL_UPDATE = "An update is available but couldn't be checked on this computer. Download the runner again from Settings, Your runner.";
 
 /** Sentence for the "where did it run" line. */
 export function ranOnSentence(r: RanOn): string {

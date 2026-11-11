@@ -218,7 +218,12 @@ describe("each line on a fake computer", () => {
 
     it("the token: accepted, revoked, not checked, an older platform", () => {
         expect(tokenLine({ status: 200, project: "Shop" })).toMatchObject({ status: "ok", title: `The platform accepts this runner's token (project "Shop"); the token is not shown` });
-        expect(tokenLine({ status: 404, sentence: "This runner agent token is not valid or was revoked." })).toMatchObject({ status: "missing", title: "The platform does not accept this runner's token: it was revoked, or the project was deleted" });
+        expect(tokenLine({ status: 404, sentence: "This runner agent token is not valid or was revoked." })).toMatchObject({ status: "missing", title: "The platform does not accept this runner's credential: it was removed, or another computer was set up in its place" });
+        // Round 45: a team or project credential is refused with the platform's own sentence, which the line shows.
+        expect(tokenLine({ status: 401, sentence: "This runner was set up for a team or a project, and those runners are no longer used. Set up your own runner from Settings in AI Studio." })).toMatchObject({
+            status: "missing",
+            title: "The platform does not accept this runner: This runner was set up for a team or a project, and those runners are no longer used. Set up your own runner from Settings in AI Studio",
+        });
         expect(tokenLine({ skipped: true }).status).toBe("optional");
         expect(tokenLine({ status: 404, sentence: "Route POST:/api/agent/check not found" }).status).toBe("optional");
         expect(tokenLine({ status: 429 }).status).toBe("optional");
@@ -278,7 +283,7 @@ describe("the whole check on a fake download folder", () => {
         let out = "";
         const code = await runCheckProgram({ argv: [], env: env(), kitDir: kit, out: (t) => (out += t), deps: deps({ fetchImpl: fakeFetch({ tokenOk: false }).fetchImpl }) });
         expect(code).toBe(1);
-        expect(out).toContain("missing   The platform does not accept this runner's token");
+        expect(out).toContain("missing   The platform does not accept this runner's credential");
         expect(out).toContain("missing   Runner files do not match this download");
         expect(out).toContain("missing   The test tools are not installed");
         expect(out).toMatch(/3 things need a look\. Fix them, then run this check again\.\n$/);

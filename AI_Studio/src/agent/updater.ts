@@ -374,7 +374,7 @@ export class RunnerUpdater {
         this.state.backoffUntil = this.now() + HOUR;
         this.state.last = { state: "needs-manual", from: this.version, to, error: reason.slice(0, 380), at: new Date(this.now()).toISOString() };
         this.save();
-        this.log?.warn(`Version ${to} was not installed: ${reason} This runner keeps running version ${this.version}. Download the new version from the Runners page to update it.`);
+        this.log?.warn(`Version ${to} was not installed: ${reason} This runner keeps running version ${this.version}. Choose Update now in Settings, Your runner, or download the runner again there.`);
     }
 
     private fail(to: string, e: unknown): void {
@@ -520,7 +520,7 @@ export class RunnerUpdater {
         // With the update's lock file: exactly the signed versions and checksums of every package, and no package's install script runs
         // (Playwright needs none; only Android helpers have one, which downloads desktop browser drivers the runner does not use).
         // Never npm install without the lock file: its versions would float and every package's install script would run.
-        if (!fs.existsSync(path.join(dir, "package-lock.json"))) throw new UpdateError("This update needs new test tools but came without their lock file, so they were not installed (an update never runs npm install without one). Nothing was changed. Download the new version from the Runners page.");
+        if (!fs.existsSync(path.join(dir, "package-lock.json"))) throw new UpdateError("This update needs new test tools but came without their lock file, so they were not installed (an update never runs npm install without one). Nothing was changed. Choose Update now in Settings, Your runner, or download the runner again there.");
         const args = [cli, "ci", "--ignore-scripts", "--no-audit", "--no-fund"];
         const r = await run(this.execPath, args, { cwd: dir, env: { ...this.env, NODE_USE_SYSTEM_CA: "1" }, timeoutMs: 15 * 60_000, signal });
         if (signal.aborted) throw new UpdateError("The update was stopped.");

@@ -1,9 +1,8 @@
 /**
  * "Check this computer" on the runner's row (docs/features/runner-check.md): what the runner found when it started. The row says how many
- * things need a look and lists them with how to fix each; Show details lists every line. Also the sentence the Add a runner panel ends with.
+ * things need a look and lists them with how to fix each; Show details lists every line.
  */
 import { relativeTime } from "../../lib/format";
-import type { KitKind, KitPlatform } from "./kit";
 import type { RunnerCheck } from "./agents";
 import "./check.css";
 
@@ -44,16 +43,4 @@ export function RunnerCheckDetails({ check }: { check: RunnerCheck }) {
             ))}
         </ul>
     );
-}
-
-/** The last line of Add a runner's start step: what to double-click when the runner does not connect. */
-export function checkComputerHelp(platform: KitPlatform, kind: KitKind): string {
-    if (platform === "windows") {
-        return kind === "installer"
-            ? "If it does not connect, double-click check-computer.cmd in the unzipped folder. It checks this computer and says what to fix. The setup window shows the same check when it finishes."
-            : "If it does not connect, double-click check-computer.cmd in the same folder. It checks this computer and says what to fix, and changes nothing.";
-    }
-    return kind === "installer"
-        ? "If it does not connect, double-click check-computer.command in the unzipped folder. It checks this computer and says what to fix. The setup window shows the same check when it finishes."
-        : "If it does not connect, run `sh check-computer.sh` in the same Terminal window (on a Mac you can also double-click check-computer.command). It checks this computer and says what to fix, and changes nothing.";
 }

@@ -1,16 +1,17 @@
 /**
- * The runner kit against a REAL platform: the download route (info, validation, token, limits, secrets), and then the kit itself, unzipped
- * into a temp folder and started the way a tester would start it: the bundled runner.mjs, the Windows start-runner.cmd and (when bash is
- * there) start-runner.sh. Each connects to the platform on a real port with the token inside its zip, shows up as online, runs a real
- * Playwright web test and a real API test from a validation job, and the results come back as the tests' verdicts. A revoked token makes
- * the runner stop with a plain message.
+ * The runner download against a REAL platform (round 45: one runner per person, set up in Settings): the download route (info, validation,
+ * who may download, the one-time code, secrets), and then the download itself, unzipped into a temp folder and started the way a person
+ * would start it: the bundled runner.mjs, the Windows start-runner.cmd and (when bash is there) start-runner.sh. Each trades the code inside
+ * its zip for the person's credential, shows up in Settings (GET /api/me/runner) under the computer's own name, runs a real Playwright web
+ * test and a real API test the person starts (no runner is chosen anywhere), and the results come back as the tests' verdicts. Removing the
+ * computer (POST /api/me/runner/retire) makes the runner stop with a plain message. The platform runs in EXECUTION_MODE=runners.
  *
  * node_modules for the unzipped kits is a junction to this repository's (no network install); the install step of the start scripts is
  * skipped with AITP_KIT_SKIP_INSTALL=1, exactly as the brief allows. What is NOT covered here: the install step itself (npm registry,
  * browser download), winget/brew, a real fresh computer.
  *
  * Browser-launching: run with  node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/runner-kit.test.ts
- * Ports: platform 6530, fixture application 6531.
+ * Ports: platform 8800, fixture application 8801.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -22,25 +23,28 @@ import { fileURLToPath } from "node:url";
 import { unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { Worker } from "../src/platform/worker.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
 
 const REPO = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PLATFORM_PORT = 6530;
-const APP_PORT = 6531;
+const PLATFORM_PORT = 8800;
+const APP_PORT = 8801;
 const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "kit-admin-key-8d41c7e2f9";
 const PASSWORD = "KITLEAK-Password-31a7c5";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "RUNNER_KIT_DIR", "AGENT_MAX_TOKENS", "RUNNER_KIT_RATE_PER_MINUTE"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "RUNNER_KIT_DIR", "RUNNER_INSTALLER_DIR", "RUNNER_COMPLETE_DIR", "RUNNER_KIT_RATE_PER_MINUTE"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
 let worker: Worker;
+let stopBeat: (() => void) | undefined;
 let dataDir: string;
 let tmp: string;
 let bundleDir: string;
@@ -49,14 +53,28 @@ const logged: string[] = [];
 const children: ChildProcess[] = [];
 const links: string[] = [];
 
-const admin = async (method: string, url: string, body?: unknown, headers: Record<string, string> = { "x-api-key": API_KEY }) => {
+/** The person (an owner with their own API token, made in beforeAll): their downloads, their runner, their runs. */
+let personToken = "";
+const admin = async (method: string, url: string, body?: unknown, headers: Record<string, string> = { authorization: `Bearer ${personToken}` }) => {
     const res = await fetch(`${BASE}${url}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const buf = Buffer.from(await res.arrayBuffer());
     const text = buf.toString("utf8");
     return { status: res.status, headers: res.headers, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; headers: Headers; buf: Buffer; text: string; body: any };
 };
-const newProject = async (name: string) => (await admin("POST", "/api/projects", { name })).body.id as string;
-const download = (projectId: string, name: string, platformName: "windows" | "unix" = "windows") => admin("POST", `/api/projects/${projectId}/runner-kits`, { name, platform: platformName, kind: "files" });
+/** A project whose imported tests run at once (no approval step: this file is about the runner, not the review). */
+const newProject = async (name: string) => {
+    const id = (await admin("POST", "/api/projects", { name })).body.id as string;
+    expect((await admin("PUT", `/api/projects/${id}/review-policy`, { aiGenerated: false, edits: false, healing: false })).status).toBe(200);
+    return id;
+};
+/** This person's runner download. Linux is the plain files with all three start scripts; there is no installer or complete build here. */
+const download = (system: "windows" | "linux" = "linux") => admin("POST", "/api/me/runner/download", { os: system, arch: "x64" });
+/** The person's runner as Settings shows it, when it is connected. */
+const myRunner = async () => {
+    const r = (await admin("GET", "/api/me/runner")).body?.runner as { id: string; name: string; status: string; update?: unknown } | null | undefined;
+    return r && (r.status === "online" || r.status === "busy") ? r : undefined;
+};
+const retire = () => admin("POST", "/api/me/runner/retire");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function until<T>(what: string, probe: () => Promise<T | undefined | false> | T | undefined | false, ms = 60_000): Promise<T> {
     const end = Date.now() + ms;
@@ -125,14 +143,14 @@ const BASH = findBash();
 beforeAll(async () => {
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "5" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
-    // These journeys download several kits per project; the one-runner default is covered in runner-limit-unit.test.ts.
-    process.env.AGENT_MAX_TOKENS = "25";
-    delete process.env.RUNNER_KIT_RATE_PER_MINUTE;
+    process.env.RUNNER_KIT_RATE_PER_MINUTE = "100";
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-kit-api-"));
     bundleDir = path.join(tmp, "dist-runner");
     // Until the bundle is built, the server must say so.
     process.env.RUNNER_KIT_DIR = path.join(tmp, "not-built");
+    process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "no-installer");
+    process.env.RUNNER_COMPLETE_DIR = path.join(tmp, "no-complete");
     appServer = http.createServer((req, res) => {
         if (req.url === "/api/health") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: "ok" }));
         res.writeHead(200, { "content-type": "text/html" });
@@ -140,7 +158,7 @@ beforeAll(async () => {
     });
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-kit-data-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0", EXECUTION_MODE: "runners" }));
     server = await buildServer(platform);
     // Everything the server writes to a request's log is kept, to prove the token never appears in it.
     server.addHook("onRequest", async (req) => {
@@ -155,6 +173,11 @@ beforeAll(async () => {
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
     worker.start();
+    // EXECUTION_MODE=runners takes runs only while the part that hands them to runners is alive (as src/platform/ops/process.ts runs it).
+    stopBeat = startHeartbeat(platform.db);
+    const users = accessControlOf(server).users;
+    const maya = users.create({ email: "maya@people.example", name: "Maya", role: "owner" });
+    personToken = users.createToken(maya.id, { name: "kit test", role: "owner" }).token;
 }, 60_000);
 
 afterAll(async () => {
@@ -164,6 +187,7 @@ afterAll(async () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
     }
+    stopBeat?.();
     await worker?.stop();
     await server?.close();
     platform?.db.close();
@@ -187,42 +211,40 @@ afterAll(async () => {
 });
 
 describe("before the kit is built", () => {
-    it("info says it is not available and why; a download is a plain 503", async () => {
-        const p = await newProject("Not built yet");
-        const info = await admin("GET", `/api/projects/${p}/runner-kits/info`);
+    it("info says it is not available and why; a download is a plain 503 that makes no code", async () => {
+        const info = await admin("GET", "/api/me/runner/download/info");
         expect(info.status).toBe(200);
         expect(info.body).toMatchObject({ available: false, reason: "The runner kit has not been built on this server. Run `npm run build:runner`.", nodeMin: 24 });
-        const d = await download(p, "Laptop");
+        const d = await download("windows");
         expect(d.status).toBe(503);
         expect(d.body.error ?? d.body.message).toContain("npm run build:runner");
-        // Nothing was handed out, so no token was made either.
-        expect((await admin("GET", `/api/projects/${p}/agent-tokens`)).body).toEqual([]);
+        expect(platform.db.all("SELECT id FROM runner_enrollments")).toEqual([]);
     });
 });
 
 describe("the routes", () => {
-    let projectId = "";
-
     it("build the bundle", async () => {
         const manifest = await buildRunner({ outDir: bundleDir });
         process.env.RUNNER_KIT_DIR = bundleDir;
         // The three programs, package.json and LICENSES.txt, plus the kit's package-lock.json when this checkout has one.
         expect(manifest.files).toHaveLength(fs.existsSync(path.join(REPO, "package-lock.json")) ? 6 : 5);
-        projectId = await newProject("Kit Shop");
     }, 120_000);
 
-    it("are protected by the API key like every other route", async () => {
+    it("need a person: nobody and a wrong key get 401, the shared access key gets a plain 403", async () => {
         for (const headers of [{} as Record<string, string>, { "x-api-key": "wrong" }]) {
-            expect((await admin("GET", `/api/projects/${projectId}/runner-kits/info`, undefined, headers)).status).toBe(401);
-            expect((await admin("POST", `/api/projects/${projectId}/runner-kits`, { name: "x", platform: "windows" }, headers)).status).toBe(401);
+            expect((await admin("GET", "/api/me/runner/download/info", undefined, headers)).status).toBe(401);
+            expect((await admin("POST", "/api/me/runner/download", { os: "windows", arch: "x64" }, headers)).status).toBe(401);
         }
-        expect((await admin("GET", `/api/projects/${projectId}/agent-tokens`)).body).toEqual([]);
+        const key = await admin("POST", "/api/me/runner/download", { os: "windows", arch: "x64" }, { "x-api-key": API_KEY });
+        expect(key.status).toBe(403);
+        expect(key.body.error).toBe("Sign in with your own account to set up your runner.");
+        expect(platform.db.all("SELECT id FROM runner_enrollments")).toEqual([]);
     });
 
     it("info: available, the version, the address from PUBLIC_URL", async () => {
-        const info = await admin("GET", `/api/projects/${projectId}/runner-kits/info`);
+        const info = await admin("GET", "/api/me/runner/download/info");
         expect(info.status).toBe(200);
-        expect(info.body).toMatchObject({ available: true, platformUrl: BASE, urlOk: true, nodeMin: 24 });
+        expect(info.body).toMatchObject({ available: true, platformUrl: BASE, urlOk: true, nodeMin: 24, mayDownload: true });
         expect(info.body.kitVersion).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{10}$/);
         // PUBLIC_URL here is an address on this computer, which the page says plainly.
         expect(info.body.urlWarning).toMatch(/only a runner on this computer/i);
@@ -234,128 +256,82 @@ describe("the routes", () => {
         const before = cfg.PUBLIC_URL;
         try {
             delete cfg.PUBLIC_URL;
-            const lan = (await admin("GET", `/api/projects/${projectId}/runner-kits/info`)).body;
+            const lan = (await admin("GET", "/api/me/runner/download/info")).body;
             expect(lan).toMatchObject({ available: true, platformUrl: BASE, urlOk: true });
             expect(lan.urlWarning).toMatch(/set PUBLIC_URL|only a runner on this computer/i);
             cfg.PUBLIC_URL = "http://tests.example.com";
-            const pub = (await admin("GET", `/api/projects/${projectId}/runner-kits/info`)).body;
+            const pub = (await admin("GET", "/api/me/runner/download/info")).body;
             expect(pub).toMatchObject({ urlOk: false, platformUrl: "http://tests.example.com" });
             expect(pub.urlWarning).toBe("Runners need an https address when the platform is not on your own network. Set PUBLIC_URL to the https address people use.");
+            expect(pub.systems.every((x: { available: boolean }) => !x.available)).toBe(true);
         } finally {
             if (before === undefined) delete cfg.PUBLIC_URL;
             else cfg.PUBLIC_URL = before;
         }
     });
 
-    it("refuse a bad name or system with a plain 400 and make no token", async () => {
-        const bodies: unknown[] = [{}, { name: "", platform: "windows" }, { name: "A".repeat(61), platform: "windows" }, { name: "a/b", platform: "unix" }, { name: "a\\b", platform: "unix" }, { name: "tab\there", platform: "unix" }, { name: "ok", platform: "mac" }, { name: "ok" }, { name: "ok", platform: "unix", extra: 1 }, { name: 5, platform: "unix" }];
+    it("refuse anything but a system and a processor with a plain 400 and make no code", async () => {
+        const bodies: unknown[] = [{}, { os: "windows" }, { arch: "x64" }, { os: "unix", arch: "x64" }, { os: "windows", arch: "x86" }, { os: "windows", arch: "x64", name: "Maya's laptop" }, { os: "linux", arch: "x64", kind: "files" }, { name: "ok", platform: "unix" }];
         for (const b of bodies) {
-            const r = await admin("POST", `/api/projects/${projectId}/runner-kits`, b);
+            const r = await admin("POST", "/api/me/runner/download", b);
             expect(r.status, JSON.stringify(b)).toBe(400);
             expect(String(r.body.error ?? r.body.message ?? "").length).toBeGreaterThan(5);
         }
-        expect((await admin("GET", `/api/projects/${projectId}/agent-tokens`)).body).toEqual([]);
+        expect(platform.db.all("SELECT id FROM runner_enrollments")).toEqual([]);
     });
 
-    it("answer 404 for a project that does not exist", async () => {
-        const ghost = "00000000-0000-4000-8000-000000000000";
-        expect((await admin("GET", `/api/projects/${ghost}/runner-kits/info`)).status).toBe(404);
-        expect((await download(ghost, "x")).status).toBe(404);
-    });
-
-    it("download: a zip, a header with the new token's id, the token in the list under the runner's name, never in the list's answer or the log", async () => {
-        const r = await download(projectId, "Maya's laptop");
+    it("download: a zip with the person's one-time code, never a credential; the code is in no answer, row or log", async () => {
+        const r = await download("windows");
         expect(r.status, r.text.slice(0, 200)).toBe(200);
         expect(r.headers.get("content-type")).toBe("application/zip");
-        expect(r.headers.get("content-disposition")).toBe('attachment; filename="runner-kit-shop-windows.zip"');
+        expect(r.headers.get("content-disposition")).toBe('attachment; filename="runner-my-computer-windows.zip"');
         expect(r.headers.get("cache-control")).toBe("no-store");
-        const tokenId = r.headers.get("x-runner-token-id")!;
-        expect(tokenId).toMatch(/^[0-9a-f-]{36}$/);
+        const enrollmentId = r.headers.get("x-runner-enrollment-id")!;
+        expect(enrollmentId).toMatch(/^[0-9a-f-]{36}$/);
+        // No installer is built here: Windows gets the plain files, and the answer says why.
+        expect(r.headers.get("x-runner-kit-kind")).toBe("files");
+        expect(r.headers.get("x-runner-kit-note")).toMatch(/Windows installer has not been built/);
 
         const files = unzipSync(new Uint8Array(r.buf));
-        const secret = Buffer.from(files["runner-kit-shop-windows/runner.token"]!).toString("utf8").trim();
-        expect(secret).toMatch(/^aitg_[A-Za-z0-9_-]{20,}$/);
+        expect(files["runner-my-computer-windows/runner.token"]).toBeUndefined();
+        const code = Buffer.from(files["runner-my-computer-windows/runner.enroll"]!).toString("utf8").trim();
+        expect(code).toMatch(/^aite_[A-Za-z0-9_-]{20,}$/);
+        expect((await admin("GET", `/api/me/runner/enrollments/${enrollmentId}`)).body).toEqual({ status: "waiting" });
 
-        const list = (await admin("GET", `/api/projects/${projectId}/agent-tokens`)).body as Array<{ id: string; label: string; revokedAt: string | null }>;
-        expect(list).toHaveLength(1);
-        expect(list[0]).toMatchObject({ id: tokenId, label: "Maya's laptop", revokedAt: null });
-        expect(JSON.stringify(list)).not.toContain(secret);
+        // The platform keeps only the hash: no row and no log line holds the code.
+        expect(logged.some((l) => l.includes("runner-downloaded"))).toBe(true);
+        for (const line of logged) expect(line).not.toContain(code);
+        expect(JSON.stringify(platform.db.all("SELECT * FROM runner_enrollments"))).not.toContain(code);
+        expect(JSON.stringify(platform.db.all("SELECT * FROM activity"))).not.toContain(code);
 
-        // The platform keeps only the hash: the audit row and the log know the token's last four characters at most.
-        const audit = platform.db.all<{ action: string; detail: string }>("SELECT action, detail FROM custom_audit WHERE project_id = ? AND action = 'runner-kit-downloaded'", projectId);
-        expect(audit).toHaveLength(1);
-        expect(audit[0]!.detail).toContain("Maya's laptop");
-        expect(audit[0]!.detail).not.toContain(secret);
-        expect(logged.some((l) => l.includes("runner-kit-downloaded"))).toBe(true);
-        for (const line of logged) expect(line).not.toContain(secret);
-        expect(JSON.stringify(platform.db.all("SELECT * FROM agent_tokens"))).not.toContain(secret);
-
-        // runner.json points at the platform and names the runner.
-        const json = JSON.parse(Buffer.from(files["runner-kit-shop-windows/runner.json"]!).toString("utf8"));
-        expect(json).toMatchObject({ url: BASE, name: "Maya's laptop" });
-        expect(json.kitVersion).toBe((await admin("GET", `/api/projects/${projectId}/runner-kits/info`)).body.kitVersion);
+        // runner.json points at the platform and names no runner: it takes the computer's own name.
+        const json = JSON.parse(Buffer.from(files["runner-my-computer-windows/runner.json"]!).toString("utf8"));
+        expect(Object.keys(json).sort()).toEqual(["kitVersion", "url"]);
+        expect(json.url).toBe(BASE);
+        expect(json.kitVersion).toBe((await admin("GET", "/api/me/runner/download/info")).body.kitVersion);
     });
 
     it("the zip holds none of the server's secrets, paths or data", async () => {
-        const r = await download(projectId, "Leak check", "unix");
+        const r = await download("linux");
         expect(r.status).toBe(200);
         const files = unzipSync(new Uint8Array(r.buf));
-        const secrets = [API_KEY, PASSWORD, dataDir, dataDir.replaceAll("\\", "/"), "platform.db", REPO, REPO.replaceAll("\\", "/")];
+        const secrets = [API_KEY, personToken, PASSWORD, dataDir, dataDir.replaceAll("\\", "/"), "platform.db", REPO, REPO.replaceAll("\\", "/")];
         for (const [name, bytes] of Object.entries(files)) {
-            if (name.endsWith("runner.token")) continue;
+            if (name.endsWith("runner.enroll")) continue;
             const body = Buffer.from(bytes).toString("latin1");
             for (const s of secrets) expect(body.includes(s), `${s.slice(0, 10)} in ${name}`).toBe(false);
         }
-        expect(Object.keys(files)).toContain("runner-kit-shop-unix/start-runner.sh");
-    });
-
-    it("a kit for one project does not show up in another", async () => {
-        const other = await newProject("Somebody else");
-        expect((await admin("GET", `/api/projects/${other}/agent-tokens`)).body).toEqual([]);
-        expect((await admin("GET", `/api/projects/${other}/agents`)).body).toEqual([]);
-    });
-
-    it("stops at the token limit (409) and works again after one is revoked", async () => {
-        const p = await newProject("Token limit");
-        process.env.AGENT_MAX_TOKENS = "2";
-        try {
-            const first = await download(p, "one");
-            expect(first.status).toBe(200);
-            expect((await admin("POST", `/api/projects/${p}/agent-tokens`, { label: "two" })).status).toBe(201);
-            const refused = await download(p, "three");
-            expect(refused.status).toBe(409);
-            expect(String(refused.body.error ?? refused.body.message)).toMatch(/already has 2 runners/);
-            expect((await admin("GET", `/api/projects/${p}/agent-tokens`)).body).toHaveLength(2);
-            // The hand-made token route has the same limit, so the limit cannot be stepped around.
-            const tokenRefused = await admin("POST", `/api/projects/${p}/agent-tokens`, { label: "four" });
-            expect(tokenRefused.status).toBe(409);
-            expect(String(tokenRefused.body.error)).toMatch(/already has 2 runners/);
-            expect((await admin("GET", `/api/projects/${p}/agent-tokens`)).body).toHaveLength(2);
-            // Removing a runner makes room again.
-            expect((await admin("DELETE", `/api/projects/${p}/agent-tokens/${first.headers.get("x-runner-token-id")}`)).status).toBe(200);
-            expect((await download(p, "three")).status).toBe(200);
-            expect((await download(p, "five")).status).toBe(409); // two active again (two and three)
-        } finally {
-            process.env.AGENT_MAX_TOKENS = "25"; // back to this file's baseline
-        }
-    });
-
-    it("is rate limited per project", async () => {
-        const p = await newProject("Rate limit");
-        const statuses: number[] = [];
-        for (let i = 0; i < 7; i++) statuses.push((await download(p, `r${i}`)).status);
-        expect(statuses.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
-        expect(statuses.slice(5)).toEqual([429, 429]);
-        // A refused download made no token.
-        expect((await admin("GET", `/api/projects/${p}/agent-tokens`)).body).toHaveLength(5);
-        // Another project is not affected.
-        expect((await download(projectId, "still fine")).status).toBe(200);
+        expect(Object.keys(files)).toContain("runner-my-computer-unix/start-runner.sh");
     });
 });
 
 describe("the unzipped kit really runs", () => {
     /** Import a web test and an API test into a project, send its runs to the agent, and check the verdicts that come back. */
     async function runTests(projectId: string, runnerName: string, withWeb: boolean) {
+        // No runner is chosen anywhere: every run the person starts goes to their own runner. The fixture application is on this computer,
+        // so the owner switches on private addresses for their runner first (off by default), as Settings does.
+        const sw = await admin("PATCH", "/api/me/runner", { switches: { privateTargets: true } });
+        expect(sw.status, sw.text).toBe(200);
         const specs = [
             { title: "The health endpoint answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/api/health" }, { action: "assertResponse", check: "status", expected: 200 }] },
             ...(withWeb
@@ -368,8 +344,6 @@ describe("the unzipped kit really runs", () => {
         const imp = await admin("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, validate: false, credentials: { username: "demo@example.com", password: PASSWORD }, specs });
         expect(imp.status, imp.text).toBe(202);
         const ids = (imp.body.tests as Array<{ id: string }>).map((t) => t.id);
-        const set = await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" });
-        expect(set.status, set.text).toBe(200);
         const verdict = async (id: string) => {
             const started = await admin("POST", `/api/tests/${id}/validate`);
             expect(started.status, started.text).toBe(202);
@@ -377,7 +351,7 @@ describe("the unzipped kit really runs", () => {
                 const j = (await admin("GET", `/api/test-generation/${started.body.jobId}`)).body;
                 return ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status) ? j : undefined;
             }, 150_000);
-            expect(job.ranOn).toMatchObject({ kind: "agent", name: runnerName });
+            expect(job.ranOn, JSON.stringify({ status: job.status, error: job.error }).slice(0, 600)).toMatchObject({ kind: "agent", name: runnerName });
             return ((await admin("GET", `/api/tests/${id}/executions`)).body as Array<{ status: string; error?: string }>)[0]!;
         };
         const results = [];
@@ -385,87 +359,87 @@ describe("the unzipped kit really runs", () => {
         return results;
     }
 
-    const onlineAgents = async (projectId: string) => ((await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ name: string; online: boolean; capabilities: { browsers: string[]; kitVersion?: string } }>).filter((a) => a.online);
+    /** The computer's own name, as the runner reports it (config.ts: the host name, trimmed to 64). */
+    const computerName = os.hostname().trim().slice(0, 64) || "agent";
 
-    it("runner.mjs from the kit connects with the token inside, runs a web and an API test, and the verdicts come back", async () => {
+    it("runner.mjs from the download trades its code, shows in Settings under the computer's name, runs a web and an API test, and the verdicts come back", async () => {
         const p = await newProject("Kit end to end");
-        const dl = await download(p, "kit runner");
+        const dl = await download("linux");
         expect(dl.status).toBe(200);
         const kit = unpack(dl.buf, "mjs");
+        const code = fs.readFileSync(path.join(kit, "runner.enroll"), "utf8").trim();
         // Started the way the README's technical readers would: node runner.mjs, nothing else on the command line.
         const run = launch(process.execPath, ["runner.mjs"], kit);
-        const agent = await until("the runner to be online", async () => (await onlineAgents(p))[0], 60_000).catch((e) => {
+        const mine = await until("the runner to be connected", myRunner, 60_000).catch((e) => {
             throw new Error(`${e.message}\n--- runner output ---\n${output(run)}`);
         });
-        expect(agent).toMatchObject({ name: "kit runner", online: true });
-        expect(agent.capabilities.browsers).toContain("chromium");
-        // The kit version it reports is the one written into runner.json.
-        const info = (await admin("GET", `/api/projects/${p}/runner-kits/info`)).body;
-        expect(agent.capabilities.kitVersion).toBe(info.kitVersion);
+        expect(mine.name).toBe(computerName);
+        expect((await admin("GET", `/api/me/runner/enrollments/${dl.headers.get("x-runner-enrollment-id")}`)).body).toEqual({ status: "connected" });
+        // The code is used up and gone from the folder; the credential is kept in this computer's store, never as a plain file here.
+        expect(fs.existsSync(path.join(kit, "runner.enroll"))).toBe(false);
         expect(output(run)).toContain("Connected to the platform");
         // Everything it stores is inside the kit folder.
         expect(fs.existsSync(path.join(kit, "work", "tasks"))).toBe(true);
 
-        const [api, ok, bad] = await runTests(p, "kit runner", true);
+        const [api, ok, bad] = await runTests(p, mine.name, true);
         expect(api).toMatchObject({ status: "passed" });
         expect(ok).toMatchObject({ status: "passed" });
         expect(bad!.status).not.toBe("passed");
         expect(bad!.error).toMatch(/Nothing like this|toBeVisible/);
 
-        // The token and the test password stay out of the runner's output.
-        const token = fs.readFileSync(path.join(kit, "runner.token"), "utf8").trim();
-        expect(output(run)).not.toContain(token);
+        // The code and the test password stay out of the runner's output.
+        expect(output(run)).not.toContain(code);
         expect(output(run)).not.toContain(PASSWORD);
 
-        // Revoking the token in the platform stops the runner, with a plain message and its own exit code.
-        const tokenId = dl.headers.get("x-runner-token-id")!;
-        expect((await admin("DELETE", `/api/projects/${p}/agent-tokens/${tokenId}`)).status).toBe(200);
+        // Removing the computer in Settings stops the runner, with a plain message and its own exit code.
+        expect((await retire()).status).toBe(200);
         expect(await Promise.race([run.exited, sleep(30_000).then(() => "timeout")])).toBe(3);
-        expect(output(run)).toMatch(/not valid or was revoked/);
-        expect(output(run)).not.toContain(token);
+        expect(output(run)).toMatch(/The platform no longer accepts this runner/);
+        expect(output(run)).not.toContain(code);
+        expect(await myRunner()).toBeUndefined();
     }, 400_000);
 
-    it.skipIf(process.platform !== "win32")("start-runner.cmd (double-click) installs nothing here, connects, runs tests, and ends with a plain message when the token is revoked", async () => {
+    it.skipIf(process.platform !== "win32")("start-runner.cmd (double-click) installs nothing here, connects, runs tests, and ends with a plain message when the computer is removed", async () => {
         const p = await newProject("Kit cmd");
-        const dl = await download(p, "cmd runner");
+        const dl = await download("windows");
         const kit = unpack(dl.buf, "cmd");
+        const enrollCode = fs.readFileSync(path.join(kit, "runner.enroll"), "utf8").trim();
         const run = launch("cmd.exe", ["/d", "/c", ".\\start-runner.cmd"], kit, { AITP_KIT_SKIP_INSTALL: "1", AITP_KIT_NO_PAUSE: "1" });
-        await until("the runner started from the .cmd to be online", async () => (await onlineAgents(p))[0], 90_000).catch((e) => {
+        const mine = await until("the runner started from the .cmd to be connected", myRunner, 90_000).catch((e) => {
             throw new Error(`${e.message}\n--- script output ---\n${output(run)}`);
         });
         expect(output(run)).toContain("Starting the runner");
-        const [api, ok] = await runTests(p, "cmd runner", true).then((r) => r.slice(0, 2));
+        const [api, ok] = await runTests(p, mine.name, true).then((r) => r.slice(0, 2));
         expect([api!.status, ok!.status]).toEqual(["passed", "passed"]);
 
-        expect((await admin("DELETE", `/api/projects/${p}/agent-tokens/${dl.headers.get("x-runner-token-id")}`)).status).toBe(200);
+        expect((await retire()).status).toBe(200);
         const code = await Promise.race([run.exited, sleep(60_000).then(() => "timeout")]);
         expect(code, output(run)).toBe(1); // the script's own "stopped for good" exit
         const text = output(run);
-        expect(text).toMatch(/no longer accepts this runner's token/);
-        expect(text).toContain("Download a new runner kit");
-        expect(text).not.toContain(fs.readFileSync(path.join(kit, "runner.token"), "utf8").trim());
+        expect(text).toMatch(/no longer accepts this runner/);
+        expect(text).toContain("Set up your runner again from Settings, Your runner");
+        expect(text).not.toContain(enrollCode);
     }, 400_000);
 
-    it.skipIf(!BASH)("start-runner.sh (bash) connects, runs an API test, and ends with a plain message when the token is revoked", async () => {
+    it.skipIf(!BASH)("start-runner.sh (bash) connects, runs an API test, and ends with a plain message when the computer is removed", async () => {
         const p = await newProject("Kit sh");
-        const dl = await download(p, "unix runner", "unix");
+        const dl = await download("linux");
         const kit = unpack(dl.buf, "sh");
         const run = launch(BASH!, ["start-runner.sh"], kit, { AITP_KIT_SKIP_INSTALL: "1", AITP_KIT_NO_PAUSE: "1" });
-        await until("the runner started from the .sh to be online", async () => (await onlineAgents(p))[0], 90_000).catch((e) => {
+        const mine = await until("the runner started from the .sh to be connected", myRunner, 90_000).catch((e) => {
             throw new Error(`${e.message}\n--- script output ---\n${output(run)}`);
         });
-        const [api] = await runTests(p, "unix runner", false);
+        const [api] = await runTests(p, mine.name, false);
         expect(api).toMatchObject({ status: "passed" });
 
-        expect((await admin("DELETE", `/api/projects/${p}/agent-tokens/${dl.headers.get("x-runner-token-id")}`)).status).toBe(200);
+        expect((await retire()).status).toBe(200);
         const code = await Promise.race([run.exited, sleep(60_000).then(() => "timeout")]);
         expect(code, output(run)).toBe(3);
-        expect(output(run)).toMatch(/no longer accepts this runner's token/);
+        expect(output(run)).toMatch(/no longer accepts this runner/);
     }, 400_000);
 
     it.skipIf(process.platform !== "win32")("start-runner.cmd on a computer without Node.js explains it, never installs anything on its own, and does not start a runner", async () => {
-        const p = await newProject("Kit no node");
-        const kit = unpack((await download(p, "no node")).buf, "nonode");
+        const kit = unpack((await download("windows")).buf, "nonode");
         // A PATH with only Windows' own folder: no node, and no winget either (it lives in the user's WindowsApps folder).
         const system = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32");
         // The script now also looks in Program Files, the user's folders and the saved PATH, where this computer's own Node.js lives: point those at empty folders.
@@ -490,12 +464,11 @@ describe("the unzipped kit really runs", () => {
         expect(text).toContain("https://nodejs.org");
         expect(text).not.toMatch(/Connected|Starting the runner/);
         expect(fs.existsSync(path.join(kit, "work"))).toBe(false); // nothing was started or installed
-        expect((await onlineAgents(p)).length).toBe(0);
+        expect(await myRunner()).toBeUndefined();
     }, 60_000);
 
     it.skipIf(!BASH)("start-runner.sh on a computer without Node.js explains it and does not start a runner", async () => {
-        const p = await newProject("Kit sh no node");
-        const kit = unpack((await download(p, "no node", "unix")).buf, "shnonode");
+        const kit = unpack((await download("linux")).buf, "shnonode");
         const tools = path.dirname(BASH!); // Git's own tools (dirname, uname), but no node
         const home = fs.mkdtempSync(path.join(tmp, "home-")); // an empty home: no nvm, Volta or fnm to find
         const run = launch(BASH!, ["start-runner.sh"], kit, { PATH: tools, Path: tools, HOME: home.replaceAll("\\", "/"), AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1" });
@@ -509,8 +482,7 @@ describe("the unzipped kit really runs", () => {
     }, 60_000);
 
     it("a runner whose runner.json is damaged stops with exit code 2 and a plain message", async () => {
-        const p = await newProject("Kit broken");
-        const dl = await download(p, "broken");
+        const dl = await download("linux");
         const kit = unpack(dl.buf, "broken");
         fs.writeFileSync(path.join(kit, "runner.json"), "{ not json");
         const run = launch(process.execPath, ["runner.mjs"], kit);

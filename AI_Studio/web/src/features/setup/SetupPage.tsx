@@ -87,7 +87,7 @@ function GeneralSetting({ id }: { id: string }) {
 /**
  * The project's Settings place (it used to be called Setup). General and members first, then what tests use (environments, test
  * data, accounts, AI), how they run (frameworks, the mobile app), who is told (alerts, issue tracker) and storage. Runners are
- * machine-level: a project's runners are on the Runners page (round 37).
+ * per person: each person sets up their own runner in Settings (round 45).
  * Settings that rarely change sit behind a titled row with "Change".
  */
 export function SetupPage({ id }: { id: string }) {

@@ -7,6 +7,7 @@ import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { mergeEvents, type JobStream } from "../../lib/stream";
 import { Elapsed, RelTime } from "./RunTime";
+import { RUNNER_SETTINGS_HREF, useMyRunner } from "../runners/my-runner";
 import { currentLine, foldLiveRun, isRunnerEvent, liveShotUrl, PHASE_STEP_WORD, PHASE_STEPS, phaseEnded, phaseSentence, runnerIdOf, runPhase, shotCaption, type LiveRun, type TaskPhase } from "./live-run";
 import "./runs.css";
 
@@ -102,19 +103,11 @@ export function useLiveRun(jobId: string | null, enabled: boolean, active: boole
     return { live, loaded };
 }
 
-/** The part of GET /api/projects/:id/runner-choices this view reads: which runners are the caller's own and which are the team's. */
-interface RunnerChoices {
-    runners: Array<{ id: string; name: string; kind: "personal" | "team"; mine: boolean }>;
+/** "Your computer" when the run is on the person's own runner (GET /api/me/runner); nothing otherwise. */
+function useIsMine(runnerId: string | undefined): boolean {
+    const me = useMyRunner(0, Boolean(runnerId));
+    return Boolean(runnerId && me.data?.runner?.id === runnerId);
 }
-
-/** "Your computer" or "Team runner", when the platform says which; nothing when it does not. */
-function useRunnerKind(projectId: string, runnerId: string | undefined): "mine" | "team" | "personal" | null {
-    const choices = useFetch<RunnerChoices>(runnerId ? `/projects/${projectId}/runner-choices` : null);
-    const r = runnerId ? choices.data?.runners?.find((x) => x.id === runnerId) : undefined;
-    if (!r) return null;
-    return r.mine ? "mine" : r.kind === "team" ? "team" : "personal";
-}
-const KIND_WORD = { mine: "Your computer", team: "Team runner", personal: "Someone’s own computer" } as const;
 
 /** Queued, Offered, Accepted, Getting ready, Running, Sending results, Done: where the runner's task is, and how far it got. */
 function PhaseSteps({ phase, furthest }: { phase: TaskPhase; furthest: number }) {
@@ -283,7 +276,7 @@ export function LiveRunPanel({ projectId, job, active, live, loaded, planned, an
     const onRunner = job.ranOn?.kind === "agent";
     // The runner (an agent_tokens id: the id of its page and of the runner choices), when the platform names it.
     const runnerId = runnerIdOf(job);
-    const kind = useRunnerKind(projectId, runnerId);
+    const mine = useIsMine(runnerId);
     if (!onRunner && !live.detailed && live.phase === null) return null;
     if (!loaded && live.lines.length === 0) return null;
 
@@ -301,7 +294,7 @@ export function LiveRunPanel({ projectId, job, active, live, loaded, planned, an
                 <h2 className="t-section" id="run-live-h">
                     {active ? "Progress on the runner" : "On the runner"}
                 </h2>
-                {kind && <Badge tone={kind === "mine" ? "brand" : "neutral"}>{KIND_WORD[kind]}</Badge>}
+                {mine && <Badge tone="brand">Your computer</Badge>}
             </div>
             {phase && <PhaseSteps phase={phase} furthest={live.furthest} />}
             {phase && (
@@ -317,8 +310,8 @@ export function LiveRunPanel({ projectId, job, active, live, loaded, planned, an
                     <>
                         <dt>Runner</dt>
                         <dd>
-                            {runnerId ? (
-                                <a href={routes.runner(runnerId)} data-testid="run-live-runner">
+                            {mine ? (
+                                <a href={RUNNER_SETTINGS_HREF} data-testid="run-live-runner">
                                     {runner}
                                     <ChevronRight size={14} aria-hidden />
                                 </a>

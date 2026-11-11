@@ -16,6 +16,7 @@ import { TaskOffer as TaskOfferSchema } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner, runOwner, testPerson } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { recorderOptions } from "../src/platform/routes/recorder.js";
 import { buildServer } from "../src/platform/server.js";
@@ -25,6 +26,7 @@ const PORT = 6030;
 const BASE = `http://127.0.0.1:${PORT}`;
 const APP = "http://localhost:6031";
 const API_KEY = "ao-admin-key-93d1b6e0";
+let RUN_AS = API_KEY;
 const PASSWORD = "AOLEAK-Password-4e82c1";
 const TYPED = "AOLEAK-TypedSecret-77aa3f";
 const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "BLOCK_PRIVATE_TARGETS", "AGENT_MAX_TOKENS"];
@@ -37,7 +39,7 @@ let dataDir: string;
 const answers: string[] = [];
 
 const admin = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": API_KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": RUN_AS, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const text = await res.text();
     answers.push(text);
     return { status: res.status, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; text: string; body: any };
@@ -64,9 +66,16 @@ const until = async <T>(fn: () => Promise<T | undefined | false> | T | undefined
 };
 
 const svc = () => getAgentServices(platform);
-const newProject = async (name: string) => (await admin("POST", "/api/projects", { name })).body.id as string;
-const connect = async (projectId: string, name: string, caps = defaultCaps({ record: true, recordHeaded: true })) => {
-    const secret = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: name })).body.secret as string;
+// The test acts as a person (round 45), whose changes would wait for approval: these tests are about running them.
+const newProject = async (name: string) => {
+    const id = (await admin("POST", "/api/projects", { name })).body.id as string;
+    await admin("PUT", `/api/projects/${id}/review-policy`, { edits: false });
+    return id;
+};
+/** A runner of the test's person (round 45: every runner is one person's), or of someone else with `ownerId`. */
+const connect = async (projectId: string, name: string, caps = defaultCaps({ record: true, recordHeaded: true }), ownerId?: string) => {
+    void projectId;
+    const secret = personalRunner(platform, { label: name, ...(ownerId ? { ownerId } : {}) }).secret;
     const agent = new FakeAgent(viaFetch(BASE), secret, { name, capabilities: caps });
     expect((await agent.hello()).status).toBe(200);
     return agent;
@@ -97,6 +106,8 @@ beforeAll(async () => {
     Object.assign(recorderOptions, { remote: { lostContactMs: 1500, claimWaitMs: 2500, settleMs: 700 } });
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-recagent-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    // Round 45: runs started with the shared key have no owner, so the test acts as a person whose runner takes them.
+    RUN_AS = testPerson(platform).token;
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
 }, 60_000);
@@ -119,7 +130,7 @@ describe("routing and refusals", () => {
         projectId = await newProject("Record on agent");
         other = await newProject("Other project");
         platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, { username: "tester", password: PASSWORD });
-        expect(await start(projectId)).toMatchObject({ status: 409, body: { error: expect.stringMatching(/No runner agent is online/) } });
+        expect(await start(projectId)).toMatchObject({ status: 409, body: { error: "Set up your runner in Settings to run tests." } });
 
         const old = await connect(projectId, "Old agent", defaultCaps());
         expect(await start(projectId)).toMatchObject({ status: 422, body: { error: expect.stringMatching(/Old agent can't record/) } });
@@ -129,7 +140,7 @@ describe("routing and refusals", () => {
             body: { error: "Maya's laptop has no display, so it can't show the browser window. Turn off “Show the browser window”, or use another agent." },
         });
         expect(old.agentId).not.toBe(nodisplay.agentId);
-        const foreign = await connect(other, "Foreign");
+        const foreign = await connect(other, "Foreign", undefined, "someone-else");
         expect((await start(projectId, { agentId: foreign.agentId })).status).toBe(404);
         expect((await start(projectId, { agentId: "no-such-agent" })).status).toBe(404);
         expect((await start(projectId, { agentId: nodisplay.agentId, url: "ftp://x/" })).status).toBe(400);
@@ -195,7 +206,7 @@ describe("a recording on an agent", () => {
         expect((await raw("POST", `/api/agent/tasks/${offer.taskId}/recording`, { "content-type": "application/json" }, Buffer.from(body))).status).toBe(401);
         expect((await raw("POST", `/api/agent/tasks/${offer.taskId}/recording`, { authorization: "Bearer aitg_notarealtoken0000000000000000", "content-type": "application/json" }, Buffer.from(body))).status).toBe(404);
         // An admin API key is not an agent token.
-        expect((await raw("POST", `/api/agent/tasks/${offer.taskId}/recording`, { "x-api-key": API_KEY, "content-type": "application/json" }, Buffer.from(body))).status).toBe(401);
+        expect((await raw("POST", `/api/agent/tasks/${offer.taskId}/recording`, { "x-api-key": RUN_AS, "content-type": "application/json" }, Buffer.from(body))).status).toBe(401);
         // Path tricks fall through to the API-key check: with only an agent token they are refused.
         const secret = (agent as unknown as { token: string }).token;
         for (const [method, p] of [
@@ -219,7 +230,7 @@ describe("a recording on an agent", () => {
         // A run task is not a recording.
         const runId = randomUUID();
         svc().store.enqueue({
-            id: runId, projectId, jobId: "run-job-x", adapterId: "playwright", files: [],
+            id: runId, projectId, jobId: "run-job-x", adapterId: "playwright", files: [], ownerId: runOwner(),
             payloadEnc: svc().encrypt(TaskOfferSchema.parse({ taskId: runId, jobId: "run-job-x", adapterId: "playwright", leaseSeconds: 3, workers: 1, scripts: [{ testId: "t", filename: "t.spec.ts", content: "x" }], env: { baseUrl: APP, headless: true } })),
         });
         const run = await bystander.next(5000);

@@ -1,13 +1,12 @@
 /**
- * Round 39: enrollment codes, machine binding, rotation and downloads that carry no credential, against real HTTP (a stand-in Crowd4Test
- * sign-in on 8020, the platform on 8021). A protocol-1 agent with an old aitg_ token keeps working unchanged.
+ * Round 39, kept in round 45: one-time codes (the download from Settings carries one), machine binding and rotation, against real HTTP (a
+ * stand-in Crowd4Test sign-in on 8762, the platform on 8763). A protocol-1 agent with an old aitg_ token of a person keeps working unchanged.
  */
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TaskOffer } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
@@ -23,8 +22,8 @@ import { parseAgentArgs } from "../src/agent/config.js";
 import { CREDENTIAL_FILE, loadCredential, MACHINE_ID_FILE } from "../src/agent/credential-store.js";
 import { Logger } from "../src/agent/log.js";
 
-const C4T_PORT = 8020;
-const PORT = 8021;
+const C4T_PORT = 8762;
+const PORT = 8763;
 const BASE = `http://127.0.0.1:${PORT}`;
 const KEY = "enroll-owner-key-51b0a3";
 const PAGE = { "x-requested-with": "ai-studio" };
@@ -60,9 +59,11 @@ const rotate = async (token: string) => {
     const res = await fetch(`${BASE}/api/agent/rotate`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" });
     return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
 };
-const personalCode = async (who = "t-tess") => {
-    const r = await as(who, "POST", "/api/runners/enroll", { kind: "personal" });
-    return r.body as { id: string; code: string; expiresAt: string };
+let tessId = "";
+/** A one-time code as the download from Settings carries it (routes/runner-kits.ts makes it with the same store function). */
+const personalCode = async () => {
+    const { code, record } = getAgentServices(platform).store.createPersonalEnrollment({ ownerId: tessId, createdBy: "Tess" });
+    return { id: record.id, code, expiresAt: new Date(record.expiresMs).toISOString() };
 };
 
 beforeAll(async () => {
@@ -90,7 +91,7 @@ beforeAll(async () => {
     await app.listen({ port: PORT, host: "127.0.0.1" });
     // Tess runs tests in one project, so she may add her own computer.
     const projectId = (await asKey("POST", "/api/projects", { name: "Tess's project" })).body.id as string;
-    const tessId = (await as("t-tess", "GET", "/api/auth/state")).body.me.id as string;
+    tessId = (await as("t-tess", "GET", "/api/auth/state")).body.me.id as string;
     accessControlOf(app).projects.store.addMember(projectId, tessId, { role: "owner", projectAdmin: false, source: "added", addedBy: "test" });
 }, 60_000);
 
@@ -121,20 +122,19 @@ describe("enrollment codes", () => {
         expect(first.body.token).toMatch(/^aitg_/);
         const again = await enroll(made.code, M2);
         expect(again.status).toBe(410);
-        expect(again.body.error ?? again.body.message).toBe("This code was already used. Make a new one on the Runners page.");
+        expect(again.body.error ?? again.body.message).toBe("This code was already used. Download the runner again from Settings.");
 
         const old = await personalCode();
         platform.db.run("UPDATE runner_enrollments SET expires_ms = ? WHERE id = ?", Date.now() - 1, old.id);
         const expired = await enroll(old.code, M1);
         expect(expired.status).toBe(410);
-        expect(expired.body.error ?? expired.body.message).toBe("This code has expired. Make a new one on the Runners page.");
+        expect(expired.body.error ?? expired.body.message).toBe("This code has expired. Download the runner again from Settings.");
         expect((await enroll(`aite_${"x".repeat(43)}`, M1)).status).toBe(404);
         // A runner credential is never accepted in place of a code.
         expect((await enroll((await personalCode()).code, M1, { authorization: `Bearer ${first.body.token}` })).status).toBe(400);
-        // The maker can see when it was used, and by which runner.
-        const state = await as("t-tess", "GET", `/api/runners/enrollments/${made.id}`);
-        expect(state.body).toMatchObject({ status: "used", runnerId: first.body.runnerId });
-        expect((await as("t-cora", "GET", `/api/runners/enrollments/${made.id}`)).status).toBe(404);
+        // Its person sees that the computer connected; nobody else sees the code at all.
+        expect((await as("t-tess", "GET", `/api/me/runner/enrollments/${made.id}`)).body).toEqual({ status: "connected" });
+        expect((await as("t-cora", "GET", `/api/me/runner/enrollments/${made.id}`)).status).toBe(404);
     });
 
     it("a lost answer: the same computer may ask again while the new credential is unused; anyone else gets 'already used'", async () => {
@@ -188,71 +188,22 @@ describe("enrollment codes", () => {
     });
 });
 
-describe("old runners and downloads", () => {
-    it("a protocol-1 agent with an old aitg_ token still connects and runs a task, without an install id", async () => {
+describe("old runners", () => {
+    it("a protocol-1 agent with a person's old aitg_ token still connects and runs its owner's task, without an install id", async () => {
         const projectId = (await asKey("POST", "/api/projects", { name: "Old runner shop" })).body.id as string;
-        const reg = await asKey("POST", "/api/runners", { name: "Lab PC" });
-        expect(reg.status).toBe(201);
-        expect((await asKey("PUT", `/api/projects/${projectId}/runner-access/${reg.body.runner.id}`)).status).toBe(200);
-        const agent = new FakeAgent(viaFetch(BASE), reg.body.secret, { name: "lab-pc" });
+        const svc = getAgentServices(platform);
+        const { secret } = svc.store.createPersonalToken({ ownerId: tessId, label: "Lab PC", createdBy: "test" });
+        const agent = new FakeAgent(viaFetch(BASE), secret, { name: "lab-pc" });
         const h = await agent.hello();
         expect(h.status).toBe(200);
         expect(h.json.protocol).toBe(1);
-        const svc = getAgentServices(platform);
         const taskId = randomUUID();
         const offer = TaskOffer.parse({ taskId, jobId: randomUUID(), adapterId: "playwright", leaseSeconds: 60, workers: 1, scripts: [], env: { baseUrl: "http://app.example", headless: true } });
-        svc.store.enqueue({ id: taskId, projectId, jobId: offer.jobId, adapterId: "playwright", payloadEnc: svc.encrypt(offer), files: [] });
+        accessControlOf(app).projects.store.addMember(projectId, tessId, { role: "owner", projectAdmin: false, source: "added", addedBy: "test" });
+        svc.store.enqueue({ id: taskId, projectId, jobId: offer.jobId, adapterId: "playwright", payloadEnc: svc.encrypt(offer), files: [], ownerId: tessId });
         const got = await agent.poll(1);
         expect(got.offer?.taskId).toBe(taskId);
         expect((await agent.result(taskId, { ok: true, runs: [] })).status).toBe(200);
-    });
-
-    it("a project's kit and a personal kit carry a single-use code, never a runner credential", async () => {
-        const projectId = (await asKey("POST", "/api/projects", { name: "Kit shop" })).body.id as string;
-        const kit = await asKey("POST", `/api/projects/${projectId}/runner-kits`, { name: "Desk PC", platform: "unix", kind: "files" });
-        expect(kit.status).toBe(200);
-        expect(String(kit.headers["x-runner-enrollment-id"])).toMatch(/^[0-9a-f-]{36}$/);
-        expect(kit.headers["x-runner-token-id"]).toBeUndefined();
-        const entries = unzipSync(new Uint8Array(kit.raw));
-        const names = Object.keys(entries);
-        const enrollFile = names.find((n) => n.endsWith("/runner.enroll"));
-        expect(enrollFile).toBeDefined();
-        expect(Buffer.from(entries[enrollFile!]!).toString("utf8").trim()).toMatch(/^aite_/);
-        expect(names.some((n) => n.endsWith("runner.token"))).toBe(false);
-        for (const n of names) expect(Buffer.from(entries[n]!).toString("utf8")).not.toMatch(/aitg_[A-Za-z0-9_-]{20,}/);
-        // No runner exists until the code is traded.
-        expect((await asKey("GET", `/api/projects/${projectId}/agent-tokens`)).body).toEqual([]);
-        const code = Buffer.from(entries[enrollFile!]!).toString("utf8").trim();
-        const got = await enroll(code, M2);
-        expect(got.body.kind).toBe("team");
-        expect((await asKey("GET", `/api/projects/${projectId}/agent-tokens`)).body).toHaveLength(1);
-
-        const mine = await as("t-tess", "POST", "/api/runners/kits", { runner: "personal", name: "Tess laptop", platform: "windows", kind: "files" });
-        expect(mine.status).toBe(200);
-        const mineEntries = unzipSync(new Uint8Array(mine.raw));
-        expect(Object.keys(mineEntries).some((n) => n.endsWith("/runner.enroll"))).toBe(true);
-        for (const n of Object.keys(mineEntries)) expect(Buffer.from(mineEntries[n]!).toString("utf8")).not.toMatch(/aitg_[A-Za-z0-9_-]{20,}/);
-    });
-
-    it("only Crowd4Test staff make shared runners; a runner made from a project with no organisation serves only that project", async () => {
-        // A tester never makes a team runner; a customer's team code is always for their own organisation.
-        expect((await as("t-tess", "POST", "/api/runners/enroll", { kind: "team" })).status).toBe(403);
-        const coraCode = await as("t-cora", "POST", "/api/runners/enroll", { kind: "team", organizationId: null });
-        expect(coraCode.status).toBe(201);
-        const coraRunner = await enroll(coraCode.body.code, "33333333-aaaa-4bbb-8ccc-000000000003");
-        expect(getAgentServices(platform).store.getToken(coraRunner.body.runnerId)?.organizationId).toBe("org-a");
-
-        const p0 = (await asKey("POST", "/api/projects", { name: "No org one" })).body.id as string;
-        const p1 = (await asKey("POST", "/api/projects", { name: "No org two" })).body.id as string;
-        const kit = await asKey("POST", `/api/projects/${p0}/runner-kits`, { name: "P0 box", platform: "unix", kind: "files" });
-        const entries = unzipSync(new Uint8Array(kit.raw));
-        const code = Buffer.from(entries[Object.keys(entries).find((n) => n.endsWith("/runner.enroll"))!]!).toString("utf8").trim();
-        const got = await enroll(code, "44444444-aaaa-4bbb-8ccc-000000000004");
-        const t = getAgentServices(platform).store.getToken(got.body.runnerId)!;
-        expect(t).toMatchObject({ organizationId: null, projectId: p0, kind: "team" });
-        const grant = await asKey("PUT", `/api/projects/${p1}/runner-access/${t.id}`);
-        expect(grant.status).toBe(409);
-        expect((await asKey("GET", `/api/projects/${p1}/runner-access`)).body.available.map((r: { id: string }) => r.id)).not.toContain(t.id);
     });
 });
 

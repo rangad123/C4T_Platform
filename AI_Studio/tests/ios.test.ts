@@ -16,12 +16,14 @@ import { CapabilityProbe } from "../src/agent/capabilities.js";
 import { memoryLogger } from "../src/agent/log.js";
 import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner, runOwner, testPerson } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 
 const PORT = 6150;
 const BASE = `http://127.0.0.1:${PORT}`;
 const API_KEY = "ios-admin-key-77d1";
+let RUN_AS = API_KEY;
 const FAKE_TAQWRIGHT = path.join(REPO_ROOT, "tests/fixtures/fake-taqwright.mjs");
 const FAKE_XCRUN = path.join(REPO_ROOT, "tests/fixtures/fake-xcrun.mjs");
 const XCRUN_STATE = path.join(os.tmpdir(), "aitp-fake-xcrun-state.json");
@@ -40,7 +42,7 @@ let dataDir: string;
 let tmp: string;
 const agents: Array<{ agent: Agent; done: Promise<number>; lines: string[] }> = [];
 
-const admin = async (method: string, url: string, body?: unknown, key: string | null = API_KEY) => {
+const admin = async (method: string, url: string, body?: unknown, key: string | null = RUN_AS) => {
     const res = await fetch(`${BASE}${url}`, { method, headers: { ...(key ? { "x-api-key": key } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const text = await res.text();
     return { status: res.status, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; text: string; body: any };
@@ -84,7 +86,7 @@ const macProbe = (over: { xcuitest?: boolean } = {}) =>
 const windowsProbe = () => new CapabilityProbe({ platform: "win32", browsers: () => ["chromium"], exec: async () => undefined, desktop: async () => ({ uiautomation: true, interactive: true, elevated: false }) });
 
 async function startAgent(projectId: string, name: string, probe: CapabilityProbe, env: NodeJS.ProcessEnv = {}) {
-    const made = await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: name });
+    const made = { status: 201, body: { secret: personalRunner(platform, { label: name, replace: true }).secret } };
     expect(made.status).toBe(201);
     const { log, lines } = memoryLogger();
     const agent = new Agent({
@@ -116,6 +118,8 @@ beforeAll(async () => {
     dataDir = path.join(tmp, "data");
     resetSimulators();
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    // Round 45: runs started with the shared key have no owner, so the test acts as a person whose runner takes them.
+    RUN_AS = testPerson(platform).token;
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
@@ -151,6 +155,8 @@ describe("iOS tests on a runner agent that is a Mac (fake toolchain)", () => {
 
     it("imports iOS tests: they get the iOS framework, the project gets its iOS app, and Android tests next to them keep theirs", async () => {
         projectId = (await admin("POST", "/api/projects", { name: "iOS project" })).body.id;
+        // The test acts as a person (round 45), whose changes would wait for approval: these tests are about running them.
+        await admin("PUT", `/api/projects/${projectId}/review-policy`, { edits: false });
         const imp = await admin("POST", `/api/projects/${projectId}/specs`, {
             mobile: { iosBundleId: "com.apple.Preferences" },
             validate: false,
@@ -186,7 +192,7 @@ describe("iOS tests on a runner agent that is a Mac (fake toolchain)", () => {
     it("with the project running here, an iOS run is refused early with plain wording (no job, no verdict)", async () => {
         const here = await admin("POST", `/api/tests/${ids.general}/validate`);
         expect(here.status).toBe(409);
-        expect(here.body.error).toBe("iOS tests need a runner agent on a Mac with Xcode. Connect one and choose it for this project.");
+        expect(here.body.error).toBe("iOS tests need a runner on a Mac with Xcode. Set up your runner on a Mac in Settings.");
         const tests = (await admin("GET", `/api/projects/${projectId}/tests`)).body as Array<{ id: string; validationStatus: string }>;
         expect(tests.find((t) => t.id === ids.general)!.validationStatus).toBe("PENDING");
     });
@@ -196,7 +202,7 @@ describe("iOS tests on a runner agent that is a Mac (fake toolchain)", () => {
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
         const r = await admin("POST", `/api/tests/${ids.general}/validate`);
         expect(r.status).toBe(409);
-        expect(r.body.error).toContain("iOS tests need a runner agent on a Mac with Xcode");
+        expect(r.body.error).toContain("iOS tests need a runner on a Mac with Xcode");
         expect(r.body.error).toContain("XCUITest driver is not installed");
         const status = (await admin("GET", `/api/projects/${projectId}/runner`)).body;
         expect(status.canRunIos).toBe(false);
@@ -300,7 +306,7 @@ describe("iOS tests on a runner agent that is a Mac (fake toolchain)", () => {
         resetSimulators();
         const r = await admin("POST", `/api/tests/${ids.android}/validate`);
         expect(r.status).toBe(409);
-        expect(r.body.error).toContain("run mobile tests");
+        expect(r.body.error).toContain("cannot run phone tests");
         expect(r.body.error).toContain("Android tools");
         expect(xcrunCalls()).toEqual([]);
     });
@@ -310,6 +316,7 @@ describe("agents that are not Macs, other projects, and keys", () => {
     it("an agent without iOS is never offered an iOS task, and a project with only such an agent is refused early", async () => {
         resetSimulators();
         const projectId = (await admin("POST", "/api/projects", { name: "Windows agent only" })).body.id;
+        await admin("PUT", `/api/projects/${projectId}/review-policy`, { edits: false });
         const imp = await admin("POST", `/api/projects/${projectId}/specs`, { mobile: { iosBundleId: "com.apple.Preferences" }, validate: false, specs: [iosSpec("Settings shows General", "General")] });
         expect(imp.status, imp.text).toBe(202);
         const testId = imp.body.tests[0].id;
@@ -317,7 +324,7 @@ describe("agents that are not Macs, other projects, and keys", () => {
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
         const r = await admin("POST", `/api/tests/${testId}/validate`);
         expect(r.status).toBe(409);
-        expect(r.body.error).toContain("iOS tests need a runner agent on a Mac with Xcode");
+        expect(r.body.error).toContain("iOS tests need a runner on a Mac with Xcode");
         expect(r.body.error).toContain("it is not a Mac");
         expect((await admin("GET", `/api/projects/${projectId}/runner`)).body.canRunIos).toBe(false);
         // the Mac of the other project never saw it

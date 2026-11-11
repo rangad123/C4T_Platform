@@ -14,7 +14,7 @@ export const glossaryEntries: GlossaryEntry[] = [
     { id: "severity", term: "Severity", meaning: "How serious a finding is: critical, high, medium or low." },
     { id: "flaky", term: "Flaky", meaning: "A test that sometimes passes and sometimes fails without any change in your app, like a light that flickers.", alsoCalled: ["unreliable"] },
     { id: "quarantine", term: "Quarantine", meaning: "Setting a flaky test aside so it still runs but stops counting, like benching a player who is not fit." },
-    { id: "runner", term: "Runner", meaning: "A computer, other than the platform's own, that runs your tests.", alsoCalled: ["runner agent"] },
+    { id: "runner", term: "Runner", meaning: "The program on your computer that runs your tests. You set it up once in Settings.", alsoCalled: ["runner agent"] },
     { id: "environment", term: "Environment", meaning: "A named place to run against, such as staging or production, with its own address and sign-in." },
     { id: "staging", term: "Staging", meaning: "A spare copy of your application used for testing, so real customers are never affected." },
     { id: "production", term: "Production", meaning: "Your real application, the one customers use. The platform asks before it does anything there." },

@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WireRun } from "../src/agent-protocol/schema.js";
 import { backoffDelay } from "../src/agent/backoff.js";
 import { CapabilityProbe, describeCapabilities, detectBrowsers, parseAdbDevices, parseSimctl } from "../src/agent/capabilities.js";
-import { PlatformClient, PlatformError } from "../src/agent/client.js";
+import { ACCESS_REMOVED, PlatformClient, PlatformError } from "../src/agent/client.js";
 import { agentGuard, opsOfScript, runAgentCleanup } from "../src/agent/cleanup.js";
 import { checkPlatformAddress, isPrivateHost, parseAgentArgs } from "../src/agent/config.js";
 import { CacheIntegrityError, FileCache, sha256OfFile } from "../src/agent/file-cache.js";
@@ -307,7 +307,13 @@ describe("protocol client: every answer is validated", () => {
     it("maps statuses: bad token, revoked token, refusal, protocol, server trouble", async () => {
         const a = await err(client(reply(401, { error: "bad" })).hello(hello));
         expect(a.kind).toBe("auth");
-        expect(a.message).toMatch(/not valid or was revoked/);
+        expect(a.message).toBe("The platform no longer accepts this runner. bad.");
+        // Round 45: a team or project credential is refused with the platform's own sentence, shown as it is (and the runner stops, exit 3).
+        const team = "This runner was set up for a team or a project, and those runners are no longer used. Set up your own runner from Settings in AI Studio.";
+        const t = await err(client(reply(401, { error: team })).hello(hello));
+        expect([t.kind, t.message]).toEqual(["auth", `The platform no longer accepts this runner. ${team}`]);
+        // Without a sentence: what to do, in plain words.
+        expect((await err(client(reply(401, "")).hello(hello))).message).toBe(ACCESS_REMOVED);
         expect((await err(client(reply(404, { error: "no such token" })).hello(hello))).kind).toBe("auth"); // revoked = 404
         expect((await err(client(reply(404, "")).poll({ agentId: "a", freeSlots: 1 }))).kind).toBe("auth");
         const c = await err(client(reply(409, { message: "Another agent is called that." })).hello(hello));

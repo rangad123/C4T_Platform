@@ -547,7 +547,7 @@ describe("where a phone session runs (decision table)", () => {
     it("refuses in plain words and names what is missing", () => {
         const throws = (fn: () => unknown) => { try { fn(); } catch (e) { return (e as { status: number; message: string }); } throw new Error("did not throw"); };
         expect(throws(() => chooseDeviceHost({ runner: platformRunner, agents: [], localProblem: "This computer has no Android tools." })).message).toContain("no Android tools");
-        expect(throws(() => chooseDeviceHost({ runner: agentRunner, agents: [] })).message).toContain("No runner agent is online");
+        expect(throws(() => chooseDeviceHost({ runner: agentRunner, agents: [] })).message).toBe("Set up your runner in Settings to run tests.");
         expect(throws(() => chooseDeviceHost({ runner: agentRunner, agents: [agent("a", { online: false })] })).status).toBe(409);
         expect(throws(() => chooseDeviceHost({ runner: agentRunner, agentId: "zzz", agents: [agent("a")] })).status).toBe(404);
         expect(throws(() => chooseDeviceHost({ runner: agentRunner, agentId: "a", agents: [agent("a", { online: false })] })).message).toContain("offline");
@@ -559,12 +559,12 @@ describe("where a phone session runs (decision table)", () => {
         expect(throws(() => chooseDeviceHost({ runner: agentRunner, agentId: "x", agents: [noAndroid] })).status).toBe(422);
     });
 
-    it("picks the least busy capable agent, and a pinned agent wins", () => {
+    it("picks the least busy capable agent; a project's pin is no longer read (round 45)", () => {
         const busy = agent("busy", { activeTasks: 3 });
         const idle = agent("idle", { activeTasks: 0 });
         const incapable = agent("inc", { capabilities: caps({ deviceSession: undefined, android: { adb: false, devices: [], avds: [] } }), activeTasks: 0 });
         expect(chooseDeviceHost({ runner: agentRunner, agents: [busy, incapable, idle] })).toMatchObject({ agent: { id: "idle" } });
-        expect(chooseDeviceHost({ runner: { runOn: "agent", agentId: "busy" }, agents: [busy, idle] })).toMatchObject({ agent: { id: "busy" } });
+        expect(chooseDeviceHost({ runner: { runOn: "agent", agentId: "busy" }, agents: [busy, idle] })).toMatchObject({ agent: { id: "idle" } });
     });
 
     it("the capability rule gives a reason for each way a computer can fail", () => {

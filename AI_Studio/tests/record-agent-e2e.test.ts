@@ -17,6 +17,7 @@ import { memoryLogger } from "../src/agent/log.js";
 import { pidAlive } from "../src/engine/recorder/session.js";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -87,7 +88,7 @@ beforeAll(async () => {
     appServer = await startRecorderApp(APP_PORT);
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-recagent-e2e-"));
     agentWork = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-recagent-e2e-agent-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
@@ -122,7 +123,7 @@ describe("recording on the real agent program", () => {
     it("the agent connects and reports that it can record", async () => {
         projectId = (await admin("POST", "/api/projects", { name: "Record on the real agent" })).body.id;
         platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, { username: "tester", password: PROJECT_PASSWORD });
-        const token = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "e2e" })).body.secret as string;
+        const token = personalRunner(platform, { label: "e2e", replace: true }).secret;
         const { log, lines } = memoryLogger();
         agentLines = lines;
         agent = new Agent({

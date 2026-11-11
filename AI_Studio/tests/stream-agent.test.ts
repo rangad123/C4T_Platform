@@ -13,6 +13,7 @@ import { Agent } from "../src/agent/agent.js";
 import { memoryLogger } from "../src/agent/log.js";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -56,7 +57,7 @@ beforeAll(async () => {
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-streamagent-"));
     agentWork = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-streamagent-work-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 100);
@@ -83,7 +84,7 @@ afterAll(async () => {
 describe("a real agent run, watched live", () => {
     it("shows what the agent is doing as it happens, test by test, long before the heartbeat interval", async () => {
         const projectId = (await admin("POST", "/api/projects", { name: "Live agent" })).body.id as string;
-        const made = await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "live" });
+        const made = { status: 201, body: { secret: personalRunner(platform, { label: "live", replace: true }).secret } };
         const { log } = memoryLogger();
         // A 6 s heartbeat: without early beats, nothing but the first (empty) beat would reach the platform before the run is over.
         agent = new Agent({
@@ -109,7 +110,8 @@ describe("a real agent run, watched live", () => {
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
 
         const appId = platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
-        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds });
+        // Round 45: the open server's run (this platform has no API_KEY and no accounts), so its runner takes it.
+        const job = await platform.repo.createJob(projectId, appId, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds, startedBy: { kind: "open", id: null } });
         const ticket = (await admin("POST", "/api/stream-tickets", { path: `/api/test-generation/${job.id}/stream` })).body.ticket as string;
         const c = await SseClient.open(PORT, `/api/test-generation/${job.id}/stream?ticket=${ticket}`);
         await c.untilClosed(120_000);

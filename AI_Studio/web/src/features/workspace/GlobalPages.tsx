@@ -10,8 +10,7 @@ import { routes } from "../../lib/router";
 import { useCan } from "../auth/permissions";
 import { FleetDashboard } from "../dashboard/FleetDashboard";
 import { ReviewQueueCard } from "../review/ReviewCards";
-import { RunnerHealthCard, RunnersList } from "../runners/RunnersPages";
-import { ProjectRunnersSection } from "../runners/ProjectRunnersSection";
+import { YourRunnerCard } from "../runners/YourRunner";
 import { EmulatorSetup } from "../setup/EmulatorSetup";
 
 /**
@@ -19,7 +18,7 @@ import { EmulatorSetup } from "../setup/EmulatorSetup";
  * Each shows what exists today and, where its backend is not built yet, says so plainly (decision D-28).
  */
 
-function GlobalPage({ title, nav, subtitle, actions, children }: { title: string; nav: "dashboard" | "develop" | "runners" | "libraries" | "profile"; subtitle: ReactNode; actions?: ReactNode; children: ReactNode }) {
+function GlobalPage({ title, nav, subtitle, actions, children }: { title: string; nav: "dashboard" | "develop" | "libraries" | "profile"; subtitle: ReactNode; actions?: ReactNode; children: ReactNode }) {
     useDocumentTitle(title);
     usePage({ crumbs: [{ label: title }], nav });
     return (
@@ -47,7 +46,7 @@ export function DashboardPage() {
             </EmbeddedContext.Provider>
             {/* Outstanding reviews across the person's projects (features/review/ReviewCards.tsx). */}
             <ReviewQueueCard />
-            <RunnerHealthCard />
+            {(can("ai_studio.tests.run") || can("ai_studio.runners.manage")) && <YourRunnerCard />}
             {can("ai_studio.usage.view") && (
                 <section className="card card-pad stack-sm" data-testid="dashboard-ai">
                     <h2 className="t-section">AI usage</h2>
@@ -121,8 +120,8 @@ export function TestDevelopmentPage() {
     );
 }
 
-/** The Android emulator on this computer (it moved here from Settings: it is about machines, not about the platform). */
-function MobileTooling() {
+/** The Android emulator on the platform's own computer (Settings; it was on the Runners page until round 45). */
+export function MobileTooling() {
     const config = useConfig();
     return (
         <section className="card card-pad stack-sm" data-testid="mobile-tooling">
@@ -146,20 +145,6 @@ function MobileTooling() {
         </section>
     );
 }
-
-/** Runners: every machine the person may see, each given to any number of projects (features/runners/RunnersPages.tsx). */
-export function RunnersPage() {
-    return (
-        <GlobalPage title="Runners" nav="runners" subtitle="The computers that run your tests: Windows and Mac machines, their browsers and phones.">
-            {/* A project's runners live here, not in the project (round 37): `#/runners?project=<id>`. */}
-            <ProjectRunnersSection />
-            <RunnersList />
-            <MobileTooling />
-        </GlobalPage>
-    );
-}
-
-export { RunnerPage } from "../runners/RunnersPages";
 
 // Folders and Profile have their own files (round 34); main.tsx keeps importing them from here.
 export { FoldersPage } from "./FoldersPage";

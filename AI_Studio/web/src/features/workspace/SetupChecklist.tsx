@@ -14,9 +14,9 @@ const FIX: Record<string, (id: string) => { href: string; label: string }> = {
     "web-address": (id) => ({ href: routes.projectSettings(id, "environments"), label: "Open Environments" }),
     "android-app": (id) => ({ href: routes.projectSettings(id, "mobile"), label: "Open Mobile app" }),
     "ios-app": (id) => ({ href: routes.projectSettings(id, "mobile"), label: "Open Mobile app" }),
-    // Runners are machine-level (round 37): the project's runners are on the Runners page.
-    "ios-runner": (id) => ({ href: routes.runners(id), label: "Open Runners" }),
-    runner: (id) => ({ href: routes.runners(id), label: "Open Runners" }),
+    // Round 45: each person's runner is set up once in Settings.
+    "ios-runner": () => ({ href: routes.allRunners, label: "Open Your runner" }),
+    runner: () => ({ href: routes.allRunners, label: "Open Your runner" }),
     "ai-model": () => ({ href: routes.settings, label: "Open Settings" }),
 };
 

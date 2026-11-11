@@ -264,37 +264,22 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/projects/:id/runbooks/:rid/runs/:runId/cancel": "ai_studio.tests.run",
     "GET /api/projects/:id/runbook-runs/:runId": "read",
 
-    // ── runners (their tokens and kits are credentials) ──
+    // ── runners (round 45: one runner per person, set up in Settings; routes/runners.ts and routes/runner-kits.ts) ──
+    // A project's view of where its tests run: the caller's own runner only (routes/agents.ts).
     "GET /api/projects/:id/agents": "read",
-    "GET /api/projects/:id/agent-tokens": "ai_studio.runners.manage",
-    "POST /api/projects/:id/agent-tokens": "ai_studio.runners.manage",
-    "DELETE /api/projects/:id/agent-tokens/:tid": "ai_studio.runners.manage",
     "GET /api/projects/:id/runner": "read",
     "PUT /api/projects/:id/runner": "ai_studio.project.settings",
-    "POST /api/projects/:id/runner-kits": "ai_studio.runners.manage",
-    "GET /api/projects/:id/runner-kits/info": "read",
-    // runner updates (routes/runner-updates.ts): turning automatic updates off or asking one runner to update is managing runners
-    "PUT /api/projects/:id/agents/:agentId/updates": "ai_studio.runners.manage",
-    "POST /api/projects/:id/agents/:agentId/update": "ai_studio.runners.manage",
-    // Runners as machines of an organisation (routes/runners.ts, round 34): reading is narrowed by the handler; changing one is also limited there to its owner's side.
-    "GET /api/runners": "read",
-    "GET /api/runners/summary": "read",
-    "GET /api/runners/:runnerId": "read",
-    "POST /api/runners": "ai_studio.runners.manage",
-    // Round 39: the handler decides by kind (a person's own computer: its owner; a team runner: "manage runners" and the organisation rule).
-    "PATCH /api/runners/:runnerId": "read",
-    "POST /api/runners/:runnerId/retire": "read",
-    "GET /api/projects/:id/runner-access": "read",
-    "PUT /api/projects/:id/runner-access/:runnerId": "ai_studio.runners.manage",
-    "DELETE /api/projects/:id/runner-access/:runnerId": "ai_studio.runners.manage",
-    // Round 39: enrollment codes and kits from the Runners page. The handler decides by kind: a person's own computer needs running tests in some
-    // project (canAddPersonal), a team runner "manage runners" and the organisation rule (canManageRunner). Reading a code's state: its maker.
-    "POST /api/runners/enroll": "read",
-    "POST /api/runners/kits": "read",
-    "GET /api/runners/kits/info": "read",
-    "GET /api/runners/enrollments/:enrollmentId": "read",
-    // The runners a person may choose for one run of the project (their own computers and the project's team runners).
-    "GET /api/projects/:id/runner-choices": "ai_studio.tests.run",
+    // The person's own runner: the handlers decide (running tests in at least one project; the shared access key has none).
+    "GET /api/me/runner": "read",
+    "PATCH /api/me/runner": "read",
+    "POST /api/me/runner/retire": "read",
+    "POST /api/me/runner/update": "read",
+    "GET /api/me/runner/enrollments/:enrollmentId": "read",
+    "POST /api/me/runner/download": "read",
+    "GET /api/me/runner/download/info": "read",
+    // Everyone's runners: "manage runners", and the handler also asks for a platform admin or someone with every project.
+    "GET /api/admin/runners": "ai_studio.runners.manage",
+    "POST /api/admin/runners/:runnerId/retire": "ai_studio.runners.manage",
 
     // ── issue trackers, Sentry (tokens of other systems) ──
     "GET /api/projects/:id/integrations": "read",

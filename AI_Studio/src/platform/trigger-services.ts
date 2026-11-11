@@ -91,6 +91,12 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
     const minGap = opts.minGapMs ?? MIN_RUN_GAP_MS;
     const secrets = new SecretBox(p.config.dataDir, p.config.SECRET_KEY);
     const store = new TriggerStore(p.db, secrets, clock);
+    // Round 45: tokens made before their creator was recorded get one from Activity where that is certain (else their runs are refused).
+    try {
+        store.backfillOwners();
+    } catch {
+        /* a database without the activity table yet: nothing to attribute */
+    }
 
     const failuresOf = (job: JobRow, skip: Set<string> = new Set()) =>
         (job.options.testIds ?? [])
@@ -177,7 +183,7 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
 
             refuseUnlessRunsStart(p); // tests switched off on this server: the pipeline is told, nothing is queued
             // From here to the insert nothing is awaited: no other job can slip in between the checks and the create.
-            const testIds = await runnableTestIds(repo, token.projectId);
+            const testIds = await runnableTestIds(repo, token.projectId, "validate", token.createdBy);
             if (testIds.length === 0) throw new HttpError(409, "This project has no tests that can be run yet.");
             const busy = await activeJobOf(repo, token.projectId);
             if (busy) throw new HttpError(409, `Tests are already running for this project (${busy.status.toLowerCase().replace(/_/g, " ")}). Try again when that run has finished.`);
@@ -188,6 +194,8 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
                 mode: "validate",
                 testIds,
                 trigger: "deploy",
+                // Whose runner runs it: the person who made the token (round 45; null for an older token, refused by the job gate).
+                startedBy: { kind: "trigger", id: token.id, ownerId: token.createdBy },
                 deploy: { ...(input.commit ? { commit: input.commit } : {}), ...(input.environment ? { environment: input.environment } : {}), ...(token.label ? { label: token.label } : {}) },
             };
             const job = await repo.createJob(token.projectId, applicationId, options);

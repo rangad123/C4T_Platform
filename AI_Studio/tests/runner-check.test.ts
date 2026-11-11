@@ -1,15 +1,16 @@
 /**
  * "Check this computer" for real (docs/features/runner-check.md), on local sockets only:
- *  - a runner download from the REAL platform route, unzipped into a folder with a space and brackets, with this checkout's node_modules
- *    linked in (a junction, removed by unlinking only): check-computer.cmd run by cmd.exe and check-computer.sh run by Git Bash find
- *    Node.js the way the start scripts do and print the check; the token is accepted and never printed;
- *  - the REAL runner program started from that download sends its check with its hello, and the platform's runner list shows it;
- *  - the token revoked, the platform unreachable, and an https platform behind the TEST-ONLY company certificate reached through a proxy
+ *  - a person's runner download from the REAL platform route (POST /api/me/runner/download, round 45), its one-time code traded the way
+ *    the runner trades it (the credential kept in this computer's store), unzipped into a folder with a space and brackets, with this
+ *    checkout's node_modules linked in (a junction, removed by unlinking only): check-computer.cmd run by cmd.exe and check-computer.sh run
+ *    by Git Bash find Node.js the way the start scripts do and print the check; the credential is accepted and never printed;
+ *  - the REAL runner program started from that download sends its check with its hello, and Settings (GET /api/me/runner) shows it;
+ *  - the computer removed in Settings, the platform unreachable, and an https platform behind the TEST-ONLY company certificate reached through a proxy
  *    with a password (untrusted until runner.json names the certificate file; the password never printed).
  *
  * Starts a platform server and runner programs: run under the lock,
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/runner-check.test.ts
- * Ports 6930-6939 (6939 is left closed on purpose).
+ * Ports 8802-8806 (8806 is left closed on purpose).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -22,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
+import { enrollByHand, personToken } from "./fixtures/runner-person.js";
 import { ConnectProxy, tlsFront } from "./fixtures/connect-proxy.js";
 import { companyTls, removeMintedTls, TLS_SKIP_REASON } from "./fixtures/tls-files.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
@@ -33,11 +35,13 @@ if (!COMPANY) console.warn(TLS_SKIP_REASON);
 const CA = COMPANY?.ca ?? "";
 const FAKE_REG = path.join(ROOT, "tests/fixtures/fake-reg.mjs");
 const API_KEY = "chk-admin-key-2b7e";
-const PLATFORM_PORT = 6930;
-const STUB_PORT = 6932;
-const FRONT_PORT = 6933;
-const PROXY_PORT = 6934;
-const CLOSED_PORT = 6939;
+const PLATFORM_PORT = 8802;
+const STUB_PORT = 8803;
+const FRONT_PORT = 8804;
+const PROXY_PORT = 8805;
+const CLOSED_PORT = 8806;
+/** The runner takes the computer's own name (the download names none). */
+const NAME = os.hostname().trim().slice(0, 64) || "agent";
 const USER = "maya";
 const PASSWORD = "Chk-Pr0xy-S3cret-e2e";
 const STUB_TOKEN = "aitg_CheckStubTokenSentinel0123456789abcd";
@@ -47,8 +51,7 @@ const win = process.platform === "win32";
 let tmp: string;
 let platform: Platform;
 let app: Awaited<ReturnType<typeof buildServer>>;
-let projectId: string;
-let tokenId: string;
+let person: { id: string; token: string };
 let token: string;
 let kit: string;
 const links: string[] = [];
@@ -57,9 +60,11 @@ let stub: http.Server;
 let front: { stop(): Promise<void> };
 let proxy: ConnectProxy;
 const savedKitDir = process.env.RUNNER_KIT_DIR;
+const savedInstallerDir = process.env.RUNNER_INSTALLER_DIR;
 
+/** Requests as the person whose runner this is (their own API token). */
 const admin = async (method: "GET" | "POST" | "DELETE", url: string, body?: unknown) => {
-    const r = await app.inject({ method, url, headers: { "x-api-key": API_KEY }, ...(body !== undefined ? { payload: body as object } : {}) });
+    const r = await app.inject({ method, url, headers: { authorization: `Bearer ${person.token}` }, ...(body !== undefined ? { payload: body as object } : {}) });
     return { status: r.statusCode, headers: r.headers, raw: r.rawPayload, body: (r.headers["content-type"] ?? "").includes("json") ? r.json() : undefined };
 };
 
@@ -113,13 +118,14 @@ beforeAll(async () => {
     const bundleDir = path.join(tmp, "bundle");
     await buildRunner({ outDir: bundleDir });
     process.env.RUNNER_KIT_DIR = bundleDir;
-    platform = bootstrap(loadConfig({ DATA_DIR: path.join(tmp, "data"), API_KEY, HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: `http://127.0.0.1:${PLATFORM_PORT}`, SECRET_KEY: "chk-secret-key-0123456789abcdef" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: path.join(tmp, "data"), HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: `http://127.0.0.1:${PLATFORM_PORT}`, SECRET_KEY: "chk-secret-key-0123456789abcdef" }));
     app = await buildServer(platform);
     await app.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
-    projectId = (await admin("POST", "/api/projects", { name: "Check shop" })).body.id as string;
-    const dl = await admin("POST", `/api/projects/${projectId}/runner-kits`, { name: "Check PC", platform: "windows", kind: "files" });
+    person = personToken(app);
+    // No installer is built here: the Windows download is the plain files with the start and check scripts.
+    process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "no-installer");
+    const dl = await admin("POST", "/api/me/runner/download", { os: "windows", arch: "x64" });
     expect(dl.status).toBe(200);
-    tokenId = String(dl.headers["x-runner-token-id"]);
     kit = path.join(tmp, "runner kit (1)");
     for (const [name, bytes] of Object.entries(unzipSync(new Uint8Array(dl.raw)))) {
         if (name.endsWith("/")) continue;
@@ -127,7 +133,8 @@ beforeAll(async () => {
         fs.mkdirSync(path.dirname(path.join(kit, rel)), { recursive: true });
         fs.writeFileSync(path.join(kit, rel), bytes);
     }
-    token = fs.readFileSync(path.join(kit, "runner.token"), "utf8").trim();
+    // The code traded as the runner would: the credential is kept in this computer's store for this folder, the code file is gone.
+    token = await enrollByHand(`http://127.0.0.1:${PLATFORM_PORT}`, kit, NAME);
     link(kit);
 
     // A stand-in platform behind the company certificate, reached only through the proxy (platform.test exists only there).
@@ -151,6 +158,8 @@ afterAll(async () => {
     for (const l of links) fs.unlinkSync(l);
     if (savedKitDir === undefined) delete process.env.RUNNER_KIT_DIR;
     else process.env.RUNNER_KIT_DIR = savedKitDir;
+    if (savedInstallerDir === undefined) delete process.env.RUNNER_INSTALLER_DIR;
+    else process.env.RUNNER_INSTALLER_DIR = savedInstallerDir;
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 }, 60_000);
 
@@ -160,13 +169,13 @@ const nodeDirFirst = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
 };
 
 function expectGoodCheck(out: string): void {
-    expect(out).toContain(`Check this computer for the AI Testing Platform runner "Check PC" (platform 127.0.0.1:${PLATFORM_PORT}).`);
-    expect(out).toContain(`ok        Settings: platform 127.0.0.1:${PLATFORM_PORT}, runner name "Check PC", token read from runner.token (not shown)`);
+    expect(out).toContain(`Check this computer for the AI Testing Platform runner "${NAME}" (platform 127.0.0.1:${PLATFORM_PORT}).`);
+    expect(out).toContain(`ok        Settings: platform 127.0.0.1:${PLATFORM_PORT}, runner name "${NAME}", token kept in this computer's credential store (not shown)`);
     expect(out).toMatch(/ok {8}Runner files match this download \(version \d+\.\d+\.\d+\+[0-9a-f]{10}\)/);
     expect(out).toMatch(/ok {8}Test tools are installed \(Playwright \d/);
     expect(out).toMatch(/ok {8}Web tests will use /);
     expect(out).toContain(`ok        The platform at 127.0.0.1:${PLATFORM_PORT} answers (plain http, on this computer or a private network)`);
-    expect(out).toContain(`ok        The platform accepts this runner's token (project "Check shop"); the token is not shown`);
+    expect(out).toContain("ok        The platform accepts this runner's token; the token is not shown");
     expect(out).toContain("ok        The clock agrees with the platform's");
     expect(out).toMatch(/Everything the runner needs is here\./);
     expect(out).not.toContain(token);
@@ -178,8 +187,8 @@ describe.skipIf(!win || !COMPANY)("check-computer in a real download", () => {
         expect(r.out).toMatch(/Using Node\.js v\d+\.\d+\.\d+ from /);
         expectGoodCheck(r.out);
         expect(r.code).toBe(0);
-        // It installed nothing and started no runner: no runner row exists yet.
-        expect((await admin("GET", `/api/projects/${projectId}/agents`)).body).toEqual([]);
+        // It installed nothing and started no runner: Settings shows the runner as never connected.
+        expect((await admin("GET", "/api/me/runner")).body.runner).toMatchObject({ status: "offline", lastSeenAt: null });
     }, 120_000);
 
     it.skipIf(!BASH)("check-computer.sh under Git Bash does the same", async () => {
@@ -188,7 +197,7 @@ describe.skipIf(!win || !COMPANY)("check-computer in a real download", () => {
         expect(r.code).toBe(0);
     }, 120_000);
 
-    it("the real runner sends its check with its hello, and the runner list shows it without a path or the token", async () => {
+    it("the real runner sends its check with its hello, and Settings shows it without a path or the credential", async () => {
         const child = spawn(process.execPath, ["runner.mjs"], { cwd: kit, env: cleanEnv(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
         started.push(child);
         let out = "";
@@ -200,8 +209,8 @@ describe.skipIf(!win || !COMPANY)("check-computer in a real download", () => {
             let check: Check | undefined;
             while (!check) {
                 if (Date.now() > until) throw new Error(`no check reported. Runner output:\n${out}`);
-                const list = (await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ capabilities: { check?: Check } }>;
-                check = list[0]?.capabilities.check?.items.some((i) => i.id === "clock") ? list[0]!.capabilities.check : undefined;
+                const mine = (await admin("GET", "/api/me/runner")).body.runner as { check?: Check } | null;
+                check = mine?.check?.items.some((i) => i.id === "clock") ? mine.check : undefined;
                 if (!check) await new Promise((r) => setTimeout(r, 300));
             }
             const ids = check.items.map((i) => i.id);
@@ -232,7 +241,7 @@ describe.skipIf(!win || !COMPANY)("check-computer in a real download", () => {
         const before = await run(process.execPath, ["runner.mjs", "--check"], secure, env);
         expect(before.code).toBe(1);
         expect(before.out).toContain(`ok        Network: connects through the proxy http://${USER}:***@127.0.0.1:${PROXY_PORT}, from HTTPS_PROXY / HTTP_PROXY;`);
-        expect(before.out).toMatch(/missing {3}Could not reach platform\.test:6933: the platform's certificate was not accepted \((SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY)\)/);
+        expect(before.out).toMatch(/missing {3}Could not reach platform\.test:8804: the platform's certificate was not accepted \((SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY)\)/);
         expect(before.out).toMatch(/To fix: .*--ca-file/);
         fs.copyFileSync(CA, path.join(secure, "company-root.pem"));
         const cfg = JSON.parse(fs.readFileSync(path.join(secure, "runner.json"), "utf8"));
@@ -249,11 +258,11 @@ describe.skipIf(!win || !COMPANY)("check-computer in a real download", () => {
         }
     }, 120_000);
 
-    it("a revoked token: the check says so plainly, exit 1", async () => {
-        expect((await admin("DELETE", `/api/projects/${projectId}/agent-tokens/${tokenId}`)).status).toBeLessThan(300);
+    it("the computer removed in Settings: the check says so plainly, exit 1", async () => {
+        expect((await admin("POST", "/api/me/runner/retire")).status).toBe(200);
         const r = await run(process.env.ComSpec ?? "cmd.exe", ["/d", "/c", ".\\check-computer.cmd"], kit, nodeDirFirst(cleanEnv()));
         expect(r.code).toBe(1);
-        expect(r.out).toContain("missing   The platform does not accept this runner's token: it was revoked, or the project was deleted");
+        expect(r.out).toContain("missing   The platform does not accept this runner's credential: it was removed, or another computer was set up in its place");
         expect(r.out).not.toContain(token);
     }, 120_000);
 });

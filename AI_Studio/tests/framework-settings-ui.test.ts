@@ -3,7 +3,7 @@
  * model): availability lines in words, switching a framework off, a time limit, clamping and plain errors, "Use defaults", the change
  * log, the lock while a run is in progress, the quiet status line on the Tests page, keyboard use, axe in light and dark, phone width.
  * Run: node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/framework-settings-ui.test.ts
- * Port 5954. Set FW_SHOTS=<folder> to also write screenshots there.
+ * Port 8794. Set FW_SHOTS=<folder> to also write screenshots there.
  */
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect as pwExpect } from "@playwright/test";
@@ -16,10 +16,12 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
+import { getAgentServices } from "../src/platform/agent-services.js";
+import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
 import { defaultCaps, FakeAgent, viaInject } from "./fixtures/fake-agent.js";
 import { addTest, seedProject, type Seed } from "./fixtures/dashboard-seed.js";
 
-const PORT = 5954;
+const PORT = 8794;
 const BASE = `http://127.0.0.1:${PORT}`;
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
@@ -137,7 +139,8 @@ describe("the Frameworks section", () => {
     });
 
     it("names the runner agent and offers a visible window once the project runs on one", async () => {
-        const token = JSON.parse((await server.inject({ method: "POST", url: `/api/projects/${shop.projectId}/agent-tokens`, payload: { label: "maya" } })).body).secret as string;
+        // Round 45: the open server's one person's own runner (no project runner tokens any more).
+        const token = getAgentServices(platform).store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: "maya", createdBy: OPEN_OWNER_ID }).secret;
         const agent = new FakeAgent(viaInject(server), token, { name: "Maya laptop", capabilities: defaultCaps({ android: { adb: true, devices: [], avds: ["Pixel_6"] } }) });
         expect((await agent.hello()).status).toBe(200);
         expect((await server.inject({ method: "PUT", url: `/api/projects/${shop.projectId}/runner`, payload: { runOn: "agent" } })).statusCode).toBe(200);

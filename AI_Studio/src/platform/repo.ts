@@ -15,7 +15,6 @@ import { HttpError } from "./http-error.js";
 import { trackTestVersion, type VersionSource } from "./review-store.js";
 import { currentActor } from "./auth/actor.js";
 import { isArchived, PROJECT_ARCHIVED } from "./project-folders.js";
-import { requestedRunnerId } from "./run-request.js";
 import { HANDED_OVER } from "./runner-handover.js";
 
 export const JOB_STATES = [
@@ -58,7 +57,7 @@ export interface JobOptions {
      * (`{ kind: "schedule", id: <scheduleId>, ownerId: <user id or null> }`), so a person's own runner can take their own schedules.
      */
     startedBy?: { kind: string; id: string | null; ownerId?: string | null };
-    /** The runner a person chose for this one run (an agent_tokens id). Carried only: the job gate checks it, the dispatch offers it only to that runner. */
+    /** Round 45: no longer read (every run goes to its owner's own runner). Older jobs may still carry the runner a person chose then. */
     runner?: { id: string };
     maxPages: number;
     maxDepth: number;
@@ -459,7 +458,7 @@ export class Repo {
     /** Refuses (HTTP 409) a job that would run hand-written tests where they may not run (platform/custom-policy.ts). */
     customGate?: (projectId: string, options: JobOptions) => Promise<void>;
     /** May hand-written tests run for this project right now? Schedules and runbooks leave them out when not (platform/custom-policy.ts). */
-    customPolicy?: (projectId: string) => Promise<{ allowed: true } | { allowed: false; message: string }>;
+    customPolicy?: (projectId: string, ownerId?: string | null) => Promise<{ allowed: true } | { allowed: false; message: string }>;
 
     /** Refuses (HTTP 409) a job that cannot be handed to a runner when the platform runs tests only on runners (platform/runner-only.ts). */
     executionGate?: (projectId: string, options: JobOptions) => Promise<void>;
@@ -475,9 +474,6 @@ export class Repo {
     async createJob(projectId: string, applicationId: string, options: JobOptions): Promise<JobRow> {
         // An archived project starts no run, whoever asks (a person, a schedule, a deploy trigger): project-folders.ts.
         if (isArchived(this.db, projectId)) throw new HttpError(409, PROJECT_ARCHIVED);
-        // The runner the person chose for this run, from the request that starts it (run-request.ts): in the options before the gates read them.
-        const chosen = options.runner ? undefined : requestedRunnerId();
-        if (chosen) options = { ...options, runner: { id: chosen } };
         // EXECUTION_MODE=runners: a job that would need this server's browser is refused before anything else is checked (runner-only.ts).
         await this.executionGate?.(projectId, options);
         await this.pluginGate?.(projectId, options);

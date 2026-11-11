@@ -20,6 +20,7 @@ import { memoryLogger } from "../src/agent/log.js";
 import { loadConfig } from "../src/config.js";
 import type { TaskOffer } from "../src/agent-protocol/schema.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { FakePlatform } from "./fixtures/fake-platform.js";
@@ -277,7 +278,7 @@ describe("the real platform with real agents", () => {
         for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
         dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-custom-agent-pf-"));
         // this server does NOT allow hand-written scripts itself: only an agent that agreed can run them
-        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY: KEY, HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
         server = await buildServer(platform);
         await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
         worker = new Worker(platform, 150);
@@ -295,7 +296,7 @@ describe("the real platform with real agents", () => {
 
     it("an agent without the flag: hand-written tests are refused before a job exists, generated ones run", async () => {
         pid = (await admin("POST", "/api/projects", { name: "Custom on agents" })).body.id;
-        const tok1 = (await admin("POST", `/api/projects/${pid}/agent-tokens`, { label: "plain" })).body.secret as string;
+        const tok1 = personalRunner(platform, { label: "plain", replace: true, codeScripts: false }).secret;
         const imp = await admin("POST", `/api/projects/${pid}/specs`, {
             baseUrl: APP,
             validate: false,
@@ -315,10 +316,11 @@ describe("the real platform with real agents", () => {
             const saved = await admin("PUT", `/api/tests/${testId}/script`, { content: hitScript("via-real-agent") });
             expect(saved.status, saved.text).toBe(200);
             expect(saved.body.jobId).toBeNull();
-            expect(saved.body.note).toMatch(/--allow-custom-scripts/);
+            // Round 45: code scripts follow the owner's switch for their runner (Settings), off here.
+            expect(saved.body.note).toMatch(/code scripts are switched off on your runner/);
             const refused = await admin("POST", `/api/tests/${testId}/validate`, {});
             expect(refused.status).toBe(409);
-            expect(refused.body.error).toMatch(/none of its connected runner agents was started with --allow-custom-scripts/);
+            expect(refused.body.error).toMatch(/code scripts are switched off on your runner/);
             // a generated test runs on the very same agent
             const ok = await admin("POST", `/api/tests/${generated}/validate`, {});
             expect(ok.status, ok.text).toBe(202);
@@ -332,7 +334,7 @@ describe("the real platform with real agents", () => {
     }, 240_000);
 
     it("an agent with the flag runs the hand-written test, with its helper, and the platform stores the result like any other", async () => {
-        const tok2 = (await admin("POST", `/api/projects/${pid}/agent-tokens`, { label: "flagged" })).body.secret as string;
+        const tok2 = personalRunner(platform, { label: "flagged", replace: true }).secret;
         expect((await admin("PUT", `/api/projects/${pid}/helpers/open-shop`, { content: helper("real-agent-helper") })).status).toBe(200);
         const flagged = startAgent(BASE, path.join(tmp, "pf-flagged"), { allowCustomScripts: true }, tok2);
         try {

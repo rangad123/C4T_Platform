@@ -948,7 +948,7 @@ step_platform() {
     RUNNER_NAME=$(json_get "$sp_json" name)
     if [ -z "$PLATFORM_URL" ]; then
         step 5 "Platform connection" "failed: runner.json has no platform address"
-        die "Setup stopped. Download a new runner kit from the platform (Setup, Runners, Add a runner)."
+        die "Setup stopped. Download the runner again from the platform (Settings, Your runner)."
     fi
     if [ "$MODE" = "check" ]; then
         step 5 "Platform connection" "not checked here ($PLATFORM_URL)"
@@ -964,7 +964,7 @@ step_platform() {
             ;;
         *)
             step 5 "Platform connection" "failed: the address $PLATFORM_URL is not an http or https address"
-            die "Setup stopped. Download a new runner kit from the platform (Setup, Runners, Add a runner)."
+            die "Setup stopped. Download the runner again from the platform (Settings, Your runner)."
             ;;
     esac
     if ! command -v curl >/dev/null 2>&1; then
@@ -1095,7 +1095,7 @@ remove_launch_agent() {
 fatal_message() {
     case "$1" in
         2) printf '%s' "The runner could not read its settings. Check that you unzipped the whole kit, or download a new one from the platform." ;;
-        3) printf '%s' "The platform no longer accepts this runner. It was removed, its one-time code was already used or has expired, or the project was deleted. Make a new download on the Runners page of the platform." ;;
+        3) printf '%s' "The platform no longer accepts this runner. It was removed, another computer was set up in its place, or its one-time code was already used or has expired. Set up your runner again from Settings, Your runner in the platform." ;;
         4) printf '%s' "This runner and the platform are different versions. Download a new runner kit from the platform." ;;
         5) printf '%s' "The platform refused this runner. The message above says why." ;;
     esac
@@ -1161,7 +1161,7 @@ watch_connection() {
     wc_i=0
     while [ "$wc_i" -lt 120 ]; do
         if tail -c +"$(($1 + 1))" "$RUNLOG" 2>/dev/null | grep -q 'Connected to the platform'; then
-            notify "Connected to $PLATFORM_URL as $RUNNER_NAME"
+            notify "Connected to $PLATFORM_URL${RUNNER_NAME:+ as $RUNNER_NAME}"
             return 0
         fi
         sleep 1
@@ -1385,7 +1385,7 @@ show_status() {
     say ""
     say "The AI Testing runner is already running on this Mac (process $ss_pid)."
     if [ -n "$PLATFORM_URL" ]; then
-        say "It belongs to $PLATFORM_URL and is named \"$RUNNER_NAME\"."
+        say "It belongs to $PLATFORM_URL${RUNNER_NAME:+ and is named \"$RUNNER_NAME\"}."
     fi
     if [ -f "$RUNLOG" ]; then
         say "The end of its log ($RUNLOG):"
@@ -1504,8 +1504,8 @@ do_setup() {
             ww=0
             while [ "$ww" -lt "$wait_s" ]; do
                 if grep -q 'Connected to the platform' "$RUNLOG" 2>/dev/null; then
-                    say "The runner is connected to $PLATFORM_URL as \"$RUNNER_NAME\"."
-                    notify "Connected to $PLATFORM_URL as $RUNNER_NAME"
+                    say "The runner is connected to $PLATFORM_URL${RUNNER_NAME:+ as \"$RUNNER_NAME\"}."
+                    notify "Connected to $PLATFORM_URL${RUNNER_NAME:+ as $RUNNER_NAME}"
                     break
                 fi
                 sleep 1

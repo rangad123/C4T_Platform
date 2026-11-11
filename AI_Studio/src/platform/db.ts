@@ -294,6 +294,7 @@ CREATE INDEX idx_built_suite_schedules_suite ON built_suite_schedules(suite_id);
     /* 52: runs that start only on runners: who made each schedule, so a person's own runner can take that person's scheduled runs (schedule-store.ts; existing schedules have none: null) */ `ALTER TABLE schedules ADD COLUMN created_by TEXT;`,
     /* 53: a runner task's phases and attempts, and its live events (schema lives in agent-store.ts; existing tasks get their phase from their status, every existing runner speaks protocol 1 until its next hello) */ RUNNER_LIFECYCLE_MIGRATION,
     /* 54: what an approved test version depends on (shared steps, helpers, elements), so a change there holds it back (schema lives in approval-deps.ts; existing approved versions have no record and get one the first time a run checks them) */ APPROVAL_DEPS_MIGRATION,
+    /* 55: one runner per person: who made each deploy trigger token, so its runs go to that person's runner (trigger-store.ts; existing tokens have none: null, and their runs are refused with a sentence) */ `ALTER TABLE trigger_tokens ADD COLUMN created_by TEXT;`,
 ];
 
 /** Slots that were reserved before their SQL existed: the slot number and a table only that slot creates. */

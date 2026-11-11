@@ -7,7 +7,7 @@ A run that goes to a runner shows, while it goes and afterwards, what the runner
 **Run page** (`#/projects/:id/runs/:jobId`), a card "Progress on the runner" (after the run: "On the runner"):
 
 - **Where the run is**: Queued, Offered, Accepted, Getting ready, Running, Sending results, Done. A run that ended badly shows how far it got, then Turned down, Did not finish, Stopped, Took too long or Lost contact. One sentence says it with the runner's name ("maya-laptop is getting ready: it fetches the tests and the files they need.").
-- **Runner**: its name, linked to its page on the Runners page, and "Your computer" or "Team runner" when the platform says which (from `GET /api/projects/:id/runner-choices`).
+- **Runner**: its name; when it is the viewer's own runner (from `GET /api/me/runner`), "Your computer" and a link to Your runner in Settings.
 - **Started** (when the runner accepted the run or started its first test), **Running for** (ticking) or **Took**.
 - **Now**: the test and step it is on ("Checkout (WEB-002), step 4: Click Pay").
 - **Steps done** and **Results so far** ("2 passed, 1 failed, 1 running").
@@ -36,5 +36,5 @@ A screen reader hears the phase and the test ("Test 3 of 7: Checkout."), never e
 
 - Live screenshots are kept with the runner's task for a day; after that the card says the picture is no longer kept, and the run's own screenshots (with its results) remain.
 - A test run in several browsers or screen sizes is shown as one test: each run of it starts it over.
-- "Your computer" or "Team runner" needs `GET /api/projects/:id/runner-choices`, which needs permission to run tests in the project; someone who may only read sees the runner's name without it.
+- "Your computer" compares the run's runner with the viewer's own (`GET /api/me/runner`); anyone else sees the runner's name only.
 - The card keeps the last 300 log lines; the full list of events is under "View technical details".

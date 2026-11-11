@@ -155,7 +155,7 @@ export async function startSuiteForSchedule(p: Platform, s: Schedule): Promise<J
     if (!isAppUri(url)) await assertRunTarget(s.projectId, url);
     const settings = suite.settings;
     const shape = settings.environment ? "environment" : "validate";
-    const allowed = new Set(await runnableTestIds(repo, s.projectId, shape));
+    const allowed = new Set(await runnableTestIds(repo, s.projectId, shape, s.createdBy ?? null));
     const chosen = await chooseVersionsToRun(repo, s.projectId, await suiteTests(repo, store, suite));
     const testIds = chosen.run.filter((t) => allowed.has(t.id)).map((t) => t.id);
     if (testIds.length === 0) throw new Error(`The suite “${suite.name}” has no tests that can run automatically here.`);

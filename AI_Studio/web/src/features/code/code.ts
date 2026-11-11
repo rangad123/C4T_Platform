@@ -124,7 +124,7 @@ export const errorText = (e: unknown): string => (e instanceof Error ? e.message
 
 export const NOT_ENABLED_TITLE = "Code tests cannot run yet";
 export const NOT_ENABLED_TEXT =
-    "Running a script you wrote means running your code. Switch on one of these: start a runner with --allow-custom-scripts and choose it under Runners, or set ALLOW_CUSTOM_SCRIPTS=true in the platform’s environment (that runs your code on the server). You can still write and save scripts now.";
+    "Running a script you wrote means running your code. Set up your runner in Settings and switch on Run code scripts there, or, on a platform you host yourself, set ALLOW_CUSTOM_SCRIPTS=true (that runs your code on the server). You can still write and save scripts now.";
 
 // ── Starter templates (kept free of the literals the generated scripts must never contain) ──
 

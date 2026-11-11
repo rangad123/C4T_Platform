@@ -25,7 +25,7 @@ import { AppMonitor } from "../quality/monitor.js";
 import type { AppHealth } from "./types.js";
 
 /** A person's own computer whose owner did not allow their connected phone (round 39): said instead of using it. */
-export const NO_REAL_PHONE = "This computer's owner has not allowed their connected phone to be used. Set up an emulator on it, or its owner can turn on “Use my connected phone” on the Runners page.";
+export const NO_REAL_PHONE = "This computer's owner has not allowed their connected phone to be used. Set up an emulator on it, or its owner can turn on “Use my connected phone” for their runner in Settings.";
 export const SESSION_DEFAULTS = { maxActions: 200, maxMinutes: 20 } as const;
 /** The most actions one session may be given (R24: a Thorough exploration, with room for going back and starting again). */
 export const MAX_SESSION_ACTIONS = 1500;

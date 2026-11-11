@@ -1,17 +1,18 @@
 /**
  * The macOS installer against a REAL platform: a kit is downloaded from the platform the way a tester downloads it, "AI Testing
- * Runner.app" is put beside the runner files, and runner-setup.sh is run under Git Bash (or any POSIX shell) as a simulated Mac. There is
+ * Runner.app" is put beside the runner files, and runner-setup.sh is run under Git Bash (or any POSIX shell) as a simulated Mac. The kit is
+ * the person's own download (POST /api/me/runner/download, round 45) with their one-time code in runner.enroll. There is
  * no Node.js anywhere on its search path, so it downloads one from a local stand-in for nodejs.org (a real .tar.gz holding a Node.js shim
- * that runs this computer's real Node.js), checks the SHA-256, unpacks it, and starts the runner with it. The runner connects to the
- * platform with the token inside the kit, shows up as online, runs a real API test and returns the verdict. A revoked token ends the run
- * with the plain message; a second launch only shows the status; --uninstall stops only the runner this installer recorded.
+ * that runs this computer's real Node.js), checks the SHA-256, unpacks it, and starts the runner with it. The runner trades the code
+ * copied from the kit for the person's credential (kept in the computer's store), shows up as connected in Settings, runs a real API test
+ * the person starts and returns the verdict. Removing the computer in Settings ends the run with the plain message; a second launch only shows the status; --uninstall stops only the runner this installer recorded.
  * The LaunchAgent's command line (--run-loop) is also run for real, without launchd.
  *
  * What is NOT covered (never run on a Mac): Terminal and the .command hand-over, the osascript dialogs, launchctl loading the agent,
  * Gatekeeper and App Translocation, Rosetta detection with sysctl, the real nodejs.org download, hdiutil, signing.
  *
  * Run with  node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/installer-mac.test.ts
- * (it starts no browser, but the machine is small). Ports: platform 6610, fixture application 6613, nodejs.org stand-in 6614.
+ * (it starts no browser, but the machine is small). Ports: platform 8812, fixture application 8813, nodejs.org stand-in 8814.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
@@ -24,7 +25,9 @@ import { unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { buildServer } from "../src/platform/server.js";
+import { allowPrivateAddresses, downloadRunner, myOnlineRunner, personToken, retireMyRunner } from "./fixtures/runner-person.js";
 import { Worker } from "../src/platform/worker.js";
 // @ts-expect-error plain JavaScript build scripts (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
@@ -32,9 +35,9 @@ import { buildRunner } from "../scripts/build-runner.mjs";
 import { APP_NAME, buildInstallerMac } from "../scripts/build-installer-mac.mjs";
 
 const REPO = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PLATFORM_PORT = 6610;
-const APP_PORT = 6613;
-const DIST_PORT = 6614;
+const PLATFORM_PORT = 8812;
+const APP_PORT = 8813;
+const DIST_PORT = 8814;
 const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const DIST = `http://127.0.0.1:${DIST_PORT}`;
@@ -87,14 +90,33 @@ const fresh = (...parts: string[]) => {
     return dir;
 };
 
+/** The person whose runner this is (an owner with their own API token, made in beforeAll). */
+let person = { id: "", token: "" };
+let stopBeat: (() => void) | undefined;
+/** The runner takes the computer's own name (the download names none). */
+const NAME = os.hostname().trim().slice(0, 64) || "agent";
 const admin = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": API_KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const res = await fetch(`${BASE}${url}`, { method, headers: { authorization: `Bearer ${person.token}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const buf = Buffer.from(await res.arrayBuffer());
     const text = buf.toString("utf8");
     return { status: res.status, headers: res.headers, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; headers: Headers; buf: Buffer; text: string; body: any };
 };
-const newProject = async (name: string) => (await admin("POST", "/api/projects", { name })).body.id as string;
-const onlineAgents = async (projectId: string) => ((await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ name: string; online: boolean }>).filter((a) => a.online);
+/** A project whose imported tests run at once (no approval step: this file is about the installer). */
+const newProject = async (name: string) => {
+    const id = (await admin("POST", "/api/projects", { name })).body.id as string;
+    expect((await admin("PUT", `/api/projects/${id}/review-policy`, { aiGenerated: false, edits: false, healing: false })).status).toBe(200);
+    return id;
+};
+/** The person's runner while connected, as a list (empty when none). */
+const onlineAgents = async (_projectId?: string) => {
+    const r = await myOnlineRunner(BASE, person.token);
+    return r ? [r] : [];
+};
+/** The person's Mac download (one runner per person: the last test's is removed first). No installer is built on this server, so it is the plain files; unpackKit puts the app beside them. */
+const macDownload = async () => {
+    await retireMyRunner(BASE, person.token);
+    return downloadRunner(BASE, person.token, "mac", "arm64");
+};
 
 /** Unzip a platform-built kit into  <tmp>/<n>/Maya Singh/runner (1)  and put "AI Testing Runner.app" beside the runner files (what the platform's zip will hold). */
 function unpackKit(zip: Buffer): string {
@@ -175,13 +197,14 @@ function buildTarball(version: string): Buffer {
 beforeAll(async () => {
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "5" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
-    delete process.env.AGENT_MAX_TOKENS;
-    delete process.env.RUNNER_KIT_RATE_PER_MINUTE;
+    process.env.RUNNER_KIT_RATE_PER_MINUTE = "100";
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-inst-mac-api-"));
     const bundleDir = path.join(tmp, "dist-runner");
     await buildRunner({ outDir: bundleDir });
     process.env.RUNNER_KIT_DIR = bundleDir;
+    process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "no-installer");
+    process.env.RUNNER_COMPLETE_DIR = path.join(tmp, "no-complete");
     installerApp = buildInstallerMac({ outDir: path.join(tmp, "built") }).appDir;
 
     if (BASH) {
@@ -202,11 +225,14 @@ beforeAll(async () => {
     });
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-inst-mac-data-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0", EXECUTION_MODE: "runners" }));
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
     worker.start();
+    // EXECUTION_MODE=runners takes runs only while the part that hands them to runners is alive.
+    stopBeat = startHeartbeat(platform.db);
+    person = personToken(server);
 }, 180_000);
 
 afterAll(async () => {
@@ -216,6 +242,7 @@ afterAll(async () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
     }
+    stopBeat?.();
     await worker?.stop();
     await server?.close();
     platform?.db.close();
@@ -262,7 +289,8 @@ async function runApiTest(projectId: string, runnerName: string): Promise<void> 
     });
     expect(imp.status, imp.text).toBe(202);
     const id = (imp.body.tests as Array<{ id: string }>)[0]!.id;
-    expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
+    // No runner is chosen: the run goes to the person's own runner. The fixture is on this computer: private addresses on.
+    expect(await allowPrivateAddresses(BASE, person.token)).toBe(200);
     const started = await admin("POST", `/api/tests/${id}/validate`);
     expect(started.status, started.text).toBe(202);
     const job = await until("the job to finish", async () => {
@@ -274,9 +302,9 @@ async function runApiTest(projectId: string, runnerName: string): Promise<void> 
 }
 
 describe.skipIf(!BASH)("AI Testing Runner.app against a real platform (simulated Mac)", () => {
-    it("downloads Node.js, installs the runner files, starts the runner, which connects, runs a real API test and returns the verdict; a revoked token ends it plainly", async () => {
+    it("downloads Node.js, installs the runner files, starts the runner, which trades its code, runs a real API test and returns the verdict; removing the computer ends it plainly", async () => {
         const p = await newProject("Mac installer story");
-        const dl = await admin("POST", `/api/projects/${p}/runner-kits`, { name: "mac runner", platform: "unix" });
+        const dl = await macDownload();
         expect(dl.status, dl.text).toBe(200);
         const kit = unpackKit(dl.buf);
         const home = fresh("Users", "Maya Singh");
@@ -288,12 +316,14 @@ describe.skipIf(!BASH)("AI Testing Runner.app against a real platform (simulated
         const first = output(setup);
         expect(first).toMatch(/\[1\/5\] Node\.js 24 or newer \.\.\. downloading /);
         expect(first).toMatch(new RegExp(`\\[1/5\\] Node\\.js 24 or newer \\.\\.\\. done \\(v${NODE_VERSION.replaceAll(".", "\\.")} at \.+/node/bin\\)`));
-        expect(first).toContain("[2/5] Runner files ... done (7 of 7 files copied to ");
+        expect(first).toMatch(/\[2\/5\] Runner files \.\.\. done \(\d+ of \d+ files copied to /);
         expect(first).toMatch(/\[3\/5\] Test tools \.\.\. (not complete|installing|skipped)/);
         expect(first).toContain("[5/5] Platform connection ... found (");
         expect(distRequests).toContain(`GET /v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz`);
         expect(fs.existsSync(path.join(install, "node", "bin", "node"))).toBe(true);
-        expect(fs.readFileSync(path.join(install, "runner", "runner.token"), "utf8")).toBe(fs.readFileSync(path.join(kit, "runner.token"), "utf8"));
+        // The one-time code is copied once, owner-only; no credential exists yet (the runner makes it when it trades the code).
+        expect(fs.readFileSync(path.join(install, "runner", "runner.enroll"), "utf8")).toBe(fs.readFileSync(path.join(kit, "runner.enroll"), "utf8"));
+        expect(fs.existsSync(path.join(install, "runner", "runner.token"))).toBe(false);
         const downloadsBefore = distRequests.length;
 
         // 2. Give the install the repository's test tools (what npm would install on a Mac), then open the app again: everything is skipped
@@ -313,7 +343,9 @@ describe.skipIf(!BASH)("AI Testing Runner.app against a real platform (simulated
         expect(distRequests.length, "the second run downloaded something").toBe(downloadsBefore);
 
         // 3. The runner really works: a real API test is sent to it and passes.
-        await runApiTest(p, "mac runner");
+        // The code is used up and gone from the install folder.
+        expect(fs.existsSync(path.join(install, "runner", "runner.enroll"))).toBe(false);
+        await runApiTest(p, NAME);
 
         // 4. A second launch while it runs only shows the status and starts nothing.
         const again = launchSetup(kit, home, ["--silent"]);
@@ -323,10 +355,10 @@ describe.skipIf(!BASH)("AI Testing Runner.app against a real platform (simulated
         expect((await onlineAgents(p)).length).toBe(1);
         expect(run.child.exitCode).toBeNull();
 
-        // 5. The token is revoked: the runner says so in plain words, the installer ends with the runner's code, and cleans up its pid file.
-        expect((await admin("DELETE", `/api/projects/${p}/agent-tokens/${dl.headers.get("x-runner-token-id")}`)).status).toBe(200);
+        // 5. The computer is removed in Settings: the runner says so in plain words, the installer ends with the runner's code, and cleans up its pid file.
+        expect(await retireMyRunner(BASE, person.token)).toBe(200);
         expect(await Promise.race([run.exited, sleep(60_000).then(() => "timeout")]), output(run)).toBe(3);
-        expect(output(run)).toMatch(/no longer accepts this runner's token/);
+        expect(output(run)).toMatch(/no longer accepts this runner/);
         expect(fs.existsSync(path.join(install, "runner.pid"))).toBe(false);
 
         // 6. Uninstall removes the folder it created (the test tools link is taken away first, as the existing kit tests do).
@@ -334,12 +366,13 @@ describe.skipIf(!BASH)("AI Testing Runner.app against a real platform (simulated
         const un = launchSetup(kit, home, ["--uninstall", "--silent"]);
         expect(await un.exited, output(un)).toBe(0);
         expect(fs.existsSync(install)).toBe(false);
-        expect(fs.existsSync(path.join(kit, "runner.token"))).toBe(true);
+        // The download folder itself is left as it was (the person deletes it).
+        expect(fs.existsSync(path.join(kit, "runner.enroll"))).toBe(true);
     }, 600_000);
 
     it("the command line a LaunchAgent runs (--run-loop) starts the runner, which connects and is online; --uninstall stops exactly that process", async () => {
         const p = await newProject("Mac installer login item");
-        const dl = await admin("POST", `/api/projects/${p}/runner-kits`, { name: "login runner", platform: "unix" });
+        const dl = await macDownload();
         const kit = unpackKit(dl.buf);
         const home = fresh("Users", "Maya Singh");
         const install = path.join(fresh("Support [x] (y)"), "AITestingRunner");

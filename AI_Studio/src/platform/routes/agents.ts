@@ -1,7 +1,7 @@
 /**
  * Runner agent routes.
  *
- * Admin routes (API key, like every other route): tokens, the agent list, where a project's tests run.
+ * Project routes (API key or a person, like every other route): the caller's own runner as the project sees it, where a project's tests run.
  * Agent routes (/api/agent/*, the six of the protocol): no API key, the agent token is the credential. The server's API-key hook skips
  * exactly those six (see agent-routing.ts) and EVERY handler registered below authenticates with the token first (one hook on the
  * encapsulated scope, so a handler cannot forget). An API key is never accepted instead of the token.
@@ -15,17 +15,16 @@ import { AcceptRequest, ATTEMPT_HEADER, DevicePush, EventsRequest, HeartbeatRequ
 import { EnrollRequest } from "../../agent-protocol/schema.js";
 import { MAX_DEVICE_PUSH_BYTES } from "../agent-device.js";
 import { MAX_PUSH_BYTES } from "../agent-record.js";
-import type { AgentTokenRecord } from "../agent-store.js";
+import type { AgentRecord, AgentTokenRecord } from "../agent-store.js";
 import { androidSummary } from "../agent-routing.js";
 import { getAgentServices, MachineRefused, type AgentService } from "../agent-services.js";
 import { HttpError } from "../http-error.js";
 import { redactCredentials } from "../../engine/net/company-network.js";
 import { RUNNER_UPDATE_HEADER } from "../../agent-protocol/schema.js";
 import { runnerUpdatesFor } from "../runner-update.js";
-import { maxTokensFrom, runnerLimitMessage } from "../runner-kit.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
-import { actorLabel, currentActor } from "../auth/actor.js";
-import { assertMayAddRunner, CANNOT_MANAGE_RUNNER, canManageRunner } from "../runner-health.js";
+import { currentActor } from "../auth/actor.js";
+import { ownerIdOfActor } from "../agent-store.js";
 import { registerUpdateAgentRoutes } from "./runner-updates.js";
 import type { RouteCtx } from "./types.js";
 
@@ -34,9 +33,7 @@ const RESULT_CAP = 8_000_000;
 /** Protocol 2: a batch of live events (at most 100 short events). */
 const EVENTS_CAP = 1_000_000;
 
-const publicToken = (t: AgentTokenRecord) => ({ id: t.id, label: t.label, hint: `aitg_…${t.hint}`, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt, revokedAt: t.revokedAt });
-
-export function publicAgent(a: ReturnType<AgentService["store"]["listAgents"]>[number]) {
+export function publicAgent(a: AgentRecord & { online: boolean; activeTasks: number }) {
     const c = a.capabilities;
     return {
         id: a.id,
@@ -134,51 +131,17 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
     const svc = getAgentServices(p);
     const updates = runnerUpdatesFor(p);
 
-    // ── admin: tokens ───────────────────────────────────────────────────────
-    app.get("/api/projects/:id/agent-tokens", async (req) => {
-        const { id } = req.params as { id: string };
-        ctx.project(id);
-        return svc.store.listTokens(id).map((t) => ({ ...publicToken(t), ...(t.projectId !== id ? { shared: true } : {}) }));
-    });
-
-    app.post("/api/projects/:id/agent-tokens", async (req, reply) => {
-        const { id } = req.params as { id: string };
-        const project = ctx.project(id);
-        assertMayAddRunner(app, req, svc.store, (project.organization_id as string | null) ?? null);
-        const body = z.object({ label: z.string().trim().max(60).optional() }).parse(req.body ?? {});
-        // One runner per project (same limit as the kit download): refuse a new token until the current runner is removed.
-        const max = maxTokensFrom();
-        if (svc.store.countActiveTokens(id) >= max) throw new HttpError(409, runnerLimitMessage(max));
-        // Who made it is kept with the runner, as on the Runners page.
-        const { secret, record } = svc.store.createToken(id, body.label, actorLabel(actorOf(req) ?? currentActor()));
-        // The only time the token is shown. It is not stored, logged or returned again.
-        return reply.code(201).send({ token: publicToken(record), secret });
-    });
-
-    app.delete("/api/projects/:id/agent-tokens/:tid", async (req) => {
-        const { id, tid } = req.params as { id: string; tid: string };
-        ctx.project(id);
-        const token = svc.store.getToken(tid);
-        if (!token || token.revokedAt || !svc.store.hasAccess(tid, id)) throw new HttpError(404, "Token not found, or already revoked.");
-        // Registered from this project and used by no other: it goes, as it always did. Otherwise only this project's access ends.
-        const others = svc.store.projectsOf(tid).some((x) => x.projectId !== id);
-        // The same rule as adding one, whichever way the runner goes (round 39: retiring the project's own runner skipped it).
-        const actor = actorOf(req) ?? currentActor();
-        if (!canManageRunner(accessControlOf(app).projects, actor, token.organizationId)) throw new HttpError(403, CANNOT_MANAGE_RUNNER);
-        if (token.projectId === id && !others) {
-            if (!svc.store.revokeToken(id, tid)) throw new HttpError(404, "Token not found, or already revoked.");
-            return { ok: true };
-        }
-        svc.store.removeAccess(tid, id);
-        return { ok: true };
-    });
-
-    // ── admin: agents and where tests run ───────────────────────────────────
+    // ── a project's view of where its tests run (round 45: the caller's own runner; no project runners, tokens or pins) ──
+    /** The caller's own computer as a list of at most one (the shape the project pages read), never anyone else's. */
     app.get("/api/projects/:id/agents", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
+        const owner = ownerIdOfActor(actorOf(req) ?? currentActor());
+        const own = owner && svc.store.ownerMayRun(owner, id) ? svc.store.runnerOf(owner) : undefined;
+        if (!own?.agent) return [];
+        const a = { ...own.agent, online: own.online, activeTasks: svc.store.runningCount(own.agent.id) };
         // Runner updates (runner-update.ts): only for a runner started from a download, so a checkout-based runner's answer is unchanged.
-        return svc.store.listAgents(id).map((a) => (a.capabilities.kitVersion || a.capabilities.update ? { ...publicAgent(a), update: updates.publicView(a) } : publicAgent(a)));
+        return [a.capabilities.kitVersion || a.capabilities.update ? { ...publicAgent(a), update: updates.publicView(a) } : publicAgent(a)];
     });
 
     app.get("/api/projects/:id/runner", async (req) => {
@@ -187,30 +150,17 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
         return svc.runnerStatus(id);
     });
 
+    /** EXECUTION_MODE=local only: whether the project's tests run on this server or on runners (each run on its owner's own runner). */
     app.put("/api/projects/:id/runner", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
+        // agentId and allowPersonal are accepted and ignored (round 45: no pinned runner, no project switch).
         const body = z.object({ runOn: z.enum(["platform", "agent"]).optional(), agentId: z.string().max(64).nullable().optional(), allowPersonal: z.boolean().optional() }).parse(req.body ?? {});
-        // "Allow people's own computers" (migration 51) may be changed on its own; it does not move the project's runs.
-        if (body.allowPersonal !== undefined) {
-            if (svc.store.allowsPersonal(id) !== body.allowPersonal) {
-                svc.store.setAllowPersonal(id, body.allowPersonal);
-                const actor = actorOf(req) ?? currentActor();
-                accessControlOf(app).users.addActivity({ actorKind: actor.kind, actorId: actor.id ?? null, actorName: actor.name, action: "runner-personal-switched", detail: body.allowPersonal ? "People's own computers may run this project's tests." : "People's own computers no longer run this project's tests.", projectId: id });
-            }
-            if (body.runOn === undefined) return svc.runnerStatus(id);
-        }
-        if (body.runOn === undefined) throw new HttpError(400, "Say where the project's tests run (runOn), or send allowPersonal.");
+        if (body.runOn === undefined) return svc.runnerStatus(id);
         // EXECUTION_MODE=runners: nothing runs on this server, so a project cannot be set to run here (runner-only.ts).
         if (body.runOn === "platform" && runnersOnly(ctx.p.config)) throw new HttpError(409, PLATFORM_SETTING_REFUSED, { executionMode: "runners" });
         await ctx.assertNoActiveJob(id);
-        if (body.runOn === "agent") {
-            const agentId = body.agentId ?? null;
-            if (agentId && !svc.store.agentServes(agentId, id)) throw new HttpError(404, "That runner agent does not belong to this project.");
-            const online = svc.eligibleAgents(id, { runOn: "agent", agentId });
-            if (online.length === 0) throw new HttpError(409, agentId ? "That runner agent is not online. Start it, then try again." : "No runner agent is online for this project. Start one, then try again.");
-            svc.store.setRunner(id, { runOn: "agent", agentId });
-        } else svc.store.setRunner(id, { runOn: "platform", agentId: null });
+        svc.store.setRunner(id, { runOn: body.runOn, agentId: null });
         return svc.runnerStatus(id);
     });
 
@@ -244,7 +194,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             const out = svc.enroll(body, clientAddress(req));
             const t = svc.store.getToken(out.runnerId);
             // Who added which runner, where people look (Activity); the code and the credential are never written anywhere.
-            if (t) accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-enrolled", detail: `${t.kind === "personal" ? "A person's own computer" : "A team runner"} “${t.label ?? body.name.slice(0, 64)}” connected with its enrollment code.`, projectId: t.projectId });
+            if (t) accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-enrolled", detail: `Their runner “${t.label ?? body.name.slice(0, 64)}” connected with its one-time code. Any runner they had before was removed.`, projectId: t.projectId });
             req.log.info({ audit: "runner-enrolled", tokenId: out.runnerId, kind: out.kind }, "runner enrolled");
             return reply.code(201).send(out);
         });
@@ -271,7 +221,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             const out = svc.rotate(token(req), req.headers.authorization);
             // Where people look (Activity): which runner changed its credential. Never the credential itself.
             const t = token(req);
-            accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-credential-rotated", detail: `${t.kind === "personal" ? "A person's own computer" : "The team runner"} “${t.label ?? `…${t.hint}`}” changed its credential. The previous one stops working once the new one is used, or after 24 hours.`, projectId: t.projectId });
+            accessControlOf(app).users.addActivity({ actorKind: "runner", actorId: null, actorName: t.label ?? `Runner …${t.hint}`, action: "runner-credential-rotated", detail: `The runner “${t.label ?? `…${t.hint}`}” changed its credential. The previous one stops working once the new one is used, or after 24 hours.`, projectId: t.projectId });
             req.log.info({ audit: "runner-credential-rotated", tokenId: t.id }, "runner credential rotated");
             return out;
         });

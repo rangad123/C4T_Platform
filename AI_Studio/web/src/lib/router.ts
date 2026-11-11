@@ -8,7 +8,8 @@ export interface Route {
 
 function parse(hash: string): Route {
     const raw = hash.replace(/^#/, "") || "/";
-    const [path, qs] = raw.split("?");
+    // A place inside a page (`#/settings#runner`) is not part of the route.
+    const [path, qs] = raw.split("#")[0]!.split("?");
     return { parts: path!.split("/").filter(Boolean), query: new URLSearchParams(qs ?? "") };
 }
 
@@ -21,6 +22,9 @@ export function useRoute(): Route {
     }, []);
     return parse(hash);
 }
+
+/** "Your runner" in Settings: one runner per person, set up once (features/runners/YourRunner.tsx). */
+const RUNNER_SETTINGS = "#/settings#runner";
 
 export const go = (href: string) => {
     location.hash = href.replace(/^#/, "");
@@ -35,7 +39,7 @@ export const go = (href: string) => {
 export const CASES_SECTIONS = ["all", "automated", "manual"] as const;
 export const SCRIPTS_SECTIONS = ["scripts", "review", "steps", "elements", "helpers", "library"] as const;
 export const RUNS_SECTIONS = ["runs", "schedules", "deploys", "trends", "releases", "compliance"] as const;
-// Round 37: runners are machine-level, so they are not a project setting: a project's runners are on the Runners page (`projectRunners`).
+// Runners are not a project setting: each person sets up their own runner once in Settings (round 45).
 export const SETTINGS_SECTIONS = ["general", "members", "environments", "data", "accounts", "ai", "frameworks", "mobile", "alerts", "issues", "storage"] as const;
 export type CasesSection = (typeof CASES_SECTIONS)[number];
 export type ScriptsSection = (typeof SCRIPTS_SECTIONS)[number];
@@ -107,10 +111,10 @@ export const routes = {
     agentRun: (id: string, runId: string) => `#/projects/${id}/agent/${runId}`,
     /** The project's settings, one section open. */
     projectSettings: (id: string, section?: SettingsSection) => place(id, "settings", "general", section),
-    /** Where tests run: the runners this project may use, on the Runners page (round 37: not inside the project). */
-    runners: (id: string) => `#/runners?project=${encodeURIComponent(id)}`,
-    /** The old Setup place: each section is a Settings section of the same name; its Runners section is on the Runners page. */
-    setup: (id: string, section?: SetupSection) => (section === "runners" ? `#/runners?project=${encodeURIComponent(id)}` : place(id, "settings", "general", section)),
+    /** Where tests run: every run goes to its starter's own runner, set up once in Settings (round 45: no project runners). */
+    runners: (_id?: string) => RUNNER_SETTINGS,
+    /** The old Setup place: each section is a Settings section of the same name; its Runners section is Your runner in Settings. */
+    setup: (id: string, section?: SetupSection) => (section === "runners" ? RUNNER_SETTINGS : place(id, "settings", "general", section)),
     /** The old Library place: each section moved (`libraryHome`). */
     library: (id: string, section?: LibrarySection) => libraryHome(id, section),
     objects: (id: string) => libraryHome(id, "elements"),
@@ -150,8 +154,9 @@ export const routes = {
     /** The global places (docs/product-restructure/INFORMATION_ARCHITECTURE.md). `home` stays the project list. */
     dashboard: "#/dashboard",
     develop: "#/develop",
-    allRunners: "#/runners",
-    runner: (id: string) => `#/runners/${id}`,
+    /** The person's runner: the "Your runner" section of Settings (round 45 removed the Runners pages; old links land here). */
+    allRunners: RUNNER_SETTINGS,
+    runner: (_id?: string) => RUNNER_SETTINGS,
     /** Integrations: every system the projects connect to, set up once for an organisation, and which projects use each. */
     integrations: "#/integrations",
     /** An old link (the Folders place of round 34): it lands on Reusable libraries (lib/aliases.ts). */

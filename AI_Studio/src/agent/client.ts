@@ -40,8 +40,11 @@ import { AGENT_VERSION } from "./config.js";
 import { noteServerTime, runnerCheckReport } from "./computer-check.js";
 import { networkCapabilities, noteNetworkProblem, proxyUsedFor } from "./net.js";
 
+/** What the runner says when the platform refuses its credential without a sentence of its own. */
+export const ACCESS_REMOVED = "The platform no longer accepts this runner: it was removed, or another computer was set up in its place. Set up your runner again from Settings, Your runner.";
+
 /**
- * auth       the token is not valid or was revoked (stop)
+ * auth       the credential is not accepted any more: retired, replaced by another computer, or a team credential (stop)
  * conflict   the platform refuses this agent (stop)
  * protocol   the platform speaks another protocol version (stop)
  * network    could not reach the platform, or a server error, or rate limited (retry)
@@ -116,7 +119,7 @@ export class PlatformClient {
         const res = await this.send("POST", "/api/agent/enroll", { body: JSON.stringify(req), headers: { "content-type": "application/json" }, timeoutMs: 30_000, anonymous: true });
         if (res.status === 404 || res.status === 410) {
             const sentence = sentenceOf(await res.text().catch(() => ""));
-            return Promise.reject(new PlatformError("auth", sentence || "This enrollment code is not valid. Make a new one on the Runners page.", res.status));
+            return Promise.reject(new PlatformError("auth", sentence || "This one-time code is not valid. Download the runner again from Settings, Your runner.", res.status));
         }
         if (!res.ok) throw await this.failure(res, "add this computer", true);
         return this.json(res, EnrollResponse, "enroll");
@@ -178,7 +181,9 @@ export class PlatformClient {
         const said = sentence ? ` The platform said: ${sentence}` : "";
         const retry = Number(res.headers.get("retry-after"));
         const retryAfter = Number.isFinite(retry) && retry > 0 ? Math.min(retry, 120) : undefined;
-        if (res.status === 401 || (res.status === 404 && entry)) return new PlatformError("auth", `The agent token is not valid or was revoked. Create a new one on the project's Agents page.${said}`, res.status);
+        // The credential was retired, replaced by another computer of the same person, or is a team or project credential (round 45): the
+        // platform's own sentence says which and what to do, so it is shown as it is. The runner then stops (exit code 3).
+        if (res.status === 401 || (res.status === 404 && entry)) return new PlatformError("auth", sentence ? `The platform no longer accepts this runner. ${/[.!?]$/.test(sentence) ? sentence : `${sentence}.`}` : ACCESS_REMOVED, res.status);
         // A protocol refusal comes first: the platform answers it with 409 on hello, and it must end with the protocol exit code (4), not 5.
         if (res.status === 426 || ((res.status === 400 || res.status === 409) && /\bprotocol\b/i.test(sentence))) return new PlatformError("protocol", `The platform does not accept this agent's protocol version.${said} Update the agent (or the platform) so both speak the same version.`, res.status);
         if (res.status === 409 && entry) return new PlatformError("conflict", `The platform refused this agent.${said}`, res.status);

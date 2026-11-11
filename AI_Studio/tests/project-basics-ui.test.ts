@@ -1,8 +1,8 @@
 /**
- * Round 37, project basics, in a real browser against a real platform (port 7600, no access key): Create a project asks for a
+ * Round 37, project basics, in a real browser against a real platform (port 8788, no access key): Create a project asks for a
  * typed name, one platform and one testing mode, and the app for that platform; an older project with several platforms and
  * both modes shows them and asks for one of each on save; the project's tabs in their new order with no Runners in Settings; old
- * runner links land on the Runners page, where a runner is given to a project and taken away; the Projects page in pages of 20
+ * runner links land on Your runner in Settings; the Projects page in pages of 20
  * with the page in the address, View all and search; no Security assessment in the sidebar. Requires `web/dist` (vite build).
  */
 import fs from "node:fs";
@@ -15,7 +15,7 @@ import { loadConfig, REPO_ROOT } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 
-const PORT = 7600;
+const PORT = 8788;
 const BASE = `http://127.0.0.1:${PORT}`;
 let browser: Browser;
 let platform: Platform;
@@ -171,27 +171,13 @@ describe("the project menu and runners", () => {
         expect(await page.locator(".subtabs a").allTextContents()).not.toContain("Runners");
     });
 
-    it("lands an old project runners link on the Runners page, where a runner is given to a project and taken away", async () => {
+    it("lands an old project runners link on Your runner in Settings (round 45: one runner per person, no project runners)", async () => {
         const id = byName("Gift shop")!.id as string;
         await visit(`#/projects/${id}/settings?section=runners`);
-        expect(await hash()).toBe(`#/runners?project=${id}`);
-        await pwExpect(page.getByRole("heading", { name: "Runners for Gift shop" })).toBeVisible();
-        await pwExpect(page.getByRole("button", { name: "Add a runner", exact: true })).toBeVisible();
-        await page.getByLabel("For the project").selectOption({ label: "Atlas shop" });
-        await pwExpect(page.getByRole("heading", { name: "Runners for Atlas shop" })).toBeVisible();
-        // A runner's page gives it to a project and takes it away (round 34 sharing, managed here now).
-        const runner = (await api("POST", "/api/runners", { name: "Lab laptop" })).body.runner.id as string;
-        await visit(`#/runners/${runner}`);
-        const box = page.getByTestId("runner-projects");
-        await pwExpect(box.getByText("No project uses this runner yet. Give it to one below.")).toBeVisible();
-        await box.getByLabel("Give it to a project").selectOption({ label: "Gift shop" });
-        await box.getByRole("button", { name: "Give access" }).click();
-        await pwExpect(box.getByText("Gift shop may now use Lab laptop.")).toBeVisible();
-        await pwExpect(box.getByRole("link", { name: "Gift shop" })).toHaveAttribute("href", `#/runners?project=${id}`);
-        expect((await api("GET", `/api/projects/${id}/runner-access`)).body.runners.map((r: { id: string }) => r.id)).toEqual([runner]);
-        await box.getByRole("button", { name: "Stop Gift shop using Lab laptop" }).click();
-        await pwExpect(box.getByText("Gift shop no longer uses Lab laptop.")).toBeVisible();
-        expect((await api("GET", `/api/projects/${id}/runner-access`)).body.runners).toEqual([]);
+        await pwExpect.poll(hash).toBe("#/settings#runner");
+        await pwExpect(page.getByTestId("your-runner")).toBeVisible();
+        await visit(`#/runners?project=${id}`);
+        await pwExpect.poll(hash).toBe("#/settings#runner");
     });
 
     it("has no Security assessment in the sidebar", async () => {

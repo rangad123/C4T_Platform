@@ -1,17 +1,18 @@
 /**
- * The Windows runner installer, really run. The program is compiled with csc.exe, the kit is downloaded from a REAL platform's route (default
- * kind: installer), unzipped into a folder with spaces and brackets, and AITestingRunnerSetup.exe is started the way the quiet switches are
+ * The Windows runner installer, really run. The program is compiled with csc.exe, the kit is a person's own download from a REAL platform
+ * (POST /api/me/runner/download, round 45: the Windows download is the installer, with the person's one-time code in runner.enroll), unzipped into a folder with spaces and brackets, and AITestingRunnerSetup.exe is started the way the quiet switches are
  * meant to be used (--check, --silent, --stop, --uninstall). Nothing leaves this computer: the "nodejs.org" it downloads Node.js from is a
  * local HTTP server (AITP_NODE_DIST_URL) serving a fake index.json, SHASUMS256.txt and a real zip whose node.exe is a copy of this computer's.
  *
  * Covered: the checklist and its exit codes; Node.js found and skipped; Node.js missing or too old, downloaded, checked against its checksum
  * and unpacked into the private folder (and refused when the checksum is wrong, the download is cut short, the checksum line is missing or
  * the person stops it); the newest long-term release chosen from the index, the pinned fallback when the index cannot be read; files copied
- * and compared; a second run that skips everything and is quick; the runner started HIDDEN, connecting to the platform with the token from
- * the kit, running a real API test and a real web test; one copy at a time; stopping only the process it started (a decoy node process and a
- * recorded pid that is not ours survive); a revoked token ending with exit code 3 and a plain message; uninstalling only what it created
+ * and compared; a second run that skips everything and is quick; the runner started HIDDEN, trading the code from the kit for the person's
+ * credential (kept with Windows data protection, never as plain text), running a real API test and a real web test the person starts; one
+ * copy at a time; stopping only the process it started (a decoy node process and a recorded pid that is not ours survive); the computer
+ * removed in Settings ending it with exit code 3 and a plain message; uninstalling only what it created
  * (a sentinel in the install folder, a sentinel outside it, the Node.js it found elsewhere and a linked node_modules survive); shortcuts in
- * folders the test chooses; the token file readable only by this user and the token never in any output or log; running again from the
+ * folders the test chooses; the copied code readable only by this user and the code never in any output or log; running again from the
  * installed copy after the unzipped folder is deleted; and a window smoke test (created and painted off screen, never shown).
  *
  * NOT covered here (said plainly in docs/features/runner-installer.md): the real nodejs.org and npm registry downloads, the npm install and
@@ -19,7 +20,7 @@
  * unsigned program, the tray icon's look and menu, Windows 10, and a person clicking in the window.
  *
  * Run with  node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/installer-win.test.ts
- * Ports: platform 6590, fixture application 6591, fake nodejs.org 6592.
+ * Ports: platform 8815, fixture application 8816, fake nodejs.org 8817.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -32,7 +33,9 @@ import { unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { startHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { buildServer } from "../src/platform/server.js";
+import { allowPrivateAddresses, downloadRunner, myOnlineRunner, personToken, retireMyRunner } from "./fixtures/runner-person.js";
 import { Worker } from "../src/platform/worker.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
@@ -42,9 +45,9 @@ import { buildInstallerWin, EXE_NAME, findCsc } from "../scripts/build-installer
 import { writeManifest } from "../scripts/build-installer.mjs";
 
 const REPO = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PLATFORM_PORT = 6590;
-const APP_PORT = 6591;
-const DIST_PORT = 6592;
+const PLATFORM_PORT = 8815;
+const APP_PORT = 8816;
+const DIST_PORT = 8817;
 const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const DIST = `http://127.0.0.1:${DIST_PORT}`;
@@ -84,20 +87,34 @@ const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
 // ── the platform ────────────────────────────────────────────────────────────
 
+/** The person whose runner this is (an owner with their own API token, made in beforeAll). */
+let person = { id: "", token: "" };
+let stopBeat: (() => void) | undefined;
+/** The runner takes the computer's own name (the download names none). */
+const NAME = os.hostname().trim().slice(0, 64) || "agent";
 const admin = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(`${BASE}${url}`, { method, headers: { "x-api-key": API_KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const res = await fetch(`${BASE}${url}`, { method, headers: { authorization: `Bearer ${person.token}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const buf = Buffer.from(await res.arrayBuffer());
     const text = buf.toString("utf8");
     return { status: res.status, headers: res.headers, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; headers: Headers; buf: Buffer; text: string; body: any };
 };
-const newProject = async (name: string) => (await admin("POST", "/api/projects", { name })).body.id as string;
-const onlineAgents = async (projectId: string) => ((await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ name: string; online: boolean }>).filter((a) => a.online);
+/** A project whose imported tests run at once (no approval step: this file is about the installer). */
+const newProject = async (name: string) => {
+    const id = (await admin("POST", "/api/projects", { name })).body.id as string;
+    expect((await admin("PUT", `/api/projects/${id}/review-policy`, { aiGenerated: false, edits: false, healing: false })).status).toBe(200);
+    return id;
+};
+/** The person's runner while connected, as a list (empty when none). */
+const onlineAgents = async (_projectId?: string) => {
+    const r = await myOnlineRunner(BASE, person.token);
+    return r ? [r] : [];
+};
 
 interface Kit {
-    /** The unzipped folder that holds AITestingRunnerSetup.exe, runner.json and runner.token. */
+    /** The unzipped folder that holds AITestingRunnerSetup.exe, runner.json and runner.enroll. */
     dir: string;
     projectId: string;
-    tokenId: string;
+    /** The one-time code in runner.enroll: a secret that must appear in no output. */
     token: string;
     name: string;
 }
@@ -105,7 +122,9 @@ interface Kit {
 /** The real download (default kind, so the installer zip), unzipped into  <tmp>/<n>/Maya Singh [kit]/<folder>  (spaces and brackets on purpose). */
 async function makeKit(name: string): Promise<Kit> {
     const projectId = await newProject(`Installer ${name}`);
-    const r = await admin("POST", `/api/projects/${projectId}/runner-kits`, { name, platform: "windows" });
+    // One runner per person: the one the last test left is removed first, so "online" always means this kit's runner.
+    await retireMyRunner(BASE, person.token);
+    const r = await downloadRunner(BASE, person.token, "windows");
     expect(r.status, r.text).toBe(200);
     expect(r.headers.get("x-runner-kit-kind")).toBe("installer");
     const parent = path.join(tmp, String(++counter), "Maya Singh [kit]");
@@ -117,7 +136,7 @@ async function makeKit(name: string): Promise<Kit> {
         fs.writeFileSync(dest, bytes);
     }
     const dir = path.join(parent, top);
-    return { dir, projectId, tokenId: r.headers.get("x-runner-token-id")!, token: fs.readFileSync(path.join(dir, "runner.token"), "utf8").trim(), name };
+    return { dir, projectId, token: fs.readFileSync(path.join(dir, "runner.enroll"), "utf8").trim(), name: NAME };
 }
 
 const freshInstallDir = (): string => path.join(tmp, String(++counter), "Local [data]", "AI Runner");
@@ -205,8 +224,7 @@ beforeAll(async () => {
     if (!ON_WINDOWS) return;
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "5" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
-    delete process.env.AGENT_MAX_TOKENS;
-    delete process.env.RUNNER_KIT_RATE_PER_MINUTE;
+    process.env.RUNNER_KIT_RATE_PER_MINUTE = "100";
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-inst-win-"));
     // The platform's inputs: the runner bundle and the installer, both built here into temp folders.
@@ -216,6 +234,7 @@ beforeAll(async () => {
     buildInstallerWin({ outDir: path.join(instDir, "win") });
     writeManifest({ outDir: instDir });
     process.env.RUNNER_INSTALLER_DIR = instDir;
+    process.env.RUNNER_COMPLETE_DIR = path.join(tmp, "no-complete");
 
     appServer = http.createServer((req, res) => {
         if (req.url === "/api/health") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: "ok" }));
@@ -268,11 +287,14 @@ beforeAll(async () => {
     await new Promise<void>((r) => distServer.listen(DIST_PORT, "127.0.0.1", () => r()));
 
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-inst-win-data-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), PUBLIC_URL: BASE, CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0", EXECUTION_MODE: "runners" }));
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
     worker.start();
+    // EXECUTION_MODE=runners takes runs only while the part that hands them to runners is alive.
+    stopBeat = startHeartbeat(platform.db);
+    person = personToken(server);
     setupExe = path.join(instDir, "win", EXE_NAME);
 }, 240_000);
 
@@ -283,6 +305,7 @@ afterAll(async () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
     }
+    stopBeat?.();
     await worker?.stop();
     await server?.close();
     platform?.db.close();
@@ -321,7 +344,8 @@ async function runTests(projectId: string, runnerName: string, withWeb: boolean)
     const imp = await admin("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, validate: false, credentials: { username: "demo@example.com", password: PASSWORD }, specs });
     expect(imp.status, imp.text).toBe(202);
     const ids = (imp.body.tests as Array<{ id: string }>).map((t) => t.id);
-    expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
+    // No runner is chosen: the run goes to the person's own runner. The fixture is on this computer: private addresses on.
+    expect(await allowPrivateAddresses(BASE, person.token)).toBe(200);
     const results = [];
     for (const id of ids) {
         const started = await admin("POST", `/api/tests/${id}/validate`);
@@ -528,10 +552,11 @@ describeWin("Node.js is downloaded only when it is missing, and only after its c
         expect(leftovers(inst)).toEqual([]);
         expect(fs.existsSync(path.join(inst, "node.new"))).toBe(false);
         expect(readState(inst).node).toBe("private");
-        // The runner files were copied, the program copied itself next to them, and the token is exactly the kit's.
-        for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "runner.json", "runner.token"]) expect(fs.existsSync(path.join(inst, "app", n)), n).toBe(true);
+        // The runner files were copied, the program copied itself next to them, and the one-time code is exactly the kit's (not traded yet: nothing started).
+        for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "runner.json", "runner.enroll"]) expect(fs.existsSync(path.join(inst, "app", n)), n).toBe(true);
         expect(fs.existsSync(path.join(inst, "AITestingRunner.exe"))).toBe(true);
-        expect(fs.readFileSync(path.join(inst, "app", "runner.token"), "utf8").trim()).toBe(kit.token);
+        expect(fs.readFileSync(path.join(inst, "app", "runner.enroll"), "utf8").trim()).toBe(kit.token);
+        expect(fs.existsSync(path.join(inst, "app", "runner.token"))).toBe(false);
         // The next look finds the private copy and downloads nothing more.
         resetDist("good");
         const again = await run(kit, ["--check"], inst, missingEnv());
@@ -603,7 +628,7 @@ describeWin("Node.js is downloaded only when it is missing, and only after its c
 // ── the runner, really ──────────────────────────────────────────────────────
 
 describeWin("--silent starts the runner hidden; it connects, runs real tests and is stopped cleanly", () => {
-    it("connects with the token from the kit, runs an API test and web tests, is not shown, keeps to one copy, and --stop ends only its own runner", async () => {
+    it("trades the code from the kit, runs an API test and web tests, is not shown, keeps to one copy, and --stop ends only its own runner", async () => {
         const kit = await makeKit("silent run");
         const inst = freshInstallDir();
         withTools(inst);
@@ -620,7 +645,7 @@ describeWin("--silent starts the runner hidden; it connects, runs real tests and
         expect(text()).toMatch(/Test tools \(npm packages\): Found, skipped/);
         expect(text()).toMatch(/Browser for web tests: Checked\. Left to the runner/);
         expect(text()).toContain("Runner started (process ");
-        await until("the connected line", () => /Connected to 127\.0\.0\.1 as silent run/.test(text()), 30_000);
+        await until("the connected line", () => text().includes(`Connected to 127.0.0.1 as ${NAME}`), 30_000);
 
         // Hidden: neither this program nor the runner it started has a window.
         const state = readState(inst);
@@ -630,7 +655,7 @@ describeWin("--silent starts the runner hidden; it connects, runs real tests and
             expect(q.stdout.trim(), `window handle of process ${pid}`).toBe("0");
         }
 
-        const [api, ok, bad] = await runTests(kit.projectId, "silent run", chromiumCached());
+        const [api, ok, bad] = await runTests(kit.projectId, NAME, chromiumCached());
         expect(api).toMatchObject({ status: "passed" });
         if (chromiumCached()) {
             expect(ok).toMatchObject({ status: "passed" });
@@ -645,19 +670,21 @@ describeWin("--silent starts the runner hidden; it connects, runs real tests and
         expect(second.ms).toBeLessThan(20_000);
         expect(alive(state.runnerPid)).toBe(true);
 
-        // The token is read from its file: it is in no output, no log file, and not on any command line it started.
+        // The code is read from its file: it is in no output, no log file, and not on any command line it started.
         const logs = [text(), fs.readFileSync(logFile, "utf8"), ...["setup.log", "runner.log"].map((f) => (fs.existsSync(path.join(inst, "logs", f)) ? fs.readFileSync(path.join(inst, "logs", f), "utf8") : ""))].join("\n");
         expect(logs.includes(kit.token)).toBe(false);
         expect(logs.includes(PASSWORD)).toBe(false);
         expect(fs.existsSync(path.join(inst, "logs", "runner.log"))).toBe(true);
         const cmdline = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${state.runnerPid}").CommandLine`], { encoding: "utf8", windowsHide: true });
-        expect(cmdline.stdout).toContain("--token-file");
+        expect(cmdline.stdout).toContain("--enroll-file");
         expect(cmdline.stdout.includes(kit.token)).toBe(false);
 
-        // The token file is readable only by this user.
-        const acl = spawnSync("icacls", [path.join(inst, "app", "runner.token")], { encoding: "utf8", windowsHide: true }).stdout;
-        expect(acl).toContain(os.userInfo().username);
-        expect(acl).not.toMatch(/Everyone|BUILTIN\\Users|Authenticated Users|BUILTIN\\Administrators|NT AUTHORITY\\SYSTEM/);
+        // The code is used up and deleted; the credential it was traded for is kept with Windows data protection, never as plain text.
+        expect(fs.existsSync(path.join(inst, "app", "runner.enroll"))).toBe(false);
+        expect(fs.existsSync(path.join(inst, "app", "runner.token"))).toBe(false);
+        const stored = path.join(inst, "app", "runner.credential");
+        expect(fs.existsSync(stored)).toBe(true);
+        expect(/aitg_|aite_/.test(fs.readFileSync(stored, "latin1"))).toBe(false);
 
         // --stop: the program ends with 0, its runner is gone and is shown offline, and the decoy is untouched.
         const stop = await run(kit, ["--stop"], inst, {}, 60_000);
@@ -708,7 +735,7 @@ describeWin("--silent starts the runner hidden; it connects, runs real tests and
         expect(fs.readFileSync(path.join(inst, "app", "LICENSES.txt"), "utf8")).toContain("updated");
     }, 400_000);
 
-    it("a revoked token ends it with exit code 3 and a plain message", async () => {
+    it("the computer removed in Settings ends it with exit code 3 and a plain message", async () => {
         const kit = await makeKit("revoked");
         const inst = freshInstallDir();
         withTools(inst);
@@ -716,10 +743,10 @@ describeWin("--silent starts the runner hidden; it connects, runs real tests and
         await until("the runner to be online", async () => (await onlineAgents(kit.projectId))[0], 120_000).catch((e) => {
             throw new Error(`${e.message}\n--- output ---\n${output(main)}`);
         });
-        expect((await admin("DELETE", `/api/projects/${kit.projectId}/agent-tokens/${kit.tokenId}`)).status).toBe(200);
+        expect(await retireMyRunner(BASE, person.token)).toBe(200);
         expect(await Promise.race([main.exited, sleep(60_000).then(() => "timeout")]), output(main)).toBe(3);
-        expect(output(main)).toMatch(/The platform no longer accepts this runner's token\. It was revoked, or the project was deleted\./);
-        expect(output(main)).toContain("Download a new runner from the platform");
+        expect(output(main)).toContain("The platform no longer accepts this runner. It was removed, another computer was set up in its place, or its one-time code was already used or has expired.");
+        expect(output(main)).toContain("Set up your runner again from Settings, Your runner in the platform.");
         expect(output(main).includes(kit.token)).toBe(false);
         expect(readState(inst).runnerPid).toBe(0);
     }, 400_000);

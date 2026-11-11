@@ -25,6 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TaskOffer } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildKitZip, loadBundle, projectSlugOf } from "../src/platform/runner-kit.js";
 import { buildServer } from "../src/platform/server.js";
 import { ConnectProxy, tlsFront } from "./fixtures/connect-proxy.js";
@@ -233,7 +234,7 @@ describe.skipIf(!COMPANY)("the platform", () => {
 
     beforeAll(() => {
         dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-net-platform-"));
-        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, HOST: "127.0.0.1", PORT: "6975", SECRET_KEY: "net-secret-key-0123456789abcdef" }));
+        platform = bootstrap(loadConfig({ DATA_DIR: dataDir, HOST: "127.0.0.1", PORT: "6975", SECRET_KEY: "net-secret-key-0123456789abcdef" }));
     });
     afterAll(() => {
         platform?.db.close();
@@ -248,7 +249,7 @@ describe.skipIf(!COMPANY)("the platform", () => {
                 return { status: r.statusCode, body: r.json() as any };
             };
             const projectId = (await admin("POST", "/api/projects", { name: "Net project" })).body.id as string;
-            const secret = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "Net runner" })).body.secret as string;
+            const secret = personalRunner(platform, { label: "Net runner", replace: true }).secret;
             const caps = { os: "win32", arch: "x64", node: "v24.19.0", browsers: [] };
             const hello = (network: unknown) => app.inject({ method: "POST", url: "/api/agent/hello", headers: { authorization: `Bearer ${secret}` }, payload: { protocol: 1, name: "Net runner", version: "1.0.0", concurrency: 1, capabilities: { ...caps, network } } });
             const ok = await hello({ proxy: "proxy.corp.test:8080", proxySource: "windows", certificates: ["system"], problem: `Could not reach x: via http://maya:${PASSWORD}@proxy.corp.test:8080 failed.`, problemAt: "2026-10-18T10:00:00.000Z" });

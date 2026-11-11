@@ -11,7 +11,7 @@
  * from whatever the agent sends back before it is stored.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { NO_RUNNER_MESSAGE, runnersOnly } from "./runner-only.js";
+import { KEY_HAS_NO_RUNNER, NO_RUNNER_MESSAGE, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_LINK, runnerRefusal, runnersOnly, SCHEDULE_HAS_NO_OWNER, TEAM_RUNNER_REFUSED, TRIGGER_HAS_NO_OWNER, type RunnerRefusalCode } from "./runner-only.js";
 import { isHandedOver, isLeaseLoss, parkForHandover } from "./runner-handover.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -28,10 +28,10 @@ import { scrubTraceFile, traceSecretsOfRun } from "../engine/evidence/trace-scru
 import { agentDesktopProblem, assertHostDesktop, desktopApps } from "./desktop-guard.js";
 import { desktopUnavailableReason, lastProbe, probeDesktop } from "../engine/desktop/probe.js";
 import type { Platform } from "./bootstrap.js";
-import { AgentStore, isSharedToken, jobOwnerId, MAX_OFFERS, NEVER_ACCEPTED, refusalsOf, MAX_PERSONAL_RUNNERS, MAX_RUNNERS_PER_ORGANIZATION, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type RunnerSetting, type SweepChange, type TaskFile, type TaskRecord } from "./agent-store.js";
+import { AgentStore, jobOwnerId, MAX_OFFERS, NEVER_ACCEPTED, OPEN_OWNER_ID, ownerIdOfActor, refusalsOf, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type RunnerSetting, type SweepChange, type TaskFile, type TaskRecord } from "./agent-store.js";
 import { currentActor } from "./auth/actor.js";
+import { crowd4testFromConfig } from "./auth/crowd4test.js";
 import { isPrivateHost } from "./net-guard.js";
-import { maxTokensFrom } from "./runner-kit.js";
 import type { EnrollRequest, EnrollResponse, RotateResponse, WireRunEnv } from "../agent-protocol/schema.js";
 import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecrets, liveEventData, liveEventMessage, negotiateProtocol, phaseSentence, RateLimiter, scrubSecrets, toWireEnv } from "./agent-routing.js";
 import { DeviceHub, deviceAgentOf, isDeviceAdapter } from "./agent-device.js";
@@ -44,15 +44,16 @@ import { assertAllowedTarget } from "./net-guard.js";
 import type { JobOptions, JobRow } from "./repo.js";
 import { SecretBox } from "./secrets.js";
 
-export const NO_AGENT_MESSAGE = "No runner agent is connected for this project. Start one, or switch the project back to running here.";
-/** The project's "Allow people's own computers" is off (migration 51). */
-export const PERSONAL_NOT_ALLOWED = "This project does not allow people's own computers. A project admin can switch that on in the project's settings.";
+export const NO_AGENT_MESSAGE = "Your runner is not connected. Start it on your computer, or switch the project back to running here.";
+/** A step of a runbook started by hand, resumed after a restart: its starter is not known here, so no runner may take it. */
+export const RUNBOOK_STARTER_UNKNOWN = "This runbook was started before the platform restarted, and who started it is not known any more. Start it again to run it on your computer.";
+export { KEY_HAS_NO_RUNNER, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, RUNNER_SETTINGS_LINK, runnerRefusal, SCHEDULE_HAS_NO_OWNER, TEAM_RUNNER_REFUSED, TRIGGER_HAS_NO_OWNER, type RunnerRefusalCode };
 /** Live events kept per task attempt (whichever comes first); past them one note, and the rest only in the final result. */
 export const LIVE_EVENTS_MAX = 5_000;
 export const LIVE_EVENT_BYTES_MAX = 5 * 1024 * 1024;
 export const LIVE_EVENTS_TRUNCATED = "Too many live events; the rest are in the final result.";
 /** iOS tests never run on the platform server: they need a Mac with Xcode, which only a runner agent can be. */
-export const IOS_NEEDS_AGENT_MESSAGE = "iOS tests need a runner agent on a Mac with Xcode. Connect one and choose it for this project.";
+export const IOS_NEEDS_AGENT_MESSAGE = "iOS tests need a runner on a Mac with Xcode. Set up your runner on a Mac in Settings.";
 
 /** Knobs, readable from the environment so tests (and unusual installs) can shorten the waits. */
 export interface AgentLimits {
@@ -92,27 +93,18 @@ export function agentLimits(env: NodeJS.ProcessEnv = process.env): AgentLimits {
 /** The failure of the run itself, not of a test: the agent could not run the tests, or was lost. Never a test verdict. */
 export class RunnerAgentError extends Error {}
 
-/** Who a run is for and the runner chosen for it (per-run choice), as eligibility needs them. */
+/** Who a run is for, as eligibility needs it (round 45: the run goes to that person's runner, nowhere else). */
 export interface RunContext {
-    /** The person whose run it is (a schedule's: the person who made it); null: nobody's, so no personal runner takes it. */
+    /** The person whose run it is (a schedule's or trigger's: the person who made it; OPEN_OWNER_ID on an open server); null: nobody's. */
     ownerId: string | null;
-    /** The runner (agent_tokens.id) chosen for this run; null: the project's setting decides. */
-    runnerId?: string | null;
 }
 
-export { jobOwnerId };
-
-/** The runner chosen for this run (`JobOptions.runner.id`), if any. */
-export function chosenRunnerOf(options: JobOptions): string | null {
-    const id = (options as JobOptions & { runner?: { id?: unknown } }).runner?.id;
-    return typeof id === "string" && id.length > 0 && id.length <= 64 ? id : null;
-}
+export { jobOwnerId, OPEN_OWNER_ID };
 
 /** Whose a job about to be made is: its recorded starter, else the person acting now (createJob records them only after its gates). */
 export function ownerOfNewJob(options: JobOptions): string | null {
     if (options.startedBy) return jobOwnerId(options);
-    const a = currentActor();
-    return a.kind === "user" && a.id ? a.id : null;
+    return ownerIdOfActor(currentActor());
 }
 
 /**
@@ -137,7 +129,7 @@ export function looksPrivateAddress(raw: string): boolean {
 /** A credential presented from a computer other than the one it is bound to (the route adds an Activity entry). */
 export class MachineRefused extends HttpError {
     constructor(readonly token: AgentTokenRecord) {
-        super(409, "This runner's credential belongs to another computer, so this one was refused. Add this computer on the Runners page to give it its own.");
+        super(409, "This runner's credential belongs to another computer, so this one was refused. Set up this computer from Settings to give it its own.");
     }
 }
 
@@ -230,6 +222,8 @@ export class AgentService {
         // Per address (an office may add several computers at once) and, separately, per code (enroll keys them apart).
         this.enrollLimit = new RateLimiter(30, 60_000, this.clock);
         this.enrollCodeLimit = new RateLimiter(5, 60_000, this.clock);
+        // The open server acts as one person (OPEN_OWNER_ID): its runner takes runs only while the server is open.
+        this.store.openMode = () => !crowd4testFromConfig(p.config) && !p.config.API_KEY && Number(p.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users WHERE role IS NOT NULL")?.n ?? 0) === 0;
     }
     readonly clock: () => number;
 
@@ -241,6 +235,8 @@ export class AgentService {
         if (!presented) throw new HttpError(401, "Missing runner agent token (send Authorization: Bearer aitg_...)");
         const token = this.store.findToken(presented);
         if (!token) throw new HttpError(404, "This runner agent token is not valid or was revoked.");
+        // Round 45: only a person's own runner works. A team, shared or project runner is refused with the sentence (the runner stops, exit 3).
+        if (token.kind !== "personal") throw new HttpError(401, TEAM_RUNNER_REFUSED);
         this.store.touchToken(token.id);
         return token;
     }
@@ -263,12 +259,12 @@ export class AgentService {
             if (!token.machineId) this.store.bindMachine(token.id, body.machineId);
         } else if (token.machineId && (token.kind === "personal" || this.store.isEnrolled(token.id))) throw new MachineRefused(token);
         const other = this.store.agentsOfToken(token.id).find((a) => a.name !== body.name && (!body.machineId || a.machineId !== body.machineId) && this.clock() - a.lastSeenMs <= ONLINE_MS);
-        if (other) throw new HttpError(409, `This token is already used by the agent “${other.name}”, which is online. Make a token for each machine.`);
+        if (other) throw new HttpError(409, `This runner's credential is already used by “${other.name}”, which is online. Set up each computer from Settings.`);
         const agent = this.store.upsertAgent(token, body);
         this.store.setAgentProtocol(agent.id, speak);
         return {
             agentId: agent.id,
-            // Always a string, as protocol 1 says. An installed runner only prints it; a runner registered on the Runners page has no project of its own.
+            // Always a string, as protocol 1 says (the wire format is kept). An installed runner only prints it; a person's runner has no project of its own.
             projectId: token.projectId ?? "shared",
             protocol: speak,
             pollSeconds: this.limits.pollSeconds,
@@ -289,15 +285,12 @@ export class AgentService {
         if (!this.enrollLimit.take(`ip:${address}`) || !this.enrollCodeLimit.take(createHash("sha256").update(body.code).digest("hex"))) {
             throw new HttpError(429, "Too many attempts to add a runner from this address. Wait a minute and try again.");
         }
-        const out = this.store.redeemEnrollment(body.code, { name: body.name, machineId: body.machineId }, { maxPersonal: MAX_PERSONAL_RUNNERS, maxPerOrganization: MAX_RUNNERS_PER_ORGANIZATION, maxPerProject: maxTokensFrom() });
+        const out = this.store.redeemEnrollment(body.code, { name: body.name, machineId: body.machineId });
         if (!out.ok) {
-            if (out.reason === "expired") throw new HttpError(410, "This code has expired. Make a new one on the Runners page.");
-            if (out.reason === "used") throw new HttpError(410, "This code was already used. Make a new one on the Runners page.");
-            if (out.reason === "personal-cap") throw new HttpError(409, `This person has added ${MAX_PERSONAL_RUNNERS} computers already, the most one person can have. Retire one on the Runners page, then make a new code.`);
-            if (out.reason === "runner-cap") throw new HttpError(409, `This organisation has ${MAX_RUNNERS_PER_ORGANIZATION} runners already, the most it can have. Retire one on the Runners page, then make a new code.`);
-            if (out.reason === "project-cap") throw new HttpError(409, "This project already has as many runners as it may have. Remove one on the Runners page, then make a new code.");
-            if (out.reason === "maker") throw new HttpError(403, "The person who made this code can no longer manage runners. Ask someone who can to make a new one on the Runners page.");
-            throw new HttpError(404, "This enrollment code is not valid. Make a new one on the Runners page.");
+            if (out.reason === "expired") throw new HttpError(410, "This code has expired. Download the runner again from Settings.");
+            if (out.reason === "used") throw new HttpError(410, "This code was already used. Download the runner again from Settings.");
+            if (out.reason === "team") throw new HttpError(410, TEAM_RUNNER_REFUSED);
+            throw new HttpError(404, "This enrollment code is not valid. Download the runner again from Settings.");
         }
         return { token: out.secret, runnerId: out.token.id, kind: out.token.kind };
     }
@@ -329,10 +322,9 @@ export class AgentService {
         }
         if (this.store.runningCount(agent.id) >= agent.concurrency) return undefined;
         const token = this.store.getToken(agent.tokenId);
-        if (!token || token.revokedAt) return undefined;
-        // A team runner looks at the projects it was given; a personal runner at its owner's runs, wherever they are (it has no project access of its own).
-        const candidates =
-            token.kind === "personal" ? (token.ownerId ? this.store.queuedOfOwner(token.ownerId) : []) : this.store.queuedFor(agent.tokenId);
+        if (!token || token.revokedAt || token.kind !== "personal" || !token.ownerId) return undefined;
+        // A person's runner looks at its owner's runs, wherever they are (round 45: the only runner there is).
+        const candidates = this.store.queuedOfOwner(token.ownerId);
         for (const t of candidates) {
             // A runner that said no to a task (protocol 2 reject) is never offered it again.
             if (refusalsOf(t).some((r) => r.agentId === agent.id)) continue;
@@ -342,16 +334,10 @@ export class AgentService {
                 if (session) return session;
                 continue;
             }
-            if (token.kind === "personal" && !this.personalMayTake(token, t)) continue;
-            // The runner chosen for this run (per-run choice) is the only one that may take it; the project's pin does not apply then.
-            const chosen = this.jobContext(t.jobId).runnerId;
-            if (chosen && chosen !== token.id) continue;
-            const setting = this.store.getRunner(t.projectId);
-            const pinnedElsewhere = !chosen && setting.runOn === "agent" && Boolean(setting.agentId) && setting.agentId !== agent.id;
-            if (pinnedElsewhere) continue;
+            if (!this.personalMayTake(token, t)) continue;
             const adapter = this.adapterOrUndefined(t.adapterId);
             if (!adapter || capabilityProblem(adapter, agent.capabilities)) continue;
-            // A task with hand-written scripts goes only where its owner agreed to run them (mayRunCodeScripts), and never to a shared runner.
+            // A task with hand-written scripts goes only where its owner agreed to run them (mayRunCodeScripts).
             if (this.hasCustomScripts(t) && !this.mayRunCodeScripts(agent, token)) continue;
             // A private or local address only to a runner that allows them.
             if (!this.targetAllowed(token, t)) continue;
@@ -364,32 +350,29 @@ export class AgentService {
 
     /**
      * A record or device task (a recording, a live session, a phone session) for this machine, or nothing: it goes only to the machine it
-     * was started on, if that machine can host it; on a person's own computer only when its owner started it, the project allows people's
-     * own computers and the owner may still run its tests (a phone session also needs a runner that understands the phone switches).
+     * was started on, if that machine can host it, only when its owner started it and may still run the project's tests (a phone session
+     * also needs a runner that understands the phone switches).
      */
     private offerSession(agent: AgentRecord, token: AgentTokenRecord, t: TaskRecord): TaskOffer | undefined {
         const record = isRecordAdapter(t.adapterId);
         if ((record ? recordAgentOf(t.adapterId) : deviceAgentOf(t.adapterId)) !== agent.id) return undefined;
         if (record ? agent.capabilities.record !== true : agent.capabilities.deviceSession !== true) return undefined;
-        if (token.kind === "personal") {
-            const starter = (record ? this.records.get(t.id) : this.devices.get(t.id))?.startedBy ?? null;
-            if (!token.ownerId || starter !== token.ownerId || !this.store.allowsPersonal(t.projectId) || !this.store.ownerMayRun(token.ownerId, t.projectId)) return undefined;
-            if (!record && agent.capabilities.runnerSwitches !== true) return undefined;
-        }
+        const starter = (record ? this.records.get(t.id) : this.devices.get(t.id))?.startedBy ?? null;
+        if (token.kind !== "personal" || !token.ownerId || starter !== token.ownerId || !this.store.ownerMayRun(token.ownerId, t.projectId)) return undefined;
+        if (!record && agent.capabilities.runnerSwitches !== true) return undefined;
         const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, record ? undefined : this.deviceOf(t));
         return claimed ? this.handOut(agent, claimed) : undefined;
     }
 
     /**
-     * Why an open recording, live session or phone session must end now: its starter can no longer run this project's tests; on a person's
-     * own computer also when the project stopped allowing people's own computers or the computer was retired. Undefined: it may go on.
+     * Why an open recording, live session or phone session must end now: its starter can no longer run this project's tests, or the
+     * computer was retired (removed, or another computer set up). Undefined: it may go on.
      * Asked on every beat of the session, so it ends within one heartbeat.
      */
     sessionAccessProblem(s: { projectId: string; startedBy: string | null; tokenId: string; personal: boolean }): string | undefined {
         if (s.personal) {
             const token = this.store.getToken(s.tokenId);
-            if (!token || token.revokedAt) return "This computer was retired as a runner, so the session ended.";
-            if (!this.store.allowsPersonal(s.projectId)) return "This project no longer allows people's own computers, so the session ended.";
+            if (!token || token.revokedAt) return "This computer was removed as a runner, so the session ended.";
         }
         if (s.startedBy && !this.store.ownerMayRun(s.startedBy, s.projectId)) return "The person who started this session can no longer use this project, so the session ended.";
         return undefined;
@@ -411,22 +394,16 @@ export class AgentService {
         return { ...offer, attemptId: attempt.attemptId, attempt: attempt.attempt, acceptSeconds: this.limits.acceptSeconds, ...(config ? { config } : {}) };
     }
 
-    /** A Crowd4Test shared runner: a team runner of no organisation and no project. An unknown token counts as shared (fail closed). */
-    private isSharedRunner(agent: AgentRecord): boolean {
-        const t = this.store.getToken(agent.tokenId);
-        return !t || isSharedToken(t);
-    }
-
     // ── who a run is for, and which runners may take it (migration 51) ─────
 
-    /** Who started a job and which runner they chose for it, read once per job (a job's options never change these). */
+    /** Who a job belongs to, read once per job (a job's options never change it). */
     jobContext(jobId: string): RunContext {
         const hit = this.jobContexts.get(jobId);
         if (hit) return hit;
-        let ctx: RunContext = { ownerId: null, runnerId: null };
+        let ctx: RunContext = { ownerId: null };
         try {
             const job = this.p.repo.getJob(jobId);
-            if (job) ctx = { ownerId: jobOwnerId(job.options), runnerId: chosenRunnerOf(job.options) };
+            if (job) ctx = { ownerId: jobOwnerId(job.options) };
         } catch {
             /* a job that cannot be read is nobody's: no personal runner takes it */
         }
@@ -437,28 +414,25 @@ export class AgentService {
 
     /** May hand-written (code) scripts go to this machine? The same rule for offering, the check when a run is made, and the executor's wait. */
     mayRunCodeScripts(agent: Pick<AgentRecord, "tokenId" | "capabilities">, token: AgentTokenRecord | undefined = this.store.getToken(agent.tokenId)): boolean {
-        if (!token || token.revokedAt) return false;
-        // Personal: its owner's switch, applied by a runner that understands it (an older runner never gets them).
-        if (token.kind === "personal") return token.allowCodeScripts && agent.capabilities.runnerSwitches === true;
-        // Crowd4Test's shared machines never: one customer's code must not run on a machine that serves others.
-        if (isSharedToken(token)) return false;
-        return agent.capabilities.customScripts === true || (token.allowCodeScripts && agent.capabilities.runnerSwitches === true);
+        if (!token || token.revokedAt || token.kind !== "personal") return false;
+        // Its owner's switch, applied by a runner that understands it (an older runner never gets them).
+        return token.allowCodeScripts && agent.capabilities.runnerSwitches === true;
     }
 
     /** The switches as the platform holds them for a runner (the hello answer and, for protocol 2, heartbeats send them to it). */
     runnerSwitches(tokenId: string): { customScripts: boolean; privateTargets: boolean } {
         const t = this.store.getToken(tokenId);
         if (!t || t.revokedAt) return { customScripts: false, privateTargets: false };
-        return { customScripts: !isSharedToken(t) && t.allowCodeScripts, privateTargets: t.allowPrivateTargets };
+        return { customScripts: t.kind === "personal" && t.allowCodeScripts, privateTargets: t.allowPrivateTargets };
     }
 
     /**
-     * May this personal runner take this task? It is its owner's run (the candidates are read by agent_tasks.owner_id, and the claim checks it
-     * again), the project allows people's own computers, and the owner may still run its tests (ownerMayRun also checks their role here).
+     * May this person's runner take this task? It is its owner's run (the candidates are read by agent_tasks.owner_id, and the claim checks
+     * it again), and the owner may still run the project's tests (ownerMayRun also checks their role here).
      */
     private personalMayTake(token: AgentTokenRecord, t: { projectId: string }): boolean {
         if (token.kind !== "personal" || !token.ownerId) return false;
-        return this.store.allowsPersonal(t.projectId) && this.store.ownerMayRun(token.ownerId, t.projectId);
+        return this.store.ownerMayRun(token.ownerId, t.projectId);
     }
 
     /** A run against a private or local address goes only to a runner that allows those (a runner whose owner did not switch them on refuses them too). */
@@ -553,12 +527,14 @@ export class AgentService {
         // Retired (or unknown), or a person's own computer whose owner is gone or switched off here: finish what runs, take nothing new, exit.
         const t = this.store.getToken(agent.tokenId);
         if (!t || t.revokedAt) return true;
-        if (t.kind !== "personal") return false;
+        if (t.kind !== "personal") return true;
+        // The open server's runner: while the server is open (it acts as one person).
+        if (t.ownerId === OPEN_OWNER_ID) return !this.store.openMode();
         const owner = t.ownerId ? this.p.db.get<{ status: string | null }>("SELECT status FROM users WHERE id = ? AND role IS NOT NULL", t.ownerId) : undefined;
         return !owner || owner.status !== "active";
     };
     runnerConfig: (agent: AgentRecord) => RunnerConfigPush | undefined = (agent) => {
-        // What the runner should apply now: code scripts by the same rule as offering (a team runner's own --allow-custom-scripts counts), and private addresses.
+        // What the runner should apply now: code scripts by the same rule as offering, and private addresses.
         const t = this.store.getToken(agent.tokenId);
         if (!t || t.revokedAt) return undefined;
         return { customScripts: this.mayRunCodeScripts(agent, t), privateTargets: t.allowPrivateTargets };
@@ -927,77 +903,28 @@ export class AgentService {
     }
 
     /**
-     * Online agents that may take this project's work: the team runners given to it (the project's pinned machine, or any), and, for a run
-     * of a person (`who`), that person's own computers while the project allows them. A runner chosen for the run is the only one then, and
-     * the project's pin does not apply. Without `who`: team runners only, as before.
+     * The computer that may take this project's work for `who` (round 45: only the run's owner's own runner, while they may still run the
+     * project's tests), online, as a list of at most one. `who` absent: the person asking now (a page's view of their own runner); nobody's
+     * run (no owner): none.
      */
-    eligibleAgents(projectId: string, setting: RunnerSetting = this.store.getRunner(projectId), who?: RunContext) {
-        const chosen = who?.runnerId ?? null;
-        const team = this.store.listAgents(projectId).filter((a) => a.online && (chosen ? a.tokenId === chosen : !setting.agentId || a.id === setting.agentId));
-        if (!who?.ownerId || (setting.agentId && !chosen) || !this.store.allowsPersonal(projectId) || !this.store.ownerMayRun(who.ownerId, projectId)) return team;
-        const now = this.clock();
-        const personal = this.store
-            .personalTokensOf(who.ownerId)
-            .filter((t) => !t.revokedAt && (!chosen || t.id === chosen))
-            .flatMap((t) => this.store.agentsOfToken(t.id).slice(0, 1))
-            .filter((a) => now - a.lastSeenMs <= ONLINE_MS)
-            .map((a) => ({ ...a, online: true, activeTasks: this.store.runningCount(a.id) }));
-        return [...personal, ...team];
+    eligibleAgents(projectId: string, _setting?: RunnerSetting, who: RunContext = { ownerId: ownerIdOfActor(currentActor()) }): Array<AgentRecord & { online: boolean; activeTasks: number }> {
+        const own = who?.ownerId ? this.ownRunner(who.ownerId, projectId) : undefined;
+        return own?.agent && own.online ? [{ ...own.agent, online: true, activeTasks: this.store.runningCount(own.agent.id) }] : [];
     }
 
     /**
-     * The runner chosen for one run (`runnerId` of a run-start route): it must be one this person may use for this project, else the same
-     * 404 as an unknown id (another person's computer, a runner the project was not given); a plain 409 when it cannot take the run now.
+     * The owner's runner as it last reported itself, online or not (what code scripts and capabilities are judged by when the run is made:
+     * a schedule that fires while the computer is off keeps its code tests and waits for it). `who` absent: the person asking now.
      */
-    private assertChosenRunner(projectId: string, who: RunContext): void {
-        const t = who.runnerId ? this.store.getToken(who.runnerId) : undefined;
-        const usable = t && (t.kind === "personal" ? Boolean(who.ownerId) && t.ownerId === who.ownerId : this.store.hasAccess(t.id, projectId));
-        if (!t || !usable) throw new HttpError(404, "Runner not found");
-        const name = t.label ?? this.store.agentsOfToken(t.id)[0]?.name ?? "That runner";
-        if (t.revokedAt) throw new HttpError(409, `“${name}” is retired. Choose another runner.`);
-        if (t.kind === "personal" && !this.store.allowsPersonal(projectId)) throw new HttpError(409, PERSONAL_NOT_ALLOWED);
-        const latest = this.store.agentsOfToken(t.id)[0];
-        if (!latest || this.clock() - latest.lastSeenMs > ONLINE_MS) throw new HttpError(409, `“${name}” is offline. Start it, or choose another runner.`);
+    lastKnownRunner(projectId: string, who: RunContext = { ownerId: ownerIdOfActor(currentActor()) }): AgentRecord[] {
+        const own = who.ownerId ? this.ownRunner(who.ownerId, projectId) : undefined;
+        return own?.agent ? [own.agent] : [];
     }
 
-    /**
-     * GET /api/projects/:id/runner-choices: the runners this person may choose for a run of this project (their own computers first, then the
-     * team runners the project was given), with what each can run and why it cannot take the run now.
-     */
-    runnerChoices(projectId: string, ownerId: string | null) {
-        const setting = this.store.getRunner(projectId);
-        const allowPersonal = this.store.allowsPersonal(projectId);
-        const mayRun = ownerId ? this.store.ownerMayRun(ownerId, projectId) : false;
-        const now = this.clock();
-        const tokens = [...(ownerId ? this.store.personalTokensOf(ownerId) : []), ...this.store.listTokens(projectId).filter((t) => t.kind === "team")].filter((t) => !t.revokedAt);
-        const web = this.adapterOrUndefined("playwright");
-        const mobile = this.adapterOrUndefined("taqwright");
-        const runners = tokens.map((t) => {
-            const latest = this.store.agentsOfToken(t.id)[0];
-            const online = Boolean(latest) && now - latest!.lastSeenMs <= ONLINE_MS;
-            const personal = t.kind === "personal";
-            let problem: string | null = null;
-            if (!latest) problem = "It has not connected yet.";
-            else if (!online) problem = "It is offline.";
-            else if (personal && !allowPersonal) problem = PERSONAL_NOT_ALLOWED;
-            else if (personal && !mayRun) problem = "You can't run this project's tests.";
-            return {
-                id: t.id,
-                name: t.label ?? latest?.name ?? "Unnamed runner",
-                kind: t.kind,
-                mine: personal,
-                online,
-                busy: Boolean(latest) && this.store.runningCount(latest!.id) >= latest!.concurrency,
-                machine: latest ? { os: latest.os, ...(latest.osVersion ?? latest.capabilities.osVersion ? { osVersion: latest.osVersion ?? latest.capabilities.osVersion } : {}), arch: latest.arch } : null,
-                canRunWeb: Boolean(latest && web && !capabilityProblem(web, latest.capabilities)),
-                canRunMobile: Boolean(latest && mobile && !capabilityProblem(mobile, latest.capabilities)),
-                codeScripts: latest ? this.mayRunCodeScripts(latest, t) : personal ? t.allowCodeScripts : t.allowCodeScripts && !isSharedToken(t),
-                problem,
-            };
-        });
-        runners.sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.online) - Number(a.online));
-        const pinned = setting.agentId ? this.store.getAgent(setting.agentId)?.tokenId ?? null : null;
-        return { runners, allowPersonal, defaultRunnerId: pinned };
+    /** The person's runner as seen for this project: undefined when they have none or may not run its tests. */
+    private ownRunner(ownerId: string, projectId: string) {
+        if (!this.store.ownerMayRun(ownerId, projectId)) return undefined;
+        return this.store.runnerOf(ownerId);
     }
 
     /** Adapter ids a job's script execution will use. */
@@ -1030,57 +957,99 @@ export class AgentService {
         });
     }
 
-    /** Refuse a job that cannot run where its project runs. Called by `Repo.createJob`. */
+    /**
+     * Refuse a job that cannot run where its project runs. Called by `Repo.createJob`. On a runner (round 45): the job's owner's runner,
+     * nowhere else. A person's run is refused up front when their runner is not set up or offline; a schedule's or deploy trigger's run whose
+     * owner's runner is off is made and waits for it (it fails at the wait limit with a sentence naming the owner, RemoteExecutor.waitFor).
+     */
     assertJobAllowed(projectId: string, options: JobOptions): void {
         // An agent run uses the worker's own browser and cannot go to a runner yet (agent-run.ts), so no runner is needed for it.
         if (options.mode === "agent") return;
-        const setting = this.store.getRunner(projectId);
         // Windows desktop tests start an application: the computer that runs them must be set up for it (allow-list), whoever runs them.
         const desktop = this.adaptersFor(options).includes("windows-uia") ? desktopApps(this.specsOf(options)) : [];
         const runsIos = this.adaptersFor(options).includes(IOS_ADAPTER_ID);
-        const chosen = chosenRunnerOf(options);
         if (!this.routesToAgent(projectId)) {
-            if (chosen) throw new HttpError(409, "This project's tests run on this server, so a runner can't be chosen for a run. Choose “On a runner” in the project's settings first.");
             assertHostDesktop(desktop);
             if (runsIos) throw new HttpError(409, IOS_NEEDS_AGENT_MESSAGE);
             return;
         }
-        // Whose run it is, and the runner chosen for it: a person's own computer takes only their runs (migration 51).
-        const who: RunContext = { ownerId: ownerOfNewJob(options), runnerId: chosen };
-        if (chosen) this.assertChosenRunner(projectId, who);
-        const agents = this.eligibleAgents(projectId, setting, who);
-        if (agents.length === 0) {
-            if (runsIos) throw new HttpError(409, IOS_NEEDS_AGENT_MESSAGE);
-            // Their own computer is online, but this project does not take people's own computers.
-            const ownOnline = who.ownerId && !this.store.allowsPersonal(projectId) && this.store.personalTokensOf(who.ownerId).some((t) => !t.revokedAt && this.store.agentsOfToken(t.id).some((a) => this.clock() - a.lastSeenMs <= ONLINE_MS));
-            throw new HttpError(409, ownOnline ? `${PERSONAL_NOT_ALLOWED} No team runner is online for it.` : runnersOnly(this.p.config) ? NO_RUNNER_MESSAGE : NO_AGENT_MESSAGE);
+        // Only the kinds of job that run scripts need the runner now; the others never reach one.
+        const kind = options.startedBy?.kind ?? (options.trigger === "schedule" ? "schedule" : undefined);
+        // A schedule or trigger the open server made, once the server is no longer open, has nobody to run it: refused like one with no owner.
+        const named = ownerOfNewJob(options);
+        const ownerId = named === OPEN_OWNER_ID && !this.store.openMode() ? null : named;
+        // A schedule firing or a deploy trigger waits for its owner's computer; "Run now" (a person clicking, so a person acts now) is told now.
+        const acting = currentActor().kind;
+        const automated = (kind === "schedule" || kind === "trigger") && acting !== "user" && acting !== "open" && acting !== "key";
+        if (!ownerId) {
+            if (kind === "schedule") throw runnerRefusal("RUNNER_NOT_SET_UP", SCHEDULE_HAS_NO_OWNER);
+            if (kind === "trigger") throw runnerRefusal("RUNNER_NOT_SET_UP", TRIGGER_HAS_NO_OWNER);
+            if (kind === "key" || (!options.startedBy && currentActor().kind === "key")) throw runnerRefusal("RUNNER_NOT_SET_UP", KEY_HAS_NO_RUNNER);
+            // A runbook started by hand and resumed after the platform restarted: who started it was kept only in memory.
+            if (options.runbookRunId && !options.startedBy) throw runnerRefusal("RUNNER_NOT_SET_UP", RUNBOOK_STARTER_UNKNOWN);
+            throw runnerRefusal("RUNNER_NOT_SET_UP", RUNNER_NOT_SET_UP);
+        }
+        const own = this.ownRunner(ownerId, projectId);
+        if (!own) throw runnerRefusal("RUNNER_NOT_SET_UP", automated ? `${this.ownerName(ownerId)} has no runner set up for this project's tests. Set up the runner in Settings.` : RUNNER_NOT_SET_UP);
+        // Automated runs wait for the owner's computer; a person is told now. What it can run is read from what it last reported.
+        if (!own.online && !automated) throw runnerRefusal("RUNNER_OFFLINE", RUNNER_OFFLINE);
+        const agent = own.agent;
+        if (!agent) {
+            if (automated) return void (options.runOn = "agent");
+            throw runnerRefusal("RUNNER_OFFLINE", RUNNER_OFFLINE);
         }
         // Code scripts are checked next by the custom gate (custom-policy.ts), with the same rule as offering (mayRunCodeScripts).
-        // A private or local address: only runners that allow them (a person's own computer does not, unless its owner switched it on).
+        // A private or local address: only when the owner switched private addresses on for their runner.
         const address = this.projectAddress(projectId);
-        if (address && looksPrivateAddress(address) && !agents.some((a) => this.store.getToken(a.tokenId)?.allowPrivateTargets === true)) {
-            throw new HttpError(409, "This project's address is a private or local one (such as localhost or a computer on your network), and the runners that could take this run don't open those. The runner's owner can allow private addresses on the Runners page.");
+        if (address && looksPrivateAddress(address) && !own.token.allowPrivateTargets) {
+            throw runnerRefusal("RUNNER_CANNOT_RUN", "This project's address is a private or local one (such as localhost or a computer on your network), and your runner does not open those. Switch on private addresses for your runner in Settings.");
         }
         for (const id of this.adaptersFor(options)) {
             const adapter = this.adapterOrUndefined(id)!;
-            const problems = agents.map((a) => ({ a, why: capabilityProblem(adapter, a.capabilities) }));
-            if (problems.every((x) => x.why)) {
-                if (adapter.id === IOS_ADAPTER_ID) throw new HttpError(409, `iOS tests need a runner agent on a Mac with Xcode. ${agents.length === 1 ? `The connected runner agent “${agents[0]!.name}” can't run them` : "None of the connected runner agents can run them"}: ${problems[0]!.why}.`);
-                const kind = adapter.kinds[0] === "api" ? "API" : (adapter.kinds[0] ?? adapter.id);
-                throw new HttpError(409, agents.length === 1 ? `The connected runner agent “${agents[0]!.name}” can't run ${kind} tests: ${problems[0]!.why}.` : `None of the connected runner agents can run ${kind} tests: ${problems[0]!.why}.`);
-            }
+            const why = capabilityProblem(adapter, agent.capabilities);
+            if (!why) continue;
+            if (adapter.id === IOS_ADAPTER_ID) throw runnerRefusal("RUNNER_CANNOT_RUN", `iOS tests need a runner on a Mac with Xcode. Your runner “${agent.name}” can't run them: ${why}.`);
+            const what = adapter.id === "taqwright" ? "phone" : adapter.kinds[0] === "api" ? "API" : (adapter.kinds[0] ?? adapter.id);
+            throw runnerRefusal("RUNNER_CANNOT_RUN", `Your runner cannot run ${what} tests: ${why}.`);
         }
         if (desktop.length > 0) {
-            const capable = agents.filter((a) => !capabilityProblem(this.adapterOrUndefined("windows-uia")!, a.capabilities));
-            const why = agentDesktopProblem(desktop, capable);
-            if (why) throw new HttpError(409, why);
+            const why = agentDesktopProblem(desktop, [agent]);
+            if (why) throw runnerRefusal("RUNNER_CANNOT_RUN", why);
         }
         options.runOn = "agent";
     }
 
-    /** What the Agents page shows about where this project's tests run. */
-    runnerStatus(projectId: string) {
-        return { ...this.runnerStatusOf(projectId), allowPersonal: this.store.allowsPersonal(projectId) };
+    /** Why a queued run of this job failed waiting for its owner's computer, in one sentence. */
+    noRunnerSentence(jobId: string): string {
+        let kind: string | undefined;
+        try {
+            kind = this.p.repo.getJob(jobId)?.options.startedBy?.kind;
+        } catch {
+            kind = undefined;
+        }
+        const owner = this.jobContext(jobId).ownerId;
+        if (owner && (kind === "schedule" || kind === "trigger")) return `${this.ownerName(owner)}'s computer was off when this ${kind === "schedule" ? "schedule" : "deploy trigger"} ran.`;
+        return runnersOnly(this.p.config) ? `${RUNNER_OFFLINE} Your runner was not online, or cannot run these tests.` : "Your runner is not connected or cannot run these tests. Start it on your computer, or switch the project back to running here.";
+    }
+
+    /**
+     * A person's name for a sentence ("Asha's computer was off …"): their name only, never their email (a deploy trigger's refusal ends up
+     * in CI logs). No name, or the open server: a neutral word.
+     */
+    ownerName(ownerId: string): string {
+        if (ownerId === OPEN_OWNER_ID) return "The owner";
+        try {
+            const r = this.p.db.get<{ name: string | null }>("SELECT name FROM users WHERE id = ?", ownerId);
+            const name = (r?.name ?? "").trim();
+            return name && !name.includes("@") ? name.slice(0, 80) : "The owner";
+        } catch {
+            return "The owner";
+        }
+    }
+
+    /** What the project's pages show about where this project's tests run, for the person asking (their own runner). */
+    runnerStatus(projectId: string, ownerId: string | null = ownerIdOfActor(currentActor())) {
+        return this.runnerStatusOf(projectId, ownerId);
     }
 
     /** The address the project's tests run against: its latest application's (an environment of it may differ; the runner checks every address itself). */
@@ -1092,11 +1061,8 @@ export class AgentService {
         }
     }
 
-    private runnerStatusOf(projectId: string) {
+    private runnerStatusOf(projectId: string, ownerId: string | null) {
         const setting = this.store.getRunner(projectId);
-        const all = this.store.listAgents(projectId);
-        const eligible = all.filter((a) => a.online && (!setting.agentId || a.id === setting.agentId));
-        const chosen = setting.agentId ? all.find((a) => a.id === setting.agentId) : undefined;
         if (setting.runOn === "platform") {
             const mobile = mobileAvailability();
             if (process.platform === "win32" && !lastProbe()) void probeDesktop();
@@ -1104,28 +1070,22 @@ export class AgentService {
             const phonesText = mobile.available ? "Phone tests can run on this server (Android tools were found)." : `Phone tests can't run on this server: ${mobile.reason ?? "no Android tools were found"}.`;
             return { runOn: "platform" as const, agentId: null, status: "Runs on this platform.", canRunWeb: true, canRunMobile: mobile.available, canRunWindows: !windowsWhy, canRunIos: false, phones: { canRun: mobile.available, text: phonesText }, unavailableReason: mobile.available ? null : `Mobile tests can't run here: ${mobile.reason ?? "no Android tools were found"}` };
         }
-        const canWeb = eligible.some((a) => !capabilityProblem(getAdapter("playwright"), a.capabilities));
-        const canMobile = eligible.some((a) => !capabilityProblem(getAdapter("taqwright"), a.capabilities));
-        const canWindows = eligible.some((a) => !capabilityProblem(getAdapter("windows-uia"), a.capabilities));
-        const canIos = eligible.some((a) => !capabilityProblem(getAdapter(IOS_ADAPTER_ID), a.capabilities));
-        let status: string;
-        if (chosen) status = `Runs on ${chosen.name} (${chosen.online ? "online" : "offline"}).`;
-        else if (setting.agentId) status = "The agent chosen for this project no longer exists.";
-        else status = eligible.length ? `Runs on any connected agent (${eligible.length} online).` : "No agent is connected.";
+        // What the owner's runner can run, from what it last reported (also while it is off: a schedule waits for it).
+        const own = ownerId ? this.ownRunner(ownerId, projectId) : undefined;
+        const a = own?.agent;
+        const can = (id: string) => Boolean(a) && !capabilityProblem(getAdapter(id), a!.capabilities);
+        const status = !own ? RUNNER_NOT_SET_UP : !a ? "Your runner has not connected yet." : `Runs on your runner “${a.name}” (${own.online ? "online" : "offline"}).`;
         let reason: string | null = null;
-        if (eligible.length === 0) reason = chosen ? `${chosen.name} is offline.` : "No agent is connected.";
+        if (!own) reason = RUNNER_NOT_SET_UP;
+        else if (!a || !own.online) reason = RUNNER_OFFLINE;
         else {
             const parts: string[] = [];
-            if (!canWeb) parts.push(`Web and API tests can't run: ${capabilityProblem(getAdapter("playwright"), eligible[0]!.capabilities)}.`);
-            if (!canMobile) parts.push(`Mobile tests can't run: ${capabilityProblem(getAdapter("taqwright"), eligible[0]!.capabilities)}.`);
+            if (!can("playwright")) parts.push(`Web and API tests can't run: ${capabilityProblem(getAdapter("playwright"), a.capabilities)}.`);
+            if (!can("taqwright")) parts.push(`Mobile tests can't run: ${capabilityProblem(getAdapter("taqwright"), a.capabilities)}.`);
             reason = parts.length ? parts.join(" ") : null;
         }
-        // One sentence about phone tests, made from the same rule the agent card uses, so the two always agree.
-        const phoneAgent = eligible.find((a) => !capabilityProblem(getAdapter("taqwright"), a.capabilities));
-        const phonesText = phoneAgent
-            ? `Phone tests can run on ${phoneAgent.name}. ${androidSummary(phoneAgent.capabilities.android).summary}.`
-            : `Phone tests can't run: ${eligible.length === 0 ? (chosen ? `${chosen.name} is offline` : "no agent is connected") : capabilityProblem(getAdapter("taqwright"), eligible[0]!.capabilities)}.`;
-        return { runOn: "agent" as const, agentId: setting.agentId, status, canRunWeb: canWeb, canRunMobile: canMobile, canRunWindows: canWindows, canRunIos: canIos, phones: { canRun: canMobile, text: phonesText }, unavailableReason: reason };
+        const phonesText = a && can("taqwright") ? `Phone tests can run on ${a.name}. ${androidSummary(a.capabilities.android).summary}.` : `Phone tests can't run: ${!own ? "your runner is not set up" : !a ? "your runner has not connected yet" : capabilityProblem(getAdapter("taqwright"), a.capabilities)}.`;
+        return { runOn: "agent" as const, agentId: a?.id ?? null, status, canRunWeb: can("playwright"), canRunMobile: can("taqwright"), canRunWindows: can("windows-uia"), canRunIos: can(IOS_ADAPTER_ID), phones: { canRun: can("taqwright"), text: phonesText }, unavailableReason: reason };
     }
 
     /**
@@ -1507,9 +1467,7 @@ class RemoteExecutor implements ScriptExecutor {
                     svc.store.failQueuedOrRunning(taskId, `No runner that may take this run can run it. ${reasons}`.slice(0, 1000), "rejected");
                 } else {
                     noAgentSince ??= svc.clock();
-                    if (svc.clock() - noAgentSince >= svc.limits.noAgentGraceMs) {
-                        svc.store.failQueuedOrRunning(taskId, runnersOnly(svc.p.config) ? "No runner that can run these tests is online. Start the runner, or add one on the Runners page." : "No runner agent that can run these tests is connected. Start one, or switch the project back to running here.");
-                    }
+                    if (svc.clock() - noAgentSince >= svc.limits.noAgentGraceMs) svc.store.failQueuedOrRunning(taskId, svc.noRunnerSentence(jobId));
                 }
             } else if (t.status === "running") {
                 if (!announced) {
@@ -1766,10 +1724,10 @@ export function projectRunsOnAgent(projectId: string): boolean {
 export { MAX_OFFERS, ONLINE_MS };
 
 /** Same question for iOS tests. Undefined for a project that runs here (iOS tests never run on the platform server). */
-export function agentCanRunIos(projectId: string): boolean | undefined {
+export function agentCanRunIos(projectId: string, ownerId?: string | null): boolean | undefined {
     for (const s of installed.values()) {
         try {
-            if (s.routesToAgent(projectId)) return s.runnerStatus(projectId).canRunIos;
+            if (s.routesToAgent(projectId)) return (ownerId === undefined ? s.runnerStatus(projectId) : s.runnerStatus(projectId, ownerId)).canRunIos;
         } catch {
             /* closed database */
         }
@@ -1793,10 +1751,10 @@ export function agentServiceOf(projectId: string): AgentService | undefined {
  * For a project whose scripts run on a runner agent: can a connected agent run mobile tests? Undefined for a project that runs here
  * (the caller then asks this machine's own toolchain).
  */
-export function agentCanRunMobile(projectId: string): boolean | undefined {
+export function agentCanRunMobile(projectId: string, ownerId?: string | null): boolean | undefined {
     for (const s of installed.values()) {
         try {
-            if (s.routesToAgent(projectId)) return s.runnerStatus(projectId).canRunMobile;
+            if (s.routesToAgent(projectId)) return (ownerId === undefined ? s.runnerStatus(projectId) : s.runnerStatus(projectId, ownerId)).canRunMobile;
         } catch {
             /* closed database */
         }

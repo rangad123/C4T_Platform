@@ -114,7 +114,7 @@ describe("where it can run", () => {
         const by = Object.fromEntries(rows.map((r) => [r.id, r]));
         expect(by["ok"]).toMatchObject({ can: true, detail: "Android: 1 emulator ready." });
         expect(by["off"]).toMatchObject({ can: false, detail: "Offline, last seen 2 days ago." });
-        expect(by["old"]).toMatchObject({ can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from its page in Runners." });
+        expect(by["old"]).toMatchObject({ can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from Your runner in Settings." });
         expect(by["none"]).toMatchObject({ can: false, detail: "Android: no devices connected." });
         expect(by["notools"]).toMatchObject({ can: false, detail: "No phone or emulator is connected to this runner." });
         // Online ones come before offline ones.

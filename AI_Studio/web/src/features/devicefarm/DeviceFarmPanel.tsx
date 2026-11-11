@@ -212,7 +212,7 @@ function FarmRow({ projectId, farm, providers, onChanged }: { projectId: string;
                     variant="ghost"
                     icon={Trash2}
                     onClick={() => {
-                        if (window.confirm(`Remove “${farm.label}”? Phone tests that run on it go back to this computer’s phone or the project’s runner.`)) void run(async () => {
+                        if (window.confirm(`Remove “${farm.label}”? Phone tests that run on it go back to this computer’s phone or the runner of the person who starts them.`)) void run(async () => {
                             await api(`/projects/${projectId}/device-farms/${farm.id}`, { method: "DELETE" });
                             onChanged();
                         });
@@ -249,7 +249,7 @@ function RunChoice({ projectId, data, onSaved }: { projectId: string; data: Answ
             <legend className="t-section">Device farm or this computer</legend>
             <label className="row">
                 <input type="radio" name="farm-run-on" checked={choice.runOn === "device"} onChange={() => setChoice({ ...choice, runOn: "device" })} />
-                <span>This computer’s phone, or the project’s runner</span>
+                <span>This computer’s phone, or your runner</span>
             </label>
             <label className="row">
                 <input type="radio" name="farm-run-on" checked={choice.runOn === "farm"} disabled={data.farms.length === 0} onChange={() => setChoice({ ...choice, runOn: "farm", farmId: choice.farmId ?? data.farms[0]?.id ?? null })} />
@@ -350,7 +350,7 @@ export function DeviceFarmPanel({ projectId }: { projectId: string }) {
             )}
             {d.farms.length === 0 && !adding ? (
                 <EmptyState icon={Cloud} title="No device farm connected" actions={<Button onClick={() => setAdding(true)}>Connect a device farm</Button>}>
-                    Phone tests run on this computer’s phone or emulator, or on the project’s runner.
+                    Phone tests run on this computer’s phone or emulator, or on the runner of the person who starts them.
                 </EmptyState>
             ) : (
                 <ul className="stack-sm">

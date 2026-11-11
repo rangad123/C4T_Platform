@@ -1,6 +1,6 @@
 /**
- * The runner installer, platform side: the zip a tester downloads when they choose "Installer" in Settings, Runners, Add a runner
- * (see docs/features/runner-installer.md).
+ * The runner installer, platform side: the zip a person downloads on Windows or a Mac from Settings, Your runner (round 45: the one
+ * download for those systems; see docs/features/runner-installer.md).
  *
  * The programs inside are prebuilt by `npm run build:installer` into dist/installer/ (git-ignored): the Windows setup program
  * (`win/AITestingRunnerSetup.exe`, built with the C# compiler that ships with Windows) and the macOS app (`mac/AI Testing Runner.app/...`,
@@ -132,8 +132,10 @@ export const installerFileName = (slug: string, platform: KitPlatform): string =
 
 export interface InstallerReadmeInput {
     platform: KitPlatform;
-    projectName: string;
-    runnerName: string;
+    /** @deprecated Downloads are for a person's own computer (round 45); a line is shown only when given. */
+    projectName?: string;
+    /** Left out: the runner uses the computer's own name. */
+    runnerName?: string;
     platformUrl: string;
     kitVersion: string;
 }
@@ -142,12 +144,12 @@ const WINDOWS_STEPS = `1. Unzip this folder on the computer where your applicati
 2. Open the folder and double-click AITestingRunnerSetup.exe.
    Windows may say "Windows protected your PC" because the installer is not signed yet. Choose More info, then Run anyway.
 3. The setup window checks what your computer already has and only downloads what is missing: Node.js and the test tools. You do not need to install anything first, and it does not need administrator rights. The runner itself uses Chrome or Edge from this computer, or downloads a browser once.
-4. Choose Install and start. When the window says "The runner is running", the runner shows as online under Settings, then Runners in the platform. You can close the window: the runner keeps working in the background and has an icon in the notification area next to the clock.
+4. Choose Install and start. When the window says "The runner is running", Settings, Your runner in the platform shows this computer as connected, under the computer's own name. Your runs, schedules and sessions then use it by themselves. You can close the window: the runner keeps working in the background and has an icon in the notification area next to the clock.
 5. Delete the zip file and this unzipped folder once the runner is online. Setup copies what it needs to your own folder (C:\\Users\\<you>\\AppData\\Local\\AITestingRunner). The file runner.enroll in this folder is a one-time code: it works once, within 30 minutes of the download, and the runner deletes it when it connects.
 
 Later: open "AI Testing Runner" from the Start menu (if you left that box ticked) to see the runner again. Right-click the notification-area icon to stop the runner, open the platform, show the log or remove the runner from this computer.
 Remove it completely: right-click the icon and choose "Remove this runner from the computer", or run AITestingRunnerSetup.exe --uninstall. That deletes only what Setup put in its own folder; a Node.js that was already on the computer and the shared browser cache stay.
-To take this runner's access away, open Settings, then Runners in the platform and revoke its token. The runner then stops with a message saying so.
+To take this runner's access away, open Settings, Your runner in the platform and choose Remove this computer. The runner then stops with a message saying so. Setting up another computer does the same for this one: each person has one runner.
 
 If Setup cannot find the runner files, open it from the folder you unzipped: that folder holds runner.mjs, runner.json and runner.enroll next to it.`;
 
@@ -155,16 +157,15 @@ const MAC_STEPS = `1. Unzip this folder on the Mac where your application can be
 2. Open the folder and double-click "AI Testing Runner".
    macOS will probably say it could not verify the app, because the app is not signed yet. On macOS 15 and newer: choose Done, open System Settings, Privacy & Security, scroll down to Security and choose Open Anyway, then sign in. On macOS 14 and older: right-click the app, choose Open, then Open. In Terminal you can instead run  xattr -dr com.apple.quarantine "AI Testing Runner.app"  once.
 3. A Terminal window opens and shows what it checks: it only downloads what your Mac is missing (Node.js and the test tools). The runner itself uses Chrome or Edge from this Mac, or downloads a browser once. You do not need to install anything first, and it does not need an administrator password.
-4. When it says the runner is connected, the runner shows as online under Settings, then Runners in the platform.
+4. When it says the runner is connected, Settings, Your runner in the platform shows this Mac as connected, under the Mac's own name. Your runs, schedules and sessions then use it by themselves.
 5. Delete the zip file and this unzipped folder once the runner is online. The file runner.enroll in this folder is a one-time code: it works once, within 30 minutes of the download, and the runner deletes it when it connects.
 
-To take this runner's access away, open Settings, then Runners in the platform and revoke its token. The runner then stops with a message saying so.`;
+To take this runner's access away, open Settings, Your runner in the platform and choose Remove this computer. The runner then stops with a message saying so. Setting up another computer does the same for this one: each person has one runner.`;
 
 export function installerReadme(i: InstallerReadmeInput): string {
     const steps = i.platform === "windows" ? WINDOWS_STEPS : MAC_STEPS;
-    return `AI Testing Platform runner "${i.runnerName}"
-Project: ${i.projectName}
-Platform: ${i.platformUrl}
+    return `AI Testing Platform runner${i.runnerName ? ` "${i.runnerName}"` : ""}
+${i.projectName ? `Project: ${i.projectName}\n` : ""}Platform: ${i.platformUrl}
 Kit version: ${i.kitVersion}
 
 ${steps}
@@ -182,8 +183,10 @@ export interface BuildInstallerInput {
     bundle: Extract<Bundle, { ok: true }>;
     part: Extract<InstallerPart, { ok: true }>;
     platform: KitPlatform;
-    runnerName: string;
-    projectName: string;
+    /** Left out: the runner uses the computer's own name (round 45). */
+    runnerName?: string;
+    /** @deprecated Shown in the README only when given. */
+    projectName?: string;
     projectSlug: string;
     platformUrl: string;
     /** The single-use enrollment code (aite_...), written as runner.enroll; every download carries one (round 39). See runner-kit.ts kitCredentialFile. */
@@ -210,11 +213,11 @@ export function buildInstallerZip(i: BuildInstallerInput): Uint8Array {
     const lock = i.bundle.files.get("package-lock.json");
     if (lock) add("package-lock.json", lock);
     // What belongs to this download.
-    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.runnerName, kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
+    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, ...(i.runnerName ? { name: i.runnerName } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
     const credential = kitCredentialFile(i);
     add(credential.name, text(credential.text), 0o600);
     // "Check this computer" (docs/features/runner-check.md): checks the runner the installer set up; Setup runs the same check at its end.
     for (const f of CHECK_FILES) add(f.name, text(withLineEnding(f.text, f.eol)), 0o755);
-    add("README.txt", text(withLineEnding(installerReadme({ platform: i.platform, projectName: i.projectName, runnerName: i.runnerName, platformUrl: i.platformUrl, kitVersion }), i.platform === "windows" ? "\r\n" : "\n")));
+    add("README.txt", text(withLineEnding(installerReadme({ platform: i.platform, ...(i.projectName ? { projectName: i.projectName } : {}), ...(i.runnerName ? { runnerName: i.runnerName } : {}), platformUrl: i.platformUrl, kitVersion }), i.platform === "windows" ? "\r\n" : "\n")));
     return zipSync(entries);
 }

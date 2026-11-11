@@ -3,9 +3,10 @@
  * checkout of the repository (see docs/features/runner-kit.md).
  *
  * The program inside (runner.mjs and its helper processes) is prebuilt by `npm run build:runner` into dist/runner/ and only read here.
- * What is generated per download is small: runner.json (address and name), runner.token (the new project token), the start script for
- * the chosen system and a README. Nothing is ever read from the server's environment, `.env`, database or data folder: the only
- * inputs are the prebuilt bundle, the project's name, what the person typed, and the token created for this download.
+ * What is generated per download is small: runner.json (the address), runner.enroll (the person's one-time code), the start scripts and a
+ * README. Nothing is ever read from the server's environment, `.env`, database or data folder: the only inputs are the prebuilt bundle,
+ * the address and the code made for this download. Since round 45 this is the Linux download (and the fallback when a server has no
+ * installer built); Windows and Mac get the installer (runner-installer.ts).
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -19,22 +20,6 @@ import { CHECK_FILES } from "./runner-check-scripts.js";
 import { slugify } from "./storage.js";
 
 export { NODE_MIN_MAJOR, type KitPlatform };
-
-/**
- * How many runners (active, not revoked tokens) one project may have. One by default: a project runs its tests on a single runner, and a new
- * one is refused until the current one is removed. Raise it with AGENT_MAX_TOKENS when a project genuinely needs several runner computers.
- */
-export const DEFAULT_MAX_TOKENS = 1;
-export const maxTokensFrom = (env: NodeJS.ProcessEnv = process.env): number => {
-    const n = Number(env.AGENT_MAX_TOKENS);
-    return Number.isInteger(n) && n >= 1 && n <= 1000 ? n : DEFAULT_MAX_TOKENS;
-};
-
-/** The plain refusal when a project is already at its runner limit (both the kit download and a hand-made token use it). */
-export const runnerLimitMessage = (max: number): string =>
-    max === 1
-        ? "This project already has a runner. Remove it first (Settings → Runners → Remove access), then add the new one."
-        : `This project already has ${max} runners, the most it can have. Remove one you no longer use (Settings → Runners), then add it again.`;
 
 export const BUILD_HINT = "The runner kit has not been built on this server. Run `npm run build:runner`.";
 
@@ -137,45 +122,34 @@ export function decideAddress(input: { publicUrl?: string | undefined; protocol:
 
 // ── what the person may ask for ─────────────────────────────────────────────
 
-/** Characters that mean something in a path or a shell; a runner name has no use for them. */
-// eslint-disable-next-line no-control-regex
-const FORBIDDEN_NAME = /[\u0000-\u001f\u007f\u0080-\u009f/\\:*?"<>|]/;
-
-export const KitRequest = z
+/**
+ * The one download a person asks for in Settings (round 45): their computer's system and processor. Windows gets the setup program, a
+ * Mac the app, Linux the plain files; each carries its own Node.js when this server has built it for that system and processor.
+ * Nothing else is a choice: the runner's name is the computer's own name unless the person renames it in Settings.
+ */
+export const DownloadRequest = z
     .object({
-        name: z
-            .string()
-            .trim()
-            .min(1, "Give the runner a name.")
-            .max(60, "The runner name can have at most 60 characters.")
-            .refine((s) => !FORBIDDEN_NAME.test(s), "The runner name cannot contain control characters or any of / \\ : * ? \" < > |."),
-        platform: z.enum(["windows", "unix"], { message: "Choose windows or unix." }),
-        /** "installer" is the setup program (Windows) or app (Mac); "files" is the plain zip with the start scripts. Default: installer for windows, files for unix. */
-        kind: z.enum(["installer", "files"], { message: "Choose installer or files." }).optional(),
-        /** The complete download: its own Node.js and every package, for one system and processor (runner-kit-complete.ts). */
-        complete: z.boolean({ message: "complete is true or false." }).optional(),
-        /** The processor, for the complete download. */
-        arch: z.enum(["x64", "arm64"], { message: "Choose the processor: x64 or arm64." }).optional(),
-        /** Mac or Linux, for a complete download with platform "unix" (Windows needs nothing more). */
-        os: z.enum(["windows", "mac", "linux"], { message: "Choose windows, mac or linux." }).optional(),
+        os: z.enum(["windows", "mac", "linux"], { message: "Choose windows, mac or linux." }),
+        arch: z.enum(["x64", "arm64"], { message: "Choose the processor: x64 or arm64." }),
     })
-    .strict()
-    .superRefine((r, ctx) => {
-        if (r.os && (r.os === "windows") !== (r.platform === "windows")) ctx.addIssue({ code: "custom", message: "The system does not match: windows goes with platform windows, mac and linux with unix." });
-        if (!r.complete) return;
-        if (r.kind === "installer") ctx.addIssue({ code: "custom", message: "The complete download and the installer are two different choices. Ask for one of them." });
-        if (!r.arch) ctx.addIssue({ code: "custom", message: "Choose the processor for the complete download: x64 or arm64." });
-        if (r.platform === "unix" && !r.os) ctx.addIssue({ code: "custom", message: "Choose mac or linux for the complete download." });
-    });
-export type KitRequest = z.infer<typeof KitRequest>;
+    .strict();
+export type DownloadRequest = z.infer<typeof DownloadRequest>;
+
+/** What one zip is for: the system its start scripts and README lead with, and (optionally) a name for the runner. */
+export interface KitTarget {
+    platform: KitPlatform;
+    /** Left out: the runner uses the computer's own name. */
+    name?: string;
+}
 
 // ── the zip ─────────────────────────────────────────────────────────────────
 
 export interface BuildKitInput {
     bundle: Extract<Bundle, { ok: true }>;
-    request: KitRequest;
-    projectName: string;
-    /** The project name as a folder-safe word (used in the file name and the folder inside the zip). */
+    request: KitTarget;
+    /** @deprecated Downloads are for a person's own computer now (round 45); only shown in the README when given. */
+    projectName?: string;
+    /** A folder-safe word for the file name and the folder inside the zip. */
     projectSlug: string;
     platformUrl: string;
     /**
@@ -218,7 +192,7 @@ export function buildKitZip(i: BuildKitInput): Uint8Array {
     const lock = i.bundle.files.get("package-lock.json");
     if (lock) add("package-lock.json", lock);
     // What belongs to this download.
-    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, name: i.request.name, kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
+    add("runner.json", text(`${JSON.stringify({ url: i.platformUrl, ...(i.request.name ? { name: i.request.name } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
     const credential = kitCredentialFile(i);
     add(credential.name, text(credential.text), 0o600);
     // All three start scripts are in every kit: someone who picked the wrong system (or downloaded on one computer and unzipped on another)
@@ -228,6 +202,6 @@ export function buildKitZip(i: BuildKitInput): Uint8Array {
     add("start-runner.command", text(withLineEnding(START_COMMAND, "\n")), 0o755);
     // "Check this computer" (docs/features/runner-check.md): double-clickable, in every download.
     for (const f of CHECK_FILES) add(f.name, text(withLineEnding(f.text, f.eol)), 0o755);
-    add("README.txt", text(withLineEnding(readme({ platform: i.request.platform, projectName: i.projectName, runnerName: i.request.name, platformUrl: i.platformUrl, kitVersion }), win ? "\r\n" : "\n")));
+    add("README.txt", text(withLineEnding(readme({ platform: i.request.platform, ...(i.projectName ? { projectName: i.projectName } : {}), ...(i.request.name ? { runnerName: i.request.name } : {}), platformUrl: i.platformUrl, kitVersion }), win ? "\r\n" : "\n")));
     return zipSync(entries);
 }

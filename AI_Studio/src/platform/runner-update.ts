@@ -374,7 +374,7 @@ export class RunnerUpdates {
                 : u.state === "failed"
                   ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” could not update${u.to ? ` to ${u.to}` : ""}: ${error || "no reason given"} Still on version ${caps?.kitVersion ?? "unknown"}.` }
                   : u.state === "needs-manual"
-                    ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” did not install version ${u.to ?? "the platform's version"} by itself: ${error || "its signature could not be checked."} It keeps running version ${caps?.kitVersion ?? "unknown"}. Download the new version from the Runners page.` }
+                    ? { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-update-failed", detail: `Runner “${agent.name}” did not install version ${u.to ?? "the platform's version"} by itself: ${error || "its signature could not be checked."} It keeps running version ${caps?.kitVersion ?? "unknown"}. Download the runner again from Settings.` }
                   : { projectId: agent.projectId, agentId: agent.id, agentName: agent.name, action: "runner-rolled-back", detail: `Runner “${agent.name}” went back to version ${caps?.kitVersion ?? u.from ?? "unknown"}${u.to ? ` from ${u.to}` : ""}: ${error || "no reason given"}` };
         try {
             this.activity?.(row);

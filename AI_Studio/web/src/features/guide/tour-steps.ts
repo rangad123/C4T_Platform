@@ -45,7 +45,7 @@ export type TourPage =
     /** The latest release of the project. */
     | { kind: "release-detail" }
     | { kind: "setup"; section: SetupSection }
-    /** The Runners page, open on the tour's project (runners are machine-level, round 37). */
+    /** Your runner in Settings (round 45: one runner per person, no Runners pages). */
     | { kind: "runners" }
     | { kind: "settings"; section: SettingsSection }
     | { kind: "security-home" }
@@ -85,9 +85,8 @@ export const TOUR_STEPS: TourStep[] = [
     { id: "nav-agents", chapter: "around", target: "nav-agents", page: any, title: "Agents", text: "The kinds of checking the AI does when it explores an application. Open one to see what it checks and which projects use it." },
     { id: "nav-develop", chapter: "around", target: "nav-develop", page: any, title: "Test development", text: "Start writing tests in any of your projects: with the AI, by recording, step by step or as code." },
     { id: "nav-libraries", chapter: "around", target: "nav-libraries", page: any, title: "Reusable libraries", text: "Reusable steps, helpers and shared elements your organisation's projects share. A project takes a copy and updates it when it chooses." },
-    { id: "nav-runners", chapter: "around", target: "nav-runners", page: any, title: "Runners", text: "The computers that run your tests, and the Android emulator on this computer." },
     { id: "nav-integrations", chapter: "around", target: "nav-integrations", page: any, title: "Integrations", text: "Issue trackers, Sentry, alert channels and the other systems your projects connect to. Set one up once, then choose the projects that use it." },
-    { id: "nav-settings", chapter: "around", target: "nav-settings", page: any, title: "Settings", text: "How the platform itself is set up: the AI model, and people and their access." },
+    { id: "nav-settings", chapter: "around", target: "nav-settings", page: any, title: "Settings", text: "Your runner, and how the platform itself is set up: the AI model, and people and their access." },
     { id: "nav-help", chapter: "around", target: "nav-help", page: any, title: "Help in the sidebar", text: "Opens the Help panel for the page you are on. The full Guide is one click from there." },
     { id: "account", chapter: "around", target: "nav-account", page: any, needs: ["account"], title: "Who you are", text: "Who is using the platform, and their role. Sign out here, or forget the access key, when you are done." },
     { id: "places", chapter: "around", target: "project-tabs", page: project, needs: P, title: "The places of a project", text: "An AI agent project has Dashboard, Runs, Requirements and Settings. A code project also has Test cases, Test scripts and Test suites." },
@@ -129,8 +128,7 @@ export const TOUR_STEPS: TourStep[] = [
     { id: "signoff", chapter: "release", target: "release-signoff", page: { kind: "release-detail" }, needs: [...P, "release"], title: "The decision", text: "Sign-off lists anything that stands in the way of approval. Approve or Reject records who decided, when and why." },
     { id: "manual", chapter: "release", target: "tests-manual", page: { kind: "release", section: "manual" }, needs: P, title: "Manual test cases", text: "Test cases a person does by hand. Manual shows only them; a release counts them in its sign-off." },
     { id: "compliance", chapter: "release", target: "runs-compliance", page: { kind: "release", section: "compliance" }, needs: P, title: "Compliance", text: "Which security-control topics your tests touch, from the tests you already have." },
-    { id: "runners", chapter: "release", target: "project-runners", page: { kind: "runners" }, needs: P, title: "Runners", text: "The computers that run your tests, on the Runners page. A runner on your own computer reaches sites that only your network can reach." },
-    { id: "add-runner", chapter: "release", target: "add-runner", page: { kind: "runners" }, needs: P, title: "Add a runner", text: "Add a runner walks you through it: choose the computer, download the kit, start it and watch it connect." },
+    { id: "runners", chapter: "release", target: "your-runner", page: { kind: "runners" }, needs: P, title: "Your runner", text: "A runner is the program on your computer that runs your tests. Set it up once here: download it, start it, and every run you start goes to it." },
     { id: "environments", chapter: "release", target: "settings-environments", page: { kind: "setup", section: "environments" }, needs: P, title: "Environments", text: "Staging, production and other addresses to run against. Production is read-only: nothing risky runs there without asking." },
     { id: "alerts", chapter: "release", target: "settings-alerts", page: { kind: "setup", section: "alerts" }, needs: P, title: "Alerts", text: "Who is told when a run finds something: Slack, Teams, email or a webhook." },
     { id: "issues", chapter: "release", target: "settings-issues", page: { kind: "setup", section: "issues" }, needs: P, title: "Issue tracker", text: "Connect GitHub, Jira or Notion to file a problem straight from a failing test." },
@@ -283,7 +281,7 @@ export function pageHref(page: TourPage, h: TourHave): string | null {
         case "setup":
             return routes.setup(p, page.section);
         case "runners":
-            return routes.runners(p);
+            return routes.allRunners;
         case "settings":
             return routes.projectSettings(p, page.section);
         case "security":

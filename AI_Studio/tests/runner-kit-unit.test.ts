@@ -16,7 +16,7 @@ import { parseAgentArgs } from "../src/agent/config.js";
 import { CapabilityProbe } from "../src/agent/capabilities.js";
 import { filesLine } from "../src/agent/computer-check.js";
 import { Capabilities } from "../src/agent-protocol/schema.js";
-import { buildKitZip, decideAddress, KitRequest, loadBundle, projectSlugOf, type Bundle } from "../src/platform/runner-kit.js";
+import { buildKitZip, decideAddress, DownloadRequest, loadBundle, projectSlugOf, type Bundle } from "../src/platform/runner-kit.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner, KIT_DEPENDENCIES, KIT_OPTIONAL } from "../scripts/build-runner.mjs";
 
@@ -51,9 +51,9 @@ afterAll(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-const request = (platform: "windows" | "unix", name = "Maya's laptop") => ({ name, platform });
-const makeZip = (platform: "windows" | "unix", over: { name?: string; projectName?: string; url?: string } = {}) =>
-    buildKitZip({ bundle, request: request(platform, over.name), projectName: over.projectName ?? "Shop Checkout", projectSlug: projectSlugOf(over.projectName ?? "Shop Checkout"), platformUrl: over.url ?? "https://tests.example.com", token: TOKEN });
+const request = (platform: "windows" | "unix", name: string | undefined = "Maya's laptop") => ({ platform, ...(name ? { name } : {}) });
+const makeZip = (platform: "windows" | "unix", over: { name?: string; noName?: boolean; projectName?: string; url?: string } = {}) =>
+    buildKitZip({ bundle, request: request(platform, over.noName ? undefined : over.name), projectName: over.projectName ?? "Shop Checkout", projectSlug: projectSlugOf(over.projectName ?? "Shop Checkout"), platformUrl: over.url ?? "https://tests.example.com", token: TOKEN });
 const entries = (zip: Uint8Array) => unzipSync(zip);
 const text = (b: Uint8Array) => Buffer.from(b).toString("utf8");
 
@@ -146,6 +146,13 @@ describe("the zip a download produces", () => {
         const dir = "runner-shop-checkout-windows";
         expect(JSON.parse(text(z[`${dir}/runner.json`]!))).toEqual({ url: "https://tests.example.com/app", name: "Maya's laptop", kitVersion: bundle.manifest.kitVersion });
         expect(text(z[`${dir}/runner.token`]!)).toBe(`${TOKEN}\n`);
+        // Round 45: a download from Settings names no runner, so the runner takes the computer's own name; its README says no name either.
+        const nameless = entries(buildKitZip({ bundle, request: { platform: "unix" }, projectSlug: "my-computer", platformUrl: "https://tests.example.com", enrollCode: "aite_NamelessDownloadCode0123456789abcdefghij" }));
+        expect(JSON.parse(text(nameless["runner-my-computer-unix/runner.json"]!))).toEqual({ url: "https://tests.example.com", kitVersion: bundle.manifest.kitVersion });
+        const readme = text(nameless["runner-my-computer-unix/README.txt"]!);
+        expect(readme.split("\n")[0]).toBe("AI Testing Platform runner");
+        expect(readme).not.toContain("Project:");
+        expect(readme).toContain("Settings, Your runner");
     });
 
     it("passes the computer check's file comparison as it comes out of the zip, lock file included (it once said every download was damaged)", () => {
@@ -196,7 +203,7 @@ describe("the zip a download produces", () => {
 
     it("explains itself in the README without printing the token", () => {
         const readme = text(entries(makeZip("windows", { name: "Maya's laptop", projectName: "Shop Checkout" }))["runner-shop-checkout-windows/README.txt"]!);
-        for (const needle of ["Maya's laptop", "Shop Checkout", "https://tests.example.com", "start-runner.cmd", "Connected to the platform", "runner.enroll", "one-time code", "30 minutes", "Node.js 24", "remove it", "--forget-credential", "Ctrl+C", bundle.manifest.kitVersion]) expect(readme, needle).toContain(needle);
+        for (const needle of ["Maya's laptop", "Shop Checkout", "https://tests.example.com", "start-runner.cmd", "Connected to the platform", "runner.enroll", "one-time code", "30 minutes", "Node.js 24", "Remove this computer", "--forget-credential", "Ctrl+C", bundle.manifest.kitVersion]) expect(readme, needle).toContain(needle);
         expect(readme).not.toContain(TOKEN);
         // Each README leads with its own system's way and still mentions the other, because both scripts are in the folder.
         const unixReadme = text(entries(makeZip("unix"))["runner-shop-checkout-unix/README.txt"]!);
@@ -210,17 +217,8 @@ describe("the zip a download produces", () => {
     });
 
     it("never contains the server's secrets, paths or data", () => {
-        // What a real server holds: the sentinels set above, and every value in the repository's own .env if there is one (read, never printed).
+        // What a real server holds: the sentinels set above (in the environment while the bundle was built and the zip made).
         const secrets = Object.values(SENTINELS);
-        const dotenv = path.join(ROOT, ".env");
-        if (fs.existsSync(dotenv)) {
-            for (const line of fs.readFileSync(dotenv, "utf8").split(/\r?\n/)) {
-                const m = /^\s*([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD)[A-Z0-9_]*)\s*=\s*(.*)$/.exec(line);
-                const value = m?.[2]?.replace(/^["']|["']$/g, "").trim();
-                // Short and generic values (ports, true, names) would match by accident; secrets are longer than this.
-                if (value && value.length >= 12 && /[A-Za-z]/.test(value) && !/^(true|false|https?:\/\/)/.test(value)) secrets.push(value);
-            }
-        }
         const forbidden = [...secrets, "platform.db", ROOT, ROOT.replaceAll("\\", "/")];
         for (const platform of ["windows", "unix"] as const) {
             const z = entries(makeZip(platform));
@@ -259,20 +257,13 @@ describe("the zip a download produces", () => {
 });
 
 describe("what the person may ask for", () => {
-    const ok = (name: unknown, platform: unknown = "windows") => KitRequest.safeParse({ name, platform });
-    it("accepts a plain name and either system", () => {
-        expect(ok("Maya's laptop").success).toBe(true);
-        expect(ok("Build server 2", "unix").success).toBe(true);
-        expect(ok("  padded  ").data?.name).toBe("padded");
-        expect(ok("A".repeat(60)).success).toBe(true);
-        expect(ok("Büro Rechner 日本").success).toBe(true);
+    const ok = (body: unknown) => DownloadRequest.safeParse(body);
+    it("accepts each system and processor, nothing else to choose", () => {
+        for (const os of ["windows", "mac", "linux"]) for (const arch of ["x64", "arm64"]) expect(ok({ os, arch }).success, `${os} ${arch}`).toBe(true);
     });
-    it("refuses an empty, long, control-character or path-like name", () => {
-        for (const bad of ["", "   ", "A".repeat(61), "a/b", "a\\b", "C:\\x", "a:b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a|b", "tab\there", "line\nbreak", "nul\u0000", "\u007fdel", 42, null, undefined]) expect(ok(bad).success, JSON.stringify(bad)).toBe(false);
-    });
-    it("refuses an unknown system and unknown fields", () => {
-        for (const bad of ["mac", "linux", "", "WINDOWS", null]) expect(ok("x", bad).success, String(bad)).toBe(false);
-        expect(KitRequest.safeParse({ name: "x", platform: "unix", token: "aitg_x" }).success).toBe(false);
+    it("refuses an unknown system or processor and every other field (a name, a kind, a token)", () => {
+        for (const bad of [{}, { os: "windows" }, { arch: "x64" }, { os: "WINDOWS", arch: "x64" }, { os: "unix", arch: "x64" }, { os: "mac", arch: "ia32" }, { os: "linux", arch: null }]) expect(ok(bad).success, JSON.stringify(bad)).toBe(false);
+        for (const extra of [{ name: "x" }, { kind: "installer" }, { complete: true }, { token: "aitg_x" }, { platform: "windows" }]) expect(ok({ os: "windows", arch: "x64", ...extra }).success, JSON.stringify(extra)).toBe(false);
     });
 });
 
@@ -352,7 +343,7 @@ describe("the runner program reading its kit files", () => {
     });
 
     it("stops with a plain message when runner.json is broken, huge or incomplete", () => {
-        for (const body of ["{ nope", "[]", JSON.stringify({ url: "https://x.example.com" }), JSON.stringify({ ...validJson, name: "bad\u0000name" }), "x".repeat(20_000)]) {
+        for (const body of ["{ nope", "[]", JSON.stringify({ name: "No address" }), JSON.stringify({ ...validJson, name: "bad\u0000name" }), JSON.stringify({ ...validJson, name: "" }), "x".repeat(20_000)]) {
             const dir = kitDir();
             fs.writeFileSync(path.join(dir, "runner.json"), body);
             const r = applyKitDefaults({}, dir);
@@ -360,6 +351,18 @@ describe("the runner program reading its kit files", () => {
             expect((r as { message: string }).message).toMatch(/runner kit|runner\.json/i);
         }
         expect(parseKitFile(`\uFEFF${JSON.stringify(validJson)}`.replace(/^\uFEFF/, "")).ok).toBe(true);
+    });
+
+    it("without a name in runner.json (downloads from round 45 on) the runner is named after the computer", () => {
+        const dir = kitDir();
+        fs.writeFileSync(path.join(dir, "runner.json"), JSON.stringify({ url: "https://tests.example.com", kitVersion: validJson.kitVersion }));
+        fs.writeFileSync(path.join(dir, "runner.token"), `${TOKEN}\n`);
+        const r = applyKitDefaults({}, dir) as { kit: boolean; env: NodeJS.ProcessEnv };
+        expect(r.kit).toBe(true);
+        expect(r.env.AITP_AGENT_NAME).toBeUndefined();
+        const parsed = parseAgentArgs([], r.env);
+        if (parsed.kind !== "run") throw new Error("did not parse");
+        expect(parsed.config.name).toBe(os.hostname().trim().slice(0, 64));
     });
 
     it("reports the kit version to the platform as an additive capability, and only then", async () => {

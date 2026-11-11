@@ -1,8 +1,7 @@
 /**
- * The runner a person chose for one run (COMMON contract "per-run runner choice"). Every route that starts a run accepts an optional
- * `runnerId` (an agent_tokens id) in its JSON body. A hook reads it once, before the route's own body check (so strict bodies need no
- * new field), and `Repo.createJob` puts it in `JobOptions.runner` the way it records who started the job (from the request, not from
- * each route). Only carried here: the job gate checks that this person may use that runner, and only that runner is offered the run.
+ * `runnerId` in a run-start body (the per-run runner choice of rounds 39-44). Round 45: every run goes to its owner's own runner, so the
+ * field is accepted and ignored: a hook removes it before the route's own body check (strict bodies stay unchanged), so a web page or
+ * script that still sends it keeps working. A malformed value is still a plain 400.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { FastifyInstance } from "fastify";

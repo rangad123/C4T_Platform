@@ -16,6 +16,8 @@ import {
 } from "../../engine/frameworks/settings.js";
 import { capabilityProblem } from "../agent-routing.js";
 import { getAgentServices } from "../agent-services.js";
+import { ownerIdOfActor } from "../agent-store.js";
+import { currentActor } from "../auth/actor.js";
 import { FrameworkSettingsStore } from "../framework-settings-store.js";
 import { HttpError } from "../http-error.js";
 import type { RouteCtx } from "./types.js";
@@ -40,7 +42,10 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
         const svc = agents();
         if (svc.routesToAgent(projectId)) {
             const names = new Set<string>();
-            for (const a of svc.store.listAgents(projectId)) for (const n of a.capabilities.android?.avds ?? []) names.add(n);
+            // The asker's own runner (round 45: the only one their runs go to).
+            const owner = ownerIdOfActor(currentActor());
+            const own = owner ? svc.store.runnerOf(owner)?.agent : undefined;
+            for (const n of own?.capabilities.android?.avds ?? []) names.add(n);
             return { names: [...names], where: "agent" };
         }
         return { names: mobileAvailability().avds, where: "server" };
@@ -76,7 +81,7 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
         const runner = svc.runnerStatus(projectId);
         const settings = store().get(projectId);
         const chosen = runner.agentId ? svc.store.getAgent(runner.agentId) : undefined;
-        const onlineNames = svc.eligibleAgents(projectId).map((a) => a.name);
+        const onlineNames = svc.eligibleAgents(projectId, undefined, { ownerId: ownerIdOfActor(currentActor()) }).map((a) => a.name);
         return {
             settings,
             effective: effectiveSettings(settings, { onAgent: runner.runOn === "agent", platformWorkers: ctx.p.config.CONCURRENCY }),

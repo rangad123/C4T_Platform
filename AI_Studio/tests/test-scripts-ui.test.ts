@@ -1,5 +1,5 @@
 /**
- * The Test scripts place in a real browser against a real platform (port 7864, no AI, nothing runs): the scripts list with its
+ * The Test scripts place in a real browser against a real platform (port 8798, no AI, nothing runs): the scripts list with its
  * columns (ID, Test script, DSL | Code, Requirement, Status) and actions (Import, Run, New test script, more), the New test script
  * menu (no recording, no phone exploring), DSL | Code opening those tabs of the workbench (DSL and Code first), an old Test cases
  * link with a status landing on the scripts list, a draft reaching its review, the empty states by kind of project, and the
@@ -26,7 +26,7 @@ import { ReviewStore } from "../src/platform/review-store.js";
 import { NO_APP_FOR_SCRIPTS } from "../src/platform/routes/generate-scripts.js";
 import { buildServer } from "../src/platform/server.js";
 
-const PORT = 7864;
+const PORT = 8798;
 const BASE = `http://127.0.0.1:${PORT}`;
 const KEY = "scripts-ui-owner-key-81d0";
 let browser: Browser;

@@ -14,6 +14,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { REPO_ROOT, loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner, testPerson } from "./helpers/personal-runner.js";
 import { eventBus } from "../src/platform/event-bus.js";
 import { Db } from "../src/platform/db.js";
 import { writeHeartbeat } from "../src/platform/ops/heartbeat.js";
@@ -29,6 +30,8 @@ const APP_PORT = 5971;
 const CHILD_PORT = 5972;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "al-admin-key-7e3d91c4";
+/** Round 45: runs started with the shared key have no owner; the runner test below starts its run as this person. */
+let PERSON = "";
 const PASSWORD = "ALLEAK-Password-4d8b13";
 const API_TOKEN = "ALLEAK-ApiToken-92c7e5";
 const STREAM_ENV: Record<string, string> = {
@@ -525,12 +528,14 @@ describe("a real validation job, from start to end", () => {
 describe("a runner agent's progress", () => {
     it("appears as events as the heartbeat arrives, named after the agent, with credentials scrubbed", async () => {
         const projectId = await newProject("Agent progress");
-        const made = await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "maya" });
+        // Round 45: runs started with the shared key have no owner, so this run is started by a person whose runner takes it.
+        PERSON = testPerson(platform).token;
+        const made = { status: 201, body: { secret: personalRunner(platform, { label: "maya", replace: true }).secret } };
         const agent = new FakeAgent(viaFetch(`http://127.0.0.1:${PORT}`), made.body.secret, { name: "Maya’s laptop", capabilities: defaultCaps(), concurrency: 1 });
         expect((await agent.hello()).status).toBe(200);
         const [t1] = await importTests(admin, projectId, [["Health answers", "/health", 200]]);
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
-        const started = await admin("POST", `/api/tests/${t1}/validate`);
+        const started = await call(PORT, "POST", `/api/tests/${t1}/validate`, undefined, { "x-api-key": PERSON });
         expect(started.status, started.text).toBe(202);
         const jobId = started.body.jobId as string;
         const c = await openWithTicket(jobStream(jobId));

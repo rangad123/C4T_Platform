@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, FolderKanban, LayoutDashboard, Library, Menu, Plug, Server, Settings, Sparkles, X } from "lucide-react";
+import { Bot, ChevronRight, FolderKanban, LayoutDashboard, Library, Menu, Plug, Settings, Sparkles, X } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import crowd4testMark from "../assets/crowd4test-mark.png";
 import { useEmbedded } from "../lib/embedded";
@@ -16,7 +16,7 @@ import { useAuth } from "../features/auth/auth";
 export interface PageMeta {
     crumbs: Array<{ label: string; href?: string }>;
     /** Which top-level destination is current (everything inside a project counts as "projects"). */
-    nav: "dashboard" | "projects" | "agents" | "develop" | "libraries" | "runners" | "integrations" | "settings" | "guide" | "security" | "profile";
+    nav: "dashboard" | "projects" | "agents" | "develop" | "libraries" | "integrations" | "settings" | "guide" | "security" | "profile";
 }
 
 const Ctx = createContext<(m: PageMeta) => void>(() => undefined);
@@ -69,11 +69,10 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
                     {item(routes.agents, "Agents", Bot, "agents", "nav-agents")}
                     {(can("ai_studio.tests.write") || can("ai_studio.tests.generate")) && item(routes.develop, "Test development", Sparkles, "develop", "nav-develop")}
                     {item(routes.libraries, "Reusable libraries", Library, "libraries", "nav-libraries")}
-                    {(can("ai_studio.runners.manage") || can("ai_studio.tests.run") || can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && (
+                    {(can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && (
                         <>
                             <div className="nav-label">Operations</div>
-                            {/* Runners: also for anyone who may run tests, who may add their own computer (round 39). */}
-                            {(can("ai_studio.runners.manage") || can("ai_studio.tests.run")) && item(routes.allRunners, "Runners", Server, "runners", "nav-runners")}
+                            {/* Round 45: no Runners place. Each person's runner is set up once in Settings (Your runner). */}
                             {/* Integrations: set up with "manage keys and connections", chosen per project with project settings. */}
                             {(can("ai_studio.ai_keys.manage") || can("ai_studio.project.settings")) && item(routes.integrations, "Integrations", Plug, "integrations", "nav-integrations")}
                         </>
@@ -81,7 +80,8 @@ export function Shell({ children, routeKey }: { children: ReactNode; routeKey: s
                     {/* Round 37: Security assessment is no longer in the left panel. Its pages stay: a project that includes it has
                         a Security assessment tab, and #/security still lists those projects. */}
                     <div className="nav-label">System</div>
-                    {(can("ai_studio.platform.settings") || can("ai_studio.usage.view")) && item(routes.settings, "Settings", Settings, "settings", "nav-settings")}
+                    {/* Settings: also for anyone who may run tests, who sets up their runner there. */}
+                    {(can("ai_studio.platform.settings") || can("ai_studio.usage.view") || can("ai_studio.tests.run") || can("ai_studio.runners.manage")) && item(routes.settings, "Settings", Settings, "settings", "nav-settings")}
                     <HelpNavItem />
                     <div className="sidebar-foot">
                         <AccountChip />

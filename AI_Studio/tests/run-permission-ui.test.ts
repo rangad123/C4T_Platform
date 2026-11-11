@@ -2,7 +2,7 @@
  * The Run control for a person who may look at a project but not run its tests (no ai_studio.tests.run there): Run is shown switched
  * off with the reason, reachable by keyboard, instead of a button that only answers with a refusal. The project's answer is stood in
  * for with a browser route (the server sends the same `access` field for a Crowd4Test customer); the server's own refusal is
- * covered by the permission tests. Port 8660. Requires `web/dist` (vite build).
+ * covered by the permission tests. Port 8797. Requires `web/dist` (vite build).
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +15,7 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { NO_RUN_PERMISSION } from "../web/src/features/runs/runs-here.js";
 
-const PORT = 8660;
+const PORT = 8797;
 const BASE = `http://localhost:${PORT}`;
 let browser: Browser;
 let platform: Platform;

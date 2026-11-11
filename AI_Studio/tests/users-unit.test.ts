@@ -219,6 +219,6 @@ describe("the route-to-role table covers every registered route", () => {
         // Reading never needs more than a viewer, except owner-only records (people, activity, SSO, runner tokens, whole-project backups,
         // and since round 25 a project's members, which need ai_studio.project.members: owners only on a local install; since round 34 the AI configurations, which name keys).
         const ownerReads = routes.filter((r) => r.method === "GET" && ruleFor("GET", r.url) === "owner").map((r) => r.url).sort();
-        expect(ownerReads).toEqual(["/api/activity", "/api/ai-configurations", "/api/projects/:id/agent-tokens", "/api/projects/:id/backup", "/api/projects/:id/members", "/api/projects/:id/members/candidates", "/api/sso-settings", "/api/users"]);
+        expect(ownerReads).toEqual(["/api/activity", "/api/admin/runners", "/api/ai-configurations", "/api/projects/:id/backup", "/api/projects/:id/members", "/api/projects/:id/members/candidates", "/api/sso-settings", "/api/users"]);
     });
 });

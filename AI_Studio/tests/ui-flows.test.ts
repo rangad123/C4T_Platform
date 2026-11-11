@@ -26,9 +26,9 @@ import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 
 const KEY = "correct-horse-battery";
-const FIXTURE_PORT = 5191;
-const KEYED_PORT = 4191;
-const OPEN_PORT = 4192;
+const FIXTURE_PORT = 8791;
+const KEYED_PORT = 8792;
+const OPEN_PORT = 8793;
 
 let browser: Browser;
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -233,8 +233,8 @@ describe("mobile testing", () => {
 
             const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
-            // Runners explains what is missing and how to fix it (the emulator panel moved there from Settings in round 25)
-            await page.goto(`${base}/#/runners`);
+            // Settings explains what is missing and how to fix it (round 45: the emulator panel is back in Settings, the Runners page is gone)
+            await page.goto(`${base}/#/settings`);
             await pwExpect(page.getByTestId("mobile-tooling").getByRole("heading", { name: "Mobile tooling on this computer" })).toBeVisible();
             // A one-step setup download for each kind of computer, with the command line as the alternative.
             const setup = page.getByTestId("emulator-setup");

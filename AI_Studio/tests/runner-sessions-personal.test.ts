@@ -1,7 +1,8 @@
 /**
  * Recordings, live sessions and phone sessions on a person's own computer (personal runner): only its owner may pick it, see the session or
  * drive it; another person's session is never offered to it; a real phone is used only when the owner allowed it, and what the session
- * installed on it is removed after; a session ends within one heartbeat when its starter loses access. Team runners keep the project's rules.
+ * installed on it is removed after; a session ends within one heartbeat when its starter loses access or the computer is removed. Round 45: a
+ * person's own computer is the only runner there is.
  *
  * A real platform through inject (no ports), FAKE AGENTS written in plain requests (tests/fixtures/fake-agent.ts), and the device session
  * opener against the fake adb (tests/fixtures/fake-adb.mjs). No browser, no phone, no network.
@@ -42,7 +43,6 @@ const tokenOf: Record<string, string> = {};
 let projectId = "";
 let annLaptop: FakeAgent;
 let annTokenId = "";
-let team: FakeAgent;
 
 const svc = () => getAgentServices(platform);
 const call = async (who: string, method: string, url: string, body?: unknown) => {
@@ -71,9 +71,6 @@ beforeAll(async () => {
     // Two slots, so "not offered" below is never just "busy".
     annLaptop = new FakeAgent(viaInject(app), made.secret, { name: "Ann's laptop", capabilities: phoneCaps(), concurrency: 2 });
     expect((await annLaptop.hello()).status).toBe(200);
-    const teamSecret = (await call("key", "POST", `/api/projects/${projectId}/agent-tokens`, { label: "Lab" })).body.secret as string;
-    team = new FakeAgent(viaInject(app), teamSecret, { name: "Lab machine", capabilities: phoneCaps() });
-    expect((await team.hello()).status).toBe(200);
 }, 60_000);
 
 afterAll(async () => {
@@ -106,7 +103,6 @@ describe("recordings and live sessions on a person's own computer", () => {
         const r = await startRec("ann", { agentId: annLaptop.agentId });
         expect(r.status, JSON.stringify(r.body)).toBe(201);
         rid = r.body.id;
-        expect(await team.poll(1)).toMatchObject({ status: 204 });
         offer = await annLaptop.next(10_000);
         expect(offer?.kind).toBe("record");
         expect((await annLaptop.recording(offer!.taskId, { status: "recording", currentUrl: APP, steps: [] })).status).toBe(200);
@@ -147,20 +143,13 @@ describe("recordings and live sessions on a person's own computer", () => {
         // The agent gives the task up, as a real one does on cancel.
         expect((await annLaptop.result(offer!.taskId, { ok: false, error: "The platform ended this session.", runs: [] })).status).toBe(200);
     });
-
-    it("a team runner keeps the project's rules: another project member may read it", async () => {
-        const r = await startRec("ann", { agentId: team.agentId });
-        expect(r.status).toBe(201);
-        expect((await call("ben", "GET", `/api/recordings/${r.body.id}`)).status).toBe(200);
-        await call("ann", "DELETE", `/api/recordings/${r.body.id}`);
-    });
 });
 
 describe("phone sessions on a person's own computer", () => {
     it("another person cannot choose it; its owner can, emulators only until they allow their phone", () => {
         const runner = svc().store.getRunner(projectId);
         const ask = (caller: string) => chooseDeviceHost({ on: "agent", agentId: annLaptop.agentId, runner, agents: sessionHosts(svc().store, projectId, caller), caller });
-        expect(() => ask(benId)).toThrow(/does not belong/);
+        expect(() => ask(benId)).toThrow(/not yours/);
         // No emulator on it and "Use my connected phone" off: refused with what to do.
         expect(() => ask(annId)).toThrow(/no emulator, and “Use my connected phone” is off/);
         svc().store.setTokenSwitches(annTokenId, { allowRealPhone: true });
@@ -179,14 +168,14 @@ describe("phone sessions on a person's own computer", () => {
         expect(offer?.kind).toBe("device");
         expect(offer!.device).toMatchObject({ realPhone: false, removeInstalledApp: true });
         expect(svc().store.getTask(bens.taskId)?.status).not.toBe("running");
-        // The project stops allowing people's own computers: the session ends within one heartbeat.
+        // The computer is removed (Settings, "Remove this computer"): the session ends within one heartbeat. The heartbeat itself is no
+        // longer accepted with a removed credential, so the platform's side is what this checks.
         expect((await annLaptop.heartbeat(offer!.taskId, {})).json).toMatchObject({ cancel: false });
-        svc().store.setAllowPersonal(projectId, false);
+        platform.db.run("UPDATE agent_tokens SET revoked_at = ? WHERE id = ?", new Date().toISOString(), annTokenId);
         try {
-            expect((await annLaptop.heartbeat(offer!.taskId, {})).json).toMatchObject({ cancel: true });
-            expect(anns.state).toMatchObject({ status: "failed", error: expect.stringMatching(/no longer allows people's own computers/) });
+            expect(svc().sessionAccessProblem({ projectId, startedBy: annId, tokenId: annTokenId, personal: true })).toMatch(/removed as a runner/);
         } finally {
-            svc().store.setAllowPersonal(projectId, true);
+            platform.db.run("UPDATE agent_tokens SET revoked_at = NULL WHERE id = ?", annTokenId);
         }
         await annLaptop.result(offer!.taskId, { ok: false, error: "The platform ended this session.", runs: [] });
     });

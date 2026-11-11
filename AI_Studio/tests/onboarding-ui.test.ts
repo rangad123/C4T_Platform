@@ -8,7 +8,7 @@
  * to hold still (a job in the middle of planning, a stopped run, a plan that was discarded) the page's own requests for that one
  * project are answered by the test; those cases say so in their names.
  *
- * Ports: 6490 platform + UI, 6491 site.
+ * Ports: 8791 platform + UI, 8792 site.
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/onboarding-ui.test.ts
@@ -30,8 +30,8 @@ import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { startMemorySite, type MemorySite } from "./fixtures/memory-site.js";
 
-const PORT = 6490;
-const SITE_PORT = 6491;
+const PORT = 8791;
+const SITE_PORT = 8792;
 const BASE = `http://127.0.0.1:${PORT}`;
 const SITE = `http://127.0.0.1:${SITE_PORT}`;
 
@@ -514,7 +514,7 @@ describe("explore, then a plan, then the tests (real jobs, scripted model)", () 
         // One action each, in words.
         await pwExpect(steps.getByRole("button", { name: "Run all tests" })).toBeVisible();
         await pwExpect(steps.getByRole("link", { name: "Set a schedule" })).toHaveAttribute("href", `#/projects/${projectId}/runs?section=schedules`);
-        await pwExpect(steps.getByRole("link", { name: "Connect a runner" })).toBeVisible();
+        await pwExpect(steps.getByRole("link", { name: "Set up your runner" })).toBeVisible();
         await pwExpect(steps.getByRole("link", { name: "Add sign-in details" })).toBeVisible();
         // The empty cards stay out of the way.
         const text = await contentText();
@@ -538,18 +538,19 @@ describe("explore, then a plan, then the tests (real jobs, scripted model)", () 
         await pwExpect(steps.getByText("You have run them again.")).toBeVisible();
 
         // A runner is connected (answered by the test for this one request: connecting one needs a second computer).
-        await page.route(`**/api/projects/${projectId}/agents`, (route) => route.fulfill({ json: [{ id: "a1", name: "Maya’s laptop", online: true }] }));
+        // Round 45: the step reads the person's own runner (GET /api/me/runner).
+        await page.route("**/api/me/runner", (route) => route.fulfill({ json: { runner: { id: "a1", name: "Maya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), os: "darwin", arch: "arm64", switches: { codeScripts: true, privateTargets: false, realPhone: false } } } }));
         await visit(`#/projects/${projectId}`);
         await pwExpect(steps.locator('[data-step="runner"]')).toHaveAttribute("data-done", "true");
-        await page.unroute(`**/api/projects/${projectId}/agents`);
+        await page.unroute("**/api/me/runner");
     }, 240_000);
 
     it("Next steps: keyboard path, 375 px, 44 px targets, axe in both themes", async () => {
         await visit(`#/projects/${projectId}`);
         await pwExpect(page.getByTestId("next-steps")).toBeVisible();
         for (const l of await page.getByTestId("next-steps").locator("a.btn, button.btn").all()) await tallEnough(l, `the action "${(await l.textContent())?.trim()}"`);
-        await page.getByTestId("next-steps").getByRole("link", { name: "Connect a runner" }).focus();
-        const ring = await page.getByTestId("next-steps").getByRole("link", { name: "Connect a runner" }).evaluate((el) => getComputedStyle(el).outlineStyle + "|" + getComputedStyle(el).boxShadow);
+        await page.getByTestId("next-steps").getByRole("link", { name: "Set up your runner" }).focus();
+        const ring = await page.getByTestId("next-steps").getByRole("link", { name: "Set up your runner" }).evaluate((el) => getComputedStyle(el).outlineStyle + "|" + getComputedStyle(el).boxShadow);
         expect(ring).not.toBe("none|none");
         await axeBoth(async () => {
             await visit(`#/projects/${projectId}`);

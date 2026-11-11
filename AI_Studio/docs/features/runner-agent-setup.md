@@ -4,11 +4,11 @@
 
 The platform normally runs your tests on the computer where it is installed. That is not always where the application is reachable: a staging site on your office network, an app on a laptop, a build that only exists on a test machine, an Android phone on your desk.
 
-The **runner agent** is a small program you start on such a computer. It connects **out** to the platform (it never opens a port and needs no inbound firewall rule), asks for work, runs the tests next to your application and devices, and sends the results back. In the platform you switch a project to "run on an agent" (see `runner-agent.md` for the platform side) and everything else looks the same: results, screenshots, traces, evidence and the cleanup ledger appear exactly as for a local run.
+The **runner agent** is a small program you start on such a computer. It connects **out** to the platform (it never opens a port and needs no inbound firewall rule), asks for work, runs the tests next to your application and devices, and sends the results back. Each person has one runner, set up once in **Settings, Your runner**; every run, schedule and session that person starts then goes to it (see `runner-agent.md` for the platform side), and everything else looks the same: results, screenshots, traces, evidence and the cleanup ledger appear exactly as for a local run.
 
 The agent runs the platform's own execution code (`runScripts` for web and API tests through the Playwright adapter, `runMobileScripts` for Android through the Taqwright adapter), so a remote run behaves like a local one. The AI work (analysing a site, writing and repairing tests, judging screenshots, healing locators) still runs on the platform; only running the generated scripts moves to the agent.
 
-**No checkout of the repository on that computer?** Download a runner kit instead (Setup, Runners, Add a runner): a zip with the program, the platform's address and a new token inside, started by double-clicking one file. It runs the same agent described below; see `runner-kit.md`. The rest of this page applies to both.
+**This is the developer's way.** Most people download the runner from Settings, Your runner instead: the installer on Windows and a Mac, plain files on Linux, with the platform's address and a one-time code inside, started by double-clicking one file. It runs the same agent described below; see `runner-kit.md`. The rest of this page applies to both.
 
 ## What you need
 
@@ -24,9 +24,9 @@ The agent runs the platform's own execution code (`runScripts` for web and API t
 
 If you start it from a folder that is not a checkout with `@playwright/test` installed, it stops and says so.
 
-## 1. Create a token
+## 1. Get a one-time code
 
-In the project, open **Agents** and choose **Create token** (or `POST /api/projects/:id/agent-tokens`). The token starts with `aitg_`, is shown once, and belongs to that project only: an agent with it can receive that project's runs and nothing else. You can revoke it at any time; a running agent then stops with a clear message.
+In **Settings, Your runner**, download the runner (`POST /api/me/runner/download`). Its `runner.enroll` holds a one-time code (`aite_...`, valid 30 minutes). Start the checkout's agent with `--enroll <code>` once: it trades the code for your one runner credential, keeps it in this computer's credential store and needs no code afterwards. This replaces any runner you had before (one runner per person). Choosing **Remove this computer** in Settings stops the agent with a clear message. A token given with `--token` or `AITP_AGENT_TOKEN` still works for development, but there is no page that makes one any more, and a team or project token is refused.
 
 ## 2. Start the agent
 
@@ -35,7 +35,7 @@ Windows (PowerShell):
 ```powershell
 cd C:\path\to\automation-testing
 $env:AITP_URL = "https://tests.example.com"
-$env:AITP_AGENT_TOKEN = "aitg_..."
+$env:AITP_ENROLL_CODE = "aite_..."   # the first start only
 npm run agent -- --name "Maya's laptop"
 ```
 
@@ -44,7 +44,7 @@ macOS and Linux:
 ```bash
 cd /path/to/automation-testing
 export AITP_URL=https://tests.example.com
-export AITP_AGENT_TOKEN=aitg_...
+export AITP_ENROLL_CODE=aite_...   # the first start only
 npm run agent -- --name "Build server"
 ```
 
@@ -66,9 +66,9 @@ Every option can also be set in the environment. The flag wins.
 | Option | Environment | Meaning |
 |---|---|---|
 | `--url <address>` | `AITP_URL` | The platform's address. |
-| `--token <aitg_...>` | `AITP_AGENT_TOKEN` | The agent token. |
-| `--token-file <file>` | `AITP_AGENT_TOKEN_FILE` | Read the token from the first line of a file. |
-| `--name <label>` | `AITP_AGENT_NAME` | The name shown on the Agents page. Default: the computer's name. |
+| `--token <aitg_...>` | `AITP_AGENT_TOKEN` | A credential given by hand (development only; not in --help). |
+| `--token-file <file>` | `AITP_AGENT_TOKEN_FILE` | The same from the first line of a file (development only). |
+| `--name <label>` | `AITP_AGENT_NAME` | The name shown in Settings. Default: the computer's name. |
 | `--concurrency <1-8>` | `AITP_AGENT_CONCURRENCY` | Runs at the same time. Default 1. Mobile runs are always one at a time per computer. |
 | `--work-dir <folder>` | `AITP_AGENT_WORK_DIR` | Where task folders and the file cache live. Default: `.agent-work` in the checkout. |
 | `--cache-mb <number>` | `AITP_AGENT_CACHE_MB` | Size limit of the file cache (baselines, APKs). Default 2048. Least recently used files go first. |
@@ -79,7 +79,7 @@ Every option can also be set in the environment. The flag wins.
 | `--browser <auto\|bundled\|chrome\|msedge>` | `AITP_BROWSER` (or `"browser"` in a kit's runner.json) | Which browser web tests use. Default `auto`: Playwright's Chromium if it is installed, else the computer's Google Chrome, else Microsoft Edge, else Chromium is downloaded once. See [runner-browsers.md](runner-browsers.md). |
 | `--help`, `--version` | | |
 
-Exit codes: 0 stopped normally, 1 failed (for example the work folder is unusable), 2 wrong command line, 3 token not valid or revoked, 4 protocol mismatch (update the agent or the platform), 5 the platform refused this agent.
+Exit codes: 0 stopped normally, 1 failed (for example the work folder is unusable), 2 wrong command line, 3 not accepted any more (removed, replaced by another computer, or a team or project runner; the platform's sentence is shown), 4 protocol mismatch (update the agent or the platform), 5 the platform refused this agent.
 
 ### The token stays secret
 
@@ -209,7 +209,7 @@ A Windows agent can run desktop tests (kind "desktop", framework "windows-uia"; 
 - **Nothing may start unless you say so.** A test names the application it drives, but the computer decides whether it may start it. List every application with `--allow-app` (a full path such as `C:Program FilesMyAppMyApp.exe`, or a name such as `calc.exe` that is looked up on the PATH and stands for that one file). Matching is on the resolved full path, case-insensitive, no wildcards. An application that is not listed is refused with "This computer isn't set up to start <app>. Add it with --allow-app, then run again." and is never a failing test.
 - **Shells and script hosts are never allowed.** `cmd`, `powershell`, `pwsh`, `wscript`, `cscript`, `mshta`, `rundll32`, script interpreters, download tools and similar programs are on a built-in deny-list that wins over your allow-list. The agent prints a note and ignores such an entry.
 - **A signed-in, interactive session.** UI Automation needs the desktop of a logged-in user. Run the agent from the Scheduled Task at log-on (above), not as a Windows service, and keep the screen unlocked while tests run. The Agents page says "needs an interactive desktop session" when the agent was started in a session without one.
-- **Not as administrator.** The agent and the applications run as a normal user. If the agent is elevated, desktop tests are refused and the Agents page says so. Reason: an elevated process driven by test text would hand that text administrator power.
+- **Not as administrator.** The agent and the applications run as a normal user. If the agent is elevated, desktop tests are refused and Settings says so. Reason: an elevated process driven by test text would hand that text administrator power.
 - **Your keyboard and mouse stay yours.** Tests act through UI Automation patterns (Invoke, Value, SelectionItem, Toggle) and never send keystrokes or move the cursor. They only look at windows of the process they started.
 
 ## Mac with Xcode (iOS tests)
@@ -220,7 +220,7 @@ A Mac agent can run iOS tests (framework `taqwright-ios`; see `docs/features/ios
 - **The Appium XCUITest driver.** `npx @taqwright/taqwright install` in the platform folder on that Mac installs it (and Appium) under Taqwright's own folder; or install it yourself with `appium driver install xcuitest`. `npx taqwright doctor` reports what is in place.
 - Start the agent from a normal user session on the Mac (the LaunchAgent above), not as root. No extra option is needed: iOS has no `--allow-...` flag, because a simulator is a throwaway device, like an Android emulator.
 
-The agent reports Xcode, the number of iOS simulators and whether the XCUITest driver was found; the Agents page and `describeCapabilities` in the agent log say "XCUITest driver found (iOS tests can run)" when everything is there. If something is missing, a run is refused up front with a sentence that names it, and it is never a failing test.
+The agent reports Xcode, the number of iOS simulators and whether the XCUITest driver was found; Settings and `describeCapabilities` in the agent log say "XCUITest driver found (iOS tests can run)" when everything is there. If something is missing, a run is refused up front with a sentence that names it, and it is never a failing test.
 
 How it behaves on the simulator: the agent uses a simulator that is already running as it is and leaves it running. If none is running it boots one (the project's default simulator by name if set, otherwise the newest iOS version, iPhones before iPads), waits until it has finished starting, runs the tests, and shuts down only that simulator by the id it noted at boot. It never boots, shuts down or erases any other simulator, and never uses `simctl shutdown all`. The app under test must already be installed on the simulator (for example with `xcrun simctl install booted MyApp.app`); the platform does not send an app file for iOS.
 
@@ -229,7 +229,7 @@ How it behaves on the simulator: the agent uses a simulator that is already runn
 | You see | What it means and what to do |
 |---|---|
 | `ai-test-agent cannot start: @playwright/test was not found` | Run `npm install` in the checkout and start the agent from there. |
-| `The agent token is not valid or was revoked` (exit 3) | The token was revoked, mistyped, or belongs to another platform. Create a new one on the project's Agents page. |
+| `The platform no longer accepts this runner` (exit 3) | The computer was removed or replaced in Settings, or it was set up for a team or a project. Set up your runner again from Settings, Your runner. |
 | `This agent speaks protocol 1 but the platform speaks protocol N` (exit 4) | Update the checkout of the agent (or the platform) so both are the same version. |
 | `The platform refused this agent` (exit 5) | The platform said no (the text after it says why), for example another agent already uses that name. |
 | `--url must use https://` (exit 2) | Use an https address, or a private-network address, or `--allow-insecure`. |
@@ -237,7 +237,7 @@ How it behaves on the simulator: the agent uses a simulator that is already runn
 | `the platform's certificate was not accepted` | A private certificate authority or a security tool that re-signs https: install its root certificate on the computer, or start the agent with `--ca-file <file>`. The message says which. Proxy problems (a password, a blocked address, a proxy that is down) have their own sentences: [company-networks.md](company-networks.md). |
 | `no Playwright browsers installed` in the capabilities line | The runner now finds an installed Chrome or Edge or downloads Chromium itself (the lines before it say which, see [runner-browsers.md](runner-browsers.md)); `npx playwright install chromium` in the checkout still works. Web tests are refused until a browser is ready. |
 | `Chromium could not be downloaded: ...` | The reason follows (a server answer, a proxy, a certificate). Fix the network ([company-networks.md](company-networks.md)) or install Google Chrome or Microsoft Edge, then start the runner again. |
-| The Agents page says the agent is offline | It was not seen for 45 seconds: the agent stopped, lost the network, or a proxy cuts idle requests shorter than about 60 s. |
+| Settings says the runner is offline | It was not seen for 45 seconds: the agent stopped, lost the network, or a proxy cuts idle requests shorter than about 60 s. |
 | `The work folder ... cannot find @playwright/test` | Use a `--work-dir` inside the checkout (the default), or a folder whose parent has the platform's `node_modules`. For other folders the agent links the checkout's `node_modules` into it. |
 | A run says `Playwright browsers are not installed on this agent` | The browsers were removed or never installed for this Playwright version. Install them and run again. |
 | `The Android device ... is not connected to this agent or is not ready` | Check `adb devices` on the agent: the phone must show `device` (accept the USB debugging prompt), and the cable or Wi-Fi must be up. |

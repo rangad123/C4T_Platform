@@ -40,7 +40,8 @@ const usage = (argv: string[]): string => {
 
 describe("arguments", () => {
     it("has plain defaults", () => {
-        expect(parseArgs([])).toMatchObject({ kit: "files", port: 6950, noNodeOnPath: false, linkNodeModules: false, onlineTimeout: 900, testTimeout: 300, name: "Smoke runner", keep: false });
+        expect(parseArgs([])).toMatchObject({ kit: "files", port: 6950, noNodeOnPath: false, linkNodeModules: false, onlineTimeout: 900, testTimeout: 300, keep: false });
+        expect(parseArgs([])).not.toHaveProperty("name"); // round 45: the runner is named after the computer
         expect(parseArgs(["--kit", "files", "--link-node-modules"]).onlineTimeout).toBe(180);
         expect(parseArgs(["--kit", "complete", "--no-node-on-path", "--port", "6954", "--online-timeout", "60", "--out", "rep"])).toMatchObject({ kit: "complete", noNodeOnPath: true, port: 6954, onlineTimeout: 60, out: path.resolve("rep") });
         expect(parseArgs(["--help"]).help).toBe(true);
@@ -54,7 +55,7 @@ describe("arguments", () => {
         expect(usage(["--no-node-on-path"])).toMatch(/only makes sense with --kit complete/);
         expect(usage(["--kit", "complete", "--link-node-modules"])).toBe("--link-node-modules only works with --kit files.");
         expect(usage(["--build-runner", "--runner-kit-dir", "x"])).toBe("Use --build-runner or --runner-kit-dir, not both.");
-        expect(usage(["--name", "a/b"])).toMatch(/1 to 60 characters/);
+        expect(usage(["--name", "x"])).toBe("Unknown option --name. Run with --help to see the options.");
         expect(usage(["--frobnicate"])).toBe("Unknown option --frobnicate. Run with --help to see the options.");
     });
 
@@ -80,25 +81,21 @@ describe("decisions", () => {
         expect(linux).toMatchObject({ kitPlatform: "unix", id: "linux-arm64" });
     });
 
-    it("asks for each download with the route's own fields", () => {
-        expect(kitRequestBody("files", win, "R")).toEqual({ name: "R", platform: "windows", kind: "files" });
-        expect(kitRequestBody("installer", mac, "R")).toEqual({ name: "R", platform: "unix", kind: "installer" });
-        expect(kitRequestBody("complete", linux, "R")).toEqual({ name: "R", platform: "unix", complete: true, arch: "arm64", os: "linux" });
-        expect(kitRequestBody("complete", mac, "R")).toEqual({ name: "R", platform: "unix", complete: true, arch: "arm64", os: "mac" });
-        expect(kitRequestBody("complete", win, "R")).toEqual({ name: "R", platform: "windows", complete: true, arch: "x64" });
+    it("asks for this computer's one download with the route's own fields: the system and the processor", () => {
+        expect(kitRequestBody(win)).toEqual({ os: "windows", arch: "x64" });
+        expect(kitRequestBody(mac)).toEqual({ os: "mac", arch: "arm64" });
+        expect(kitRequestBody(linux)).toEqual({ os: "linux", arch: "arm64" });
     });
 
-    it("skips plainly when the complete download is missing or not offered, and fails on real refusals", () => {
-        expect(interpretKitAnswer("complete", linux, { status: 503, message: "The complete runner download for linux-arm64 has not been built." }).skip).toMatch(/^The complete download for linux-arm64 has not been built on this platform: /);
-        expect(interpretKitAnswer("complete", win, { status: 400, message: "Unrecognized key(s) in object: 'complete', 'arch'" }).skip).toMatch(/does not offer the complete download yet/);
-        expect(interpretKitAnswer("complete", win, { status: 200 })).toEqual({ ok: true });
-        // Any other 400 is a wrong request, not "not offered".
-        expect(interpretKitAnswer("complete", linux, { status: 400, message: "Choose mac or linux for the complete download." }).fail).toBe("The download was refused (400): Choose mac or linux for the complete download.");
+    it("skips plainly when the download cannot be started the asked way here, and fails on real refusals", () => {
+        expect(interpretKitAnswer("complete", linux, { status: 200, kind: "files" }).skip).toMatch(/^The download for linux-arm64 does not carry its own Node\.js: .*npm run build:runner -- --complete --targets linux-arm64/);
+        expect(interpretKitAnswer("complete", win, { status: 200, kind: "installer", target: "win-x64" })).toEqual({ ok: true });
         expect(interpretKitAnswer("files", win, { status: 503, message: "The runner kit has not been built on this server." }).fail).toMatch(/no runner download/);
-        expect(interpretKitAnswer("files", win, { status: 409, message: "This project already has 25 runner accesses." }).fail).toBe("The download was refused (409): This project already has 25 runner accesses.");
+        expect(interpretKitAnswer("files", win, { status: 403, message: "Sign in with your own account to set up your runner." }).fail).toBe("The download was refused (403): Sign in with your own account to set up your runner.");
         expect(interpretKitAnswer("installer", linux, { status: 200 }).skip).toMatch(/no installer for Linux/);
         expect(interpretKitAnswer("installer", win, { status: 200, kind: "files", note: "The Windows installer was not built." }).skip).toMatch(/sent plain files instead\. The Windows installer was not built\./);
         expect(interpretKitAnswer("installer", win, { status: 200, kind: "installer" })).toEqual({ ok: true });
+        expect(interpretKitAnswer("files", linux, { status: 200, kind: "files" })).toEqual({ ok: true });
     });
 
     it("starts each download the way its README says", () => {
@@ -247,7 +244,8 @@ describe("stopping only what it started", () => {
 
 describe("a whole run that ends in the plain skip", () => {
     const PORT = 6960;
-    it("the complete download is not built: the run says skipped, exits 0, and stops the sample app it started", async () => {
+    const PERSON_TOKEN = "aitp_SmokePersonToken0123456789abcdef";
+    it("the complete download is not built: the run signs up its first person, downloads as them, says skipped, exits 0, and stops the sample app it started", async () => {
         const seen: string[] = [];
         let fake: http.Server | undefined;
         const children = new Children();
@@ -263,11 +261,15 @@ describe("a whole run that ends in the plain skip", () => {
                         let body = "";
                         req.on("data", (d) => (body += d));
                         req.on("end", () => {
-                            seen.push(`${req.method} ${req.url} ${req.headers["x-api-key"] === apiKey ? "key" : "NO KEY"} ${body}`);
-                            const send = (code: number, obj: unknown) => res.writeHead(code, { "content-type": "application/json" }).end(JSON.stringify(obj));
+                            const who = req.headers["x-api-key"] === apiKey ? "key" : req.headers.authorization === `Bearer ${PERSON_TOKEN}` ? "person" : /aitp_session=s1/.test(String(req.headers.cookie)) && req.headers["x-csrf-token"] === "c1" ? "session" : "NOBODY";
+                            seen.push(`${req.method} ${req.url} ${who} ${body}`);
+                            const send = (code: number, obj: unknown, headers: Record<string, string | string[]> = {}) => res.writeHead(code, { "content-type": "application/json", ...headers }).end(JSON.stringify(obj));
+                            if (req.url === "/api/auth/setup") return send(201, { me: {} }, { "set-cookie": ["aitp_session=s1; Path=/; HttpOnly", "aitp_csrf=c1; Path=/"] });
+                            if (req.url === "/api/me/tokens") return send(201, { token: PERSON_TOKEN });
                             if (req.url === "/api/projects") return send(201, { id: "p1" });
                             if (req.url === "/api/projects/p1/specs") return send(202, { tests: [{ id: "t1" }, { id: "t2" }] });
-                            if (req.url === "/api/projects/p1/runner-kits") return send(503, { error: "The complete runner download for linux-x64 has not been built on this server. Run `npm run build:runner -- --complete`." });
+                            // A download without its own Node.js (no x-runner-kit-target): the complete build was not made here.
+                            if (req.url === "/api/me/runner/download") return void res.writeHead(200, { "content-type": "application/zip", "x-runner-kit-kind": "files" }).end(Buffer.from("PK\u0005\u0006"));
                             send(404, { error: "not here" });
                         });
                     });
@@ -279,18 +281,19 @@ describe("a whole run that ends in the plain skip", () => {
         await new Promise((r) => fake?.close(r));
 
         expect(report.verdict).toBe("skipped");
-        expect(report.skipReason).toBe("The complete download for linux-x64 has not been built on this platform: The complete runner download for linux-x64 has not been built on this server. Run `npm run build:runner -- --complete`.");
+        expect(report.skipReason).toBe("The download for linux-x64 does not carry its own Node.js: the complete build for it was not made on this platform (npm run build:runner -- --complete --targets linux-x64).");
         expect(report.steps.map((s: { name: string; status: string }) => `${s.status} ${s.name}`)).toEqual([
             "ok Start the sample app",
             "ok Start the platform on a new data folder",
+            "ok Sign up the first person (an owner), as the setup page does",
             "ok Create a project with a web test and an API test (no AI)",
             "skipped Download the runner (complete download)",
             "ok Clean up",
         ]);
-        // Every request carried the run's own access key; the download asked for the complete kit for this processor.
-        expect(seen.every((s) => s.includes(" key "))).toBe(true);
-        expect(seen.find((s) => s.startsWith("POST /api/projects/p1/runner-kits"))).toContain('"complete":true,"arch":"x64","os":"linux"');
-        expect(JSON.parse(seen.find((s) => s.startsWith("POST /api/projects/p1/specs"))!.split(" key ")[1]!).specs.map((s: { kind: string }) => s.kind)).toEqual(["web", "api"]);
+        // The access key only signs up the first person; their session makes their own token, and everything after is that person.
+        expect(seen.map((s) => s.split(" ").slice(0, 3).join(" "))).toEqual(["POST /api/auth/setup key", "POST /api/me/tokens session", "POST /api/projects person", "POST /api/projects/p1/specs person", "POST /api/me/runner/download person"]);
+        expect(seen.find((s) => s.startsWith("POST /api/me/runner/download"))).toContain('{"os":"linux","arch":"x64"}');
+        expect(JSON.parse(seen.find((s) => s.startsWith("POST /api/projects/p1/specs"))!.split(" person ")[1]!).specs.map((s: { kind: string }) => s.kind)).toEqual(["web", "api"]);
         // The sample app it started is stopped; nothing it started is left running.
         expect(children.list.map((c: { name: string }) => c.name)).toEqual(["sample app"]);
         expect(children.list.every((c: unknown) => !Children.running(c))).toBe(true);
@@ -298,6 +301,7 @@ describe("a whole run that ends in the plain skip", () => {
         const json = fs.readFileSync(path.join(out, "report.json"), "utf8");
         expect(JSON.parse(json).verdict).toBe("skipped");
         expect(json).not.toMatch(/smoke-[0-9a-f]{36}/);
+        expect(json).not.toContain(PERSON_TOKEN);
         expect(fs.readFileSync(path.join(out, "report.md"), "utf8")).toContain("Runner smoke check skipped: complete download with no Node.js on the PATH, Linux x64");
         expect(fs.existsSync(path.join(out, "sample-app.log"))).toBe(true);
     }, 60_000);

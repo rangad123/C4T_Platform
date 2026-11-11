@@ -39,13 +39,26 @@ export const PLAIN_ON_RUNNERS_MESSAGE = "Describing a test in your own words is 
 /** The dispatch worker is not alive (it starts with the API process): a run started now would wait and never start. */
 export const DISPATCH_DOWN_MESSAGE = "Runs cannot start right now: the part of this platform that hands runs to runners is not running. Try again in a minute. If it stays like this, tell the platform's administrator.";
 /** No runner this project may use is online (the job gate's answer in this mode). */
-export const NO_RUNNER_MESSAGE = "No runner is online for this project, and tests run only on runners here. Start the runner on your computer, or add one on the Runners page.";
+/** Round 45: one runner per person, set up in Settings, used for every run of theirs. Where the refusals below send people. */
+export const RUNNER_SETTINGS_LINK = "#/settings#runner";
+export const RUNNER_NOT_SET_UP = "Set up your runner in Settings to run tests.";
+export const RUNNER_OFFLINE = "Your runner is offline. Start it on your computer, then try again.";
+/** A run started with the server's shared access key: nobody's, so no runner may take it (a person's own API token is that person). */
+export const KEY_HAS_NO_RUNNER = "Runs started with the server's access key have no owner. Use your own API token, so the run goes to your runner.";
+export const SCHEDULE_HAS_NO_OWNER = "This schedule has no owner. Open it and save it again to run it on your computer.";
+export const TRIGGER_HAS_NO_OWNER = "This deploy trigger has no owner. Make a new deploy trigger token, so its runs go to your computer.";
+/** A team runner, Crowd4Test's shared runner or a project's runner token (all removed in round 45), at every runner route. */
+export const TEAM_RUNNER_REFUSED = "This runner was set up for a team or a project, and those runners are no longer used. Set up your own runner from Settings in AI Studio.";
+/** The typed refusal codes of a run that cannot start on its owner's runner (details.code), each linkable to Settings. */
+export type RunnerRefusalCode = "RUNNER_NOT_SET_UP" | "RUNNER_OFFLINE" | "RUNNER_CANNOT_RUN";
+export const runnerRefusal = (code: RunnerRefusalCode, message: string): HttpError => new HttpError(409, message, { code, link: RUNNER_SETTINGS_LINK });
+export const NO_RUNNER_MESSAGE = "Your runner is not online, and tests run only on runners here. Start the runner on your computer, or set it up in Settings.";
 /** PUT /api/projects/:id/runner with "platform". */
-export const PLATFORM_SETTING_REFUSED = "Tests run only on runners on this platform, so a project cannot be set to run on the server. Choose a runner, or leave it on any connected runner.";
+export const PLATFORM_SETTING_REFUSED = "Tests run only on runners on this platform, so a project cannot be set to run on the server. Each run goes to the runner of the person who starts it.";
 /** Saved sign-ins: checking or capturing one opens a browser. */
 export const SIGN_IN_BROWSER_REFUSED = "Checking or saving a sign-in in a browser is not available here: it would open a browser on the server, and this platform runs tests only on runners. The saved sign-in goes to the runner with the tests, and a test that finds it expired says so.";
 /** A recording or a phone session asked for on the server. */
-export const ON_SERVER_REFUSED = (what: "Recording" | "A phone session") => `${what} on the server is not available here: this platform runs tests only on runners. Choose a runner instead.`;
+export const ON_SERVER_REFUSED = (what: "Recording" | "A phone session") => `${what} on the server is not available here: this platform runs tests only on runners. Use your runner instead.`;
 /** A security assessment opens a browser and sends its scans from the server. */
 export const ASSESSMENT_REFUSED = "Security assessments are not available here yet: they explore the application with a browser on the server and send their checks from it, and this platform runs tests only on runners.";
 /** What the last-line guard throws: a path that should have gone to a runner tried to run here. */

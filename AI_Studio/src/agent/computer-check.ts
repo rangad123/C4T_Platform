@@ -91,7 +91,7 @@ export function filesLine(kitVersion: string | undefined, read: (name: string) =
         else parts.set(name, `${name}\0${createHash("sha256").update(bytes).digest("hex")}\n`);
     }
     const lock = read(BUNDLE_LOCK_FILE);
-    const again = "Unzip the whole download again, or download a new runner from the platform (Settings, Runners, Add a runner).";
+    const again = "Unzip the whole download again, or download a new runner from the platform (Settings, Your runner).";
     if (missing.length) return line("files", "missing", `Runner files: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing`, again);
     const want = /\+([0-9a-f]{10})$/.exec(kitVersion ?? "")?.[1];
     if (!want) return line("files", "optional", "Runner files are all here; this download has no checksum to compare them with", "Nothing to do unless the runner behaves oddly; then download a new runner from the platform.");
@@ -205,7 +205,9 @@ export function tokenLine(a: TokenAnswer): CheckLine {
     if ("skipped" in a) return line("token", "optional", "The token was not checked, because the platform could not be reached", "Fix the platform line first, then run this check again.");
     if ("error" in a) return line("token", "missing", a.error.replace(/\.$/, ""), "Check the network, then run this check again.");
     if (a.status >= 200 && a.status < 300) return line("token", "ok", `The platform accepts this runner's token${a.project ? ` (project "${a.project}")` : ""}; the token is not shown`);
-    if ((a.status === 404 || a.status === 401) && /token/i.test(a.sentence ?? "")) return line("token", "missing", "The platform does not accept this runner's token: it was revoked, or the project was deleted", "Download a new runner from the platform (Settings, Runners, Add a runner).");
+    // Round 45: a team or project credential is refused with 401 and the platform's own sentence (set up your own runner); that is shown.
+    if (a.status === 401 && a.sentence && !/token/i.test(a.sentence)) return line("token", "missing", `The platform does not accept this runner: ${a.sentence.replace(/\.$/, "")}`, "Set up your runner from the platform (Settings, Your runner).");
+    if ((a.status === 404 || a.status === 401) && /token/i.test(a.sentence ?? "")) return line("token", "missing", "The platform does not accept this runner's credential: it was removed, or another computer was set up in its place", "Set up your runner again from the platform (Settings, Your runner).");
     if (a.status === 429) return line("token", "optional", "The platform asked to slow down, so the token was not checked", "Run this check again in a minute.");
     return line("token", "optional", `The platform cannot check the token without connecting (it answered HTTP ${a.status}; it may be an older version)`, "Start the runner: it says plainly when the token is not accepted.");
 }
@@ -483,7 +485,7 @@ export async function checkComputer(input: { argv: string[]; env: NodeJS.Process
     else {
         const host = new URL(cfg.baseUrl).host;
         header = `Check this computer for the AI Testing Platform runner "${cfg.name}" (platform ${host}).`;
-        const tokenFrom = cfg.tokenSource === "store" ? (cfg.token ? "kept in this computer's credential store" : cfg.enroll ? "not made yet: the runner trades its enrollment code when it starts" : "missing: add this computer on the Runners page") : cfg.tokenSource === "file" ? `read from ${path.basename(env.AITP_AGENT_TOKEN_FILE ?? "the token file")}` : cfg.tokenSource === "flag" ? "given with --token" : "from AITP_AGENT_TOKEN";
+        const tokenFrom = cfg.tokenSource === "store" ? (cfg.token ? "kept in this computer's credential store" : cfg.enroll ? "not made yet: the runner trades its enrollment code when it starts" : "missing: add this computer in Settings, Your runner") : cfg.tokenSource === "file" ? `read from ${path.basename(env.AITP_AGENT_TOKEN_FILE ?? "the token file")}` : cfg.tokenSource === "flag" ? "given with --token" : "from AITP_AGENT_TOKEN";
         lines.push(line("settings", "ok", `Settings: platform ${host}, runner name "${cfg.name}", token ${tokenFrom} (not shown)`, undefined, kit.kit === false ? ["Not started from a download (no runner.json next to the runner): the settings come from the command line and the environment."] : undefined));
     }
     const workDir = cfg?.workDir ?? path.join(input.kitDir, "work");
@@ -507,7 +509,7 @@ export async function checkComputer(input: { argv: string[]; env: NodeJS.Process
         lines.push(platformLine(host, platform));
         const reached = platform.reached && platform.status < 300;
         if (platform.reached) serverDate = platform.date;
-        if (!cfg.token) lines.push(line("token", cfg.enroll ? "optional" : "missing", cfg.enroll ? "This runner has no credential yet; it trades its enrollment code when it starts" : "This runner has no credential and no enrollment code", cfg.enroll ? "Start the runner within 30 minutes of the download, or make a new code on the Runners page." : "Add this computer on the Runners page."));
+        if (!cfg.token) lines.push(line("token", cfg.enroll ? "optional" : "missing", cfg.enroll ? "This runner has no credential yet; it trades its enrollment code when it starts" : "This runner has no credential and no enrollment code", cfg.enroll ? "Start the runner within 30 minutes of the download, or make a new code in Settings, Your runner." : "Add this computer in Settings, Your runner."));
         else lines.push(tokenLine(reached ? await askToken(d, cfg, s, host) : { skipped: true }));
     }
 

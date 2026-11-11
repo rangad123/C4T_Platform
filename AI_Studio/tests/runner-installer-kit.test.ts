@@ -1,10 +1,13 @@
 /**
- * The installer download, platform side (no browser, no ports: requests go through server.inject): the info route says which installers this
- * server has, the download route makes the installer zip (Windows setup program, Mac app) or falls back to the plain files kit with a plain
- * note, the kind is validated, modes and README are right, and neither the server's secrets nor the token (outside runner.token) are inside.
+ * The runner download from Settings (round 45), platform side (no browser, no ports: requests go through server.inject). One download per
+ * system, nothing to choose: Windows gets the setup program, a Mac the app, Linux the plain files; a system whose installer is not built
+ * here gets the plain files with a plain note. Who may download (a person who may run tests, the open server; never the shared access
+ * key), what is inside (runner.json without a name, so the runner takes the computer's name; runner.enroll with this person's one-time
+ * code, owner-bound), the info answer, the rate limit, and that neither the server's secrets nor the code (outside runner.enroll) are inside.
  *
  * The installers here are stand-ins (a few bytes named like the real files): what is tested is the platform's handling of whatever
  * `npm run build:installer` produced, not the C# program, which tests/installer-win-unit.test.ts and tests/installer-win.test.ts cover.
+ * The complete builds (own Node.js) are covered by tests/runner-complete-kit-unit.test.ts.
  */
 import fs from "node:fs";
 import { createHash } from "node:crypto";
@@ -14,8 +17,10 @@ import { fileURLToPath } from "node:url";
 import { unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
+import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
-import { CustomScriptStore } from "../src/platform/custom-script-store.js";
+import { CANNOT_DOWNLOAD, KEY_CANNOT_DOWNLOAD } from "../src/platform/routes/runner-kits.js";
 import { buildServer } from "../src/platform/server.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
@@ -25,7 +30,7 @@ import { writeManifest } from "../scripts/build-installer.mjs";
 const ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const API_KEY = "inst-kit-admin-key-3f9a1c";
 const SENTINELS = { ANTHROPIC_API_KEY: "INSTLEAK-anthropic-8c21f0a4", SECRET_BOX_KEY: "INSTLEAK-box-4be7d913", OPENAI_API_KEY: "INSTLEAK-openai-71d0c2e8" };
-const ENV_KEYS = ["RUNNER_KIT_DIR", "RUNNER_INSTALLER_DIR", "RUNNER_KIT_RATE_PER_MINUTE", "AGENT_MAX_TOKENS", ...Object.keys(SENTINELS)];
+const ENV_KEYS = ["RUNNER_KIT_DIR", "RUNNER_INSTALLER_DIR", "RUNNER_COMPLETE_DIR", "RUNNER_KIT_RATE_PER_MINUTE", ...Object.keys(SENTINELS)];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 const APP = "AI Testing Runner.app";
 
@@ -33,18 +38,23 @@ let tmp: string;
 let platform: Platform;
 let server: Awaited<ReturnType<typeof buildServer>>;
 let instDir: string;
+/** People with their own API tokens (Bearer): an owner (may run tests everywhere), and a viewer (may run tests nowhere). */
+const people: Record<"maya" | "vic" | "rita", { id: string; token: string }> = {} as never;
 const logged: string[] = [];
 
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
-const call = async (method: "GET" | "POST", url: string, body?: unknown) => {
-    const res = await server.inject({ method, url, headers: { "x-api-key": API_KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, ...(body !== undefined ? { payload: JSON.stringify(body) } : {}) });
+type Answer = { status: number; headers: Record<string, string>; buf: Buffer; text: string; body: any };
+async function callOn(app: Awaited<ReturnType<typeof buildServer>>, headers: Record<string, string>, method: "GET" | "POST", url: string, body?: unknown): Promise<Answer> {
+    const res = await app.inject({ method, url, headers: { ...headers, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, ...(body !== undefined ? { payload: JSON.stringify(body) } : {}) });
     const buf = res.rawPayload;
     const text = buf.toString("utf8");
-    return { status: res.statusCode, headers: res.headers, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; headers: Record<string, string>; buf: Buffer; text: string; body: any };
-};
-const newProject = async (name: string) => (await call("POST", "/api/projects", { name })).body.id as string;
-const download = (projectId: string, name: string, platformName: "windows" | "unix", kind?: string) => call("POST", `/api/projects/${projectId}/runner-kits`, { name, platform: platformName, ...(kind ? { kind } : {}) });
+    return { status: res.statusCode, headers: res.headers as Record<string, string>, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined };
+}
+const as = (who: keyof typeof people, method: "GET" | "POST", url: string, body?: unknown) => callOn(server, { authorization: `Bearer ${people[who].token}` }, method, url, body);
+const asKey = (method: "GET" | "POST", url: string, body?: unknown) => callOn(server, { "x-api-key": API_KEY }, method, url, body);
+const download = (who: keyof typeof people, os: "windows" | "mac" | "linux", arch: "x64" | "arm64" = "x64") => as(who, "POST", "/api/me/runner/download", { os, arch });
+const enrollment = (id: string) => platform.db.get<{ kind: string; owner_id: string | null; project_id: string | null; label: string | null; used_ms: number | null }>("SELECT kind, owner_id, project_id, label, used_ms FROM runner_enrollments WHERE id = ?", id);
 
 /** Unix permission bits of each entry from the zip's central directory (fflate's unzip does not expose them). */
 function modes(zip: Uint8Array): Record<string, number> {
@@ -79,13 +89,14 @@ function writeStandIns(dir: string): void {
 
 beforeAll(async () => {
     for (const [k, v] of Object.entries(SENTINELS)) process.env[k] = v;
-    // Several downloads for one project here; the one-runner default is covered in runner-limit-unit.test.ts.
-    process.env.AGENT_MAX_TOKENS = "25";
-    delete process.env.RUNNER_KIT_RATE_PER_MINUTE;
+    // Several downloads per person here; the limit itself is checked below with its own number.
+    process.env.RUNNER_KIT_RATE_PER_MINUTE = "100";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-inst-kit-"));
     const bundleDir = path.join(tmp, "dist-runner");
     await buildRunner({ outDir: bundleDir });
     process.env.RUNNER_KIT_DIR = bundleDir;
+    // No complete build here: the plain installer and files downloads are what this file checks.
+    process.env.RUNNER_COMPLETE_DIR = path.join(tmp, "no-complete-builds");
     instDir = path.join(tmp, "dist-installer");
     writeStandIns(instDir);
     process.env.RUNNER_INSTALLER_DIR = instDir;
@@ -102,6 +113,11 @@ beforeAll(async () => {
         }
     });
     await server.ready();
+    const users = accessControlOf(server).users;
+    for (const [key, role] of [["maya", "owner"], ["rita", "editor"], ["vic", "viewer"]] as const) {
+        const person = users.create({ email: `${key}@people.example`, name: key === "maya" ? "Maya" : key === "rita" ? "Rita" : "Vic", role });
+        people[key] = { id: person.id, token: users.createToken(person.id, { name: "download test", role }).token };
+    }
 }, 120_000);
 
 afterAll(async () => {
@@ -114,53 +130,154 @@ afterAll(async () => {
     fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe("info", () => {
-    it("says which installers this server has", async () => {
-        const p = await newProject("Info shop");
-        const info = (await call("GET", `/api/projects/${p}/runner-kits/info`)).body;
-        expect(info.available).toBe(true);
-        expect(info.installer).toEqual({ windows: true, mac: true, reasons: {} });
+describe("who may download", () => {
+    it("a person who may run tests gets their own one-time code; the access key and a person who may not run tests are refused", async () => {
+        const r = await download("maya", "linux");
+        expect(r.status, r.text.slice(0, 200)).toBe(200);
+        const e = enrollment(r.headers["x-runner-enrollment-id"]!);
+        expect(e).toMatchObject({ kind: "personal", owner_id: people.maya.id, project_id: null, label: null, used_ms: null });
+        expect(Date.parse(r.headers["x-runner-enrollment-expires"]!)).toBeGreaterThan(Date.now());
+        // An editor may run tests: the same.
+        const editor = await download("rita", "windows");
+        expect(editor.status).toBe(200);
+        expect(enrollment(editor.headers["x-runner-enrollment-id"]!)).toMatchObject({ kind: "personal", owner_id: people.rita.id });
+
+        const key = await asKey("POST", "/api/me/runner/download", { os: "windows", arch: "x64" });
+        expect(key.status).toBe(403);
+        expect(key.body.error ?? key.body.message).toBe(KEY_CANNOT_DOWNLOAD);
+        const viewer = await download("vic", "windows");
+        expect(viewer.status).toBe(403);
+        expect(viewer.body.error ?? viewer.body.message).toBe(CANNOT_DOWNLOAD);
+        const nobody = await callOn(server, {}, "POST", "/api/me/runner/download", { os: "windows", arch: "x64" });
+        expect(nobody.status).toBe(401);
+        // A refused download made no code.
+        expect(Number(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments WHERE owner_id IS NULL OR owner_id = ?", people.vic.id)?.n)).toBe(0);
     });
 
-    it("says why, in plain words, when an installer is missing or damaged; the plain files kit stays available", async () => {
-        const p = await newProject("Info missing");
+    it("the open server (no access key, nobody signed up) downloads as its one person", async () => {
+        const dataDir = path.join(tmp, "open-data");
+        const open = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: "6591", PUBLIC_URL: "http://127.0.0.1:6591", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0" }));
+        const app = await buildServer(open);
+        try {
+            await app.ready();
+            const info = await callOn(app, {}, "GET", "/api/me/runner/download/info");
+            expect(info.body).toMatchObject({ available: true, mayDownload: true });
+            const r = await callOn(app, {}, "POST", "/api/me/runner/download", { os: "mac", arch: "arm64" });
+            expect(r.status, r.text.slice(0, 200)).toBe(200);
+            expect(open.db.get("SELECT kind, owner_id FROM runner_enrollments WHERE id = ?", r.headers["x-runner-enrollment-id"])).toEqual({ kind: "personal", owner_id: OPEN_OWNER_ID });
+        } finally {
+            await app.close();
+            open.db.close();
+        }
+    });
+
+    it("checks what is asked for: a system and a processor, nothing else", async () => {
+        for (const body of [{}, { os: "windows" }, { os: "unix", arch: "x64" }, { os: "windows", arch: "ia32" }, { os: "windows", arch: "x64", name: "Office PC" }, { os: "windows", arch: "x64", kind: "files" }, { os: "linux", arch: "x64", complete: true }]) {
+            const r = await as("maya", "POST", "/api/me/runner/download", body);
+            expect(r.status, JSON.stringify(body)).toBe(400);
+            expect(String(r.body.error ?? r.body.message ?? "").length).toBeGreaterThan(5);
+        }
+    });
+
+    it("is rate limited per person", async () => {
+        const saved = process.env.RUNNER_KIT_RATE_PER_MINUTE;
+        process.env.RUNNER_KIT_RATE_PER_MINUTE = "5";
+        const limited = bootstrap(loadConfig({ DATA_DIR: path.join(tmp, "limit-data"), API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: "6592", PUBLIC_URL: "https://tests.example.com", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0" }));
+        const app = await buildServer(limited);
+        try {
+            await app.ready();
+            const u = accessControlOf(app).users;
+            const a = u.create({ email: "a@people.example", name: "A", role: "owner" });
+            const b = u.create({ email: "b@people.example", name: "B", role: "owner" });
+            const ta = u.createToken(a.id, { name: "a", role: "owner" }).token;
+            const tb = u.createToken(b.id, { name: "b", role: "owner" }).token;
+            const statuses: number[] = [];
+            for (let i = 0; i < 7; i++) statuses.push((await callOn(app, { authorization: `Bearer ${ta}` }, "POST", "/api/me/runner/download", { os: "linux", arch: "x64" })).status);
+            expect(statuses).toEqual([200, 200, 200, 200, 200, 429, 429]);
+            // Another person is not affected.
+            expect((await callOn(app, { authorization: `Bearer ${tb}` }, "POST", "/api/me/runner/download", { os: "linux", arch: "x64" })).status).toBe(200);
+            expect(Number(limited.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments WHERE owner_id = ?", a.id)?.n)).toBe(5);
+        } finally {
+            process.env.RUNNER_KIT_RATE_PER_MINUTE = saved;
+            await app.close();
+            limited.db.close();
+        }
+    });
+});
+
+describe("info", () => {
+    it("says, per system and processor, what the download is here, and whether this person may download", async () => {
+        const info = (await as("maya", "GET", "/api/me/runner/download/info")).body;
+        expect(info).toMatchObject({ available: true, platformUrl: "https://tests.example.com", urlOk: true, nodeMin: 24, mayDownload: true });
+        expect(info.kitVersion).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{10}$/);
+        const kinds = Object.fromEntries((info.systems as Array<{ os: string; arch: string; kind: string; ownNode: boolean; available: boolean }>).map((s) => [`${s.os}-${s.arch}`, [s.kind, s.ownNode, s.available]]));
+        expect(kinds).toEqual({
+            "windows-x64": ["installer", false, true],
+            "windows-arm64": ["installer", false, true],
+            "mac-x64": ["installer", false, true],
+            "mac-arm64": ["installer", false, true],
+            "linux-x64": ["files", false, true],
+            "linux-arm64": ["files", false, true],
+        });
+        const viewer = (await as("vic", "GET", "/api/me/runner/download/info")).body;
+        expect(viewer).toMatchObject({ mayDownload: false, refusal: CANNOT_DOWNLOAD });
+        expect((await asKey("GET", "/api/me/runner/download/info")).body).toMatchObject({ mayDownload: false, refusal: KEY_CANNOT_DOWNLOAD });
+    });
+
+    it("says why, in plain words, when an installer is missing or damaged; that system then gets the plain files", async () => {
         const saved = process.env.RUNNER_INSTALLER_DIR;
         try {
             process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "nothing-here");
-            const none = (await call("GET", `/api/projects/${p}/runner-kits/info`)).body;
-            expect(none.available).toBe(true);
-            expect(none.installer.windows).toBe(false);
-            expect(none.installer.mac).toBe(false);
-            expect(none.installer.reasons.windows).toMatch(/Windows installer has not been built[\s\S]*npm run build:installer[\s\S]*RUNNER_INSTALLER_DIR/);
-            expect(none.installer.reasons.mac).toMatch(/Mac installer has not been built/);
+            const none = (await as("maya", "GET", "/api/me/runner/download/info")).body;
+            const win = none.systems.find((s: { os: string; arch: string }) => s.os === "windows" && s.arch === "x64");
+            expect(win).toMatchObject({ kind: "files", available: true });
+            expect(win.note).toMatch(/Windows installer has not been built[\s\S]*npm run build:installer[\s\S]*The plain files were sent instead\./);
+            expect(none.systems.find((s: { os: string }) => s.os === "mac").note).toMatch(/Mac installer has not been built/);
             // A Mac app with one file edited after the build is refused, and the Windows program is still offered.
             const copy = path.join(tmp, "tampered");
             fs.cpSync(instDir, copy, { recursive: true });
             fs.appendFileSync(path.join(copy, "mac", APP, "Contents", "Info.plist"), "tampered");
             process.env.RUNNER_INSTALLER_DIR = copy;
-            const mixed = (await call("GET", `/api/projects/${p}/runner-kits/info`)).body;
-            expect(mixed.installer.windows).toBe(true);
-            expect(mixed.installer.mac).toBe(false);
-            expect(mixed.installer.reasons.mac).toMatch(/damaged/);
+            const mixed = (await as("maya", "GET", "/api/me/runner/download/info")).body;
+            expect(mixed.systems.find((s: { os: string }) => s.os === "windows").kind).toBe("installer");
+            const mac = mixed.systems.find((s: { os: string }) => s.os === "mac");
+            expect(mac.kind).toBe("files");
+            expect(mac.note).toMatch(/damaged/);
         } finally {
             process.env.RUNNER_INSTALLER_DIR = saved;
         }
     });
+
+    it("before the runner is built: not available, and a download is a plain 503 that makes no code", async () => {
+        const saved = process.env.RUNNER_KIT_DIR;
+        try {
+            process.env.RUNNER_KIT_DIR = path.join(tmp, "not-built");
+            const info = (await as("maya", "GET", "/api/me/runner/download/info")).body;
+            expect(info).toMatchObject({ available: false, reason: "The runner kit has not been built on this server. Run `npm run build:runner`." });
+            const before = Number(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments")?.n);
+            const r = await download("maya", "windows");
+            expect(r.status).toBe(503);
+            expect(r.body.error ?? r.body.message).toContain("npm run build:runner");
+            expect(Number(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments")?.n)).toBe(before);
+        } finally {
+            process.env.RUNNER_KIT_DIR = saved;
+        }
+    });
 });
 
-describe("the Windows installer zip", () => {
-    it("is the default for Windows: the program, the runner bundle, runner.json, runner.token and a README, with the right modes", async () => {
-        const p = await newProject("Maya's Shop");
-        const r = await download(p, "Office PC", "windows");
+describe("the Windows download", () => {
+    it("is the installer: the program, the runner bundle, runner.json without a name, runner.enroll and a README, with the right modes", async () => {
+        const r = await download("maya", "windows");
         expect(r.status, r.text).toBe(200);
         expect(r.headers["content-type"]).toBe("application/zip");
-        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-maya-s-shop-windows-setup.zip"');
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-windows-setup.zip"');
         expect(r.headers["x-runner-kit-kind"]).toBe("installer");
         expect(r.headers["x-runner-kit-note"]).toBeUndefined();
+        expect(r.headers["x-runner-kit-target"]).toBeUndefined();
         expect(r.headers["cache-control"]).toBe("no-store");
-        expect(r.headers["x-runner-enrollment-id"]).toMatch(/\S/);
+        expect(r.headers["access-control-expose-headers"]).toContain("x-runner-enrollment-id");
         const z = unzipSync(new Uint8Array(r.buf));
-        const dir = "runner-maya-s-shop-windows-setup";
+        const dir = "runner-my-computer-windows-setup";
         expect(Object.keys(z).filter((n) => !n.endsWith("/package-lock.json")).sort()).toEqual(
             // check-computer.* (package-lock.json comes with newer bundles): "Check this computer" in every download (docs/features/runner-check.md).
             ["AITestingRunnerSetup.exe", "LICENSES.txt", "README.txt", "check-computer.cmd", "check-computer.command", "check-computer.sh", "package.json", "record-child.mjs", "runner.enroll", "runner.json", "runner.mjs", "task-child.mjs"].map((n) => `${dir}/${n}`),
@@ -171,57 +288,56 @@ describe("the Windows installer zip", () => {
         expect(m[`${dir}/runner.mjs`]).toBe(0o644);
         expect(Buffer.from(z[`${dir}/AITestingRunnerSetup.exe`]!).toString()).toBe("MZ stand-in program\n");
         const cfg = JSON.parse(Buffer.from(z[`${dir}/runner.json`]!).toString());
-        expect(cfg).toMatchObject({ url: "https://tests.example.com", name: "Office PC" });
+        // No name: the runner is named after the computer (the person can rename it in Settings).
+        expect(Object.keys(cfg).sort()).toEqual(["kitVersion", "url"]);
+        expect(cfg.url).toBe("https://tests.example.com");
         expect(cfg.kitVersion).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{10}$/);
-        // The same prebuilt runner bytes as the files kit.
-        const files = await download(p, "Office PC 2", "windows", "files");
+        // The same prebuilt runner bytes as the plain files download.
+        const files = await download("maya", "linux");
         const fz = unzipSync(new Uint8Array(files.buf));
-        for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) expect(Buffer.from(z[`${dir}/${n}`]!).equals(Buffer.from(fz[`runner-maya-s-shop-windows/${n}`]!)), n).toBe(true);
+        for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) expect(Buffer.from(z[`${dir}/${n}`]!).equals(Buffer.from(fz[`runner-my-computer-unix/${n}`]!)), n).toBe(true);
     });
 
-    it("has a README that says, in plain words, what to click, what the SmartScreen prompt means and how to remove it", async () => {
-        const p = await newProject("Readme shop");
-        const r = await download(p, "Maya's laptop", "windows", "installer");
+    it("has a README that says, in plain words, what to click, what the SmartScreen prompt means, where the runner shows and how to remove it", async () => {
+        const r = await download("maya", "windows", "arm64");
         const z = unzipSync(new Uint8Array(r.buf));
-        const readme = Buffer.from(z["runner-readme-shop-windows-setup/README.txt"]!).toString("utf8");
+        const readme = Buffer.from(z["runner-my-computer-windows-setup/README.txt"]!).toString("utf8");
         expect(readme).toContain("\r\n");
         expect(readme.replace(/\r\n/g, "\n")).not.toMatch(/\r/);
-        for (const needle of ["AITestingRunnerSetup.exe", "Windows protected your PC", "More info", "Run anyway", "not signed", "only downloads what is missing", "Node.js", "does not need administrator rights", "--uninstall", "revoke", 'runner "Maya\'s laptop"']) expect(readme, needle).toContain(needle);
-        expect(readme).not.toMatch(/start-runner/);
+        expect(readme.split("\r\n")[0]).toBe("AI Testing Platform runner");
+        for (const needle of ["AITestingRunnerSetup.exe", "Windows protected your PC", "More info", "Run anyway", "not signed", "only downloads what is missing", "Node.js", "does not need administrator rights", "--uninstall", "Settings, Your runner", "Remove this computer", "each person has one runner"]) expect(readme, needle).toContain(needle);
+        for (const gone of ["Project:", "Runners", "revoke its token", "start-runner"]) expect(readme, gone).not.toContain(gone);
         expect(readme).not.toMatch(/seamless|leverage|unlock|empower/i);
     });
 
-    it("carries a single-use code in runner.enroll only (round 39: no download carries a runner credential)", async () => {
-        const p = await newProject("Token shop");
-        const r = await download(p, "Token PC", "windows");
+    it("carries this person's single-use code in runner.enroll only, never a runner credential, and logs no code", async () => {
+        const r = await download("maya", "windows");
         const z = unzipSync(new Uint8Array(r.buf));
-        const token = Buffer.from(z["runner-token-shop-windows-setup/runner.enroll"]!).toString("utf8").trim();
-        expect(token).toMatch(/^aite_/);
-        // No runner exists until the code is traded.
-        expect((await call("GET", `/api/projects/${p}/agent-tokens`)).body).toEqual([]);
+        const code = Buffer.from(z["runner-my-computer-windows-setup/runner.enroll"]!).toString("utf8").trim();
+        expect(code).toMatch(/^aite_/);
         for (const [name, bytes] of Object.entries(z)) {
-            if (!name.endsWith("runner.enroll")) expect(Buffer.from(bytes).includes(token), name).toBe(false);
+            if (!name.endsWith("runner.enroll")) expect(Buffer.from(bytes).includes(code), name).toBe(false);
             expect(/aitg_[A-Za-z0-9_-]{20,}/.test(Buffer.from(bytes).toString("latin1")), name).toBe(false);
         }
-        expect(logged.join("\n").includes(token)).toBe(false);
-        // The download is recorded without the token, and says it was the installer.
-        const audit = new CustomScriptStore(platform.db).auditTrail(p).filter((r) => r.action === "runner-kit-downloaded");
-        expect(audit.length).toBe(1);
-        expect(audit[0]!.detail).toContain("Token PC");
-        expect(audit[0]!.detail).toContain("installer");
-        expect(audit[0]!.detail?.includes(token)).toBe(false);
+        expect(logged.join("\n").includes(code)).toBe(false);
+        expect(logged.some((l) => l.includes("runner-downloaded"))).toBe(true);
+        // The plaintext is never stored: only its hash and the last four characters.
+        expect(JSON.stringify(platform.db.all("SELECT * FROM runner_enrollments"))).not.toContain(code);
+        // The person's Activity says a runner was downloaded, without the code.
+        const rows = platform.db.all<{ action: string; detail: string }>("SELECT action, detail FROM activity WHERE action = 'runner-download'");
+        expect(rows.length).toBeGreaterThan(0);
+        expect(JSON.stringify(rows)).not.toContain(code);
     });
 });
 
-describe("the Mac installer zip", () => {
-    it("holds the .app with the modes the build recorded, the runner files and a Mac README", async () => {
-        const p = await newProject("Mac shop");
-        const r = await download(p, "Mac mini", "unix", "installer");
+describe("the Mac download", () => {
+    it("is the app, with the modes the build recorded, the runner files and a Mac README", async () => {
+        const r = await download("maya", "mac", "arm64");
         expect(r.status, r.text).toBe(200);
-        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-mac-shop-mac-setup.zip"');
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-mac-setup.zip"');
         expect(r.headers["x-runner-kit-kind"]).toBe("installer");
         const z = unzipSync(new Uint8Array(r.buf));
-        const dir = "runner-mac-shop-mac-setup";
+        const dir = "runner-my-computer-mac-setup";
         for (const n of [`${APP}/Contents/Info.plist`, `${APP}/Contents/MacOS/AITestingRunner`, `${APP}/Contents/Resources/runner-setup.sh`, "runner.mjs", "runner.json", "runner.enroll", "README.txt"]) expect(z[`${dir}/${n}`], n).toBeDefined();
         const m = modes(new Uint8Array(r.buf));
         expect(m[`${dir}/${APP}/Contents/MacOS/AITestingRunner`]).toBe(0o755);
@@ -230,73 +346,46 @@ describe("the Mac installer zip", () => {
         expect(m[`${dir}/runner.enroll`]).toBe(0o600);
         const readme = Buffer.from(z[`${dir}/README.txt`]!).toString("utf8");
         expect(readme).not.toContain("\r");
-        for (const needle of ["could not verify the app", "Open Anyway", "xattr -dr com.apple.quarantine", "AI Testing Runner"]) expect(readme, needle).toContain(needle);
+        for (const needle of ["could not verify the app", "Open Anyway", "xattr -dr com.apple.quarantine", "AI Testing Runner", "Settings, Your runner"]) expect(readme, needle).toContain(needle);
     });
 });
 
-describe("kind", () => {
-    it("defaults to the plain files for a Mac or Linux computer, and 'files' keeps today's zip for Windows", async () => {
-        const p = await newProject("Kinds shop");
-        const unix = await download(p, "Linux box", "unix");
-        expect(unix.headers["x-runner-kit-kind"]).toBe("files");
-        expect(unix.headers["content-disposition"]).toBe('attachment; filename="runner-kinds-shop-unix.zip"');
-        expect(Object.keys(unzipSync(new Uint8Array(unix.buf)))).toContain("runner-kinds-shop-unix/start-runner.sh");
-        const win = await download(p, "Old way", "windows", "files");
-        expect(win.headers["x-runner-kit-kind"]).toBe("files");
-        expect(win.headers["content-disposition"]).toBe('attachment; filename="runner-kinds-shop-windows.zip"');
-        expect(Object.keys(unzipSync(new Uint8Array(win.buf)))).toEqual(expect.arrayContaining(["runner-kinds-shop-windows/start-runner.cmd", "runner-kinds-shop-windows/start-runner.sh"]));
+describe("the Linux download, and the fallback", () => {
+    it("Linux gets the plain files with the start scripts", async () => {
+        const r = await download("maya", "linux", "arm64");
+        expect(r.headers["x-runner-kit-kind"]).toBe("files");
+        expect(r.headers["x-runner-kit-note"]).toBeUndefined();
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-unix.zip"');
+        const names = Object.keys(unzipSync(new Uint8Array(r.buf)));
+        expect(names).toEqual(expect.arrayContaining(["runner-my-computer-unix/start-runner.sh", "runner-my-computer-unix/runner.enroll", "runner-my-computer-unix/README.txt"]));
+        expect(names.some((n) => n.includes("AITestingRunnerSetup") || n.includes(APP))).toBe(false);
     });
 
-    it("rejects a kind that does not exist, with a plain message", async () => {
-        const p = await newProject("Bad kind shop");
-        for (const kind of ["dmg", "exe", "", 5, null]) {
-            const r = await call("POST", `/api/projects/${p}/runner-kits`, { name: "x", platform: "windows", kind });
-            expect(r.status, JSON.stringify(kind)).toBe(400);
-            expect(r.body.error).toMatch(/Choose installer or files|Invalid|expected/i);
-        }
-        expect((await call("GET", `/api/projects/${p}/agent-tokens`)).body).toEqual([]);
-    });
-
-    it("falls back to the plain files kit when the installer is not built, and says so (each download still makes its own code)", async () => {
-        const p = await newProject("Fallback shop");
+    it("Windows and Mac get the plain files when the installer is not built here, and the answer says so (each download makes its own code)", async () => {
         const saved = process.env.RUNNER_INSTALLER_DIR;
+        const before = Number(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments WHERE owner_id = ?", people.maya.id)?.n);
         try {
             process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "not-built");
-            for (const platformName of ["windows", "unix"] as const) {
-                const r = await download(p, `Fallback ${platformName}`, platformName, "installer");
+            for (const system of ["windows", "mac"] as const) {
+                const r = await download("maya", system);
                 expect(r.status, r.text).toBe(200);
                 expect(r.headers["x-runner-kit-kind"]).toBe("files");
-                expect(r.headers["x-runner-kit-note"]).toMatch(/has not been built[\s\S]*A plain files kit was made instead\./);
-                expect(r.headers["content-disposition"]).toContain(platformName === "windows" ? "-windows.zip" : "-unix.zip");
+                expect(r.headers["x-runner-kit-note"]).toMatch(/has not been built[\s\S]*The plain files were sent instead\./);
+                expect(r.headers["content-disposition"]).toContain(system === "windows" ? "-windows.zip" : "-unix.zip");
                 expect(Object.keys(unzipSync(new Uint8Array(r.buf))).some((n) => n.endsWith("start-runner.sh"))).toBe(true);
             }
-            // The default for Windows is the installer, so it falls back the same way.
-            const dflt = await download(p, "Fallback default", "windows");
-            expect(dflt.headers["x-runner-kit-kind"]).toBe("files");
-            expect(dflt.headers["x-runner-kit-note"]).toBeTruthy();
         } finally {
             process.env.RUNNER_INSTALLER_DIR = saved;
         }
-        // Each download made its own single-use code (round 39); no runner exists until one is traded.
-        expect(Number(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments WHERE project_id = ?", p)?.n)).toBe(3);
+        expect(Number(platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runner_enrollments WHERE owner_id = ?", people.maya.id)?.n)).toBe(before + 2);
     });
 });
 
 describe("secrets", () => {
-    it("never put the server's secrets, paths or data in an installer zip", async () => {
-        const secrets: string[] = [...Object.values(SENTINELS)];
-        const dotenv = path.join(ROOT, ".env");
-        if (fs.existsSync(dotenv)) {
-            for (const line of fs.readFileSync(dotenv, "utf8").split(/\r?\n/)) {
-                const m = /^\s*([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD)[A-Z0-9_]*)\s*=\s*(.*)$/.exec(line);
-                const value = m?.[2]?.replace(/^["']|["']$/g, "").trim();
-                if (value && value.length >= 12 && /[A-Za-z]/.test(value) && !/^(true|false|https?:\/\/)/.test(value)) secrets.push(value);
-            }
-        }
-        const forbidden = [...secrets, API_KEY, "platform.db", ROOT, ROOT.replaceAll("\\", "/"), tmp, tmp.replaceAll("\\", "/")];
-        const p = await newProject("Leak shop");
-        for (const [platformName, kind] of [["windows", "installer"], ["unix", "installer"], ["windows", "files"]] as const) {
-            const r = await download(p, `Leak ${platformName} ${kind}`, platformName, kind);
+    it("never put the server's secrets, paths or data in a download", async () => {
+        const forbidden = [...Object.values(SENTINELS), API_KEY, people.maya.token, "platform.db", ROOT, ROOT.replaceAll("\\", "/"), tmp, tmp.replaceAll("\\", "/")];
+        for (const system of ["windows", "mac", "linux"] as const) {
+            const r = await download("maya", system);
             expect(r.status).toBe(200);
             for (const [name, bytes] of Object.entries(unzipSync(new Uint8Array(r.buf)))) {
                 if (name.endsWith("runner.enroll")) continue;

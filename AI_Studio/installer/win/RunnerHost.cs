@@ -95,7 +95,7 @@ namespace AITestingRunner
                 if (code == StartFailed) { code = 1; break; }
                 if (code == 0) { Set(RunnerPhase.Stopped, "The runner stopped", 0); break; }
                 if (code == 2) { Set(RunnerPhase.NeedsAttention, "The runner could not read its settings. Check that you unzipped the whole kit, or download a new one from the platform.", 2); break; }
-                if (code == 3) { Set(RunnerPhase.AccessRemoved, "The platform no longer accepts this runner. It was removed, its one-time code was already used or has expired, or the project was deleted. Make a new download on the Runners page of the platform.", 3); break; }
+                if (code == 3) { Set(RunnerPhase.AccessRemoved, "The platform no longer accepts this runner. It was removed, another computer was set up in its place, or its one-time code was already used or has expired. Set up your runner again from Settings, Your runner in the platform.", 3); break; }
                 if (code == 4) { Set(RunnerPhase.NeedsAttention, "This runner and the platform are different versions. Download a new runner from the platform.", 4); break; }
                 if (code == 5) { Set(RunnerPhase.NeedsAttention, "The platform refused this runner. The log says why.", 5); break; }
                 // 75: the runner switched to a new version of itself (docs/features/runner-updates.md); start it again at once.
@@ -168,7 +168,7 @@ namespace AITestingRunner
         {
             AppendRunnerLog(line);
             if (line.IndexOf("Connected to the platform", StringComparison.Ordinal) >= 0)
-                Set(RunnerPhase.Connected, "Connected to " + Util.Hostname(platformUrl) + " as " + runnerName, 0);
+                Set(RunnerPhase.Connected, "Connected to " + Util.Hostname(platformUrl) + (string.IsNullOrEmpty(runnerName) ? "" : " as " + runnerName), 0);
             else
             {
                 Match m = Warn.Match(line);

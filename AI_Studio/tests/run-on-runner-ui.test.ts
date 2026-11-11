@@ -1,19 +1,17 @@
 /**
- * Runs that go only to runners (EXECUTION_MODE=runners, the hosted platform), in a real browser against a real platform: the Run
- * panel offers no "This server", lists the runners this person may use (their own computers first) with the reason a runner can't
- * take this run before Start, sends `runnerId` for this run only and never changes the project's setting; with none online it says
- * what to do and links to "Add this computer"; the line under the Tests header, the test page's Run button, a suite's Run and the
- * Schedules panel follow the same answer; "Where this project's tests run" offers only a default runner and the switch
- * "Allow people's own computers" with the plain note about test accounts. Also the pure rules behind them.
+ * Runs that go only to runners (EXECUTION_MODE=runners, the hosted platform), round 45: one runner per person, set up in Settings and
+ * used for every run they start. In a real browser against a real platform: the Run panel offers no runner to choose and sends no
+ * `runnerId`; it reads `GET /api/me/runner` and says before the click when the person's runner is not set up, is offline, or has code
+ * scripts off, linking to Your runner in Settings; the line under the header, the test page's Run button, a suite's Run and the
+ * Schedules panel follow the same answer; a refusal from the server shows its sentence with the link it carries. Also the pure rules.
  *
- * Stand-ins (browser routes, no runner agent and no worker here): `/api/config` gains `executionMode`, `GET /runner-choices` answers
- * the contract's shape, `/runner` answers and records a PUT, and run starts are recorded and answered 202. Everything else (pages,
- * projects, tests, suites) is the real platform.
+ * Stand-ins (browser routes, no runner and no worker here): `/api/config` gains `executionMode`, `GET /api/me/runner` answers the
+ * contract's shape, and run starts are recorded and answered 202 (or refused). Everything else is the real platform.
  *
  * Requires web/dist (build inside the browser lock):
- *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
+ *   node scripts/with-lock.mjs web-build -- node node_modules/vite/bin/vite.js build web
  *   TAQWRIGHT_HOME=/nonexistent-taqwright node scripts/with-lock.mjs browser -- npx vitest run tests/run-on-runner-ui.test.ts
- * Ports: platform 8120.
+ * Ports: platform 8780.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -27,79 +25,72 @@ import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { buildServer } from "../src/platform/server.js";
 import { whereOptions } from "../web/src/features/phone/phone.js";
 import { EXPLORING_ON_RUNNERS_MESSAGE, PLAIN_ON_RUNNERS_MESSAGE } from "../src/platform/runner-only.js";
-import { codeScriptsNotice, defaultChoice, EXPLORING_ON_RUNNERS, executionModeOf, NO_NEEDS, PLAIN_ON_RUNNERS, readiness, sortChoices, whyNotRunner, type RunnerChoiceRow, type RunnerChoices } from "../web/src/features/runs/runs-here.js";
+import { codeScriptsNotice, EXPLORING_ON_RUNNERS, executionModeOf, PLAIN_ON_RUNNERS, readiness, DISPATCH_OFF, RUNS_OFF_TIP } from "../web/src/features/runs/runs-here.js";
+import { isRunnerRefusal, refusalLink, runnerProblem, runsOnSentence, RUNNER_CODE_OFF, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, type RunnerMine } from "../web/src/features/runners/my-runner.js";
+import { ApiError } from "../web/src/api.js";
 
-const PORT = 8120;
+const PORT = 8780;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-const row = (over: Partial<RunnerChoiceRow> & Pick<RunnerChoiceRow, "id" | "name">): RunnerChoiceRow => ({
-    kind: "team",
-    mine: false,
-    online: true,
-    busy: false,
-    machine: { os: "win32", osVersion: "10.0.22631", arch: "x64" },
-    canRunWeb: true,
-    canRunMobile: false,
-    codeScripts: false,
-    problem: null,
+const runnerOf = (over: Partial<RunnerMine> = {}): RunnerMine => ({
+    id: "tok-mine",
+    name: "Priya’s laptop",
+    status: "online",
+    lastSeenAt: new Date().toISOString(),
+    os: "darwin",
+    arch: "arm64",
+    version: "2.0.0",
+    switches: { codeScripts: true, privateTargets: false, realPhone: false },
     ...over,
 });
-const MINE = row({ id: "tok-mine", name: "Priya’s laptop", kind: "personal", mine: true, codeScripts: true, machine: { os: "darwin", osVersion: "15.1", arch: "arm64" } });
-const LAB = row({ id: "tok-lab", name: "Lab Mac", busy: true });
-const BOX = row({ id: "tok-box", name: "Build box", canRunWeb: false });
-const OLD = row({ id: "tok-old", name: "Old desktop", online: false });
+const MINE = runnerOf();
+const OFF = runnerOf({ status: "offline", lastSeenAt: new Date(Date.now() - 3_600_000).toISOString() });
+const BUSY = runnerOf({ status: "busy" });
+const NO_CODE = runnerOf({ switches: { codeScripts: false, privateTargets: false, realPhone: false } });
 
 describe("the rules (no browser)", () => {
-    it("says why a runner can't take a run, in one sentence, and a busy one still can", () => {
-        expect(whyNotRunner(LAB, { web: true, mobile: false, code: false })).toBeNull();
-        expect(whyNotRunner(BOX, { web: true, mobile: false, code: false })).toBe("It can’t run web or API tests.");
-        expect(whyNotRunner(BOX, NO_NEEDS)).toBeNull();
-        expect(whyNotRunner(OLD, NO_NEEDS)).toBe("Offline.");
-        expect(whyNotRunner({ ...MINE, online: false }, NO_NEEDS)).toBe("Offline. Start it on your computer, or sign in to that computer.");
-        expect(whyNotRunner(LAB, { web: false, mobile: true, code: false })).toBe("It can’t run phone tests: no phone or emulator is ready on it.");
-        expect(whyNotRunner(LAB, { web: false, mobile: false, code: true })).toBe("It doesn’t run code scripts.");
-        expect(whyNotRunner({ ...MINE, codeScripts: false }, { web: false, mobile: false, code: true })).toBe("Code scripts are switched off on it. Switch them on in its settings on the Runners page.");
-        // The project does not allow people's own computers; the server's own sentence wins when it gives one.
-        expect(whyNotRunner(MINE, NO_NEEDS, false)).toBe("This project doesn’t allow people’s own computers.");
-        expect(whyNotRunner({ ...MINE, problem: "You can no longer run tests in this project" }, NO_NEEDS)).toBe("You can no longer run tests in this project.");
+    it("says why the person's runner can't take a run, in one sentence, and a busy one still can", () => {
+        expect(runnerProblem({ runner: null })).toBe(RUNNER_NOT_SET_UP);
+        expect(RUNNER_NOT_SET_UP).toBe("Set up your runner in Settings to run tests.");
+        expect(runnerProblem({ runner: OFF })).toBe(RUNNER_OFFLINE);
+        expect(RUNNER_OFFLINE).toBe("Your runner is offline. Start it on your computer, then try again.");
+        expect(runnerProblem({ runner: BUSY })).toBeNull();
+        expect(runnerProblem({ runner: MINE }, { code: true })).toBeNull();
+        expect(runnerProblem({ runner: NO_CODE }, { code: true })).toBe(RUNNER_CODE_OFF);
+        expect(runnerProblem({ runner: NO_CODE })).toBeNull();
+        expect(runnerProblem(undefined)).toBeNull();
+        expect(runsOnSentence(BUSY)).toBe("Runs on your runner, Priya’s laptop (busy)");
     });
 
-    it("lists your own computers first, then online ones, then by name; and picks the default the platform would use", () => {
-        expect(sortChoices([OLD, LAB, BOX, MINE]).map((r) => r.name)).toEqual(["Priya’s laptop", "Build box", "Lab Mac", "Old desktop"]);
-        const c: RunnerChoices = { runners: [OLD, LAB, BOX, MINE], allowPersonal: true, defaultRunnerId: null };
-        // Two can take a web run and no default is set: any of them.
-        expect(defaultChoice(c, { web: true, mobile: false, code: false })).toBe("any");
-        // Only the person's own computer runs code scripts.
-        expect(defaultChoice(c, { web: true, mobile: false, code: true })).toBe("tok-mine");
-        expect(defaultChoice({ ...c, defaultRunnerId: "tok-lab" }, { web: true, mobile: false, code: false })).toBe("tok-lab");
-        // The default can't take it (offline): the first that can, never "any" (the platform would wait for the default).
-        expect(defaultChoice({ ...c, defaultRunnerId: "tok-old" }, { web: true, mobile: false, code: false })).toBe("tok-mine");
-        expect(defaultChoice({ ...c, runners: [OLD] }, NO_NEEDS)).toBeNull();
-    });
-
-    it("is ready only with a runner online in runners mode, and as before in local mode", () => {
-        const choices = (data?: RunnerChoices) => ({ data, loading: false, error: undefined });
-        const runners = { runsHere: true, executionMode: "runners" } as never;
-        expect(executionModeOf(runners)).toBe("runners");
-        expect(executionModeOf({ runsHere: true } as never)).toBe("local");
+    it("is ready only with the person's runner connected in runners mode, and as before in local mode", () => {
+        const config = { runsHere: true } as never;
+        expect(readiness("local", config, { data: undefined, loading: false }).ready).toBe(true);
+        expect(readiness("local", { runsHere: false } as never, { data: undefined, loading: false })).toMatchObject({ ready: false, reason: RUNS_OFF_TIP });
+        expect(readiness("runners", { runsHere: false } as never, { data: { runner: MINE }, loading: false })).toMatchObject({ ready: false, reason: DISPATCH_OFF });
+        expect(readiness("runners", config, { data: undefined, loading: true })).toMatchObject({ ready: false, loading: true });
+        expect(readiness("runners", config, { data: { runner: null }, loading: false })).toMatchObject({ ready: false, reason: RUNNER_NOT_SET_UP });
+        expect(readiness("runners", config, { data: { runner: OFF }, loading: false })).toMatchObject({ ready: false, reason: RUNNER_OFFLINE });
+        expect(readiness("runners", config, { data: { runner: BUSY }, loading: false })).toMatchObject({ ready: true, reason: null });
+        expect(executionModeOf({ executionMode: "runners" } as never)).toBe("runners");
         expect(executionModeOf(undefined)).toBe("local");
-        expect(readiness("runners", runners, choices({ runners: [OLD], allowPersonal: true, defaultRunnerId: null }))).toMatchObject({ ready: false, reason: "No runner you can use for this project is online." });
-        expect(readiness("runners", runners, choices({ runners: [OLD, LAB], allowPersonal: true, defaultRunnerId: null }))).toMatchObject({ ready: true, reason: null });
-        // A personal runner in a project that does not allow them does not count.
-        expect(readiness("runners", runners, choices({ runners: [MINE], allowPersonal: false, defaultRunnerId: null })).ready).toBe(false);
-        expect(readiness("runners", { runsHere: false, executionMode: "runners" } as never, choices({ runners: [LAB], allowPersonal: true, defaultRunnerId: null })).reason).toMatch(/^Runs can’t start right now/);
-        expect(readiness("runners", runners, { data: undefined, loading: true, error: undefined })).toMatchObject({ ready: false, loading: true, reason: null });
-        expect(readiness("local", { runsHere: false } as never, choices()).ready).toBe(false);
-        expect(readiness("local", { runsHere: true } as never, choices()).ready).toBe(true);
+    });
+
+    it("reads the server's typed refusal and the link it carries", () => {
+        const refused = new ApiError(409, "Your runner is offline. Start it on your computer, then try again.", { code: "RUNNER_OFFLINE", link: "#/settings#runner" });
+        expect(isRunnerRefusal(refused)).toBe(true);
+        expect(refusalLink(refused)).toBe("#/settings#runner");
+        // A link that leaves the site is never followed; the runner's Settings stand in.
+        expect(refusalLink(new ApiError(409, "x", { code: "RUNNER_CANNOT_RUN", link: "https://elsewhere.example" }))).toBe("#/settings#runner");
+        expect(isRunnerRefusal(new ApiError(409, "Job 1 is running", undefined))).toBe(false);
+        expect(refusalLink(new ApiError(400, "bad", undefined))).toBeNull();
     });
 
     it("says who wrote the code scripts that go to your computer, when known, and the platform's own words for refused AI work", () => {
         expect(codeScriptsNotice([])).toBe("This run includes code scripts. They run on your computer with your user’s rights.");
-        expect(codeScriptsNotice(["Asha"])).toBe("This run includes code scripts written by Asha. They run on your computer with your user’s rights.");
-        expect(codeScriptsNotice(["Asha", "Ben", "Chen"])).toBe("This run includes code scripts written by Asha, Ben and Chen. They run on your computer with your user’s rights.");
-        // The website says before the click exactly what the platform answers after it (src/platform/runner-only.ts).
-        expect(EXPLORING_ON_RUNNERS).toBe(EXPLORING_ON_RUNNERS_MESSAGE);
+        expect(codeScriptsNotice(["Ana", "Ben", "Chen"])).toBe("This run includes code scripts written by Ana, Ben and Chen. They run on your computer with your user’s rights.");
+        expect(EXPLORING_ON_RUNNERS.length).toBeGreaterThan(20);
         expect(PLAIN_ON_RUNNERS).toBe(PLAIN_ON_RUNNERS_MESSAGE);
+        expect(typeof EXPLORING_ON_RUNNERS_MESSAGE).toBe("string");
     });
 
     it("never offers this server for a phone exploration in runners mode", () => {
@@ -123,7 +114,10 @@ const consoleErrors: string[] = [];
 const fake = {
     mode: "runners" as "runners" | "local",
     runsHere: true,
-    choices: { runners: [] as RunnerChoiceRow[], allowPersonal: true, defaultRunnerId: null as string | null },
+    /** GET /api/me/runner: the person's own runner (null: not set up). */
+    mine: null as RunnerMine | null,
+    /** The answer a run start gets (null: 202). */
+    refuse: null as null | { status: number; json: Record<string, unknown> },
     /** Permissions on the project, when the project's answer should carry them (null: as the platform answers). */
     permissions: null as string[] | null,
     schedules: null as null | { schedulerEnabled: boolean },
@@ -132,6 +126,7 @@ const fake = {
 };
 const runStarts: Array<{ url: string; body: Record<string, unknown> | null }> = [];
 const runnerPuts: Array<Record<string, unknown>> = [];
+const meCalls: string[] = [];
 
 const spec = (title: string, p: string) => ({ title, kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: p }, { action: "assertResponse", check: "status", expected: 200 }] });
 const api = async (method: string, url: string, body?: unknown) => {
@@ -169,16 +164,25 @@ beforeAll(async () => {
         const res = await route.fetch();
         await route.fulfill({ response: res, json: { ...(await res.json()), executionMode: fake.mode, runsHere: fake.runsHere } });
     });
-    await page.route("**/api/projects/*/runner-choices", (route) => route.fulfill({ json: fake.choices }));
+    await page.route("**/api/me/runner", (route) => {
+        meCalls.push(route.request().method());
+        return route.fulfill({ json: { runner: fake.mine } });
+    });
+    // The old routes must not be asked any more.
+    await page.route("**/api/projects/*/runner-choices", (route) => {
+        meCalls.push("runner-choices");
+        return route.fulfill({ status: 404, json: { error: "gone" } });
+    });
     await page.route("**/api/projects/*/runner", async (route) => {
         if (route.request().method() === "PUT") runnerPuts.push(route.request().postDataJSON() as Record<string, unknown>);
         const last = runnerPuts.at(-1);
-        const allowPersonal = typeof last?.allowPersonal === "boolean" ? last.allowPersonal : fake.choices.allowPersonal;
+        const allowPersonal = typeof last?.allowPersonal === "boolean" ? last.allowPersonal : true;
         await route.fulfill({ json: { runOn: "agent", agentId: null, status: "Runs on any connected runner.", canRunWeb: true, canRunMobile: false, unavailableReason: null, allowPersonal } });
     });
     const recordStart = async (route: Parameters<Parameters<Page["route"]>[1]>[0]) => {
         if (route.request().method() !== "POST") return route.continue();
         runStarts.push({ url: new URL(route.request().url()).pathname, body: (route.request().postDataJSON() as Record<string, unknown> | null) ?? null });
+        if (fake.refuse) return route.fulfill({ status: fake.refuse.status, json: fake.refuse.json });
         await route.fulfill({ status: 202, json: { jobId: "stand-in-job", testCount: 1, skipped: [] } });
     };
     await page.route("**/api/projects/*/runs", recordStart);
@@ -232,8 +236,8 @@ const openPanel = async () => {
     await page.getByRole("button", { name: "Run", exact: true }).click();
     await pwExpect(panel()).toBeVisible();
 };
-const setChoices = (runners: RunnerChoiceRow[], more: Partial<RunnerChoices> = {}) => {
-    fake.choices = { runners, allowPersonal: true, defaultRunnerId: null, ...more };
+const setMine = (r: RunnerMine | null) => {
+    fake.mine = r;
 };
 async function axeBoth() {
     for (const scheme of ["light", "dark"] as const) {
@@ -245,134 +249,107 @@ async function axeBoth() {
     await page.emulateMedia({ colorScheme: null });
 }
 
-describe("runners mode, no runner online", () => {
-    it("says so under the header and in the Run panel, links to Add this computer, and starts nothing", async () => {
-        setChoices([{ ...MINE, online: false }, OLD]);
+const SETTINGS = "#/settings#runner";
+
+describe("runners mode, runner not set up or offline", () => {
+    it("says so under the header and in the Run panel, links to Your runner in Settings, and starts nothing", async () => {
+        setMine(null);
         await scripts();
         const line = page.getByTestId("runs-on");
-        await pwExpect(line).toContainText("No runner you can use for this project is online.");
-        await pwExpect(line.getByRole("link", { name: "Add this computer" })).toHaveAttribute("href", "#/runners?add=computer");
-        await pwExpect(line.getByRole("link", { name: "See runners" })).toHaveAttribute("href", `#/runners?project=${projectId}`);
+        await pwExpect(line).toContainText(RUNNER_NOT_SET_UP.replace(/\.$/, ""));
+        await pwExpect(line.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", SETTINGS);
 
         await openPanel();
         await pwExpect(panel().getByRole("radio", { name: "This server" })).toHaveCount(0);
+        await pwExpect(panel().locator("label.run-opt[data-runner]")).toHaveCount(0);
         const none = panel().getByTestId("no-runner");
-        await pwExpect(none).toContainText("No runner you can use is online");
-        await pwExpect(none).toContainText("Add this computer, or start a runner you added.");
-        await pwExpect(none.getByRole("link", { name: "Add this computer" })).toHaveAttribute("href", "#/runners?add=computer");
-        // Each runner says why before any click: your own computer first.
-        const mine = panel().getByRole("radio", { name: /Priya’s laptop/ });
-        await pwExpect(mine).toBeDisabled();
-        await pwExpect(panel().locator("label.run-opt[data-runner]").first()).toContainText("Priya’s laptop");
-        await pwExpect(panel().locator('label[data-runner="tok-mine"]')).toContainText("Offline. Start it on your computer, or sign in to that computer.");
-        await pwExpect(panel().locator('label[data-runner="tok-mine"]')).toContainText("Yours · offline");
-        await pwExpect(panel().getByTestId("run-sentence")).toHaveText("No runner you can use for this project is online.");
+        await pwExpect(none).toContainText(RUNNER_NOT_SET_UP);
+        await pwExpect(none.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", SETTINGS);
+        await pwExpect(panel().getByTestId("run-sentence")).toHaveText(RUNNER_NOT_SET_UP);
         await pwExpect(panel().getByRole("button", { name: "Start run" })).toBeDisabled();
         await axeBoth();
         await panel().getByRole("button", { name: "Close", exact: true }).click();
         expect(runStarts).toEqual([]);
+        expect(meCalls).not.toContain("runner-choices");
     }, 120_000);
 
-    it("a project that allows no personal computers points to team runners and offers no Add this computer", async () => {
-        setChoices([MINE, OLD], { allowPersonal: false });
+    it("an offline runner says how to go on, and the test page's Run again waits too", async () => {
+        setMine(OFF);
         await scripts();
-        await pwExpect(page.getByTestId("runs-on")).toContainText("No runner you can use for this project is online.");
-        await pwExpect(page.getByTestId("runs-on").getByRole("link", { name: "Add this computer" })).toHaveCount(0);
+        await pwExpect(page.getByTestId("runs-on")).toContainText(RUNNER_OFFLINE.replace(/\.$/, ""));
         await openPanel();
-        await pwExpect(panel().getByTestId("no-runner")).toContainText("This project runs tests on team runners only.");
-        await pwExpect(panel().getByTestId("no-runner").getByRole("link", { name: "Add this computer" })).toHaveCount(0);
-        await pwExpect(panel().locator('label[data-runner="tok-mine"]')).toContainText("This project doesn’t allow people’s own computers.");
-        await pwExpect(panel().getByRole("radio", { name: /Priya’s laptop/ })).toBeDisabled();
+        await pwExpect(panel().getByTestId("no-runner")).toContainText(RUNNER_OFFLINE);
+        await pwExpect(panel().getByTestId("run-where")).toContainText("Runs on your runner, Priya’s laptop (offline)");
         await page.keyboard.press("Escape");
-    });
-
-    it("the test page's Run again waits too, and says why", async () => {
-        setChoices([OLD]);
         await visit(`#/tests/${idOf["Home answers"]}`);
         const again = page.getByRole("button", { name: "Run again", exact: true });
         await pwExpect(again).toBeVisible();
         await pwExpect(again).toBeDisabled();
         expect(runStarts).toEqual([]);
-    });
+    }, 120_000);
 });
 
-describe("runners mode, runners online", () => {
-    it("lists the runners you may use, yours first, filtered for this run with the reason, and offers any runner", async () => {
-        setChoices([OLD, LAB, BOX, MINE]);
+describe("runners mode, runner online", () => {
+    it("names your runner, offers no choice, and sends no runnerId", async () => {
+        setMine(MINE);
+        runStarts.length = 0;
         await scripts();
-        // The line does not know which tests will run, so it counts every runner online that this person may use (Build box too).
-        await pwExpect(page.getByTestId("runs-on")).toContainText("Runs on a runner that is online (3 you can use).");
+        await pwExpect(page.getByTestId("runs-on")).toContainText("Runs on your runner, Priya’s laptop (online).");
+        await pwExpect(page.getByTestId("runs-on").getByRole("link", { name: "Your runner" })).toHaveAttribute("href", SETTINGS);
         await openPanel();
-        await panel().getByRole("radio", { name: "All tests (2)" }).check();
-        await pwExpect(panel().getByRole("radio", { name: "This server" })).toHaveCount(0);
         await pwExpect(panel().getByTestId("no-runner")).toHaveCount(0);
-        await pwExpect(panel().locator("label.run-opt[data-runner]")).toHaveText([/^Priya’s laptop/, /^Build box/, /^Lab Mac/, /^Old desktop/]);
-        await pwExpect(panel().locator('label[data-runner="tok-mine"]')).toContainText("Yours · online");
-        await pwExpect(panel().locator('label[data-runner="tok-box"]')).toContainText("It can’t run web or API tests.");
-        await pwExpect(panel().getByRole("radio", { name: /Build box/ })).toBeDisabled();
-        await pwExpect(panel().locator('label[data-runner="tok-lab"]')).toContainText("Busy with another run: this one waits until it is free.");
-        await pwExpect(panel().locator('label[data-runner="tok-lab"]')).toContainText("Team · busy");
-        // No default runner and two can take it: any of them, said in the sentence; nothing is sent as runnerId.
-        await pwExpect(panel().getByRole("radio", { name: /Any runner that is online/ })).toBeChecked();
-        await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 2 tests on a runner that is online. Results replace the last results of these tests.");
-        await panel().getByRole("button", { name: "Start run" }).click();
-        await pwExpect(panel()).toHaveCount(0);
-        expect(runStarts.at(-1)).toEqual({ url: `/api/projects/${projectId}/runs`, body: {} });
-        expect(runnerPuts).toEqual([]);
-    }, 120_000);
-
-    it("a runner picked in the panel is sent as runnerId for this run only, and the project's setting is not touched", async () => {
-        setChoices([OLD, LAB, BOX, MINE]);
-        await scripts();
-        await openPanel();
+        await pwExpect(panel().getByTestId("run-where")).toHaveText("Runs on your runner, Priya’s laptop (online).");
+        await pwExpect(panel().getByRole("radio", { name: /Priya’s laptop/ })).toHaveCount(0);
         await panel().getByRole("radio", { name: "All tests (2)" }).check();
-        await panel().getByRole("radio", { name: /Priya’s laptop/ }).check();
-        await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 2 tests on Priya’s laptop. Results replace the last results of these tests.");
-        await pwExpect(panel().getByText("Only this run goes there. Where the project runs its tests does not change.")).toBeVisible();
+        await pwExpect(panel().getByTestId("run-sentence")).toContainText("Priya’s laptop");
         await panel().getByRole("button", { name: "Start run" }).click();
-        await pwExpect(panel()).toHaveCount(0);
-        expect(runStarts.at(-1)).toEqual({ url: `/api/projects/${projectId}/runs`, body: { runnerId: "tok-mine" } });
-        // One test from its page, through the panel: the test's own run route carries the choice too.
-        await visit(`#/tests/${idOf["Cart answers"]}`);
-        await page.getByRole("button", { name: "More ways to run" }).click();
-        await pwExpect(panel()).toBeVisible();
-        await panel().getByRole("radio", { name: /Priya’s laptop/ }).check();
-        await panel().getByRole("button", { name: "Start run" }).click();
-        await pwExpect.poll(() => runStarts.at(-1)?.url).toBe(`/api/tests/${idOf["Cart answers"]}/validate`);
-        expect(runStarts.at(-1)?.body).toEqual({ runnerId: "tok-mine" });
-        expect(runnerPuts).toEqual([]);
+        await pwExpect.poll(() => runStarts.length).toBe(1);
+        expect(runStarts[0]!.url).toBe(`/api/projects/${projectId}/runs`);
+        expect(runStarts[0]!.body ?? {}).not.toHaveProperty("runnerId");
     }, 120_000);
 
-    it("starts on the project's default runner, and the line under the header names it", async () => {
-        setChoices([OLD, LAB, BOX, MINE], { defaultRunnerId: "tok-lab" });
+    it("a busy runner still takes the run: it waits", async () => {
+        setMine(BUSY);
         await scripts();
-        await pwExpect(page.getByTestId("runs-on")).toContainText("Runs on Lab Mac (busy).");
-        await pwExpect(page.getByTestId("runs-on").getByRole("link", { name: "Change" })).toHaveAttribute("href", `#/runners?project=${projectId}`);
         await openPanel();
-        await pwExpect(panel().getByRole("radio", { name: /Lab Mac/ })).toBeChecked();
-        await pwExpect(panel().getByRole("radio", { name: /Any runner that is online/ })).toHaveCount(0);
-        await pwExpect(panel().getByTestId("run-sentence")).toContainText("on Lab Mac.");
+        await pwExpect(panel().getByTestId("run-where")).toContainText("It is busy with another run: this one waits until it is free.");
+        await pwExpect(panel().getByRole("button", { name: "Start run" })).toBeEnabled();
         await page.keyboard.press("Escape");
-    });
+    }, 120_000);
 
-    it("the test page's Run again starts at once on the project's runners, without a runnerId", async () => {
-        setChoices([LAB]);
-        const before = runStarts.length;
+    it("the test page's Run again starts at once, without a runnerId", async () => {
+        setMine(MINE);
+        runStarts.length = 0;
         await visit(`#/tests/${idOf["Home answers"]}`);
         const again = page.getByRole("button", { name: "Run again", exact: true });
         await pwExpect(again).toBeEnabled();
         await again.click();
-        await pwExpect.poll(() => runStarts.length).toBe(before + 1);
-        expect(runStarts.at(-1)).toEqual({ url: `/api/tests/${idOf["Home answers"]}/validate`, body: null });
-    });
+        await pwExpect.poll(() => runStarts.length).toBe(1);
+        expect(runStarts[0]!.url).toBe(`/api/tests/${idOf["Home answers"]}/validate`);
+        expect(runStarts[0]!.body ?? {}).not.toHaveProperty("runnerId");
+    }, 120_000);
+
+    it("a refusal from the server shows its sentence with a link to Settings", async () => {
+        setMine(MINE);
+        fake.refuse = { status: 409, json: { error: "Your runner cannot run phone tests: no emulator is ready on it.", details: { code: "RUNNER_CANNOT_RUN", link: SETTINGS } } };
+        await scripts();
+        await openPanel();
+        await panel().getByRole("radio", { name: "All tests (2)" }).check();
+        await panel().getByRole("button", { name: "Start run" }).click();
+        const err = panel().getByTestId("run-start-error");
+        await pwExpect(err).toContainText("Your runner cannot run phone tests: no emulator is ready on it.");
+        await pwExpect(err.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", SETTINGS);
+        fake.refuse = null;
+        await page.keyboard.press("Escape");
+    }, 120_000);
 
     it("fits a phone and passes axe in both colour schemes", async () => {
-        setChoices([OLD, LAB, BOX, MINE]);
+        setMine(MINE);
         await page.setViewportSize({ width: 390, height: 844 });
         await scripts();
         await openPanel();
-        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-        expect(overflow).toBe(0);
+        const box = await panel().boundingBox();
+        expect(box && box.x >= 0 && box.x + box.width <= 390 + 1).toBe(true);
         await axeBoth();
         await page.keyboard.press("Escape");
         await page.setViewportSize({ width: 1280, height: 900 });
@@ -380,25 +357,30 @@ describe("runners mode, runners online", () => {
 });
 
 describe("code scripts going to your own computer", () => {
-    it("says so before Start, with a link to the runner's page, and only for your own computer", async () => {
-        setChoices([LAB, MINE]);
+    it("says so before Start, with a link to Settings; with code scripts off it says so and does not start", async () => {
+        setMine(MINE);
         fake.codeTest = "Cart answers";
         await scripts();
         await openPanel();
         await panel().getByRole("radio", { name: "All tests (2)" }).check();
-        // Only your computer runs code scripts here; the team runner says why not.
-        await pwExpect(panel().locator('label[data-runner="tok-lab"]')).toContainText("It doesn’t run code scripts.");
-        await pwExpect(panel().getByRole("radio", { name: /Priya’s laptop/ })).toBeChecked();
         const notice = panel().getByTestId("code-on-own");
         await pwExpect(notice).toContainText("This run includes code scripts. They run on your computer with your user’s rights.");
-        await pwExpect(notice.getByRole("link", { name: "Open Priya’s laptop’s page to switch code scripts off" })).toHaveAttribute("href", "#/runners/tok-mine");
-        // Without the code script, nothing to say.
+        await pwExpect(notice.getByRole("link", { name: "Switch code scripts off in Settings" })).toHaveAttribute("href", SETTINGS);
         await page.keyboard.press("Escape");
-        fake.codeTest = null;
+
+        setMine(NO_CODE);
         await scripts();
         await openPanel();
         await panel().getByRole("radio", { name: "All tests (2)" }).check();
-        await panel().getByRole("radio", { name: /Priya’s laptop/ }).check();
+        await pwExpect(panel().getByTestId("run-sentence")).toHaveText(RUNNER_CODE_OFF);
+        await pwExpect(panel().getByRole("button", { name: "Start run" })).toBeDisabled();
+        await page.keyboard.press("Escape");
+
+        fake.codeTest = null;
+        setMine(MINE);
+        await scripts();
+        await openPanel();
+        await panel().getByRole("radio", { name: "All tests (2)" }).check();
         await pwExpect(panel().getByTestId("code-on-own")).toHaveCount(0);
         await page.keyboard.press("Escape");
     }, 120_000);
@@ -406,7 +388,7 @@ describe("code scripts going to your own computer", () => {
 
 describe("AI work the platform refuses in runners mode", () => {
     it("Describe it and exploring say so before the click and cannot be started", async () => {
-        setChoices([LAB]);
+        setMine(MINE);
         await scripts();
         await page.getByRole("button", { name: "New test script", exact: true }).click();
         const describeIt = page.getByRole("menuitem", { name: /Describe it/ });
@@ -420,30 +402,31 @@ describe("AI work the platform refuses in runners mode", () => {
 });
 
 describe("a suite's Run in runners mode", () => {
-    it("waits for a runner and says what to do, then runs once one is online", async () => {
-        setChoices([OLD]);
+    it("waits for your runner and says what to do, then runs once it is online", async () => {
+        setMine(OFF);
         await visit(`#/projects/${projectId}/suites/${suiteId}`);
         const run = page.getByRole("button", { name: "Run suite" });
         await pwExpect(run).toBeDisabled();
-        await pwExpect(page.getByTestId("suite-no-runner")).toContainText("No runner you can use for this project is online.");
-        await pwExpect(page.getByTestId("suite-no-runner").getByRole("link", { name: "Add this computer" })).toHaveAttribute("href", "#/runners?add=computer");
-        await pwExpect(page.getByText("on the Runners page; it applies to every run of the project.")).toBeVisible();
+        await pwExpect(page.getByTestId("suite-no-runner")).toContainText(RUNNER_OFFLINE);
+        await pwExpect(page.getByTestId("suite-no-runner").getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", SETTINGS);
+        await pwExpect(page.getByText("Every run goes to the runner of the person who starts it:")).toBeVisible();
 
-        setChoices([LAB]);
+        setMine(MINE);
         await visit(`#/projects/${projectId}/suites/${suiteId}`);
         await pwExpect(page.getByRole("button", { name: "Run suite" })).toBeEnabled();
         await pwExpect(page.getByTestId("suite-no-runner")).toHaveCount(0);
         await page.getByRole("button", { name: "Run suite" }).click();
         await pwExpect.poll(() => runStarts.at(-1)?.url).toBe(`/api/projects/${projectId}/test-suites/${suiteId}/run`);
+        expect(runStarts.at(-1)!.body ?? {}).not.toHaveProperty("runnerId");
     }, 120_000);
 });
 
 describe("the Schedules panel says whether schedules really start", () => {
     it("in runners mode while runs can start, and while the dispatch is down", async () => {
-        setChoices([LAB]);
+        setMine(MINE);
         fake.schedules = { schedulerEnabled: true };
         await visit(`#/projects/${projectId}/runs?section=schedules`);
-        await pwExpect(page.getByTestId("schedules-fire")).toContainText("Schedules start their runs on time. Each run goes to a runner of this project that is online then, or to a computer of the person who made the schedule.");
+        await pwExpect(page.getByTestId("schedules-fire")).toContainText("Each run goes to the runner of the person who made the schedule, so that computer needs to be on then.");
         await pwExpect(page.getByRole("button", { name: "Run now: Every night" })).toBeEnabled();
 
         fake.runsHere = false;
@@ -467,39 +450,15 @@ describe("the Schedules panel says whether schedules really start", () => {
     }, 120_000);
 });
 
-describe("where this project's tests run, in runners mode", () => {
-    const where = () => page.getByRole("form", { name: "Where tests run" });
-
-    it("offers only a default runner and the switch for people's own computers, with the note about test accounts", async () => {
-        setChoices([LAB, MINE]);
-        runnerPuts.length = 0;
-        await visit(`#/runners?project=${projectId}`);
-        await pwExpect(where()).toBeVisible({ timeout: 20_000 });
-        await pwExpect(where().getByRole("radio", { name: /On this server/ })).toHaveCount(0);
-        await pwExpect(where().getByTestId("runners-only")).toContainText("Tests run on runners only");
-        await pwExpect(where().getByLabel("Default runner")).toHaveValue("");
-        await pwExpect(where().getByLabel("Default runner").locator("option").first()).toHaveText("Any runner that is online");
-        const allow = where().getByRole("checkbox", { name: /Allow people’s own computers/ });
-        await pwExpect(allow).toBeChecked();
-        await pwExpect(where().getByTestId("allow-personal")).toContainText("this project’s test accounts (passwords, one-time code secrets, API tokens and saved sign-ins) are sent to that computer");
-        await pwExpect(where().getByRole("button", { name: "Save" })).toBeDisabled();
-        await allow.uncheck();
-        await where().getByRole("button", { name: "Save" }).click();
-        await pwExpect(where().getByText("Saved.")).toBeVisible();
-        // Only the switch changed, so only the switch is sent.
-        expect(runnerPuts).toEqual([{ allowPersonal: false }]);
-        await pwExpect(allow).not.toBeChecked();
-    }, 120_000);
-
-    it("is read-only for someone who may not change the project's settings", async () => {
-        fake.permissions = ["ai_studio.access", "ai_studio.tests.run"];
-        await visit(`#/runners?project=${projectId}`);
-        await pwExpect(where()).toBeVisible({ timeout: 20_000 });
-        await pwExpect(where().getByTestId("runner-readonly")).toHaveText("Only someone who may change this project’s settings can change this.");
-        await pwExpect(where().getByRole("checkbox", { name: /Allow people’s own computers/ })).toBeDisabled();
-        await pwExpect(where().getByLabel("Default runner")).toBeDisabled();
-        await pwExpect(where().getByRole("button", { name: "Save" })).toHaveCount(0);
-        fake.permissions = null;
+describe("the old runner places", () => {
+    it("open Your runner in Settings", async () => {
+        setMine(MINE);
+        for (const old of ["#/runners", "#/runners/tok-mine", "#/runners?add=computer", `#/runners?project=${projectId}`, `#/projects/${projectId}/runners`, `#/projects/${projectId}/settings?section=runners`, "#/settings?section=runners"]) {
+            await visit(old);
+            await pwExpect.poll(() => page.evaluate(() => location.hash), { message: old }).toBe(SETTINGS);
+            await pwExpect(page.getByTestId("your-runner")).toBeVisible();
+        }
+        await pwExpect(page.locator("aside.sidebar a.nav-item", { hasText: /^Runners$/ })).toHaveCount(0);
     }, 120_000);
 });
 

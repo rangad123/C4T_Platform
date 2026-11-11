@@ -1,13 +1,12 @@
 /**
- * Which browser a runner used, on screen: the run details say "Ran in Microsoft Edge 155, installed on maya-laptop.", the runner's card
- * says which browser its web tests run in, and its details list the Chrome and Edge it found (with why one is not used). Accessible in
- * light and dark, no sideways scroll at phone width. A real platform and the real UI bundle; a FAKE AGENT (plain protocol calls) stands
+ * Which browser a runner used, on screen: the run details say "Ran in Microsoft Edge 155, installed on maya-laptop." (round 45 removed
+ * the runner's card; the person's runner is in Settings). Accessible in light and dark, no sideways scroll at phone width. A real platform and the real UI bundle; a FAKE AGENT (plain protocol calls) stands
  * in for the runner.
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/runner-browsers-ui.test.ts
- * Port: platform 6936.
+ * Port: platform 8782.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -18,14 +17,15 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
+import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, passedRun, viaFetch } from "./fixtures/fake-agent.js";
 
-const PORT = 6936;
+const PORT = 8782;
 const BASE = `http://127.0.0.1:${PORT}`;
-const APP = "http://127.0.0.1:6937";
+const APP = "http://127.0.0.1:8783";
 const EDGE = { name: "msedge" as const, version: "155.0.4283.62", source: "installed" as const };
 
 let platform: Platform;
@@ -52,16 +52,19 @@ beforeAll(async () => {
     await server.listen({ port: PORT, host: "127.0.0.1" });
 
     projectId = (await call("POST", "/api/projects", { name: "Browser shop" })).body.id;
-    const secret = (await call("POST", `/api/projects/${projectId}/agent-tokens`, { label: "maya-laptop" })).body.secret as string;
+    // The open server acts as one person; this is that person's own runner (round 45: one runner per person).
+    const { secret, record } = getAgentServices(platform).store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: "maya-laptop", createdBy: OPEN_OWNER_ID });
+    // The application here is on 127.0.0.1: its owner lets this computer test private and local addresses (off by default).
+    getAgentServices(platform).store.setTokenSwitches(record.id, { allowPrivateTargets: true });
     const agent = new FakeAgent(viaFetch(BASE), secret, {
         name: "maya-laptop",
         capabilities: defaultCaps({ os: "win32", browsers: ["chromium"], browser: EDGE, installedBrowsers: [{ name: "chrome", version: "120.0.6099.71", usable: false, reason: "Google Chrome 120 is too old: the test tools need version 150 or newer" }, { name: "msedge", version: EDGE.version, usable: true }] }),
     });
     expect((await agent.hello()).status).toBe(200);
-    getAgentServices(platform).store.setRunner(projectId, { runOn: "agent", agentId: null });
     // One run on the runner whose result names its browser.
     const app = platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
-    const job = await platform.repo.createJob(projectId, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
+    // Started by the open server's one person, so the run goes to that person's runner.
+    const job = await platform.repo.createJob(projectId, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [], startedBy: { kind: "open", id: null } } as never);
     jobId = job.id;
     const pending = getAgentServices(platform).executorFor({ projectId, jobId }).execute("playwright", { scratchDir: path.join(dataDir, "scratch"), scripts: [{ testId: "WEB-001", filename: "WEB-001.spec.ts", content: "// script" }] }, { run: { baseUrl: APP, headless: true } }, { workers: 1 });
     const offer = (await agent.next())!;
@@ -106,18 +109,6 @@ describe("the browser a runner used, on screen", () => {
         const facts = page.getByRole("region", { name: "About this run" });
         await pwExpect(facts.getByTestId("run-browser")).toHaveText("Ran in Microsoft Edge 155, installed on maya-laptop.");
         await pwExpect(facts.getByText("On maya-laptop", { exact: true })).toBeVisible();
-        await axe();
-        await noSidewaysScroll();
-    });
-
-    it("the runner's card says which browser its web tests run in, and its details list what it found", async () => {
-        await page.goto(`${BASE}/#/projects/${projectId}/runners`);
-        await page.reload();
-        const card = page.locator(".ag-agent", { hasText: "maya-laptop" });
-        await pwExpect(card.getByTestId("agent-browser")).toHaveText("Web tests run in Microsoft Edge 155, installed on maya-laptop.");
-        await card.getByRole("button", { name: "Show details for maya-laptop" }).click();
-        const found = card.getByRole("list", { name: "Browsers found on maya-laptop" });
-        await pwExpect(found.getByRole("listitem")).toHaveText(["Google Chrome 120, not used: Google Chrome 120 is too old: the test tools need version 150 or newer", "Microsoft Edge 155, used for web tests"]);
         await axe();
         await noSidewaysScroll();
     });

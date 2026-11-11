@@ -17,6 +17,8 @@ import { requestStop } from "../src/agent/stop-file.js";
 import { loadConfig } from "../src/config.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { SseClient } from "./fixtures/sse-client.js";
@@ -83,7 +85,7 @@ async function project(name: string): Promise<{ id: string; pass: string; fail: 
 
 /** A hand-driven agent: a token of the project, a hello offering protocols 1 and 2 (or only 1). */
 async function rawAgent(projectId: string, name: string, protocols: number[] = [1, 2]) {
-    const { secret } = svc().store.createToken(projectId, name);
+    const { secret } = personalRunner(platform, { label: name, replace: true });
     const hello = await agentApi(secret, "POST", "/api/agent/hello", { protocol: 1, ...(protocols.length > 1 ? { protocols } : {}), name, version: "1.0.0", concurrency: 1, capabilities: caps });
     expect(hello.status).toBe(200);
     return { token: secret, agentId: hello.body.agentId as string, protocol: hello.body.protocol as number };
@@ -123,7 +125,7 @@ beforeAll(async () => {
     });
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-p2-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
@@ -147,10 +149,10 @@ afterAll(async () => {
 describe("protocol 2 with the real agent", () => {
     it("live steps and the failure screenshot arrive before the result, and a reconnect with Last-Event-ID replays them", async () => {
         const p = await project("Live events");
-        const { secret } = svc().store.createToken(p.id, "live");
+        const { secret } = personalRunner(platform, { label: "live", replace: true });
         const a = realAgent(secret, "Live laptop");
         try {
-            await until("the agent to say hello", () => svc().store.listAgents(p.id).some((x) => x.online));
+            await until("the agent to say hello", () => Boolean(svc().store.runnerOf(OPEN_OWNER_ID)?.online));
             const started = await admin("POST", `/api/tests/${p.fail}/validate`);
             expect(started.status, started.text).toBe(202);
             const jobId = started.body.jobId as string;
@@ -192,7 +194,7 @@ describe("protocol 2 with the real agent", () => {
 
     it("a result the platform could not take for more than 30 s is kept on disk and delivered once", async () => {
         const p = await project("Durable result");
-        const { secret } = svc().store.createToken(p.id, "spool");
+        const { secret } = personalRunner(platform, { label: "spool", replace: true });
         let blockedUntil = 0;
         let resultOk = 0;
         const fetchImpl: typeof fetch = async (input, init) => {
@@ -208,7 +210,7 @@ describe("protocol 2 with the real agent", () => {
         };
         const a = realAgent(secret, "Spool laptop", { fetchImpl });
         try {
-            await until("the agent to say hello", () => svc().store.listAgents(p.id).some((x) => x.online));
+            await until("the agent to say hello", () => Boolean(svc().store.runnerOf(OPEN_OWNER_ID)?.online));
             const started = await admin("POST", `/api/tests/${p.pass}/validate`);
             expect(started.status, started.text).toBe(202);
             await until("the platform to go away", () => blockedUntil > 0, 120_000);
@@ -228,7 +230,7 @@ describe("protocol 2 with the real agent", () => {
 
     it("an agent whose newer protocol is refused says hello again with protocol 1, and still completes a run (as protocol 1)", async () => {
         const p = await project("Protocol one");
-        const { secret } = svc().store.createToken(p.id, "old");
+        const { secret } = personalRunner(platform, { label: "old", replace: true });
         let refusedOnce = false;
         const fetchImpl: typeof fetch = async (input, init) => {
             // A platform that speaks only protocol 1 and refuses anything else (today's platform answers a mismatch with 409).
@@ -240,9 +242,9 @@ describe("protocol 2 with the real agent", () => {
         };
         const a = realAgent(secret, "Old platform", { fetchImpl });
         try {
-            await until("the agent to say hello", () => svc().store.listAgents(p.id).some((x) => x.online));
+            await until("the agent to say hello", () => Boolean(svc().store.runnerOf(OPEN_OWNER_ID)?.online));
             expect(refusedOnce).toBe(true);
-            const agentId = svc().store.listAgents(p.id)[0]!.id;
+            const agentId = svc().store.runnerOf(OPEN_OWNER_ID)!.agent!.id;
             expect(svc().store.agentProtocol(agentId)).toBe(1);
             const started = await admin("POST", `/api/tests/${p.pass}/validate`);
             const job = await jobDone(started.body.jobId);
@@ -267,12 +269,12 @@ describe("stopping the agent with the stop file", () => {
         const id = (await admin("POST", "/api/projects", { name: "Stop file" })).body.id as string;
         const imp = await admin("POST", `/api/projects/${id}/specs`, { baseUrl: APP, validate: false, specs: [{ title: "A slow page", kind: "web", category: "Web", steps: [{ action: "navigate", url: `${APP}/slow` }] }] });
         svc().store.setRunner(id, { runOn: "agent", agentId: null });
-        const { secret } = svc().store.createToken(id, "stop");
+        const { secret } = personalRunner(platform, { label: "stop", replace: true });
         const stopDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-p2-stop-"));
         work.push(stopDir);
         requestStop(stopDir); // left from an earlier session: cleared at start, it must not stop this one
         const a = realAgent(secret, "Stop laptop", { stopDir });
-        await until("the agent to say hello", () => svc().store.listAgents(id).some((x) => x.online));
+        await until("the agent to say hello", () => Boolean(svc().store.runnerOf(OPEN_OWNER_ID)?.online));
         expect(fs.existsSync(path.join(stopDir, "stop.request"))).toBe(false);
         const started = await admin("POST", `/api/tests/${imp.body.tests[0].id}/validate`);
         await until("the run to be running on the agent", () => svc().store.tasksOfJob(started.body.jobId).some((t) => t.phase === "running"), 60_000);
@@ -287,10 +289,9 @@ describe("stopping the agent with the stop file", () => {
 });
 
 describe("protocol 2 rules, with hand-driven agents", () => {
-    it("a reject re-offers the run to another runner; when every runner said no, the run fails with their reasons", async () => {
+    it("a reject is never offered to that runner again; with no other runner of its owner, the run fails with the reason (round 45: one runner per person)", async () => {
         const p = await project("Rejects");
         const first = await rawAgent(p.id, "No browser");
-        const second = await rawAgent(p.id, "No display");
         expect(first.protocol).toBe(2);
         const started = await admin("POST", `/api/tests/${p.pass}/validate`);
         expect(started.status, started.text).toBe(202);
@@ -298,19 +299,15 @@ describe("protocol 2 rules, with hand-driven agents", () => {
         expect(o1.attemptId).toBeTruthy();
         expect(o1.attempt).toBe(1);
         expect((await agentApi(first.token, "POST", `/api/agent/tasks/${o1.taskId}/reject`, { attemptId: o1.attemptId, reason: "missing-browser", message: "This computer has no browser ready." })).status).toBe(200);
-        // never offered to the first runner again; the second gets a new attempt
+        // never offered to that runner again
         expect((await agentApi(first.token, "POST", "/api/agent/poll", { agentId: first.agentId, freeSlots: 1 })).status).toBe(204);
-        const o2 = await poll(second);
-        expect(o2.taskId).toBe(o1.taskId);
-        expect(o2.attempt).toBe(2);
-        expect(svc().store.getTask(o1.taskId)!.offers).toBe(1);
-        expect((await agentApi(second.token, "POST", `/api/agent/tasks/${o2.taskId}/reject`, { attemptId: o2.attemptId, reason: "no-display", message: "No screen for a visible browser." })).status).toBe(200);
+        expect(svc().store.getTask(o1.taskId)!.offers).toBe(0);
         const job = await jobDone(started.body.jobId, 60_000);
         expect(job.status).toBe("FAILED");
         const ev = events(started.body.jobId);
-        expect(ev.filter((e) => e.kind === "runner_rejected").map((e) => e.message)).toEqual(["No browser did not take the run: This computer has no browser ready.", "No display did not take the run: No screen for a visible browser."]);
+        expect(ev.filter((e) => e.kind === "runner_rejected").map((e) => e.message)).toEqual(["No browser did not take the run: This computer has no browser ready."]);
         expect(svc().store.getTask(o1.taskId)).toMatchObject({ status: "failed", phase: "rejected" });
-        expect(svc().store.getTask(o1.taskId)!.error).toMatch(/no browser ready.*No screen/);
+        expect(svc().store.getTask(o1.taskId)!.error).toMatch(/no browser ready/);
     }, 120_000);
 
     it("accept time-out, fencing, duplicate events, a scrubbed heartbeat, and a result posted twice", async () => {

@@ -21,6 +21,7 @@ import { loadConfig } from "../src/config.js";
 import { localExecutor } from "../src/engine/frameworks/executor.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS, WORKER_LOST_GIVE_UP } from "../src/platform/repo.js";
 import { EXPLORING_ON_RUNNERS_MESSAGE, PLAIN_ON_RUNNERS_MESSAGE, PLATFORM_SETTING_REFUSED, DISPATCH_DOWN_MESSAGE, removeServerExecutionGuard, serverRunRefusals, SERVER_RUN_REFUSED } from "../src/platform/runner-only.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
@@ -53,7 +54,7 @@ const call = async (method: string, url: string, body?: unknown, base = BASE) =>
 const jobCount = (projectId: string) => platform.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM generation_jobs WHERE project_id = ?", projectId)!.n;
 const newProject = async (name: string) => (await call("POST", "/api/projects", { name })).body.id as string;
 const connect = async (projectId: string, name: string) => {
-    const token = (await call("POST", `/api/projects/${projectId}/agent-tokens`, { label: name })).body.secret as string;
+    const token = personalRunner(platform, { label: name }).secret;
     const agent = new FakeAgent(viaFetch(BASE), token, { name, capabilities: defaultCaps(), concurrency: 1 });
     expect((await agent.hello()).status).toBe(200);
     return agent;
@@ -83,7 +84,7 @@ beforeAll(async () => {
     appServer = http.createServer((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end("{}"));
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", r));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-runners-only-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, EXECUTION_MODE: "runners", WORKER_EMBEDDED: "false", SCHEDULER_ENABLED: "false", SECRET_KEY: "runner-only-mode-secret-key-0123456789", DISPATCH_CONCURRENCY: "4", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, EXECUTION_MODE: "runners", WORKER_EMBEDDED: "false", SCHEDULER_ENABLED: "false", SECRET_KEY: "runner-only-mode-secret-key-0123456789", DISPATCH_CONCURRENCY: "4", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
 }, 60_000);
@@ -227,8 +228,8 @@ describe("runners only: a run goes to the runner", () => {
         await agent.answer(offer!, { runs: [passedRun(t!.testId)] });
         const job = await waitForJob(fired.jobId!);
         expect(job.status).toBe("COMPLETED");
-        // Made with the API key, not by a person: the owner is null (a person's schedule names them).
-        expect(job.options.startedBy).toEqual({ kind: "schedule", id: made.body.id, ownerId: null });
+        // Made on an open server (round 45: it acts as one person), so the open server owns it and its runner takes the run.
+        expect(job.options.startedBy).toEqual({ kind: "schedule", id: made.body.id, ownerId: "open" });
         expect(job.options.trigger).toBe("schedule");
     }, 60_000);
 
@@ -236,8 +237,13 @@ describe("runners only: a run goes to the runner", () => {
         const pid = await newProject("Run now, nobody home");
         await importTests(pid, ["Health answers"]);
         const made = await call("POST", `/api/projects/${pid}/schedules`, { kind: "validate", cadence: { type: "daily", time: "03:00" } });
+        // The open server's runners of the tests above were last seen long ago: offline. Run now is a person's click, so it is told now.
+        const seen = platform.db.all<{ id: string; last_seen_ms: number }>("SELECT id, last_seen_ms FROM agents");
+        platform.db.run("UPDATE agents SET last_seen_ms = 0");
         const r = await call("POST", `/api/projects/${pid}/schedules/${made.body.id}/run`);
+        for (const a of seen) platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE id = ?", a.last_seen_ms, a.id);
         expect(r.status).toBe(409);
+        expect(r.body.error).toBe("Your runner is offline. Start it on your computer, then try again.");
         expect(jobCount(pid)).toBe(0);
     });
 });
@@ -281,7 +287,7 @@ describe("runners only: a job whose worker was lost", () => {
         const [t] = await importTests(pid, ["Health answers"]);
         await dispatch!.stop(); // nothing claims the job again while this test plays the lost worker
         const app = platform.repo.getLatestApplicationPublic(pid)!.id as string;
-        const job = await platform.repo.createJob(pid, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [t!.id] });
+        const job = await platform.repo.createJob(pid, app, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [t!.id], startedBy: { kind: "open", id: null } });
         expect(platform.repo.claimNextJob(60_000, "lost-worker", ["validate"])?.id).toBe(job.id);
         const svc = getAgentServices(platform);
         svc.store.enqueue({ id: "task-of-attempt-1", projectId: pid, jobId: job.id, adapterId: "playwright-api", payloadEnc: svc.encrypt({}), files: [] });
@@ -319,7 +325,7 @@ describe("local mode is unchanged", () => {
     let localDir: string;
     beforeAll(async () => {
         localDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-runners-local-"));
-        local = bootstrap(loadConfig({ DATA_DIR: localDir, API_KEY, WORKER_EMBEDDED: "true", SCHEDULER_ENABLED: "false", SECRET_KEY: "runner-only-local-secret-key-0123456789" }));
+        local = bootstrap(loadConfig({ DATA_DIR: localDir, WORKER_EMBEDDED: "true", SCHEDULER_ENABLED: "false", SECRET_KEY: "runner-only-local-secret-key-0123456789" }));
         localServer = await buildServer(local);
         await localServer.listen({ port: LOCAL_PORT, host: "127.0.0.1" });
     });

@@ -15,6 +15,7 @@ import { Agent } from "../src/agent/agent.js";
 import { memoryLogger } from "../src/agent/log.js";
 import { loadConfig } from "../src/config.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 
@@ -65,7 +66,7 @@ beforeAll(async () => {
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-age2e-"));
     agentWork = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-age2e-agent-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
@@ -95,9 +96,8 @@ describe("a validation job that runs on a real agent", () => {
 
     it("connects with a token made through the API and shows up as online", async () => {
         projectId = (await admin("POST", "/api/projects", { name: "Agent end to end" })).body.id;
-        const made = await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "e2e" });
-        expect(made.status).toBe(201);
-        token = made.body.secret;
+        // Round 45: the open server's own runner (a platform without API_KEY and accounts acts as one person).
+        token = personalRunner(platform, { label: "e2e" }).secret;
         const { log, lines } = memoryLogger();
         agentLines = lines;
         agent = new Agent({

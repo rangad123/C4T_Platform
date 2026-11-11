@@ -7,7 +7,7 @@
  * stand-in that follows .scratch/briefs/RECORDER-API-SHAPES.md, served by a front server that forwards everything else to the
  * platform; it exists so this file does not depend on the platform half landing and so a test can push steps, picked
  * elements, a 409, a 422 and a failed session. The last journey runs against the real platform when its recorder routes exist.
- * Ports: 6010 front (the address the browser uses), 6011 platform, 6012 fixture application.
+ * Ports: 8791 front (the address the browser uses), 8792 platform, 8793 fixture application.
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
@@ -29,9 +29,9 @@ import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { addTest, seedProject, seedRun, type Seed } from "./fixtures/dashboard-seed.js";
 
-const FRONT_PORT = 6010;
-const PLATFORM_PORT = 6011;
-const APP_PORT = 6012;
+const FRONT_PORT = 8791;
+const PLATFORM_PORT = 8792;
+const APP_PORT = 8793;
 const BASE = `http://127.0.0.1:${FRONT_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}/`;
 
@@ -402,9 +402,9 @@ describe("Record a test: start", () => {
         await pwExpect(warning()).toBeVisible();
         await pwExpect(page.getByText("where you cannot click in it")).toBeVisible();
         await shot("start-remote-warning-light-1280");
-        await page.getByRole("button", { name: "Add a runner on your computer" }).click();
-        // Round 37: runners are machine-level; the link opens the Runners page on this project.
-        await pwExpect(page).toHaveURL(/#\/runners\?project=[^&]+$/);
+        await page.getByRole("button", { name: "Set up your runner" }).click();
+        // Round 45: one runner per person, set up in Settings.
+        await pwExpect(page).toHaveURL(/#\/settings#runner$/);
     });
 
     it("says what is wrong with the address in plain words and sends nothing", async () => {
@@ -428,11 +428,11 @@ describe("Record a test: start", () => {
     it("sends the address, the window choice and the environment, then opens the session", async () => {
         resetFake();
         await openStart();
-        await page.getByLabel("Address to start from").fill("127.0.0.1:6012/shop");
+        await page.getByLabel("Address to start from").fill("127.0.0.1:8793/shop");
         await page.getByLabel("Show the browser window").uncheck();
         await page.getByRole("button", { name: "Start recording", exact: true }).click();
         await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording");
-        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: "http://127.0.0.1:6012/shop", headed: false } });
+        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: "http://127.0.0.1:8793/shop", headed: false } });
         expect(page.url()).toContain("?session=rec-1");
         await pwExpect(page.getByText("Your steps appear here as you click in the browser window.")).toBeVisible();
         await pwExpect(page.getByTestId("rec-count")).toHaveText("0 steps");
@@ -442,12 +442,12 @@ describe("Record a test: start", () => {
         resetFake();
         fake.start = "422";
         await openStart();
-        await page.getByLabel("Address to start from").fill("http://127.0.0.1:6012/keep-me");
+        await page.getByLabel("Address to start from").fill("http://127.0.0.1:8793/keep-me");
         await page.getByLabel("Show the browser window").uncheck();
         await page.getByRole("button", { name: "Start recording", exact: true }).click();
         await pwExpect(page.getByText("We can’t open the browser window")).toBeVisible();
         await pwExpect(page.getByText("This computer has no screen to show a browser window on.", { exact: false })).toBeVisible();
-        await pwExpect(page.getByLabel("Address to start from")).toHaveValue("http://127.0.0.1:6012/keep-me");
+        await pwExpect(page.getByLabel("Address to start from")).toHaveValue("http://127.0.0.1:8793/keep-me");
         await pwExpect(page.getByLabel("Show the browser window")).not.toBeChecked();
         await pwExpect(page.getByRole("button", { name: "Start recording", exact: true })).toBeEnabled();
     });
@@ -485,7 +485,7 @@ describe("Record a test: start", () => {
         await page.getByRole("button", { name: "Start recording", exact: true }).click();
         await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording");
         const sent = fake.bodies[0]!.body as { url: string };
-        expect(sent.url).toMatch(/^http:\/\/127\.0\.0\.1:6012\/?$/);
+        expect(sent.url).toMatch(/^http:\/\/127\.0\.0\.1:8793\/?$/);
         expect(fake.bodies[0]).toEqual({ call: "start", body: { url: sent.url, headed: true, environment: "live", confirmProduction: true } });
     });
 

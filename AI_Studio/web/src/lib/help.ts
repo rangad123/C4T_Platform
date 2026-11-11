@@ -135,7 +135,7 @@ export const TRIGGER_HELP = {
 
 export const RUNNER_HELP = {
     online: "The runner was heard from in the last 45 seconds and can take tests.",
-    offline: "Nothing heard from the runner in the last 45 seconds. A run waiting for a runner fails after about 90 seconds if no runner that can run its tests is online.",
+    offline: "Nothing heard from the runner in the last 45 seconds. A run waits a short while for your runner, then fails if it is still offline.",
     busy: "The runner is running tests now. It takes more when it has a free slot.",
     thisServer: "Tests run on the platform's own server, not on a runner.",
 } as const;
@@ -296,7 +296,7 @@ export const PROJECT_ACCESS: Record<"all" | "only", string> = {
 export const PROJECT_ROLE: Record<"viewer" | "editor" | "owner", string> = {
     viewer: "Looks at this project's tests, runs, findings and reports, and downloads reports. Changes nothing in it.",
     editor: "Also creates, changes and runs tests, and starts security assessments, in this project.",
-    owner: "Also manages this project's runner tokens, alert and tracker connections, device farms, storage, backups and security authorizations.",
+    owner: "Also manages this project's alert and tracker connections, device farms, storage, backups and security authorizations.",
 };
 
 // ── Numbers (src/engine/summary/pass-rate.ts, src/platform/trends.ts, security overview counts, compliance map) ──

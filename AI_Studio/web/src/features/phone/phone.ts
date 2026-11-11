@@ -74,7 +74,7 @@ export const willDo = (app: string): string =>
 export const WONT_DO = ["Pay for anything or subscribe", "Delete accounts or data", "Send messages or money, or make calls", "Use a fingerprint or face check", "Get past captchas", "Explore games"];
 export const ACCOUNT_REMINDER = "If the app needs a login, add a test account under Advanced options.";
 export const NO_WHERE_TITLE = "No phone or emulator is ready";
-export const NO_WHERE_BODY = "Connect a runner on a computer with an Android emulator or phone: open Runners and add that computer. For a real phone, turn on USB debugging first.";
+export const NO_WHERE_BODY = "Set up your runner in Settings on a computer with an Android emulator or phone. For a real phone, turn on USB debugging first and switch on Use my connected phone.";
 export const AI_MISSING = "The AI model isn’t set up on this server. Exploring a phone app needs it.";
 /** Runners mode: the platform refuses explorations (the AI's exploration does not run on runners yet). */
 export const EXPLORE_ON_RUNNERS_TITLE = "Exploring a phone app isn’t available here yet";
@@ -112,7 +112,7 @@ export function whereOptions(config: PlatformConfig | undefined, agents: Agent[]
     for (const a of [...agents].sort((x, y) => Number(y.online) - Number(x.online))) {
         const android = a.capabilities.android;
         if (!a.online) out.push({ id: a.id, label: a.name, can: false, detail: `Offline, last seen ${relativeTime(a.lastSeenAt, now)}.` });
-        else if (!exploresPhones(a)) out.push({ id: a.id, label: a.name, can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from its page in Runners." });
+        else if (!exploresPhones(a)) out.push({ id: a.id, label: a.name, can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from Your runner in Settings." });
         else if (!android || android.state === "none" || android.state === "no-tools" || (android.state === undefined && android.devices.length === 0)) {
             out.push({ id: a.id, label: a.name, can: false, detail: android?.summary ? `${android.summary.replace(/\.$/, "")}.` : "No phone or emulator is connected to this runner." });
         } else out.push({ id: a.id, label: a.name, can: true, detail: android.summary ? `${android.summary.replace(/\.$/, "")}.` : "A phone or emulator is ready." });

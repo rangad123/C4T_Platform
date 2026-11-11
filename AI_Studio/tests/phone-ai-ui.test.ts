@@ -13,7 +13,7 @@
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/phone-ai-ui.test.ts
- * Port: fake API and UI 6690.
+ * Port: fake API and UI 8791.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -25,7 +25,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { REPO_ROOT } from "../src/config.js";
 import { DEFAULT_CONFIG, startPhoneFake, type PhoneFake } from "./fixtures/phone-fake-api.js";
 
-const PORT = 6690;
+const PORT = 8791;
 const SHOTS = path.join(REPO_ROOT, ".scratch", "phone-ai", "shots");
 const APP = "com.example.shop";
 
@@ -263,8 +263,8 @@ describe("start: the panel", () => {
         await pwExpect(dialog().getByRole("radio", { name: /This server/ })).toBeDisabled();
         await pwExpect(dialog()).toContainText("There is no Android emulator on this server.");
         await pwExpect(dialog()).toContainText("No phone or emulator is ready");
-        await pwExpect(dialog()).toContainText("Connect a runner on a computer with an Android emulator or phone: open Runners and add that computer. For a real phone, turn on USB debugging first.");
-        await pwExpect(dialog().getByRole("link", { name: "Open Runners", exact: true })).toHaveAttribute("href", `#/runners?project=${p.id}`); // round 37: runners are machine-level, on the Runners page
+        await pwExpect(dialog()).toContainText("Set up your runner in Settings on a computer with an Android emulator or phone. For a real phone, turn on USB debugging first and switch on Use my connected phone.");
+        await pwExpect(dialog().getByRole("link", { name: "Open Your runner in Settings", exact: true })).toHaveAttribute("href", "#/settings#runner"); // round 45: one runner per person, in Settings
         await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeDisabled();
         await shot("start-no-device-light-1280");
     });
@@ -283,18 +283,18 @@ describe("start: the panel", () => {
         await pwExpect(radio("Old laptop")).toBeDisabled();
         await pwExpect(dialog()).toContainText("Offline, last seen 3 hours ago.");
         await pwExpect(radio("Build box")).toBeDisabled();
-        await pwExpect(dialog()).toContainText("This runner is out of date and cannot explore phone apps. Update it from its page in Runners.");
+        await pwExpect(dialog()).toContainText("This runner is out of date and cannot explore phone apps. Update it from Your runner in Settings.");
         await pwExpect(radio("Desk PC")).toBeDisabled();
         await pwExpect(dialog()).toContainText("Android: no devices connected.");
         // The one that can is chosen without being asked, and says where it will run from now on.
         await pwExpect(radio("Maya’s laptop")).toBeChecked();
         await pwExpect(dialog()).toContainText("Android: 1 emulator ready.");
-        await pwExpect(dialog().getByTestId("phone-runner-change")).toHaveText("Phone tests for this project will run there from now on. You can change it on the Runners page.");
+        await pwExpect(dialog().getByTestId("phone-runner-change")).toHaveText("Phone tests for this project will run there from now on. Each person’s runs go to their own runner, set up in Settings.");
         await dialog().getByRole("button", { name: "Start exploring", exact: true }).click();
         await pwExpect(page).toHaveURL(new RegExp(`#/projects/${p.id}$`));
         const order = fake.requests.filter((r) => (r.method === "PUT" && /\/runner$/.test(r.path)) || (r.method === "POST" && /test-generation$/.test(r.path))).slice(-2);
         expect(order.map((r) => `${r.method} ${r.path.split("/").pop()}`)).toEqual(["PUT runner", "POST test-generation"]);
-        expect(order[0]!.body).toEqual({ runOn: "agent", agentId: "a-ok" });
+        expect(order[0]!.body).toEqual({ runOn: "agent" });
     });
 
     it("when the AI model is not set up it says so, links to Settings and does not start", async () => {

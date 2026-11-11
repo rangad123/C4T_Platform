@@ -4,9 +4,10 @@
  *     folders, a symbolic link, a GNU long name and a pax record), real SHA-256 checking against SHASUMS256.txt, the cache, a damaged
  *     archive refused and deleted, and the package rules (native code, os/cpu limits, install scripts, optional packages) on a small
  *     stand-in node_modules; plus the same rules run over this checkout's REAL node_modules for every target (nothing copied);
- *   - the route (server.inject): info per target with sizes, the zip for each built target (entries, Unix modes, content-length, headers,
- *     token only in runner.token, no secrets or server paths), a 503 with the build command for a target that was not built, a stale or
- *     damaged build refused, request validation;
+ *   - the route (server.inject, POST /api/me/runner/download, round 45): a system's one download carries its own Node.js whenever that
+ *     target is built here (entries, Unix modes, content-length, headers, the code only in runner.enroll, no secrets or server paths), with
+ *     the installer inside when the server has it; a target that was not built, or a stale or damaged build, falls back to the download
+ *     without its own Node.js; the info answer says which systems carry it and how large they are;
  *   - the start scripts: the served zip unpacked with Windows' own tar.exe, start-runner.cmd run under cmd.exe and start-runner.sh under
  *     Git Bash with NO Node.js and no npm on the PATH: they use the Node.js inside the download, skip npm install and start the runner
  *     (a stand-in runner.mjs that says which Node.js runs it). A bundled Node.js that does not start falls back to the search; a complete
@@ -27,11 +28,14 @@ import zlib from "node:zlib";
 import { unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { START_CMD, START_SH } from "../src/platform/runner-kit-scripts.js";
 import { buildServer } from "../src/platform/server.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
+// @ts-expect-error plain JavaScript build script (no type declarations)
+import { writeManifest } from "../scripts/build-installer.mjs";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { allows, buildComplete, distBase, packageClosure, parseTargets, readTarGzEntries, TARGET_NAMES } from "../scripts/build-runner-complete.mjs";
 
@@ -41,7 +45,7 @@ const DIST = `http://127.0.0.1:${PORT}`;
 const VERSION = "24.19.0";
 const API_KEY = "complete-kit-admin-key-5d1e93";
 const SENTINELS = { ANTHROPIC_API_KEY: "CMPLLEAK-anthropic-6b2d90e1", SECRET_BOX_KEY: "CMPLLEAK-box-1f7a3c55", OPENAI_API_KEY: "CMPLLEAK-openai-9e04c7b2" };
-const ENV_KEYS = ["RUNNER_KIT_DIR", "RUNNER_INSTALLER_DIR", "RUNNER_COMPLETE_DIR", "RUNNER_KIT_RATE_PER_MINUTE", "AGENT_MAX_TOKENS", "AITP_NODE_DIST_URL", ...Object.keys(SENTINELS)];
+const ENV_KEYS = ["RUNNER_KIT_DIR", "RUNNER_INSTALLER_DIR", "RUNNER_COMPLETE_DIR", "RUNNER_KIT_RATE_PER_MINUTE", "AITP_NODE_DIST_URL", ...Object.keys(SENTINELS)];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 let tmp: string;
@@ -158,15 +162,32 @@ function writeModules(root: string): void {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
+/** The person downloading: an owner with their own API token (made in beforeAll). */
+let bearer = "";
 const call = async (method: "GET" | "POST", url: string, body?: unknown) => {
-    const res = await server.inject({ method, url, headers: { "x-api-key": API_KEY, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, ...(body !== undefined ? { payload: JSON.stringify(body) } : {}) });
+    const res = await server.inject({ method, url, headers: { authorization: `Bearer ${bearer}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, ...(body !== undefined ? { payload: JSON.stringify(body) } : {}) });
     const buf = res.rawPayload;
     const text = buf.toString("utf8");
     return { status: res.statusCode, headers: res.headers, buf, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; headers: Record<string, string>; buf: Buffer; text: string; body: any };
 };
-const newProject = async (name: string) => (await call("POST", "/api/projects", { name })).body.id as string;
-const complete = (projectId: string, name: string, platformName: "windows" | "unix", arch: string, osName?: string) =>
-    call("POST", `/api/projects/${projectId}/runner-kits`, { name, platform: platformName, complete: true, arch, ...(osName ? { os: osName } : {}) });
+/** The one download of a system (round 45): it carries its own Node.js whenever this server built that target. */
+const complete = (osName: "windows" | "mac" | "linux", arch: string) => call("POST", "/api/me/runner/download", { os: osName, arch });
+const systemOf = (info: { systems: Array<{ os: string; arch: string }> }, osName: string, arch: string) => info.systems.find((x) => x.os === osName && x.arch === arch) as unknown as { kind: string; ownNode: boolean; bytes?: number; note?: string; available: boolean };
+
+/** What `npm run build:installer` writes, in miniature: a stand-in Windows program and Mac app, with a manifest. */
+function writeInstallerStandIns(dir: string): void {
+    const put = (rel: string, body: string, mode: number) => {
+        const f = path.join(dir, ...rel.split("/"));
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, body);
+        return { path: rel.replace(/^mac\//, ""), mode, sha256: createHash("sha256").update(Buffer.from(body)).digest("hex") };
+    };
+    put("win/AITestingRunnerSetup.exe", "MZ stand-in program\n", 0o755);
+    const app = "AI Testing Runner.app";
+    const entries = [put(`mac/${app}/Contents/Info.plist`, "<plist/>\n", 0o644), put(`mac/${app}/Contents/MacOS/AITestingRunner`, "#!/bin/sh\nexit 0\n", 0o755), put(`mac/${app}/Contents/Resources/runner-setup.sh`, "#!/bin/sh\nexit 0\n", 0o755)];
+    fs.writeFileSync(path.join(dir, "mac", "manifest-part.json"), JSON.stringify({ version: 1, entries }));
+    writeManifest({ outDir: dir, platformVersion: "1.0.0" });
+}
 
 function modes(zip: Uint8Array): Record<string, { mode: number; unix: boolean }> {
     const b = Buffer.from(zip);
@@ -246,11 +267,11 @@ function run(command: string, args: string[], cwd: string, env: Record<string, s
 
 beforeAll(async () => {
     for (const [k, v] of Object.entries(SENTINELS)) process.env[k] = v;
-    // These tests download several runners for one project; the one-runner default is covered in runner-limit-unit.test.ts.
-    process.env.AGENT_MAX_TOKENS = "25";
-    delete process.env.RUNNER_KIT_RATE_PER_MINUTE;
-    delete process.env.RUNNER_INSTALLER_DIR;
+    // Several downloads by one person here.
+    process.env.RUNNER_KIT_RATE_PER_MINUTE = "100";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-complete-"));
+    // No installer built here, unless a test points at the stand-ins: the download is then the start scripts with their own Node.js.
+    process.env.RUNNER_INSTALLER_DIR = path.join(tmp, "no-installer");
     bundleDir = path.join(tmp, "dist-runner");
     await buildRunner({ outDir: bundleDir });
     kitPkg = JSON.parse(fs.readFileSync(path.join(bundleDir, "package.json"), "utf8"));
@@ -275,6 +296,9 @@ beforeAll(async () => {
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: "6911", PUBLIC_URL: "https://tests.example.com", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.ready();
+    const users = accessControlOf(server).users;
+    const maya = users.create({ email: "maya@people.example", name: "Maya", role: "owner" });
+    bearer = users.createToken(maya.id, { name: "complete test", role: "owner" }).token;
 }, 180_000);
 
 afterAll(async () => {
@@ -422,29 +446,31 @@ function range(m: { files: Array<{ path: string; offset: number; csize: number }
 // ── the route ───────────────────────────────────────────────────────────────
 
 describe("the download route", () => {
-    it("info says, per system and processor, which complete downloads exist and about how large they are", async () => {
-        const p = await newProject("Info complete");
-        const info = (await call("GET", `/api/projects/${p}/runner-kits/info`)).body;
+    it("info says, per system and processor, which downloads carry their own Node.js and about how large they are", async () => {
+        const info = (await call("GET", "/api/me/runner/download/info")).body;
         expect(info.available).toBe(true);
-        expect(Object.keys(info.complete.targets)).toEqual(["win-x64", "win-arm64", "mac-arm64", "mac-x64", "linux-x64", "linux-arm64"]);
-        expect(info.complete.targets["win-x64"]).toMatchObject({ available: true, nodeVersion: `v${VERSION}` });
-        expect(info.complete.targets["win-x64"].bytes).toBeGreaterThan(readManifest("win-x64").packBytes);
-        expect(info.complete.targets["win-arm64"].available).toBe(false);
-        expect(info.complete.targets["win-arm64"].reason).toMatch(/has not been built on this server\. Run `npm run build:runner -- --complete --targets win-arm64`/);
+        expect(info.systems.map((x: { os: string; arch: string }) => `${x.os}-${x.arch}`)).toEqual(["windows-x64", "windows-arm64", "mac-x64", "mac-arm64", "linux-x64", "linux-arm64"]);
+        const win = systemOf(info, "windows", "x64");
+        expect(win).toMatchObject({ ownNode: true, kind: "files", available: true });
+        expect(win.bytes).toBeGreaterThan(readManifest("win-x64").packBytes);
+        // Not built for this processor: the download is still there, without its own Node.js.
+        expect(systemOf(info, "windows", "arm64")).toMatchObject({ ownNode: false, available: true });
+        expect(systemOf(info, "windows", "arm64").bytes).toBeUndefined();
     });
 
-    it("streams the complete zip for Windows: its own Node.js, every package, the runner, the start scripts, with the right modes and length", async () => {
-        const p = await newProject("Maya's Shop");
-        const r = await complete(p, "Office PC", "windows", "x64");
+    it("streams the Windows download with its own Node.js, every package, the runner, the start scripts, with the right modes and length", async () => {
+        const r = await complete("windows", "x64");
         expect(r.status, r.text).toBe(200);
         expect(r.headers["content-type"]).toBe("application/zip");
-        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-maya-s-shop-win-x64.zip"');
-        expect(r.headers["x-runner-kit-kind"]).toBe("complete");
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-win-x64.zip"');
+        // No installer on this server: the plain files, and the answer says why.
+        expect(r.headers["x-runner-kit-kind"]).toBe("files");
+        expect(r.headers["x-runner-kit-note"]).toMatch(/Windows installer has not been built/);
         expect(r.headers["x-runner-kit-target"]).toBe("win-x64");
         expect(r.headers["cache-control"]).toBe("no-store");
         expect(Number(r.headers["content-length"])).toBe(r.buf.length);
         const z = unzipSync(new Uint8Array(r.buf));
-        const dir = "runner-maya-s-shop-win-x64";
+        const dir = "runner-my-computer-win-x64";
         for (const n of ["node/node.exe", "node/LICENSE", "node_modules/.aitp-complete", "node_modules/@playwright/test/package.json", "complete-kit.json", "runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt", "runner.json", "runner.enroll", "start-runner.cmd", "start-runner.sh", "start-runner.command", "README.txt"]) {
             expect(z[`${dir}/${n}`], n).toBeDefined();
         }
@@ -458,45 +484,71 @@ describe("the download route", () => {
         expect(m[`${dir}/start-runner.cmd`]!.mode).toBe(0o755);
         expect(m[`${dir}/runner.mjs`]!.mode).toBe(0o644);
         const cfg = JSON.parse(Buffer.from(z[`${dir}/runner.json`]!).toString());
-        expect(cfg).toMatchObject({ url: "https://tests.example.com", name: "Office PC" });
+        expect(Object.keys(cfg).sort()).toEqual(["kitVersion", "url"]);
+        expect(cfg.url).toBe("https://tests.example.com");
         const readme = Buffer.from(z[`${dir}/README.txt`]!).toString();
         expect(readme).toContain("\r\n");
-        for (const needle of ["Download: complete, for Windows on an Intel or AMD processor (win-x64)", "Nothing is installed: this download already holds Node.js and the test tools.", `Node.js v${VERSION} in the node folder`, "start-runner.cmd", "Google Chrome or Microsoft Edge"]) expect(readme, needle).toContain(needle);
+        for (const needle of ["Download: complete, for Windows on an Intel or AMD processor (win-x64)", "Nothing is installed: this download already holds Node.js and the test tools.", `Node.js v${VERSION} in the node folder`, "start-runner.cmd", "Google Chrome or Microsoft Edge", "Settings, Your runner"]) expect(readme, needle).toContain(needle);
         expect(readme).not.toMatch(/You need Node\.js 24 or newer/);
         // The bundle is the same prebuilt one as the plain kit.
         expect(Buffer.from(z[`${dir}/runner.mjs`]!).equals(fs.readFileSync(path.join(bundleDir, "runner.mjs")))).toBe(true);
     });
 
+    it("puts the installer inside when the server has it: Windows leads with the setup program, the start scripts stay as the way without installing", async () => {
+        const saved = process.env.RUNNER_INSTALLER_DIR;
+        const inst = path.join(tmp, "installer-stand-ins");
+        if (!fs.existsSync(inst)) writeInstallerStandIns(inst);
+        process.env.RUNNER_INSTALLER_DIR = inst;
+        try {
+            const r = await complete("windows", "x64");
+            expect(r.status, r.text).toBe(200);
+            expect(r.headers["x-runner-kit-kind"]).toBe("installer");
+            expect(r.headers["x-runner-kit-note"]).toBeUndefined();
+            expect(r.headers["x-runner-kit-target"]).toBe("win-x64");
+            const z = unzipSync(new Uint8Array(r.buf));
+            const dir = "runner-my-computer-win-x64";
+            for (const n of ["AITestingRunnerSetup.exe", "node/node.exe", "node_modules/.aitp-complete", "start-runner.cmd", "runner.enroll"]) expect(z[`${dir}/${n}`], n).toBeDefined();
+            const readme = Buffer.from(z[`${dir}/README.txt`]!).toString();
+            expect(readme.indexOf("Double-click AITestingRunnerSetup.exe")).toBeGreaterThan(-1);
+            expect(readme.indexOf("AITestingRunnerSetup.exe")).toBeLessThan(readme.indexOf("start-runner.cmd"));
+            expect(readme).toContain("Or, to run it without installing, double-click start-runner.cmd");
+            const mac = await complete("mac", "arm64");
+            expect(mac.headers["x-runner-kit-kind"]).toBe("installer");
+            expect(Object.keys(unzipSync(new Uint8Array(mac.buf)))).toContain("runner-my-computer-mac-arm64/AI Testing Runner.app/Contents/MacOS/AITestingRunner");
+            // Linux never gets an installer.
+            const linux = await complete("linux", "x64");
+            expect(linux.headers["x-runner-kit-kind"]).toBe("files");
+            expect(linux.headers["x-runner-kit-target"]).toBe("linux-x64");
+        } finally {
+            process.env.RUNNER_INSTALLER_DIR = saved;
+        }
+    });
+
     it("streams Linux and Mac downloads with node/bin/node executable, chosen by os and arch", async () => {
-        const p = await newProject("Unix complete");
-        const linux = await complete(p, "Build box", "unix", "x64", "linux");
+        const linux = await complete("linux", "x64");
         expect(linux.status, linux.text).toBe(200);
-        expect(linux.headers["content-disposition"]).toBe('attachment; filename="runner-unix-complete-linux-x64.zip"');
+        expect(linux.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-linux-x64.zip"');
         const lm = modes(new Uint8Array(linux.buf));
-        expect(lm["runner-unix-complete-linux-x64/node/bin/node"]).toEqual({ mode: 0o755, unix: true });
+        expect(lm["runner-my-computer-linux-x64/node/bin/node"]).toEqual({ mode: 0o755, unix: true });
         const lz = unzipSync(new Uint8Array(linux.buf));
-        expect(Buffer.from(lz["runner-unix-complete-linux-x64/README.txt"]!).toString()).not.toContain("\r\n");
-        const mac = await complete(p, "Maya's Mac", "unix", "arm64", "mac");
+        expect(Buffer.from(lz["runner-my-computer-linux-x64/README.txt"]!).toString()).not.toContain("\r\n");
+        const mac = await complete("mac", "arm64");
         expect(mac.status, mac.text).toBe(200);
         expect(mac.headers["x-runner-kit-target"]).toBe("mac-arm64");
-        expect(Object.keys(unzipSync(new Uint8Array(mac.buf)))).toContain("runner-unix-complete-mac-arm64/node_modules/mac-watcher/package.json");
+        expect(Object.keys(unzipSync(new Uint8Array(mac.buf)))).toContain("runner-my-computer-mac-arm64/node_modules/mac-watcher/package.json");
     });
 
-    it("answers 503 with the build command for a target that was not built; the plain kit still works", async () => {
-        const p = await newProject("Missing target");
-        const before = (await call("GET", `/api/projects/${p}/agent-tokens`)).body.length;
-        const r = await complete(p, "ARM laptop", "windows", "arm64");
-        expect(r.status).toBe(503);
-        expect(r.body.error).toMatch(/complete download for Windows on an ARM processor has not been built on this server\. Run `npm run build:runner -- --complete --targets win-arm64`/);
-        // No access was made for a download that did not happen.
-        expect((await call("GET", `/api/projects/${p}/agent-tokens`)).body.length).toBe(before);
-        const plain = await call("POST", `/api/projects/${p}/runner-kits`, { name: "ARM laptop", platform: "windows", kind: "files" });
-        expect(plain.status).toBe(200);
-        expect(plain.headers["x-runner-kit-kind"]).toBe("files");
+    it("a target that was not built gets the download without its own Node.js", async () => {
+        const r = await complete("windows", "arm64");
+        expect(r.status).toBe(200);
+        expect(r.headers["x-runner-kit-target"]).toBeUndefined();
+        expect(r.headers["x-runner-kit-kind"]).toBe("files");
+        const names = Object.keys(unzipSync(new Uint8Array(r.buf)));
+        expect(names.some((n) => n.includes("/node/"))).toBe(false);
+        expect(names).toContain("runner-my-computer-windows/start-runner.cmd");
     });
 
-    it("refuses a build made for other test tool versions, and a damaged pack", async () => {
-        const p = await newProject("Stale complete");
+    it("never hands out a build made for other test tool versions, or a damaged pack", async () => {
         const copy = path.join(tmp, "stale-complete");
         fs.cpSync(completeOut, copy, { recursive: true });
         const m = JSON.parse(fs.readFileSync(path.join(copy, "win-x64", "manifest.json"), "utf8"));
@@ -507,38 +559,26 @@ describe("the download route", () => {
         const saved = process.env.RUNNER_COMPLETE_DIR;
         process.env.RUNNER_COMPLETE_DIR = copy;
         try {
-            const stale = await complete(p, "Old", "windows", "x64");
-            expect(stale.status).toBe(503);
-            expect(stale.body.error).toMatch(/built for other test tool versions than this platform's runner/);
-            const bad = await complete(p, "Bad", "unix", "x64", "linux");
-            expect(bad.status).toBe(503);
-            expect(bad.body.error).toMatch(/is damaged/);
-            const info = (await call("GET", `/api/projects/${p}/runner-kits/info`)).body;
-            expect(info.complete.targets["mac-arm64"].available).toBe(true);
-            expect(info.complete.targets["linux-x64"].available).toBe(false);
+            for (const [osName, arch] of [["windows", "x64"], ["linux", "x64"]] as const) {
+                const r = await complete(osName, arch);
+                expect(r.status, `${osName} ${arch}`).toBe(200);
+                expect(r.headers["x-runner-kit-target"], `${osName} ${arch}`).toBeUndefined();
+            }
+            const info = (await call("GET", "/api/me/runner/download/info")).body;
+            expect(systemOf(info, "mac", "arm64").ownNode).toBe(true);
+            expect(systemOf(info, "linux", "x64").ownNode).toBe(false);
+            expect(systemOf(info, "windows", "x64").ownNode).toBe(false);
         } finally {
             process.env.RUNNER_COMPLETE_DIR = saved;
         }
     });
 
-    it("checks what is asked for", async () => {
-        const p = await newProject("Validation complete");
-        const ask = (body: Record<string, unknown>) => call("POST", `/api/projects/${p}/runner-kits`, { name: "x", ...body });
-        expect((await ask({ platform: "windows", complete: true })).body.error).toMatch(/Choose the processor for the complete download: x64 or arm64/);
-        expect((await ask({ platform: "unix", complete: true, arch: "x64" })).body.error).toMatch(/Choose mac or linux for the complete download/);
-        expect((await ask({ platform: "windows", complete: true, arch: "x86" })).status).toBe(400);
-        expect((await ask({ platform: "windows", complete: true, arch: "x64", kind: "installer" })).body.error).toMatch(/two different choices/);
-        expect((await ask({ platform: "windows", complete: true, arch: "x64", os: "mac" })).body.error).toMatch(/does not match/);
-        expect((await ask({ platform: "unix", complete: "yes", arch: "x64", os: "linux" })).status).toBe(400);
-    });
-
-    it("never puts the server's secrets, paths or data in a complete zip; the single-use code is in runner.enroll only", async () => {
-        const p = await newProject("Secrets complete");
-        const r = await complete(p, "Secret PC", "windows", "x64");
+    it("never puts the server's secrets, paths or data in a download with its own Node.js; the single-use code is in runner.enroll only", async () => {
+        const r = await complete("windows", "x64");
         const z = unzipSync(new Uint8Array(r.buf));
-        const token = Buffer.from(z["runner-secrets-complete-win-x64/runner.enroll"]!).toString().trim();
+        const token = Buffer.from(z["runner-my-computer-win-x64/runner.enroll"]!).toString().trim();
         expect(token).toMatch(/^aite_/);
-        const forbidden = [...Object.values(SENTINELS), API_KEY, "platform.db", tmp, fwd(tmp), ROOT, fwd(ROOT)];
+        const forbidden = [...Object.values(SENTINELS), API_KEY, bearer, "platform.db", tmp, fwd(tmp), ROOT, fwd(ROOT)];
         for (const [name, bytes] of Object.entries(z)) {
             const b = Buffer.from(bytes);
             if (!name.endsWith("runner.enroll")) expect(b.includes(token), name).toBe(false);
@@ -563,8 +603,7 @@ describe("the start scripts with a complete download", () => {
     });
 
     it.skipIf(process.platform !== "win32" || !fs.existsSync(SYSTEM_TAR))("start-runner.cmd, unzipped with Windows' own tar, runs the runner with the Node.js inside, with no Node.js or npm on the PATH", async () => {
-        const p = await newProject("Cmd complete");
-        const r = await complete(p, "Cmd PC", "windows", "x64");
+        const r = await complete("windows", "x64");
         const kit = unpackWithSystemTar(r.buf, "cmd");
         expect(fs.existsSync(path.join(kit, "node", "node.exe"))).toBe(true);
         // Stand in a real Node.js for the fake one, and a runner that only says which Node.js runs it.
@@ -578,15 +617,14 @@ describe("the start scripts with a complete download", () => {
         const res = run("cmd.exe", ["/d", "/c", ".\\start-runner.cmd"], kit, { PATH: pathWithoutNode(), Path: pathWithoutNode(), AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1", LOCALAPPDATA: path.join(tmp, "no-localappdata"), APPDATA: path.join(tmp, "no-appdata") });
         expect(res.out).toContain(`Using the Node.js that came with this download, version ${process.version}.`);
         expect(res.out).toContain("The test tools came with this download. Nothing to install.");
-        expect(res.out).toMatch(new RegExp(`RUNNER-STAND-IN execPath=${path.join(kit, "node", "node.exe").replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")} version=${process.version.replace(/\./g, "\\.")} args=--token-file runner.token`, "i"));
+        expect(res.out).toMatch(new RegExp(`RUNNER-STAND-IN execPath=${path.join(kit, "node", "node.exe").replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")} version=${process.version.replace(/\./g, "\\.")} args=--enroll-file runner.enroll`, "i"));
         expect(res.out).not.toMatch(/npm|installing the test tools|playwright install/i);
         expect(res.out).toContain("The runner stopped.");
         expect(res.code).toBe(0);
     });
 
     it.skipIf(!BASH)("start-runner.sh, under Git Bash, makes node/bin/node executable again and runs the runner with it, with no Node.js on the PATH", async () => {
-        const p = await newProject("Sh complete");
-        const r = await complete(p, "Linux box", "unix", "x64", "linux");
+        const r = await complete("linux", "x64");
         const kit = unpackWithFflate(r.buf, "sh");
         const nodeBin = path.join(kit, "node", "bin", "node");
         // The stand-in for a real Node.js: a two-line script that runs this computer's node. It loses its executable bit, as some unzip tools do.
@@ -596,15 +634,14 @@ describe("the start scripts with a complete download", () => {
         const res = run(BASH!, ["start-runner.sh"], kit, { PATH: bashPathWithoutNode(), HOME: msys(path.join(tmp, "home-sh")), AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1" });
         expect(res.out).toContain(`Using the Node.js that came with this download, version ${process.version}.`);
         expect(res.out).toContain("The test tools came with this download. Nothing to install.");
-        expect(res.out).toMatch(/RUNNER-STAND-IN execPath=\S+ version=v\d+\.\d+\.\d+ args=--token-file runner\.token/);
+        expect(res.out).toMatch(/RUNNER-STAND-IN execPath=\S+ version=v\d+\.\d+\.\d+ args=--enroll-file runner\.enroll/);
         expect(res.out).not.toMatch(/npm|installing the test tools|playwright install/i);
         expect(res.out).toContain("The runner stopped.");
         expect(res.code).toBe(0);
     });
 
     it.skipIf(process.platform !== "win32")("a Node.js inside the download that does not start (another processor) falls back to the one on the computer; npm is still skipped", async () => {
-        const p = await newProject("Wrong arch");
-        const r = await complete(p, "Wrong PC", "windows", "x64");
+        const r = await complete("windows", "x64");
         const kit = unpackWithFflate(r.buf, "wrong");
         fs.writeFileSync(path.join(kit, "runner.mjs"), STAND_IN_RUNNER);
         // node/node.exe stays the fake one from the archive, which is not a program.
@@ -617,8 +654,7 @@ describe("the start scripts with a complete download", () => {
     });
 
     it.skipIf(!BASH)("a complete download whose node_modules is missing says it is incomplete instead of trying npm", async () => {
-        const p = await newProject("Incomplete");
-        const r = await complete(p, "Half", "unix", "x64", "linux");
+        const r = await complete("linux", "x64");
         const kit = unpackWithFflate(r.buf, "half");
         fs.writeFileSync(path.join(kit, "node", "bin", "node"), `#!/bin/sh\nexec "${msys(process.execPath)}" "$@"\n`);
         fs.rmSync(path.join(kit, "node_modules"), { recursive: true, force: true });

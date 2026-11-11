@@ -4,15 +4,23 @@
  */
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../web/src/api.js";
-import { downloadErrorText, KitError } from "../web/src/features/agents/kit.js";
+import { downloadMyRunner } from "../web/src/features/runners/my-runner.js";
 import { describeApiError, signedOutText } from "../web/src/lib/labels.js";
 import { externalHref } from "../web/src/lib/url.js";
 
 describe("a refused sign-in (401)", () => {
     const SIGNED_OUT = "You are signed out, or the access key was not accepted. Reload the page to sign in again.";
 
-    it("never sends the person to an access-key card in Settings", () => {
-        for (const text of [describeApiError(new ApiError(401, "Missing or invalid x-api-key")), downloadErrorText(new KitError(401, "Missing or invalid x-api-key")).text]) {
+    it("never sends the person to an access-key card in Settings", async () => {
+        // The runner download in Settings says the same as every other refused call (the fetch is a stand-in answering 401).
+        const realFetch = globalThis.fetch;
+        globalThis.fetch = (async () => new Response(JSON.stringify({ error: "Missing or invalid x-api-key" }), { status: 401, headers: { "content-type": "application/json" } })) as typeof fetch;
+        const download = await downloadMyRunner("windows", "x64", () => undefined).then(
+            () => "saved",
+            (e: Error) => e.message,
+        );
+        globalThis.fetch = realFetch;
+        for (const text of [describeApiError(new ApiError(401, "Missing or invalid x-api-key")), download]) {
             expect(text).toBe(SIGNED_OUT);
             expect(text).not.toMatch(/settings/i);
         }

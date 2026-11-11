@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vites
 import { loadConfig } from "../src/config.js";
 import { runScripts } from "../src/engine/validation/runner.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner, testPerson } from "./helpers/personal-runner.js";
 import { CustomScriptStore } from "../src/platform/custom-script-store.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
@@ -64,7 +65,7 @@ interface Env {
     worker: Worker;
     dataDir: string;
     headers: Record<string, string>;
-    call(method: "GET" | "POST" | "PUT" | "DELETE", url: string, payload?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any; raw: any }>;
+    call(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, payload?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any; raw: any }>;
     waitJob(jobId: string): Promise<any>;
 }
 
@@ -544,7 +545,7 @@ describe("the run policy is the boundary: hand-written tests do not run where th
     let hand = "";
     let plain = "";
     const marker = path.join(os.tmpdir(), `aitp-custom-marker-${process.pid}.txt`);
-    const REFUSAL = /--allow-custom-scripts/;
+    const REFUSAL = /--allow-custom-scripts|code scripts|ALLOW_CUSTOM_SCRIPTS/;
 
     beforeAll(async () => {
         if (!appServer?.listening) await startApp();
@@ -679,51 +680,38 @@ describe("the run policy is the boundary: hand-written tests do not run where th
         }
     }, 120_000);
 
-    it("a runner agent without the flag is never offered one; an agent with it is, with its helpers", async () => {
-        // Two runners in one project on purpose (one may run hand-written tests, one may not); the default is one per project.
-        const savedMax = process.env.AGENT_MAX_TOKENS;
-        process.env.AGENT_MAX_TOKENS = "25";
-        onTestFinished(() => {
-            if (savedMax === undefined) delete process.env.AGENT_MAX_TOKENS;
-            else process.env.AGENT_MAX_TOKENS = savedMax;
-        });
+    it("a person's runner with code scripts switched off is never offered one; with the switch on it is (round 45)", async () => {
+        // The run is a person's (runs started with the server's shared key have no owner); their runner takes it.
+        const me = testPerson(e.platform);
+        const mine = { "x-api-key": me.token };
         const send = viaInject(e.server);
-        const hdr = { ...e.headers, "content-type": "application/json" };
-        const token = async () => (await e.server.inject({ method: "POST", url: `/api/projects/${pid}/agent-tokens`, headers: hdr, payload: { label: "t" } })).json().secret as string;
-        const plainAgent = new FakeAgent(send, await token(), { name: "no flag", capabilities: defaultCaps() });
-        expect((await plainAgent.hello()).status).toBe(200);
+        const runner = personalRunner(e.platform, { ownerId: me.id, label: "mine", codeScripts: false });
+        const agent = new FakeAgent(send, runner.secret, { name: "mine", capabilities: defaultCaps({ runnerSwitches: true }) });
+        expect((await agent.hello()).status).toBe(200);
         const set = await e.call("PUT", `/api/projects/${pid}/runner`, { runOn: "agent" });
         expect(set.status, JSON.stringify(set.body)).toBe(200);
 
-        // the only agent did not agree: refused before a job exists
-        const refused = await e.call("POST", `/api/tests/${hand}/validate`, {});
+        // code scripts off on the person's runner: refused before a job exists, with the code that links to Settings
+        const refused = await e.call("POST", `/api/tests/${hand}/validate`, {}, mine);
         expect(refused.status).toBe(409);
         expect(refused.body.error).toMatch(REFUSAL);
+        expect(refused.body.details).toMatchObject({ code: "RUNNER_CANNOT_RUN" });
         // generated tests still go to it
-        const fine = await e.call("POST", `/api/tests/${plain}/validate`, {});
+        const fine = await e.call("POST", `/api/tests/${plain}/validate`, {}, mine);
         expect(fine.status, JSON.stringify(fine.body)).toBe(202);
-        const offer = await plainAgent.next(15_000);
+        const offer = await agent.next(15_000);
         expect(offer?.scripts.map((s) => s.custom)).toEqual([undefined]);
-        await plainAgent.answer(offer!, { runs: offer!.scripts.map((s) => passedRun(s.testId)) });
+        await agent.answer(offer!, { runs: offer!.scripts.map((s) => passedRun(s.testId)) });
         await e.waitJob(fine.body.jobId);
 
-        // an agent that agreed
-        const flagged = new FakeAgent(send, await token(), { name: "flag", capabilities: defaultCaps({ customScripts: true }) });
-        expect((await flagged.hello()).status).toBe(200);
-        expect((await e.call("PUT", `/api/projects/${pid}/helpers/open-shop`, { content: HELPER("agent-helper") })).status).toBe(200);
-        const code = WITH_HELPER("open-shop");
-        const saved = await e.call("PUT", `/api/tests/${hand}/script`, { content: code });
-        expect(saved.body.jobId).toBeTruthy();
-        // that save queued a run for the agent that agreed; the one that did not agree must not see it
-        const stillPlain = await plainAgent.poll(1);
-        expect(stillPlain.offer).toBeUndefined();
-        const got = await flagged.next(20_000);
+        // the owner switches code scripts on: the hand-written test goes to it
+        expect((await e.call("PATCH", "/api/me/runner", { switches: { codeScripts: true } }, mine)).status).toBe(200);
+        const started = await e.call("POST", `/api/tests/${hand}/validate`, {}, mine);
+        expect(started.status, JSON.stringify(started.body)).toBe(202);
+        const got = await agent.next(20_000);
         expect(got).toBeTruthy();
-        expect(got!.scripts[0]).toMatchObject({ custom: true, content: code });
-        expect(got!.helpers).toEqual([{ name: "open-shop", content: HELPER("agent-helper") }]);
-        await flagged.answer(got!, { runs: got!.scripts.map((s) => passedRun(s.testId)) });
-        await e.waitJob(saved.body.jobId);
-        expect((await waitSettled(hand)).validationStatus).toBe("VALIDATED");
-        expect(hitsOf("agent-helper")).toBe(0); // it ran on the (fake) agent, not on this machine
+        expect(got!.scripts[0]).toMatchObject({ custom: true });
+        await agent.answer(got!, { runs: got!.scripts.map((s) => passedRun(s.testId)) });
+        await e.waitJob(started.body.jobId);
     }, 120_000);
 });

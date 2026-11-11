@@ -210,8 +210,6 @@ describe("the protocol additions", () => {
         for (const [m, p] of [["GET", "/api/agent/update"], ["POST", "/api/agent/update/"], ["GET", "/api/agent/update/files/../x"], ["GET", "/api/agent/update/files/a/b"], ["GET", "/api/agent/update/files/.hidden"], ["PUT", "/api/agent/update/files/x"]] as const) expect(isAgentRoute(m, p), p).toBe(false);
         expect(ROUTE_ROLES["POST /api/agent/update"]).toBe("own");
         expect(ROUTE_ROLES["GET /api/agent/update/files/:name"]).toBe("own");
-        expect(ROUTE_ROLES["PUT /api/projects/:id/agents/:agentId/updates"]).toBe("owner");
-        expect(ROUTE_ROLES["POST /api/projects/:id/agents/:agentId/update"]).toBe("owner");
     });
 });
 
@@ -577,13 +575,13 @@ describe("signed updates (round 39)", () => {
             expect(st.retryAt, label).toBeDefined();
             expect(fs.readFileSync(path.join(kit, "runner.mjs"), "utf8"), label).toBe(before);
             expect(fs.existsSync(path.join(kit, ".update", "next")), label).toBe(false);
-            expect(lines.join("\n"), label).toMatch(/was not installed: .* Download the new version from the Runners page/);
-            // The platform writes it to Activity once and the Runners page can say "download the new version".
+            expect(lines.join("\n"), label).toMatch(/was not installed: .* Choose Update now in Settings, Your runner, or download the runner again there\./);
+            // The platform writes it to Activity once and Settings can say "download the new version".
             rows.length = 0;
             updates.observe({ id: "agent-1", name: "Maya", projectId: "p1" }, caps(u, versionA));
             updates.observe({ id: "agent-1", name: "Maya", projectId: "p1" }, caps(u, versionA));
             expect(rows, label).toHaveLength(1);
-            expect(rows[0]!.detail, label).toMatch(/did not install version .* by itself: .* Download the new version from the Runners page\./);
+            expect(rows[0]!.detail, label).toMatch(/did not install version .* by itself: .*\./);
             expect(updates.publicView({ id: "agent-1", capabilities: caps(u, versionA) }).state, label).toBe("needs-manual");
             db.run("DELETE FROM runner_update_settings");
         }

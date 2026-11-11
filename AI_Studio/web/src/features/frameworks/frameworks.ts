@@ -1,4 +1,4 @@
-/** Types and wording for the Frameworks section of the Runners tab (API: GET/PUT /projects/:id/framework-settings). */
+/** Types and wording for the Frameworks section of a project's settings (API: GET/PUT /projects/:id/framework-settings). */
 
 export type FrameworkId = "playwright" | "playwright-api" | "taqwright" | "windows-uia" | "taqwright-ios";
 

@@ -23,6 +23,8 @@ import { DeviceSessionError } from "../src/engine/mobile/device/errors.js";
 import { deviceOptions, openDeviceSession } from "../src/platform/agent-device.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
+import { OPEN_OWNER_ID } from "../src/platform/agent-store.js";
 import { buildServer } from "../src/platform/server.js";
 
 const PORT = 6911;
@@ -102,7 +104,7 @@ beforeAll(async () => {
         res.writeHead(404).end();
     });
     await new Promise<void>((r) => google.listen(GOOGLE_PORT, "127.0.0.1", () => r()));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PORT, host: "127.0.0.1" });
     Object.assign(deviceOptions, { remote: { lostContactMs: 20_000, claimWaitMs: 10_000, startWaitMs: 60_000, commandWaitMs: 20_000, settleMs: 8_000 } });
@@ -120,7 +122,7 @@ afterAll(async () => {
 describe("a runner without Android tools gets Google's phone tools when a phone session arrives", { timeout: 120_000 }, () => {
     it("offers, fetches once into its own folder, says what to do on the phone, reports them ready, and reuses them after a restart", async () => {
         const projectId = (await admin("POST", "/api/projects", { name: "USB phone" })).body.id as string;
-        const token = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "USB laptop" })).body.secret as string;
+        const token = personalRunner(platform, { label: "USB laptop", replace: true, realPhone: true }).secret;
         const workDir = fs.mkdtempSync(path.join(work, "agent-"));
         const env = bareEnv();
         const a = await startAgent(projectId, token, workDir, env);
@@ -133,7 +135,7 @@ describe("a runner without Android tools gets Google's phone tools when a phone 
             expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent", agentId: a.me.id })).status).toBe(200);
 
             // the session arrives: the runner fetches, then tries the phone; the stand-in adb cannot start on this computer, said in words
-            const e = await openDeviceSession({ appPackage: SHOP }, { agents: getAgentServices(platform), projectId }).then(
+            const e = await openDeviceSession({ appPackage: SHOP }, { agents: getAgentServices(platform), projectId, startedBy: OPEN_OWNER_ID }).then(
                 () => undefined,
                 (x: unknown) => x as Error,
             );
@@ -188,7 +190,7 @@ describe("a runner without Android tools gets Google's phone tools when a phone 
 
     it("a runner set to off (the default for a checkout) offers nothing and is not sent a phone session", async () => {
         const projectId = (await admin("POST", "/api/projects", { name: "Off" })).body.id as string;
-        const token = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "USB laptop" })).body.secret as string;
+        const token = personalRunner(platform, { label: "USB laptop", replace: true, realPhone: true }).secret;
         const env = bareEnv();
         delete env.AITP_PHONE_TOOLS;
         const before = googleRequests.length;
@@ -197,7 +199,7 @@ describe("a runner without Android tools gets Google's phone tools when a phone 
             expect(a.me.capabilities.phoneTools).toBeUndefined();
             expect(a.me.capabilities.deviceSession).toBeUndefined();
             expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent", agentId: a.me.id })).status).toBe(200);
-            await expect(openDeviceSession({ appPackage: SHOP }, { agents: getAgentServices(platform), projectId })).rejects.toThrow(/USB laptop can't be used to explore a phone: it has no Android tools/);
+            await expect(openDeviceSession({ appPackage: SHOP }, { agents: getAgentServices(platform), projectId, startedBy: OPEN_OWNER_ID })).rejects.toThrow(/USB laptop can't be used to explore a phone: it has no Android tools/);
             expect(googleRequests.length).toBe(before);
         } finally {
             a.agent.stop();

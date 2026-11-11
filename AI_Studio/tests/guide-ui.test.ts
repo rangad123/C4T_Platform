@@ -4,7 +4,7 @@
  *
  * The platform underneath is real (seeded through the repo; the page talks to it over HTTP). The one thing stood in for is the
  * empty projects list, to reach the first-run welcome page and the tour with no project, which a seeded platform cannot show.
- * Ports: 6510 platform + UI.
+ * Ports: 8799 platform + UI.
  *
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
@@ -41,7 +41,7 @@ const noProjects = (route: import("playwright").Route) => {
     return route.fulfill({ json: q.has("limit") || q.has("offset") ? { projects: [], total: 0, limit: Number(q.get("limit") ?? 20), offset: Number(q.get("offset") ?? 0) } : [] });
 };
 
-const PORT = 6510;
+const PORT = 8799;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 let dataDir = "";
@@ -190,7 +190,7 @@ function everyPlace(): Array<[string, PlaceId]> {
         [routes.cases(P(), "manual"), "release-manual"],
         [routes.runs(P(), "compliance"), "release-compliance"],
         [routes.release(P(), releaseId), "release-detail"],
-        // Round 37: a project's runners are on the Runners page (routes.runners(P()) is that place, listed once below as allRunners).
+        // Round 45: every runner link opens Your runner in Settings (the settings place).
         [routes.projectSettings(P(), "environments"), "setup-environments"],
         [routes.projectSettings(P(), "frameworks"), "setup-frameworks"],
         [routes.projectSettings(P(), "mobile"), "setup-mobile"],
@@ -206,7 +206,6 @@ function everyPlace(): Array<[string, PlaceId]> {
         [routes.agentRuns(P()), "agent-runs"],
         [routes.dashboard, "dashboard"],
         [routes.develop, "develop"],
-        [routes.allRunners, "runners-global"],
         [routes.integrations, "integrations"],
         [routes.libraries, "libraries"],
         [routes.projectFolders, "folders"],

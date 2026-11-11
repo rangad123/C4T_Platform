@@ -1,6 +1,6 @@
 /**
  * Private and local addresses on a runner: localhost, the computer's own network (10.x, 172.16-31.x, 192.168.x, fc00::/7) and link-local
- * addresses (169.254.x, fe80::). A person's own computer refuses them unless its owner allows them on the Runners page; a team runner keeps
+ * addresses (169.254.x, fe80::). A person's own computer refuses them unless its owner allows them in Settings, Your runner; a team runner keeps
  * allowing them unless an admin switched them off. The platform says which in the hello answer (`runner.privateTargets`) and, when the switch
  * changes, in a heartbeat (`config.privateTargets`). `BLOCK_PRIVATE_TARGETS=true` in the runner's own environment refuses them whatever the
  * platform says (stricter only).
@@ -24,9 +24,9 @@ import { isPrivateHost } from "../platform/net-guard.js";
 export const ADDRESS_GUARD_ENV = "AITP_ADDRESS_GUARD";
 
 /** What the guard answers in place of a refused page, and the end of every refusal sentence. */
-export const RUNNER_PRIVATE_REFUSED = "This address is private or local to this computer's network, and this runner does not open those. The runner's owner can allow private addresses on the Runners page.";
+export const RUNNER_PRIVATE_REFUSED = "This address is private or local to this computer's network, and this runner does not open those. The runner's owner can allow private addresses in Settings, Your runner.";
 
-const OWNER_NOTE = "This runner does not open private or local addresses (such as localhost or a device on the same network). The runner's owner can allow them on the Runners page.";
+const OWNER_NOTE = "This runner does not open private or local addresses (such as localhost or a device on the same network). The runner's owner can allow them in Settings, Your runner.";
 
 /** "host:port" pairs treated as public. Tests only (a local site stands in for a public one); the agent never sets it. */
 let testTrust: string[] = [];
@@ -93,7 +93,7 @@ export async function runAddressRefusal(env: Pick<WireRunEnv, "baseUrl" | "apiBa
 export function proxyTestsConflict(env: NodeJS.ProcessEnv): string | undefined {
     const on = env.AITP_PROXY_TESTS !== undefined && /^(1|true|yes|on)$/i.test(env.AITP_PROXY_TESTS.trim());
     if (!on || !(env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY)) return undefined;
-    return "The run was not started: this runner sends tests through a company proxy (--proxy-tests) and does not open private addresses, and it cannot check where the proxy sends a test. Allow private addresses for this runner on the Runners page, or start it without --proxy-tests.";
+    return "The run was not started: this runner sends tests through a company proxy (--proxy-tests) and does not open private addresses, and it cannot check where the proxy sends a test. Allow private addresses for this runner in Settings, Your runner, or start it without --proxy-tests.";
 }
 
 /** The guard for one task: started inside the agent on 127.0.0.1, closed when the task ends. */

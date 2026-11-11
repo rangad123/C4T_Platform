@@ -1,7 +1,7 @@
 /**
- * Runner kit support: a runner started from the zip that the platform generates (Settings, Runners, Add a runner) has no command line
- * to speak of. Next to `runner.mjs` it finds `runner.json` (the platform's address, the name the person typed, the kit version) and
- * `runner.token` (the project token). This file turns those into the same settings the flags and environment variables set, so the
+ * Runner kit support: a runner started from the zip the platform makes (Settings, Your runner) has no command line to speak of. Next to
+ * `runner.mjs` it finds `runner.json` (the platform's address, the kit version, and a name only in downloads made before round 45: the
+ * runner is otherwise named after the computer) and `runner.enroll` (the person's one-time code; `runner.token` in older downloads). This file turns those into the same settings the flags and environment variables set, so the
  * rest of the agent does not know the difference.
  *
  * Order of precedence stays what the setup guide says: a flag beats an environment variable, and both beat the kit's files. A runner
@@ -18,7 +18,8 @@ const MAX_CONFIG_BYTES = 8 * 1024;
 
 export interface KitFile {
     url: string;
-    name: string;
+    /** Left out by downloads from round 45 on: the runner then uses the computer's own name (config.ts). */
+    name?: string;
     kitVersion?: string;
     /** Which browser web tests use (auto, bundled, chrome, msedge). Optional: a person may add it; the flag and AITP_BROWSER beat it. */
     browser?: string;
@@ -41,14 +42,14 @@ export function parseKitFile(text: string): { ok: true; file: KitFile } | { ok: 
     const o = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : undefined;
     const str = (v: unknown, max: number): string | undefined => (typeof v === "string" && v.length > 0 && v.length <= max && printable(v) ? v : undefined);
     const url = str(o?.url, 300);
-    const name = str(o?.name, 64);
+    const name = o?.name === undefined ? undefined : str(o.name, 64);
     const kitVersion = o?.kitVersion === undefined ? undefined : str(o.kitVersion, 80);
-    if (!url || !name || (o?.kitVersion !== undefined && !kitVersion)) return { ok: false, message: `${KIT_CONFIG_FILE} is missing the platform address or the runner name. Download the runner kit again from the platform.` };
+    if (!url || (o?.name !== undefined && !name) || (o?.kitVersion !== undefined && !kitVersion)) return { ok: false, message: `${KIT_CONFIG_FILE} is missing the platform address, or its runner name is not valid. Download the runner again from Settings, Your runner.` };
     const browser = typeof o?.browser === "string" ? o.browser.trim().toLowerCase() : undefined;
     if (o?.browser !== undefined && !(browser && ["auto", "bundled", "chrome", "msedge"].includes(browser))) return { ok: false, message: `${KIT_CONFIG_FILE} has a "browser" the runner does not know. Use "auto", "bundled", "chrome" or "msedge", or remove the line.` };
     const phoneTools = typeof o?.phoneTools === "string" ? o.phoneTools.trim().toLowerCase() : undefined;
     if (o?.phoneTools !== undefined && !(phoneTools && ["auto", "now", "off"].includes(phoneTools))) return { ok: false, message: `${KIT_CONFIG_FILE} has a "phoneTools" the runner does not know. Use "auto", "now" or "off", or remove the line.` };
-    return { ok: true, file: { url, name, ...(kitVersion ? { kitVersion } : {}), ...(browser ? { browser } : {}), ...(phoneTools ? { phoneTools } : {}) } };
+    return { ok: true, file: { url, ...(name ? { name } : {}), ...(kitVersion ? { kitVersion } : {}), ...(browser ? { browser } : {}), ...(phoneTools ? { phoneTools } : {}) } };
 }
 
 /**
@@ -71,7 +72,7 @@ export function applyKitDefaults(env: NodeJS.ProcessEnv, dir: string): KitResult
     const out: NodeJS.ProcessEnv = { ...env };
     const unset = (k: string) => !out[k]?.trim();
     if (unset("AITP_URL")) out.AITP_URL = file.url;
-    if (unset("AITP_AGENT_NAME")) out.AITP_AGENT_NAME = file.name;
+    if (unset("AITP_AGENT_NAME") && file.name) out.AITP_AGENT_NAME = file.name;
     // Runs and the file cache live inside the kit folder, so deleting the folder removes everything the runner left behind.
     if (unset("AITP_AGENT_WORK_DIR")) out.AITP_AGENT_WORK_DIR = path.join(dir, "work");
     if (unset("AITP_AGENT_TOKEN") && unset("AITP_AGENT_TOKEN_FILE") && fs.existsSync(path.join(dir, KIT_TOKEN_FILE))) out.AITP_AGENT_TOKEN_FILE = path.join(dir, KIT_TOKEN_FILE);

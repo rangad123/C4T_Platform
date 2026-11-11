@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { canMovePhase, AgentStore, MAX_OFFERS } from "../src/platform/agent-store.js";
+import { canMovePhase, AgentStore, MAX_OFFERS, OPEN_OWNER_ID } from "../src/platform/agent-store.js";
 import { basicAuthForms, envSecrets, liveEventData, liveEventMessage, negotiateProtocol, scrubSecrets } from "../src/platform/agent-routing.js";
 import { secretVariants } from "../src/agent-protocol/secret-variants.js";
 import { EventsRequest, HelloRequest, LIVE_EVENT_KINDS, TaskOffer, type Capabilities as Caps, type LiveEvent } from "../src/agent-protocol/schema.js";
@@ -32,6 +32,7 @@ beforeAll(() => {
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir }));
     projectId = platform.repo.createProject({ name: "Protocol two" }).id as string;
     store = new AgentStore(platform.db, () => now);
+    store.openMode = () => true;
 });
 afterAll(() => {
     platform.db.close();
@@ -54,11 +55,11 @@ describe("phases and attempts in the store", () => {
     const LEASE = 60_000;
     const newTask = () => {
         const id = crypto.randomUUID();
-        store.enqueue({ id, projectId, jobId: `job-${id}`, adapterId: "playwright", payloadEnc: "enc", files: [] });
+        store.enqueue({ id, projectId, jobId: `job-${id}`, adapterId: "playwright", payloadEnc: "enc", files: [], ownerId: OPEN_OWNER_ID });
         return id;
     };
     const agentFor = (name: string, protocol = 2) => {
-        const { record } = store.createToken(projectId, name);
+        const { record } = store.createPersonalToken({ ownerId: OPEN_OWNER_ID, label: name, createdBy: "test" });
         const agent = store.upsertAgent(record, { name, version: "1", capabilities: caps(), concurrency: 1 });
         store.setAgentProtocol(agent.id, protocol);
         return agent;

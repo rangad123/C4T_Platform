@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ownerIdOfActor } from "../agent-store.js";
 import { SEVERITIES } from "../../engine/validation/severity.js";
 import { ALERT_EVENTS, API_DRIFT_EVENT, type AlertChannel } from "../alerts.js";
 import { assertSmtpHostAllowed, fromInput, mergeSmtp, NO_MAIL_SERVER_MESSAGE, publicSmtp, Recipients, serverSmtp, SmtpInput, SmtpPatch } from "../alert-email.js";
@@ -171,7 +172,7 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         if (body.runbookId) checkRunbook(id, body.runbookId);
         // Who made it: a person's own runner may take the runs of that person's schedules (COMMON contract, scheduler.ts startedBy).
         const actor = currentActor();
-        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures, createdBy: actor.kind === "user" ? (actor.id ?? null) : null });
+        const created = svc.store.create({ projectId: id, name: body.name ?? autoName(body), kind: body.kind, cadence: body.cadence, enabled: body.enabled, retryFailures: body.retryFailures, createdBy: ownerIdOfActor(actor) });
         if (body.environment) setScheduleEnvironment(repo.db, created.id, { environment: body.environment, confirmProduction: Boolean(body.confirmProduction) });
         if (body.runbookId) runbooks.setScheduleLink(created.id, body.runbookId);
         if (body.suiteId) await suites.setScheduleLink(created.id, body.suiteId);
@@ -198,9 +199,9 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         const nextEnv = environment === undefined ? target.environment : environment;
         const nextConfirm = nextEnv === target.environment && confirmProduction === undefined ? target.confirmProduction : Boolean(confirmProduction);
         if (nextEnv) checkScheduleEnvironment(id, patch.kind ?? cur.kind, nextEnv, nextConfirm);
-        // The editor now owns its runs: from here on they may go to the editor's own computer (or team runners), never to the previous maker's.
+        // The editor now owns its runs: from here on they go to the editor's own runner, never to the previous maker's.
         const editor = currentActor();
-        const updated = svc.store.update(sid, { ...own, name: renamed, createdBy: editor.kind === "user" ? (editor.id ?? null) : null })!;
+        const updated = svc.store.update(sid, { ...own, name: renamed, createdBy: ownerIdOfActor(editor) })!;
         if (environment !== undefined || confirmProduction !== undefined) setScheduleEnvironment(repo.db, sid, { environment: nextEnv, confirmProduction: nextConfirm });
         if (runbookId !== undefined) runbooks.setScheduleLink(sid, runbookId);
         if (suiteId !== undefined) await suites.setScheduleLink(sid, suiteId);
@@ -220,9 +221,9 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         project(id);
         schedule(id, sid);
         try {
-            // "Run now" belongs to the person who clicks: only their own computer (or a team runner) may take it, never the schedule maker's.
+            // "Run now" belongs to the person who clicks (the open server on an open one): their own runner takes it, never the maker's.
             const clicker = currentActor();
-            const job = await svc.runNow(sid, clicker.kind === "user" ? (clicker.id ?? null) : null);
+            const job = await svc.runNow(sid, ownerIdOfActor(clicker));
             if (isRunbookStart(job)) return reply.code(202).send({ runbookRunId: job.runbookRunId, runbook: job.runbookName });
             return reply.code(202).send({ jobId: job.id, status: job.status, job: ctx.publicJob(job) });
         } catch (e) {

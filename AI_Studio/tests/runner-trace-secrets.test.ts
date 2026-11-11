@@ -30,6 +30,7 @@ import { memoryLogger } from "../src/agent/log.js";
 import { loadConfig } from "../src/config.js";
 import { scrubTraceFile, traceSecretForms, traceSecretsOfRun } from "../src/engine/evidence/trace-scrub.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import type { ObjectStore } from "../src/platform/object-store.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -104,7 +105,7 @@ beforeAll(async () => {
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", () => r()));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-trace-secrets-"));
     agentWork = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-trace-secrets-agent-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT), CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
     worker = new Worker(platform, 150);
@@ -130,7 +131,7 @@ afterAll(async () => {
 describe("a failure trace from a runner", () => {
     it("from the real agent program: the stored trace holds the fill and the sign-in, with the password and token hidden in every part", async () => {
         const projectId = (await admin("POST", "/api/projects", { name: "Trace secrets" })).body.id as string;
-        const made = await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "trace" });
+        const made = { status: 201, body: { secret: personalRunner(platform, { label: "trace", replace: true }).secret } };
         expect(made.status).toBe(201);
         const { log, lines } = memoryLogger();
         agent = new Agent({ config: { baseUrl: BASE, token: made.body.secret, name: "trace agent", concurrency: 1, workDir: agentWork, allowInsecure: false, cacheBytes: 64 * 1024 * 1024, tokenSource: "env" }, log, heartbeatMs: 500, backoff: { baseMs: 100, maxMs: 500 } });
@@ -188,7 +189,7 @@ describe("a failure trace from a runner", () => {
         const imp = await admin("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, validate: false, credentials: { username: USER, password: OLD_PASSWORD }, specs: [{ title: "Home", kind: "web", category: "Web", steps: [{ action: "navigate", url: `${APP}/` }, { action: "assert", check: "visible", locator: { by: "text", value: "Nothing" } }] }] });
         expect(imp.status).toBe(202);
         const testId = imp.body.tests[0].id as string;
-        const secret = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "old" })).body.secret as string;
+        const secret = personalRunner(platform, { label: "old", replace: true }).secret;
         const old = new FakeAgent(viaFetch(BASE), secret, { name: "older runner" });
         expect((await old.hello()).status).toBe(200);
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
@@ -244,7 +245,7 @@ describe("an upload on a store that is not this disk", () => {
         const imp = await admin("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, validate: false, credentials: { username: USER, password: pw }, specs: [{ title: "Home", kind: "web", category: "Web", steps: [{ action: "navigate", url: `${APP}/` }, { action: "assert", check: "visible", locator: { by: "text", value: "Nothing" } }] }] });
         expect(imp.status).toBe(202);
         const testId = imp.body.tests[0].id as string;
-        const secret = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "remote" })).body.secret as string;
+        const secret = personalRunner(platform, { label: "remote", replace: true }).secret;
         const old = new FakeAgent(viaFetch(BASE), secret, { name: "older runner, remote store" });
         expect((await old.hello()).status).toBe(200);
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);

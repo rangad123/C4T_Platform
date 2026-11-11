@@ -1,7 +1,7 @@
 /**
- * Round 39 review fixes, against real HTTP (stand-in Crowd4Test sign-in on 8340, the platform on 8341): "Run now" and editing a schedule
+ * Round 39 review fixes, against real HTTP (stand-in Crowd4Test sign-in on 8766, the platform on 8767): "Run now" and editing a schedule
  * make the clicker / editor the run's owner (never the maker's own computer); a person's own computer's switches are the owner's alone;
- * a team code's projects need "manage runners" in each; a team code dies with its maker's right to manage runners; rotation is in
+ * a schedule left without an owner is refused at its next fire (round 45); rotation is in
  * Activity; live events are capped per attempt (and keep no stack); a task never accepted is not offered forever.
  */
 import { randomUUID } from "node:crypto";
@@ -23,8 +23,8 @@ import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, viaFetch } from "./fixtures/fake-agent.js";
 
-const C4T_PORT = 8340;
-const PORT = 8341;
+const C4T_PORT = 8766;
+const PORT = 8767;
 const BASE = `http://127.0.0.1:${PORT}`;
 const KEY = "review-fixes-key-8f2a61";
 const PAGE = { "x-requested-with": "ai-studio" };
@@ -57,7 +57,7 @@ const asKey = (method: string, url: string, payload?: unknown) => call({ "x-api-
 const svc = () => getAgentServices(platform);
 
 async function addComputer(who: string): Promise<{ runnerId: string; agent: FakeAgent; machineId: string }> {
-    const code = (await as(who, "POST", "/api/runners/enroll", { kind: "personal" })).body.code as string;
+    const { code } = svc().store.createPersonalEnrollment({ ownerId: ids[who]!, createdBy: who });
     const machineId = randomUUID();
     const res = await fetch(`${BASE}/api/agent/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name: `${who}-pc-${++n}`, machineId }) });
     const got = (await res.json()) as { token: string; runnerId: string };
@@ -130,8 +130,8 @@ describe("review fixes", () => {
         await tom.agent.result(tomTask, { ok: true, runs: [] });
         finishJob(byTom.body.jobId);
 
-        // Naming Tess's computer for it does not help either: the run is Tom's.
-        expect(() => svc().assertJobAllowed(projectId, { ...platform.repo.getJob(byTom.body.jobId)!.options, runner: { id: tess.runnerId } })).toThrow();
+        // Naming Tess's computer for it does not help either (round 45: a chosen runner is ignored): the run is Tom's.
+        expect(svc().jobContext(byTom.body.jobId).ownerId).toBe(ids["t-tom"]);
 
         // Tess's own Run now still goes to her computer; the schedule still names her.
         writeHeartbeat(platform.db);
@@ -170,44 +170,26 @@ describe("review fixes", () => {
         expect((await tom.agent.poll(1)).offer?.taskId).toBe(tomTask);
         await tom.agent.result(tomTask, { ok: true, runs: [] });
         finishJob(after);
-        // An edit with the access key (no person): only team runners take its runs from then on.
+        // An edit with the access key (no person): the schedule has no owner from then on, and its next fire is refused with a sentence.
         expect((await asKey("PATCH", `/api/projects/${projectId}/schedules/${sid}`, { retryFailures: 0 })).status).toBe(200);
         expect(getScheduleServices(platform).store.get(sid)!.createdBy).toBeNull();
+        platform.db.run("UPDATE schedules SET next_run_at = ? WHERE id = ?", Date.now() - 1000, sid);
+        writeHeartbeat(platform.db);
+        const orphan = (await getScheduleServices(platform).scheduler.tick()).find((x) => x.scheduleId === sid)!;
+        expect(orphan.result).not.toBe("started");
+        expect(JSON.stringify(orphan)).toContain("This schedule has no owner. Open it and save it again to run it on your computer.");
+        // Tess saves it again: hers once more.
+        expect((await as("t-tess", "PATCH", `/api/projects/${projectId}/schedules/${sid}`, { retryFailures: 1 })).status).toBe(200);
     }, 60_000);
 
-    it("M1: a platform admin may rename a person's own computer but not change its switches; its owner may", async () => {
-        expect((await as("t-ada", "PATCH", `/api/runners/${tess.runnerId}`, { name: "Tess laptop" })).status).toBe(200);
-        for (const body of [{ codeScripts: false }, { privateAddresses: true }, { realPhone: true }, { name: "x", codeScripts: false }]) {
-            const r = await as("t-ada", "PATCH", `/api/runners/${tess.runnerId}`, body);
-            expect(r.status).toBe(403);
-            expect(r.body.error ?? r.body.message).toContain("Only the person whose computer this is");
-        }
-        expect((await as("t-tess", "GET", `/api/runners/${tess.runnerId}`)).body).toMatchObject({ name: "Tess laptop", settings: { codeScripts: true, privateAddresses: false } });
-        expect((await as("t-tess", "PATCH", `/api/runners/${tess.runnerId}`, { privateAddresses: true })).body.settings.privateAddresses).toBe(true);
-        expect((await as("t-tess", "PATCH", `/api/runners/${tess.runnerId}`, { privateAddresses: false })).status).toBe(200);
-    });
-
-    it("M2: a team code's projects need 'manage runners' in every one of them", async () => {
-        const mine = (await as("t-cora", "POST", "/api/projects", { name: "Cora's own" })).body.id as string;
-        const viewed = (await asKey("POST", "/api/projects", { name: "Cora only views" })).body.id as string;
-        platform.db.run("UPDATE projects SET organization_id = 'org-a' WHERE id = ?", viewed);
-        accessControlOf(app).projects.store.addMember(viewed, ids["t-cora"]!, { role: "viewer", projectAdmin: false, source: "added", addedBy: "test" });
-        // A Crowd4Test account's permissions are the same in every project it reaches (its role here is always "owner"), so today no real
-        // account holds "manage runners" in one project and not another: narrow the scope's answer to stand for such a person.
-        const scope = accessControlOf(app).projects;
-        const real = scope.permissionsIn;
-        scope.permissionsIn = (actor, id) => (id === viewed ? new Set([...(real(actor, id) ?? [])].filter((x) => x !== "ai_studio.runners.manage")) : real(actor, id));
-        try {
-            expect((await as("t-cora", "POST", "/api/runners/enroll", { kind: "team", projectIds: [mine] })).status).toBe(201);
-            const refused = await as("t-cora", "POST", "/api/runners/enroll", { kind: "team", projectIds: [mine, viewed] });
-            expect(refused.status).toBe(403);
-            expect(refused.body.error ?? refused.body.message).toContain("manage runners in that project");
-            // Not visible at all: still "not found".
-            expect((await as("t-cora", "POST", "/api/runners/enroll", { kind: "team", projectIds: [projectId] })).status).toBe(404);
-        } finally {
-            scope.permissionsIn = real;
-        }
-        expect((await as("t-cora", "POST", "/api/runners/enroll", { kind: "team", projectIds: [mine, viewed] })).status).toBe(201);
+    it("M1: a person's runner's switches are its owner's alone: nobody else reaches them", async () => {
+        // The routes are the caller's own runner only (round 45): an admin has none here, and cannot name Tess's.
+        expect((await as("t-ada", "PATCH", "/api/me/runner", { switches: { codeScripts: false } })).status).toBe(404);
+        expect((await as("t-tom", "PATCH", "/api/me/runner", { switches: { privateTargets: true } })).body.runner.id).toBe(tom.runnerId);
+        expect(svc().store.getToken(tess.runnerId)).toMatchObject({ allowCodeScripts: true, allowPrivateTargets: false });
+        expect((await as("t-tess", "PATCH", "/api/me/runner", { name: "Tess laptop", switches: { privateTargets: true } })).body.runner).toMatchObject({ name: "Tess laptop", switches: { privateTargets: true } });
+        expect((await as("t-tess", "PATCH", "/api/me/runner", { switches: { privateTargets: false } })).status).toBe(200);
+        expect((await as("t-tom", "PATCH", "/api/me/runner", { switches: { privateTargets: false } })).status).toBe(200);
     });
 
     it("L7: rotating a credential leaves an Activity entry, without the credential", async () => {
@@ -219,29 +201,6 @@ describe("review fixes", () => {
         expect(rows[0]).toMatchObject({ actor: { kind: "runner" } });
         expect(rows[0]!.detail).toContain("changed its credential");
         for (const secret of [fresh, tom.agent.token]) expect(JSON.stringify(rows)).not.toContain(secret);
-    });
-
-    it("L8: a team code is refused once its maker may no longer manage runners", async () => {
-        const users = accessControlOf(app).users;
-        const local = users.create({ email: "lena@people.example", name: "Lena", role: "owner" });
-        expect(svc().store.makerMayManage(local.id, null)).toBe(true);
-        const made = svc().store.createEnrollment({ kind: "team", organizationId: null, createdBy: "Lena", createdById: local.id });
-        users.update(local.id, { role: "viewer" });
-        expect(svc().store.makerMayManage(local.id, null)).toBe(false);
-        const res = await fetch(`${BASE}/api/agent/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: made.code, name: "lab-1", machineId: randomUUID() }) });
-        expect(res.status).toBe(403);
-        expect(((await res.json()) as { error?: string; message?: string }).error ?? "").toContain("can no longer manage runners");
-        // A Crowd4Test customer's code: refused once they are switched off here.
-        const cora = await as("t-cora", "POST", "/api/runners/enroll", { kind: "team" });
-        expect(cora.status).toBe(201);
-        expect(svc().store.makerMayManage(ids["t-cora"]!, "org-a")).toBe(true);
-        expect(svc().store.makerMayManage(ids["t-cora"]!, "org-b")).toBe(false);
-        expect(svc().store.makerMayManage(ids["t-tess"]!, null)).toBe(false);
-        expect(svc().store.makerMayManage(ids["t-ada"]!, null)).toBe(true);
-        platform.db.run("UPDATE users SET status = 'disabled' WHERE id = ?", ids["t-cora"]);
-        const late = await fetch(`${BASE}/api/agent/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: cora.body.code, name: "lab-2", machineId: randomUUID() }) });
-        expect(late.status).toBe(403);
-        platform.db.run("UPDATE users SET status = 'active' WHERE id = ?", ids["t-cora"]);
     });
 
     it("M3: live events are capped per attempt with one note, dropped quietly after it; no stack is kept", async () => {
@@ -282,11 +241,11 @@ describe("review fixes", () => {
     it(`L3: a task never accepted fails after ${MAX_ACCEPT_TIMEOUTS} offers with a sentence, and the runner is not treated as having said no`, () => {
         let now = 1_800_000_000_000;
         const store = new AgentStore(platform.db, () => now);
-        const { record } = store.createToken(projectId, "slow-box");
+        const { record } = store.createPersonalToken({ ownerId: ids["t-tess"]!, label: "slow-box", createdBy: "test" });
         const agent = store.upsertAgent(record, { name: "slow-box", version: "1", capabilities: { os: "linux", arch: "x64", node: "v24.0.0", browsers: ["chromium"] }, concurrency: 1 });
         store.setAgentProtocol(agent.id, 2);
         const id = randomUUID();
-        store.enqueue({ id, projectId, jobId: `job-${id}`, adapterId: "playwright", payloadEnc: "enc", files: [] });
+        store.enqueue({ id, projectId, jobId: `job-${id}`, adapterId: "playwright", payloadEnc: "enc", files: [], ownerId: ids["t-tess"]! });
         for (let i = 1; i <= MAX_ACCEPT_TIMEOUTS; i++) {
             expect(store.claimFor(id, agent, 60_000)).toBeDefined();
             store.beginAttempt(id, agent.id, { protocol: 2, acceptMs: 30_000 });

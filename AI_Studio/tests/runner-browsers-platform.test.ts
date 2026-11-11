@@ -12,6 +12,7 @@ import type { Capabilities } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
 import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, passedRun, viaInject } from "./fixtures/fake-agent.js";
@@ -32,7 +33,7 @@ const admin = async (method: string, url: string, body?: unknown) => {
 };
 const newProject = async (name: string) => (await admin("POST", "/api/projects", { name })).body.id as string;
 const connect = async (projectId: string, name: string, caps: Capabilities) => {
-    const secret = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: name })).body.secret as string;
+    const secret = personalRunner(platform, { label: name, replace: true }).secret;
     const agent = new FakeAgent(viaInject(server), secret, { name, capabilities: caps });
     expect((await agent.hello()).status).toBe(200);
     return agent;
@@ -42,7 +43,7 @@ const svc = () => getAgentServices(platform);
 beforeAll(async () => {
     Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "5", AGENT_WATCH_MS: "50", AGENT_NO_AGENT_GRACE_SECONDS: "5", AGENT_MAX_TOKENS: "25" }); // one project, several runners
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-browsers-platform-"));
-    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0" }));
+    platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);
 }, 60_000);
 
@@ -60,11 +61,14 @@ describe("the runner list", () => {
     it("shows the browser a runner uses and the browsers it found; an older runner's entry is unchanged", async () => {
         const projectId = await newProject("Runner browsers");
         await connect(projectId, "maya-laptop", defaultCaps({ os: "win32", browsers: ["chromium", "firefox"], browser: EDGE, installedBrowsers: [{ name: "chrome", version: "120.0.6099.71", usable: false, reason: "Google Chrome 120 is too old" }, { name: "msedge", version: EDGE.version, usable: true }] }));
-        await connect(projectId, "old-runner", defaultCaps());
+        // Round 45: a project shows the person's own runner (one per person).
         const list = (await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ name: string; capabilities: Record<string, unknown> }>;
         const maya = list.find((a) => a.name === "maya-laptop")!;
         expect(maya.capabilities).toMatchObject({ browsers: ["chromium", "firefox"], browser: EDGE, installedBrowsers: [{ name: "chrome", usable: false, reason: "Google Chrome 120 is too old" }, { name: "msedge", usable: true }] });
-        expect(list.find((a) => a.name === "old-runner")!.capabilities).toEqual({ browsers: ["chromium"] });
+        // An older runner set up instead: its entry is unchanged.
+        await connect(projectId, "old-runner", defaultCaps());
+        const again = (await admin("GET", `/api/projects/${projectId}/agents`)).body as Array<{ name: string; capabilities: Record<string, unknown> }>;
+        expect(again.find((a) => a.name === "old-runner")!.capabilities).toEqual({ browsers: ["chromium"] });
     });
 
     it("a runner without a ready browser is refused for web tests with its own sentence", async () => {
@@ -107,7 +111,7 @@ describe("a run's browser", () => {
         const events = platform.repo.listEvents(job.id).filter((e) => e.kind === "agent_browser");
         expect(events.map((e) => [e.message, e.data])).toEqual([["Ran in Microsoft Edge 155, installed on maya-laptop.", { browser: EDGE }]]);
         const shown = (await admin("GET", `/api/test-generation/${job.id}`)).body;
-        expect(shown.ranOn).toEqual({ kind: "agent", agentId: agent.agentId, name: "maya-laptop", browser: EDGE });
+        expect(shown.ranOn).toMatchObject({ kind: "agent", agentId: agent.agentId, name: "maya-laptop", browser: EDGE });
         // Kept with the run's events: it is still there when the task itself is gone.
         platform.db.run("DELETE FROM agent_tasks WHERE job_id = ?", job.id);
         expect((await admin("GET", `/api/test-generation/${job.id}`)).body.ranOn.browser).toEqual(EDGE);
@@ -116,7 +120,9 @@ describe("a run's browser", () => {
     it("a runner that does not say (an older one) leaves the run exactly as before", async () => {
         const job = await runOnce(undefined);
         expect(platform.repo.listEvents(job.id).filter((e) => e.kind === "agent_browser")).toEqual([]);
-        expect((await admin("GET", `/api/test-generation/${job.id}`)).body.ranOn).toEqual({ kind: "agent", agentId: agent.agentId, name: "maya-laptop" });
+        const ranOn = (await admin("GET", `/api/test-generation/${job.id}`)).body.ranOn;
+        expect(ranOn).toMatchObject({ kind: "agent", agentId: agent.agentId, name: "maya-laptop" });
+        expect(ranOn).not.toHaveProperty("browser");
     });
 
     it("a browser the protocol does not know is refused with the rest of the result", async () => {

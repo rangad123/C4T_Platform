@@ -19,6 +19,7 @@ import type { ExecutionBatch, ExecutionEnv } from "../src/engine/frameworks/type
 import { loadConfig } from "../src/config.js";
 import { getAgentServices, RunnerAgentError } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
+import { personalRunner, runOwner, testPerson } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS, type JobRow } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
@@ -29,6 +30,7 @@ const APP_PORT = 5851;
 const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "af-admin-key-5c19e7a2";
+let RUN_AS = API_KEY;
 const PASSWORD = "AFLEAK-Password-71c4a2";
 const API_TOKEN = "AFLEAK-ApiToken-b83e19";
 const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_MAX_FILE_BYTES", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "AGENT_MAX_TOKENS"];
@@ -41,7 +43,7 @@ let dataDir: string;
 let appServer: http.Server;
 const appHits: string[] = [];
 
-const admin = async (method: string, url: string, body?: unknown, headers: Record<string, string> = { "x-api-key": API_KEY }) => {
+const admin = async (method: string, url: string, body?: unknown, headers: Record<string, string> = { "x-api-key": RUN_AS }) => {
     const res = await fetch(`${BASE}${url}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const text = await res.text();
     return { status: res.status, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : undefined } as { status: number; text: string; body: any };
@@ -60,8 +62,14 @@ const raw = (method: string, rawPath: string, headers: Record<string, string> = 
         req.end(body);
     });
 
-const newProject = async (name: string) => (await admin("POST", "/api/projects", { name })).body.id as string;
-const newToken = async (projectId: string, label?: string) => (await admin("POST", `/api/projects/${projectId}/agent-tokens`, label ? { label } : {})).body.secret as string;
+// The test acts as a person (round 45), whose changes would wait for approval: these tests are about running them.
+const newProject = async (name: string) => {
+    const id = (await admin("POST", "/api/projects", { name })).body.id as string;
+    await admin("PUT", `/api/projects/${id}/review-policy`, { edits: false });
+    return id;
+};
+/** Round 45: a runner of the test's person (every run here is theirs); several may be live at once for the routing tests below. */
+const newToken = async (_projectId: string, label?: string) => personalRunner(platform, { label: label ?? "Test runner" }).secret;
 const connect = async (projectId: string, name: string, caps = defaultCaps(), concurrency = 1) => {
     const agent = new FakeAgent(viaFetch(BASE), await newToken(projectId, name), { name, capabilities: caps, concurrency });
     const r = await agent.hello();
@@ -70,7 +78,7 @@ const connect = async (projectId: string, name: string, caps = defaultCaps(), co
 };
 const svc = () => getAgentServices(platform);
 const appOf = (projectId: string) => platform.repo.createApplication(projectId, APP, { ...DEFAULT_JOB_OPTIONS }, undefined);
-const jobFor = (projectId: string, testIds: string[] = []): Promise<JobRow> => platform.repo.createJob(projectId, appOf(projectId), { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds });
+const jobFor = (projectId: string, testIds: string[] = []): Promise<JobRow> => platform.repo.createJob(projectId, appOf(projectId), { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "validate", testIds });
 const endJob = (job: JobRow) => platform.repo.setJobStatus(job.id, "FAILED", "test over");
 const script = (testId: string, content = "// script body") => ({ testId, filename: `${testId}.spec.ts`, content });
 const runEnv = (over: Partial<ExecutionEnv["run"]> = {}): ExecutionEnv => ({ run: { baseUrl: APP, apiBaseUrl: APP, credentials: { username: "demo", password: PASSWORD }, apiToken: API_TOKEN, headless: true, ...over } });
@@ -93,6 +101,8 @@ beforeAll(async () => {
     // (one by default; maxTokensFrom reads process.env) so several runners can be registered for one project here.
     process.env.AGENT_MAX_TOKENS = "25";
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
+    // Round 45: runs started with the shared key have no owner, so the test acts as a person whose runner takes them.
+    RUN_AS = testPerson(platform).token;
     server = await buildServer(platform);
     await server.listen({ port: PLATFORM_PORT, host: "127.0.0.1" });
 }, 60_000);
@@ -115,25 +125,19 @@ describe("tokens and who may call the agent routes", () => {
         projectId = await newProject("Tokens");
     });
 
-    it("a token is shown once, listed without its secret or hash, and belongs to its project", async () => {
-        const made = await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "Maya's laptop" });
-        expect(made.status).toBe(201);
-        expect(made.body.secret).toMatch(/^aitg_[A-Za-z0-9_-]{43}$/);
-        expect(Object.keys(made.body.token).sort()).toEqual(["createdAt", "hint", "id", "label", "lastUsedAt", "revokedAt"]);
-        expect(made.body.token).toMatchObject({ label: "Maya's laptop", lastUsedAt: null, revokedAt: null });
-        expect(made.body.token.hint).toBe(`aitg_…${made.body.secret.slice(-4)}`);
-        const list = await admin("GET", `/api/projects/${projectId}/agent-tokens`);
-        expect(list.body).toHaveLength(1);
-        expect(list.text).not.toContain(made.body.secret);
-        expect(list.text).not.toMatch(/token_hash|tokenHash|[0-9a-f]{64}/);
-        // not in the database in clear either
-        expect(JSON.stringify(platform.db.all("SELECT * FROM agent_tokens"))).not.toContain(made.body.secret);
-        expect((await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "x".repeat(61) })).status).toBe(400);
-        expect((await admin("GET", "/api/projects/nope/agent-tokens")).status).toBe(404);
+    it("a credential is kept only as its hash, and a project's token routes are gone (round 45: one runner per person, from Settings)", async () => {
+        const { secret } = personalRunner(platform, { label: "Maya's laptop" });
+        expect(secret).toMatch(/^aitg_[A-Za-z0-9_-]{43}$/);
+        expect(JSON.stringify(platform.db.all("SELECT * FROM agent_tokens"))).not.toContain(secret);
+        const mine = await admin("GET", "/api/me/runner");
+        expect(mine.text).not.toContain(secret);
+        expect(mine.text).not.toMatch(/token_hash|tokenHash|[0-9a-f]{64}/);
+        expect((await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "x" })).status).toBe(404);
+        expect((await admin("GET", `/api/projects/${projectId}/agent-tokens`)).status).toBe(404);
     });
 
     it("the admin routes need the API key; the agent routes need the token and an API key does not stand in for it", async () => {
-        expect((await admin("GET", `/api/projects/${projectId}/agent-tokens`, undefined, {})).status).toBe(401);
+        expect((await admin("GET", "/api/me/runner", undefined, {})).status).toBe(401);
         expect((await admin("GET", `/api/projects/${projectId}/agents`, undefined, {})).status).toBe(401);
         expect((await admin("GET", `/api/projects/${projectId}/runner`, undefined, { "x-api-key": "wrong" })).status).toBe(401);
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "platform" }, {})).status).toBe(401);
@@ -141,7 +145,7 @@ describe("tokens and who may call the agent routes", () => {
         const none = await admin("POST", "/api/agent/hello", {}, {});
         expect(none.status).toBe(401);
         // the API key is not a token
-        expect((await admin("POST", "/api/agent/hello", {}, { "x-api-key": API_KEY })).status).toBe(401);
+        expect((await admin("POST", "/api/agent/hello", {}, { "x-api-key": RUN_AS })).status).toBe(401);
         expect((await admin("POST", "/api/agent/poll", {}, { authorization: `Bearer ${API_KEY}` })).status).toBe(401);
         // malformed and unknown tokens
         expect((await admin("POST", "/api/agent/hello", {}, { authorization: "Bearer aitg_short" })).status).toBe(401);
@@ -149,20 +153,17 @@ describe("tokens and who may call the agent routes", () => {
         expect((await admin("POST", "/api/agent/hello", {}, { authorization: `Bearer aitg_${"A".repeat(43)}` })).status).toBe(404);
     });
 
-    it("a revoked token is a 404 at the agent's next request, and revoking is per project", async () => {
-        const other = await newProject("Other");
-        const made = (await admin("POST", `/api/projects/${projectId}/agent-tokens`, { label: "to revoke" })).body;
+    it("a removed credential is a 404 at the agent's next request", async () => {
+        const made = personalRunner(platform, { label: "to revoke" });
         const agent = new FakeAgent(viaFetch(BASE), made.secret, { name: "revoked-one" });
         expect((await agent.hello()).status).toBe(200);
-        expect((await admin("DELETE", `/api/projects/${other}/agent-tokens/${made.token.id}`)).status).toBe(404);
         expect((await agent.poll()).status).not.toBe(404);
-        expect((await admin("DELETE", `/api/projects/${projectId}/agent-tokens/${made.token.id}`)).body).toEqual({ ok: true });
+        expect(getAgentServices(platform).store.retireToken(made.id)).toBe(true);
         expect((await agent.hello()).status).toBe(404);
         expect((await agent.poll()).status).toBe(404);
-        expect((await admin("DELETE", `/api/projects/${projectId}/agent-tokens/${made.token.id}`)).status).toBe(404);
-        const listed = (await admin("GET", `/api/projects/${projectId}/agent-tokens`)).body.find((t: { id: string }) => t.id === made.token.id);
-        expect(listed.revokedAt).toBeTruthy();
-        expect(listed.lastUsedAt).toBeTruthy();
+        const t = getAgentServices(platform).store.getToken(made.id)!;
+        expect(t.revokedAt).toBeTruthy();
+        expect(t.lastUsedAt).toBeTruthy();
     });
 
     it("path tricks never get past the API key: only the six exact routes skip it", async () => {
@@ -212,7 +213,8 @@ describe("tokens and who may call the agent routes", () => {
         const a = new FakeAgent(viaFetch(BASE), secret, { name: "shape" });
         const r = await a.hello();
         expect(r.status).toBe(200);
-        expect(r.json).toMatchObject({ projectId, protocol: 1, pollSeconds: 1, heartbeatSeconds: 10, maxFileBytes: 200000 });
+        // The wire format is kept: projectId is always a string ("shared" for a person's runner, which has no project of its own).
+        expect(r.json).toMatchObject({ projectId: "shared", protocol: 1, pollSeconds: 1, heartbeatSeconds: 10, maxFileBytes: 200000 });
         // Round 39 adds `runner` (what it is and what its switches allow; an older agent ignores it).
         expect(Object.keys(r.json).sort()).toEqual(["agentId", "heartbeatSeconds", "maxFileBytes", "pollSeconds", "projectId", "protocol", "runner", "serverTime"]);
         // Protocol 2 is spoken too (runner-protocol-2.md); a version neither side knows is a plain 409.
@@ -226,7 +228,7 @@ describe("tokens and who may call the agent routes", () => {
         const twin = new FakeAgent(viaFetch(BASE), secret, { name: "twin" });
         const refused = await twin.hello();
         expect(refused.status).toBe(409);
-        expect(refused.json.error).toMatch(/already used by the agent “shape”/);
+        expect(refused.json.error).toMatch(/already used by “shape”/);
     });
 
     it("hello is limited to 6 a minute per token", async () => {
@@ -252,33 +254,24 @@ describe("the registry and where a project's tests run", () => {
         expect(Date.parse(row.lastSeenAt)).not.toBeNaN();
         expect(row.capabilities).toEqual({ browsers: ["chromium", "firefox"], android: { adb: true, devices: [{ serial: "R58M", model: "Pixel 7", state: "device", emulator: false }], avds: ["Pixel_7"], state: "phone", summary: "Android: 1 device" }, ios: { xcode: false, simulators: [] } });
         expect(list.text).not.toMatch(/aitg_[A-Za-z0-9_-]{20}/);
-        // another project sees none of it
+        // it follows its owner: another project of theirs shows the same computer; without a person, none
         const empty = await newProject("Empty");
-        expect((await admin("GET", `/api/projects/${empty}/agents`)).body).toEqual([]);
+        expect((await admin("GET", `/api/projects/${empty}/agents`)).body.map((x: { id: string }) => x.id)).toEqual([a.agentId]);
+        expect((await admin("GET", `/api/projects/${empty}/agents`, undefined, { "x-api-key": API_KEY })).body).toEqual([]);
     });
 
-    it("the setting defaults to the platform; choosing an agent needs one online, none running jobs, and one of this project", async () => {
+    it("the setting defaults to the platform; it changes only while no job is running", async () => {
         const projectId = await newProject("Runner");
         const first = await admin("GET", `/api/projects/${projectId}/runner`);
         expect(first.body).toMatchObject({ runOn: "platform", agentId: null, status: "Runs on this platform.", canRunWeb: true });
-        expect(Object.keys(first.body).sort()).toEqual(["agentId", "allowPersonal", "canRunIos", "canRunMobile", "canRunWeb", "canRunWindows", "phones", "runOn", "status", "unavailableReason"]);
-        const refused = await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" });
-        expect(refused.status).toBe(409);
-        expect(refused.body.error).toMatch(/No runner agent is online/);
-        const agent = await connect(projectId, "maya-laptop");
-        const set = await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" });
+        expect(Object.keys(first.body).sort()).toEqual(["agentId", "canRunIos", "canRunMobile", "canRunWeb", "canRunWindows", "phones", "runOn", "status", "unavailableReason"]);
+        // Round 45: "On a runner" needs no runner online (each run goes to its starter's own runner, and is refused then if it is off).
+        await connect(projectId, "maya-laptop");
+        const set = await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent", agentId: "ignored" });
         expect(set.status).toBe(200);
-        expect(set.body).toMatchObject({ runOn: "agent", agentId: null, status: "Runs on any connected agent (1 online).", canRunWeb: true, canRunMobile: false });
+        expect(set.body).toMatchObject({ runOn: "agent", canRunWeb: true, canRunMobile: false });
         expect(set.body.unavailableReason).toMatch(/Mobile tests can't run: it has no Android tools/);
         expect((await admin("GET", `/api/projects/${projectId}/runner`)).body).toEqual(set.body);
-        // a specific agent
-        const named = await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent", agentId: agent.agentId });
-        expect(named.body).toMatchObject({ agentId: agent.agentId, status: "Runs on maya-laptop (online)." });
-        // an agent of another project cannot be chosen
-        const elsewhere = await newProject("Elsewhere");
-        const stranger = await connect(elsewhere, "stranger");
-        expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent", agentId: stranger.agentId })).status).toBe(404);
-        expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent", agentId: "nope" })).status).toBe(404);
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "elsewhere" })).status).toBe(400);
         // not while a job is running
         const job = await jobFor(projectId);
@@ -294,14 +287,15 @@ describe("the registry and where a project's tests run", () => {
 });
 
 describe("routing a run and refusing it", () => {
-    it("with no agent online, starting a run is a plain 409 for every way a job is made", async () => {
+    it("with the person's runner offline, starting a run is a plain 409 for every way a person makes a job; a deploy trigger's run waits for it", async () => {
         const projectId = await newProject("NoAgent");
         const imp = await admin("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, validate: false, specs: [{ title: "Health answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/health" }, { action: "assertResponse", check: "status", expected: 200 }] }] });
         expect(imp.status).toBe(202);
         const testId = imp.body.tests[0].id as string;
-        // forced: the setting says agent, nobody is connected (agents that were seen long ago are offline)
+        // forced: the setting says agent, and the person's runners were last seen long ago (offline)
         svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
-        const message = "No runner agent is connected for this project. Start one, or switch the project back to running here.";
+        platform.db.run("UPDATE agents SET last_seen_ms = 0");
+        const message = "Your runner is offline. Start it on your computer, then try again.";
         const one = await admin("POST", `/api/tests/${testId}/validate`);
         expect(one.status).toBe(409);
         expect(one.body.error).toBe(message);
@@ -309,14 +303,15 @@ describe("routing a run and refusing it", () => {
         expect((await admin("POST", `/api/projects/${projectId}/specs`, { baseUrl: APP, specs: [{ title: "Another", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/x" }] }] })).body.error).toBe(message);
         const trig = (await admin("POST", `/api/projects/${projectId}/triggers`, { label: "ci" })).body;
         const run = await admin("POST", `/api/triggers/${trig.token}/run`, {}, {});
-        expect(run.status).toBe(409);
-        expect(run.body.error).toBe(message);
-        await expect(platform.repo.createJob(projectId, appOf(projectId), { ...DEFAULT_JOB_OPTIONS, mode: "generate" })).rejects.toThrow(message);
+        expect(run.status).toBe(202);
+        await platform.repo.requestCancel(run.body.jobId);
+        endJob(platform.repo.getJob(run.body.jobId)!);
+        await expect(platform.repo.createJob(projectId, appOf(projectId), { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "generate" })).rejects.toThrow(message);
         // nothing was queued
         expect((await admin("GET", `/api/projects/${projectId}/jobs`)).body.filter((j: { status: string }) => j.status === "QUEUED")).toEqual([]);
         // back on the platform: the setting is honoured again
         svc().store.setRunner(projectId, { runOn: "platform", agentId: null });
-        endJob(await platform.repo.createJob(projectId, appOf(projectId), { ...DEFAULT_JOB_OPTIONS, mode: "generate" }));
+        endJob(await platform.repo.createJob(projectId, appOf(projectId), { ...DEFAULT_JOB_OPTIONS, startedBy: { kind: "user", id: runOwner() }, mode: "generate" }));
     });
 
     it("an agent that lacks what the tests need is named in the refusal", async () => {
@@ -327,7 +322,8 @@ describe("routing a run and refusing it", () => {
         expect((await admin("PUT", `/api/projects/${projectId}/runner`, { runOn: "agent" })).status).toBe(200);
         const web = await admin("POST", `/api/tests/${apiTest}/validate`);
         expect(web.status).toBe(409);
-        expect(web.body.error).toBe("The connected runner agent “no-browsers” can't run API tests: it has no browsers installed (run `npx playwright install` on that machine).");
+        expect(web.body.error).toBe("Your runner cannot run API tests: it has no browsers installed (run `npx playwright install` on that machine).");
+        expect(web.body.details).toMatchObject({ code: "RUNNER_CANNOT_RUN" });
         const status = (await admin("GET", `/api/projects/${projectId}/runner`)).body;
         expect(status).toMatchObject({ canRunWeb: false, canRunMobile: false });
         expect(status.unavailableReason).toMatch(/Web and API tests can't run: it has no browsers installed/);
@@ -340,7 +336,7 @@ describe("routing a run and refusing it", () => {
         svc().store.setRunner(projectId, { runOn: "agent", agentId: null });
         const m = await admin("POST", `/api/tests/${mob.body.tests[0].id}/validate`);
         expect(m.status).toBe(409);
-        expect(m.body.error).toMatch(/run mobile tests: it has no Android tools/);
+        expect(m.body.error).toMatch(/cannot run phone tests: it has no Android tools/);
         // with a phone attached to one of them it is accepted
         const phone = await connect(projectId, "with-phone", defaultCaps({ android: { adb: true, devices: [{ serial: "R58M", state: "device", emulator: false }], avds: [] } }));
         const ok = await admin("POST", `/api/tests/${mob.body.tests[0].id}/validate`);
@@ -481,8 +477,8 @@ describe("a task, from claim to result", () => {
             expect((await other.result(offer.taskId, { ok: true, runs: [passedRun("API-010")] })).status).toBe(404);
         }
         // the API key is not a way in
-        expect((await agent.send("POST", `/api/agent/tasks/${offer.taskId}/result`, { headers: { "x-api-key": API_KEY, "content-type": "application/json" }, body: "{}" })).status).toBe(401);
-        expect((await agent.send("POST", `/api/agent/tasks/${offer.taskId}/heartbeat`, { headers: { "x-api-key": API_KEY } })).status).toBe(401);
+        expect((await agent.send("POST", `/api/agent/tasks/${offer.taskId}/result`, { headers: { "x-api-key": RUN_AS, "content-type": "application/json" }, body: "{}" })).status).toBe(401);
+        expect((await agent.send("POST", `/api/agent/tasks/${offer.taskId}/heartbeat`, { headers: { "x-api-key": RUN_AS } })).status).toBe(401);
         // the task is untouched and the owner can still finish it
         expect(svc().store.getTask(offer.taskId)!.status).toBe("running");
         expect((await agent.answer(offer, { runs: [passedRun("API-010")] })).status).toBe(200);
@@ -620,25 +616,28 @@ describe("a task, from claim to result", () => {
         const lonely = await newProject("Lonely");
         const job = await jobFor(lonely);
         svc().store.setRunner(lonely, { runOn: "agent", agentId: null });
+        platform.db.run("UPDATE agents SET last_seen_ms = 0");
         const started = Date.now();
         const out = await settle(apiExec(lonely, job, batch("API-070")));
         expect(out.ok).toBe(false);
-        expect((out as { e: Error }).e.message).toBe("No runner agent that can run these tests is connected. Start one, or switch the project back to running here.");
+        expect((out as { e: Error }).e.message).toBe("Your runner is not connected or cannot run these tests. Start it on your computer, or switch the project back to running here.");
         expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
         endJob(job);
     });
 
     it("tasks go to the agent that is allowed and has a free slot, one task per slot, oldest first", async () => {
         const proj = await newProject("Slots");
-        const a = await connect(proj, "a", defaultCaps(), 1);
+        // a: another person's computer (round 45: a run goes to its owner's runner only); b: the person's own
+        const a = new FakeAgent(viaFetch(BASE), personalRunner(platform, { ownerId: "someone-else", label: "a" }).secret, { name: "a", capabilities: defaultCaps(), concurrency: 1 });
+        expect((await a.hello()).status).toBe(200);
         const b = await connect(proj, "b", defaultCaps(), 1);
-        svc().store.setRunner(proj, { runOn: "agent", agentId: b.agentId });
+        svc().store.setRunner(proj, { runOn: "agent", agentId: null });
         const job = await jobFor(proj);
         const p1 = settle(apiExec(proj, job, batch("API-081")));
         await new Promise((r) => setTimeout(r, 150));
         const p2 = settle(apiExec(proj, job, batch("API-082")));
         await new Promise((r) => setTimeout(r, 150));
-        // agent a is not the chosen one
+        // agent a is not the person's
         expect((await a.poll()).status).toBe(204);
         // no free slot: nothing offered
         expect((await b.poll(0)).status).toBe(204);
@@ -757,7 +756,7 @@ describe("one validation job through the worker, end to end", () => {
         const artifacts = platform.db.all<{ id: string; kind: string; path: string }>("SELECT id, kind, path FROM artifacts WHERE project_id = ? AND test_case_id = ?", projectId, t2!.id);
         const shot = artifacts.find((a) => a.kind === "screenshot")!;
         expect(shot.path).toContain(`${projectId}/_artifacts/${t2!.testId}/`);
-        const served = await fetch(`${BASE}/api/artifacts/${shot.id}?key=${API_KEY}`);
+        const served = await fetch(`${BASE}/api/artifacts/${shot.id}?key=${RUN_AS}`);
         expect(Buffer.from(await served.arrayBuffer()).equals(png(222))).toBe(true);
         // the cleanup the agent did is in the ledger, and the platform sent no DELETE of its own
         const events = (await admin("GET", `/api/test-generation/${job}/events`)).body;

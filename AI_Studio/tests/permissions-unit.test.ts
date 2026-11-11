@@ -94,12 +94,15 @@ describe("the route-to-permission table", () => {
         expect(Object.values(ROUTE_PERMISSIONS)).not.toContain("ai_studio.access");
     });
 
+    const REMOVED_ROUND_45 = new Set(["GET /api/projects/:id/agent-tokens", "POST /api/projects/:id/agent-tokens", "DELETE /api/projects/:id/agent-tokens/:tid", "POST /api/projects/:id/runner-kits", "GET /api/projects/:id/runner-kits/info", "PUT /api/projects/:id/agents/:agentId/updates", "POST /api/projects/:id/agents/:agentId/update"]);
     it("keeps every route's answer for owners, editors and viewers exactly as when the table named roles", () => {
         expect(Object.keys(BEFORE).length).toBeGreaterThan(350);
         const changed: string[] = [];
         for (const [k, before] of Object.entries(BEFORE)) {
             const rule = ROUTE_PERMISSIONS[k];
             if (rule === undefined) {
+                // Round 45 removed the project runner tokens, kits and per-project update routes (one runner per person, set up in Settings).
+                if (REMOVED_ROUND_45.has(k)) continue;
                 changed.push(`${k}: gone from the table`);
                 continue;
             }
