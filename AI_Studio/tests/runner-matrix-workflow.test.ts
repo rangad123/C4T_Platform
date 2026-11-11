@@ -50,7 +50,7 @@ describe("the real-machine workflow", () => {
 
     it("covers Windows Server 2022 and 2025, macOS on Apple silicon and Intel, and Linux", () => {
         const legs = wf.jobs.smoke.strategy.matrix.include as Array<{ os: string; target: string; installer: boolean }>;
-        expect(legs.map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-15", "macos-15-intel", "ubuntu-latest"]);
+        expect(legs.map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-15", "macos-15-intel", "ubuntu-24.04"]);
         expect(legs.map((l) => l.target)).toEqual(["win-x64", "win-x64", "mac-arm64", "mac-x64", "linux-x64"]);
         expect(legs.filter((l) => l.installer).map((l) => l.os)).toEqual(["windows-2022", "windows-2025", "macos-15", "macos-15-intel"]);
         expect(wf.jobs.smoke["runs-on"]).toBe("${{ matrix.os }}");

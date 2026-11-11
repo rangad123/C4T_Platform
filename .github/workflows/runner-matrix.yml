@@ -68,7 +68,8 @@ jobs:
             label: macOS 15 Intel
             target: mac-x64
             installer: true
-          - os: ubuntu-latest
+          # ubuntu-latest moved to Ubuntu 26.04, whose package mirrors GitHub's machines could not resolve (2026-11-11): pinned to 24.04.
+          - os: ubuntu-24.04
             label: Linux x64
             target: linux-x64
             installer: false

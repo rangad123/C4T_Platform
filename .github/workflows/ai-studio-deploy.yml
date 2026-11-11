@@ -94,7 +94,7 @@ jobs:
     # Node.js and the packages without the installer program.
     # A run by hand builds the downloads only from main, which is what the box deploys (deploy-pull.sh).
     if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -159,7 +159,7 @@ jobs:
     name: Sign the runner update
     needs: runner-downloads
     if: ${{ !cancelled() && needs.runner-downloads.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -270,7 +270,7 @@ jobs:
   deploy:
     name: Deploy to EC2
     needs: [runner-downloads, sign-runner-update]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The first deploy downloads Node and Chromium on a small box at low priority.
     timeout-minutes: 45
     # Deploys even when the runner downloads could not be built: the box then keeps the ones it has.
