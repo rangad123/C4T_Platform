@@ -38,7 +38,13 @@ jobs:
 
       # The access tests run real jobs and make a PDF, so they need a browser.
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
+      # GitHub's Ubuntu images already carry the browser's system libraries. Installing them again needs Ubuntu's package mirrors,
+      # which were unreachable from GitHub's machines for hours on 2026-11-11, so a failure here no longer stops the job: a library
+      # that is really missing still fails the browser tests below, with the reason.
+      - name: System libraries for the browser
+        continue-on-error: true
+        run: npx playwright install-deps chromium
 
       - name: Typecheck the server
         run: npx tsc --noEmit

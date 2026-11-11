@@ -68,7 +68,7 @@ jobs:
             label: macOS 15 Intel
             target: mac-x64
             installer: true
-          # ubuntu-latest moved to Ubuntu 26.04, whose package mirrors GitHub's machines could not resolve (2026-11-11): pinned to 24.04.
+          # Pinned: ubuntu-latest moved to Ubuntu 26.04 on 2026-11-11; 24.04 is the image this was last proven on.
           - os: ubuntu-24.04
             label: Linux x64
             target: linux-x64
@@ -90,8 +90,11 @@ jobs:
           cache: npm
           cache-dependency-path: AI_Studio/package-lock.json
       - run: npm ci
+      # Not fatal: GitHub's Ubuntu image already has these libraries, and Ubuntu's package mirrors were unreachable from GitHub's
+      # machines for hours on 2026-11-11. A library that is really missing still fails the runs below, with the reason.
       - name: System libraries for the browser (Linux)
         if: runner.os == 'Linux'
+        continue-on-error: true
         run: npx playwright install-deps chromium
       - name: Build the web UI
         run: npm run build:web
