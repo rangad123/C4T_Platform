@@ -289,6 +289,7 @@ describe("a whole run that ends in the plain skip", () => {
                             if (req.url === "/api/auth/setup") return send(201, { me: {} }, { "set-cookie": ["aitp_session=s1; Path=/; HttpOnly", "aitp_csrf=c1; Path=/"] });
                             if (req.url === "/api/me/tokens") return send(201, { token: PERSON_TOKEN });
                             if (req.url === "/api/projects") return send(201, { id: "p1" });
+                            if (req.url === "/api/projects/p1/review-policy") return send(200, { aiGenerated: false, edits: false, healing: false });
                             if (req.url === "/api/projects/p1/specs") return send(202, { tests: [{ id: "t1" }, { id: "t2" }] });
                             // A download without its own Node.js (no x-runner-kit-target): the complete build was not made here.
                             if (req.url === "/api/me/runner/download") return void res.writeHead(200, { "content-type": "application/zip", "x-runner-kit-kind": "files" }).end(Buffer.from("PK\u0005\u0006"));
@@ -313,8 +314,10 @@ describe("a whole run that ends in the plain skip", () => {
             "ok Clean up",
         ]);
         // The access key only signs up the first person; their session makes their own token, and everything after is that person.
-        expect(seen.map((s) => s.split(" ").slice(0, 3).join(" "))).toEqual(["POST /api/auth/setup key", "POST /api/me/tokens session", "POST /api/projects person", "POST /api/projects/p1/specs person", "POST /api/me/runner/download person"]);
+        expect(seen.map((s) => s.split(" ").slice(0, 3).join(" "))).toEqual(["POST /api/auth/setup key", "POST /api/me/tokens session", "POST /api/projects person", "PUT /api/projects/p1/review-policy person", "POST /api/projects/p1/specs person", "POST /api/me/runner/download person"]);
         expect(seen.find((s) => s.startsWith("POST /api/me/runner/download"))).toContain('{"os":"linux","arch":"x64"}');
+        // Imported tests run without an approval step (else every run ends "Nothing ran: the test is waiting for approval.").
+        expect(seen.find((s) => s.startsWith("PUT /api/projects/p1/review-policy"))).toContain('{"aiGenerated":false,"edits":false,"healing":false}');
         expect(JSON.parse(seen.find((s) => s.startsWith("POST /api/projects/p1/specs"))!.split(" person ")[1]!).specs.map((s: { kind: string }) => s.kind)).toEqual(["web", "api"]);
         // The sample app it started is stopped; nothing it started is left running.
         expect(children.list.map((c: { name: string }) => c.name)).toEqual(["sample app"]);

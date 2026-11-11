@@ -646,6 +646,11 @@ export async function runSmoke(opts, deps = {}) {
             const p = await api("POST", "/api/projects", { name: `Runner smoke ${target.id}` });
             if (p.status >= 300 || !p.json?.id) throw new Error(`Could not create the project (${p.status}): ${p.message}`);
             projectId = p.json.id;
+            // A new project asks a Project Admin to approve imported tests before they run (the review policy); a run of an unapproved test
+            // ends at once with "Nothing ran: the test is waiting for approval." This check is about the runner, so the owner switches the
+            // review step off for this project, as they would under Settings.
+            const policy = await api("PUT", `/api/projects/${projectId}/review-policy`, { aiGenerated: false, edits: false, healing: false });
+            if (policy.status !== 200) throw new Error(`Could not switch off the review step for the project (${policy.status}): ${policy.message}`);
             const imp = await api("POST", `/api/projects/${projectId}/specs`, { baseUrl: app.url, validate: false, specs });
             if (imp.status !== 202 && imp.status !== 200) throw new Error(`Could not import the two tests (${imp.status}): ${imp.message}`);
             testIds = (imp.json?.tests ?? []).map((t) => t.id);
@@ -760,9 +765,15 @@ export async function runSmoke(opts, deps = {}) {
                 const b = exec?.browser ?? job.browser;
                 const browser = b && typeof b === "object" ? `${b.name ?? "browser"} ${b.version ?? ""} (${b.source ?? "unknown source"})`.replace(/\s+/g, " ") : undefined;
                 const status = exec?.status ?? `no result (job ${job.status})`;
-                report.tests.push({ title: spec.title, kind: spec.kind, status, where, ...(browser ? { browser } : {}), jobStatus: job.status, ...(exec?.error ? { error: redact(String(exec.error).slice(0, 500), secrets) } : {}) });
+                const jobError = job.error ? redact(String(job.error).slice(0, 500), secrets) : undefined;
+                report.tests.push({ title: spec.title, kind: spec.kind, status, where, ...(browser ? { browser } : {}), jobStatus: job.status, ...(jobError ? { jobError } : {}), ...(exec?.error ? { error: redact(String(exec.error).slice(0, 500), secrets) } : {}) });
+                // The job's own outcome first: a job that never reached a runner has no runner to name, and its error says why.
+                if (job.status === "FAILED" || job.status === "CANCELLED" || !exec) {
+                    const why = [jobError, exec?.error ? redact(String(exec.error).slice(0, 300), secrets) : undefined].filter(Boolean).join(" ");
+                    throw new Error(`The job ended ${job.status}${exec ? ` (the test ${exec.status})` : ", with no test result"}${why ? `: ${why}` : "."}`);
+                }
                 if (job.ranOn?.kind !== "agent" || job.ranOn.name !== runnerName) throw new Error(`It ${where}, not on the runner "${runnerName}".`);
-                if (status !== "passed") throw new Error(`It ended ${status}${exec?.error ? `: ${String(exec.error).slice(0, 300)}` : ""}.`);
+                if (status !== "passed") throw new Error(`It ended ${status}${exec?.error ? `: ${redact(String(exec.error).slice(0, 300), secrets)}` : ""}.`);
                 return where;
             });
         }
