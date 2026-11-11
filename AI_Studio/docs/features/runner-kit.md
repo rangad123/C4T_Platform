@@ -16,7 +16,7 @@ You never type the platform's address or a token. The start script looks for Nod
 
 > **Installer.** Windows and Mac get the **installer** (a real setup program for Windows, an app for a Mac) that checks what the computer already has and downloads only what is missing (`runner-installer.md`). This document is about the **plain files** (`x-runner-kit-kind: files`): the Linux download, and what Windows and Mac get when the installer was not built here (the answer then says so in `x-runner-kit-note`).
 
-> **Own Node.js (complete build).** Where the server has built it for that system and processor, the download also carries its own Node.js and every test tool, so nothing has to be installed (`runner-complete-kit.md`). It is not a separate choice any more. The start scripts below are the same file in every download: they use the Node.js inside a complete download first and skip `npm install` when its `node_modules` is complete.
+> **Own Node.js (complete build).** Where the server has built it for that system and processor, the Linux download (and a Windows or Mac download that fell back to the plain files) also carries its own Node.js and every test tool, so nothing has to be installed (`runner-complete-kit.md`). It is not a separate choice any more. The start scripts below are the same file in every download: they use the Node.js inside a complete download first and skip `npm install` when its `node_modules` is complete.
 >
 > **No browser download in the scripts (round 17).** The start scripts no longer run `npx playwright install chromium` (and no longer write `.chromium-installed`). The runner program itself uses Google Chrome or Microsoft Edge from the computer, or downloads a browser once, and says which (`runner-browsers.md`).
 

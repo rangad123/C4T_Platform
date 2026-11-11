@@ -7,7 +7,7 @@ The runner kit used to be a zip with a start script. The **installer** is a real
 - **Windows:** `AITestingRunnerSetup.exe`, a small WinForms program (about 130 KB) built with the C# compiler that ships with Windows. This document is mostly about it.
 - **Mac:** `AI Testing Runner.app`, built by another part of the same build (`scripts/build-installer-mac.mjs`, see `runner-installer-mac.md`). The platform packs both the same way.
 
-Since round 45 it is the one download for Windows and a Mac, from **Settings, Your runner**; nothing is chosen (`runner-enrollment.md`). A server that has not built the installer for a system sends the plain files instead (`runner-kit.md`) and says so. When the server has the complete build for the computer's processor, the installer comes inside that download and uses its Node.js and test tools (`runner-complete-kit.md`).
+Since round 45 it is the one download for Windows and a Mac, from **Settings, Your runner**; nothing is chosen (`runner-enrollment.md`). A server that has not built the installer for a system sends the plain files instead (`runner-kit.md`) and says so. On a Mac, when the server has the complete build for the computer's processor, the app comes inside that download and uses its Node.js and test tools (`runner-complete-kit.md`). The Windows installer download never carries them (a complete `node_modules` copied into the install folder passes Windows' 260-character path limit): Setup finds or downloads Node.js and installs the test tools with `npm ci`.
 
 ## What the person sees (Windows)
 
@@ -96,7 +96,7 @@ Rebuild after updating the platform, as with `npm run build:runner`.
 
 ## The platform side
 
-`POST /api/me/runner/download` `{ os: "windows" | "mac", arch }` makes the installer zip when the installer for that system is built here (`x-runner-kit-kind: installer`); otherwise the plain files with `x-runner-kit-kind: files` and `x-runner-kit-note` (a plain sentence). The zip is named `runner-my-computer-windows-setup.zip` (or `-mac-setup.zip`; `runner-my-computer-<target>.zip` when it carries its own Node.js). It holds the program (modes from the manifest), the same prebuilt runner files as the plain kit, `runner.json` (no name: the runner uses the computer's name), `runner.enroll` (mode 0600) and a `README.txt`. `GET /api/me/runner/download/info` says per system and processor whether it is the installer (`kind`) and why not (`note`). Nothing from the server's `.env`, database or data folder enters the zip, and the code is made per download and appears in `runner.enroll` only.
+`POST /api/me/runner/download` `{ os: "windows" | "mac", arch }` makes the installer zip when the installer for that system is built here (`x-runner-kit-kind: installer`); otherwise the plain files with `x-runner-kit-kind: files` and `x-runner-kit-note` (a plain sentence). The zip is named `runner-my-computer-windows-setup.zip` (or `-mac-setup.zip`; a Mac download that carries its own Node.js is `runner-my-computer-mac-<arch>.zip`). It holds the program (modes from the manifest), the same prebuilt runner files as the plain kit, `runner.json` (no name: the runner uses the computer's name), `runner.enroll` (mode 0600) and a `README.txt`. `GET /api/me/runner/download/info` says per system and processor whether it is the installer (`kind`) and why not (`note`). Nothing from the server's `.env`, database or data folder enters the zip, and the code is made per download and appears in `runner.enroll` only.
 
 ## Tests
 

@@ -494,27 +494,38 @@ describe("the download route", () => {
         expect(Buffer.from(z[`${dir}/runner.mjs`]!).equals(fs.readFileSync(path.join(bundleDir, "runner.mjs")))).toBe(true);
     });
 
-    it("puts the installer inside when the server has it: Windows leads with the setup program, the start scripts stay as the way without installing", async () => {
+    it("puts the Mac app inside when the server has it; the Windows installer download never carries the complete parts (260-character path limit)", async () => {
         const saved = process.env.RUNNER_INSTALLER_DIR;
         const inst = path.join(tmp, "installer-stand-ins");
         if (!fs.existsSync(inst)) writeInstallerStandIns(inst);
         process.env.RUNNER_INSTALLER_DIR = inst;
         try {
-            const r = await complete("windows", "x64");
-            expect(r.status, r.text).toBe(200);
-            expect(r.headers["x-runner-kit-kind"]).toBe("installer");
-            expect(r.headers["x-runner-kit-note"]).toBeUndefined();
-            expect(r.headers["x-runner-kit-target"]).toBe("win-x64");
-            const z = unzipSync(new Uint8Array(r.buf));
-            const dir = "runner-my-computer-win-x64";
-            for (const n of ["AITestingRunnerSetup.exe", "node/node.exe", "node_modules/.aitp-complete", "start-runner.cmd", "runner.enroll"]) expect(z[`${dir}/${n}`], n).toBeDefined();
-            const readme = Buffer.from(z[`${dir}/README.txt`]!).toString();
-            expect(readme.indexOf("Double-click AITestingRunnerSetup.exe")).toBeGreaterThan(-1);
-            expect(readme.indexOf("AITestingRunnerSetup.exe")).toBeLessThan(readme.indexOf("start-runner.cmd"));
-            expect(readme).toContain("Or, to run it without installing, double-click start-runner.cmd");
+            // Windows: the installer zip as before this round (the program and the bundle; it installs the test tools with npm ci).
+            const win = await complete("windows", "x64");
+            expect(win.status, win.text).toBe(200);
+            expect(win.headers["x-runner-kit-kind"]).toBe("installer");
+            expect(win.headers["x-runner-kit-target"]).toBeUndefined();
+            expect(win.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-windows-setup.zip"');
+            const wz = Object.keys(unzipSync(new Uint8Array(win.buf)));
+            expect(wz).toContain("runner-my-computer-windows-setup/AITestingRunnerSetup.exe");
+            expect(wz.some((n) => n.includes("/node_modules/") || n.includes("/node/"))).toBe(false);
+            const info = (await call("GET", "/api/me/runner/download/info")).body;
+            expect(systemOf(info, "windows", "x64")).toMatchObject({ kind: "installer", ownNode: false });
+            expect(systemOf(info, "mac", "arm64")).toMatchObject({ kind: "installer", ownNode: true });
+
+            // Mac: the app inside the complete download; it leads the README, the start scripts stay as the way without installing.
             const mac = await complete("mac", "arm64");
+            expect(mac.status, mac.text).toBe(200);
             expect(mac.headers["x-runner-kit-kind"]).toBe("installer");
-            expect(Object.keys(unzipSync(new Uint8Array(mac.buf)))).toContain("runner-my-computer-mac-arm64/AI Testing Runner.app/Contents/MacOS/AITestingRunner");
+            expect(mac.headers["x-runner-kit-note"]).toBeUndefined();
+            expect(mac.headers["x-runner-kit-target"]).toBe("mac-arm64");
+            const z = unzipSync(new Uint8Array(mac.buf));
+            const dir = "runner-my-computer-mac-arm64";
+            for (const n of ["AI Testing Runner.app/Contents/MacOS/AITestingRunner", "node/bin/node", "node_modules/.aitp-complete", "start-runner.sh", "runner.enroll"]) expect(z[`${dir}/${n}`], n).toBeDefined();
+            const readme = Buffer.from(z[`${dir}/README.txt`]!).toString();
+            expect(readme.indexOf('Double-click "AI Testing Runner"')).toBeGreaterThan(-1);
+            expect(readme.indexOf('Double-click "AI Testing Runner"')).toBeLessThan(readme.indexOf("sh start-runner.sh"));
+            expect(readme).toContain("Or, to run it without installing, open Terminal");
             // Linux never gets an installer.
             const linux = await complete("linux", "x64");
             expect(linux.headers["x-runner-kit-kind"]).toBe("files");

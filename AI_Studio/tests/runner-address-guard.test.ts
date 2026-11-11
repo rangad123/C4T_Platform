@@ -6,7 +6,7 @@
  * the person's own network and counts every request it gets.
  *
  * Browser-launching: node scripts/with-lock.mjs browser -- npx vitest run tests/runner-address-guard.test.ts
- * Ports: fake platforms 8240 and 8243, the "public" site 8241, the "private" server 8242.
+ * Ports: fake platforms 8802 and 8805, the "public" site 8803, the "private" server 8804.
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -23,8 +23,8 @@ import { renderScript } from "../src/engine/generators/index.js";
 import { TestSpecSchema } from "../src/engine/spec/schema.js";
 import { FakePlatform } from "./fixtures/fake-platform.js";
 
-const PUB_PORT = 8241;
-const PRIV_PORT = 8242;
+const PUB_PORT = 8803;
+const PRIV_PORT = 8804;
 const PUB = `http://127.0.0.1:${PUB_PORT}`;
 const PRIV = `http://127.0.0.1:${PRIV_PORT}`;
 const TOKEN = "aitg_AddressGuardToken0123456789abcdefghij";
@@ -61,7 +61,7 @@ describe("an address, looked up on the runner", () => {
             expect(await addressProblem(a, lookup), a).toMatch(/private or local address/);
         }
         expect(await addressProblem("https://router.example/", lookup)).toMatch(/leads to a private or local address on this computer's network/);
-        expect(await addressProblem("https://intranet.example/", lookup)).toMatch(/owner can allow them on the Runners page/);
+        expect(await addressProblem("https://intranet.example/", lookup)).toMatch(/owner can allow them in Settings, Your runner\./);
     });
     it("lets a public address through, and says so plainly when a name cannot be found", async () => {
         expect(await addressProblem("https://shop.example/cart", lookup)).toBeUndefined();
@@ -191,7 +191,7 @@ describe("a runner whose owner did not allow private addresses", () => {
     let fake: FakePlatform;
     let a: Awaited<ReturnType<typeof startAgent>>;
     beforeAll(async () => {
-        fake = new FakePlatform(8240, { token: TOKEN });
+        fake = new FakePlatform(8802, { token: TOKEN });
         await fake.start();
         a = await startAgent(fake, false);
     }, 90_000);
@@ -206,7 +206,7 @@ describe("a runner whose owner did not allow private addresses", () => {
         fake.enqueue({ offer: t });
         const r = await fake.result(t.taskId);
         expect(r.ok).toBe(false);
-        expect(r.error).toMatch(/^The run was not started: 127\.0\.0\.1:8242 is a private or local address\. .*Runners page/);
+        expect(r.error).toMatch(/^The run was not started: 127\.0\.0\.1:8804 is a private or local address\. .*in Settings, Your runner\./);
         expect(r.runs).toEqual([]);
         expect(privateHits).toEqual([]);
     }, 60_000);
@@ -216,7 +216,7 @@ describe("a runner whose owner did not allow private addresses", () => {
         fake.enqueue({ offer: t });
         const r = await fake.result(t.taskId);
         expect(r.ok).toBe(false);
-        expect(r.error).toMatch(/^The recording was not started: 127\.0\.0\.1:8242 is a private or local address/);
+        expect(r.error).toMatch(/^The recording was not started: 127\.0\.0\.1:8804 is a private or local address/);
         expect(privateHits).toEqual([]);
     }, 60_000);
 
@@ -243,7 +243,7 @@ describe("a runner whose owner allowed private addresses", () => {
     let fake: FakePlatform;
     let a: Awaited<ReturnType<typeof startAgent>>;
     beforeAll(async () => {
-        fake = new FakePlatform(8243, { token: TOKEN });
+        fake = new FakePlatform(8805, { token: TOKEN });
         await fake.start();
         a = await startAgent(fake, true);
     }, 90_000);

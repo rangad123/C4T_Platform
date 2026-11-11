@@ -19,8 +19,10 @@ import type { RouteCtx } from "./types.js";
  *   POST /api/me/runner/download        { os: "windows" | "mac" | "linux", arch: "x64" | "arm64" } -> the zip with this person's one-time code
  *
  * One download per system, nothing to choose: Windows gets the setup program, a Mac the app, Linux the plain files with the start scripts.
- * Each one also carries its own Node.js and every test tool (the complete build, runner-kit-complete.ts) when this server has built it for
- * that system and processor; then the installer is put inside it. A server without the installer for a system sends the plain files and
+ * The Mac app and the Linux files also carry their own Node.js and every test tool (the complete build, runner-kit-complete.ts) when this
+ * server has built it for that system and processor (the Mac app is then put inside it). The Windows installer never does: it finds or
+ * downloads Node.js and installs the test tools with npm ci, because a complete node_modules copied into its install folder passes
+ * Windows' 260-character path limit. Only a Windows download that falls back to the plain files (no installer built here) carries them. A server without the installer for a system sends the plain files and
  * says so (x-runner-kit-note). The runner is named after the computer (runner.json holds no name).
  *
  * The zip holds a single-use code (runner.enroll), never a credential: the runner trades it once at /api/agent/enroll for this person's one
@@ -51,7 +53,9 @@ function planFor(req: DownloadRequest, bundle: Extract<Bundle, { ok: true }>, in
     const complete = build.ok ? build : undefined;
     if (req.os === "linux") return { kind: "files", ...(complete ? { complete } : {}) };
     const part = installers ? (req.os === "windows" ? installers.windows : installers.mac) : undefined;
-    if (part?.ok) return { kind: "installer", installer: part, ...(complete ? { complete } : {}) };
+    // The Windows installer installs the test tools itself (npm ci): copying a complete node_modules into the install folder runs past
+    // Windows' 260-character path limit, so the Windows installer download never carries the complete parts. The Mac app does.
+    if (part?.ok) return { kind: "installer", installer: part, ...(complete && req.os === "mac" ? { complete } : {}) };
     return { kind: "files", ...(complete ? { complete } : {}), note: `${part && !part.ok ? part.reason : ""} The plain files were sent instead.`.trim() };
 }
 

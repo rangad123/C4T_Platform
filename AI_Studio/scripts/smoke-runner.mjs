@@ -710,6 +710,15 @@ export async function runSmoke(opts, deps = {}) {
             return `as "${runnerName}" after ${fmtMs(Date.now() - t0)}${nodeLine ? `; ${nodeLine.trim()}` : ""}`;
         });
 
+        await step("Allow private addresses for this runner (the sample app is on this computer), as Settings does", async () => {
+            // A person's runner refuses private and local addresses by default; the sample app is on 127.0.0.1.
+            const r = await api("PATCH", "/api/me/runner", { switches: { privateTargets: true } });
+            if (r.status !== 200) throw new Error(`The switch was refused (${r.status}): ${r.message}`);
+            const now = (await api("GET", "/api/me/runner")).json?.runner?.switches;
+            if (now?.privateTargets !== true) throw new Error(`Settings does not show private addresses as allowed (switches: ${JSON.stringify(now ?? null)}).`);
+            return "switched on, and Settings shows it";
+        });
+
         if (opts.kit === "complete") {
             await step("Check it used the Node.js inside the download", async () => {
                 if (!usedBundledNode(runner.output, kitDir)) throw new Error("The start script did not say it used the Node.js that came with the download.");

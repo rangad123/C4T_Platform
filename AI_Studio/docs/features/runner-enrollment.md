@@ -28,8 +28,9 @@ No download carries a runner credential. The download from Settings holds a sing
   its own Node.js), `bytes?`, `note?` and `available`.
 - `POST /api/me/runner/download` `{ os, arch }` (nothing else) -> the zip, with `x-runner-enrollment-id`, `x-runner-enrollment-expires`,
   `x-runner-kit-kind`, `x-runner-kit-note` (Windows or Mac fell back to the plain files), `x-runner-kit-target` (it carries its own Node.js).
-  One download per system: Windows the setup program, a Mac the app, Linux the plain files; each with its own Node.js and test tools when
-  the server built that target (`runner-complete-kit.md`), the installer then inside it. `runner.json` holds no name: the runner is named
+  One download per system: Windows the setup program (it installs the test tools itself), a Mac the app, Linux the plain files; the Mac
+  and Linux downloads carry their own Node.js and test tools when the server built that target (`runner-complete-kit.md`), the Mac app
+  then inside it. `runner.json` holds no name: the runner is named
   after the computer, and the person can rename it in Settings.
 - Who may download: a signed-in person who may run tests in at least one project, and the open server (no access key, nobody signed up),
   which acts as one person (owner id "open"). The shared access key is refused with 403 "Sign in with your own account to set up your

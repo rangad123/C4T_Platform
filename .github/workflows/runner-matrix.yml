@@ -1,9 +1,11 @@
 # The runner on real machines: GitHub's hosted Windows, macOS and Linux computers each build the runner download, sign up a person on a
 # platform started in the same job, download that person's runner the way Settings does (one download per system: the installer on
-# Windows and a Mac, the plain files on Linux, with its own Node.js because the complete build is made below), install it with the real
+# Windows and a Mac, the plain files on Linux; the Mac and Linux ones with their own Node.js because the complete build is made below,
+# while the Windows installer installs the test tools itself), install it with the real
 # installer without questions, check that it connects, run a web test and an API test on it end to end, stop it, start it again, remove
 # the computer, uninstall it and check that nothing is left (AI_Studio/scripts/smoke-runner.mjs --kit installer --lifecycle). The same
-# download started with its start script, and with no Node.js on the PATH (its own Node.js), is checked too. What this proves and what it cannot: AI_Studio/docs/features/real-machine-checks.md.
+# download started with its start script, and with no Node.js on the PATH (its own Node.js), is checked too (on Mac and Linux; Windows
+# skips them plainly, its installer download has no start script). What this proves and what it cannot: AI_Studio/docs/features/real-machine-checks.md.
 #
 # GitHub's Windows machines run Windows Server 2022 and 2025, not Windows 10 or 11 desktop, and nobody is signed in at a screen: a manual
 # pass on a real Windows 11 PC and a real Mac is still needed (AI_Studio/docs/runner-implementation/MANUAL_VERIFICATION.md).
