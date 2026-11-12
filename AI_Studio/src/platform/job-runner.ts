@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Config } from "../config.js";
-import type { EngineContext } from "../engine/context.js";
+import type { EngineContext, EngineEvent } from "../engine/context.js";
+import type { JobMeter } from "../engine/llm/metered.js";
 import { executorFor, isBuiltInAdapterId } from "../engine/frameworks/index.js";
 import { createLlmClientOrUnavailable, type LlmClient } from "../engine/llm/provider.js";
-import { runGeneration, type GenerationSummary } from "../engine/orchestrator.js";
+import { runGeneration, type GenerationRequest, type GenerationSummary } from "../engine/orchestrator.js";
 import type { Scenario } from "../engine/spec/schema.js";
 import { runValidationOnly, type TestToValidate } from "../engine/validate-only.js";
 import { runVariantsJob, type VariantTest } from "../engine/validation/variants.js";
@@ -12,7 +13,7 @@ import { runEnvironmentJob } from "../engine/environments/run.js";
 import { deleteOperationsOf, deleteOperationsOfSpec, mergeOperations } from "../engine/cleanup/helper.js";
 import type { CleanupRequest } from "../engine/cleanup/run.js";
 import { CleanupStore } from "./cleanup-store.js";
-import { applyFrameworkSettings } from "./framework-settings-store.js";
+import { applyFrameworkSettings, FrameworkSettingsStore } from "./framework-settings-store.js";
 import { applyDeviceFarm } from "./device-farm-run.js";
 import { applyExecutorPolicy, customRunInputs } from "./custom-run.js";
 import { assertAllowedTarget } from "./net-guard.js";
@@ -43,9 +44,11 @@ import { SecretBox } from "./secrets.js";
 import { prepareJobSignIn, type JobSignIn } from "./hard-signin-service.js";
 import { meterFor } from "./usage-store.js";
 import { routedLlmForJob } from "./llm-routing.js";
-import { configuredLlmForJob, resolveProjectAi } from "./ai-config.js";
+import { configuredLlmForJob, resolveProjectAi, type ProjectAi } from "./ai-config.js";
 import { jobPersonGate } from "./phone-person-gate.js";
-import { RunnerAgentError } from "./agent-services.js";
+import { agentServiceOf, RunnerAgentError } from "./agent-services.js";
+import { exploreOnRunner } from "./explore-dispatch.js";
+import { runnersOnly } from "./runner-only.js";
 import { LEASE_LOST, onHandover } from "./runner-handover.js";
 import { TERMINAL_STATES, type JobRow, type Repo } from "./repo.js";
 import type { ArtifactStore } from "./storage.js";
@@ -96,13 +99,31 @@ export async function runJob(deps: RunnerDeps, job: JobRow, owner: string): Prom
     return withJobStarter(job.options.startedBy, () => runJobAs(deps, job, owner));
 }
 
-async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<void> {
-    const { repo, store, config } = deps;
+export type JobLlmDeps = Pick<RunnerDeps, "repo" | "config" | "makeLlm" | "makeFastLlm">;
+
+/**
+ * The model a job uses, as a server-side job builds it: which AI and who pays (ai-config.ts), routing to the fast model (llm-routing.ts) and
+ * the usage meter (engine/llm/metered.ts). `emit` is where routing tells the job about escalations. Also used for an exploration on a runner,
+ * whose model calls come back here (explore-llm.ts).
+ */
+export async function jobLlm(deps: JobLlmDeps, job: JobRow, emit: (e: EngineEvent) => void): Promise<{ ai: ProjectAi; meter: JobMeter | null; rawLlm: LlmClient; llm: LlmClient }> {
+    const { repo, config } = deps;
     // Which AI this job uses and who pays: read once, here, so the engine never waits for it (ai-config.ts).
     const ai = await resolveProjectAi({ sql: repo.db.sql, config }, job.projectId);
     // A client per job so its token usage is this job's alone (the shared client's counters span jobs).
     // Every model call of the job is counted and checked against the AI budgets before it is made (engine/llm/metered.ts).
     const meter = meterFor(repo, config, job, undefined, ai.billing);
+    // With a fast model set, routine steps go to it and hard ones (or ones it fumbles) to the main model; without one this is the main client itself (llm-routing.ts).
+    // A project's own configuration keeps to its own models: the server's fallback and fast models are never used for it (ai-config.ts).
+    const rawLlm =
+        ai.source === "server"
+            ? routedLlmForJob({ db: repo.db, config, emit }, job, (deps.makeLlm ?? createLlmClientOrUnavailable)(config), deps.makeFastLlm ? { fast: deps.makeFastLlm(config) } : {})
+            : configuredLlmForJob({ sql: repo.db.sql, db: repo.db, config }, job, ai, deps.makeLlm);
+    return { ai, meter, rawLlm, llm: meter ? meter.wrap(rawLlm) : rawLlm };
+}
+
+async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<void> {
+    const { repo, store, config } = deps;
     // The job's events and its agents' actions go through this sink's ordered queue, with the sink's database-only writes (repo-sink.ts).
     const sink = new RepoSink(repo, store, { id: job.id, projectId: job.projectId, applicationId: job.applicationId, mode: job.options.mode });
     // Set when a graceful restart hands this job over (runner-handover.ts): from then on the engine's writes for it are not made.
@@ -111,18 +132,7 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
     const going = new Set<Promise<unknown>>();
     // What the engine writes through: the same sink, closed by a hand-over (fenceSink).
     const engineSink = fenceSink(sink, () => handingOver, going);
-    // With a fast model set, routine steps go to it and hard ones (or ones it fumbles) to the main model; without one this is the main client itself (llm-routing.ts).
-    // A project's own configuration keeps to its own models: the server's fallback and fast models are never used for it (ai-config.ts).
-    const rawLlm =
-        ai.source === "server"
-            ? routedLlmForJob(
-                  { db: repo.db, config, emit: (e) => (job.options.mode === "validate" || handingOver ? undefined : sink.event(e)) },
-                  job,
-                  (deps.makeLlm ?? createLlmClientOrUnavailable)(config),
-                  deps.makeFastLlm ? { fast: deps.makeFastLlm(config) } : {},
-              )
-            : configuredLlmForJob({ sql: repo.db.sql, db: repo.db, config }, job, ai, deps.makeLlm);
-    const llm = meter ? meter.wrap(rawLlm) : rawLlm;
+    const { ai, meter, rawLlm, llm } = await jobLlm(deps, job, (e) => (job.options.mode === "validate" || handingOver ? undefined : sink.event(e)));
     const app = repo.getApplication(job.applicationId);
     if (!app) {
         repo.setJobStatus(job.id, "FAILED", "Application record not found");
@@ -382,46 +392,48 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         } else {
             // Creating from a plan the person approved: the plan is read back here, so a missing one fails before anything is touched.
             const fromPlan = o.fromPlan ? await requireStoredPlan(repo, store, o.fromPlan) : undefined;
-            summary = await runGeneration(
-                ctx,
-                {
-                    ...(o.planOnly ? { planOnly: true } : {}),
-                    ...(fromPlan ? { plan: fromPlan, excludeIdeas: o.excludeIdeas } : {}),
-                    url: app.url,
-                    maxPages: o.maxPages,
-                    maxDepth: o.maxDepth,
-                    maxScenarios: o.maxScenarios,
-                    scope: o.scope,
-                    includePaths: o.includePaths,
-                    targets: o.targets,
-                    ...(o.targets?.includes("mobile") && MobileTargetSchema.safeParse(app.config.mobile).success ? { mobile: MobileTargetSchema.parse(app.config.mobile) } : {}),
-                    allowMutatingApiTests: o.allowMutatingApiTests,
-                    openApiUrl: o.openApiUrl,
-                    apiBaseUrl: o.apiBaseUrl,
-                    ...(o.functionalTests === false ? { functionalTests: false } : {}),
-                    accessibility: o.accessibility,
-                    healthChecks: o.healthChecks,
-                    securityChecks: o.securityChecks,
-                    performanceChecks: o.performanceChecks,
-                    loadChecks: o.loadChecks === true && !(await loadTargetProblem(repo.db, job.projectId, [app.config.apiBaseUrl ?? o.apiBaseUrl, app.url])) ? true : undefined,
-                    loadBudgets: o.loadBudgets,
-                    inputChecks: o.inputChecks,
-                    visionChecks: o.visionChecks,
-                    contractChecks: o.contractChecks,
-                    performanceBudgets: o.performanceBudgets,
-                    visual: o.visual,
-                    requirements: o.requirementsText ? { name: o.requirementsName ?? "requirements", text: o.requirementsText } : undefined,
-                    variants: o.variants,
-                    credentials: app.credentials,
-                    roles,
-                    accessChecks: o.accessChecks,
-                    useMemory: o.useMemory,
-                    ...(o.fullExploration ? { fullExploration: true } : {}),
-                    cleanup,
-                    ...(signIn.savedSession ? { savedSession: signIn.savedSession } : {}),
-                },
-                engineSink,
-            );
+            const request: GenerationRequest = {
+                ...(o.planOnly ? { planOnly: true } : {}),
+                ...(fromPlan ? { plan: fromPlan, excludeIdeas: o.excludeIdeas } : {}),
+                url: app.url,
+                maxPages: o.maxPages,
+                maxDepth: o.maxDepth,
+                maxScenarios: o.maxScenarios,
+                scope: o.scope,
+                includePaths: o.includePaths,
+                targets: o.targets,
+                ...(o.targets?.includes("mobile") && MobileTargetSchema.safeParse(app.config.mobile).success ? { mobile: MobileTargetSchema.parse(app.config.mobile) } : {}),
+                allowMutatingApiTests: o.allowMutatingApiTests,
+                openApiUrl: o.openApiUrl,
+                apiBaseUrl: o.apiBaseUrl,
+                ...(o.functionalTests === false ? { functionalTests: false } : {}),
+                accessibility: o.accessibility,
+                healthChecks: o.healthChecks,
+                securityChecks: o.securityChecks,
+                performanceChecks: o.performanceChecks,
+                loadChecks: o.loadChecks === true && !(await loadTargetProblem(repo.db, job.projectId, [app.config.apiBaseUrl ?? o.apiBaseUrl, app.url])) ? true : undefined,
+                loadBudgets: o.loadBudgets,
+                inputChecks: o.inputChecks,
+                visionChecks: o.visionChecks,
+                contractChecks: o.contractChecks,
+                performanceBudgets: o.performanceBudgets,
+                visual: o.visual,
+                requirements: o.requirementsText ? { name: o.requirementsName ?? "requirements", text: o.requirementsText } : undefined,
+                variants: o.variants,
+                credentials: app.credentials,
+                roles,
+                accessChecks: o.accessChecks,
+                useMemory: o.useMemory,
+                ...(o.fullExploration ? { fullExploration: true } : {}),
+                cleanup,
+                ...(signIn.savedSession ? { savedSession: signIn.savedSession } : {}),
+            };
+            // Round 51: on a platform that runs tests only on runners, the exploration runs on its starter's runner and the AI stays here
+            // (explore-dispatch.ts); its model calls and what it saves come back through the explore routes. Elsewhere it runs here, as before.
+            const svc = runnersOnly(config) ? agentServiceOf(job.projectId) : undefined;
+            summary = svc
+                ? await exploreOnRunner(svc, { deps, job, request, modelName: llm.modelName, frameworkSettings: frameworkSettingsOf(repo, job.projectId), signal: abort.signal, emit })
+                : await runGeneration(ctx, request, engineSink);
         }
 
         // A run that stops at the abort may simply end: a job past its limit is still a failed one, whatever it got done.
@@ -495,6 +507,15 @@ async function runJobAs(deps: RunnerDeps, job: JobRow, owner: string): Promise<v
         }
         await cleanScratch(config.scratchDir).catch(() => undefined);
         await notifyFinished(deps, job.id);
+    }
+}
+
+/** The project's framework settings, sent with an exploration to its runner (applied there as for a run). Unreadable: none. */
+function frameworkSettingsOf(repo: Repo, projectId: string): unknown {
+    try {
+        return new FrameworkSettingsStore(repo.db).get(projectId);
+    } catch {
+        return undefined;
     }
 }
 

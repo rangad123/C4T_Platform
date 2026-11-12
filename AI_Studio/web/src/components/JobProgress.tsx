@@ -11,6 +11,7 @@ import { CreatedTests, Elapsed } from "../features/onboarding/CreatedTests";
 import { ExplorerWatch } from "../features/explorer/ExplorerView";
 import { PhoneProgress } from "../features/phone/PhoneProgress";
 import { isPhoneJob, isPhoneOnly, phoneCounts, phonePhase } from "../features/phone/phone";
+import { exploringOn, useExecutionMode } from "../features/runs/runs-here";
 
 /** Live "what is happening" for a running analysis: a checklist, one progress bar, no jargon. */
 export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: () => void }) {
@@ -33,6 +34,9 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
     const phoneJob = isPhoneJob(job) && (job.mode === undefined || job.mode === "generate");
     const phoneAlone = phoneJob && isPhoneOnly(job);
     const screens = phoneCounts(job, undefined).screens;
+    // Runners mode (round 51): an exploration runs on the runner of the person who started it, which the job names once it is handed out.
+    const explores = job.mode === undefined || job.mode === "generate";
+    const onRunner = useExecutionMode() === "runners" && explores && isActive(job.status) ? exploringOn(job.ranOn?.kind === "agent" ? job.ranOn.name : undefined) : null;
 
     return (
         <section className="card card-pad stack">
@@ -51,6 +55,12 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
                     <span style={{ width: `${pct}%` }} />
                 </div>
             </div>
+
+            {onRunner && (
+                <p className="t-secondary" data-testid="exploring-on">
+                    {onRunner}. The browser runs on that computer; the AI works from the platform.
+                </p>
+            )}
 
             <LiveLine state={stream.state} latest={stream.latest} />
 

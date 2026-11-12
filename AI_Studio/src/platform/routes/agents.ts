@@ -14,6 +14,11 @@ import { z } from "zod";
 import { AcceptRequest, ATTEMPT_HEADER, DevicePush, EventsRequest, HeartbeatRequest, HelloRequest, PollRequest, RecordingPush, RejectRequest, ResultRequest, SafeName, type UploadResponse } from "../../agent-protocol/schema.js";
 import { EnrollRequest } from "../../agent-protocol/schema.js";
 import { MAX_DEVICE_PUSH_BYTES } from "../agent-device.js";
+import { EXPLORE_LLM_MAX_BYTES } from "../../agent-protocol/explore-llm.js";
+import { EXPLORE_SINK_BODY_MAX } from "../../agent-protocol/explore-sink.js";
+import { handleExploreLlm } from "../explore-llm.js";
+import { handleExploreSink } from "../explore-sink.js";
+import { exploreLlmDeps } from "../explore-dispatch.js";
 import { MAX_PUSH_BYTES } from "../agent-record.js";
 import type { AgentRecord, AgentTokenRecord } from "../agent-store.js";
 import { androidSummary } from "../agent-routing.js";
@@ -394,6 +399,20 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
             const { id } = req.params as { id: string };
             return svc.pushDevice(token(req), id, parse(DevicePush, await readJson(req, MAX_DEVICE_PUSH_BYTES), "phone session update"));
         });
+
+        // Round 51: an exploration on a runner asks the job's AI and saves what it finds. Fenced to this runner's own running explore task and
+        // its current attempt (AgentService.exploreTask), then the body is read with its cap and handed over (explore-llm.ts, explore-sink.ts).
+        const exploreCall = async (req: FastifyRequest, route: "llm" | "sink") => {
+            other(req);
+            const { id } = req.params as { id: string };
+            const attempt = req.headers[ATTEMPT_HEADER];
+            const task = svc.exploreTask(token(req), id, typeof attempt === "string" ? attempt : undefined);
+            const body = await readJson(req, route === "llm" ? EXPLORE_LLM_MAX_BYTES : EXPLORE_SINK_BODY_MAX);
+            // The job's model is built from the job's own worker deps (explore-dispatch.ts), as runJobAs builds it.
+            return route === "llm" ? handleExploreLlm(exploreLlmDeps(task.taskId) ?? p, task, body) : handleExploreSink(p, task, body);
+        };
+        scope.post("/api/agent/tasks/:id/explore/llm", async (req) => exploreCall(req, "llm"));
+        scope.post("/api/agent/tasks/:id/explore/sink", async (req) => exploreCall(req, "sink"));
 
         // Runner updates: the offer and its files (routes/runner-updates.ts), behind the same token check.
         registerUpdateAgentRoutes(scope, { svc, updates, token, other });

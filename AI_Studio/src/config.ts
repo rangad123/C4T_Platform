@@ -251,6 +251,9 @@ export const ADAPTER_PLUGINS_NEED_API_KEY =
 /** Repo root (this file is src/config.ts). */
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+/** The environment's settings alone, without the platform's own folders (a runner's exploration builds its Config from this: agent/explore-child.ts). */
+export const parseEnvSettings = (env: NodeJS.ProcessEnv): z.infer<typeof EnvSchema> => EnvSchema.parse(env);
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     const parsed = EnvSchema.parse(env);
     const dataDir = path.resolve(parsed.DATA_DIR);

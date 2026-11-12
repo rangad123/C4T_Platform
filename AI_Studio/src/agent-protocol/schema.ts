@@ -90,6 +90,11 @@ export const Capabilities = z.object({
      */
     deviceSession: z.boolean().optional(),
     /**
+     * Round 51 (additive, optional): the agent runs a whole exploration (`explore` task) with the AI on the platform. The platform offers an explore
+     * task only to an agent that reports this; for an older one the person is told to update the runner.
+     */
+    explore: z.boolean().optional(),
+    /**
      * The runner's own Android phone tools (additive, optional; see docs/features/phone-setup-simple.md): "can-fetch" means this computer has no adb
      * yet and the runner gets Google's platform-tools itself when a phone session arrives; "ready" means it uses the ones it fetched. Reported only
      * when the runner's setting allows it and no other adb is found. Never a path.
@@ -695,6 +700,25 @@ export const DevicePush = z.object({
 });
 export type DevicePush = z.infer<typeof DevicePush>;
 
+/**
+ * Round 51: an exploration on the runner (docs/features/explore-on-runner.md). The child calls the engine's runGeneration with `request`; the AI
+ * stays on the platform (POST .../explore/llm) and what the job saves goes there too (POST .../explore/sink). `request` holds the job's test
+ * account secrets: the agent registers `secrets` with its log scrubber and never writes the offer to disk.
+ */
+export const ExploreTask = z.object({
+    /** The engine's GenerationRequest as JSON (no functions: the runner adds its own cleanup guard). Checked by the engine itself. */
+    request: z.record(z.string(), z.unknown()),
+    /** The name the job's model goes by (informational: the platform decides which model answers). */
+    modelName: z.string().max(200),
+    /** Remove the records data-changing API tests create once the run ends (the runner removes them, on its own network). */
+    cleanup: z.boolean().optional(),
+    /** The project's framework settings (engine/frameworks/settings.ts), applied on the runner as for a run. */
+    frameworkSettings: z.unknown().optional(),
+    /** Exact strings the agent masks in everything it logs or sends (passwords, tokens, saved sign-in values). */
+    secrets: z.array(z.string().max(20_000)).max(500),
+});
+export type ExploreTask = z.infer<typeof ExploreTask>;
+
 export const TaskOffer = z.object({
     taskId: z.string(),
     jobId: z.string(),
@@ -714,7 +738,7 @@ export const TaskOffer = z.object({
     /** Playwright projects for a cross-browser run (same as RunnerProject). */
     projects: z.array(z.object({ name: z.string(), device: z.string(), viewport: z.object({ width: z.number(), height: z.number() }).optional() })).optional(),
     /** Absent or "run": execute the scripts. "record": host a recording session (the agent must have reported `record: true`). */
-    kind: z.enum(["run", "record", "device"]).optional(),
+    kind: z.enum(["run", "record", "device", "explore"]).optional(),
     scripts: z.array(WireScript).max(500),
     /** Shared helper modules custom scripts import as ./helpers/<name> (additive, optional; at most 20 of at most 100 KB). The agent writes them next to the scripts. */
     helpers: z.array(z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,40}$/), content: z.string().max(100_000) })).max(20).optional(),
@@ -726,6 +750,8 @@ export const TaskOffer = z.object({
     record: RecordTask.optional(),
     /** Present when kind is "device" (AI phone exploration; the agent must have reported `deviceSession: true`). */
     device: DeviceTask.optional(),
+    /** Present when kind is "explore" (round 51; the agent must have reported `explore: true`). */
+    explore: ExploreTask.optional(),
     /**
      * Protocol 2 only (absent for a protocol-1 agent): this hand-out of the task. Every claim mints a new id; the agent sends it with each
      * accept, reject, heartbeat, event, upload and result, and a message for an attempt that is no longer the current one is refused with 409.
@@ -752,6 +778,8 @@ export const CheckedTaskOffer = TaskOffer.superRefine((t, ctx) => {
         if (!t.record) ctx.addIssue({ code: "custom", path: ["record"], message: "a record task needs its record settings" });
     } else if (t.kind === "device") {
         if (!t.device) ctx.addIssue({ code: "custom", path: ["device"], message: "a device task needs its device settings" });
+    } else if (t.kind === "explore") {
+        if (!t.explore) ctx.addIssue({ code: "custom", path: ["explore"], message: "an explore task needs its exploration settings" });
     } else if (t.scripts.length < 1) ctx.addIssue({ code: "too_small", minimum: 1, origin: "array", inclusive: true, path: ["scripts"], message: "a run task needs at least one script" });
 });
 
@@ -836,6 +864,18 @@ export const ResultRequest = z.object({
     browser: WebBrowserUsed.optional(),
     /** Protocol 2: the attempt this result is for. A result for an attempt that is no longer current is refused with 409 (superseded). */
     attemptId: z.string().max(64).optional(),
+    /** Explore tasks only (round 51): the engine's GenerationSummary. What it saved went to the platform already (explore/sink). */
+    explore: z
+        .object({
+            testsGenerated: z.number().int().min(0),
+            testsValidated: z.number().int().min(0),
+            testsFailedValidation: z.number().int().min(0),
+            testsNeedingReview: z.number().int().min(0),
+            errors: z.array(z.string().max(2000)).max(200),
+            model: z.unknown().optional(),
+            plan: z.unknown().optional(),
+        })
+        .optional(),
 });
 export type ResultRequest = z.infer<typeof ResultRequest>;
 
@@ -876,6 +916,8 @@ export const RejectRequest = z.object({
 });
 export type RejectRequest = z.infer<typeof RejectRequest>;
 
+/** The engine's stages (engine/context.ts Stage), for explore tasks' engine events. */
+export const ENGINE_STAGES = ["discovery", "analysis", "planning", "generation", "validation", "orchestration"] as const;
 const TestRef = { testId: z.string().min(1).max(80), variant: z.string().max(60).optional() };
 const Seq = { seq: z.number().int().min(0).max(10_000_000), at: z.string().max(40) };
 const StepStatus = z.enum(["passed", "failed"]);
@@ -891,6 +933,8 @@ export const LiveEvent = z.discriminatedUnion("type", [
     /** A file already uploaded for this attempt (PUT .../files/:name); `ref` is the name it was uploaded under. */
     z.object({ type: z.literal("screenshot"), ...Seq, ...TestRef, ref: SafeName, step: z.number().int().min(0).max(10_000).optional(), kind: z.enum(["screenshot", "vision-shot", "visual-actual", "visual-diff"]).optional() }),
     z.object({ type: z.literal("phase"), ...Seq, phase: AgentPhase }),
+    /** Explore tasks only (round 51): one event of the engine (ctx.emit), kept as the job's own event. */
+    z.object({ type: z.literal("engine"), ...Seq, stage: z.enum(ENGINE_STAGES), kind: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), level: z.enum(["info", "warn", "error"]).optional(), message: z.string().max(2000), data: z.record(z.string(), z.unknown()).optional() }),
 ]);
 export type LiveEvent = z.infer<typeof LiveEvent>;
 export type LiveEventType = LiveEvent["type"];
@@ -918,4 +962,6 @@ export const LIVE_EVENT_KINDS: Record<LiveEventType, string> = {
     log: "runner_log",
     screenshot: "runner_screenshot",
     phase: "runner_phase",
+    // An engine event keeps its own kind (agent-services.ts events); this one is never written.
+    engine: "runner_engine",
 };

@@ -5,7 +5,9 @@
  * or timeout, and so a crash in a test runner cannot take the agent down. The task's credentials travel over this
  * in-memory channel only: never in the command line, never in a file.
  */
-import type { LiveResultWire, RecordCommand } from "../agent-protocol/schema.js";
+import type { ExploreTask, LiveResultWire, RecordCommand } from "../agent-protocol/schema.js";
+import type { EngineEvent } from "../engine/context.js";
+import type { GenerationSummary } from "../engine/orchestrator.js";
 import type { BrowserLaunch } from "../engine/browsers/choice.js";
 import type { RecState } from "../engine/recorder/session.js";
 import type { MobileTarget } from "../engine/mobile/target.js";
@@ -56,9 +58,34 @@ export interface ChildRun {
     live?: boolean;
 }
 
-export type ToChild = ChildRun;
+/**
+ * Round 51: an exploration (explore task). The child runs the engine's runGeneration; its AI and what it saves go to the platform through the
+ * agent (`post` messages answered by `answer`), which holds the credential. The request carries the job's test account secrets: this channel only.
+ */
+export interface ChildExplore {
+    type: "explore";
+    /** The task's own folder: scratch files, baselines from the platform, removed with the task. */
+    scratchDir: string;
+    explore: ExploreTask;
+    /** The installed Chrome or Edge this runner uses for web tests. Absent: Playwright's own Chromium. */
+    browser?: BrowserLaunch;
+    /** This runner refuses private and local addresses (address-guard.ts): also every record the exploration's tests clean up. */
+    refusePrivate?: boolean;
+}
+export type ExploreAnswer = { type: "answer"; id: number; ok: true; value: unknown } | { type: "answer"; id: number; ok: false; message: string; status?: number };
 
-export type FromChild = { type: "log"; line: string } | { type: "result"; runs: ScriptRun[] } | { type: "error"; message: string } | { type: "live"; event: LiveRunEvent };
+export type ToChild = ChildRun | ChildExplore | ExploreAnswer;
+
+export type FromChild =
+    | { type: "log"; line: string }
+    | { type: "result"; runs: ScriptRun[] }
+    | { type: "error"; message: string }
+    | { type: "live"; event: LiveRunEvent }
+    /** Explore tasks: a call for the platform (the agent answers with the same id), one the child gave up on, an engine event, and the summary. */
+    | { type: "post"; id: number; route: "llm" | "sink"; body: unknown }
+    | { type: "post-abort"; id: number }
+    | { type: "engine"; event: EngineEvent }
+    | { type: "explored"; summary: GenerationSummary };
 
 // ── a recording session (record tasks) ──────────────────────────────────────
 // A record task runs the shared recorder core (src/engine/recorder/session.ts) in its own process, like a script run, so a crash or hang cannot take the

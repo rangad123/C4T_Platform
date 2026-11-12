@@ -9,7 +9,8 @@ import { spawn, fork, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { LiveRunEvent, ScriptRun } from "../engine/validation/runner.js";
 import { CHILD_ENV_ALLOW } from "../engine/validation/runner.js";
-import type { ChildRun, FromChild } from "./child-protocol.js";
+import type { FromChild, ToChild } from "./child-protocol.js";
+import type { GenerationSummary } from "../engine/orchestrator.js";
 import { lowerPriority } from "./resources.js";
 
 /** What the task's process may take from this computer (resources.ts). */
@@ -20,7 +21,7 @@ export interface ProcessLimits {
     heapMb?: number;
 }
 
-export type TaskOutcome = { kind: "result"; runs: ScriptRun[] } | { kind: "error"; message: string } | { kind: "crashed"; detail: string };
+export type TaskOutcome = { kind: "result"; runs: ScriptRun[] } | { kind: "explored"; summary: GenerationSummary } | { kind: "error"; message: string } | { kind: "crashed"; detail: string };
 
 /** Kill a process and everything below it. */
 export function killTree(child: ChildProcess): void {
@@ -61,6 +62,8 @@ export class TaskProcess {
     readonly done: Promise<TaskOutcome>;
     /** Protocol 2: the child's live events (set before `start`). */
     onLive?: (e: LiveRunEvent) => void;
+    /** Explore tasks (round 51): the child's calls for the platform and its engine events (set before `start`). */
+    onExplore?: (m: Extract<FromChild, { type: "post" | "post-abort" | "engine" }>) => void;
 
     constructor(source: NodeJS.ProcessEnv, private readonly onLog: (line: string) => void, entry: string = ENTRY, limits: ProcessLimits = {}) {
         const heap = limits.heapMb && limits.heapMb > 0 ? Math.round(limits.heapMb) : 0;
@@ -87,6 +90,8 @@ export class TaskProcess {
             if (m?.type === "log" && typeof m.line === "string") this.onLog(m.line);
             else if (m?.type === "live" && m.event && typeof m.event === "object") this.onLive?.(m.event);
             else if (m?.type === "result" && Array.isArray(m.runs)) this.finish({ kind: "result", runs: m.runs });
+            else if (m?.type === "post" || m?.type === "post-abort" || m?.type === "engine") this.onExplore?.(m);
+            else if (m?.type === "explored" && m.summary && typeof m.summary === "object") this.finish({ kind: "explored", summary: m.summary });
             else if (m?.type === "error") this.finish({ kind: "error", message: String(m.message).slice(0, 500) });
         });
         this.child.on("error", (e) => this.finish({ kind: "crashed", detail: `The test runner could not be started (${e.message}).` }));
@@ -114,10 +119,16 @@ export class TaskProcess {
         return this.tail;
     }
 
-    start(msg: ChildRun): void {
+    start(msg: ToChild): void {
         this.child.send(msg, (err) => {
             if (err) this.finish({ kind: "crashed", detail: "The test runner did not accept the task." });
         });
+    }
+
+    /** A later message for the child (an explore task's answers). Lost when the child is gone, which ends the task anyway. */
+    send(msg: ToChild): void {
+        if (!this.child.connected) return;
+        this.child.send(msg, () => undefined);
     }
 
     /** Kill the runner and everything it started, now (cancel, time-out, shutdown). Killing the whole tree at once also catches workers and browsers that would be orphans if only the top process died. */

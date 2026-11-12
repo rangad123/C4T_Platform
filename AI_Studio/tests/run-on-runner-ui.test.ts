@@ -33,7 +33,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 const runnerOf = (over: Partial<RunnerMine> = {}): RunnerMine => ({
     id: "tok-mine",
-    name: "Priya’s laptop",
+    name: "Office laptop",
     status: "online",
     lastSeenAt: new Date().toISOString(),
     os: "darwin",
@@ -319,9 +319,9 @@ describe("runners mode, runner online", () => {
         await pwExpect(page.getByTestId("runs-on")).toHaveCount(0);
         await pwExpect(panel().getByTestId("no-runner")).toHaveCount(0);
         await pwExpect(panel().getByRole("group", { name: "Where" })).toHaveCount(0);
-        await pwExpect(panel().getByRole("radio", { name: /Priya’s laptop/ })).toHaveCount(0);
+        await pwExpect(panel().getByRole("radio", { name: /Office laptop/ })).toHaveCount(0);
         await panel().getByRole("radio", { name: "All tests (2)" }).check();
-        await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 2 tests on your runner, Priya’s laptop. Results replace the last results of these tests.");
+        await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 2 tests on your runner, Office laptop. Results replace the last results of these tests.");
         await panel().getByRole("button", { name: "Start run" }).click();
         await pwExpect.poll(() => runStarts.length).toBe(1);
         expect(runStarts[0]!.url).toBe(`/api/projects/${projectId}/runs`);
@@ -488,7 +488,7 @@ describe("phone tests on a project's device farm", () => {
 });
 
 describe("AI work the platform refuses in runners mode", () => {
-    it("Describe it and exploring say so before the click and cannot be started", async () => {
+    it("Describe it says so before the click and cannot be started; exploring goes to your runner", async () => {
         setMine(MINE);
         await scripts();
         await page.getByRole("button", { name: "New test script", exact: true }).click();
@@ -496,9 +496,10 @@ describe("AI work the platform refuses in runners mode", () => {
         await pwExpect(describeIt).toBeDisabled();
         await pwExpect(describeIt).toContainText("Describing a test in your own words is not available here yet");
         await page.keyboard.press("Escape");
+        // Round 51: exploring runs on the person's own runner (tests/explore-on-runner-ui.test.ts has its states).
         await visit(`#/new?project=${projectId}`);
-        await pwExpect(page.getByTestId("exploring-off")).toHaveText(EXPLORING_ON_RUNNERS);
-        await pwExpect(page.getByRole("button", { name: "Explore again" })).toBeDisabled();
+        await pwExpect(page.getByTestId("explore-on-hint")).toContainText("Explores on your runner, Office laptop.");
+        await pwExpect(page.getByRole("button", { name: "Explore again" })).toBeEnabled();
     }, 120_000);
 });
 

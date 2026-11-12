@@ -287,6 +287,8 @@ export class CapabilityProbe {
         Object.assign(caps, machineIdentity(platform));
         // This agent applies the platform's switches for it (code scripts, private addresses; hello `runner` and heartbeats).
         caps.runnerSwitches = true;
+        // Round 51: this agent runs an exploration task (the engine in a child process, the AI on the platform: explore-child.ts).
+        caps.explore = true;
 
         const parsed = Capabilities.safeParse(caps);
         // A value the protocol cannot carry is a bug here, not a reason to stop: fall back to the part that is certainly valid.

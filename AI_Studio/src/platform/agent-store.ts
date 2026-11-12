@@ -1172,7 +1172,8 @@ export class AgentStore {
                 this.db.run("UPDATE agent_tasks SET status = 'cancelled', finished_ms = ?, lease_until = NULL, phase = 'cancelled', phase_ms = ?, rejections_json = ? WHERE id = ?", now, now, JSON.stringify(rejections), taskId);
                 return { outcome: "cancelled", task: this.getTask(taskId) };
             }
-            if (t.adapterId.startsWith("record:") || t.adapterId.startsWith("device:")) {
+            // Only one runner may explore for its person (round 51): a refusal ends the task, as for a recording or a phone session.
+            if (t.adapterId.startsWith("record:") || t.adapterId.startsWith("device:") || t.adapterId === "explore") {
                 this.db.run("UPDATE agent_tasks SET status = 'failed', error = ?, finished_ms = ?, lease_until = NULL, phase = 'rejected', phase_ms = ?, rejections_json = ? WHERE id = ?", why.message.slice(0, 500), now, now, JSON.stringify(rejections), taskId);
                 return { outcome: "failed", task: this.getTask(taskId) };
             }
@@ -1245,9 +1246,9 @@ export class AgentStore {
                 else notAccepted++;
                 changes.push({ kind: last ? "never_accepted" : "accept_timeout", taskId: r.id, jobId: r.job_id, agentId: r.agent_id ?? null, attempt: Number(r.attempt ?? 0) });
             }
-            // A record task is never re-offered: a recording cannot move to another computer (adapter_id "record:<agentId>"); the same holds for a phone session ("device:<agentId>").
-            const requeued = move("requeued", "status = 'running' AND lease_until < ? AND offers < ? AND adapter_id NOT LIKE 'record:%' AND adapter_id NOT LIKE 'device:%'", [now, MAX_OFFERS], "status = 'queued', agent_id = NULL, lease_until = NULL, phase = 'queued', phase_ms = ?", [now]);
-            const lost = move("lost", "status = 'running' AND lease_until < ? AND (offers >= ? OR adapter_id LIKE 'record:%' OR adapter_id LIKE 'device:%')", [now, MAX_OFFERS], "status = 'failed', error = 'The runner agent stopped responding while it was running these tests.', finished_ms = ?, lease_until = NULL, phase = 'lost_connection', phase_ms = ?", [now, now]);
+            // A record task is never re-offered: a recording cannot move to another computer (adapter_id "record:<agentId>"); the same holds for a phone session ("device:<agentId>") and an exploration ("explore", round 51: its browser is on that computer).
+            const requeued = move("requeued", "status = 'running' AND lease_until < ? AND offers < ? AND adapter_id NOT LIKE 'record:%' AND adapter_id NOT LIKE 'device:%' AND adapter_id <> 'explore'", [now, MAX_OFFERS], "status = 'queued', agent_id = NULL, lease_until = NULL, phase = 'queued', phase_ms = ?", [now]);
+            const lost = move("lost", "status = 'running' AND lease_until < ? AND (offers >= ? OR adapter_id LIKE 'record:%' OR adapter_id LIKE 'device:%' OR adapter_id = 'explore')", [now, MAX_OFFERS], "status = 'failed', error = 'The runner agent stopped responding while it was running these tests.', finished_ms = ?, lease_until = NULL, phase = 'lost_connection', phase_ms = ?", [now, now]);
             // Counted from when it last went into the queue (phase_ms, set by every re-queue), so a task re-offered after a long run still gets its wait.
             const stale = move("stale", "status = 'queued' AND COALESCE(phase_ms, created_ms) < ?", [now - QUEUE_MAX_MS], "status = 'failed', error = 'No runner took this run within 30 minutes.', finished_ms = ?, phase = 'timed_out', phase_ms = ?", [now, now]);
             const orphaned = move("cancelled", `status IN ('queued','running') AND job_id IN (SELECT id FROM generation_jobs WHERE status IN ${TERMINAL_JOB_SQL})`, [], "status = 'cancelled', finished_ms = ?, lease_until = NULL, phase = 'cancelled', phase_ms = ?", [now, now]);

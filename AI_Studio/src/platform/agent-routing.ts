@@ -48,6 +48,9 @@ const ROUTES: Array<{ method: string; kind: AgentRoute["kind"]; re: RegExp }> = 
     { method: "POST", kind: "accept", re: new RegExp(`^/api/agent/tasks/(${ID})/accept$`) },
     { method: "POST", kind: "reject", re: new RegExp(`^/api/agent/tasks/(${ID})/reject$`) },
     { method: "POST", kind: "events", re: new RegExp(`^/api/agent/tasks/(${ID})/events$`) },
+    // Round 51: an exploration on a runner asks the job's AI and saves what it finds (docs/features/explore-on-runner.md).
+    { method: "POST", kind: "explore-llm", re: new RegExp(`^/api/agent/tasks/(${ID})/explore/llm$`) },
+    { method: "POST", kind: "explore-sink", re: new RegExp(`^/api/agent/tasks/(${ID})/explore/sink$`) },
     // Runner updates: what to update to, and the files of that update (docs/features/runner-updates.md). The empty group keeps the name in m[2].
     { method: "POST", kind: "update", re: /^\/api\/agent\/update$/ },
     { method: "GET", kind: "update-file", re: new RegExp(`^/api/agent/update/files/()(${NAME})$`) },
@@ -59,7 +62,7 @@ const ROUTES: Array<{ method: string; kind: AgentRoute["kind"]; re: RegExp }> = 
 ];
 
 export interface AgentRoute {
-    kind: "hello" | "poll" | "heartbeat" | "download" | "upload" | "result" | "recording" | "device" | "update" | "update-file" | "check" | "accept" | "reject" | "events" | "enroll" | "rotate";
+    kind: "hello" | "poll" | "heartbeat" | "download" | "upload" | "result" | "recording" | "device" | "update" | "update-file" | "check" | "accept" | "reject" | "events" | "enroll" | "rotate" | "explore-llm" | "explore-sink";
     taskId?: string;
     name?: string;
 }
@@ -283,6 +286,8 @@ export function liveEventMessage(e: LiveEvent, runner: string): string {
             return `${runner}: screenshot of ${testName(e)}${e.step !== undefined ? `, step ${e.step + 1}` : ""}`;
         case "phase":
             return `${runner}: ${e.phase === "preparing" ? "getting ready" : e.phase === "uploading" ? "sending the results" : "running the tests"}`;
+        case "engine":
+            return e.message;
     }
 }
 

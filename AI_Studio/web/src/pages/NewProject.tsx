@@ -5,7 +5,6 @@ import { Button, Callout, LinkButton, PageHeader } from "../components/ui";
 import { FieldHelp } from "../components/Tooltip";
 import { usePage } from "../components/Shell";
 import { normalizeUrl } from "../lib/url";
-import { describeApiError } from "../lib/labels";
 import { useConfig, useDocumentTitle, useFetch } from "../lib/hooks";
 import { go, routes } from "../lib/router";
 import { Welcome } from "../features/onboarding/Welcome";
@@ -15,7 +14,9 @@ import { SecurityStartGate } from "../features/security/TestingType";
 import { applyPendingTestingType } from "../features/security/security";
 import type { AgentInputs } from "../features/requirements/AgentInputs";
 import { MissingInputsDialog } from "../features/requirements/AgentInputsDialog";
-import { EXPLORING_OFF_HERE, EXPLORING_ON_RUNNERS, executionModeOf } from "../features/runs/runs-here";
+import { EXPLORING_OFF_HERE } from "../features/runs/runs-here";
+import { ExploreOnRunnerNote, ExploreStartError } from "../features/runs/ExploreOnRunner";
+import { useReadiness } from "../features/runners/my-runner";
 
 export function NewProject({ welcome = false, projectId, initialUrl }: { welcome?: boolean; projectId?: string; initialUrl?: string }) {
     useDocumentTitle(welcome ? "" : "New project");
@@ -47,7 +48,11 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
     const [nameError, setNameError] = useState("");
     const [scope, setScope] = useState("");
     const [busy, setBusy] = useState(false);
-    const [error, setError] = useState("");
+    const [error, setError] = useState<unknown>(null);
+    // Runners mode (round 51): the exploration runs on the person's own runner, so it starts only once that runner can take it.
+    const ready = useReadiness({ can: ["web", "explore"] });
+    const runnersOnly = ready.mode === "runners";
+    const blocked = runnersOnly ? ready.loading || !ready.ready : config?.runsHere === false;
     /** A project created by a failed attempt is reused when the user retries, instead of creating duplicates. */
     const createdProject = useRef<string | undefined>(undefined);
     // A new project starts at the choice of how to start (explore, record, bring tests); a link that names a project or an address goes straight to the form.
@@ -69,7 +74,8 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
 
     /** Explore, then stop at a plan: nothing is created or run until the person has looked (see the plan on the project page). */
     async function begin() {
-        setError("");
+        setError(null);
+        if (runnersOnly && blocked) return;
         if (missing.length) return setAskOpen(true);
         const needsName = !projectId && !createdProject.current;
         if (needsName && !name.trim()) setNameError("Give the project a name.");
@@ -95,7 +101,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
             });
             go(routes.project(id));
         } catch (err) {
-            setError(describeApiError(err));
+            setError(err);
             setBusy(false);
         }
     }
@@ -150,19 +156,17 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                         Exploring the web application needs it, so only the application’s API is explored here. API tests are created without the AI.
                     </Callout>
                 )}
-                {executionModeOf(config) === "runners" ? (
-                    <Callout tone="warning" title="Exploring isn’t available here yet">
-                        <span data-testid="exploring-off">{EXPLORING_ON_RUNNERS}</span>
-                    </Callout>
+                {runnersOnly ? (
+                    <ExploreOnRunnerNote ready={ready} />
                 ) : config?.runsHere === false && (
                     <Callout tone="warning" title="Exploring does not run here">
                         <span data-testid="exploring-off">{EXPLORING_OFF_HERE} Explore where tests run, or once tests are switched on here.</span>
                     </Callout>
                 )}
-                {error && <Callout tone="danger" title="We couldn’t start the exploration">{error}</Callout>}
+                {error !== null && <ExploreStartError error={error} />}
 
                 <div className="row">
-                    <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} disabled={config?.runsHere === false || executionModeOf(config) === "runners"}>
+                    <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} disabled={blocked}>
                         {busy ? "Starting…" : projectId ? "Explore again" : "Start exploring"}
                     </Button>
                     {agents && (
@@ -200,7 +204,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
         const chooser = (
             <Welcome
                 aiConfigured={config ? config.llm.configured : undefined}
-                explore={{ url, setUrl, urlError, clearUrlError: () => setUrlError(""), busy, error, onExplore: () => void begin(), onOptions: () => setStep("form"), autoFocus: welcome }}
+                explore={{ url, setUrl, urlError, clearUrlError: () => setUrlError(""), busy, error, blocked: runnersOnly && blocked, runnerNote: runnersOnly ? <ExploreOnRunnerNote ready={ready} /> : null, onExplore: () => void begin(), onOptions: () => setStep("form"), autoFocus: welcome }}
                 name={{ value: name, set: (v: string) => (setName(v), setNameError("")), error: nameError, setError: setNameError }}
             />
         );
@@ -236,7 +240,7 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
                 {step === "choose" ? (
                     <Welcome
                         aiConfigured={config ? config.llm.configured : undefined}
-                        explore={{ url, setUrl, urlError, clearUrlError: () => setUrlError(""), busy, error, onExplore: () => void begin(), onOptions: () => setStep("form"), autoFocus: true }}
+                        explore={{ url, setUrl, urlError, clearUrlError: () => setUrlError(""), busy, error, blocked: runnersOnly && blocked, runnerNote: runnersOnly ? <ExploreOnRunnerNote ready={ready} /> : null, onExplore: () => void begin(), onOptions: () => setStep("form"), autoFocus: true }}
                         name={{ value: name, set: (v: string) => (setName(v), setNameError("")), error: nameError, setError: setNameError }}
                     />
                 ) : (
@@ -283,3 +287,4 @@ export function NewProject({ welcome = false, projectId, initialUrl }: { welcome
         </div>
     );
 }
+

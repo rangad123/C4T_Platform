@@ -23,7 +23,7 @@ import { getAgentServices } from "../src/platform/agent-services.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import { personalRunner } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS, WORKER_LOST_GIVE_UP } from "../src/platform/repo.js";
-import { EXPLORING_ON_RUNNERS_MESSAGE, PLAIN_ON_RUNNERS_MESSAGE, PLATFORM_SETTING_REFUSED, DISPATCH_DOWN_MESSAGE, removeServerExecutionGuard, serverRunRefusals, SERVER_RUN_REFUSED } from "../src/platform/runner-only.js";
+import { PLAIN_ON_RUNNERS_MESSAGE, PLATFORM_SETTING_REFUSED, DISPATCH_DOWN_MESSAGE, removeServerExecutionGuard, serverRunRefusals, SERVER_RUN_REFUSED } from "../src/platform/runner-only.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
 import { EXPLORE_SCHEDULE_REFUSED } from "../src/platform/routes/schedules.js";
 import { SecretBox } from "../src/platform/secrets.js";
@@ -131,11 +131,12 @@ describe("runners only: what is refused", () => {
         expect(jobCount(pid)).toBe(0);
     });
 
-    it("an exploration, a described test and an agent run are refused when they are made; the project cannot be set to run here", async () => {
+    it("a described test and an agent run are refused when they are made, an exploration needs the starter's runner; the project cannot be set to run here", async () => {
         const pid = await newProject("Server work");
+        // Round 51: an exploration goes to the starter's runner, so without one it is refused as a run is (explore-on-runner.test.ts has the rest).
         const explore = await call("POST", `/api/projects/${pid}/test-generation`, { url: "https://shop.example.test" });
         expect(explore.status).toBe(409);
-        expect(explore.body.error).toBe(EXPLORING_ON_RUNNERS_MESSAGE);
+        expect(explore.body.details).toMatchObject({ code: "RUNNER_NOT_SET_UP" });
         const plain = await call("POST", `/api/projects/${pid}/plain-tests`, { description: "Open the home page and check the title" });
         expect(plain.status).toBe(409);
         expect(plain.body.error).toBe(PLAIN_ON_RUNNERS_MESSAGE);

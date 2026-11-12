@@ -38,6 +38,7 @@ import { androidSummary, bearerToken, capabilityProblem, deviceNeedOf, envSecret
 import { DeviceHub, deviceAgentOf, isDeviceAdapter } from "./agent-device.js";
 import { isRecordAdapter, RecordHub, RemoteDriver, recordAdapterId, recordAgentOf, recordJobId, type RemoteInit } from "./agent-record.js";
 import { IdentityStore } from "./identity-store.js";
+import { exploreProblem, isExploreAdapter, type ExploreTaskRef } from "./explore-task.js";
 import { CleanupStore } from "./cleanup-store.js";
 import { HttpError } from "./http-error.js";
 import { hashObject, keyOfStoredFile, localCopyIn, validKey } from "./object-store.js";
@@ -340,6 +341,15 @@ export class AgentService {
                 continue;
             }
             if (!this.personalMayTake(token, t)) continue;
+            // Round 51: an exploration goes to its starter's runner when that runner can explore (an older one never sees it), and a private
+            // address only where they are allowed. It holds no phone.
+            if (isExploreAdapter(t.adapterId)) {
+                // Its calls are fenced by attempt, so only a protocol-2 agent (every one that reports `explore` speaks it).
+                if (exploreProblem(agent) || this.store.agentProtocol(agent.id) < 2 || !this.targetAllowed(token, t)) continue;
+                const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000);
+                if (claimed) return this.handOut(agent, claimed);
+                continue;
+            }
             const adapter = this.adapterOrUndefined(t.adapterId);
             if (!adapter || capabilityProblem(adapter, agent.capabilities)) continue;
             // A task with hand-written scripts goes only where its owner agreed to run them (mayRunCodeScripts).
@@ -624,6 +634,18 @@ export class AgentService {
                     continue;
                 }
                 const e = scrubSecrets(raw, secrets) as LiveEvent;
+                // An exploration's engine event (round 51) is the job's own event, as it would be on the server; only an explore task sends them.
+                if (e.type === "engine") {
+                    if (!isExploreAdapter(t.adapterId)) continue;
+                    const data = { ...(e.data ?? {}), taskId, attempt: t.attempt };
+                    const text = JSON.stringify(data);
+                    this.p.repo.addEvent(t.jobId, { stage: e.stage, kind: e.kind, level: e.level ?? "info", message: e.message, ...(text.length <= 20_000 ? { data } : { data: { taskId, attempt: t.attempt } }) });
+                    stored++;
+                    count++;
+                    bytes += e.message.length + Math.min(text.length, 20_000);
+                    full = count >= LIVE_EVENTS_MAX || bytes >= LIVE_EVENT_BYTES_MAX;
+                    continue;
+                }
                 if (e.type === "log") lines.push(e.line.slice(0, 300));
                 if (e.type === "phase") phase = e.phase;
                 const level = (e.type === "test_finished" && e.status !== "passed" && e.status !== "skipped") || (e.type === "step_finished" && e.status === "failed") ? "warn" : "info";
@@ -645,6 +667,20 @@ export class AgentService {
         if (lines.length || phase) this.store.heartbeat(taskId, t.agentId!, this.limits.leaseSeconds * 1000, { log: lines.length ? lines : undefined }, phase);
         if (phase) this.notePhase(t);
         return { ok: true, stored, duplicates };
+    }
+
+    /**
+     * Round 51: the exploration an explore route is about, fenced like every message of a task: this runner's own task, an exploration, still
+     * running and not being stopped, on the attempt named in the x-attempt-id header. Anything else is refused (409), so a lost or replaced
+     * runner can never write into a job or spend its AI.
+     */
+    exploreTask(token: AgentTokenRecord, taskId: string, attemptId: string | undefined): ExploreTaskRef {
+        const t = this.ownedTask(token, taskId);
+        if (!isExploreAdapter(t.adapterId)) throw new HttpError(409, "This task is not an exploration.");
+        if (!attemptId || !t.attemptId) throw new HttpError(409, "An exploration's calls must name their attempt (x-attempt-id).", { code: SUPERSEDED });
+        this.assertAttempt(t, attemptId);
+        if (t.status !== "running" || t.cancelRequested) throw new HttpError(409, "The platform no longer expects this exploration. Stop it.", { code: SUPERSEDED });
+        return { taskId: t.id, attempt: t.attempt, jobId: t.jobId, projectId: t.projectId, agentId: t.agentId! };
     }
 
     /** A job event about a task (a convenience: a failure to write one changes nothing). */
@@ -885,7 +921,7 @@ export class AgentService {
         try {
             const offer = this.secrets.decrypt<TaskOffer>(t.payloadEnc);
             const e = offer.env;
-            return envSecrets({ credentials: e.credentials, roles: e.roles, apiToken: e.apiToken, apiAuthHeader: e.apiAuthHeader });
+            return [...envSecrets({ credentials: e.credentials, roles: e.roles, apiToken: e.apiToken, apiAuthHeader: e.apiAuthHeader }), ...(offer.explore?.secrets ?? [])];
         } catch {
             return [];
         }
@@ -991,6 +1027,11 @@ export class AgentService {
         const address = this.projectAddress(projectId);
         if (address && looksPrivateAddress(address) && !own.token.allowPrivateTargets) {
             throw runnerRefusal("RUNNER_CANNOT_RUN", "This project's address is a private or local one (such as localhost or a computer on your network), and your runner does not open those. Switch on private addresses for your runner in Settings.");
+        }
+        // Round 51: in runners mode an exploration runs on this runner as a whole, so it must be one that can explore.
+        if (runnersOnly(this.p.config) && (options.mode ?? "generate") === "generate") {
+            const why = exploreProblem(agent);
+            if (why) throw runnerRefusal("RUNNER_CANNOT_RUN", why);
         }
         const farm = farmChosen(this.p.db, projectId);
         for (const id of this.adaptersFor(options)) {
@@ -1113,8 +1154,10 @@ export class AgentService {
      */
     ranOn(job: JobRow): { kind: "platform" } | { kind: "agent"; agentId: string; name: string; browser?: WebBrowserUsed; runnerId?: string; phase?: TaskPhase; attempt?: number } | undefined {
         const mode = job.options.mode ?? "generate";
-        if (mode !== "validate" && mode !== "variants" && mode !== "environment") return undefined;
         const tasks = this.store.tasksOfJob(job.id);
+        // Round 51: an exploration that went to a runner says where, as a run does.
+        const explored = mode === "generate" && (tasks.some((t) => isExploreAdapter(t.adapterId)) || (runnersOnly(this.p.config) && job.options.runOn === "agent"));
+        if (mode !== "validate" && mode !== "variants" && mode !== "environment" && !explored) return undefined;
         const latest = tasks[tasks.length - 1];
         const stored = this.store.ranOnOf(job.id);
         if (!latest && !stored && job.options.runOn !== "agent") return { kind: "platform" };

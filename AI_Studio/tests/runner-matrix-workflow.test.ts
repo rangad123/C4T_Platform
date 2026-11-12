@@ -66,9 +66,9 @@ describe("the real-machine workflow", () => {
         expect(r.some((x) => x.includes("sh scripts/build-runner-pkg.sh") && x.includes("sh scripts/make-dmg.sh"))).toBe(true);
         const smoke = steps.filter((s) => s.run?.startsWith("node scripts/smoke-runner.mjs"));
         expect(smoke.map((s) => s.run!.trim())).toEqual([
-            "node scripts/smoke-runner.mjs --kit installer --lifecycle --port 6952 --out smoke-report/installer",
-            "node scripts/smoke-runner.mjs --kit files --port 6950 --out smoke-report/files",
-            "node scripts/smoke-runner.mjs --kit complete --no-node-on-path --port 6954 --out smoke-report/complete",
+            "node scripts/smoke-runner.mjs --kit installer --lifecycle --explore --port 6953 --out smoke-report/installer",
+            "node scripts/smoke-runner.mjs --kit files --explore --port 6950 --out smoke-report/files",
+            "node scripts/smoke-runner.mjs --kit complete --no-node-on-path --port 6956 --out smoke-report/complete",
         ]);
         expect(smoke[0]!.if).toBe("matrix.installer");
         expect(smoke[1]!.if).toBe("success() || failure()");
@@ -83,12 +83,14 @@ describe("the real-machine workflow", () => {
         const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]!);
         expect(uses.length).toBeGreaterThan(0);
         for (const u of uses) expect(u).toMatch(/^actions\/(checkout|setup-node|upload-artifact)@v\d+$/);
-        const ports = [...text.matchAll(/--port (\d+)/g)].map((m) => Number(m[1]));
-        for (const p of ports) {
+        // Each smoke run uses its port and the next (the sample app), and with --explore the one after (the scripted model).
+        const spans = [...text.matchAll(/smoke-runner\.mjs ([^\n]*)--port (\d+)/g)].map((m) => Array.from({ length: m[1]!.includes("--explore") ? 3 : 2 }, (_, i) => Number(m[2]) + i));
+        expect(spans.length).toBe(3);
+        for (const p of spans.flat()) {
             expect(p).toBeGreaterThanOrEqual(6950);
-            expect(p + 1).toBeLessThanOrEqual(6969);
+            expect(p).toBeLessThanOrEqual(6969);
         }
-        expect(new Set(ports.flatMap((p) => [p, p + 1])).size).toBe(ports.length * 2);
+        expect(new Set(spans.flat()).size).toBe(spans.flat().length);
         expect(text).not.toMatch(/secrets\./);
         expect(text).not.toMatch(/GITHUB_TOKEN|pull_request_target/);
         expect(text).not.toMatch(/aitg_|aite_|x-api-key|API_KEY\s*[:=]/i);

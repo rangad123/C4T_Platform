@@ -27,8 +27,15 @@ export function useExecutionMode(): ExecutionMode {
 /** Why the Run controls are off for a person who may look at this project but not run its tests (the server refuses them too). */
 export const NO_RUN_PERMISSION = "Running tests needs permission to run tests in this project. Ask a Project Admin.";
 
-/** What the platform answers in runners mode when an exploration or a described test is asked for (src/platform/runner-only.ts), said before the click. */
-export const EXPLORING_ON_RUNNERS = "Exploring an application is not available here yet: the AI explores it with a browser on the server, and this platform runs tests only on runners. Build tests by hand, record them on your runner, or import them.";
+/**
+ * Round 51: in runners mode an exploration runs on the runner of the person who starts it (docs/features/explore-on-runner.md): the
+ * browser opens there, the AI stays on the platform. Said before the click, and on the job while it explores.
+ */
+export const exploresOnRunner = (name: string): string => `Explores on your runner, ${name}. The browser opens on that computer; the AI works from the platform.`;
+export const exploringOn = (name: string | undefined): string => (name ? `Exploring on ${name}` : "Exploring on your runner");
+
+/** What the platform answers in runners mode when a scheduled exploration or a described test is asked for (src/platform/runner-only.ts), said before the click. */
+export const EXPLORING_ON_RUNNERS = "Scheduled and triggered explorations are not available here yet: an exploration runs on the runner of the person who starts it. Start it yourself from the project, or build tests by hand, record them on a runner, or import them.";
 export const PLAIN_ON_RUNNERS = "Describing a test in your own words is not available here yet: the AI builds and checks it with a browser on the server, and this platform runs tests only on runners. Build the steps by hand or write the test as text instead.";
 
 /** Before a run sends code scripts to the person's own computer. */

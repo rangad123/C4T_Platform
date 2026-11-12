@@ -24,8 +24,9 @@ export interface Can {
     ok: boolean;
     why?: string;
 }
-export type RunnerNeed = "web" | "phone" | "ios" | "windows" | "record" | "recordHeaded" | "phoneSession";
-export type RunnerCan = Record<RunnerNeed, Can>;
+export type RunnerNeed = "web" | "phone" | "ios" | "windows" | "record" | "recordHeaded" | "phoneSession" | "explore";
+/** `explore` (round 51): whether it can explore an application (an older runner says "Update your runner"); missing from an older server. */
+export type RunnerCan = Record<Exclude<RunnerNeed, "explore">, Can> & { explore?: Can };
 
 /** GET /api/me/runner → runner (null until the person has set one up). */
 export interface RunnerMine {

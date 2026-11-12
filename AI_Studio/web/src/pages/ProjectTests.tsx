@@ -26,7 +26,7 @@ import { RunMenu } from "../features/runs/RunMenu";
 import { RunStrip } from "../features/runs/RunStrip";
 import { SelectToggle, SelectionBar, useTestSelection, type TestSelection } from "../features/runs/Selection";
 import { SuiteFromSelection } from "../features/suites/SuiteFromSelection";
-import { EXPLORING_OFF_HERE, EXPLORING_ON_RUNNERS, useExecutionMode, useRunsHere } from "../features/runs/runs-here";
+import { EXPLORING_OFF_HERE, useExecutionMode, useRunsHere } from "../features/runs/runs-here";
 import { versionHref, type ScriptRow } from "../features/review/review";
 import "../features/authoring/authoring.css";
 
@@ -138,7 +138,7 @@ export function ProjectTests({ id }: { id: string }) {
     // Exploring makes tests only for agent projects (and mixed ones, made before round 37); a code project never offers it.
     const explores = projectKind(project.data) !== "code";
     const runsHere = useRunsHere();
-    // Runners mode: the platform refuses an exploration (the AI explores with a browser on the server), so none is offered.
+    // Runners mode (round 51): an exploration runs on the person's own runner; the explore page says whether it can take it now.
     const runnersOnly = useExecutionMode() === "runners";
     const reloadAll = () => void Promise.all([tests.reload(), project.reload(), reviews.reload()]);
 
@@ -235,7 +235,7 @@ export function ProjectTests({ id }: { id: string }) {
                                 seeHow={{ topic: "first-steps", query: "start in 10 minutes" }}
                                 actions={
                                     // New test script and Import are in the header above: the empty list does not repeat them.
-                                    explores && !runnersOnly ? (
+                                    explores ? (
                                         <a className="btn" href={routes.newProject({ project: id })}>
                                             Start exploring
                                         </a>
@@ -243,7 +243,7 @@ export function ProjectTests({ id }: { id: string }) {
                                 }
                             >
                                 {explores ? "Make your first test script with New test script, bring scripts you already have with Import, or explore the application and the AI writes tests for it." : "Make your first test script with New test script, generate them from your test cases, or bring scripts you already have with Import."}
-                                {explores && runnersOnly ? ` ${EXPLORING_ON_RUNNERS}` : explores && !runsHere ? ` ${EXPLORING_OFF_HERE}` : ""}
+                                {explores && !runnersOnly && !runsHere ? ` ${EXPLORING_OFF_HERE}` : ""}
                             </EmptyState>
                         )}
                     </div>

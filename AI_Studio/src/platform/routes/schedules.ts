@@ -23,7 +23,8 @@ import type { RouteCtx } from "./types.js";
 
 const MAX_SCHEDULES = 10;
 /** EXECUTION_MODE=runners: an "Explore again" schedule would fail at every fire (exploring needs a browser on the server). */
-export const EXPLORE_SCHEDULE_REFUSED = "Schedules here can only re-run tests: exploring needs a browser on the server, and this platform runs tests only on runners.";
+/** Round 51: an exploration runs on the runner of the person who starts it, so a schedule cannot start one yet (runner-only.ts EXPLORING_ON_RUNNERS_MESSAGE). */
+export const EXPLORE_SCHEDULE_REFUSED = "Schedules here can only re-run tests: scheduled explorations are not available yet. An exploration runs on the runner of the person who starts it, so start it yourself from the project.";
 const MAX_CHANNELS = 10;
 
 const KIND_LABEL = { validate: "Re-run all tests", generate: "Analyze again" } as const;

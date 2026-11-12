@@ -178,7 +178,8 @@ describe("live events", () => {
         expect(LIVE_EVENT_KINDS[step.type]).toBe("runner_step");
         expect(liveEventMessage(step, "Ann's laptop")).toBe("Ann's laptop: step 2 failed (1.2 s): 2. Click — Timeout");
         expect(liveEventData(step)).toMatchObject({ state: "finished", index: 1, testId: "t1", seq: 3 });
-        expect(new Set(Object.values(LIVE_EVENT_KINDS))).toEqual(new Set(["runner_test_started", "runner_test_finished", "runner_step", "runner_log", "runner_screenshot", "runner_phase"]));
+        // "runner_engine" is never written: an exploration's engine event keeps its own kind (round 51, agent-services.ts events).
+        expect(new Set(Object.values(LIVE_EVENT_KINDS))).toEqual(new Set(["runner_test_started", "runner_test_finished", "runner_step", "runner_log", "runner_screenshot", "runner_phase", "runner_engine"]));
         expect(EventsRequest.safeParse({ attemptId: "abcdefgh12", events: [] }).success).toBe(false);
         expect(TaskOffer.shape.attemptId.safeParse("bad id").success).toBe(false);
     });

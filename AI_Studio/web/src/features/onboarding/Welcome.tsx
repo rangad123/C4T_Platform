@@ -1,5 +1,5 @@
 import { Compass, FolderInput, Globe, Smartphone, Sparkles, Video } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { api, uploadApk } from "../../api";
 import { Button, Callout, FilePicker, LinkButton } from "../../components/ui";
 import { describeApiError } from "../../lib/labels";
@@ -7,6 +7,7 @@ import { go, routes } from "../../lib/router";
 import { normalizeUrl } from "../../lib/url";
 import { packageError } from "../phone/phone";
 import { applyPendingTestingType } from "../security/security";
+import { ExploreStartError } from "../runs/ExploreOnRunner";
 import "./onboarding.css";
 
 /** What the first card needs from the page that owns the exploration form (it keeps the options and does the start). */
@@ -16,7 +17,12 @@ export interface ExploreCard {
     urlError: string;
     clearUrlError: () => void;
     busy: boolean;
-    error: string;
+    /** Why the last start failed (the server's refusal), or null. */
+    error: unknown;
+    /** Runners mode (round 51): the start is off until the person's runner can explore. */
+    blocked?: boolean;
+    /** Runners mode: what is said before the click about the person's runner (not ready, or which runner it explores on). */
+    runnerNote?: ReactNode;
     /** Start exploring with the usual options. */
     onExplore: () => void;
     /** Open the form with every option instead. */
@@ -235,9 +241,10 @@ export function Welcome({ aiConfigured, explore, name }: { aiConfigured: boolean
                         </div>
                         {explore.urlError && <div className="error-text">{explore.urlError}</div>}
                     </div>
-                    {explore.error && <Callout tone="danger" title="We couldn’t start the exploration">{explore.error}</Callout>}
+                    {explore.runnerNote}
+                    {explore.error != null && <ExploreStartError error={explore.error} />}
                     <div className="row">
-                        <Button type="submit" variant="primary" icon={Sparkles} loading={explore.busy}>
+                        <Button type="submit" variant="primary" icon={Sparkles} loading={explore.busy} disabled={explore.blocked}>
                             {explore.busy ? "Starting…" : "Explore my app"}
                         </Button>
                         <Button type="button" variant="ghost" onClick={explore.onOptions} disabled={explore.busy} tip="Opens the Explore page first, where you can give the AI a focus. Sign-in details, API access and requirements are kept on the project’s Requirements tab.">

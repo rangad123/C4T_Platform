@@ -105,8 +105,14 @@ export function shouldBlockNavigation(req: NavigationRequestLike, allowed: Reado
     }
 }
 
+/** The installed Chrome or Edge an exploration opens instead of Playwright's Chromium (a runner's browser setting, round 51). Unset: Chromium. */
+let chromiumChoice: { channel?: string; executablePath?: string } = {};
+export function useChromium(choice: { channel?: string; executablePath?: string }): void {
+    chromiumChoice = { ...(choice.channel ? { channel: choice.channel } : {}), ...(choice.executablePath ? { executablePath: choice.executablePath } : {}) };
+}
+
 export async function launchChromium(headless = true): Promise<Browser> {
-    return chromium.launch({ headless, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+    return chromium.launch({ headless, args: ["--no-sandbox", "--disable-setuid-sandbox"], ...chromiumChoice });
 }
 
 /** Accessibility-tree snapshot used as the LLM-facing page representation (autospec's approach). */

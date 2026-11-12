@@ -515,7 +515,9 @@ export class Repo {
      */
     claimNextJob(leaseMs: number, owner: string, modes?: readonly JobMode[], skip: readonly string[] = []): JobRow | undefined {
         // The dispatch worker (EXECUTION_MODE=runners) takes only the kinds of job a runner can do; the mode is a fixed word list, never input.
-        const only = modes ? ` AND ${this.db.dialect.jsonText("options_json", "mode")} IN (${modes.map((m) => `'${m.replace(/[^a-z]/g, "")}'`).join(",")})` : "";
+        // A job without a mode is an exploration ("generate", the default): it counts as one (round 51: explorations go to runners too).
+        const col = this.db.dialect.jsonText("options_json", "mode");
+        const only = modes ? ` AND (${col} IN (${modes.map((m) => `'${m.replace(/[^a-z]/g, "")}'`).join(",")})${modes.includes("generate") ? ` OR ${col} IS NULL` : ""})` : "";
         // Jobs left in the queue for now (the dispatch worker: schedule and trigger runs whose owner's runner is offline, jobsWaitingForRunner).
         const not = skip.length ? ` AND id NOT IN (${skip.map(() => "?").join(",")})` : "";
         const r = this.db.get(
@@ -540,7 +542,7 @@ export class Repo {
     failQueuedJobsExcept(modes: readonly JobMode[], reason: string): number {
         const mode = this.db.dialect.jsonText("options_json", "mode");
         const list = modes.map((m) => `'${m.replace(/[^a-z]/g, "")}'`).join(",");
-        const rows = this.db.all<{ id: string }>(`SELECT id FROM generation_jobs WHERE status = 'QUEUED' AND (${mode} IS NULL OR ${mode} NOT IN (${list}))`);
+        const rows = this.db.all<{ id: string }>(`SELECT id FROM generation_jobs WHERE status = 'QUEUED' AND (${modes.includes("generate") ? "" : `${mode} IS NULL OR `}${mode} NOT IN (${list}))`);
         for (const { id } of rows) {
             this.db.run("UPDATE generation_jobs SET status = 'FAILED', error = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'QUEUED'", reason, now(), now(), id);
             eventBus.publish(id);

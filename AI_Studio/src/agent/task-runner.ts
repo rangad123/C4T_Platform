@@ -177,6 +177,15 @@ export class TaskRunner {
      */
     private async refusalOf(task: TaskOffer): Promise<Refusal | undefined> {
         if (task.kind === "record" || task.kind === "device") return undefined;
+        // Round 51: an exploration opens the application in this computer's browser, so the same address rule and disk check as a web run.
+        if (task.kind === "explore") {
+            if (this.refusesPrivate()) {
+                const why = proxyTestsConflict(this.deps.env) ?? (await runAddressRefusal(task.env));
+                if (why) return { reason: "private-target", message: why };
+            }
+            const disk = await lowDiskRefusal(this.deps.workDir, resourceLimits(this.deps.env).minFreeMb);
+            return disk ? { reason: "other", message: disk, lowDisk: true } : undefined;
+        }
         const runtime = SUPPORTED[task.adapterId];
         if (!runtime) return { reason: "unsupported", message: `This agent can't run ${task.adapterId} tasks yet.` };
         if (task.scripts.some((s) => s.custom) && this.deps.allowCustomScripts !== true) return { reason: "code-scripts-off", message: "This task has hand-written scripts, and code scripts are switched off for this runner, so it did not run them. Switch them on for your runner in Settings." };
@@ -277,7 +286,7 @@ export class TaskRunner {
         if (task.kind === "device") return this.runDevice(task);
         const { client, log, cache } = this.deps;
         const short = task.taskId.slice(0, 12);
-        const forgetSecrets = log.addSecrets(secretsOfEnv(task.env));
+        const forgetSecrets = log.addSecrets([...secretsOfEnv(task.env), ...(task.explore?.secrets ?? [])]);
         const v2 = this.v2(task);
         const attemptId = v2 ? task.attemptId : undefined;
         const abort = new AbortController();
@@ -352,7 +361,7 @@ export class TaskRunner {
             }
         })();
 
-        let result: { ok: boolean; error?: string; runs: WireRun[]; browser?: WebBrowserUsed };
+        let result: { ok: boolean; error?: string; runs: WireRun[]; browser?: WebBrowserUsed; explore?: ResultRequest["explore"] };
         try {
             log.info(`Task ${short} started: ${task.adapterId}, ${task.scripts.length} script${task.scripts.length === 1 ? "" : "s"}${task.projects?.length ? `, ${task.projects.length} variants` : ""}.`);
             live?.push({ type: "phase", phase });
@@ -393,7 +402,7 @@ export class TaskRunner {
         }
         // Protocol 2: the live events still waiting go before the result (bounded: a platform that does not answer must not hold it back).
         await live?.close(5000);
-        if (!lost) await this.postResult(task.taskId, { ok: result.ok, ...(result.error ? { error: log.redact(result.error).slice(0, 500) } : {}), runs: result.runs, ...(result.ok && result.browser ? { browser: result.browser } : {}), ...(attemptId ? { attemptId } : {}) }, short);
+        if (!lost) await this.postResult(task.taskId, { ok: result.ok, ...(result.error ? { error: log.redact(result.error).slice(0, 500) } : {}), runs: result.runs, ...(result.ok && result.browser ? { browser: result.browser } : {}), ...(result.ok && result.explore ? { explore: result.explore } : {}), ...(attemptId ? { attemptId } : {}) }, short);
         else log.warn(`Task ${short} was taken away by the platform; its result was not sent.`);
 
         this.active.delete(task.taskId);
@@ -478,7 +487,8 @@ export class TaskRunner {
             attemptId?: string;
             setPhase?(p: AgentPhase): void;
         },
-    ): Promise<{ ok: boolean; error?: string; runs: WireRun[]; browser?: WebBrowserUsed }> {
+    ): Promise<{ ok: boolean; error?: string; runs: WireRun[]; browser?: WebBrowserUsed; explore?: ResultRequest["explore"] }> {
+        if (task.kind === "explore") return this.executeExplore(task, dir, ctl);
         const { client, cache, log, hello } = this.deps;
         const short = task.taskId.slice(0, 12);
         const fail = (error: string) => ({ ok: false, error, runs: [] as WireRun[] });
@@ -642,6 +652,7 @@ export class TaskRunner {
             return fail(`${ran.outcome.detail}${tail ? ` Last output: ${tail}` : ""}`);
         }
         if (ran.outcome.kind === "error") return fail(`The test runner could not run the scripts: ${ran.outcome.message}`);
+        if (ran.outcome.kind !== "result") return fail("The test runner returned no results.");
         const runs = ran.outcome.runs;
         // A run on other browsers has one result per script and variant.
         const expected = scripts.length * Math.max(1, task.projects?.length ?? 0);
@@ -680,6 +691,108 @@ export class TaskRunner {
         const counts = runs.reduce<Record<string, number>>((n, r) => ((n[r.status] = (n[r.status] ?? 0) + 1), n), {});
         log.info(`Task ${short} finished: ${runs.length} result${runs.length === 1 ? "" : "s"} (${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")}), ${outcome.uploaded.size} file${outcome.uploaded.size === 1 ? "" : "s"} uploaded.`);
         return { ok: true, runs: checked.data.runs, ...(web ? { browser: { name: web.name, ...(web.version ? { version: web.version } : {}), source: web.source } } : {}) };
+    }
+
+    /**
+     * Round 51: an exploration (docs/features/explore-on-runner.md). The engine runs in the task's own process (explore-child.ts) with this
+     * runner's browser and address rule; its AI calls and what it saves are sent to the platform from here, with this task's attempt, and its
+     * engine events go out as live events. The result carries the engine's summary.
+     */
+    private async executeExplore(
+        task: TaskOffer,
+        dir: string | undefined,
+        ctl: { abort: AbortController; isStopped(): string | undefined; setProc(p: TaskProcess): void; pushLog(line: string): void; entry: ActiveTask; live?: LiveEventSender; attemptId?: string; setPhase?(p: AgentPhase): void },
+    ): Promise<{ ok: boolean; error?: string; runs: WireRun[]; browser?: WebBrowserUsed; explore?: ResultRequest["explore"] }> {
+        const { client, log } = this.deps;
+        const short = task.taskId.slice(0, 12);
+        const fail = (error: string) => ({ ok: false, error, runs: [] as WireRun[] });
+        if (!task.explore) return fail("The exploration's settings are missing.");
+        if (!dir) return fail("The task has an id the agent cannot use as a folder name.");
+        // Every call is fenced to this attempt on the platform, so an exploration needs protocol 2 (every platform that offers one speaks it).
+        if (!ctl.live || !ctl.attemptId) return fail("This platform did not hand out the exploration as protocol 2 needs. Update the platform or the runner.");
+        const live = ctl.live;
+        const attemptId = ctl.attemptId;
+        await fs.mkdir(dir, { recursive: true });
+        let web: BrowserInUse | undefined;
+        if (this.deps.browsers) {
+            const w = await this.deps.browsers.forWeb();
+            if (!w.ok) return fail(w.error);
+            web = w.browser;
+        }
+        if (ctl.isStopped()) throw new TaskStopped();
+        const refusePrivate = this.refusesPrivate();
+        const limits = resourceLimits(this.deps.env);
+        // A runner that refuses private addresses: the engine's own guard is on for every page, request and cleanup (BLOCK_PRIVATE_TARGETS).
+        const proc = new TaskProcess(refusePrivate ? { ...this.deps.env, BLOCK_PRIVATE_TARGETS: "true" } : this.deps.env, (line) => ctl.pushLog(line), undefined, { ...(limits.priority !== undefined ? { priority: limits.priority } : {}), heapMb: limits.heapMb });
+        const calls = new Map<number, AbortController>();
+        proc.onExplore = (m) => {
+            if (m.type === "engine") {
+                const e = m.event;
+                // A batch of live events is capped (1 MB): an event's data travels only while it is small.
+                const data = e.data && typeof e.data === "object" && JSON.stringify(e.data).length <= 8_000 ? e.data : undefined;
+                live.push({ type: "engine", stage: e.stage, kind: /^[a-z][a-z0-9_]{0,63}$/.test(e.kind) ? e.kind : "engine_event", ...(e.level ? { level: e.level } : {}), message: String(e.message).slice(0, 2000), ...(data ? { data } : {}) });
+                return;
+            }
+            if (m.type === "post-abort") return void calls.get(m.id)?.abort();
+            const stop = new AbortController();
+            calls.set(m.id, stop);
+            client
+                .explore(task.taskId, attemptId, m.route, m.body, AbortSignal.any([stop.signal, ctl.abort.signal]))
+                .then(
+                    (value) => proc.send({ type: "answer", id: m.id, ok: true, value }),
+                    (e: unknown) => {
+                        const status = e instanceof PlatformError ? e.status : undefined;
+                        proc.send({ type: "answer", id: m.id, ok: false, message: log.redact(e instanceof Error ? e.message : String(e)).slice(0, 500), ...(status !== undefined ? { status } : {}) });
+                        // The platform no longer has this exploration for us (stopped, or handed out again): stop it here too.
+                        if (status === 404 || status === 409 || status === 410) ctl.entry.cancel("The platform no longer expects this exploration.");
+                    },
+                )
+                .finally(() => calls.delete(m.id));
+        };
+        ctl.setPhase?.("running");
+        ctl.setProc(proc);
+        ctl.entry.pid = proc.pid;
+        log.info(`Task ${short}: exploring ${task.env.baseUrl}.`);
+        proc.start({ type: "explore", scratchDir: dir, explore: task.explore, ...(web && (web.launch.channel || web.launch.executablePath) ? { browser: web.launch } : {}), ...(refusePrivate ? { refusePrivate: true } : {}) });
+        // The platform's own time limit ends it first (its heartbeat says cancel); this one only catches a platform that stopped answering.
+        let watchdogFired = false;
+        const timer = setTimeout(() => {
+            watchdogFired = true;
+            proc.kill();
+        }, (task.timeoutMs ?? 6 * 3_600_000) + WATCHDOG_GRACE_MS);
+        let overLimit: string | undefined;
+        const stopWatch = watchMemory(proc.pid, limits.memoryMb, (used) => {
+            overLimit = overMemory(limits.memoryMb, used);
+            proc.kill();
+        });
+        const outcome = await proc.done;
+        clearTimeout(timer);
+        stopWatch();
+        for (const c of calls.values()) c.abort();
+        if (outcome.kind !== "explored") proc.kill();
+        if (ctl.isStopped()) throw new TaskStopped();
+        if (watchdogFired) return fail("The exploration took longer than its time limit and was stopped.");
+        if (overLimit) return fail(overLimit);
+        if (outcome.kind === "crashed") {
+            const tail = log.redact(proc.output).replace(/\s+/g, " ").trim().slice(-200);
+            return fail(`${outcome.detail}${tail ? ` Last output: ${tail}` : ""}`);
+        }
+        if (outcome.kind === "error") return fail(`The exploration could not finish: ${log.redact(outcome.message)}`);
+        if (outcome.kind !== "explored") return fail("The exploration ended without a result.");
+        const sum = outcome.summary;
+        const explore = {
+            testsGenerated: sum.testsGenerated,
+            testsValidated: sum.testsValidated,
+            testsFailedValidation: sum.testsFailedValidation,
+            testsNeedingReview: sum.testsNeedingReview,
+            errors: sum.errors.slice(0, 200).map((e) => log.redact(String(e)).slice(0, 2000)),
+            ...(sum.model ? { model: sum.model } : {}),
+            ...(sum.plan ? { plan: sum.plan } : {}),
+        };
+        const checked = ResultRequest.safeParse({ ok: true, runs: [], explore });
+        if (!checked.success) return fail(`The agent could not describe the exploration in the platform's format (${checked.error.issues[0]?.message ?? "unknown problem"}).`);
+        log.info(`Task ${short} finished: ${explore.testsGenerated} test${explore.testsGenerated === 1 ? "" : "s"} written, ${explore.testsValidated} validated.`);
+        return { ok: true, runs: [], explore: checked.data.explore, ...(web ? { browser: { name: web.name, ...(web.version ? { version: web.version } : {}), source: web.source } } : {}) };
     }
 
     /** Why this computer will not run these desktop scripts (not Windows, not interactive, elevated, an application it may not start), or undefined. */

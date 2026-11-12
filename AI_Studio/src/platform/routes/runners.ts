@@ -24,6 +24,7 @@ import { RUNNER_OFFLINE } from "../runner-only.js";
 import { OPEN_OWNER_ID, ownerIdOfActor, type AgentRecord, type AgentTokenRecord } from "../agent-store.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
 import { currentActor, type Actor } from "../auth/actor.js";
+import { exploreProblem } from "../explore-task.js";
 import { HttpError } from "../http-error.js";
 import { CANNOT_HAVE_RUNNER, checkView, KEY_CANNOT_HAVE_RUNNER, networkSentence, RUNNER_NOT_FOUND, RUNNER_RETIRED, runnerState, seesEveryRunner } from "../runner-health.js";
 import { runnerUpdatesFor } from "../runner-update.js";
@@ -59,7 +60,7 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
 
     /** What the runner can start now, in the words of the server's refusals (assertJobAllowed, chooseRecorder, chooseDeviceHost). */
     const canOf = (t: AgentTokenRecord, latest: AgentRecord | undefined, online: boolean) => {
-        const kinds = ["web", "phone", "ios", "windows", "record", "recordHeaded", "phoneSession"] as const;
+        const kinds = ["web", "phone", "ios", "windows", "record", "recordHeaded", "phoneSession", "explore"] as const;
         if (!latest || !online) return Object.fromEntries(kinds.map((k) => [k, can(RUNNER_OFFLINE)])) as Record<(typeof kinds)[number], Can>;
         const tests = (id: string) => {
             const adapter = getAdapter(id);
@@ -74,6 +75,8 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
             record: can(recordProblem(latest, false)),
             recordHeaded: can(recordProblem(latest, true)),
             phoneSession: can(hostDeviceProblem({ ...latest, personal: true, allowRealPhone: t.allowRealPhone })),
+            // Round 51: exploring an application on this runner (the AI stays on the platform; explore-task.ts). An older runner: "Update your runner".
+            explore: can(exploreProblem(latest)),
         };
     };
 

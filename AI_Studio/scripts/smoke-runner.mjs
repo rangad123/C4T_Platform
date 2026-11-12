@@ -16,6 +16,9 @@
 //    again (it now uses the credential it saved, the one-time code is used up) and waits for it to be online again.
 // 5b. On Mac (installer) and Linux: downloads again and starts the new download while the runner runs; the earlier one must stop and the
 //    new one come online (a new download replaces a running runner, round 50).
+// 5c. With --explore (round 51): explores the sample app on the runner (Explore my app in runners mode, docs/features/explore-on-runner.md).
+//    The platform's AI is a scripted model double this script serves on the port after the sample app's (an OpenAI-compatible address,
+//    never a real AI provider). Checks the exploration ran on the runner, created tests, and that the platform opened no browser.
 // 6. Removes the computer (Settings, Your runner, Remove this computer) and checks the runner ends with the plain "no longer accepts this
 //    runner" message. With --lifecycle,
 //    uninstalls with the installer's own --uninstall and checks that nothing is left: no install folder, no sign-in start.
@@ -27,6 +30,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -60,6 +64,7 @@ export const HELP = `Runner smoke check: start the platform and a sample app, do
   --test-timeout <seconds>         how long one test may take (default 300)
   --out <dir>                      where the report and logs go (default .scratch/smoke-runner/<time>)
   --lifecycle                      (installer only) also stop, start again, uninstall, and check nothing is left
+  --explore                        also explore the sample app on the runner, the platform's AI being a scripted model (no AI provider)
   --keep                           keep the temporary folder (its path is printed)
   --help                           this text
 
@@ -121,6 +126,9 @@ export function parseArgs(argv) {
             case "--lifecycle":
                 o.lifecycle = true;
                 break;
+            case "--explore":
+                o.explore = true;
+                break;
             case "--keep":
                 o.keep = true;
                 break;
@@ -135,6 +143,7 @@ export function parseArgs(argv) {
     if (o.noNodeOnPath && o.kit !== "complete") throw new UsageError("--no-node-on-path only makes sense with --kit complete: the other downloads need a Node.js on the computer.");
     if (o.linkNodeModules && o.kit !== "files") throw new UsageError("--link-node-modules only works with --kit files.");
     if (o.buildRunner && o.runnerKitDir) throw new UsageError("Use --build-runner or --runner-kit-dir, not both.");
+    if (o.explore && o.port > 65532) throw new UsageError("--port must be at most 65532 with --explore: the scripted model uses the port two above it.");
     if (o.lifecycle && o.kit !== "installer") throw new UsageError("--lifecycle only works with --kit installer: it stops, restarts and uninstalls what the installer set up.");
     o.onlineTimeout ??= o.linkNodeModules ? 180 : 900;
     return o;
@@ -376,6 +385,8 @@ export async function signUpFirstOwner(base, apiKey, password) {
 
 /** How long a runner may take to get a browser for web tests ready (it may download Chromium once, the first time it starts). */
 export const BROWSER_READY_MS = 10 * 60_000;
+/** How long the exploration (--explore) may take, so each matrix leg stays within its job's time limit. */
+export const EXPLORE_TIMEOUT_MS = 12 * 60_000;
 
 /** The platform's refusal while the runner is still getting its browser: wait and ask again. Any other answer is final. */
 export const isBrowserNotReady = (r) => r.status === 409 && /no browser ready|downloading (Chromium|a browser)/i.test(String(r.message ?? ""));
@@ -432,6 +443,10 @@ async function downloadKit(base, auth, body, file) {
 const BASIC_ENV = /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|SYSTEMDRIVE|TEMP|TMP|TMPDIR|HOME|USERPROFILE|HOMEDRIVE|HOMEPATH|LOCALAPPDATA|APPDATA|PROGRAMDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMW6432|COMMONPROGRAMFILES.*|USERNAME|USER|LOGNAME|SHELL|LANG|LC_.*|TZ|NUMBER_OF_PROCESSORS|PROCESSOR_.*|OS|XDG_.*|PLAYWRIGHT_BROWSERS_PATH|CI|GITHUB_ACTIONS|HTTPS?_PROXY|NO_PROXY|NODE_EXTRA_CA_CERTS)$/i;
 
 export function platformEnv(base, s) {
+    const model = s.modelUrl
+        ? // The scripted model double (--explore): an OpenAI-compatible address on this computer; the key is a placeholder it ignores.
+          { LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: s.modelUrl, LLM_MODEL: SCRIPTED_MODEL, LLM_API_KEY: "smoke-placeholder-not-a-key" }
+        : {};
     const env = Object.fromEntries(Object.entries(base).filter(([k, v]) => v !== undefined && BASIC_ENV.test(k)));
     Object.assign(env, {
         DATA_DIR: s.dataDir,
@@ -455,6 +470,7 @@ export function platformEnv(base, s) {
         AGENT_LEASE_SECONDS: "30",
         AGENT_NO_AGENT_GRACE_SECONDS: "60",
     });
+    Object.assign(env, model);
     if (s.runnerKitDir) env.RUNNER_KIT_DIR = s.runnerKitDir;
     if (s.installerDir) env.RUNNER_INSTALLER_DIR = s.installerDir;
     return env;
@@ -573,6 +589,7 @@ export function renderReport(r) {
         lines.push("Tests:");
         for (const t of r.tests) lines.push(`  ${t.status === "passed" ? "ok  " : "FAIL"}  ${t.title} (${t.kind}): ${t.status}, ${t.where}${t.browser ? `, ${t.browser}` : ""}`);
     }
+    if (r.explore) lines.push(`Exploration: ${r.explore.jobStatus} ${r.explore.where}, ${r.explore.tests.length} tests created, AI calls: ${r.explore.modelCalls.join("; ") || "none"}`);
     for (const n of r.notes ?? []) lines.push(`Note: ${n}`);
     if (r.outDir) lines.push(`Report and logs: ${r.outDir}`);
     if (r.kept) lines.push(`Temporary folder kept: ${r.kept}`);
@@ -587,6 +604,76 @@ export function smokeSpecs(appUrl) {
         { title: "The home page welcomes people", kind: "web", category: "Web", steps: [{ action: "navigate", url: `${appUrl}/` }, { action: "assert", check: "visible", locator: { by: "text", value: "Welcome to DemoShop" } }] },
         { title: "The product list answers", kind: "api", category: "API", steps: [{ action: "request", method: "GET", path: "/api/products" }, { action: "assertResponse", check: "status", expected: 200 }] },
     ];
+}
+
+// ── the scripted model (--explore) ──────────────────────────────────────────
+
+/** The model name the platform is given for the scripted double. */
+export const SCRIPTED_MODEL = "smoke-scripted";
+/** The one test the scripted AI plans and writes: the sample app's product list shows its heading. */
+export const EXPLORE_IDEA = { title: "The product list shows", journey: "Browse products", startPath: "/products", heading: "Products" };
+
+const systemOf = (body) => (Array.isArray(body?.messages) ? body.messages.filter((m) => m.role === "system" || m.role === "developer").map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n") : "");
+
+/**
+ * What the scripted AI answers one OpenAI Chat Completions request with (the platform's model is an OpenAI-compatible address). Analysis
+ * and planning get their JSON; the authoring agent (a request with tools) is told to assert the heading, then to finish. Anything else
+ * gets a plain "done" and is named in `kind`, so a new kind of call shows in the report instead of failing silently.
+ */
+export function scriptedAnswer(body) {
+    const system = systemOf(body);
+    const tools = (body?.tools ?? []).map((t) => t?.function?.name).filter(Boolean);
+    const json = (kind, value) => ({ kind, message: { role: "assistant", content: JSON.stringify(value) }, finish: "stop" });
+    const call = (kind, name, args) => ({ kind, message: { role: "assistant", content: null, tool_calls: [{ id: `call_${randomBytes(6).toString("hex")}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] }, finish: "tool_calls" });
+    if (tools.length) {
+        const done = (body.messages ?? []).filter((m) => m.role === "tool").length;
+        if (done === 0 && tools.includes("assert")) return call("author: assert", "assert", { check: "visible", target: { by: "role", role: "heading", value: EXPLORE_IDEA.heading }, why: `The ${EXPLORE_IDEA.heading} heading is shown` });
+        if (tools.includes("finish")) return call("author: finish", "finish", { result: "complete", explanation: "The heading is shown." });
+        return { kind: `tools (${tools.join(", ")})`, message: { role: "assistant", content: "done" }, finish: "stop" };
+    }
+    if (/analysing a web application/.test(system))
+        return json("analysis", {
+            siteType: "ecommerce",
+            purpose: "A small outdoor gear shop",
+            features: ["Browse products"],
+            pagePurposes: [],
+            journeys: [{ name: EXPLORE_IDEA.journey, description: "Look at the products", steps: ["Open the product list"], priority: "high", pages: ["/", EXPLORE_IDEA.startPath], requiresAuth: false }],
+            authenticationMechanisms: [],
+        });
+    if (/planning a web test suite/.test(system))
+        return json("plan", { scenarios: [{ title: EXPLORE_IDEA.title, description: EXPLORE_IDEA.title, category: "Browsing", priority: "high", journey: EXPLORE_IDEA.journey, startPath: EXPLORE_IDEA.startPath, expectedResults: [`${EXPLORE_IDEA.heading} is shown`] }] });
+    return { kind: `other: ${system.slice(0, 80).replace(/\s+/g, " ")}`, message: { role: "assistant", content: "done" }, finish: "stop" };
+}
+
+/** Serves the scripted model on this computer (in this process, closed by the caller). Every call's kind is kept for the report. */
+export async function startScriptedModel(port) {
+    const calls = [];
+    const server = http.createServer((req, res) => {
+        const chunks = [];
+        req.on("data", (c) => chunks.push(c));
+        req.on("end", () => {
+            let body = {};
+            try {
+                body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+            } catch {
+                body = {};
+            }
+            if (!/\/chat\/completions$/.test((req.url ?? "").split("?")[0])) {
+                calls.push(`not served: ${req.method} ${req.url}`);
+                res.writeHead(404, { "content-type": "application/json" });
+                return res.end(JSON.stringify({ error: { message: "The scripted model answers chat completions only." } }));
+            }
+            const a = scriptedAnswer(body);
+            calls.push(a.kind);
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ id: "chatcmpl-smoke", object: "chat.completion", created: Math.floor(Date.now() / 1000), model: SCRIPTED_MODEL, choices: [{ index: 0, message: a.message, finish_reason: a.finish }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }));
+        });
+    });
+    await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", resolve);
+    });
+    return { url: `http://127.0.0.1:${port}/v1`, calls, close: () => new Promise((resolve) => server.close(() => resolve())) };
 }
 
 async function defaultStartApp({ children, port }) {
@@ -616,6 +703,7 @@ async function defaultStartPlatform({ children, port, env }) {
 export async function runSmoke(opts, deps = {}) {
     const startApp = deps.startApp ?? defaultStartApp;
     const startPlatform = deps.startPlatform ?? defaultStartPlatform;
+    const startModel = deps.startModel ?? startScriptedModel;
     const target = deps.target ?? hostTarget();
     const children = deps.children ?? new Children();
     const started = Date.now();
@@ -629,6 +717,7 @@ export async function runSmoke(opts, deps = {}) {
     const links = [];
     let runner;
     let kitDir;
+    let model;
 
     const step = async (name, fn) => {
         const t0 = Date.now();
@@ -657,9 +746,15 @@ export async function runSmoke(opts, deps = {}) {
             app = await startApp({ children, port: opts.port + 1 });
             return app.url;
         });
+        if (opts.explore) {
+            await step("Start the scripted model the platform's AI uses (no AI provider)", async () => {
+                model = await startModel(opts.port + 2);
+                return model.url;
+            });
+        }
         let platform;
         await step("Start the platform on a new data folder", async () => {
-            const env = platformEnv(process.env, { dataDir: path.join(tmp, "data"), apiKey, port: opts.port, runnerKitDir, installerDir: opts.installerDir });
+            const env = platformEnv(process.env, { dataDir: path.join(tmp, "data"), apiKey, port: opts.port, runnerKitDir, installerDir: opts.installerDir, modelUrl: model?.url });
             platform = await startPlatform({ children, port: opts.port, env, apiKey });
             return platform.base;
         });
@@ -832,6 +927,49 @@ export async function runSmoke(opts, deps = {}) {
                 if (job.ranOn?.kind !== "agent" || job.ranOn.name !== runnerName) throw new Error(`It ${where}, not on the runner "${runnerName}".`);
                 if (status !== "passed") throw new Error(`It ended ${status}${exec?.error ? `: ${redact(String(exec.error).slice(0, 300), secrets)}` : ""}.`);
                 return where;
+            });
+        }
+
+        if (opts.explore) {
+            await step("Explore the sample app on the runner (the AI on the platform, a scripted model)", async () => {
+                const p = await api("POST", "/api/projects", { name: `Explore smoke ${target.id}`, platforms: ["web"], testingModes: ["agent"] });
+                if (p.status >= 300 || !p.json?.id) throw new Error(`Could not create the project (${p.status}): ${p.message}`);
+                const exploreProject = p.json.id;
+                // The tests the AI writes are run on the runner as soon as they are made, so the review step is off here as above.
+                const policy = await api("PUT", `/api/projects/${exploreProject}/review-policy`, { aiGenerated: false, edits: false, healing: false });
+                if (policy.status !== 200) throw new Error(`Could not switch off the review step for the project (${policy.status}): ${policy.message}`);
+                const start = await api("POST", `/api/projects/${exploreProject}/test-generation`, {
+                    url: `${app.url}/`,
+                    targets: ["web"],
+                    maxPages: 4,
+                    maxDepth: 1,
+                    maxScenarios: 1,
+                    accessibility: false,
+                    healthChecks: false,
+                    securityChecks: false,
+                    performanceChecks: false,
+                    useMemory: false,
+                });
+                if (start.status !== 202 && start.status !== 200) throw new Error(`The exploration did not start (${start.status}): ${start.message}`);
+                const t0 = Date.now();
+                const job = await until("the exploration to finish", async () => {
+                    const j = (await api("GET", `/api/test-generation/${start.json.jobId}`)).json;
+                    return j && ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"].includes(j.status) ? j : undefined;
+                }, EXPLORE_TIMEOUT_MS, 2000);
+                const tests = (await api("GET", `/api/projects/${exploreProject}/tests`)).json ?? [];
+                const refusedHere = /\[runners-only\] refused/.test(platform.entry?.output ?? "");
+                const where = job.ranOn?.kind === "agent" ? `on the runner "${job.ranOn.name}"` : job.ranOn?.kind === "platform" ? "on the platform" : "where is not known";
+                report.explore = { jobStatus: job.status, where, tests: tests.map((t) => ({ title: t.title, status: t.status ?? t.validationStatus })), modelCalls: [...model.calls], serverRefusedABrowser: refusedHere, ms: Date.now() - t0, ...(job.error ? { jobError: redact(String(job.error).slice(0, 500), secrets) } : {}) };
+                if (job.status === "FAILED" || job.status === "CANCELLED") throw new Error(`The exploration ended ${job.status}${job.error ? `: ${redact(String(job.error).slice(0, 300), secrets)}` : "."}`);
+                if (job.ranOn?.kind !== "agent" || job.ranOn.name !== runnerName) throw new Error(`It explored ${where}, not on the runner "${runnerName}".`);
+                if (refusedHere) throw new Error("The platform tried to open a browser itself (its log has a [runners-only] refusal): the exploration should have run on the runner only.");
+                if (!model.calls.includes("analysis") || !model.calls.includes("plan")) throw new Error(`The AI's calls did not reach the platform's model as expected (calls: ${model.calls.join("; ") || "none"}).`);
+                if (tests.length === 0) throw new Error(`The exploration ended ${job.status} but created no test (AI calls: ${model.calls.join("; ")}).`);
+                // The test the scripted AI wrote was run on the runner while exploring, and passed there.
+                const written = tests.find((t) => t.title === EXPLORE_IDEA.title);
+                if (!written) throw new Error(`The exploration did not create the test the AI wrote ("${EXPLORE_IDEA.title}"); it created: ${tests.map((t) => t.title).join(", ")}.`);
+                if ((written.status ?? written.validationStatus) !== "VALIDATED") throw new Error(`The test the AI wrote ended ${written.status ?? written.validationStatus ?? "with no status"}, not VALIDATED.`);
+                return `${tests.length === 1 ? "1 test" : `${tests.length} tests`} created ${where} in ${fmtMs(Date.now() - t0)}, ${model.calls.length} AI calls answered by the platform, no browser opened on the platform`;
             });
         }
 
@@ -1021,6 +1159,7 @@ export async function runSmoke(opts, deps = {}) {
         let cleanup = "stopped what this run started";
         try {
             await children.stopAll();
+            await model?.close();
             // The link to this checkout's node_modules goes first, and only the link (rmdir of a junction, unlink of a symlink): a recursive
             // delete must never walk into the real folder.
             for (const l of links) {

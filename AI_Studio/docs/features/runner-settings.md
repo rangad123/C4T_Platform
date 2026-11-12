@@ -76,8 +76,9 @@ every few seconds and has these states:
 ## Runs only on runners (`EXECUTION_MODE=runners`)
 
 A hosted platform never runs its customers' tests on its own server. In this mode a dispatch worker starts with the API process
-and hands every run to its starter's runner; exploring with the AI, tests described in words, agent runs, security assessments and
-recordings "on the server" are refused when made, with a sentence. The server's own browser launch and script runner refuse
+and hands every run to its starter's runner. Exploring with the AI runs on the starter's runner too, with the AI on the platform
+([explore-on-runner.md](explore-on-runner.md), round 51). Scheduled or triggered explorations, exploring a phone app, tests described
+in words, agent runs, security assessments and recordings "on the server" are refused when made, with a sentence. The server's own browser launch and script runner refuse
 (`SERVER_RUN_REFUSED`) as a last guard. A lost job is queued again without running a test twice, and a deploy hands running jobs
 over to the next process ([runner-restarts.md](runner-restarts.md)).
 
@@ -92,3 +93,4 @@ afterwards.
 - `tests/runner-settings-ui.test.ts`: the Settings section in a real browser against a stand-in for the `/api/me/runner*` routes
   (every state, the download, the switches, rename, remove, admins' list, refusals with their link, old links).
 - `tests/run-on-runner-ui.test.ts`: the Run panel and readiness in runners mode.
+- `tests/explore-on-runner-ui.test.ts`: exploring on your runner (not set up, offline, too old, named, "Exploring on").

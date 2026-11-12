@@ -88,7 +88,7 @@ const consoleErrors: string[] = [];
 
 const runnerOf = (over: Partial<RunnerMine> = {}): RunnerMine => ({
     id: "tok-mine",
-    name: "Priya’s laptop",
+    name: "Office laptop",
     status: "online",
     lastSeenAt: new Date().toISOString(),
     os: "win32",
@@ -310,7 +310,7 @@ describe("connected", () => {
         calls.length = 0;
         await visit();
         // The header says the name and when it was last heard from; the rest waits under Details.
-        await pwExpect(section().getByTestId("runner-head")).toContainText("Priya’s laptop, last heard from");
+        await pwExpect(section().getByTestId("runner-head")).toContainText("Office laptop, last heard from");
         const facts = section().getByTestId("runner-facts");
         await pwExpect(facts).toBeHidden();
         await section().getByText("Details", { exact: true }).click();
@@ -338,7 +338,7 @@ describe("connected", () => {
         await pwExpect(section().getByText("Busy", { exact: true })).toBeVisible();
         await pwExpect(section().getByTestId("runner-current").getByRole("link", { name: "Nightly checks" })).toHaveAttribute("href", "#/projects/p-1/runs/job-9");
         await section().getByRole("button", { name: "Rename" }).click();
-        await section().getByLabel("New name for Priya’s laptop").fill("Desk PC");
+        await section().getByLabel("New name for Office laptop").fill("Desk PC");
         await section().getByRole("button", { name: "Save name" }).click();
         await pwExpect(section()).toContainText("Your runner is now called “Desk PC”.");
         expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ name: "Desk PC" });
@@ -348,7 +348,7 @@ describe("connected", () => {
         fake.mine = runnerOf();
         await visit();
         await section().getByRole("button", { name: "Set up a different computer" }).click();
-        await pwExpect(section()).toContainText("Setting up a different computer removes Priya’s laptop as soon as the new one connects.");
+        await pwExpect(section()).toContainText("Setting up a different computer removes Office laptop as soon as the new one connects.");
         await section().getByRole("button", { name: "Cancel" }).click();
         await pwExpect(section().getByTestId("runner-details")).toBeVisible();
     }, 60_000);
@@ -358,7 +358,7 @@ describe("connected", () => {
         calls.length = 0;
         await visit();
         await section().getByRole("button", { name: "Remove this computer" }).click();
-        await pwExpect(section()).toContainText("Remove Priya’s laptop?");
+        await pwExpect(section()).toContainText("Remove Office laptop?");
         await section().getByRole("button", { name: "Keep it" }).click();
         expect(calls.filter((c) => c.path === "/api/me/runner/retire")).toEqual([]);
         await section().getByRole("button", { name: "Remove this computer" }).click();
@@ -383,20 +383,20 @@ describe("offline and updates", () => {
         calls.length = 0;
         await visit();
         await pwExpect(section().getByTestId("agent-update-status")).toContainText("Version 2.2.0 is available.");
-        await section().getByRole("button", { name: /Update Priya’s laptop to version 2.2.0/ }).click();
-        await pwExpect(section().getByRole("button", { name: "Update asked for Priya’s laptop" })).toBeDisabled();
+        await section().getByRole("button", { name: /Update Office laptop to version 2.2.0/ }).click();
+        await pwExpect(section().getByRole("button", { name: "Update asked for Office laptop" })).toBeDisabled();
         expect(calls.filter((c) => c.path === "/api/me/runner/update").map((c) => c.method)).toEqual(["POST"]);
 
         fake.mine = runnerOf({ update: { can: true, auto: true, latest: "2.2.0", outOfDate: true, requested: false, state: "needs-manual" } });
         await visit();
         await pwExpect(section().getByTestId("agent-update-status")).toContainText("Download the runner again from Settings");
-        await pwExpect(section().getByRole("button", { name: /Update Priya’s laptop/ })).toHaveCount(0);
+        await pwExpect(section().getByRole("button", { name: /Update Office laptop/ })).toHaveCount(0);
 
         // Nothing published to update from (the live site's unsigned download): no Update now, no promise that it updates itself.
         fake.mine = runnerOf({ update: { can: true, auto: true, latest: "2.2.0", outOfDate: true, requested: false, state: "idle", published: false, unpublished: "the runner download here is not signed." } });
         await visit();
         await pwExpect(section().getByTestId("agent-update-status")).toHaveText("Download the runner again from Settings to get version 2.2.0.");
-        await pwExpect(section().getByRole("button", { name: /Update Priya’s laptop/ })).toHaveCount(0);
+        await pwExpect(section().getByRole("button", { name: /Update Office laptop/ })).toHaveCount(0);
         await pwExpect(section()).not.toContainText("It updates between tests");
     }, 60_000);
 });
@@ -405,7 +405,7 @@ describe("everyone's runners (admins)", () => {
     it("lists every person's runner and removes one", async () => {
         fake.mine = runnerOf();
         fake.admin = [
-            { id: "tok-mine", name: "Priya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), version: "2.1.0", ownerName: "Priya" },
+            { id: "tok-mine", name: "Office laptop", status: "online", lastSeenAt: new Date().toISOString(), version: "2.1.0", ownerName: "Priya" },
             { id: "tok-ana", name: "Ana’s Mac", status: "offline", lastSeenAt: new Date(Date.now() - 86_400_000).toISOString(), version: "2.0.0", ownerName: "Ana" },
         ];
         fake.canSeeEveryone = true;
@@ -478,7 +478,7 @@ describe("the Dashboard card", () => {
         await pwExpect(card.getByRole("link", { name: "Set up your runner" })).toHaveAttribute("href", "#/settings#runner");
         fake.mine = runnerOf({ status: "offline", lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString() });
         await dashboard();
-        await pwExpect(card).toContainText("Priya’s laptop: offline since");
+        await pwExpect(card).toContainText("Office laptop: offline since");
         fake.mine = runnerOf();
         await dashboard();
         await page.waitForTimeout(1500); // the runner's answer has arrived by now

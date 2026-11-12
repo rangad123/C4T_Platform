@@ -5,6 +5,7 @@
  * switches, the up-front refusals (not set up, offline, the shared key), and a team or project credential refused at hello with a 401 and
  * the sentence that sends its person to Settings.
  */
+import { exploreNeedsUpdate } from "../src/platform/explore-task.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
@@ -157,6 +158,8 @@ describe("one runner per person", () => {
             record: { ok: false, why: expect.stringMatching(new RegExp(`^${name} can't record: `)) },
             recordHeaded: { ok: false, why: expect.stringMatching(new RegExp(`^${name} can't record: `)) },
             phoneSession: { ok: false, why: expect.stringMatching(new RegExp(`^${name} can't be used to explore a phone: `)) },
+            // Round 51: this stand-in runner does not report `explore`, as a runner from before it.
+            explore: { ok: false, why: exploreNeedsUpdate(name) },
         });
         expect((await as("t-tess", "GET", `/api/me/runner/enrollments/${tess.enrollmentId}`)).body).toEqual({ status: "connected" });
         // Another person's code is "not found".
@@ -284,7 +287,7 @@ describe("one runner per person", () => {
         platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE token_id = ?", Date.now() - 10 * 60_000, tess.runnerId);
         const off = (await as("t-tess", "GET", "/api/me/runner")).body.runner;
         expect(off.status).toBe("offline");
-        expect(Object.values(off.can)).toEqual(Array(7).fill({ ok: false, why: RUNNER_OFFLINE }));
+        expect(Object.values(off.can)).toEqual(Array(8).fill({ ok: false, why: RUNNER_OFFLINE }));
         expect(refusal(() => gate(ids["t-tess"]!))).toMatchObject({ status: 409, message: RUNNER_OFFLINE, code: "RUNNER_OFFLINE" });
         // As the scheduler fires it (the "Schedule" actor); Run now is a person acting, and is told now like any run of theirs.
         const fired = runAs({ kind: "schedule", name: "Schedule", role: "editor" }, () => refusal(() => svc().assertJobAllowed(projectId, options({ kind: "schedule", id: "s1", ownerId: ids["t-tess"]! }))));

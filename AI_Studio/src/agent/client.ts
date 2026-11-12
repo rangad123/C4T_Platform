@@ -359,6 +359,20 @@ export class PlatformClient {
     }
 
     /** A batch of live events (the platform keeps each sequence number once, so a batch may be sent again). */
+    /**
+     * Round 51: one call of an exploration on this runner (POST .../explore/llm or .../explore/sink), for the current attempt. The answer is the
+     * platform's JSON as it is (the caller's schema checks it). A refusal (409: the task or attempt is no longer ours) is a "rejected" error.
+     */
+    async explore(taskId: string, attemptId: string, route: "llm" | "sink", body: unknown, signal?: AbortSignal): Promise<unknown> {
+        const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/explore/${route}`, { body: JSON.stringify(body), headers: { "content-type": "application/json", [ATTEMPT_HEADER]: attemptId }, timeoutMs: 10 * 60_000, ...(signal ? { signal } : {}) });
+        if (!res.ok) throw await this.failure(res, route === "llm" ? "ask the AI" : "save what the exploration found");
+        try {
+            return (await res.json()) as unknown;
+        } catch {
+            throw new PlatformError("invalid", "The platform's answer was not JSON.", res.status);
+        }
+    }
+
     async events(taskId: string, req: EventsRequest, signal?: AbortSignal): Promise<EventsResponse> {
         const res = await this.send("POST", `/api/agent/tasks/${encodeURIComponent(taskId)}/events`, { body: JSON.stringify(req), headers: { "content-type": "application/json" }, timeoutMs: 15_000, ...(signal ? { signal } : {}) });
         if (!res.ok) throw await this.failure(res, "send live events");

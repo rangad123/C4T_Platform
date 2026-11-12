@@ -36,7 +36,9 @@ export const KIT_OPTIONAL = ["@taqwright/taqwright"];
 export const ENTRIES = { runner: "src/agent/index.ts", "task-child": "src/agent/task-child.ts", "record-child": "src/agent/record-child.ts" };
 export const NODE_MIN = 24;
 /** Packages whose code is copied into the bundle (everything esbuild followed into node_modules). */
-export const BUNDLED_LICENCES = ["zod", "yaml", "fflate"];
+// Round 51: an exploration runs the engine on the runner (src/agent/explore-child.ts), which brings the AI SDK and what it imports.
+// @ai-sdk/provider-utils ships without a LICENSE file: it is part of the AI SDK, under the same Apache-2.0 licence as "ai" listed here.
+export const BUNDLED_LICENCES = ["zod", "yaml", "fflate", "ai", "@ai-sdk/gateway", "@ai-sdk/provider", "eventsource-parser", "@opentelemetry/api", "@vercel/oidc"];
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");

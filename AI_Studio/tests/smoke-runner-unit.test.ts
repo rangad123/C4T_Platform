@@ -7,7 +7,7 @@
  *
  * The real run (a real platform, a real downloaded runner started by start-runner.cmd) is `node scripts/smoke-runner.mjs`; it was run on
  * this Windows laptop with the plain kit (see docs/features/real-machine-checks.md) and runs on six kinds of machine in
- * .github/workflows/runner-matrix.yml. Ports: stand-in platform 6960, sample app 6961.
+ * .github/workflows/runner-matrix.yml. Ports: stand-in platform 6960, sample app 6961, scripted model 6962.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 import { afterAll, describe, expect, it } from "vitest";
 // @ts-expect-error plain JavaScript script (no type declarations)
-import { Children, hostTarget, interpretKitAnswer, isBrowserNotReady, startWhenBrowserReady, kitRequestBody, parseArgs, pathWithoutNode, placeDownload, plainCredentialsIn, platformEnv, redact, renderReport, runnerEnv, runSmoke, startCommand, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
+import { Children, hostTarget, interpretKitAnswer, isBrowserNotReady, startWhenBrowserReady, kitRequestBody, parseArgs, pathWithoutNode, placeDownload, plainCredentialsIn, platformEnv, redact, renderReport, runnerEnv, runSmoke, SCRIPTED_MODEL, scriptedAnswer, startCommand, startScriptedModel, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
 import { buildCompleteZip } from "../src/platform/runner-kit-complete.js";
 
 const WIN = process.platform === "win32";
@@ -58,6 +58,8 @@ describe("arguments", () => {
         expect(usage(["--build-runner", "--runner-kit-dir", "x"])).toBe("Use --build-runner or --runner-kit-dir, not both.");
         expect(usage(["--name", "x"])).toBe("Unknown option --name. Run with --help to see the options.");
         expect(usage(["--frobnicate"])).toBe("Unknown option --frobnicate. Run with --help to see the options.");
+        expect(usage(["--explore", "--port", "65533"])).toMatch(/at most 65532 with --explore/);
+        expect(parseArgs(["--kit", "installer", "--lifecycle", "--explore"])).toMatchObject({ explore: true, lifecycle: true });
     });
 
     it("the command line answers wrong arguments with exit code 2 and --help with 0, starting nothing", () => {
@@ -158,6 +160,13 @@ describe("environments and secrets", () => {
         expect(env.RANDOM_THING).toBeUndefined();
         expect(env.RUNNER_KIT_DIR).toBeUndefined();
         expect(platformEnv({}, { dataDir: "d", apiKey: "k", port: 1, runnerKitDir: "/kit", installerDir: "/inst" })).toMatchObject({ RUNNER_KIT_DIR: "/kit", RUNNER_INSTALLER_DIR: "/inst" });
+    });
+
+    it("with --explore the platform's AI is the scripted model on this computer, never a provider's address or a real key", () => {
+        const env = platformEnv({ ANTHROPIC_API_KEY: "real-model-key-123456", LLM_BASE_URL: "https://api.example" }, { dataDir: "d", apiKey: "k", port: 6950, modelUrl: "http://127.0.0.1:6952/v1" });
+        expect(env).toMatchObject({ LLM_PROVIDER: "openai-compatible", LLM_BASE_URL: "http://127.0.0.1:6952/v1", LLM_MODEL: SCRIPTED_MODEL, ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "" });
+        expect(env.LLM_API_KEY).toMatch(/placeholder/);
+        expect(platformEnv({}, { dataDir: "d", apiKey: "k", port: 6950 }).LLM_BASE_URL).toBeUndefined();
     });
 
     it("the runner gets the person's environment without the platform's settings, and the clean PATH when asked", () => {
@@ -399,6 +408,39 @@ describe("--lifecycle: no credential as plain text in the install folder (round 
             expect(plainCredentialsIn(dir).sort()).toEqual([path.join("app", "work", "outbox", "task.json"), path.join("logs", "setup.log")].sort());
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("the scripted model (--explore)", () => {
+    const sys = (content: string) => ({ messages: [{ role: "system", content }, { role: "user", content: "..." }] });
+    it("answers analysis and planning with their JSON, and the authoring agent with an assertion, then finish", () => {
+        const analysis = scriptedAnswer(sys("You are a senior QA engineer analysing a web application from crawl data."));
+        expect(analysis.kind).toBe("analysis");
+        expect(JSON.parse(analysis.message.content).journeys[0].pages).toContain("/products");
+        const plan = scriptedAnswer(sys("You are a senior QA lead planning a web test suite for one application, from a model of what was discovered."));
+        expect(plan.kind).toBe("plan");
+        expect(JSON.parse(plan.message.content).scenarios).toHaveLength(1);
+        const tools = [{ type: "function", function: { name: "assert" } }, { type: "function", function: { name: "finish" } }];
+        const first = scriptedAnswer({ ...sys("author"), tools });
+        expect(first).toMatchObject({ kind: "author: assert", finish: "tool_calls" });
+        expect(JSON.parse(first.message.tool_calls[0].function.arguments)).toMatchObject({ check: "visible", target: { by: "role", role: "heading", value: "Products" } });
+        const second = scriptedAnswer({ messages: [...sys("author").messages, { role: "tool", content: "{}" }], tools });
+        expect(second.kind).toBe("author: finish");
+        expect(scriptedAnswer(sys("Something new")).kind).toMatch(/^other: Something new/);
+    });
+
+    it("serves OpenAI chat completions over HTTP and records each call", async () => {
+        const m = await startScriptedModel(6962);
+        try {
+            const r = await fetch(`${m.url}/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sys("analysing a web application")) });
+            const j = await r.json();
+            expect(j.choices[0].finish_reason).toBe("stop");
+            expect(JSON.parse(j.choices[0].message.content).siteType).toBe("ecommerce");
+            expect((await fetch(`${m.url}/embeddings`, { method: "POST", body: "{}" })).status).toBe(404);
+            expect(m.calls).toEqual(["analysis", "not served: POST /v1/embeddings"]);
+        } finally {
+            await m.close();
         }
     });
 });
