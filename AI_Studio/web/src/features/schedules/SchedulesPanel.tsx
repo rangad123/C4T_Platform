@@ -9,7 +9,7 @@ import { useHere } from "../auth/project-access";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { DISPATCH_OFF, RUNS_OFF_TIP, executionModeOf } from "../runs/runs-here";
+import { DISPATCH_OFF, EXPLORING_ON_RUNNERS, RUNS_OFF_TIP, executionModeOf, useExecutionMode } from "../runs/runs-here";
 import { WEEKDAYS, utcOffsetText, whenText, type Cadence, type Schedule, type ScheduleKind, type ScheduleList } from "./schedules";
 import "./schedules.css";
 
@@ -69,7 +69,7 @@ export function SchedulesPanel({ projectId, reloadKey, onRunStarted }: { project
                         </div>
                     ) : runnersOnly && data.schedules.length > 0 ? (
                         <p className="t-meta" style={{ padding: "12px 20px 0" }} data-testid="schedules-fire">
-                            Schedules start their runs on time. Each run goes to the runner of the person who made the schedule, so that computer needs to be on then. When it is off, the run waits a while, then fails and says so below.
+                            Schedules start their runs on time. Each run goes to the runner of the person who made the schedule, so that computer needs to be on then.
                         </p>
                     ) : null}
                     {data.schedules.length === 0 && !adding ? (
@@ -108,6 +108,7 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock, mayChang
     const [error, setError] = useState("");
     const [started, setStarted] = useState(false);
     const [confirm, setConfirm] = useState(false);
+    const runnersOnly = useExecutionMode() === "runners";
 
     async function act(kind: "run" | "toggle" | "delete") {
         setBusy(kind);
@@ -144,7 +145,9 @@ function ScheduleRow({ s, projectId, onChanged, onRunStarted, runBlock, mayChang
                     {s.lastJobId && <> · <a href={routes.runs(projectId)}>View runs</a></>}
                 </span>
                 {!s.runbookName && !s.suiteName && s.kind === "validate" && s.retryFailures > 0 && <span>A failing test is run again once to spot unreliable tests</span>}
+                {runnersOnly && s.ownerName && <span data-testid="schedule-owner">Runs on {s.ownerName}’s runner</span>}
             </div>
+            {runnersOnly && s.kind === "generate" && <Callout tone="warning">{EXPLORING_ON_RUNNERS}</Callout>}
             {s.lastOutcome === "skipped" && s.lastNote && <Callout tone="warning">Skipped {relativeTime(s.lastOutcomeAt)}: {s.lastNote}.</Callout>}
             {s.lastOutcome === "error" && s.lastNote && <Callout tone="danger" title="The last run couldn’t start">{s.lastNote}</Callout>}
             {started && <Callout tone="success">Run started. Follow it in <a href={routes.runs(projectId)}>Runs</a>; the results appear below when it finishes.</Callout>}
@@ -190,7 +193,9 @@ function NewScheduleForm({ projectId, zone, onCancel, onCreated }: { projectId: 
     const suites = useFetch<{ suites: Array<{ id: string; name: string; testCount: number }> }>(`/projects/${projectId}/test-suites`);
     // Exploring is for agent and mixed projects only: a code project is never offered it (its schedules made earlier stay listed).
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
-    const explores = project.data ? projectKind(project.data) !== "code" : false;
+    // Runners mode: exploring is not offered (the platform refuses it there, at create and at every fire).
+    const runnersOnly = useExecutionMode() === "runners";
+    const explores = project.data ? projectKind(project.data) !== "code" && !runnersOnly : false;
     const [suiteId, setSuiteId] = useState("");
     const suite = suites.data?.suites.find((x) => x.id === suiteId);
     const [freq, setFreq] = useState<Frequency>("daily");

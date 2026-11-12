@@ -61,9 +61,9 @@ export function RunnerSwitches({ runner: r, onChanged }: { runner: RunnerMine; o
                 </h3>
             </div>
             {note && <Callout tone={note.tone}>{note.text}</Callout>}
-            {box("codeScripts", "Run code scripts", "Hand-written, imported and Git scripts. They run on your computer as you, and can read what you can. Switch this off to run only tests made of steps.")}
-            {box("privateTargets", "Test private and local addresses", "localhost, addresses on your own network (such as 192.168.x.x or 10.x.x.x) and 169.254.x.x. Off by default, so a test can’t reach things on your network by mistake.")}
-            {box("realPhone", "Use my connected phone", "Phone tests and sessions you start may use the phone connected to your computer. The app under test is installed on it and removed afterwards if it wasn’t there before. When this is off, only emulators are used.")}
+            {box("codeScripts", "Run code scripts", "Hand-written, imported and Git scripts, which run on your computer as you and can read what you can.")}
+            {box("privateTargets", "Test private and local addresses", "localhost and addresses on your own network, such as 192.168.x.x; off by default, so a test can’t reach them by mistake.")}
+            {box("realPhone", "Use my connected phone", "Phone tests may install the app on the phone plugged into your computer and remove it afterwards; when this is off, only emulators are used.")}
         </div>
     );
 }

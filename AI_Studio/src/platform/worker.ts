@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { frameHub } from "./frame-hub.js";
+import { jobsWaitingForRunner } from "./agent-services.js";
 import { runJob, type RunnerDeps } from "./job-runner.js";
 import { diskFreeBytes } from "./ops/health.js";
 import { loadOpsSettings } from "./ops/settings.js";
@@ -102,7 +103,9 @@ export class Worker {
                 this.deps.repo.reclaimStaleJobs();
                 // Fill the free slots (one for the plain worker); a slot that frees up wakes the loop at once.
                 while (this.running && this.active.size < this.slots && !this.diskIsLow()) {
-                    const job = this.deps.repo.claimNextJob(60_000, this.id, this.opts.modes);
+                    // Dispatch: a schedule's or trigger's run whose owner's runner is offline stays queued, so sleeping computers never hold every place.
+                    const skip = this.opts.local === false ? jobsWaitingForRunner(this.deps.repo.db) : [];
+                    const job = this.deps.repo.claimNextJob(60_000, this.id, this.opts.modes, skip);
                     if (!job) break;
                     const run: Promise<void> = runJob(this.deps, job, this.id)
                         .catch((err) => console.error("[worker] job error:", err))

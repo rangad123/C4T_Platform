@@ -24,9 +24,9 @@ every few seconds and has these states:
 
 | State | What it shows |
 |---|---|
-| Not set up | What a runner is, the system (Windows, Mac, Linux) and processor guessed from the browser, and **Download the runner**. |
-| Waiting for the computer | Where the zip was saved, the steps for that system, the unsigned-download notice, and "Waiting for the computer to connect" until `GET /api/me/runner/enrollments/:id` says connected. An expired code offers **Download again**. |
-| Connected (online or busy) | Name, computer, system, processor, version, when last heard from, the run it is on (linked), its network sentence, updates, the computer check, the switches, **Rename**, **Set up a different computer**, **Remove this computer**. |
+| Not set up | What a runner is and one **Download for {system}** button for the computer the browser is on (system and processor guessed from the browser). **For another computer?** opens the system and processor choice. |
+| Waiting for the computer | Where the zip was saved, the steps for that system (they include how to get past the first unsigned-download warning), and "Waiting for the computer to connect" until `GET /api/me/runner/enrollments/:id` says connected. **Still blocked?** holds the other cases (a browser that holds the download, the plain files' SmartScreen warning, a blocked zip) and the computer check script. An expired code offers **Download again**. |
+| Connected (online or busy) | The header: status, name and when last heard from. Then the run it is on (linked), the update sentence, what the computer check found missing, and a **Details** disclosure with the computer, system, processor, version, network sentence and every line of the check. Then the switches (one-sentence hints), **Rename**, **Set up a different computer**, **Remove this computer**. |
 | Offline | The same, with how to bring it back on that system: runs can’t start until it is back online; schedules wait for it. |
 | Needs an update | The update sentence (said once, in the updates line) and **Update now** (`POST /api/me/runner/update`). When it cannot update itself, or the platform publishes no update (`published: false`), the sentence says to download the runner again from Settings and there is no **Update now**. |
 
@@ -39,8 +39,23 @@ every few seconds and has these states:
   connected phone (off). The server enforces each when it hands out work, and the runner checks again. A person who still has more than
   one computer from before round 45 changes the switches of all of them at once.
 - **Rename** is `PATCH /api/me/runner` `{ name }`; **Remove this computer** is `POST /api/me/runner/retire`.
-- **Everyone's runners** (people who manage runners, and platform admins): owner, name, status, last seen and version from
-  `GET /api/admin/runners`, with **Remove** (`POST /api/admin/runners/:id/retire`).
+- **Everyone's runners** (people who manage runners, and platform admins): its own section below Your runner, with owner, name,
+  status, last seen and version from `GET /api/admin/runners`, and **Remove** (`POST /api/admin/runners/:id/retire`).
+
+## Elsewhere on the website
+
+- **Dashboard**: the Your runner card shows only while the runner is not set up or is offline. A project's Still to set up list
+  (`GET /api/projects/:id/setup-check`) is the other place that asks for it; Next steps no longer does.
+- **Record**: no "Record on" choice and no "Show the browser window" box (a recording always has its window). In runners mode the
+  form says once whether the person's runner can record (`can.recordHeaded` from `GET /api/me/runner`), links to
+  Settings when not, and the server picks the runner. In local mode it records where the project runs ("this server" wording).
+- **Phones** (Settings, Mobile app): in runners mode, "Phones on your runner" (the server's `can.phone` sentence and the state of
+  Use my connected phone) replaces the platform computer's phone check, and "Where phone tests run" offers no phone of the
+  platform's computer. "Use my connected phone" is the only real-phone gate. Mobile tooling on the platform's computer is hidden.
+- **Explore with AI** for a phone app is switched off at the button in runners mode, with the reason. In local mode the panel says
+  where it runs (where the project runs its tests, from `GET /api/projects/:id/runner`, or `can.phoneSession` on the person's runner)
+  and never changes the project's setting.
+- The website no longer reads `GET /api/projects/:id/agents`: every runner shape comes from `GET /api/me/runner`.
 
 ## Running tests
 

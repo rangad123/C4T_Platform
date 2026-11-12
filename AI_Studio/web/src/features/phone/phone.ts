@@ -6,9 +6,9 @@
  * never shows a state the answers do not support: a runner that does not say it can explore a phone is shown as one that cannot.
  */
 import type { EventRow, Job, MobileApp, PlatformConfig } from "../../api.js";
-import { plural, relativeTime } from "../../lib/format.js";
+import { plural } from "../../lib/format.js";
 import { routes } from "../../lib/router.js";
-import type { Agent } from "../agents/agents.js";
+import { runnerProblem, type RunnerMine } from "../runners/my-runner.js";
 
 // ── what the AI is exploring ─────────────────────────────────────────────────
 
@@ -74,56 +74,36 @@ export const willDo = (app: string): string =>
 export const WONT_DO = ["Pay for anything or subscribe", "Delete accounts or data", "Send messages or money, or make calls", "Use a fingerprint or face check", "Get past captchas", "Explore games"];
 export const ACCOUNT_REMINDER = "If the app needs a login, add a test account under Advanced options.";
 export const NO_WHERE_TITLE = "No phone or emulator is ready";
-export const NO_WHERE_BODY = "Set up your runner in Settings on a computer with an Android emulator or phone. For a real phone, turn on USB debugging first and switch on Use my connected phone.";
 export const AI_MISSING = "The AI model isn’t set up on this server. Exploring a phone app needs it.";
 /** Runners mode: the platform refuses explorations (the AI's exploration does not run on runners yet). */
-export const EXPLORE_ON_RUNNERS_TITLE = "Exploring a phone app isn’t available here yet";
 export const EXPLORE_ON_RUNNERS = "This platform runs tests only on runners, and the AI’s exploration doesn’t run on them yet. Import your phone tests or write them by hand, then run them on a runner.";
 
 export const screensWords = (n: number): string => `${plural(n, "screen")} seen`;
 export const actionsWords = (n: number): string => plural(n, "action");
 export const countsLine = (c: { screens: number; actions: number | null }): string => (c.actions === null ? screensWords(c.screens) : `${screensWords(c.screens)}, ${actionsWords(c.actions)}`);
 
-// ── where it can run ─────────────────────────────────────────────────────────
+// ── where it runs ────────────────────────────────────────────────────────────
 
 export interface WhereOption {
-    /** "platform" for this server, otherwise the runner's id. */
-    id: string;
     label: string;
     can: boolean;
     /** One plain sentence: what is there, or why it cannot be used and what to do. */
     detail: string;
 }
 
-/** Can this runner let the AI explore a phone app? Only when it says so. */
-const exploresPhones = (a: Agent): boolean => Boolean(a.capabilities.deviceSession);
-
-/** Where an exploration of the phone app can run. On the hosted platform (runners mode) the server never runs one, so "This server" is not offered. */
-export function whereOptions(config: PlatformConfig | undefined, agents: Agent[], now = Date.now()): WhereOption[] {
-    const m = config?.mobile;
-    const runnersOnly = config?.executionMode === "runners";
-    const out: WhereOption[] = runnersOnly
-        ? []
-        : [
-              m?.available
-                  ? { id: "platform", label: "This server", can: true, detail: m.avds.length ? `An Android emulator is ready here (${m.avds[0]}).` : "An Android emulator is ready here." }
-                  : { id: "platform", label: "This server", can: false, detail: m?.reason ? `${m.reason.replace(/\.$/, "")}.` : "No Android emulator is set up on this server." },
-          ];
-    for (const a of [...agents].sort((x, y) => Number(y.online) - Number(x.online))) {
-        const android = a.capabilities.android;
-        if (!a.online) out.push({ id: a.id, label: a.name, can: false, detail: `Offline, last seen ${relativeTime(a.lastSeenAt, now)}.` });
-        else if (!exploresPhones(a)) out.push({ id: a.id, label: a.name, can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from Your runner in Settings." });
-        else if (!android || android.state === "none" || android.state === "no-tools" || (android.state === undefined && android.devices.length === 0)) {
-            out.push({ id: a.id, label: a.name, can: false, detail: android?.summary ? `${android.summary.replace(/\.$/, "")}.` : "No phone or emulator is connected to this runner." });
-        } else out.push({ id: a.id, label: a.name, can: true, detail: android.summary ? `${android.summary.replace(/\.$/, "")}.` : "A phone or emulator is ready." });
+/**
+ * Where an exploration runs: where the project runs its tests (local mode only; in runners mode it is switched off at the button). On the
+ * person's runner the server's own sentence says whether it can (`can.phoneSession`); a server that does not say decides at the click.
+ */
+export function phoneWhere(config: PlatformConfig | undefined, runOn: "platform" | "agent", runner: RunnerMine | null | undefined): WhereOption {
+    if (runOn === "platform") {
+        const m = config?.mobile;
+        return m?.available
+            ? { label: "This server", can: true, detail: m.avds.length ? `An Android emulator is ready here (${m.avds[0]}).` : "An Android emulator is ready here." }
+            : { label: "This server", can: false, detail: m?.reason ? `${m.reason.replace(/\.$/, "")}.` : "No Android emulator is set up on this server." };
     }
-    return out;
-}
-
-/** The option to start with: where the project already runs when that works, else the first that works. */
-export function defaultWhere(options: WhereOption[], current: { runOn: "platform" | "agent"; agentId: string | null } | undefined): string {
-    const want = current?.runOn === "agent" ? current.agentId : "platform";
-    return options.find((o) => o.can && o.id === want)?.id ?? options.find((o) => o.can)?.id ?? "";
+    const why = runnerProblem({ runner: runner ?? null }, { can: ["phoneSession"] });
+    return { label: runner ? `Your runner, ${runner.name}` : "Your runner", can: !why, detail: why ?? "It opens the phone or emulator on your runner’s computer." };
 }
 
 // ── starting ─────────────────────────────────────────────────────────────────

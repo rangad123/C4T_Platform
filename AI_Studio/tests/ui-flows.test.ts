@@ -380,7 +380,8 @@ describe("project report download", () => {
         };
         await open();
         const [pdf] = await Promise.all([page.waitForEvent("download"), page.getByRole("dialog", { name: "Export", exact: true }).getByRole("button", { name: "Download PDF", exact: true }).click()]);
-        expect(pdf.suggestedFilename()).toMatch(/report\.pdf$/);
+        // Saved under the name the server gives it: report-<project>-<date>.pdf.
+        expect(pdf.suggestedFilename()).toMatch(/^report-[a-z0-9-]+-\d{4}-\d{2}-\d{2}\.pdf$/);
         const pdfBytes = fs.readFileSync((await pdf.path())!);
         expect(pdfBytes.subarray(0, 5).toString()).toBe("%PDF-");
 

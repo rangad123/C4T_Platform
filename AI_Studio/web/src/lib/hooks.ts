@@ -117,3 +117,20 @@ export function useProjectChanged(id: string, reload: () => unknown): void {
         return () => window.removeEventListener(PROJECT_CHANGED, on);
     }, [id]);
 }
+
+/**
+ * Fetch `path` every few seconds while the page is visible. Polling stops when the tab is hidden and
+ * picks up again, with an immediate refresh, when it is shown.
+ */
+export function usePolled<T>(path: string | null, everyMs = 5000): Fetched<T> {
+    const f = useFetch<T>(path, () => (document.hidden ? null : everyMs));
+    const { reload } = f;
+    useEffect(() => {
+        const on = () => {
+            if (!document.hidden) void reload();
+        };
+        document.addEventListener("visibilitychange", on);
+        return () => document.removeEventListener("visibilitychange", on);
+    }, [reload]);
+    return f;
+}

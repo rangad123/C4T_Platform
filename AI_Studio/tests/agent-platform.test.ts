@@ -33,7 +33,7 @@ const API_KEY = "af-admin-key-5c19e7a2";
 let RUN_AS = API_KEY;
 const PASSWORD = "AFLEAK-Password-71c4a2";
 const API_TOKEN = "AFLEAK-ApiToken-b83e19";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_MAX_FILE_BYTES", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "AGENT_MAX_TOKENS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_MAX_FILE_BYTES", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 let platform: Platform;
@@ -99,7 +99,6 @@ beforeAll(async () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-agent-"));
     // These tests exercise multi-agent routing and token isolation, which the platform still supports; raise the per-project runner limit
     // (one by default; maxTokensFrom reads process.env) so several runners can be registered for one project here.
-    process.env.AGENT_MAX_TOKENS = "25";
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, LLM_PROVIDER: "anthropic", CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));
     // Round 45: runs started with the shared key have no owner, so the test acts as a person whose runner takes them.
     RUN_AS = testPerson(platform).token;
@@ -220,7 +219,7 @@ describe("tokens and who may call the agent routes", () => {
         // Protocol 2 is spoken too (runner-protocol-2.md); a version neither side knows is a plain 409.
         const wrong = await a.hello({ protocol: 9 });
         expect(wrong.status).toBe(409);
-        expect(wrong.json.error).toMatch(/protocol 9.*protocol 2.*Update the agent/);
+        expect(wrong.json.error).toMatch(/protocol 9.*protocol 2.*Update the runner/);
         const bad = await a.hello({ concurrency: 99 });
         expect(bad.status).toBe(400);
         expect(bad.json.error).toMatch(/not in the expected format/);

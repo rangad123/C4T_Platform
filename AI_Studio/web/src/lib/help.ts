@@ -131,21 +131,13 @@ export const TRIGGER_HELP = {
     allowUrl: "A pipeline may send another address, such as a preview deploy, and the run then tests that address instead of the project's own.",
 } as const;
 
-// ── Runners and phones (src/platform/agent-store.ts ONLINE_MS, web/src/features/agents/agents.ts) ──
+// ── Runners and phones (src/platform/agent-store.ts ONLINE_MS) ──
 
 export const RUNNER_HELP = {
     online: "The runner was heard from in the last 45 seconds and can take tests.",
-    offline: "Nothing heard from the runner in the last 45 seconds. A run waits a short while for your runner, then fails if it is still offline.",
-    busy: "The runner is running tests now. It takes more when it has a free slot.",
-    thisServer: "Tests run on the platform's own server, not on a runner.",
+    offline: "Nothing heard from the runner in the last 45 seconds. Runs you start can’t begin until it is back online, and schedules wait for it.",
+    busy: "The runner is running tests now. New runs wait for it.",
 } as const;
-
-/** What adb says about a connected phone (agents.ts deviceState). */
-export const DEVICE_STATE: Record<"device" | "offline" | "unauthorized", string> = {
-    device: "Connected and ready for tests.",
-    offline: "Connected, but the phone is not answering. Unplug it and plug it back in.",
-    unauthorized: "Unlock the phone and allow USB debugging for this computer when it asks.",
-};
 
 /** "Is this phone ready?" for one phone (src/engine/mobile/device/ready.ts checkPhoneReady: the worst of its checks). */
 export const PHONE_READY: Record<"ready" | "attention" | "not-ready", string> = {
@@ -160,16 +152,6 @@ export const PHONE_CHECK: Record<"ok" | "attention" | "problem" | "info", string
     attention: "Tests can run, but this makes them slower or less steady.",
     problem: "Tests cannot run on this phone until this is fixed.",
     info: "Worth knowing; nothing needs doing.",
-};
-
-/** The runner's Android phone tools (agents.ts phoneToolsSentence). */
-export const PHONE_TOOLS: Record<"ready" | "can-fetch" | "fetching" | "failed" | "off" | "unsupported", string> = {
-    ready: "The runner has Google's Android phone tools and can talk to a phone with USB debugging on.",
-    "can-fetch": "The runner downloads Google's Android phone tools itself the first time a phone session needs them.",
-    fetching: "The runner is downloading Google's Android phone tools now.",
-    failed: "The runner could not get the Android phone tools; the reason is shown.",
-    off: "Getting the Android phone tools is switched off on this runner.",
-    unsupported: "The Android phone tools are not available for this computer's system.",
 };
 
 /** A device farm result (features/devicefarm). */
@@ -344,8 +326,6 @@ export const HELP = {
     schedule: SCHEDULE_HELP,
     trigger: TRIGGER_HELP,
     runner: RUNNER_HELP,
-    device: DEVICE_STATE,
-    phoneTools: PHONE_TOOLS,
     phoneReady: PHONE_READY,
     phoneCheck: PHONE_CHECK,
     deviceFarm: DEVICE_FARM_RESULT,

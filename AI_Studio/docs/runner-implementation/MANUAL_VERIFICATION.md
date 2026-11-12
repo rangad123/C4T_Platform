@@ -7,7 +7,7 @@ The automated tests run on Linux, and the real-machine workflow runs on GitHub's
 - a Mac with an Apple chip (macOS 14 or newer),
 - an Intel Mac (the newest macOS it can run).
 
-Steps marked **(this round)** check work built in this round (see `IMPLEMENTATION_PLAN.md` and `PROGRESS.md`); none of it has been run on a real Windows PC or Mac before this checklist. If the build you are checking is older and does not have that part, write "not in this build" and move on. Everything else exists at commit `e344261`.
+Steps marked **(this round)** check work built in this round (see `archive/IMPLEMENTATION_PLAN.md` and `archive/PROGRESS.md`); none of it has been run on a real Windows PC or Mac before this checklist. If the build you are checking is older and does not have that part, write "not in this build" and move on. Everything else exists at commit `e344261`.
 
 Update signing (steps about updates) needs the update-signing key: until the owner makes it and pins its public key, no runner updates itself and those steps are "not possible in this build".
 
@@ -240,6 +240,6 @@ Repeat steps 1 to 38. Record any difference in the SmartScreen wording, the tray
 
 ## After the pass
 
-- [ ] Add a dated entry to `PROGRESS.md`: the computer, OS version, the build, and the result of each section. Change the status to "verified on a real machine" only for what passed.
+- [ ] Add a dated entry to `archive/PROGRESS.md`: the computer, OS version, the build, and the result of each section. Change the status to "verified on a real machine" only for what passed.
 - [ ] For each failure, file an issue with the record block, the screenshots and the log lines (secrets removed).
 - [ ] Note anything the docs promise that was not true on this computer, so the docs can be fixed.

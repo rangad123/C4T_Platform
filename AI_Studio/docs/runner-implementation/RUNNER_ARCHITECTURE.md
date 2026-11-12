@@ -1,44 +1,39 @@
 # Runner architecture
 
-How AI Studio runs tests on runners installed on testers' computers. Written 2026-11-07, starting from commit `e344261`, and brought in line with the code after the build the same day.
+How AI Studio runs tests on a runner: a light program on a person's own computer (Windows, macOS, Linux) that connects out to the platform. This document describes the code as it is. The model is **one runner per person**: a person sets it up once in Settings, Your runner, and it is used for every run, schedule, recording and phone session they start. There is no runner picker.
 
-Every capability below carries one of three labels:
+A "built" statement means the code exists. It does not mean it was run on a real Windows or Mac computer: `MANUAL_VERIFICATION.md` covers that.
 
-- **Built**: in the code. "Built before this round" means it was already in `e344261`; references with a line number point at that commit. References without one name a file and function in the current tree.
-- **Not built**: not in the code, with the reason.
-
-A "Built" label means the code exists. It does not mean it was run on a real Windows or Mac computer. `MANUAL_VERIFICATION.md` covers that.
-
-Related documents in this folder: `CURRENT_STATE_AUDIT.md` (what existed before this round), `AGENT_COMMUNICATION_PROTOCOL.md` (every message), `JOB_EXECUTION_LIFECYCLE.md` (job states and failures), `SECURITY_DESIGN.md` (threats and controls), `IMPLEMENTATION_PLAN.md`.
+Related documents in this folder: `AGENT_COMMUNICATION_PROTOCOL.md` (every message), `JOB_EXECUTION_LIFECYCLE.md` (job states and failures), `SECURITY_DESIGN.md` (threats and controls), `MANUAL_VERIFICATION.md`. The round-by-round plan, audit and progress notes are history, in `archive/`.
 
 ## The goal in one paragraph
 
-Everything stays on the website and the backend: projects, tests, AI, schedules, history, reports and runner management. Only test execution happens on a runner, a background program on a tester's Windows 10/11 or macOS computer (Apple chip or Intel). A person clicks Run on the website. The backend picks a runner that may take the run, is online and can run it. The runner runs the test with the same engine the platform uses. Progress, logs and screenshots come back while it runs. The final report shows on the website and is still there after a refresh.
+Everything stays on the website and the backend: projects, tests, AI, schedules, history and reports. Only test execution happens on a runner. A person clicks Run on the website. The backend sends the run to that person's runner when it is online and can run the test, and otherwise says plainly why. The runner runs the test with the same engine the platform uses. Progress, logs and screenshots come back while it runs. The final report shows on the website and is still there after a refresh.
 
 ## The three parts
 
 | Part | Where it runs | What it owns | What it never does |
 |---|---|---|---|
-| Website | The person's browser (`web/src`) | Every screen: Runners pages, adding a computer, the Run panel, the live run view, reports, settings. It is the only dashboard. | Talk to a runner directly. |
-| Backend | The platform's API process (`src/main.ts`, `src/platform`) | Who may do what, the job queue, choosing a runner, the task record and its phases, events, artifacts, schedules, enrollment codes and credentials, updates. It is the source of truth for every state. | In `runners` mode: run test code or open a browser for a run (built: `src/platform/runner-only.ts`). |
-| Runner agent | The tester's computer (`src/agent`) | Connecting out to the backend, reporting what the computer can do, running one task at a time in its own folder and process, sending progress, files and the result, keeping its credential, updating itself. | Listen on a port, show its own dashboard, decide which runs it may take (the backend decides; the agent only refuses what it cannot or must not run). |
+| Website | The person's browser (`web/src`) | Every screen: Settings, Your runner (set-up, switches, removal), the Run panel, the live run view, reports. It is the only dashboard. | Talk to a runner directly. |
+| Backend | The platform's API process (`src/main.ts`, `src/platform`) | Who may do what, the job queue, the task record and its phases, events, artifacts, schedules, enrollment codes and credentials, updates. It is the source of truth for every state. | In `runners` mode: run test code or open a browser for a run (`src/platform/runner-only.ts`). |
+| Runner | The person's computer (`src/agent`) | Connecting out to the backend, reporting what the computer can do, running each task in its own folder and process, sending progress, files and the result, keeping its credential, updating itself. | Listen on a port, show its own dashboard, decide whose runs it may take (the backend decides; the runner only refuses what it cannot or must not run). |
 
-The agent has no window and no local web page (no `listen` or `createServer` in `src/agent`). On Windows the tray icon is the one visible sign. It is a control (start, stop, open the log), not a dashboard.
+The runner has no window and no local web page (no `listen` or `createServer` in `src/agent`). On Windows the tray icon is the one visible sign: a control (start, stop, open the log), not a dashboard.
 
 ## Component diagram
 
 ```
- PERSON'S BROWSER                 HOSTED PLATFORM (one API process)                  TESTER'S COMPUTER
+ PERSON'S BROWSER                 HOSTED PLATFORM (one API process)                  PERSON'S COMPUTER
 +--------------------+   HTTPS   +----------------------------------------+  HTTPS  +-------------------------------+
-| Website (web/src)  |---------->| Website routes  src/platform/routes/*  |<--------| Runner agent  src/agent       |
-|  Runners pages     |           |   runs, suites, schedules, runners,    |  agent  |  client.ts   hello, poll,     |
-|  Add this computer |           |   runner-choices, runners/enroll       |  calls  |              heartbeat, files,|
+| Website (web/src)  |---------->| Website routes  src/platform/routes/*  |<--------| Runner        src/agent       |
+|  Settings,         |           |   runs, suites, schedules,             |  runner |  client.ts   hello, poll,     |
+|   Your runner      |           |   /api/me/runner*                      |  calls  |              heartbeat, files,|
 |  Run panel         |<----------|                                        |   out   |              result, events   |
 |  Live run view     |    SSE    | Job queue        generation_jobs       |  only   |  task-runner.ts  one slot per |
 +--------------------+  (events) | Dispatch worker  (runners mode)        |         |    task, folder per task      |
                                  |   RemoteExecutor -> agent_tasks        |         |    +-------------------------+|
-                                 | Agent routes     /api/agent/*          |         |    | task-child.ts (process) ||
-                                 |   (own token check, allow-list)        |         |    |  src/engine/frameworks  ||
+                                 | Runner routes    /api/agent/*          |         |    | task-child.ts (process) ||
+                                 |   (own credential check, allow-list)   |         |    |  src/engine/frameworks  ||
                                  | Event store      agent_events --> SSE  |         |    |  Playwright, Taqwright, ||
                                  | Object store     task files, artifacts |         |    |  iOS, Windows UIA       ||
                                  | Scheduler, sweep, prune                |         |    +-------------------------+|
@@ -54,89 +49,52 @@ Arrows show who opens the connection. The runner always connects out. The backen
 
 ## Execution modes
 
-A setting, `EXECUTION_MODE` in `src/config.ts`, says where tests may run. Built.
+`EXECUTION_MODE` in `src/config.ts` says where tests may run.
 
 | Mode | Who uses it | What happens |
 |---|---|---|
-| `local` (default) | Self-hosting and development | Today's behaviour, unchanged. A worker runs jobs: in the API process when `WORKER_EMBEDDED` is true (`src/main.ts:45-53`), or as a separate worker process. Each project chooses "this server" or "a runner" (`runner_settings.run_on`). |
-| `runners` | The hosted platform | The server never runs test code and never opens a browser for a run. A dispatch worker inside the API process takes jobs and hands them to runners, several at once (`DISPATCH_CONCURRENCY`, default 8; the one-active-job-per-project rule stays). Every project routes to runners without rewriting its stored setting. A pinned runner still applies. "This server" is not offered. |
+| `local` (default) | Self-hosting and development | A worker runs jobs (in the API process when `WORKER_EMBEDDED` is true, or as a separate process). Each project runs its tests on this server or on runners (`runner_settings.run_on`, `PUT /api/projects/:id/runner`). |
+| `runners` | The hosted platform | The server never runs test code and never opens a browser for a run. A dispatch worker in the API process hands jobs to runners, several at once (`DISPATCH_CONCURRENCY`, default 8; one active job per project). Every project routes to runners without rewriting its stored setting. |
 
-In `runners` mode (built; `docs/features/runner-only-mode.md`):
+In `runners` mode (`docs/features/runner-only-mode.md`):
 
-- `PUT /api/projects/:id/runner` with `platform` is refused with a plain sentence (`PLATFORM_SETTING_REFUSED`).
-- Only runs of existing tests (`validate`, `variants`, `environment`: `RUNNER_JOB_MODES`) are made; exploring, a test described in words, agent runs and security assessments are refused when made (`assertRunsOnRunner`, called by `Repo.createJob`).
-- Inside a runner job, the steps that used a server browser are skipped or refused with an honest event: the saved sign-in is not checked first (it goes to the runner with the tests), browser repair is not offered (`repair_browser_skipped`), mailbox steps fail on the runner with their own message, and the test-data reset is sent only to a public address.
+- `PUT /api/projects/:id/runner` with `platform` is refused (`PLATFORM_SETTING_REFUSED`). Recording and phone sessions on the server are refused (`ON_SERVER_REFUSED`).
+- Only runs of existing tests (`validate`, `variants`, `environment`: `RUNNER_JOB_MODES`) are made; exploring, a test described in words, agent runs and security assessments are refused when made (`assertRunsOnRunner`, called by `Repo.createJob`). An "Explore again" schedule is refused when it is made (`EXPLORE_SCHEDULE_REFUSED`).
+- Inside a runner job, the steps that used a server browser are skipped or refused with an honest event: the saved sign-in is not checked first, browser repair is not offered (`repair_browser_skipped`), mailbox steps fail on the runner with their own message, and the test-data reset is sent only to a public address.
 - A last-line guard makes the local executor and the server's browser launch helpers throw `SERVER_RUN_REFUSED`, so a missed path fails loudly instead of running. The report PDF is the one browser the server still opens (its own static page, scripts off).
-- Schedules fire and hand their jobs to runners. Housekeeping (sweep, prune) runs.
-- `/api/config` reports `executionMode`. The dispatch worker writes the worker heartbeat that `/readyz` reads.
-- The deploy script writes `EXECUTION_MODE=runners` and keeps `WORKER_EMBEDDED=false` (`deploy/c4t-box/deploy.sh`).
+- Schedules fire and hand their jobs to runners. Housekeeping (sweep, prune) runs. `/api/config` reports `executionMode`. The dispatch worker writes the heartbeat `/readyz` reads.
 
-Why a new mode instead of turning the worker on: with `WORKER_EMBEDDED=true` every project could run on the server, and a new project defaults to "this server" (`src/platform/agent-store.ts:488-491`). The hosted server keeps secrets that customer test code must never be able to read.
+## One runner per person
 
-### Why nothing could run on a runner in production before this round
+A runner is a credential (`agent_tokens` row, `kind` "personal", `owner_id`). The computer that connected with it is an `agents` row. A person has one: setting up a computer again (a new download, a new one-time code) retires their earlier credential.
 
-Built behaviour at `e344261`, in short (`CURRENT_STATE_AUDIT.md` has the full trace):
+- **Who may have one:** a signed-in person who may run tests (`ai_studio.tests.run`) in at least one project they can open, Crowd4Test testers included (`mayHaveRunner`, `src/platform/runner-health.ts`). On an open server (no access key, nobody signed up yet) the server acts as one person (`OPEN_OWNER_ID`, "open"). The shared access key is nobody's and has no runner.
+- **Whose runs it takes:** a run is its starter's; a schedule's or deploy trigger's is its creator's (`jobOwnerId`). The runner is offered only its owner's tasks (`AgentStore.queuedOfOwner`), and the claim checks the owner again, while the owner may still run that project's tests (`ownerMayRun`). Never anyone else's run.
+- **Up front:** `AgentService.assertJobAllowed` (called by `Repo.createJob`) refuses a person's run when their runner is not set up, offline or cannot run the tests, with a typed code that links to Settings (`RUNNER_NOT_SET_UP`, `RUNNER_OFFLINE`, `RUNNER_CANNOT_RUN`). A schedule's or deploy trigger's run whose owner's computer is off is made and waits for it. A run with no owner (the access key, an orphaned schedule or trigger) is refused with a sentence.
+- **Waiting:** a queued run with no runner able to take it fails after a short grace for a person's run (`AGENT_NO_AGENT_GRACE_SECONDS`, 90 s; they were told up front), and at the queue limit (30 minutes, `QUEUE_MAX_MS`) for a schedule's or trigger's run (`noRunnerWaitMs`). Both end with the same sentence (`noRunnerSentence`), naming the owner for a schedule or trigger.
+- **What it can start now:** `GET /api/me/runner` answers the runner with `can: { web, phone, ios, windows, record, recordHeaded, phoneSession }`, each `{ ok, why? }`, in the words of the server's own refusals (`cannotRunSentence`, `recordProblem`, `hostDeviceProblem`; offline: `RUNNER_OFFLINE`). The website shows what the server would say.
+- **Sessions:** a recording, a live session or a phone session opens on the caller's own runner (`ownHostFor`, `src/platform/agent-record.ts`): not set up, offline, can't (with the reason), or ok. It is its starter's alone (`maySeeSession`).
+- **The owner's switches** (Settings, Your runner; `PATCH /api/me/runner`): code scripts (hand-written, imported, Git; on by default), private and local addresses (off by default), "Use my connected phone" (off: emulators only). They are enforced when a task is offered (`mayRunCodeScripts`, `targetAllowed`) and again on the runner (`src/agent/address-guard.ts`, `task-runner.ts`). The runner's old `--allow-custom-scripts` flag is accepted and does nothing for a person's runner.
+- **Admins:** platform admins with `ai_studio.runners.manage` see everyone's runners and may remove one (`GET /api/admin/runners`, `seesEveryRunner`: one rule for the route and the page).
+- **Credentials from before one runner per person** (team, shared and project runners) are refused at every runner route with HTTP 401 and a sentence sending the person to Settings (the runner stops, exit code 3). Their tables and columns stay; nothing reads them.
 
-1. Every run start calls `runsCanStartHere` (`src/platform/suite-run.ts:30-35`). It looks only at `WORKER_EMBEDDED` and a worker heartbeat, not at where the project's tests run. Production has no worker, so every run is refused.
-2. Even without that refusal, the runner task is made by `RemoteExecutor` (`src/platform/agent-services.ts:653`), which runs inside a worker's job (`src/platform/job-runner.ts:175`). No worker means no task, so the runner's poll stays empty.
-
-The dispatch worker in `runners` mode fixes both (`Worker.dispatch`, `src/platform/worker.ts`, started in `src/main.ts` even with `WORKER_EMBEDDED=false`).
-
-## Two kinds of runner
-
-A runner is a credential (`agent_tokens` row). The computer it runs on is an `agents` row (`src/platform/agent-store.ts:99-129`).
-
-| | Team runner | Personal runner |
-|---|---|---|
-| Status | Built (machine-level runners, migration 42; kind `team` from migration 51) | Built (migration 51, `PERSONAL_RUNNERS_MIGRATION` in `src/platform/agent-store.ts`) |
-| Belongs to | An organisation (`organization_id`), or Crowd4Test's shared pool when that is null | One person (`owner_id`) |
-| Who may add one | People with `ai_studio.runners.manage` who pass `canManageRunner` (`src/platform/runner-health.ts:31-45`). Testers cannot. | Anyone who holds `ai_studio.tests.run` in at least one project they can open, testers included |
-| Which runs it takes | Runs of projects granted to it in `runner_access`, within its organisation's projects (`runner-health.ts:48`); a shared runner may serve any project | Only runs its owner starts, plus runs of schedules its owner made, in projects the owner can still open with `tests.run`, and only where the project allows people's own computers. Never anyone else's run. |
-| Limit | One per project for project kits; 50 per organisation (`MAX_RUNNERS_PER_ORGANIZATION`) | 5 active per person (`MAX_PERSONAL_RUNNERS`) |
-| Code scripts (hand-written, imported, Git) | Off by default: only when the agent was started with `--allow-custom-scripts`, or a runner manager turns on the runner's switch (`allow_code_scripts`). Never on a Crowd4Test shared runner. | On by default (`allow_code_scripts`). The owner can switch it off. Enforced when the task is offered (`mayRunCodeScripts`) and again by the agent. |
-| Private and local addresses (localhost, LAN, 169.254.x) | Allowed, as before (`allow_private_targets` 1) | Refused by default (`allow_private_targets` 0). The owner can allow them. Checked at offer and on the runner (`src/agent/address-guard.ts`). |
-| Who may rename, change switches, retire | Runner managers, as before (private addresses and the phone switch are not switches of a team runner) | Switches: the owner only. Rename and retire: the owner and platform admins |
-| A connected real phone | Not changed | Only when the owner turns on "Use my connected phone" (`allow_real_phone`); emulators otherwise |
-| Recordings, live sessions, phone sessions | The project's rules | Only for its owner |
-
-Each project has a switch "Allow people's own computers" (`runner_settings.allow_personal`). It is on by default and changed by people with `project.settings`. A project with no `runner_settings` row counts as on. When it is on, the project's test accounts (passwords, TOTP secrets, API tokens, saved sessions) reach the owner's computer for the owner's runs. The setting's help text says so. Changed with `PUT /api/projects/:id/runner { allowPersonal }`. Built.
-
-### Choosing a runner for a run
-
-Built:
-
-- Every run-start route a person uses accepts an optional `runnerId` (an `agent_tokens.id`), carried into the job as `options.runner`. It applies to that run only and never changes the project's setting. Runbook runs and deploy triggers keep the project's setting.
-- With `runnerId`: only that runner may take the run. It must be one the person may use for this project (else 404), online and capable (else 409 with the reason).
-- Without it: the project's pinned runner (`runner_settings.agent_id`), else any eligible runner.
-- `GET /api/projects/:id/runner-choices` lists the runners this person may use for this project: their own personal runners and the team runners granted to it. Each entry carries its kind, whether it is theirs, online, busy, the machine, whether it can run web and phone tests and code scripts, and a plain `problem` sentence. Needs `tests.run` on the project.
-
-Built before this round, kept: the claim is pull-based and oldest first. Whichever capable runner polls first gets the task (`agent-services.ts:199-235`).
+Routes: `GET/PATCH /api/me/runner`, `POST /api/me/runner/retire` ("Remove this computer"), `POST /api/me/runner/update`, `GET /api/me/runner/enrollments/:id`, `GET /api/me/runner/download/info`, `POST /api/me/runner/download`; admins: `GET /api/admin/runners`, `POST /api/admin/runners/:id/retire`. `GET /api/projects/:id/runner` says where a project's tests run (local mode). `GET /api/projects/:id/agents` lists the caller's own computer with its raw capabilities; the website no longer reads it, tests do.
 
 ## Enrollment and credentials
 
-### Before this round (built)
+No download or installer carries a long-lived credential.
 
-Every download carried a long-lived runner credential. A kit download mints an `aitg_` token and writes it into the zip as `runner.token` (`src/platform/routes/runner-kits.ts:87-90`). The token is kept as a plain file: on Windows with its access list reduced to the current user (`installer/win/Engine.cs:500-517`), on a Mac with mode 0600 (`installer/mac/app/Contents/Resources/runner-setup.sh:784`). It never expires and cannot be rotated.
+1. In Settings, Your runner, the person downloads the runner for their computer (`POST /api/me/runner/download`). The backend makes a single-use enrollment code: `aite_` plus 32 random bytes, stored hashed, valid 30 minutes (`runner_enrollments`).
+2. The download embeds the code as `runner.enroll` (mode 0600) and answers with `x-runner-enrollment-id` and `x-runner-enrollment-expires`; the page never sees the code and follows it with `GET /api/me/runner/enrollments/:id`.
+3. The installer starts the runner with `--enroll-file`.
+4. At first contact the runner calls `POST /api/agent/enroll` with the code, its name and a random install id (`machineId`, kept in `runner.machine`). The answer is `{ token, runnerId, kind }`: the runner credential (`aitg_`), given once. If the answer is lost, the same install id may ask again while the code is valid and the first credential was never used.
+5. The runner saves the credential in the operating system's store and deletes the code file. An expired or used code gets a plain answer: download the runner again from Settings.
 
-The credential itself is sound: `aitg_` plus 32 random bytes (`agent-store.ts:163`), stored only as a SHA-256 hash with a 4-character hint, compared in constant time, revocable.
+Rotation: the runner asks `POST /api/agent/rotate` for a new credential when the hello answer says `rotate: true` (30 days old); a runner that stays connected says hello once a day to check. The old credential keeps working until the new one is first used, for at most 24 hours.
 
-### From this round (built)
+Machine binding: the backend binds a credential to the first `machineId` it sees. The same credential from another `machineId` is refused with a plain error and an Activity entry.
 
-No download or installer carries a long-lived credential again.
-
-1. On the Runners page the person chooses "Add this computer" (personal) or "Add a team runner".
-2. The website calls `POST /api/runners/enroll` (or `POST /api/runners/kits` for a download). The backend makes a single-use enrollment code: `aite_` plus 32 random bytes, stored hashed, valid 30 minutes (`runner_enrollments`, migration slot 51).
-3. The download embeds the code as `runner.enroll` (mode 0600) and answers with the headers `x-runner-enrollment-id` and `x-runner-enrollment-expires`; the page never sees the code and follows it with `GET /api/runners/enrollments/:id`. The page can also show a copyable command with `--enroll <code>`.
-4. The installer starts the runner with `--enroll-file`. Old installs that still have `runner.token` keep working.
-5. At first contact the agent calls `POST /api/agent/enroll` with the code, its name, a random install id (`machineId`, kept in `runner.machine`) and optionally its version and capabilities. The answer is `{ token, runnerId, kind }`: the runner credential (`aitg_`), given once. If the answer is lost, the same install id may ask again while the code is valid and the first credential was never used.
-6. The agent saves the credential in the operating system's store and deletes the code file.
-7. An expired or used code gets a plain answer: make a new one on the Runners page.
-
-Rotation: the agent asks `POST /api/agent/rotate` for a new credential when the hello answer says `rotate: true` (the credential is 30 days old); a runner that stays connected says hello once a day to check. The old credential keeps working until the new one is first used, for at most 24 hours. A lost answer therefore never locks the agent out.
-
-Machine binding: the backend binds a credential to the first `machineId` it sees. The same credential from another `machineId` is refused with a plain error and an Activity entry. Agents too old to send a `machineId` keep today's behaviour.
-
-### Where the credential is kept (built)
+### Where the credential is kept
 
 | System | Store |
 |---|---|
@@ -171,22 +129,11 @@ Headed runs: browsers run headless unless the run asks for a visible window. A h
 
 ## Updates
 
-Built before this round:
-
-- The backend offers an update in the hello answer (`update`), in the `x-runner-update` header of a poll answer, and through `POST /api/agent/update`. Files come from `GET /api/agent/update/files/:name` (`src/platform/routes/runner-updates.ts:45,54`).
-- The runner stops taking tasks, downloads the files over its authenticated connection, checks each file's SHA-256 against the offer, runs a self-test, switches, and exits with code 75 so its host starts it again. It rolls back after 3 starts with no connection (`src/agent/updater.ts:1-21`). Back-off is 5, 15 and 45 minutes, at most 3 tries an hour.
-- The owner can switch updates off per runner (`AITP_UPDATES=0`, or the switch on the Runners page).
-- The installer programs and their private Node.js are not updated by this.
-
-The gap was that the checksums came from the same platform. They catch damage, not a compromised server or build artefact.
-
-Built in this round (`docs/features/runner-updates.md`):
-
-- The deploy signs the update manifest (version, a sequence number, file names, sizes, SHA-256) with Ed25519, using `node:crypto` (`scripts/sign-runner-update.mjs`). The private key lives only in a GitHub Actions secret, `RUNNER_UPDATE_SIGNING_KEY`. Without a valid signature the platform offers no update (`src/platform/runner-update.ts`) and the deploy log says so.
-- The public key is pinned in the runner bundle (`PINNED_UPDATE_KEYS`, `src/agent/update-keys.ts`; empty until the owner makes the key pair). The runner refuses any update whose signature, file list or sequence does not check, before downloading anything. It keeps running and reports `update.state: "needs-manual"`, and the Runners page says a new version is available to download by hand.
-- The plain kit, the Windows installer and the updater use `npm ci --ignore-scripts` with a shipped `package-lock.json`.
-
-Operating-system code signing (Authenticode on Windows; Developer ID and notarisation on macOS): no certificates bought yet. The signing steps are built in the deploy workflow, each skipped with a log line when its secrets are absent. A Mac `.pkg` is built by `scripts/build-runner-pkg.sh`; the zip stays the default download until a real Mac pass is green. The download pages keep their plain notices that the files are not signed.
+- The backend offers an update in the hello answer (`update`), in the `x-runner-update` header of a poll answer, and through `POST /api/agent/update`. Files come from `GET /api/agent/update/files/:name` (`src/platform/routes/runner-updates.ts`).
+- The deploy signs the update manifest (version, sequence number, file names, sizes, SHA-256) with Ed25519 (`scripts/sign-runner-update.mjs`, key in the `RUNNER_UPDATE_SIGNING_KEY` secret). Without a valid signature the platform offers no update (`src/platform/runner-update.ts`), and Settings says the new version must be downloaded by hand. The runner checks the signature, file list and sequence against a key pinned in it (`src/agent/update-keys.ts`) before downloading anything.
+- The runner stops taking tasks, downloads the files over its authenticated connection, checks each file's SHA-256, runs a self-test, switches, and exits with code 75 so its host starts it again. It rolls back after 3 starts with no connection (`src/agent/updater.ts`). Back-off is 5, 15 and 45 minutes, at most 3 tries an hour.
+- Updates are always on server-side. "Update now" in Settings asks for one at once (`POST /api/me/runner/update`). The one opt-out is the runner's own `AITP_UPDATES=0`.
+- The installer programs and their private Node.js are not updated by this. OS code signing (Authenticode, Developer ID) is built in the deploy workflow but skipped while its secrets are absent; the download pages say the files are not signed.
 
 ## Adapters: the same engine as the platform
 
@@ -210,22 +157,24 @@ Live step events (built): a small Playwright reporter (`LIVE_REPORTER`, `src/eng
 
 ### On the backend
 
-| Data | Where | Status |
-|---|---|---|
-| Runner and its credential hash | `agent_tokens` | Built; `kind`, `owner_id`, `allow_code_scripts`, `allow_private_targets`, `allow_real_phone`, `machine_id`, `rotated_at`, `previous_hash`, `previous_until_ms` from migration 51 |
-| Computer, its capabilities, last seen | `agents` | Built; `os_version`, `machine_id` (51) and `protocol` (53) |
-| Which projects a team runner serves | `runner_access` | Built |
-| Project's runner setting | `runner_settings` (`run_on`, `agent_id`) | Built; `allow_personal` (51) |
-| Enrollment codes (hashed) | `runner_enrollments` | Built (51) |
-| Who made a schedule | `schedules.created_by` | Built (52) |
-| The job | `generation_jobs` | Built |
-| The runner task, its payload and result | `agent_tasks`. Payload and result are encrypted at rest with AES-256-GCM (`src/platform/secrets.ts:58-65`). Finished tasks are removed after 24 hours. | Built; `owner_id` (51); `phase`, `phase_ms`, `attempt`, `attempt_id`, `accepted_ms`, `rejections_json`, `result_attempt_id` (53); where the run happened is kept in `generation_jobs.ran_on_json` (53), which survives the 24-hour prune |
-| Live-event duplicates check | `agent_task_events`, keyed by task, attempt and sequence number | Built (53) |
-| Job events (progress, live steps, screenshots) | `agent_events`, kept with the job, not pruned after 24 hours | Built; the `runner_*` kinds added |
-| Files sent to and from the runner | Object store: `<project>/_agent/<task>/in/` and `.../out/<name>`, with size and SHA-256 in `agent_task_files` | Built |
-| Artifacts people see | Copied by the result sink to `<project>/_artifacts/<test>/job-…/attempt-n/` with an `artifacts` row | Built |
+| Data | Where |
+|---|---|
+| A person's runner and its credential hash | `agent_tokens` (`kind`, `owner_id`, `allow_code_scripts`, `allow_private_targets`, `allow_real_phone`, `machine_id`, rotation columns) |
+| The computer, its capabilities, last seen | `agents` |
+| Enrollment codes (hashed) | `runner_enrollments` |
+| Where a project's tests run (local mode) | `runner_settings.run_on` |
+| Who made a schedule or a deploy trigger token | `schedules.created_by`, the trigger token's creator |
+| The job | `generation_jobs`; where it ran is kept in `ran_on_json` and survives the task prune |
+| The runner task, its payload and result | `agent_tasks`, payload and result encrypted at rest (AES-256-GCM); removed 24 hours after they finish |
+| Live-event duplicates check | `agent_task_events` (task, attempt, sequence number) |
+| Job events (progress, live steps, screenshots) | `agent_events`, kept with the job |
+| Files sent to and from the runner | Object store: `<project>/_agent/<task>/in/` and `.../out/<name>`, with size and SHA-256 in `agent_task_files` |
+| Artifacts people see | Copied to `<project>/_artifacts/<test>/job-…/attempt-n/` with an `artifacts` row |
+| Updates: a pending "Update now" and the last report written to Activity | `runner_update_settings` (its `auto` column is no longer read) |
 
-The object store is `LocalDiskStore` under the data folder (`src/platform/object-store.ts:294-298`). S3 is not built, so there are no time-limited upload or download links. Every file is streamed through the API. The runner never receives a storage path or a storage credential, only safe file names and hashes.
+Unused since one runner per person, kept until the PostgreSQL move: `runner_access`, `runner_settings.agent_id` and `.allow_personal`, team columns of `agent_tokens` (`organization_id`, `project_id`).
+
+The runner never receives a storage path or a storage credential, only safe file names and hashes. Every file is streamed through the API.
 
 ### On the runner
 
@@ -244,28 +193,41 @@ The test accounts in a task travel only over the authenticated connection and re
 
 ## How the website sees a run live
 
-Built. Job events go into `agent_events`. The website reads them over server-sent events: `GET /api/test-generation/:jobId/stream` and `GET /api/projects/:id/stream` (`src/platform/routes/stream.ts:208,236`), with a one-use stream ticket. A reconnect sends `Last-Event-ID` and gets every missed event. A first visit gets the last 500. A refresh therefore rebuilds the view from stored events.
+Job events go into `agent_events`. The website reads them over server-sent events (`GET /api/test-generation/:jobId/stream`, `GET /api/projects/:id/stream`, `src/platform/routes/stream.ts`) with a one-use stream ticket. A reconnect sends `Last-Event-ID` and gets every missed event; a first visit gets the last 500. A refresh therefore rebuilds the view from stored events. The runner's live events are stored as job events (`runner_test_started`, `runner_step`, `runner_test_finished`, `runner_screenshot`, `runner_log`), and the run carries the task's phase and the runner that took it (`ranOn: { kind, agentId, name, runnerId, phase, attempt }`).
 
-Built in this round: the runner's live events are stored as job events with kinds such as `runner_test_started`, `runner_step`, `runner_test_finished`, `runner_screenshot` and `runner_log`, so the same stream carries them and a refresh replays them. The task's phase and the runner that took it are exposed on the run (`ranOn: { kind, agentId, name, runnerId, phase, attempt }`), and the run page shows them (`web/src/features/runs/LiveRun.tsx`).
+## Operations and test settings
+
+Read straight from the environment, outside the config schema, so tests (and unusual installs) can change them. Defaults are what production uses.
+
+| Variable | Read by | Default | What it does |
+|---|---|---|---|
+| `AGENT_POLL_SECONDS` | `agentLimits`, `src/platform/agent-services.ts` | 25 | How long an idle runner's poll is held |
+| `AGENT_HEARTBEAT_SECONDS` | same | 10 | How often a runner beats during a task |
+| `AGENT_LEASE_SECONDS` | same | 60 | A task's lease; a runner that stops beating loses it |
+| `AGENT_ACCEPT_SECONDS` | same | 30 | Protocol 2: time to accept a task it was handed |
+| `AGENT_NO_AGENT_GRACE_SECONDS` | same | 90 | A person's queued run with no runner able to take it fails after this |
+| `AGENT_WATCH_MS` | same | 1000 | How often the executor looks at its task |
+| `AGENT_MAX_FILE_BYTES`, `AGENT_TASK_MAX_BYTES`, `AGENT_TASK_MAX_FILES` | same | 64 MB, 512 MB, 300 | Upload limits per file and per task |
+| `RUNNER_KIT_DIR`, `RUNNER_COMPLETE_DIR`, `RUNNER_INSTALLER_DIR` | `runner-kit.ts`, `runner-kit-complete.ts`, `runner-installer.ts` | under `dist/` | Where the built runner files are |
+| `RUNNER_KIT_RATE_PER_MINUTE` | `routes/runner-kits.ts` | 5 | Downloads a person may make per minute |
+| `RUNNER_UPDATE_PUBLIC_KEYS` | `runner-update.ts` | none | Extra update keys, for runners built with another key |
+
+On the runner, `AITP_*` variables (`src/agent/config.ts`, `--help`) mirror its command-line options.
 
 ## Decisions and their reasons
 
-Taken on 2026-11-07.
-
 | # | Decision | Reason |
 |---|---|---|
-| 1 | The hosted platform runs tests only on runners (`EXECUTION_MODE=runners`). A dispatch worker in the API process hands jobs to runners, several at once. "This server" is not offered. | Customer test code on the shared server could read the server's secrets. The worker that existed ran one job at a time and lived only where tests also ran on the server. |
-| 2 | Two kinds of runner: team runners as today, and personal runners owned by one person, who may be a tester. A personal runner takes only its owner's runs and schedules. At most 5 per person. | Testers need to run tests on their own computer without an administrator. One person's computer must never run another person's work. |
-| 3 | Each project has "Allow people's own computers", on by default, changed with `project.settings`. | The project's test accounts reach the owner's computer. A project owner who does not accept that can switch it off, and the help text says so plainly. |
-| 4 | Code scripts run on a personal runner by default; the owner can switch that off. Team runners keep `--allow-custom-scripts`, plus an admin switch on the runner. Never on Crowd4Test shared runners. | On their own computer a person already runs the project's code. A machine that serves many customers must not run one customer's code. The switch lets installed team runners opt in without editing a start command. |
-| 5 | A personal runner refuses private and local addresses by default; the owner can allow them. | A test should not reach into the tester's home or office network by surprise. |
-| 6 | Single-use enrollment codes, 30 minutes, traded for the credential at first contact. Rotation every 30 days with a 24-hour overlap. | A download sitting in a Downloads folder must not be a working credential. Rotation limits how long a copied credential is useful. |
-| 7 | The credential is kept in DPAPI (Windows), the login Keychain (macOS), a 0600 file (Linux). | It protects against other users and a copied disk. The documents say plainly that it does not protect against programs of the same user. |
-| 8 | A per-user background agent that starts at sign-in, on by default. No SYSTEM service, no LaunchDaemon. Headed runs only where a display exists. | Session 0 and daemons have no desktop, and a service would run customer code with full rights. |
-| 9 | Transport stays HTTPS long-poll. Protocol 2 is additive: attempt ids, accept and reject, idempotent results, typed live events. Protocol-1 agents keep working. | See below. |
-| 10 | Updates must carry an Ed25519 signature checked against a key pinned in the runner. No signing key, no update offers. | A checksum from the same server cannot stop a compromised server from pushing code to every tester's computer. |
-| 11 | OS code signing steps are built but gated on secrets that may be absent. Unsigned notices stay. | No certificates bought yet. The build must not fail without them, and people must be told the truth. |
-| 12 | One active job per runner by default, configurable 1 to 8. | A tester's computer is also their work computer. The setting exists already (`--concurrency`, `src/agent/config.ts:237-239`). |
+| 1 | The hosted platform runs tests only on runners (`EXECUTION_MODE=runners`); a dispatch worker in the API process hands jobs to them. | Customer test code on the shared server could read the server's secrets. |
+| 2 | One runner per person, used automatically for everything they start; no picker, no team or shared runners. A schedule or deploy trigger runs on its creator's runner and waits for it. | People run tests on their own computer without an administrator, and one person's computer never runs another person's work. One answer to "where does this run" is easier to understand and to keep secure. |
+| 3 | Code scripts run on a person's runner by default; the owner can switch that off in Settings. | On their own computer a person already runs the project's code. |
+| 4 | Private and local addresses are refused by default; the owner can allow them. | A test should not reach into the person's home or office network by surprise. |
+| 5 | Single-use enrollment codes, 30 minutes, traded for the credential at first contact. Rotation every 30 days with a 24-hour overlap. | A download in a Downloads folder must not be a working credential. |
+| 6 | The credential is kept in DPAPI (Windows), the login Keychain (macOS), a 0600 file (Linux). | It protects against other users and a copied disk, not against programs of the same user. |
+| 7 | A per-user background program that starts at sign-in. No SYSTEM service, no LaunchDaemon. | Session 0 and daemons have no desktop, and a service would run customer code with full rights. |
+| 8 | Transport stays HTTPS long-poll. Protocol 2 is additive; protocol-1 runners keep working. | See below. |
+| 9 | Updates must carry an Ed25519 signature checked against a key pinned in the runner. | A checksum from the same server cannot stop a compromised server from pushing code to every person's computer. |
+| 10 | One active job per runner by default, configurable 1 to 8 (`--concurrency`). | A person's computer is also their work computer. |
 
 ### Why HTTPS long-poll and not WebSocket
 
@@ -277,20 +239,9 @@ Taken on 2026-11-07.
 
 ## What this design does not cover yet
 
-- S3 storage and time-limited links (not built).
-- PostgreSQL for the runner tables: the schema is ready, the stores still use the synchronous database interface (not built in this round).
-- AI authoring and exploring on runners: refused in `runners` mode (not built).
-- Run sequences (runbooks) across a restart: a sequence is not resumed. At a deploy it ends as interrupted while the test run of its current step, when it already runs on a runner, carries on and finishes (runs on runners themselves survive a deploy or restart and are picked up again: `docs/features/runner-restarts.md`).
-- The agent's own version: still the constant `"1.0.0"` in `src/agent/config.ts`; a downloaded runner reports its `kitVersion`.
-- OS-level isolation of test processes (sandbox, separate user): not built. Tests run with the rights of the person's account.
+- S3 storage and time-limited links.
+- PostgreSQL for the runner tables (and dropping the unused ones above).
+- AI authoring and exploring on runners: refused in `runners` mode.
+- Run sequences (runbooks) across a restart: a sequence is not resumed; the test run of its current step, when it already runs on a runner, carries on (`docs/features/runner-restarts.md`).
+- OS-level isolation of test processes (sandbox, separate user): tests run with the rights of the person's account.
 - A real pass on Windows 10/11 and on Macs with Apple chip and Intel: see `MANUAL_VERIFICATION.md`.
-
-## Round 45 (2026-11-11): one runner per person
-
-This document describes rounds 39 to 44 as they were built. Round 45 replaced the team and shared runners with one simple model; where the text above says otherwise, this section wins.
-
-- **One runner per person**, set up once in Settings (`#/settings#runner`) and used for every run that person starts, in every project they may run tests in. Setting up a computer again retires the person's earlier credential; there is no cap list (the 5-computer cap is gone).
-- **Removed:** team runners, Crowd4Test's shared runner, project runner tokens and kits (`/api/projects/:id/agent-tokens*`, `/runner-kits*`), runner access (`/runner-access*`, `runner_access`), the per-run choice (`/runner-choices`, `runnerId` is accepted and ignored), the project's pinned runner (`runner_settings.agent_id`), the project switch "Allow people's own computers" (`allow_personal`) and the `/api/runners*` fleet routes. The tables and columns stay; nothing reads them. A team or project credential installed before is refused at every runner route with HTTP 401 and a sentence sending its person to Settings (the runner stops, exit code 3).
-- **Routing by owner only:** a run is its starter's (a schedule's or deploy trigger's: its creator's; on an open server: the server's single owner, `"open"`). The claim itself checks the owner. A person's run is refused up front when their runner is not set up or offline (`RUNNER_NOT_SET_UP`, `RUNNER_OFFLINE`, `RUNNER_CANNOT_RUN`); a schedule's or trigger's run waits for the computer. Runs started with the server's shared access key have no owner and are refused.
-- **Kept:** protocol 1 and 2 with attempts and hand-over, device reservations, signed updates, the server execution guard, machine binding, rotation, the private-address and owner-only rules, `maySeeSession`. The wire format is unchanged (`/api/agent/*`, hello's `projectId` string, `runner.kind` "personal").
-- **New routes:** `GET/PATCH /api/me/runner`, `POST /api/me/runner/retire`, `/update`, `GET /api/me/runner/enrollments/:id`, `POST /api/me/runner/download`; admins: `GET /api/admin/runners`, `POST /api/admin/runners/:id/retire`. Migration 55 records who made each deploy trigger token.

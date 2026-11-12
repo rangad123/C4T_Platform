@@ -1,3 +1,5 @@
+> Archived round history, not the current design: see `../RUNNER_ARCHITECTURE.md` (one runner per person).
+
 # Local runner: current state audit
 
 - **Date:** 2026-11-07.

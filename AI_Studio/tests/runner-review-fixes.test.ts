@@ -138,7 +138,7 @@ describe("review fixes", () => {
         finishJob(byTom.body.jobId);
 
         // Naming Tess's computer for it does not help either (round 45: a chosen runner is ignored): the run is Tom's.
-        expect(svc().jobContext(byTom.body.jobId).ownerId).toBe(ids["t-tom"]);
+        expect(svc().jobStarter(byTom.body.jobId).ownerId).toBe(ids["t-tom"]);
 
         // Tess's own Run now still goes to her computer; the schedule still names her.
         writeHeartbeat(platform.db);

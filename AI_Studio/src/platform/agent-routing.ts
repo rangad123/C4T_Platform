@@ -134,8 +134,8 @@ export function capabilityProblem(adapter: { id: string; label?: string; runtime
         const w = caps.windows;
         if (caps.os !== "win32") return "it is not a Windows computer";
         if (!w?.uiautomation) return "Windows UI Automation is not available on it";
-        if (w.elevated) return "the agent runs as administrator, and desktop tests do not run elevated (restart it as a normal user)";
-        if (w.interactive === false) return "it has no interactive desktop session (start the agent from a signed-in Windows session, not a service)";
+        if (w.elevated) return "the runner runs as administrator, and desktop tests do not run elevated (restart it as a normal user)";
+        if (w.interactive === false) return "it has no interactive desktop session (start the runner from a signed-in Windows session, not a service)";
     }
     return undefined;
 }

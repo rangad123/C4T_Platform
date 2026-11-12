@@ -17,6 +17,7 @@ import { isAppUri } from "../../engine/desktop/target.js";
 import { getAgentServices } from "../agent-services.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
 import { currentActor, sideOf } from "../auth/actor.js";
+import { ownerIdOfActor } from "../agent-store.js";
 import { C4T_SERVICE_OFF, c4tServiceOf, clientIpOf, type C4tOrganisation } from "../c4t-service.js";
 import type { Platform } from "../bootstrap.js";
 import type { Row } from "../db.js";
@@ -133,7 +134,7 @@ export function registerProjectSettingsRoutes(ctx: RouteCtx): void {
                 hasIosApp: Boolean(m?.iosBundleId),
                 canRunIos: runner.canRunIos,
                 aiConfigured: (await projectAiGate(p, id)).ok,
-                runner: runner.runOn === "platform" ? { runOn: "platform" } : { runOn: "agent", online: agents.eligibleAgents(id).length },
+                runner: runner.runOn === "platform" ? { runOn: "platform" } : { runOn: "agent", online: agents.ownRunner(ownerIdOfActor(currentActor()), id)?.online ? 1 : 0 },
                 runsHere: runsCanStartHere(p).ok,
             }),
         };

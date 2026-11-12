@@ -120,9 +120,10 @@ export function TestDevelopmentPage() {
     );
 }
 
-/** The Android emulator on the platform's own computer (Settings; it was on the Runners page until round 45). */
+/** The Android emulator on the platform's own computer (Settings). Not in runners mode: the server never runs phone tests there. */
 export function MobileTooling() {
     const config = useConfig();
+    if (config?.executionMode === "runners") return null;
     return (
         <section className="card card-pad stack-sm" data-testid="mobile-tooling">
             <div className="row">

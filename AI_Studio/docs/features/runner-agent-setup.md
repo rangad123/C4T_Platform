@@ -75,7 +75,6 @@ Every option can also be set in the environment. The flag wins.
 | `--allow-insecure` | `AITP_AGENT_ALLOW_INSECURE=1` | Accept a plain `http://` platform address that is not on a private network. |
 | `--allow-app <program>` (repeatable) | `AITP_ALLOW_APPS` (separated by `;`) | A Windows application that desktop tests may start: a full path or a program name. Nothing is allowed by default. See "Windows desktop apps" below. |
 | `--allow-apps-file <file>` | `AITP_ALLOW_APPS_FILE` | The same list in a file, one entry per line (lines starting with `#` are comments). |
-| `--allow-custom-scripts` | `AITP_ALLOW_CUSTOM_SCRIPTS=1` | Run hand-written scripts (code people on the project wrote or imported). Off by default. See "Hand-written scripts" below. |
 | `--browser <auto\|bundled\|chrome\|msedge>` | `AITP_BROWSER` (or `"browser"` in a kit's runner.json) | Which browser web tests use. Default `auto`: Playwright's Chromium if it is installed, else the computer's Google Chrome, else Microsoft Edge, else Chromium is downloaded once. See [runner-browsers.md](runner-browsers.md). |
 | `--help`, `--version` | | |
 
@@ -197,8 +196,7 @@ Set `AITP_URL` and `AITP_AGENT_TOKEN_FILE` as user environment variables first (
 
 People on a project can take a generated test over and edit its script, write a test from scratch, or import tests from a Git repository (see `custom-scripts.md`). Those scripts are **code**, and the agent runs code with the rights of the user who started it: it can read that user's files and reach everything that computer can reach.
 
-- **Off by default.** An agent started without `--allow-custom-scripts` does not report the ability, is never offered a hand-written script, and refuses one with the plain message "This task has hand-written scripts, and this agent was not started with --allow-custom-scripts, so it did not run them." (an infrastructure message, never a failing test). Generated tests run on it as always.
-- **Switching it on is your decision.** Start the agent with `--allow-custom-scripts` (or `AITP_ALLOW_CUSTOM_SCRIPTS=1`) only when you trust everyone who can edit tests in the project. The agent prints a reminder at start-up, and the Agents page shows that it accepts them.
+- **Your switch in Settings decides.** "Code scripts" in Settings, Your runner, is on by default; switch it off and your runner is never offered a hand-written script, and refuses one with "This task has hand-written scripts, and code scripts are switched off for this runner, so it did not run them. Switch them on for your runner in Settings." (an infrastructure message, never a failing test). Generated tests run as always. Keep it on only when you trust everyone who can edit tests in your projects. The old `--allow-custom-scripts` flag is still accepted and changes nothing.
 - **A second check.** Before it runs a hand-written script or a shared helper, the agent runs the same static guard the platform uses on its own copy. A script that does not pass is not started. The guard catches accidents and obvious escapes; it is not a sandbox, which is why the switch above is the real boundary.
 - Helpers (`./helpers/<name>`) are written next to the scripts for that task only and removed with the task folder.
 

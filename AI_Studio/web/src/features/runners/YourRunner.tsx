@@ -7,15 +7,14 @@ import { relativeTime } from "../../lib/format";
 import { useFetch } from "../../lib/hooks";
 import { friendlyError } from "../../lib/labels";
 import { routes } from "../../lib/router";
-import { boldScripts } from "../agents/bold";
-import { RunnerCheckDetails, RunnerCheckNote } from "../agents/check";
-import { RunnerUpdates } from "../agents/updates";
+import { boldScripts } from "./bold";
+import { RunnerCheckDetails, RunnerCheckNote } from "./check";
+import { RunnerUpdates } from "./updates";
 import { RunnerSwitches } from "./RunnerSwitches";
-import { UnsignedNotice } from "./UnsignedNotice";
+import { StillBlocked } from "./StillBlocked";
 import { offlineSteps, STATUS_WORDS } from "./runners";
 import {
     ARCH_WORDS,
-    checkComputerHelp,
     clockTime,
     DownloadError,
     downloadMyRunner,
@@ -35,7 +34,7 @@ import {
     type RunnerMine,
     type RunnerOs,
 } from "./my-runner";
-import "../agents/agents.css";
+import "./runners.css";
 
 const POLL_MS = 3000;
 const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
@@ -52,7 +51,8 @@ const nodeOs = (os: string | null | undefined): RunnerOs | null => {
 /**
  * "Your runner" in Settings (`#/settings#runner`; docs/features/runner-settings.md). A runner is the program on your computer that runs
  * your tests: the person sets it up once here and every run they start, and their schedules, then go to it. States: not set up, waiting
- * for the computer, connected, offline, needs an update. People the server lets see every runner (canSeeEveryone) also see everyone's runners, and may remove one.
+ * for the computer, connected, offline, needs an update. People the server lets see every runner (canSeeEveryone) also get Everyone's runners,
+ * its own section below, where they may remove one.
  */
 export function YourRunnerSection() {
     const me = useMyRunner(5000);
@@ -69,6 +69,7 @@ export function YourRunnerSection() {
     }, [me.data]);
     const state = !me.data ? null : !runner ? "not-set-up" : runner.status;
     return (
+        <>
         <section className="card card-pad stack-sm" id="runner" aria-labelledby="runner-title" data-testid="your-runner" data-tour="your-runner" data-state={state ?? "loading"}>
             <div className="row">
                 <Laptop size={18} aria-hidden />
@@ -78,7 +79,13 @@ export function YourRunnerSection() {
                 <span className="spacer" />
                 {runner ? <Badge tone={STATUS_WORDS[runner.status].tone} tip={STATUS_WORDS[runner.status].tip}>{STATUS_WORDS[runner.status].label}</Badge> : me.data ? <Badge tone="warning">Not set up</Badge> : null}
             </div>
-            <p className="t-secondary">A runner is the program on your computer that runs your tests. Set it up once here: every run you start, and your schedules, then run on it.</p>
+            {runner && !settingUp ? (
+                <p className="t-secondary" data-testid="runner-head">
+                    <b>{runner.name}</b>, last heard from {runner.lastSeenAt ? relativeTime(runner.lastSeenAt) : "never"}.
+                </p>
+            ) : (
+                <p className="t-secondary">A runner is the program on your computer that runs your tests. Set it up once here: every run you start, and your schedules, then run on it.</p>
+            )}
             {me.loading && !me.data ? (
                 <Skeleton h={60} />
             ) : me.error && !me.data ? (
@@ -95,9 +102,10 @@ export function YourRunnerSection() {
             ) : (
                 <RunnerDetails runner={runner} onChanged={me.reload} onSetUpAgain={() => setSettingUp(true)} />
             )}
-            {/* Only for someone the server lets see every runner (platform admins and the like): a missing field means no, so nothing is polled. */}
-            {me.data?.canSeeEveryone === true && <EveryonesRunners mineId={runner?.id ?? null} />}
         </section>
+        {/* Only for someone the server lets see every runner (platform admins and the like): a missing field means no, so nothing is polled. */}
+        {me.data?.canSeeEveryone === true && <EveryonesRunners mineId={runner?.id ?? null} />}
+        </>
     );
 }
 
@@ -140,55 +148,52 @@ function RunnerDetails({ runner: r, onChanged, onSetUpAgain }: { runner: RunnerM
                     </div>
                 </Callout>
             )}
-            <div className="ag-facts" data-testid="runner-facts">
-                <span>
-                    Name <b>{r.name}</b>
-                </span>
-                {r.hostname && (
-                    <span>
-                        Computer <b>{r.hostname}</b>
-                    </span>
-                )}
-                {os && (
-                    <span>
-                        System <b>{OS_WORDS[os]}</b>
-                    </span>
-                )}
-                {r.arch && (
-                    <span>
-                        Processor <b>{r.arch}</b>
-                    </span>
-                )}
-                <span>
-                    Runner version <b>{r.version ?? "Unknown"}</b>
-                </span>
-                <span>
-                    Last heard from <b>{r.lastSeenAt ? relativeTime(r.lastSeenAt) : "Never"}</b>
-                </span>
-            </div>
             {r.currentRun && (
                 <p className="t-secondary" data-testid="runner-current">
                     Running now: <a href={routes.run(r.currentRun.projectId, r.currentRun.jobId)}>{r.currentRun.title}</a>
                 </p>
             )}
-            {r.network && (
-                <p className="t-secondary" data-testid="runner-network">
-                    {r.network}
-                </p>
-            )}
             {u && <RunnerUpdates name={r.name} update={u} version={r.version ?? undefined} online={r.status !== "offline"} onChanged={onChanged} />}
             <RunnerCheckNote check={r.check} name={r.name} />
-            {r.check && (
-                <details className="disclosure">
-                    <summary>
-                        <ChevronRight size={16} className="chev" aria-hidden />
-                        Check this computer
-                    </summary>
-                    <div className="inner">
-                        <RunnerCheckDetails check={r.check} />
+            <details className="disclosure" data-testid="runner-more">
+                <summary>
+                    <ChevronRight size={16} className="chev" aria-hidden />
+                    Details
+                </summary>
+                <div className="inner stack-sm">
+                    <div className="ag-facts" data-testid="runner-facts">
+                        {r.hostname && (
+                            <span>
+                                Computer <b>{r.hostname}</b>
+                            </span>
+                        )}
+                        {os && (
+                            <span>
+                                System <b>{OS_WORDS[os]}</b>
+                            </span>
+                        )}
+                        {r.arch && (
+                            <span>
+                                Processor <b>{r.arch}</b>
+                            </span>
+                        )}
+                        <span>
+                            Runner version <b>{r.version ?? "Unknown"}</b>
+                        </span>
                     </div>
-                </details>
-            )}
+                    {r.network && (
+                        <p className="t-secondary" data-testid="runner-network">
+                            {r.network}
+                        </p>
+                    )}
+                    {r.check && (
+                        <>
+                            <p className="t-card">Check this computer</p>
+                            <RunnerCheckDetails check={r.check} />
+                        </>
+                    )}
+                </div>
+            </details>
             <RunnerSwitches runner={r} onChanged={onChanged} />
             {renaming ? (
                 <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -280,32 +285,39 @@ function SetUpRunner({ replacing, onCancel, onConnected }: { replacing: RunnerMi
                 </Callout>
             )}
             {info.data?.urlOk === false && info.data.urlWarning && <Callout tone="warning">{info.data.urlWarning}</Callout>}
-            <fieldset className="ark-os">
-                <legend className="t-card">Your computer</legend>
-                <div className="row" style={{ gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-                    <div className="field">
-                        <label htmlFor="runner-os">System</label>
-                        <select id="runner-os" className="input" value={os} onChange={(e) => setOs(e.target.value as RunnerOs)}>
-                            {(Object.keys(OS_WORDS) as RunnerOs[]).map((o) => (
-                                <option key={o} value={o}>
-                                    {OS_WORDS[o]}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="field">
-                        <label htmlFor="runner-arch">Processor</label>
-                        <select id="runner-arch" className="input" value={arch} onChange={(e) => setArch(e.target.value as RunnerArch)}>
-                            {(["x64", "arm64"] as RunnerArch[]).map((a) => (
-                                <option key={a} value={a}>
-                                    {ARCH_WORDS[os][a]}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+            <details className="disclosure" data-testid="runner-other-computer">
+                <summary>
+                    <ChevronRight size={16} className="chev" aria-hidden />
+                    For another computer?
+                </summary>
+                <div className="inner">
+                    <fieldset className="ark-os">
+                        <legend className="sr-only">The computer the runner is for</legend>
+                        <div className="row" style={{ gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+                            <div className="field">
+                                <label htmlFor="runner-os">System</label>
+                                <select id="runner-os" className="input" value={os} onChange={(e) => setOs(e.target.value as RunnerOs)}>
+                                    {(Object.keys(OS_WORDS) as RunnerOs[]).map((o) => (
+                                        <option key={o} value={o}>
+                                            {OS_WORDS[o]}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="field">
+                                <label htmlFor="runner-arch">Processor</label>
+                                <select id="runner-arch" className="input" value={arch} onChange={(e) => setArch(e.target.value as RunnerArch)}>
+                                    {(["x64", "arm64"] as RunnerArch[]).map((a) => (
+                                        <option key={a} value={a}>
+                                            {ARCH_WORDS[os][a]}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    </fieldset>
                 </div>
-                <p className="t-meta">We guessed from this browser. Change it if the runner is for another computer.</p>
-            </fieldset>
+            </details>
             {refused ? (
                 <div data-testid="runner-download-refused">
                     <Callout tone="warning">{info.data?.refusal ?? "You cannot set up a runner here."}</Callout>
@@ -325,7 +337,7 @@ function SetUpRunner({ replacing, onCancel, onConnected }: { replacing: RunnerMi
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 {!refused && (
                     <Button variant="primary" icon={Download} loading={busy} disabled={!avail.ok} onClick={() => void download()}>
-                        Download the runner{avail.bytes ? ` (${sizeWords(avail.bytes)})` : ""}
+                        Download for {OS_WORDS[os]}{avail.bytes ? ` (${sizeWords(avail.bytes)})` : ""}
                     </Button>
                 )}
                 {onCancel && (
@@ -361,7 +373,6 @@ function WaitForComputer({ made, onConnected, onAgain }: { made: { os: RunnerOs 
                 ))}
             </ol>
             {how.command && <pre className="raw">{how.command}</pre>}
-            {made.os !== "linux" && <UnsignedNotice platform={made.os === "windows" ? "windows" : "unix"} />}
             {s === "expired" ? (
                 <Callout tone="warning" title="The code in that download has expired" actions={<Button size="sm" onClick={onAgain}>Download again</Button>}>
                     A download works once, for a short while. Download the runner again and start it soon after.
@@ -371,7 +382,7 @@ function WaitForComputer({ made, onConnected, onAgain }: { made: { os: RunnerOs 
                     Waiting for the computer to connect{made.expiresAt ? `. The code inside the download works once, until ${clockTime(made.expiresAt)}` : ""}.
                 </p>
             )}
-            <p className="t-meta">{boldScripts(checkComputerHelp(made.os))}</p>
+            <StillBlocked os={made.os} kind={made.kind} />
             <div>
                 <Button size="sm" variant="ghost" onClick={onAgain}>
                     Back
@@ -405,12 +416,11 @@ function EveryonesRunners({ mineId }: { mineId: string | null }) {
         }
     };
     return (
-        <details className="disclosure" data-testid="everyones-runners">
-            <summary>
-                <ChevronRight size={16} className="chev" aria-hidden />
+        <section className="card card-pad stack-sm" data-testid="everyones-runners" aria-labelledby="everyones-runners-title">
+            <h2 className="t-section" id="everyones-runners-title">
                 Everyone’s runners ({rows.length})
-            </summary>
-            <div className="inner stack-sm">
+            </h2>
+            <div className="stack-sm">
                 {note && <Callout tone={note.tone}>{note.text}</Callout>}
                 {rows.length > 0 && <BadgeKey label="the runner states" entries={(["online", "busy", "offline"] as const).map((k) => ({ word: STATUS_WORDS[k].label, text: STATUS_WORDS[k].tip }))} />}
                 {rows.length === 0 ? (
@@ -454,14 +464,16 @@ function EveryonesRunners({ mineId }: { mineId: string | null }) {
                     </ul>
                 )}
             </div>
-        </details>
+        </section>
     );
 }
 
-/** The Dashboard's line about the person's runner, with a link to Settings. */
+/** The Dashboard's line about the person's runner, with a link to Settings: only while it is not set up or offline (nothing to say otherwise). */
 export function YourRunnerCard() {
     const me = useMyRunner(15_000);
     const r = me.data?.runner ?? null;
+    // Nothing until the answer is in, so the card never shows and then disappears.
+    if (!me.error && (!me.data || (r && r.status !== "offline"))) return null;
     return (
         <section className="card card-pad stack-sm" data-testid="dashboard-runner" aria-labelledby="dashboard-runner-title">
             <div className="row">
@@ -470,16 +482,15 @@ export function YourRunnerCard() {
                 </h2>
                 <span className="spacer" />
                 {r && <Badge tone={STATUS_WORDS[r.status].tone}>{STATUS_WORDS[r.status].label}</Badge>}
-                <a href={routes.allRunners}>{r ? "Open Your runner" : "Set up your runner"}</a>
+                <a href={routes.yourRunner}>{r ? "Open Your runner" : "Set up your runner"}</a>
             </div>
             {!me.data ? (
-                me.error ? <ErrorState error={friendlyError(me.error.message)} onRetry={me.reload} /> : <Skeleton h={40} />
+                <ErrorState error={friendlyError(me.error!.message)} onRetry={me.reload} />
             ) : !r ? (
                 <p className="t-secondary">A runner is the program on your computer that runs your tests. Set it up once in Settings, and every run you start goes to it.</p>
             ) : (
                 <p className="t-secondary">
-                    {r.name}
-                    {r.status === "offline" ? `: offline${r.lastSeenAt ? ` since ${relativeTime(r.lastSeenAt)}` : ""}. Start it on your computer to run tests.` : r.status === "busy" ? ": running tests now." : ": online and ready."}
+                    {r.name}: offline{r.lastSeenAt ? ` since ${relativeTime(r.lastSeenAt)}` : ""}. Start it on your computer to run tests.
                 </p>
             )}
         </section>

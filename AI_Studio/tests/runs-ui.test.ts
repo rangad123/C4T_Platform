@@ -8,7 +8,7 @@
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- node node_modules/vitest/vitest.mjs run tests/runs-ui.test.ts
  * Screenshots go to .scratch/ux-a/shots (light and dark, 1280 and 390).
- * Ports: platform 8789, fixture app 8790.
+ * Ports: platform 9023, fixture app 9024.
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -25,8 +25,8 @@ import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { planSentence, ranSentence, runCountsLine, runningLine, stopQuestion, stoppedLine } from "../web/src/features/runs/run-text.js";
 
-const PORT = 8789;
-const APP_PORT = 8790;
+const PORT = 9023;
+const APP_PORT = 9024;
 const BASE = `http://127.0.0.1:${PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const SHOTS = path.join(REPO_ROOT, ".scratch", "ux-a", "shots");
@@ -287,7 +287,8 @@ describe("the Run panel", () => {
         await testsPage();
         await page.getByRole("button", { name: "Run", exact: true }).click();
         // Local mode, the project runs on this server.
-        await pwExpect(panel().getByTestId("run-where")).toHaveText("Runs on this server.");
+        await pwExpect(panel().getByTestId("run-sentence")).toContainText("on this server");
+        await pwExpect(panel().getByTestId("run-where")).toHaveCount(0);
         await pwExpect(panel().getByRole("radio", { name: "This server" })).toHaveCount(0);
         await pwExpect(panel().getByRole("radio", { name: /Maya's laptop/ })).toHaveCount(0);
         await page.keyboard.press("Escape");
@@ -296,7 +297,6 @@ describe("the Run panel", () => {
         runner.runOn = "agent";
         await testsPage();
         await page.getByRole("button", { name: "Run", exact: true }).click();
-        await pwExpect(panel().getByTestId("run-where")).toHaveText("Runs on Maya's laptop (online).");
         await pwExpect(panel().getByTestId("run-sentence")).toHaveText("Runs 1 test on the project’s runner. Results replace the last results of these tests.");
         await panel().getByRole("button", { name: "Start run" }).click();
         await pwExpect(strip()).toBeVisible({ timeout: 30_000 });

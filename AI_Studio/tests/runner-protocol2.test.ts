@@ -29,7 +29,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "p2-admin-key-7d1e40";
 const PASSWORD = "P2-Pass word/9&x";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "AGENT_ACCEPT_SECONDS", "AGENT_MAX_TOKENS", "BLOCK_PRIVATE_TARGETS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "AGENT_ACCEPT_SECONDS", "BLOCK_PRIVATE_TARGETS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 const caps = { os: "linux", arch: "x64", node: "v24.0.0", browsers: ["chromium"] };
 
@@ -115,7 +115,7 @@ function realAgent(token: string, name: string, extra: Partial<ConstructorParame
 }
 
 beforeAll(async () => {
-    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "60", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "20", AGENT_ACCEPT_SECONDS: "2", AGENT_MAX_TOKENS: "20" });
+    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "60", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "20", AGENT_ACCEPT_SECONDS: "2" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     appServer = http.createServer((req, res) => {

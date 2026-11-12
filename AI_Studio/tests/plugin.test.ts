@@ -258,7 +258,7 @@ describe("adapter plug-ins switched on (ALLOW_ADAPTER_PLUGINS=true with an API k
         svc.store.setRunner(projectId, { runOn: "agent", agentId: null });
         try {
             const attempt = create({ mode: "validate", testIds: [tests.list] });
-            await expect(attempt()).rejects.toThrow(/runs on the platform computer only: runner agents do not have plug-ins. This project runs its tests on a runner agent/);
+            await expect(attempt()).rejects.toThrow(/runs on the platform computer only: runners do not have plug-ins. This project runs its tests on runners/);
         } finally {
             svc.store.setRunner(projectId, { runOn: "platform", agentId: null });
         }

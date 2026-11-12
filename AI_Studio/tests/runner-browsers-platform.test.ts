@@ -19,7 +19,7 @@ import { defaultCaps, FakeAgent, passedRun, viaInject } from "./fixtures/fake-ag
 
 const API_KEY = "br-admin-key-6e21c0f4";
 const APP = "http://127.0.0.1:6935";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "AGENT_MAX_TOKENS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 const EDGE = { name: "msedge" as const, version: "155.0.4283.62", source: "installed" as const };
 
@@ -41,7 +41,7 @@ const connect = async (projectId: string, name: string, caps: Capabilities) => {
 const svc = () => getAgentServices(platform);
 
 beforeAll(async () => {
-    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "5", AGENT_WATCH_MS: "50", AGENT_NO_AGENT_GRACE_SECONDS: "5", AGENT_MAX_TOKENS: "25" }); // one project, several runners
+    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "5", AGENT_WATCH_MS: "50", AGENT_NO_AGENT_GRACE_SECONDS: "5" }); // one project, several runners
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-browsers-platform-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, LLM_PROVIDER: "anthropic", CONCURRENCY: "1", MAX_REPAIR_ATTEMPTS: "0" }));
     server = await buildServer(platform);

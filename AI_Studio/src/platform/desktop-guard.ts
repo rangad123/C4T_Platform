@@ -27,7 +27,7 @@ export function desktopApps(specs: readonly TestSpec[]): string[] {
 export function hostDesktopProblem(apps: readonly string[], opts: { platform?: NodeJS.Platform; allow?: readonly string[] } = {}): string | undefined {
     if (apps.length === 0) return undefined;
     const platform = opts.platform ?? process.platform;
-    if (platform !== "win32") return "Windows desktop tests need a Windows computer, and this platform runs on another system. Connect a runner agent on a Windows computer and choose it for this project.";
+    if (platform !== "win32") return "Windows desktop tests need a Windows computer, and this platform runs on another system. Set up your runner on a Windows computer in Settings.";
     // The probe runs in the background the first time; once it has an answer, a non-interactive or elevated session is refused here.
     if (opts.platform === undefined) {
         const known = lastProbe();

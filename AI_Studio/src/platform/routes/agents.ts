@@ -1,8 +1,8 @@
 /**
- * Runner agent routes.
+ * Runner routes.
  *
  * Project routes (API key or a person, like every other route): the caller's own runner as the project sees it, where a project's tests run.
- * Agent routes (/api/agent/*, the six of the protocol): no API key, the agent token is the credential. The server's API-key hook skips
+ * Runner routes (/api/agent/*, the six of the protocol): no API key, the agent token is the credential. The server's API-key hook skips
  * exactly those six (see agent-routing.ts) and EVERY handler registered below authenticates with the token first (one hook on the
  * encapsulated scope, so a handler cannot forget). An API key is never accepted instead of the token.
  */
@@ -131,8 +131,11 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
     const svc = getAgentServices(p);
     const updates = runnerUpdatesFor(p);
 
-    // ── a project's view of where its tests run (round 45: the caller's own runner; no project runners, tokens or pins) ──
-    /** The caller's own computer as a list of at most one (the shape the project pages read), never anyone else's. */
+    // ── a project's view of where its tests run (the caller's own runner) ──
+    /**
+     * The caller's own computer as a list of at most one, with its raw capabilities, never anyone else's. The website reads GET /api/me/runner
+     * (with `can`) instead; this stays for the integration tests that check what a runner reported.
+     */
     app.get("/api/projects/:id/agents", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
@@ -341,7 +344,7 @@ export function registerAgentRoutes(ctx: RouteCtx): void {
                         ...(declared > 0 ? { size: declared } : {}),
                         // The platform's own hash is the truth; a client claim that disagrees means the bytes were damaged on the way, and the file is not kept.
                         verify: (r) => {
-                            if (claimed && claimed !== r.sha256) throw new HttpError(400, "The uploaded bytes do not match the hash the agent announced.");
+                            if (claimed && claimed !== r.sha256) throw new HttpError(400, "The uploaded bytes do not match the hash the runner announced.");
                         },
                     });
                 } catch (e) {

@@ -15,7 +15,8 @@ import { customPolicyFor } from "../src/platform/custom-policy.js";
 import { buildServer } from "../src/platform/server.js";
 import { writeHeartbeat } from "../src/platform/ops/heartbeat.js";
 import { jobOwnerId, OPEN_OWNER_ID } from "../src/platform/agent-store.js";
-import { runAs } from "../src/platform/auth/actor.js";
+import { runAs, type Actor } from "../src/platform/auth/actor.js";
+import { seesEveryRunner } from "../src/platform/runner-health.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import type { JobOptions } from "../src/platform/repo.js";
 import { ScheduleStore } from "../src/platform/schedule-store.js";
@@ -134,9 +135,9 @@ describe("who a run belongs to", () => {
             const { record } = svc().store.createPersonalToken({ ownerId: owner, label: "Off PC", createdBy: "test" });
             const agent = svc().store.upsertAgent(record, { name: "off-pc", version: "1", capabilities: defaultCaps({ runnerSwitches: true }), concurrency: 1 });
             platform.db.run("UPDATE agents SET last_seen_ms = 0 WHERE id = ?", agent.id);
-            expect(customPolicyFor(platform, projectId, { ownerId: owner })).toEqual({ allowed: true });
+            expect(customPolicyFor(platform, projectId, owner)).toEqual({ allowed: true });
             svc().store.setTokenSwitches(record.id, { allowCodeScripts: false });
-            const off = customPolicyFor(platform, projectId, { ownerId: owner });
+            const off = customPolicyFor(platform, projectId, owner);
             expect(off.allowed).toBe(false);
             expect(!off.allowed && off.message).toMatch(/code scripts are switched off on your runner/);
         } finally {
@@ -234,5 +235,15 @@ describe("who a run belongs to", () => {
         } finally {
             platform.db.run("DELETE FROM users WHERE id IN ('u-maker', 'u-clicker')");
         }
+    });
+});
+
+describe("who sees everyone's runners (one rule for GET /api/admin/runners and the page's canSeeEveryone)", () => {
+    const everywhere = { allowed: () => null };
+    const admin = (permissions: string[]) => ({ kind: "user" as const, id: "u1", name: "Ada", role: "owner" as const, side: "admin" as const, permissions: new Set(permissions) }) as unknown as Actor;
+    it("needs the route's permission, a platform admin too", () => {
+        expect(seesEveryRunner(everywhere, admin(["ai_studio.runners.manage"]))).toBe(true);
+        expect(seesEveryRunner(everywhere, admin([]))).toBe(false);
+        expect(seesEveryRunner(everywhere, { kind: "key", name: "Access key", role: "owner" } as Actor)).toBe(false);
     });
 });

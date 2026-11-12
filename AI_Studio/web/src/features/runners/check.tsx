@@ -3,8 +3,8 @@
  * things need a look and lists them with how to fix each; Show details lists every line.
  */
 import { relativeTime } from "../../lib/format";
-import type { RunnerCheck } from "./agents";
-import "./check.css";
+import type { RunnerCheck } from "./runners";
+import "./runners.css";
 
 const STATUS: Record<RunnerCheck["items"][number]["status"], string> = { ok: "OK", missing: "Needs a look", optional: "Optional" };
 

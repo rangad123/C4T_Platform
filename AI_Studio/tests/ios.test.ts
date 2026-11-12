@@ -28,7 +28,7 @@ const FAKE_TAQWRIGHT = path.join(REPO_ROOT, "tests/fixtures/fake-taqwright.mjs")
 const FAKE_XCRUN = path.join(REPO_ROOT, "tests/fixtures/fake-xcrun.mjs");
 const XCRUN_STATE = path.join(os.tmpdir(), "aitp-fake-xcrun-state.json");
 const OBSERVED = path.join(os.tmpdir(), "aitp-fake-taqwright-observed.json");
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "AGENT_MAX_TOKENS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 const U_NEW = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA";
@@ -111,7 +111,7 @@ const iosSpec = (title: string, text: string, extra: Record<string, unknown> = {
 
 beforeAll(async () => {
     // Several runners in one project here; the one-runner default is covered in runner-limit-unit.test.ts.
-    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "3", AGENT_MAX_TOKENS: "25" });
+    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "3" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-ios-int-"));

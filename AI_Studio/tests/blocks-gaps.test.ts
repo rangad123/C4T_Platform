@@ -389,8 +389,8 @@ describe("4. a plug-in framework test that uses a block of API steps", () => {
             const app = platform.repo.getLatestApplicationPublic(pid)!;
             const attempt = () => platform.repo.createJob(pid, app.id as string, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [testId] } as never);
             await expect(attempt()).rejects.toThrow(HttpError);
-            await expect(attempt()).rejects.toThrow(/plug-in framework "Node HTTP check \(example plug-in\)" \(node-http-check\), which runs on the platform computer only: runner agents do not have plug-ins/);
-            await expect(attempt()).rejects.toThrow(/This project runs its tests on a runner agent\. Run the project on the platform computer, or move these tests to another project\./);
+            await expect(attempt()).rejects.toThrow(/plug-in framework "Node HTTP check \(example plug-in\)" \(node-http-check\), which runs on the platform computer only: runners do not have plug-ins/);
+            await expect(attempt()).rejects.toThrow(/This project runs its tests on runners\. Run the project on the platform computer, or move these tests to another project\./);
             // and the same sentence reaches the person who presses Run again
             const run = await call("POST", `/api/tests/${testId}/validate`, {});
             expect(run.status).toBe(409);

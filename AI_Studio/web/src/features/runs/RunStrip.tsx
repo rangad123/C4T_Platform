@@ -14,8 +14,8 @@ import "./runs.css";
 
 const STATE_ICON = { waiting: Clock, running: LoaderCircle, passed: CircleCheck, failed: CircleX, finding: TriangleAlert, not_run: Minus } as const;
 const SHOWN = 50;
-/** The strip's word for a runner's task that is not running its tests yet, or is sending results (nothing while it runs). */
-const STRIP_PHASE: Partial<Record<TaskPhase, string>> = { queued: "Waiting for a runner", assigned: "Offered to the runner", accepted: "Accepted by the runner", preparing: "Getting ready", uploading: "Sending results" };
+/** The strip's word for a runner's task that is not running its tests yet (nothing once it runs). */
+const STRIP_PHASE: Partial<Record<TaskPhase, string>> = { queued: "Waiting for the runner", assigned: "Waiting for the runner", accepted: "Waiting for the runner", preparing: "Getting ready" };
 
 /** The tests of a run, one row each: state, title (a link), time. At most `SHOWN` until asked for more. `live`: what the runner reported so far. */
 export function RunTestList({ tests, onlyId, live }: { tests: RunAnswer["tests"]; onlyId?: string; live?: LiveRun }) {

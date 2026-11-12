@@ -6,13 +6,15 @@ import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { normalizeUrl } from "../../lib/url";
 import { viewerIsRemote } from "../../lib/viewer";
-import { usePolled, type RunnerChoice } from "../agents/agents";
+import type { RunnerChoice } from "../runners/runners";
+import { reloadMyRunner, useReadiness } from "../runners/my-runner";
+import { RunnerNotReady } from "../runs/RunnerNotReady";
 import type { Environment } from "../environments/environments";
-import { activeSessionId, agentRecordProblem, rememberSession, rememberedSession, type RecorderAgent, type Recording } from "./recorder";
+import { activeSessionId, rememberSession, rememberedSession, type Recording } from "./recorder";
 import { api, ApiError } from "../../api";
 import { describeApiError } from "../../lib/labels";
 
-/** The first screen: where to start, whether to show the window, and a warning about typing real data. */
+/** The first screen: where to start, where the window opens, and a warning about typing real data. */
 export function StartForm({ projectId, initialUrl, onStarted, onResume }: { projectId: string; initialUrl?: string; onStarted: (r: Recording) => void; onResume: (rid: string) => void }) {
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
     const envs = useFetch<{ environments: Environment[] }>(`/projects/${projectId}/environments`);
@@ -20,7 +22,6 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
 
     const [url, setUrl] = useState(initialUrl ?? "");
     const [touched, setTouched] = useState(!!initialUrl);
-    const [headed, setHeaded] = useState(true);
     const [environment, setEnvironment] = useState("");
     const [confirmProduction, setConfirmProduction] = useState(false);
     const [urlError, setUrlError] = useState("");
@@ -36,32 +37,17 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
 
     const chosen = environments.find((e) => e.name === environment);
 
-    // Recording on a runner agent: offered only when some agent of the project can record, so a project without one sees today's form.
-    const agentsFetch = usePolled<RecorderAgent[]>(`/projects/${projectId}/agents`);
-    const agents = Array.isArray(agentsFetch.data) ? agentsFetch.data : [];
-    const offered = agents.some((a) => a.capabilities?.record === true);
-    const runner = useFetch<RunnerChoice>(offered ? `/projects/${projectId}/runner` : null);
-    const [picked, setPicked] = useState<"platform" | "agent" | null>(null); // null until the person chooses: then the project's setting decides
-    const [agentPick, setAgentPick] = useState("");
-    const runOn = offered ? (picked ?? (runner.data?.runOn === "agent" ? "agent" : "platform")) : "platform";
-    // Selectable agents first (online ones before the rest), each with the reason when it cannot be used now.
-    const listed = [...agents]
-        .map((a) => ({ a, why: agentRecordProblem(a, headed) }))
-        .sort((x, y) => Number(!!x.why) - Number(!!y.why) || Number(y.a.online) - Number(x.a.online));
-    const usable = listed.filter((x) => !x.why).map((x) => x.a);
-    const agent =
-        runOn === "agent"
-            ? (usable.find((a) => a.id === agentPick) ?? usable.find((a) => a.id === runner.data?.agentId) ?? usable[0])
-            : undefined;
-    // An agent without a display cannot show the window: the box is shown unchecked and locked, with the reason.
-    const noDisplay = !!agent && agent.capabilities.recordHeaded === false;
-    const headedNow = noDisplay ? false : headed;
+    // Runners mode: always the person's own runner (the server picks it). Local mode: where the project runs its tests.
+    const ready = useReadiness({ can: ["recordHeaded"] });
+    const runnersOnly = ready.mode === "runners";
+    const projectRunner = useFetch<RunnerChoice>(runnersOnly ? null : `/projects/${projectId}/runner`);
+    const onRunner = runnersOnly || projectRunner.data?.runOn === "agent";
+    const blocked = runnersOnly && (ready.loading || !ready.ready);
 
     async function start(e: React.FormEvent) {
         e.preventDefault();
         setProblem(null);
         setActive(null);
-        if (runOn === "agent" && !agent) return setProblem({ tone: "warning", title: "No runner can record right now", text: "Pick a runner that is online and can record, or choose This server." });
         const typed = url.trim();
         let address: string | undefined;
         // An environment supplies the address unless the person typed a different page of it.
@@ -75,17 +61,18 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
         if (chosen?.production && !confirmProduction) return setProblem({ tone: "warning", title: "Confirm before recording on a live site", text: "Tick the box under the environment to say you know what you click is really done there." });
         setBusy(true);
         try {
-            const rec = await api<Recording>(`/projects/${projectId}/recordings`, { method: "POST", body: { url: address, headed: headedNow, ...(environment ? { environment, ...(chosen?.production ? { confirmProduction: true } : {}) } : {}), ...(runOn === "agent" && agent ? { on: "agent", agentId: agent.id } : {}) } });
+            const rec = await api<Recording>(`/projects/${projectId}/recordings`, { method: "POST", body: { url: address, headed: true, ...(environment ? { environment, ...(chosen?.production ? { confirmProduction: true } : {}) } : {}) } });
             rememberSession(projectId, rec.id);
             onStarted(rec);
         } catch (err) {
             const details = err instanceof ApiError ? (err.body?.details as { code?: unknown; link?: unknown } | undefined) : undefined;
             if (err instanceof ApiError && err.status === 409 && typeof details?.code === "string" && details.code.startsWith("RUNNER_")) {
                 // The person's runner is not set up, is offline, or may not record this: the server's sentence, with a link to Settings.
-                setProblem({ tone: "warning", text: err.message, link: typeof details.link === "string" && details.link.startsWith("#/") ? details.link : routes.allRunners });
+                setProblem({ tone: "warning", text: err.message, link: typeof details.link === "string" && details.link.startsWith("#/") ? details.link : routes.yourRunner });
+                void reloadMyRunner();
             } else if (err instanceof ApiError && err.status === 409) {
                 const id = activeSessionId(err) ?? rememberedSession(projectId);
-                setActive({ id, text: id ? err.message : `${err.message} It was not started from this browser tab, so we can’t open it from here. Stop it on the computer that runs the platform, then start again.` });
+                setActive({ id, text: id ? err.message : `${err.message} It was not started from this browser tab, so we can’t open it from here. Stop it on ${onRunner ? "your runner’s computer" : "the computer that runs the platform"}, then start again.` });
             } else if (err instanceof ApiError && err.status === 422) {
                 setProblem({ tone: "warning", title: "We can’t open the browser window", text: err.message });
             } else {
@@ -101,7 +88,7 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
             <div className="stack-sm">
                 <h2 className="t-section">Record by clicking through your application</h2>
                 <p className="t-secondary">
-                    {agent ? "We open a browser window on the runner’s computer." : "We open a browser window on the computer that runs this platform."} Click through your application as a user would. We write down each step.
+                    {onRunner ? "We open a browser window on your runner’s computer." : "We open a browser window on the computer that runs this platform."} Click through your application as a user would. We write down each step.
                 </p>
             </div>
 
@@ -126,63 +113,25 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
                 </Callout>
             )}
 
-            {runOn === "platform" && viewerIsRemote() && (
+            {runnersOnly && !problem && <RunnerNotReady reason={ready.reason} testId="rec-runner-problem" />}
+            {runnersOnly && ready.ready && ready.runner && (
+                <p className="t-secondary" data-testid="rec-on-hint">
+                    The window opens on your runner, {ready.runner.name}, not on this computer.
+                </p>
+            )}
+
+            {!onRunner && !projectRunner.loading && viewerIsRemote() && (
                 <Callout
                     tone="warning"
                     title="This opens the browser on the platform’s computer, not on yours"
                     actions={
-                        <Button type="button" size="sm" onClick={() => (location.hash = routes.allRunners)}>
+                        <Button type="button" size="sm" onClick={() => (location.hash = routes.yourRunner)}>
                             Set up your runner
                         </Button>
                     }
                 >
                     You are using the platform from another computer. A recording window would appear on the computer that runs the platform, where you cannot click in it.
-                    {offered ? " Choose A runner under Record on, to record on a computer that has one." : " To record on your own computer, set up your runner in Settings, then come back and choose it here."}
                 </Callout>
-            )}
-
-            {offered && !runner.loading && (
-                <div className="field rec-on" role="radiogroup" aria-labelledby="rec-on-label" aria-describedby="rec-on-hint">
-                    <span className="label" id="rec-on-label">
-                        Record on
-                    </span>
-                    <label className="check rec-check">
-                        <input type="radio" name="rec-on" value="platform" checked={runOn === "platform"} onChange={() => setPicked("platform")} />
-                        <span>
-                            <span className="title">This server</span>
-                        </span>
-                    </label>
-                    <label className="check rec-check">
-                        <input type="radio" name="rec-on" value="agent" checked={runOn === "agent"} onChange={() => setPicked("agent")} />
-                        <span>
-                            <span className="title">A runner</span>
-                        </span>
-                    </label>
-                    {runOn === "agent" && (
-                        <div className="field">
-                            <label htmlFor="rec-agent">Runner</label>
-                            <select id="rec-agent" className="input" value={agent?.id ?? ""} onChange={(e) => setAgentPick(e.target.value)}>
-                                {!agent && <option value="">No runner can record right now</option>}
-                                {listed.map(({ a, why }) => (
-                                    <option key={a.id} value={a.id} disabled={!!why}>
-                                        {why ? `${a.name} (${why})` : a.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-                    <p className="hint" id="rec-on-hint" data-testid="rec-on-hint">
-                        {agent
-                            ? headedNow
-                                ? `The browser window opens on ${agent.name}, not on this computer.`
-                                : `The browser runs on ${agent.name} without showing a window.`
-                            : runOn === "agent"
-                              ? "Start a runner that can record, or choose This server."
-                              : headedNow
-                                ? "The browser window opens on the computer that runs this platform."
-                                : "The browser runs on this server without showing a window."}
-                    </p>
-                </div>
             )}
 
             <div className="field">
@@ -209,7 +158,7 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
                     </p>
                 ) : (
                     <p className="hint" id="rec-url-hint">
-                        {agent ? "We open this address from the runner’s computer, so it can be a private address." : "The page the browser opens first."}
+                        {onRunner ? "We open this address from your runner’s computer, so it can be a private address." : "The page the browser opens first."}
                     </p>
                 )}
             </div>
@@ -240,21 +189,13 @@ export function StartForm({ projectId, initialUrl, onStarted, onResume }: { proj
                 </label>
             )}
 
-            <label className="check rec-check">
-                <input type="checkbox" checked={headedNow} disabled={noDisplay} onChange={(e) => setHeaded(e.target.checked)} />
-                <span>
-                    <span className="title">Show the browser window</span>
-                    <span className="hint">{noDisplay ? `${agent!.name} has no display, so it can’t show the window.` : "Turn this off only for scripted runs. You need the window to click in."}</span>
-                </span>
-            </label>
-
             <p className="rec-warn">
                 <TriangleAlert size={16} aria-hidden />
                 <span>Don’t type real personal data or secrets while recording. Password fields are never recorded.</span>
             </p>
 
             <div>
-                <Button type="submit" variant="primary" icon={Circle} loading={busy}>
+                <Button type="submit" variant="primary" icon={Circle} loading={busy} disabled={blocked}>
                     Start recording
                 </Button>
             </div>

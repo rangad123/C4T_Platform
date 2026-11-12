@@ -29,7 +29,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const API_KEY = "device-agent-admin-key-5d21";
 const SHOP = "com.example.shop";
 const PASS = "Fake-Pass-1234-Zq";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "BLOCK_PRIVATE_TARGETS", "AGENT_MAX_TOKENS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "BLOCK_PRIVATE_TARGETS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 let platform: Platform;
@@ -123,7 +123,7 @@ const by = (s: ScreenSnapshot, f: (e: ScreenSnapshot["elements"][number]) => boo
 const host = (projectId: string, over: Record<string, unknown> = {}) => ({ agents: getAgentServices(platform), projectId, startedBy: OPEN_OWNER_ID, ...over });
 
 beforeAll(async () => {
-    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "30", AGENT_WATCH_MS: "100", AGENT_MAX_TOKENS: "25" });
+    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "30", AGENT_WATCH_MS: "100" });
     delete process.env.BLOCK_PRIVATE_TARGETS;
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-devagent-"));

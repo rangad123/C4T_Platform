@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { getAgentServices } from "../agent-services.js";
 import { ownerIdOfActor } from "../agent-store.js";
+import { runnersOnly } from "../runner-only.js";
 import { SEVERITIES } from "../../engine/validation/severity.js";
 import { ALERT_EVENTS, API_DRIFT_EVENT, type AlertChannel } from "../alerts.js";
 import { assertSmtpHostAllowed, fromInput, mergeSmtp, NO_MAIL_SERVER_MESSAGE, publicSmtp, Recipients, serverSmtp, SmtpInput, SmtpPatch } from "../alert-email.js";
@@ -20,6 +22,8 @@ import { detectFlaky, getRunSummary, trendsFor } from "../trends.js";
 import type { RouteCtx } from "./types.js";
 
 const MAX_SCHEDULES = 10;
+/** EXECUTION_MODE=runners: an "Explore again" schedule would fail at every fire (exploring needs a browser on the server). */
+export const EXPLORE_SCHEDULE_REFUSED = "Schedules here can only re-run tests: exploring needs a browser on the server, and this platform runs tests only on runners.";
 const MAX_CHANNELS = 10;
 
 const KIND_LABEL = { validate: "Re-run all tests", generate: "Analyze again" } as const;
@@ -112,6 +116,7 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
     };
     /** Refuse a schedule that could never run, with the reason in plain words (as its maker's runs: their runner, their code tests). */
     const assertRunnable = async (projectId: string, kind: Schedule["kind"]) => {
+        if (kind === "generate" && runnersOnly(p.config)) throw new HttpError(409, EXPLORE_SCHEDULE_REFUSED);
         if (!repo.getLatestApplicationPublic(projectId)) throw new HttpError(409, "This project has no application yet. Run an analysis first.");
         if (kind === "validate" && (await runnableTestIds(repo, projectId, "validate", ownerIdOfActor(currentActor()))).length === 0) throw new HttpError(409, "This project has no tests that can be run yet.");
     };
@@ -139,7 +144,13 @@ export function registerScheduleRoutes(ctx: RouteCtx): void {
         if (!repo.getLatestApplicationPublic(projectId)) throw new HttpError(409, "This project has no application yet. Run an analysis first.");
         if (su.testCount === 0) throw new HttpError(409, `The suite “${su.name}” has no tests yet.`);
     };
-    const pub = async (s: Schedule) => ({ ...publicSchedule(s), ...scheduleEnvironment(repo.db, s.id), ...runbookOf(s.id), ...(await suiteOf(s.id)) });
+    const agents = getAgentServices(p);
+    /** Whose runner the schedule's runs go to, by name (never an email): "Runs on {ownerName}'s runner". */
+    const ownerNameOf = (s: Schedule) => {
+        const name = s.createdBy ? agents.personName(s.createdBy) : undefined;
+        return name ? { ownerName: name } : {};
+    };
+    const pub = async (s: Schedule) => ({ ...publicSchedule(s), ...ownerNameOf(s), ...scheduleEnvironment(repo.db, s.id), ...runbookOf(s.id), ...(await suiteOf(s.id)) });
     /** An environment run needs an environment that exists, and a production one needs the owner's confirmation. */
     const checkScheduleEnvironment = (projectId: string, kind: Schedule["kind"], name: string, confirm: boolean | undefined) => {
         if (kind !== "validate") throw new HttpError(400, "Only “Re-run all tests” schedules can run against an environment.");

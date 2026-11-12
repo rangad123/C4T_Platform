@@ -1,9 +1,9 @@
 /**
- * Recording on a runner agent, the platform side: which machine records, the task that asks an agent to record, the remote driver that
+ * Recording on a runner, the platform side: which machine records, the task that asks an agent to record, the remote driver that
  * mirrors the agent's session for the web page, and the rules for everything the agent pushes (it is semi-trusted: every push is untrusted input).
  *
  * How a record task differs from a run task (the protocol is the same queue):
- *  - `adapter_id` is `record:<agentId>`, so only the agent the recording was started on is offered it (a project may have several agents);
+ *  - `adapter_id` is `record:<agentId>`, so only the runner the recording was started on is offered it;
  *  - `job_id` is `rec-<recordingId>`: there is no job. Nothing that lists or cancels jobs matches it; the lease sweep fails such a task instead of
  *    re-offering it (a recording cannot move to another computer);
  *  - the agent pushes the whole recording state (RecordingPush) and receives the page's commands in the heartbeat reply.
@@ -76,7 +76,7 @@ export const visibleHosts = <T extends SessionHost>(agents: T[], callerId: strin
 
 /**
  * May this person read or drive a session? A session on a person's own computer is its starter's alone (anyone else is told "not found",
- * like an id that does not exist); a session on a team runner or on the platform follows the project's rules, as before.
+ * like an id that does not exist); a session on the platform follows the project's rules.
  */
 export function maySeeSession(session: { onPersonalRunner: boolean; startedBy: string | null } | undefined, callerId: string | null): boolean {
     if (!session?.onPersonalRunner) return true;
@@ -88,44 +88,45 @@ export function callerIdOf(actor: { kind: string; id?: string | undefined }): st
     return ownerIdOfActor(actor);
 }
 
-/** Why an agent cannot host this recording, in words for the person, or undefined when it can. */
+/** Why a runner cannot host this recording, in words for the person, or undefined when it can. */
 export function recordProblem(agent: Pick<AgentRecord, "name" | "capabilities">, headed: boolean): string | undefined {
     const c = agent.capabilities;
-    if (c.record !== true) return `${agent.name} can't record: it has no Chromium browser installed (run “npx playwright install chromium” on it), or its agent program is too old to record. Update it, or record on the platform.`;
-    if (headed && c.recordHeaded !== true) return `${agent.name} has no display, so it can't show the browser window. Turn off “Show the browser window”, or use another agent.`;
+    if (c.record !== true) return `${agent.name} can't record: it has no Chromium browser installed (run “npx playwright install chromium” on it), or its runner program is too old to record. Update the runner.`;
+    if (headed && c.recordHeaded !== true) return `${agent.name} has no screen to show the recording window on. Start the runner from a signed-in desktop session.`;
     return undefined;
 }
 
 /**
- * Where does a new recording run? Pure: the decision table of the start route. `agents` comes from sessionHosts (the caller's own computers and
- * the project's team runners); another person's computer is never chosen, named or not (it answers "not found").
- *  - `on` absent: the agent when the project's runner setting is "agent", else the platform (today's behaviour);
- *  - `on: "platform"`: always the platform; `on: "agent"`: an online agent of the project that can record (the one named, or the one the project
- *    is pinned to, or the best of the online ones), otherwise a plain refusal naming what is missing.
+ * The caller's own runner for a session, or the refusal: not set up, offline, can't (`problem`), or ok. `hosts` comes from sessionHosts (online
+ * first, most recent first: a person from before one runner per person may still have two). A named machine must be one of them, else "not found".
+ */
+export function ownHostFor<T extends SessionHost>(hosts: T[], problem: (host: T) => string | undefined, opts: { agentId?: string | undefined; notYours: string; offlineHint?: string }): T {
+    if (opts.agentId && !hosts.some((h) => h.id === opts.agentId)) throw new HttpError(404, opts.notYours);
+    const host = opts.agentId ? hosts.find((h) => h.id === opts.agentId)! : hosts[0];
+    if (!host) throw runnerRefusal("RUNNER_NOT_SET_UP", RUNNER_NOT_SET_UP);
+    if (!host.online) throw runnerRefusal("RUNNER_OFFLINE", opts.offlineHint ? `${RUNNER_OFFLINE} ${opts.offlineHint}` : RUNNER_OFFLINE);
+    const why = problem(host);
+    if (why) throw new HttpError(422, why);
+    return host;
+}
+
+/**
+ * Where does a new recording run? Pure: the decision table of the start route. `agents` comes from sessionHosts (the caller's own computer);
+ * another person's computer is never chosen, named or not (it answers "not found").
+ *  - `on` absent: the runner when the project's runner setting is "agent", else the platform;
+ *  - `on: "platform"`: the platform (refused in `runners` mode); `on: "agent"`: the caller's own runner (ownHostFor).
  */
 export function chooseRecorder(input: { on?: "platform" | "agent"; agentId?: string; headed: boolean; runner: RunnerSetting; agents: SessionHost[]; caller?: string | null }): RecorderChoice {
-    const agents = visibleHosts(input.agents, input.caller);
     const target = input.on ?? (input.runner.runOn === "agent" ? "agent" : "platform");
     // EXECUTION_MODE=runners: nothing is started on the server, even when asked for by name (runner-only.ts).
     if (target === "platform" && input.runner.runnersOnly) throw new HttpError(409, ON_SERVER_REFUSED("Recording"), { executionMode: "runners" });
     if (target === "platform") return { kind: "platform" };
-    // Round 45: the caller's own runner; a project pins none.
-    const wanted = input.agentId ?? undefined;
-    if (wanted) {
-        const agent = agents.find((a) => a.id === wanted);
-        if (!agent) throw new HttpError(404, "That runner is not yours. Recordings open on your own runner.");
-        if (!agent.online) throw runnerRefusal("RUNNER_OFFLINE", RUNNER_OFFLINE);
-        const why = recordProblem(agent, input.headed);
-        if (why) throw new HttpError(422, why);
-        return { kind: "agent", agent };
-    }
-    const online = agents.filter((a) => a.online);
-    if (agents.length === 0) throw runnerRefusal("RUNNER_NOT_SET_UP", RUNNER_NOT_SET_UP);
-    if (online.length === 0) throw runnerRefusal("RUNNER_OFFLINE", input.runner.runnersOnly ? RUNNER_OFFLINE : `${RUNNER_OFFLINE} Or record on the platform instead.`);
-    const capable = online.filter((a) => !recordProblem(a, input.headed));
-    if (capable.length === 0) throw new HttpError(422, recordProblem(online[0]!, input.headed)!);
-    capable.sort((a, b) => (a.activeTasks ?? 0) - (b.activeTasks ?? 0));
-    return { kind: "agent", agent: capable[0]! };
+    const agent = ownHostFor(visibleHosts(input.agents, input.caller), (a) => recordProblem(a, input.headed), {
+        agentId: input.agentId,
+        notYours: "That runner is not yours. Recordings open on your own runner.",
+        ...(input.runner.runnersOnly ? {} : { offlineHint: "Or record on the platform instead." }),
+    });
+    return { kind: "agent", agent };
 }
 
 /**
@@ -277,7 +278,7 @@ export interface RemoteInit {
 }
 
 /** Said when a session on an agent is driven step by step but the agent does not know how. */
-export const TOO_OLD_TO_DRIVE = "This agent is too old to be driven step by step. Update the runner agent, or open the session on the platform.";
+export const TOO_OLD_TO_DRIVE = "This runner is too old to be driven step by step. Update the runner.";
 const LIVE_WAIT_MS = 30_000;
 
 const stepKey = (s: RecStep): string => `${s.at}|${s.kind}|${locatorKey(s.locator)}`;

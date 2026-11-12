@@ -13,12 +13,14 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TaskOffer } from "../src/agent-protocol/schema.js";
 import { loadConfig } from "../src/config.js";
-import { getAgentServices, KEY_HAS_NO_RUNNER, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, TEAM_RUNNER_REFUSED } from "../src/platform/agent-services.js";
-import { hashToken, newAgentToken } from "../src/platform/agent-store.js";
+import { getAgentServices, KEY_HAS_NO_RUNNER, noRunnerWaitMs, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, TEAM_RUNNER_REFUSED } from "../src/platform/agent-services.js";
+import { hashToken, newAgentToken, QUEUE_MAX_MS } from "../src/platform/agent-store.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { runAs } from "../src/platform/auth/actor.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
 import type { JobOptions } from "../src/platform/repo.js";
+import { getScheduleServices } from "../src/platform/schedule-services.js";
+import { farmStoreFor } from "../src/platform/device-farm-run.js";
 import { buildServer } from "../src/platform/server.js";
 import { defaultCaps, FakeAgent, viaFetch } from "./fixtures/fake-agent.js";
 
@@ -145,6 +147,17 @@ describe("one runner per person", () => {
         const r = (await as("t-tess", "GET", "/api/me/runner")).body.runner;
         expect(r).toMatchObject({ id: tess.runnerId, status: "online", os: "linux", arch: "x64", switches: { codeScripts: true, privateTargets: false, realPhone: false } });
         expect(typeof r.lastSeenAt).toBe("string");
+        // `can`: what it can start now, in the words the server's up-front refusals use.
+        const name = r.hostname as string;
+        expect(r.can).toEqual({
+            web: { ok: true },
+            phone: { ok: false, why: "Your runner cannot run phone tests: it has no Android tools (adb) installed." },
+            ios: { ok: false, why: expect.stringMatching(new RegExp(`^iOS tests need a runner on a Mac with Xcode\\. Your runner “${name}” can't run them: `)) },
+            windows: { ok: false, why: "Your runner cannot run desktop tests: it is not a Windows computer." },
+            record: { ok: false, why: expect.stringMatching(new RegExp(`^${name} can't record: `)) },
+            recordHeaded: { ok: false, why: expect.stringMatching(new RegExp(`^${name} can't record: `)) },
+            phoneSession: { ok: false, why: expect.stringMatching(new RegExp(`^${name} can't be used to explore a phone: `)) },
+        });
         expect((await as("t-tess", "GET", `/api/me/runner/enrollments/${tess.enrollmentId}`)).body).toEqual({ status: "connected" });
         // Another person's code is "not found".
         expect((await as("t-tom", "GET", `/api/me/runner/enrollments/${tess.enrollmentId}`)).status).toBe(404);
@@ -211,9 +224,67 @@ describe("one runner per person", () => {
         platform.repo.setJobStatus(job.id, "COMPLETED");
     });
 
+    it("a project on a device farm: Android tests need no adb on the runner (the farm runs them); without the farm they do; still a person's run", async () => {
+        const phone = (owner: string | null) => ({ maxPages: 1, maxDepth: 1, maxScenarios: 1, targets: ["mobile"], allowMutatingApiTests: false, ...(owner ? { startedBy: { kind: "user", id: owner } } : {}) }) as JobOptions;
+        // Tess's runner reports no Android tools.
+        expect(refusal(() => svc().assertJobAllowed(projectId, phone(ids["t-tess"]!)))).toMatchObject({ code: "RUNNER_CANNOT_RUN", message: "Your runner cannot run phone tests: it has no Android tools (adb) installed." });
+        expect((await as("t-tess", "GET", `/api/projects/${projectId}/runner`)).body).toMatchObject({ canRunMobile: false });
+        const farms = farmStoreFor(platform.repo, platform.config);
+        const f = farms.create(projectId, { provider: "browserstack", label: "Team BS", devices: [{ name: "Google Pixel 8", osVersion: "14" }], username: "maya_ab12", accessKey: "bs-key-0123456789" });
+        farms.setChoice(projectId, { runOn: "farm", farmId: f.id, parallel: 1, matrix: false });
+        try {
+            expect(refusal(() => svc().assertJobAllowed(projectId, phone(ids["t-tess"]!))).message).toBe("");
+            expect((await as("t-tess", "GET", `/api/projects/${projectId}/runner`)).body).toMatchObject({ canRunMobile: true, phones: { canRun: true, text: "Phone tests run on the project's device farm." } });
+            // Still somebody's run, on a runner that is set up: the shared key's run and someone with no runner are refused as before.
+            expect(runAs({ kind: "key", name: "Access key", role: "owner" }, () => refusal(() => svc().assertJobAllowed(projectId, phone(null))))).toMatchObject({ message: KEY_HAS_NO_RUNNER });
+            expect(refusal(() => svc().assertJobAllowed(projectId, phone(ids["t-vic"]!)))).toMatchObject({ code: "RUNNER_NOT_SET_UP" });
+        } finally {
+            farms.setChoice(projectId, { runOn: "device", farmId: null, parallel: 1, matrix: false });
+            farms.delete(projectId, f.id);
+        }
+        expect(refusal(() => svc().assertJobAllowed(projectId, phone(ids["t-tess"]!)))).toMatchObject({ code: "RUNNER_CANNOT_RUN" });
+    });
+
+    it("dispatch: schedule runs waiting for a sleeping computer hold no place; a person's run on an online runner starts; past the queue limit they fail with the sentence", () => {
+        const insert = (startedBy: Record<string, unknown>, createdAt = new Date().toISOString()) => {
+            const id = randomUUID();
+            platform.db.run("INSERT INTO generation_jobs (id, project_id, application_id, status, options_json, progress_json, counters_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", id, projectId, appId, "QUEUED", JSON.stringify({ ...options(startedBy as JobOptions["startedBy"]), runOn: "agent" }), "{}", "{}", createdAt, createdAt);
+            return id;
+        };
+        const seen = platform.db.get<{ ms: number }>("SELECT last_seen_ms AS ms FROM agents WHERE token_id = ?", tess.runnerId)!.ms;
+        platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE token_id = ?", Date.now() - 10 * 60_000, tess.runnerId);
+        const made: string[] = [];
+        try {
+            const old = new Date(Date.now() - 1000).toISOString();
+            for (let i = 0; i < 9; i++) made.push(insert({ kind: "schedule", id: `s${i}`, ownerId: ids["t-tess"]! }, old));
+            const stale = insert({ kind: "trigger", id: "t1", ownerId: ids["t-tess"]! }, new Date(Date.now() - QUEUE_MAX_MS - 1000).toISOString());
+            const person = insert({ kind: "user", id: ids["t-tom"]! });
+            // Re-queued after a restart or a lost lease (claimed once, its runner task may still run): skipped, never failed, however old.
+            const requeued = insert({ kind: "schedule", id: "s-again", ownerId: ids["t-tess"]! }, new Date(Date.now() - QUEUE_MAX_MS - 1000).toISOString());
+            platform.db.run("UPDATE generation_jobs SET attempts = 1 WHERE id = ?", requeued);
+            made.push(stale, person, requeued);
+            const skip = svc().jobsWaitingForRunner();
+            expect(skip.sort()).toEqual([...made.slice(0, 9), requeued].sort());
+            expect(platform.repo.getJob(requeued)).toMatchObject({ status: "QUEUED" });
+            // The worker claims past them: the person's run starts although nine older schedule runs are queued.
+            expect(platform.repo.claimNextJob(60_000, "test-dispatch", ["validate", "variants", "environment"], skip)?.id).toBe(person);
+            expect(platform.repo.getJob(stale)).toMatchObject({ status: "FAILED", error: "tess Person's runner was offline or could not run these tests while this deploy trigger waited for it." });
+            // Back online: they are claimable again.
+            platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE token_id = ?", Date.now(), tess.runnerId);
+            expect(svc().jobsWaitingForRunner()).toEqual([]);
+            // ...and the re-queued one is the oldest the worker can take now.
+            expect(platform.repo.claimNextJob(60_000, "test-dispatch", ["validate", "variants", "environment"], [])?.id).toBe(requeued);
+        } finally {
+            platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE token_id = ?", seen, tess.runnerId);
+            for (const id of made) platform.db.run("DELETE FROM generation_jobs WHERE id = ?", id);
+        }
+    });
+
     it("offline: a person's run is refused up front; a schedule's waits for the computer", async () => {
         platform.db.run("UPDATE agents SET last_seen_ms = ? WHERE token_id = ?", Date.now() - 10 * 60_000, tess.runnerId);
-        expect((await as("t-tess", "GET", "/api/me/runner")).body.runner.status).toBe("offline");
+        const off = (await as("t-tess", "GET", "/api/me/runner")).body.runner;
+        expect(off.status).toBe("offline");
+        expect(Object.values(off.can)).toEqual(Array(7).fill({ ok: false, why: RUNNER_OFFLINE }));
         expect(refusal(() => gate(ids["t-tess"]!))).toMatchObject({ status: 409, message: RUNNER_OFFLINE, code: "RUNNER_OFFLINE" });
         // As the scheduler fires it (the "Schedule" actor); Run now is a person acting, and is told now like any run of theirs.
         const fired = runAs({ kind: "schedule", name: "Schedule", role: "editor" }, () => refusal(() => svc().assertJobAllowed(projectId, options({ kind: "schedule", id: "s1", ownerId: ids["t-tess"]! }))));
@@ -221,6 +292,35 @@ describe("one runner per person", () => {
         const clicked = runAs({ kind: "user", id: ids["t-tess"]!, name: "Tess", role: "editor" }, () => refusal(() => svc().assertJobAllowed(projectId, options({ kind: "schedule", id: "s1", ownerId: ids["t-tess"]! }))));
         expect(clicked).toMatchObject({ code: "RUNNER_OFFLINE" });
         await tess.agent!.hello({ machineId: tess.machineId });
+    });
+
+    it("the schedules list names whose runner each schedule runs on, by name and never by email", async () => {
+        const store = getScheduleServices(platform).store;
+        const made = store.create({ projectId, name: "Nightly", kind: "validate", cadence: { type: "daily", time: "03:00" }, createdBy: ids["t-tess"]! });
+        const nobody = store.create({ projectId, name: "Old", kind: "validate", cadence: { type: "daily", time: "04:00" } });
+        const listed = (await as("t-tess", "GET", `/api/projects/${projectId}/schedules`)).body.schedules as Array<{ id: string; ownerName?: string }>;
+        const name = platform.db.get<{ name: string }>("SELECT name FROM users WHERE id = ?", ids["t-tess"]!)!.name;
+        expect(name).not.toContain("@");
+        expect(listed.find((x) => x.id === made.id)?.ownerName).toBe(name);
+        expect(listed.find((x) => x.id === nobody.id)).not.toHaveProperty("ownerName");
+        // A name that is an email is never shown (signing in sets the name again, so this asks the rule directly).
+        platform.db.run("UPDATE users SET name = email WHERE id = ?", ids["t-tess"]!);
+        expect(svc().personName(ids["t-tess"]!)).toBeUndefined();
+        platform.db.run("UPDATE users SET name = ? WHERE id = ?", name, ids["t-tess"]!);
+        store.delete(made.id);
+        store.delete(nobody.id);
+    });
+
+    it("a schedule's or trigger's run waits for its owner's computer to the queue limit; a person's run keeps the short grace; one sentence", () => {
+        expect(noRunnerWaitMs("schedule", 90_000)).toBe(QUEUE_MAX_MS);
+        expect(noRunnerWaitMs("trigger", 90_000)).toBe(QUEUE_MAX_MS);
+        expect(noRunnerWaitMs("user", 90_000)).toBe(90_000);
+        expect(noRunnerWaitMs(undefined, 90_000)).toBe(90_000);
+        const jobId = randomUUID();
+        const t = new Date().toISOString();
+        platform.db.run("INSERT INTO generation_jobs (id, project_id, application_id, status, options_json, progress_json, counters_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", jobId, projectId, appId, "VALIDATING", JSON.stringify(options({ kind: "schedule", id: "s1", ownerId: ids["t-tess"]! })), "{}", "{}", t, t);
+        expect(svc().noRunnerSentence(jobId)).toMatch(/^tess Person's runner was offline or could not run these tests while this schedule waited for it\.$/);
+        platform.db.run("DELETE FROM generation_jobs WHERE id = ?", jobId);
     });
 
     it("nobody's run is refused with a sentence: the shared key, a schedule or a deploy trigger with no recorded owner", async () => {

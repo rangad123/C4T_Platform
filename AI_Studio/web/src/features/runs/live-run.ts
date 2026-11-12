@@ -20,8 +20,19 @@ import type { RunTest } from "./run-text.js";
 
 export type TaskPhase = "queued" | "assigned" | "accepted" | "preparing" | "running" | "uploading" | "completed" | "rejected" | "failed" | "cancelled" | "timed_out" | "lost_connection";
 export const TASK_PHASES: readonly TaskPhase[] = ["queued", "assigned", "accepted", "preparing", "running", "uploading", "completed", "rejected", "failed", "cancelled", "timed_out", "lost_connection"];
-/** The way a run normally goes, in order: the steps shown on the run page. */
-export const PHASE_STEPS: readonly TaskPhase[] = ["queued", "assigned", "accepted", "preparing", "running", "uploading", "completed"];
+/**
+ * The way a run normally goes, in the four steps the run page shows. The protocol's finer phases fold in: offered and accepted are
+ * still waiting for the runner, sending results is still running.
+ */
+export const LIVE_STEPS: ReadonlyArray<{ word: string; phases: readonly TaskPhase[] }> = [
+    { word: "Waiting for your runner", phases: ["queued", "assigned", "accepted"] },
+    { word: "Getting ready", phases: ["preparing"] },
+    { word: "Running", phases: ["running", "uploading"] },
+    { word: "Done", phases: ["completed"] },
+];
+/** The step of LIVE_STEPS a phase belongs to (-1: an ending that is not Done). */
+export const stepOf = (p: TaskPhase): number => LIVE_STEPS.findIndex((s) => s.phases.includes(p));
+/** The protocol's own word for each phase (the run's technical details). */
 export const PHASE_STEP_WORD: Record<TaskPhase, string> = {
     queued: "Queued",
     assigned: "Offered",
@@ -137,7 +148,7 @@ export interface LiveRun {
     lines: LiveLine[];
     shots: LiveShot[];
     failures: LiveFailure[];
-    /** The furthest step of PHASE_STEPS the events reached (-1: none), so a run that ended badly still shows how far it got. */
+    /** The furthest step of LIVE_STEPS the events reached (-1: none), so a run that ended badly still shows how far it got. */
     furthest: number;
     /** True when the runner sent step-level events (protocol 2); false for a runner that only sends text lines. */
     detailed: boolean;
@@ -196,7 +207,7 @@ export function foldLiveRun(events: readonly EventRow[]): LiveRun {
 
     for (const e of rows) {
         lastId = Math.max(lastId, e.id);
-        if (phase) furthest = Math.max(furthest, PHASE_STEPS.indexOf(phase));
+        if (phase) furthest = Math.max(furthest, stepOf(phase));
         const d = obj(e.data);
         if (e.kind.startsWith("runner_")) {
             const a = num(d.attempt) ?? str(d.attemptId) ?? null;
@@ -231,8 +242,8 @@ export function foldLiveRun(events: readonly EventRow[]): LiveRun {
                 if (!key) break;
                 startedAt ??= e.createdAt;
                 // A test started, so the runner is past getting ready (an ended phase stays: only a phase event moves it on).
-                const at = phase === null ? -1 : PHASE_STEPS.indexOf(phase);
-                if (phase === null || (at >= 0 && at < PHASE_STEPS.indexOf("running"))) phase = "running";
+                const at = phase === null ? -1 : stepOf(phase);
+                if (phase === null || (at >= 0 && at < stepOf("running"))) phase = "running";
                 const known = tests.find((x) => x.key === key);
                 // The same test started again (a retry of a failing test): it starts over.
                 if (known && known.status !== "running") tests = tests.filter((x) => x !== known);
@@ -314,7 +325,7 @@ export function foldLiveRun(events: readonly EventRow[]): LiveRun {
         shots,
         failures,
         detailed,
-        furthest: Math.max(furthest, phase ? PHASE_STEPS.indexOf(phase) : -1),
+        furthest: Math.max(furthest, phase ? stepOf(phase) : -1),
         lastId,
     };
 }

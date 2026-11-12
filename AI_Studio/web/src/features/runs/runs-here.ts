@@ -1,6 +1,5 @@
 import type { PlatformConfig } from "../../api.js";
-import { useConfig, type Fetched } from "../../lib/hooks.js";
-import { runnerProblem, useMyRunner, type MyRunnerAnswer, type RunnerMine } from "../runners/my-runner.js";
+import { useConfig } from "../../lib/hooks.js";
 
 /** Said before a click wherever a run or an exploration would start, while tests are switched off on this server (no worker). */
 export const RUNS_OFF_HERE = "Tests are switched off on this server, so no run starts here.";
@@ -40,46 +39,3 @@ export function codeScriptsNotice(authors: string[]): string {
 
 /** Runners mode, while the part of the platform that hands runs to runners is not running (the server says runs cannot start). */
 export const DISPATCH_OFF = "Runs can’t start right now: the part of this platform that hands runs to runners isn’t running. Try again in a few minutes.";
-/** The title over the "your runner can't take this" notice. */
-export const NO_RUNNER_TITLE = "Your runner can’t take runs right now";
-
-/** What a run needs from the runner that takes it. */
-export interface RunNeeds {
-    code: boolean;
-}
-export const NO_NEEDS: RunNeeds = { code: false };
-
-export interface RunReadiness {
-    mode: ExecutionMode;
-    /** Still asking (Run stays disabled in runners mode until the answer is in). */
-    loading: boolean;
-    /** A run started now has somewhere to go. */
-    ready: boolean;
-    /** Why not, in one sentence (null when ready). */
-    reason: string | null;
-    /** The person's runner (runners mode), null when not set up, undefined until known. */
-    runner: RunnerMine | null | undefined;
-}
-
-/**
- * Can this person start a run now? Local mode: when the server can run tests (as before). Runners mode: when the platform hands runs
- * out and the person's own runner is set up and connected (every run goes to its starter's runner; a busy one makes the run wait).
- */
-export function useRunReadiness(): RunReadiness {
-    const config = useConfig();
-    const mode = executionModeOf(config);
-    const me = useMyRunner(15_000, mode === "runners");
-    return readiness(mode, config, me);
-}
-
-export function readiness(mode: ExecutionMode, config: PlatformConfig | undefined, me: Pick<Fetched<MyRunnerAnswer>, "data" | "loading">, needs: Partial<RunNeeds> = {}): RunReadiness {
-    if (mode === "local") {
-        const off = config?.runsHere === false;
-        return { mode, loading: false, ready: !off, reason: off ? RUNS_OFF_TIP : null, runner: me.data?.runner };
-    }
-    if (config?.runsHere === false) return { mode, loading: false, ready: false, reason: DISPATCH_OFF, runner: me.data?.runner };
-    // The answer could not be read: the server decides at the click (and says why with a link to Settings).
-    if (!me.data) return { mode, loading: me.loading, ready: !me.loading, reason: null, runner: undefined };
-    const why = runnerProblem(me.data, needs);
-    return { mode, loading: false, ready: !why, reason: why, runner: me.data.runner };
-}

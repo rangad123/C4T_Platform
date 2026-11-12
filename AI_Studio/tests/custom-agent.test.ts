@@ -118,9 +118,9 @@ describe("the agent's command line", () => {
         // the existing options are untouched
         expect(parseAgentArgs([...base, "--allow-app", "calc.exe"], {})).toMatchObject({ kind: "run", config: { allowApps: ["calc.exe"] } });
     });
-    it("explains it in the help, and in what the agent reports about itself", () => {
-        expect(USAGE).toMatch(/--allow-custom-scripts/);
-        expect(USAGE).toMatch(/AITP_ALLOW_CUSTOM_SCRIPTS/);
+    it("is accepted but no longer in the help (the Settings switch decides); what the agent reports about itself still says so", () => {
+        expect(USAGE).not.toMatch(/--allow-custom-scripts/);
+        expect(USAGE).not.toMatch(/AITP_ALLOW_CUSTOM_SCRIPTS/);
         expect(describeCapabilities({ os: "linux", arch: "x64", node: "v24", browsers: ["chromium"], customScripts: true })).toMatch(/hand-written scripts: allowed/);
         expect(describeCapabilities({ os: "linux", arch: "x64", node: "v24", browsers: ["chromium"] })).not.toMatch(/hand-written/);
     });
@@ -152,7 +152,7 @@ describe("an agent started without --allow-custom-scripts", () => {
         const r = await fake.result(t.taskId);
         expect(r.ok).toBe(false);
         expect(r.error).toMatch(/hand-written scripts/);
-        expect(r.error).toMatch(/--allow-custom-scripts/);
+        expect(r.error).toMatch(/Switch them on for your runner in Settings/);
         expect(hitsOf("plain-refused")).toBe(before);
     }, 60_000);
 
@@ -196,9 +196,9 @@ describe("an agent started with --allow-custom-scripts", () => {
         await fake?.stop();
     });
 
-    it("reports the capability and says in its log that it runs hand-written code", () => {
+    it("reports the capability, and no longer warns about a flag that the Settings switch replaced", () => {
         expect(fake.hellos[0]!.capabilities.customScripts).toBe(true);
-        expect(a.lines.join("\n")).toMatch(/Hand-written scripts are allowed on this agent/);
+        expect(a.lines.join("\n")).not.toMatch(/--allow-custom-scripts/);
     });
 
     it("runs a custom script, with a helper written next to it", async () => {
@@ -267,13 +267,10 @@ describe("the real platform with real agents", () => {
         }
         throw new Error(`${name} did not come online`);
     };
-    let savedMaxTokens: string | undefined;
 
     beforeAll(async () => {
         Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "20", AGENT_WATCH_MS: "100", AGENT_NO_AGENT_GRACE_SECONDS: "5" });
         // Two runners in one project on purpose (with and without the flag); the one-runner default is covered in runner-limit-unit.test.ts.
-        savedMaxTokens = process.env.AGENT_MAX_TOKENS;
-        process.env.AGENT_MAX_TOKENS = "25";
         delete process.env.BLOCK_PRIVATE_TARGETS;
         for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
         dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-custom-agent-pf-"));
@@ -286,8 +283,6 @@ describe("the real platform with real agents", () => {
     }, 60_000);
     // A job can still be waiting for its agent when the tests end (lease 20 s): stopping the worker waits for it, so allow more than 30 s.
     afterAll(async () => {
-        if (savedMaxTokens === undefined) delete process.env.AGENT_MAX_TOKENS;
-        else process.env.AGENT_MAX_TOKENS = savedMaxTokens;
         await worker?.stop();
         await server?.close();
         platform?.db.close();

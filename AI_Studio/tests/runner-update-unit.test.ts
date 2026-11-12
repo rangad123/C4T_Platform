@@ -175,7 +175,7 @@ let versionB: string;
 let rows: ActivityRow[];
 let updates: RunnerUpdates;
 let db: Db;
-/** "Update automatically" off (0) or back to absent (on), as the earlier release's file could leave it: no route sets it any more. */
+/** An "update automatically" off (0) left by an earlier release: no longer read. */
 const setAuto = (on: Db, agentId: string, auto: boolean) =>
     on.run("INSERT INTO runner_update_settings (agent_id, auto, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET auto = excluded.auto", agentId, auto ? null : 0, new Date().toISOString());
 
@@ -189,7 +189,7 @@ beforeEach(() => {
     process.env.RUNNER_COMPLETE_DIR = path.join(platformDir, "no-complete");
     rows = [];
     db = new Db(path.join(platformDir, "platform.db"));
-    updates = new RunnerUpdates({ db, dataDir: platformDir, activity: (r) => rows.push(r), publicKeys: [TEST_PUB] });
+    updates = new RunnerUpdates({ db, activity: (r) => rows.push(r), publicKeys: [TEST_PUB] });
 });
 afterEach(() => {
     db.close();
@@ -217,28 +217,6 @@ describe("the protocol additions", () => {
 });
 
 describe("the platform's side", () => {
-    it("reads the settings file of an earlier release once into an empty table, and never writes a file", () => {
-        const dir = fresh("upgrade");
-        fs.writeFileSync(path.join(dir, "runner-updates.json"), JSON.stringify({ format: 1, agents: { old1: { auto: false, requestedAt: 1234, reported: "updated|x" }, old2: {} } }));
-        const upgraded = new Db(path.join(dir, "platform.db"));
-        try {
-            const first = new RunnerUpdates({ db: upgraded, dataDir: dir });
-            setAuto(upgraded, "old2", false);
-            const rows = upgraded.all<{ agent_id: string; auto: number | null; requested_at: number | null; reported: string | null }>("SELECT agent_id, auto, requested_at, reported FROM runner_update_settings ORDER BY agent_id");
-            expect(rows).toEqual([
-                { agent_id: "old1", auto: 0, requested_at: 1234, reported: "updated|x" },
-                { agent_id: "old2", auto: 0, requested_at: null, reported: null },
-            ]);
-            // A restart does not import again over what changed since; the file is left for a rollback and not rewritten.
-            setAuto(upgraded, "old1", true);
-            new RunnerUpdates({ db: upgraded, dataDir: dir });
-            expect(upgraded.get<{ auto: number | null }>("SELECT auto FROM runner_update_settings WHERE agent_id = 'old1'")!.auto).toBeNull(); // back on: absent, as in the file
-            expect(JSON.parse(fs.readFileSync(path.join(dir, "runner-updates.json"), "utf8")).agents.old1.auto).toBe(false);
-        } finally {
-            upgraded.close();
-        }
-    });
-
     it("offers its own bundle to a runner that can update and is on another version; never to one that cannot, or is current", () => {
         const kit = writeKit(bundleA, versionA);
         const { u } = runnerOn(kit);
@@ -266,18 +244,18 @@ describe("the platform's side", () => {
         for (const name of ["runner.json", "runner.token", "manifest.json", "update-manifest.json", "update-manifest.sig", "complete-win-x64-node_modules.json", "../x"]) expect(updates.file(name), name).toBeUndefined();
     });
 
-    it("keeps the setting per runner: off means only on request; a request is settled by the runner's report; Activity once per report", () => {
+    it("updates are always on here: an old \"update automatically\" off is not read; a request is settled by the runner's report; Activity once per report", () => {
         const kit = writeKit(bundleA, versionA);
         const { u } = runnerOn(kit);
         const agent = { id: "a2", name: "Maya", projectId: "p1", node: process.version, capabilities: caps(u, versionA) };
         setAuto(db, "a2", false);
-        expect(updates.wanted(agent)).toBeUndefined();
-        expect(updates.publicView(agent)).toMatchObject({ can: true, auto: false, outOfDate: true, latest: versionB, requested: false });
+        expect(updates.wanted(agent)).toBe("auto");
+        expect(updates.publicView(agent)).toMatchObject({ can: true, auto: true, outOfDate: true, latest: versionB, requested: false });
         updates.request("a2");
         expect(updates.wanted(agent)).toBe("requested");
-        // The setting survives a restart of the platform (a row in the database every process sees).
-        const again = new RunnerUpdates({ db, dataDir: platformDir, publicKeys: [TEST_PUB] });
-        expect(again.publicView(agent)).toMatchObject({ auto: false, requested: true });
+        // The request survives a restart of the platform (a row in the database every process sees).
+        const again = new RunnerUpdates({ db, publicKeys: [TEST_PUB] });
+        expect(again.publicView(agent)).toMatchObject({ auto: true, requested: true });
         // The runner reports a failure: one Activity row, the request is settled, the row says why.
         const at = new Date().toISOString();
         const failed = { ...agent.capabilities, update: { can: true, state: "failed" as const, to: versionB, error: "The file runner.mjs arrived damaged.", at } };
@@ -286,10 +264,10 @@ describe("the platform's side", () => {
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ action: "runner-update-failed", projectId: "p1", agentName: "Maya" });
         expect(rows[0]!.detail).toContain(`Still on version ${versionA}`);
-        expect(updates.wanted({ ...agent, capabilities: failed })).toBeUndefined();
-        expect(updates.publicView({ ...agent, capabilities: failed })).toMatchObject({ state: "failed", error: "The file runner.mjs arrived damaged." });
-        // Back on: automatic again. An "updated" report is one more row.
-        setAuto(db, "a2", true);
+        // Settled: back to the automatic offer (the runner's own backoff paces the retry).
+        expect(updates.wanted({ ...agent, capabilities: failed })).toBe("auto");
+        expect(updates.publicView({ ...agent, capabilities: failed })).toMatchObject({ state: "failed", error: "The file runner.mjs arrived damaged.", requested: false });
+        // An "updated" report is one more row.
         updates.observe(agent, { ...agent.capabilities, kitVersion: versionB, update: { can: true, state: "updated", from: versionA, to: versionB, at: new Date(Date.now() + 1000).toISOString() } });
         expect(rows.map((r) => r.action)).toEqual(["runner-update-failed", "runner-updated"]);
         expect(rows[1]!.detail).toBe(`Runner “Maya” updated itself from ${versionA} to ${versionB}.`);
@@ -723,7 +701,7 @@ describe("signed updates (round 39)", () => {
         fs.writeFileSync(path.join(bundleB, "manifest.json"), JSON.stringify(m));
         // Signed by a key the runner does not trust: refused, the program never ran.
         signBundle(bundleB, OTHER_PEM);
-        const lenient = new RunnerUpdates({ db, dataDir: platformDir, publicKeys: [OTHER_PUB] });
+        const lenient = new RunnerUpdates({ db, publicKeys: [OTHER_PUB] });
         const kit = writeKit(bundleA, versionA);
         const { u, log, agent } = runnerOn(kit);
         u.attach({ ...bridge(lenient, agent).client, updateOffer: async () => lenient.offer(agent()) } as unknown as PlatformClient, log);

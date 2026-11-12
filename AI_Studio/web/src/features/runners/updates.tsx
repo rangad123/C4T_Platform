@@ -5,7 +5,10 @@ import { ApiError, api } from "../../api";
 import { Button, Callout } from "../../components/ui";
 import { relativeTime } from "../../lib/format";
 import { describeApiError } from "../../lib/labels";
-import { NEEDS_MANUAL_UPDATE, type RunnerUpdateView } from "./agents";
+import type { RunnerUpdateView } from "./runners";
+
+/** What a runner whose update could not be checked shows. */
+const NEEDS_MANUAL_UPDATE = "An update is available but couldn't be checked on this computer. Download the runner again from Settings, Your runner.";
 
 /** "1.4.0 (3f2a9c81d0)" from a kit version "1.4.0+3f2a9c81d0". */
 export function versionWords(v: string | undefined): string {
@@ -39,9 +42,8 @@ export function updateSentence(u: RunnerUpdateView, current: string | undefined,
     if (!u.can) return { tone: "warning", text: `This platform runs runner version ${latest}. This runner cannot update itself (it was started from the project folder or from an older download). Set up this computer again from Settings to get updates.` };
     if (u.state === "preparing") return { tone: "info", text: `Updating to version ${latest}: downloading and checking. It takes no new tests until it has restarted.` };
     if (u.state === "ready") return { tone: "info", text: `Updating to version ${latest}: waiting for its running tests to finish, then it restarts.` };
-    if (!online) return { tone: "info", text: `Version ${latest} is available. ${u.auto || u.requested ? "It updates when it is next online." : "Choose Update now to install it."}` };
-    if (u.requested || u.auto) return { tone: "info", text: `Version ${latest} is available. It updates between tests.` };
-    return { tone: "info", text: `Version ${latest} is available. Choose Update now to install it.` };
+    // Updates are always on (the server sets every runner to update itself); Update now only brings it forward.
+    return { tone: "info", text: `Version ${latest} is available. ${online ? "It updates between tests." : "It updates when it is next online."}` };
 }
 
 /** The person's runner's updates in Settings: one sentence, and Update now while a newer version waits (POST /api/me/runner/update). */

@@ -4,7 +4,6 @@ import type { Job, TestSummary } from "../../api";
 import { LinkButton } from "../../components/ui";
 import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
-import { useMyRunner } from "../runners/my-runner";
 import { RunMenu } from "../runs/RunMenu";
 import "./onboarding.css";
 
@@ -19,7 +18,7 @@ interface Step {
 
 /**
  * What to do after the first tests exist, one action each. Every step ticks itself from what the platform already knows (a run
- * that happened, a schedule that exists, sign-in details that were saved, a runner that connected): nothing is stored for the list,
+ * that happened, a schedule that exists, sign-in details that were saved): nothing is stored for the list,
  * so it can never disagree with the project. A step that does not apply is not shown.
  */
 export function NextSteps({
@@ -41,11 +40,10 @@ export function NextSteps({
     explores?: boolean;
 }) {
     const jobs = useFetch<Job[]>(`/projects/${projectId}/jobs`);
-    const me = useMyRunner(0);
     const model = useFetch<{ authentication?: { required?: boolean } } | null>(`/projects/${projectId}/application-model`);
 
     // Until the facts are in, show nothing rather than a list that then changes under the person's eyes.
-    if (jobs.loading || me.loading || model.loading || scheduleCount === undefined) return null;
+    if (jobs.loading || model.loading || scheduleCount === undefined) return null;
 
     const ranAgain = (jobs.data ?? []).some((j) => j.mode === "validate" && ["COMPLETED", "PARTIALLY_COMPLETED", "FAILED"].includes(j.status));
     const needsSignIn = explores && model.data?.authentication?.required === true;
@@ -83,14 +81,6 @@ export function NextSteps({
             action: <LinkButton href={routes.requirements(projectId)} tip="Opens the Requirements tab. Sign-in details are under What the agents need; the next exploration uses them.">Add sign-in details</LinkButton>,
         });
     }
-    steps.push({
-        key: "runner",
-        done: Boolean(me.data?.runner),
-        title: "Set up your runner",
-        text: me.data?.runner ? "Your runner is set up." : "A runner is the program on your computer that runs your tests. Set it up once in Settings.",
-        action: <LinkButton href={routes.allRunners}>Set up your runner</LinkButton>,
-    });
-
     // Everything that applies is done: the list has nothing left to say.
     if (steps.every((s) => s.done)) return null;
     return (

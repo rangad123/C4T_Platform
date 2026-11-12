@@ -1,6 +1,6 @@
 /**
- * The live view of a run on a runner, in a real browser against a real platform: the task's phase, the runner (yours, with a link),
- * the test and step it is on, steps done, passed and failed so far, the failure text (its stack stays in the final result), a screenshot as it arrives and
+ * The live view of a run on a runner, in a real browser against a real platform: where the run is in four steps (a sentence only
+ * for a bad ending), the runner (yours, with a link, said once in About this run), the test and step it is on, passed and failed so far, the failure text (its stack stays in the final result), a screenshot as it arrives and
  * the runner's log, all as they happen (the run's live stream, no reload); a refresh mid-run rebuilds the same picture from the stored
  * events and keeps following; the strip on another page says where the run is; after the result, and when coming back later, the
  * final report. A protocol-1 runner (text lines only) is said to be one. Axe in light and dark, no sideways scroll at phone width.
@@ -12,7 +12,7 @@
  * Requires web/dist (build inside the browser lock):
  *   node scripts/with-lock.mjs browser -- node node_modules/vite/bin/vite.js build web
  *   node scripts/with-lock.mjs browser -- npx vitest run tests/run-live-ui.test.ts
- * Ports: platform 8784, the app under test 8785.
+ * Ports: platform 9021, the app under test 9022.
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -32,8 +32,8 @@ import { buildServer } from "../src/platform/server.js";
 import { Worker } from "../src/platform/worker.js";
 import { defaultCaps, failedRun, FakeAgent, passedRun, viaFetch } from "./fixtures/fake-agent.js";
 
-const PORT = 8784;
-const APP_PORT = 8785;
+const PORT = 9021;
+const APP_PORT = 9022;
 const BASE = `http://127.0.0.1:${PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 
@@ -182,6 +182,8 @@ const visit = async (hash: string) => {
     await page.goto(`${BASE}/${hash}`);
 };
 const panel = () => page.getByTestId("run-live");
+const about = () => page.getByRole("region", { name: "About this run" });
+const steps = () => panel().getByRole("list", { name: "Where the run is" });
 const row = (title: string) => page.locator(".run-tests .run-test", { hasText: title });
 const axe = async () => {
     for (const scheme of ["light", "dark"] as const) {
@@ -208,15 +210,18 @@ describe("a run on a runner, live", () => {
 
         await visit(`#/projects/${projectId}/runs/${jobId}`);
         await pwExpect(panel().getByRole("heading", { name: "Progress on the runner" })).toBeVisible({ timeout: 20_000 });
-        await pwExpect(panel().getByText("Your computer", { exact: true })).toBeVisible();
-        await pwExpect(panel().getByTestId("run-live-runner")).toHaveAttribute("href", "#/settings#runner");
-        await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("maya-laptop accepted the run.");
+        // The runner is named once, in About this run, not again in the runner's panel.
+        await pwExpect(about().getByText("Your computer", { exact: true })).toBeVisible();
+        await pwExpect(about().getByTestId("run-live-runner")).toHaveAttribute("href", "#/settings#runner");
+        await pwExpect(panel().locator("dl.run-facts")).toHaveCount(0);
+        await pwExpect(steps().locator("li")).toHaveText(["Waiting for your runner", "Getting ready", "Running", "Done"].map((w, i) => (i === 0 ? `${w} (now)` : w)));
+        // A run going well has no sentence repeating the steps.
+        await pwExpect(panel().getByTestId("run-live-phase")).toHaveCount(0);
         // Nothing below is a page load: the same document follows the run.
         await page.evaluate(() => ((window as unknown as { __same: number }).__same = 1));
 
         await maya.events({ type: "phase", phase: "preparing" });
-        await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("maya-laptop is getting ready: it fetches the tests and the files they need.");
-        await pwExpect(panel().getByRole("list", { name: "Where the run is" }).locator("[aria-current=step]")).toContainText("Getting ready");
+        await pwExpect(steps().locator("[aria-current=step]")).toContainText("Getting ready");
 
         await maya.events({ type: "phase", phase: "running" }, { type: "test_started", testId: "WEB-001", title: "Sign in" }, { type: "step_started", testId: "WEB-001", index: 0, title: "Open the shop" });
         await pwExpect(panel().getByTestId("run-live-current")).toHaveText("Sign in (WEB-001), step 1: Open the shop");
@@ -235,9 +240,8 @@ describe("a run on a runner, live", () => {
             { type: "test_finished", testId: "WEB-002", title: "Checkout", status: "failed", durationMs: 5100, error: "Timed out waiting for the Pay button", stack: "at checkout.spec.ts:12:5" },
             { type: "log", line: "Closing the browser" },
         );
-        await pwExpect(panel().getByTestId("run-live-counts")).toHaveText("1 passed, 1 failed");
-        await pwExpect(panel().getByTestId("run-live-steps")).toHaveText("2");
-        await pwExpect(panel().getByTestId("run-live-current")).toHaveText("Between tests");
+        await pwExpect(page.getByTestId("run-summary")).toHaveText("So far: 1 passed, 1 failed.");
+        await pwExpect(panel().getByTestId("run-live-current")).toHaveText("between tests");
         const failures = panel().getByTestId("run-live-failures");
         await pwExpect(failures).toContainText("Checkout (WEB-002)");
         await pwExpect(failures).toContainText("Step 1: Click Pay");
@@ -260,8 +264,8 @@ describe("a run on a runner, live", () => {
         await pwExpect(panel().getByTestId("run-live-current")).toHaveText("Profile (WEB-003), step 1: Open the profile");
         await page.reload();
         await pwExpect(panel().getByTestId("run-live-current")).toHaveText("Profile (WEB-003), step 1: Open the profile", { timeout: 20_000 });
-        await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("Running on maya-laptop.");
-        await pwExpect(panel().getByTestId("run-live-counts")).toHaveText("1 passed, 1 failed, 1 running");
+        await pwExpect(steps().locator("[aria-current=step]")).toContainText("Running");
+        await pwExpect(page.getByTestId("run-summary")).toHaveText("So far: 1 passed, 1 failed, 1 running.");
         await pwExpect(panel().getByTestId("run-live-failures")).toContainText("Timed out waiting for the Pay button");
         await pwExpect(panel().getByTestId("run-live-shots").getByRole("img")).toHaveCount(1);
         await pwExpect(panel().getByTestId("run-live-log")).toContainText("maya-laptop: Closing the browser");
@@ -272,7 +276,6 @@ describe("a run on a runner, live", () => {
         // Still live after the refresh.
         await maya.events({ type: "step_finished", testId: "WEB-003", index: 0, title: "Open the profile", status: "passed", durationMs: 300 }, { type: "step_started", testId: "WEB-003", index: 1, title: "Change the name" });
         await pwExpect(panel().getByTestId("run-live-current")).toHaveText("Profile (WEB-003), step 2: Change the name");
-        await pwExpect(panel().getByTestId("run-live-steps")).toHaveText("3");
     }, 120_000);
 
     it("the strip on another page says which test and step the runner is on", async () => {
@@ -288,20 +291,24 @@ describe("a run on a runner, live", () => {
         await visit(`#/projects/${projectId}/runs/${jobId}`);
         await pwExpect(panel().getByTestId("run-live-current")).toHaveText("Profile (WEB-003), step 2: Change the name", { timeout: 20_000 });
         await maya.events({ type: "step_finished", testId: "WEB-003", index: 1, title: "Change the name", status: "passed", durationMs: 200 }, { type: "test_finished", testId: "WEB-003", title: "Profile", status: "passed", durationMs: 700 }, { type: "phase", phase: "uploading" });
-        await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("maya-laptop is sending the results.");
+        // Sending results is still the Running step.
+        await pwExpect(steps().locator("[aria-current=step]")).toContainText("Running");
         await maya.finish([passedRun("WEB-001"), failedRun("WEB-002", "Timed out waiting for the Pay button"), passedRun("WEB-003")]);
         await jobDone(jobId);
 
         await pwExpect(panel().getByRole("heading", { name: "On the runner" })).toBeVisible({ timeout: 20_000 });
-        await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("Finished on maya-laptop.");
+        await pwExpect(panel().getByTestId("run-live-phase")).toHaveCount(0);
         await pwExpect(page.getByTestId("run-summary")).toHaveText("2 of 3 that ran passed, 1 failing.");
 
         await visit(`#/projects/${projectId}/runs/${jobId}`);
         await pwExpect(panel().getByRole("heading", { name: "On the runner" })).toBeVisible({ timeout: 20_000 });
-        await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("Finished on maya-laptop.");
-        await pwExpect(panel().getByRole("list", { name: "Where the run is" }).locator("li.is-done")).toHaveCount(7);
-        await pwExpect(panel().getByTestId("run-live-counts")).toHaveText("2 passed, 1 failed");
-        await pwExpect(panel().getByTestId("run-live-duration")).not.toHaveText("Not known");
+        await pwExpect(steps().locator("li.is-done")).toHaveCount(4);
+        await pwExpect(page.getByTestId("run-summary")).toHaveText("2 of 3 that ran passed, 1 failing.");
+        await pwExpect(about().getByTestId("run-duration")).not.toHaveText("Not known");
+        // The log is history now: folded, one click away.
+        await pwExpect(panel().getByTestId("run-live-log")).toBeHidden();
+        await panel().getByText("Runner log").click();
+        await pwExpect(panel().getByTestId("run-live-log")).toBeVisible();
         await pwExpect(panel().getByTestId("run-live-failures")).toContainText("Timed out waiting for the Pay button");
         await pwExpect(panel().getByTestId("run-live-shots").getByRole("img")).toHaveCount(1);
         await pwExpect(row("Sign in")).toHaveAttribute("data-state", "passed");
@@ -327,10 +334,10 @@ describe("a run on a runner, live", () => {
         await visit(`#/projects/${projectId}/runs/${run.body.jobId}`);
         await pwExpect(panel().getByTestId("run-live-text-only")).toHaveText("This runner reports its progress as text lines only, so steps and screenshots appear when the results arrive.", { timeout: 20_000 });
         await pwExpect(panel().getByTestId("run-live-log")).toContainText("maya-laptop: Finished 1 of 3");
-        await pwExpect(panel().getByTestId("run-live-counts")).toHaveCount(0);
+        await pwExpect(page.getByTestId("run-summary")).not.toContainText("So far");
         expect((await old.result(offer.taskId, { ok: true, runs: offer.scripts.map((s) => passedRun(s.testId)) })).status).toBe(200);
         await jobDone(run.body.jobId);
-        await pwExpect(panel().getByTestId("run-live-phase")).toHaveText("Finished on maya-laptop.", { timeout: 20_000 });
+        await pwExpect(panel().getByRole("heading", { name: "On the runner" })).toBeVisible({ timeout: 20_000 });
         expect(consoleErrors).toEqual([]);
     }, 120_000);
 

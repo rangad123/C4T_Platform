@@ -1,14 +1,11 @@
 import { Camera, Check, ChevronRight, Circle, CircleX } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, getKey, type EventRow, type Job } from "../../api";
-import { Badge, Button } from "../../components/ui";
-import { duration } from "../../lib/format";
-import { useFetch } from "../../lib/hooks";
-import { routes } from "../../lib/router";
+import { Button } from "../../components/ui";
 import { mergeEvents, type JobStream } from "../../lib/stream";
-import { Elapsed, RelTime } from "./RunTime";
+import { RelTime } from "./RunTime";
 import { useMyRunner } from "../runners/my-runner";
-import { currentLine, foldLiveRun, isRunnerEvent, liveShotUrl, PHASE_STEP_WORD, PHASE_STEPS, phaseEnded, phaseSentence, runnerIdOf, runPhase, shotCaption, type LiveRun, type TaskPhase } from "./live-run";
+import { currentLine, foldLiveRun, isRunnerEvent, liveShotUrl, LIVE_STEPS, PHASE_STEP_WORD, phaseEnded, phaseSentence, runnerIdOf, stepOf, runPhase, shotCaption, type LiveRun, type TaskPhase } from "./live-run";
 import "./runs.css";
 
 const PAGE = 500;
@@ -103,28 +100,29 @@ export function useLiveRun(jobId: string | null, enabled: boolean, active: boole
     return { live, loaded };
 }
 
-/** "Your computer" when the run is on the person's own runner (GET /api/me/runner); nothing otherwise. */
-function useIsMine(runnerId: string | undefined): boolean {
+/** True when the run is on the person's own runner (GET /api/me/runner, the page's shared answer). */
+export function useIsMine(job: Pick<Job, "ranOn">): boolean {
+    const runnerId = runnerIdOf(job);
     const me = useMyRunner(0, Boolean(runnerId));
     return Boolean(runnerId && me.data?.runner?.id === runnerId);
 }
 
-/** Queued, Offered, Accepted, Getting ready, Running, Sending results, Done: where the runner's task is, and how far it got. */
-function PhaseSteps({ phase, furthest }: { phase: TaskPhase; furthest: number }) {
-    const normal = PHASE_STEPS.indexOf(phase);
+/** Waiting for your runner, Getting ready, Running, Done: where the run is, and how far it got before a bad ending. */
+function PhaseSteps({ phase, furthest, mine }: { phase: TaskPhase; furthest: number; mine: boolean }) {
+    const normal = stepOf(phase);
     const bad = normal < 0;
     const reached = bad ? furthest : normal;
-    const steps = bad ? PHASE_STEPS.slice(0, Math.max(0, furthest + 1)) : PHASE_STEPS;
+    const steps = bad ? LIVE_STEPS.slice(0, Math.max(0, furthest + 1)) : LIVE_STEPS;
     return (
         <ol className="run-phases" aria-label="Where the run is">
             {steps.map((p, i) => {
-                const state = !bad && i === reached ? (p === "completed" ? "done" : "now") : i < reached || (bad && i <= reached) ? "done" : "ahead";
+                const state = !bad && i === reached ? (i === LIVE_STEPS.length - 1 ? "done" : "now") : i < reached || (bad && i <= reached) ? "done" : "ahead";
                 return (
-                    <li key={p} className={`is-${state}`} aria-current={state === "now" ? "step" : undefined}>
+                    <li key={p.word} className={`is-${state}`} aria-current={state === "now" ? "step" : undefined}>
                         <span className="pdot" aria-hidden>
                             {state === "done" ? <Check size={12} /> : <Circle size={8} />}
                         </span>
-                        {PHASE_STEP_WORD[p]}
+                        {i === 0 && !mine ? "Waiting for the runner" : p.word}
                         {state === "now" && <span className="sr-only"> (now)</span>}
                     </li>
                 );
@@ -223,7 +221,7 @@ function Shots({ live, projectId, jobId }: { live: LiveRun; projectId: string; j
     );
 }
 
-function Lines({ live }: { live: LiveRun }) {
+function Lines({ live, folded }: { live: LiveRun; folded: boolean }) {
     const box = useRef<HTMLDivElement>(null);
     const atBottom = useRef(true);
     useLayoutEffect(() => {
@@ -231,10 +229,8 @@ function Lines({ live }: { live: LiveRun }) {
         const el = box.current;
         if (el && atBottom.current) el.scrollTop = el.scrollHeight;
     }, [live.lines.length]);
-    return (
-        <div className="stack-sm">
-            <h3 className="t-card">Runner log</h3>
-            <div
+    const log = (
+        <div
                 className="log"
                 tabIndex={0}
                 aria-label="Runner log"
@@ -253,6 +249,22 @@ function Lines({ live }: { live: LiveRun }) {
                 ))}
                 {live.lines.length === 0 && <span className="muted">Nothing yet.</span>}
             </div>
+    );
+    // Once the run is over the log is history: folded, one click away.
+    if (folded)
+        return (
+            <details className="disclosure">
+                <summary>
+                    <ChevronRight size={16} className="chev" aria-hidden />
+                    Runner log
+                </summary>
+                {log}
+            </details>
+        );
+    return (
+        <div className="stack-sm">
+            <h3 className="t-card">Runner log</h3>
+            {log}
         </div>
     );
 }
@@ -267,85 +279,43 @@ export function liveCounts(live: Pick<LiveRun, "passed" | "failed" | "skipped" |
 }
 
 /**
- * The run on its runner, as it happens and afterwards: the task's phase, the runner (yours or the team's, with a link), when it
- * started and for how long, the test and step it is on, steps done, passed and failed so far, what failed with its text, the
- * screenshots as they arrive and the runner's log. Everything comes from the run's stored events (useLiveRun, called by the page so
- * its list of tests shares the same picture).
+ * The run on its runner, as it happens and afterwards: where it is (four steps, and a sentence only when it ended badly), the test and
+ * step it is on, what failed with its text, the screenshots as they arrive and the runner's log (folded once the run is over). The
+ * run's facts (which runner, when, how long, results) are said once, in About this run. Everything comes from the run's stored
+ * events (useLiveRun, called by the page so its list of tests shares the same picture).
  */
-export function LiveRunPanel({ projectId, job, active, live, loaded, planned, answer }: { projectId: string; job: Job; active: boolean; /** From useLiveRun. */ live: LiveRun; loaded: boolean; planned: number; /** The run's answer, which may name the task's phase. */ answer?: object }) {
+export function LiveRunPanel({ job, active, live, loaded, planned, answer, projectId }: { projectId: string; job: Job; active: boolean; /** From useLiveRun. */ live: LiveRun; loaded: boolean; planned: number; /** The run's answer, which may name the task's phase. */ answer?: object }) {
     const onRunner = job.ranOn?.kind === "agent";
-    // The runner (an agent_tokens id: the id of its page and of the runner choices), when the platform names it.
-    const runnerId = runnerIdOf(job);
-    const mine = useIsMine(runnerId);
+    const mine = useIsMine(job);
     if (!onRunner && !live.detailed && live.phase === null) return null;
     if (!loaded && live.lines.length === 0) return null;
 
     const runner = job.ranOn?.kind === "agent" ? job.ranOn.name : null;
     const phase = runPhase(job, live, active, answer);
-    const started = live.startedAt ?? job.startedAt;
-    const tookMs = !active && started && job.finishedAt ? Math.max(0, new Date(job.finishedAt).getTime() - new Date(started).getTime()) : null;
+    const badEnding = phase !== null && phaseEnded(phase) && phase !== "completed";
     const position = live.current ? live.tests.indexOf(live.current.test) + 1 : 0;
     // Told to a screen reader: the phase and the test, never every step (that would talk over everything else).
     const spoken = [phase ? phaseSentence(phase, runner, live.phaseReason) : null, live.current ? `Test ${position}${planned ? ` of ${planned}` : ""}: ${live.current.test.title ?? live.current.test.key}.` : null].filter(Boolean).join(" ");
 
     return (
         <section className="card card-pad stack-sm run-live" aria-labelledby="run-live-h" data-testid="run-live">
-            <div className="row run-live-head">
-                <h2 className="t-section" id="run-live-h">
-                    {active ? "Progress on the runner" : "On the runner"}
-                </h2>
-                {mine && <Badge tone="brand">Your computer</Badge>}
-            </div>
-            {phase && <PhaseSteps phase={phase} furthest={live.furthest} />}
-            {phase && (
-                <p className={phaseEnded(phase) && phase !== "completed" ? "run-live-phase is-bad" : "run-live-phase"} data-testid="run-live-phase">
+            <h2 className="t-section" id="run-live-h">
+                {active ? "Progress on the runner" : "On the runner"}
+            </h2>
+            {phase && <PhaseSteps phase={phase} furthest={live.furthest} mine={mine} />}
+            {badEnding && phase && (
+                <p className="run-live-phase is-bad" data-testid="run-live-phase">
                     {phaseSentence(phase, runner, live.phaseReason)}
                 </p>
             )}
             <p className="sr-only" role="status" aria-live="polite">
                 {active ? spoken : ""}
             </p>
-            <dl className="run-facts">
-                {runner && (
-                    <>
-                        <dt>Runner</dt>
-                        <dd>
-                            {mine ? (
-                                <a href={routes.allRunners} data-testid="run-live-runner">
-                                    {runner}
-                                    <ChevronRight size={14} aria-hidden />
-                                </a>
-                            ) : (
-                                runner
-                            )}
-                        </dd>
-                    </>
-                )}
-                {started && (
-                    <>
-                        <dt>Started</dt>
-                        <dd>
-                            <RelTime iso={started} />
-                        </dd>
-                    </>
-                )}
-                <dt>{active ? "Running for" : "Took"}</dt>
-                <dd data-testid="run-live-duration">{active ? started ? <Elapsed since={started} hidden={false} /> : "Not started yet" : tookMs !== null ? duration(tookMs) : "Not known"}</dd>
-                {active && (
-                    <>
-                        <dt>Now</dt>
-                        <dd data-testid="run-live-current">{live.current ? currentLine(live.current) : live.detailed ? "Between tests" : phase === "running" ? "The runner reports progress as text lines, below" : "Nothing yet"}</dd>
-                    </>
-                )}
-                {live.detailed && (
-                    <>
-                        <dt>Steps done</dt>
-                        <dd data-testid="run-live-steps">{live.stepsDone}</dd>
-                        <dt>{active ? "Results so far" : "Results"}</dt>
-                        <dd data-testid="run-live-counts">{liveCounts(live)}</dd>
-                    </>
-                )}
-            </dl>
+            {active && (
+                <p className="t-secondary">
+                    Now: <span data-testid="run-live-current">{live.current ? currentLine(live.current) : live.detailed ? "between tests" : phase === "running" ? "the runner reports progress as text lines, below" : "nothing yet"}</span>
+                </p>
+            )}
             {!live.detailed && onRunner && (
                 <p className="t-meta" data-testid="run-live-text-only">
                     This runner reports its progress as text lines only, so steps and screenshots appear when the results arrive.
@@ -375,7 +345,7 @@ export function LiveRunPanel({ projectId, job, active, live, loaded, planned, an
                 </div>
             )}
             {live.shots.length > 0 && <Shots live={live} projectId={projectId} jobId={job.jobId} />}
-            <Lines live={live} />
+            <Lines live={live} folded={!active} />
         </section>
     );
 }

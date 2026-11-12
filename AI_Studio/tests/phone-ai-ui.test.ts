@@ -185,6 +185,7 @@ beforeEach(() => {
     fake.requests.length = 0;
     fake.config = DEFAULT_CONFIG();
     fake.agents.length = 0;
+    fake.me = null;
     fake.startError = undefined;
     fake.planError = undefined;
     fake.delayMs = 0;
@@ -225,15 +226,15 @@ describe("start: the panel", () => {
         await pwExpect(dialog()).toBeVisible();
         await pwExpect(dialog()).toContainText(`The AI will open ${APP} on a phone or emulator, tap through it like a careful user, and plan tests. Nothing is created until you approve the plan. It never taps buttons that look like paying, deleting or sending, and passwords are hidden.`);
         expect(await dialog().getByTestId("phone-wont").locator("li").allTextContents()).toEqual(["Pay for anything or subscribe", "Delete accounts or data", "Send messages or money, or make calls", "Use a fingerprint or face check", "Get past captchas", "Explore games"]);
-        const server = dialog().getByRole("radio", { name: /This server/ });
-        await pwExpect(server).toBeChecked();
-        await pwExpect(dialog()).toContainText("An Android emulator is ready here (Pixel_6).");
+        // Where it runs is said, not chosen: where the project runs its tests.
+        await pwExpect(dialog().getByRole("radio")).toHaveCount(0);
+        await pwExpect(dialog().getByTestId("phone-where")).toContainText("This server. An Android emulator is ready here (Pixel_6).");
         await pwExpect(dialog().getByTestId("phone-account-note")).toHaveText("If the app needs a login, add a test account under Advanced options.");
         await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeEnabled();
         await shot("start-light-1280");
         await dialog().getByRole("button", { name: "Start exploring", exact: true }).click();
         await pwExpect(page).toHaveURL(new RegExp(`#/projects/${p.id}$`));
-        // It stops at a plan, names the phone target and sends nothing else; the runner choice was already this server, so it is not saved again.
+        // It stops at a plan, names the phone target and sends nothing else; the project's runner setting is never changed from here.
         const sent = post(new RegExp(`/projects/${p.id}/test-generation$`));
         expect(sent.map((r) => r.body)).toEqual([{ targets: ["mobile"], plan: true }]);
         expect(fake.called("PUT", /\/runner$/)).toEqual([]);
@@ -260,41 +261,49 @@ describe("start: the panel", () => {
         const p = fake.addProject("Shop");
         await visit(startHash(p.id));
         await pwExpect(dialog()).toBeVisible();
-        await pwExpect(dialog().getByRole("radio", { name: /This server/ })).toBeDisabled();
-        await pwExpect(dialog()).toContainText("There is no Android emulator on this server.");
         await pwExpect(dialog()).toContainText("No phone or emulator is ready");
-        await pwExpect(dialog()).toContainText("Set up your runner in Settings on a computer with an Android emulator or phone. For a real phone, turn on USB debugging first and switch on Use my connected phone.");
-        await pwExpect(dialog().getByRole("link", { name: "Open Your runner in Settings", exact: true })).toHaveAttribute("href", "#/settings#runner"); // round 45: one runner per person, in Settings
+        await pwExpect(dialog()).toContainText("This server: There is no Android emulator on this server.");
         await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeDisabled();
         await shot("start-no-device-light-1280");
     });
 
-    it("lists runners honestly: offline and out of date are off, one with a phone works, and choosing it is saved first and said so", async () => {
+    it("on the person's runner: the server's own sentence decides, with a link to Settings, and the project's setting is never changed", async () => {
         fake.config.mobile = { available: false, reason: "No Android emulator is set up here", avds: [], toolchain: "none" };
-        fake.addAgent({ id: "a-off", name: "Old laptop", online: false, lastSeenAt: new Date(Date.now() - 3 * 3600_000).toISOString() });
-        const stale = fake.addAgent({ id: "a-old", name: "Build box" });
-        delete stale.capabilities.deviceSession;
-        fake.addAgent({ id: "a-ok", name: "Maya’s laptop" });
-        fake.addAgent({ id: "a-none", name: "Desk PC", capabilities: { browsers: ["chromium"], deviceSession: true, android: { adb: true, devices: [], avds: [], state: "none", summary: "Android: no devices connected" } } });
         const p = fake.addProject("Shop");
+        p.runner = { runOn: "agent", agentId: null };
+        const ok = { ok: true };
+        const why = "Maya’s laptop has no emulator, and “Use my connected phone” is off for it. Set up an emulator on it, or turn that on for your runner in Settings.";
+        const mine = (phoneSession: { ok: boolean; why?: string }) => ({ id: "r1", name: "Maya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), os: "win32", arch: "x64", switches: { codeScripts: true, privateTargets: false, realPhone: false }, can: { web: ok, phone: ok, ios: ok, windows: ok, record: ok, recordHeaded: ok, phoneSession } });
+        fake.me = mine({ ok: false, why });
         await visit(startHash(p.id));
         await pwExpect(dialog()).toBeVisible();
-        const radio = (n: string) => dialog().getByRole("radio", { name: new RegExp(n) });
-        await pwExpect(radio("Old laptop")).toBeDisabled();
-        await pwExpect(dialog()).toContainText("Offline, last seen 3 hours ago.");
-        await pwExpect(radio("Build box")).toBeDisabled();
-        await pwExpect(dialog()).toContainText("This runner is out of date and cannot explore phone apps. Update it from Your runner in Settings.");
-        await pwExpect(radio("Desk PC")).toBeDisabled();
-        await pwExpect(dialog()).toContainText("Android: no devices connected.");
-        // The one that can is chosen without being asked, and says where it will run from now on.
-        await pwExpect(radio("Maya’s laptop")).toBeChecked();
-        await pwExpect(dialog()).toContainText("Android: 1 emulator ready.");
-        await pwExpect(dialog().getByTestId("phone-runner-change")).toHaveText("Phone tests for this project will run there from now on. Each person’s runs go to their own runner, set up in Settings.");
+        await pwExpect(dialog()).toContainText("No phone or emulator is ready");
+        await pwExpect(dialog()).toContainText(`Your runner, Maya’s laptop: ${why}`);
+        await pwExpect(dialog().getByRole("link", { name: "Open Your runner in Settings", exact: true })).toHaveAttribute("href", "#/settings#runner");
+        await pwExpect(dialog().getByRole("button", { name: "Start exploring", exact: true })).toBeDisabled();
+
+        fake.me = mine(ok);
+        await visit(startHash(p.id));
+        await pwExpect(dialog().getByTestId("phone-where")).toContainText("Your runner, Maya’s laptop. It opens the phone or emulator on your runner’s computer.");
         await dialog().getByRole("button", { name: "Start exploring", exact: true }).click();
         await pwExpect(page).toHaveURL(new RegExp(`#/projects/${p.id}$`));
-        const order = fake.requests.filter((r) => (r.method === "PUT" && /\/runner$/.test(r.path)) || (r.method === "POST" && /test-generation$/.test(r.path))).slice(-2);
-        expect(order.map((r) => `${r.method} ${r.path.split("/").pop()}`)).toEqual(["PUT runner", "POST test-generation"]);
-        expect(order[0]!.body).toEqual({ runOn: "agent" });
+        expect(fake.called("PUT", /\/runner$/)).toEqual([]);
+        expect(post(new RegExp(`/projects/${p.id}/test-generation$`))).toHaveLength(1);
+    });
+
+    it("runners mode: Explore with AI is off at the button with the reason, and ?start=phone opens nothing", async () => {
+        fake.config.executionMode = "runners";
+        const p = fake.addProject("Shop");
+        await visit(startHash(p.id));
+        const btn = page.getByRole("button", { name: "Explore with AI", exact: true }).first();
+        await pwExpect(btn).toBeVisible();
+        await pwExpect(btn).toHaveAttribute("aria-disabled", "true");
+        await btn.hover();
+        await pwExpect(page.locator('[role="tooltip"]:not([hidden])')).toContainText("the AI’s exploration doesn’t run on them yet");
+        await page.waitForTimeout(300);
+        expect(await dialog().count()).toBe(0);
+        await btn.click({ force: true });
+        expect(await dialog().count()).toBe(0);
     });
 
     it("when the AI model is not set up it says so, links to Settings and does not start", async () => {
@@ -778,7 +787,6 @@ describe("the bar", () => {
         fake.addAgent({ id: "a1", name: "Maya’s laptop" });
         await visit(startHash(p.id));
         await pwExpect(dialog()).toBeVisible();
-        for (const r of await dialog().locator(".ph-where label.check").all()) await tallEnough(r, "a place row");
         await tallEnough(dialog().getByRole("button", { name: "Start exploring", exact: true }), "Start exploring");
         await tallEnough(dialog().getByRole("button", { name: "Cancel", exact: true }), "Cancel");
         await tallEnough(dialog().locator("summary", { hasText: "Advanced options" }), "Advanced options");

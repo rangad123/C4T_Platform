@@ -253,7 +253,7 @@ describe("the task state machine", () => {
         const stale = newTask();
         now += QUEUE_MAX_MS + 1;
         store.sweep();
-        expect(store.getTask(stale)).toMatchObject({ status: "failed", error: "No runner agent picked up this run within 30 minutes." });
+        expect(store.getTask(stale)).toMatchObject({ status: "failed", error: "No runner took this run within 30 minutes." });
 
         const job = await platform.repo.createJob(projectId, platform.repo.createApplication(projectId, "http://example.test", { ...DEFAULT_JOB_OPTIONS }, undefined), { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [] });
         const t = newTask({ job: job.id });
@@ -283,7 +283,7 @@ describe("the task state machine", () => {
         expect(store.getTask(id)!.status).toBe("queued");
         now += 2;
         store.sweep();
-        expect(store.getTask(id)).toMatchObject({ status: "failed", error: "No runner agent picked up this run within 30 minutes." });
+        expect(store.getTask(id)).toMatchObject({ status: "failed", error: "No runner took this run within 30 minutes." });
     });
 
     it("finished tasks are removed after 24 hours, with their files listed for removal; long-gone agents are forgotten", () => {

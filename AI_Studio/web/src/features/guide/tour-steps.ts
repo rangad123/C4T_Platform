@@ -281,7 +281,7 @@ export function pageHref(page: TourPage, h: TourHave): string | null {
         case "setup":
             return routes.setup(p, page.section);
         case "runners":
-            return routes.allRunners;
+            return routes.yourRunner;
         case "settings":
             return routes.projectSettings(p, page.section);
         case "security":

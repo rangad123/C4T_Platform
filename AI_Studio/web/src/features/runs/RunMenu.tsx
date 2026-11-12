@@ -1,18 +1,17 @@
 import { ChevronDown, Play } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type TestSummary } from "../../api";
-import { Button, Callout, Disclosure, LinkButton } from "../../components/ui";
-import { HelpTip } from "../../components/Tooltip";
-import { help } from "../../lib/help";
+import { Button, Callout, Disclosure } from "../../components/ui";
 import { useConfig, useFetch } from "../../lib/hooks";
 import { useHere } from "../auth/project-access";
 import { describeApiError } from "../../lib/labels";
-import type { RunnerChoice } from "../agents/agents";
+import type { RunnerChoice } from "../runners/runners";
 import { PRODUCTION_WARNING, type Environment } from "../environments/environments";
 import { announceRunsChanged, planSentence, useActiveRun } from "./runs";
-import { DISPATCH_OFF, NO_NEEDS, NO_RUN_PERMISSION, NO_RUNNER_TITLE, RUNS_OFF_HERE, RUNS_OFF_TIP, executionModeOf, codeScriptsNotice, type RunNeeds } from "./runs-here";
-import { runnerProblem, runsOnSentence, useMyRunner } from "../runners/my-runner";
+import { DISPATCH_OFF, NO_RUN_PERMISSION, RUNS_OFF_HERE, RUNS_OFF_TIP, codeScriptsNotice } from "./runs-here";
+import { isRunnerRefusal, needOfTest, useReadiness, type RunnerNeeds } from "../runners/my-runner";
 import { RunStartError } from "../runners/RunnerRefusal";
+import { RunnerNotReady } from "./RunnerNotReady";
 import { resetSentence, type ResetAnswer } from "../webpages/webpages";
 import "./runs.css";
 import { routes } from "../../lib/router";
@@ -24,11 +23,11 @@ export interface RunMenuProps {
     /** "project": choose among the project's tests. "test": this one test. "fixed": exactly the tests given (for example the failing ones of a run). */
     scope?: "project" | "test" | "fixed";
     /** scope "project": the tests the choices count. */
-    tests?: Array<Pick<TestSummary, "id" | "suite" | "validationStatus" | "kind"> & { custom?: unknown }>;
+    tests?: Array<Pick<TestSummary, "id" | "suite" | "validationStatus" | "kind"> & { framework?: string; custom?: unknown }>;
     /** scope "project": the tests ticked in the list. */
     selectedIds?: string[];
     /** scope "test". */
-    test?: { id: string; kind: string; custom?: unknown };
+    test?: { id: string; kind: string; framework?: string; custom?: unknown };
     /** scope "fixed": what is run, said in words ("the 4 failing tests of this run"), and which tests. */
     fixed?: { ids: string[]; description: string; environment?: string };
     label?: string;
@@ -74,11 +73,11 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     // The page's own answer is used when it shares one (features/auth/project-access.tsx), so Run does not ask for the project again.
     const noPermission = !useHere(projectId).may("ai_studio.tests.run");
 
-    const config = useConfig();
     // Runners mode (the hosted platform): every run goes to the runner of the person who starts it, so Run waits until theirs is set
-    // up and connected. It is read while the button is shown (slowly polled) so the button can say so before a click.
-    const runnersOnly = executionModeOf(config) === "runners";
-    const me = useMyRunner(15_000, runnersOnly);
+    // up and connected (the page's one shared answer, see useMyRunner), and says so before a click.
+    const config = useConfig();
+    const base = useReadiness();
+    const runnersOnly = base.mode === "runners";
     // Local mode: where the project runs its tests (this server, as a rule), read while the panel is open.
     const runner = useFetch<RunnerChoice>(open && !runnersOnly ? `/projects/${projectId}/runner` : null);
     const envs = useFetch<{ environments: Environment[] }>(open ? `/projects/${projectId}/environments` : null);
@@ -86,10 +85,10 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     const resets = useFetch<ResetAnswer>(open ? `/projects/${projectId}/test-data-reset` : null);
     // Tests switched off on this server: said on the button and in the panel, and nothing is started (the server refuses too).
     // In runners mode the same answer means the platform's dispatch is not running, so no runner gets a run either.
-    const off = config?.runsHere === false;
+    const off = base.reason === DISPATCH_OFF || base.reason === RUNS_OFF_TIP;
     const offText = runnersOnly ? DISPATCH_OFF : RUNS_OFF_TIP;
     useEffect(() => {
-        if (open && runnersOnly) void me.reload();
+        if (open && runnersOnly) void base.reload();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
@@ -188,20 +187,21 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     const count = scope === "fixed" ? ids.length : runnable.length;
 
     // What this run needs from the runner that takes it, from the tests it covers (a "fixed" run knows only ids: the server checks).
-    const needs: RunNeeds = useMemo(() => {
-        if (scope === "fixed") return NO_NEEDS;
+    const needs: RunnerNeeds = useMemo(() => {
+        if (scope === "fixed") return {};
         const picked = scope === "test" ? (test ? [test] : []) : tests.filter((t) => runnable.includes(t.id));
-        return { code: picked.some((t) => Boolean(t.custom)) };
+        return { code: picked.some((t) => Boolean(t.custom)), can: [...new Set(picked.map(needOfTest))] };
     }, [scope, test, tests, runnable]);
+    const ready = useReadiness(needs, projectId);
 
     // Where it runs: in runners mode always on the starter's own runner (the platform decides; nothing is chosen here), with the
     // reason it cannot take this run, if any. Local mode: where the project runs its tests, as the platform says it.
-    const mine = me.data?.runner ?? null;
-    const problem = runnersOnly ? runnerProblem(me.data, needs) : null;
+    const mine = ready.runner ?? null;
+    const problem = ready.runnerReason ? ready.reason : null;
     // Runners mode, the person's runner cannot take any run now (not set up, offline): the main button waits, the panel says what to do.
-    const noRunner = runnersOnly && Boolean(runnerProblem(me.data));
-    const runnerPending = runnersOnly && me.loading && !me.data;
-    const placeName: string | null = runnersOnly ? (mine ? mine.name : "your runner") : runner.data?.runOn === "agent" ? "the project’s runner" : null;
+    const noRunner = base.runnerReason;
+    const runnerPending = runnersOnly && base.loading;
+    const placeName: string | null = runnersOnly ? (mine ? `your runner, ${mine.name}` : "your runner") : runner.data?.runOn === "agent" ? "the project’s runner" : null;
     // Code scripts going to the person's own computer: said before Start, with who wrote them when the platform says so (a test's
     // script versions carry who saved each; the list of tests does not, so a project run names nobody), and where to switch them off.
     const codeToOwn = runnersOnly && Boolean(mine) && needs.code && !problem;
@@ -209,8 +209,8 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     const authors = [...new Set((versions.data ?? []).map((v) => v.by?.trim()).filter((b): b is string => Boolean(b)))];
 
     const variantList = (config?.variants ?? []).filter((v) => v.available);
-    // The person's runner cannot take this run: the reason, and nothing claims where it would run.
-    const sentence = problem ?? planSentence({
+    // The person's runner cannot take this run: the callout says why, and nothing claims where it would run.
+    const sentence = problem || off ? null : planSentence({
         count,
         runner: placeName,
         ...(environment ? { environment } : {}),
@@ -218,7 +218,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
         retry,
         leftOut,
         before: resetSentence(resets.data?.hooks, environment),
-    });
+    }) + (mine?.status === "busy" ? " Your runner is busy with another run: this one waits until it is free." : "");
     const needsConfirm = Boolean(env?.production);
 
     async function start(direct = false) {
@@ -244,6 +244,8 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
         } catch (e) {
             if (direct && onError) onError(describeApiError(e));
             else setError(e);
+            // The server knew better than the page: read the runner again so Run says the same.
+            if (isRunnerRefusal(e)) void base.reload();
         } finally {
             setStarting(false);
         }
@@ -264,7 +266,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
     return (
         <div className={`run-menu${split ? " is-split" : ""}`} ref={root} data-tour="run">
             {split && (
-                <Button variant={variant} size={size} disabled={noPermission || busyRun || starting || off || noRunner || runnerPending} loading={starting && !open} onClick={() => void start(true)} tip={noPermission ? NO_RUN_PERMISSION : off ? offText : busyRun ? BUSY : noRunner ? runnerProblem(me.data) : runnersOnly ? "Runs it now on your runner." : "Runs it now where this project runs its tests."} className="run-main">
+                <Button variant={variant} size={size} disabled={noPermission || busyRun || starting || off || noRunner || runnerPending} loading={starting && !open} onClick={() => void start(true)} tip={noPermission ? NO_RUN_PERMISSION : off ? offText : busyRun ? BUSY : noRunner ? base.reason : runnersOnly ? "Runs it now on your runner." : "Runs it now where this project runs its tests."} className="run-main">
                     {main}
                 </Button>
             )}
@@ -277,7 +279,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                 aria-controls={open ? panelId : undefined}
                 aria-label={split ? "More ways to run" : undefined}
                 disabled={noPermission || (busyRun && !open)}
-                tip={noPermission ? NO_RUN_PERMISSION : off && !open ? offText : busyRun && !open ? BUSY : noRunner && !open ? runnerProblem(me.data) : split ? "Choose which tests, where they run and how." : undefined}
+                tip={noPermission ? NO_RUN_PERMISSION : off && !open ? offText : busyRun && !open ? BUSY : noRunner && !open ? base.reason : split ? "Choose which tests, where they run and how." : undefined}
                 onClick={() => setOpen((o) => !o)}
             >
                 {split ? null : main}
@@ -295,13 +297,7 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                             <span data-testid="runs-off">{DISPATCH_OFF}</span>
                         </Callout>
                     )}
-                    {!off && noRunner && (
-                        <div data-testid="no-runner">
-                            <Callout tone="warning" title={NO_RUNNER_TITLE} actions={<LinkButton size="sm" variant="primary" href={routes.allRunners}>Open Your runner in Settings</LinkButton>}>
-                                {runnerProblem(me.data)}
-                            </Callout>
-                        </div>
-                    )}
+                    {!off && <RunnerNotReady reason={problem} />}
                     <fieldset className="run-sec">
                         <legend>What</legend>
                         {scope === "test" && <p className="t-secondary">This test.</p>}
@@ -335,34 +331,11 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                         )}
                     </fieldset>
 
-                    <fieldset className="run-sec">
-                        <legend>
-                            Where <HelpTip label="where runs go" text={`Online: ${help("runner", "online")} Every run you start goes to your own runner, set up once in Settings.`} />
-                        </legend>
-                        {runnersOnly ? (
-                            runnerPending ? (
-                                <p className="t-meta" role="status">Looking for your runner…</p>
-                            ) : mine ? (
-                                <p className="t-secondary" data-testid="run-where">
-                                    {runsOnSentence(mine)}.{mine.status === "busy" ? " It is busy with another run: this one waits until it is free." : ""}
-                                </p>
-                            ) : (
-                                <p className="t-secondary" data-testid="run-where">Your runner, once it is set up in Settings.</p>
-                            )
-                        ) : runner.loading && !runner.data ? (
-                            <p className="t-meta" role="status">Looking…</p>
-                        ) : (
-                            <p className="t-secondary" data-testid="run-where">{runner.data?.runOn === "agent" ? runner.data.status : "Runs on this server."}</p>
-                        )}
-                        {codeToOwn && (
-                            <div data-testid="code-on-own">
-                                <Callout tone="warning" actions={<a href={routes.allRunners}>Switch code scripts off in Settings</a>}>
-                                    {codeScriptsNotice(authors)}
-                                </Callout>
-                            </div>
-                        )}
-                        {hasEnvs && scope !== "fixed" && (
-                            <div className="run-against">
+                    {((hasEnvs && scope !== "fixed") || needsConfirm) && (
+                        <fieldset className="run-sec">
+                            <legend>Against</legend>
+                            {scope === "fixed" && <p className="t-secondary">{environment}</p>}
+                            {scope !== "fixed" && <div className="run-against">
                                 <label className="run-opt">
                                     <input type="radio" name={`${panelId}-against`} checked={environment === ""} onChange={() => pickEnvironment("")} />
                                     <span className="text">Project address</span>
@@ -370,18 +343,22 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                                 {(envs.data?.environments ?? []).map((e) => (
                                     <label key={e.id} className="run-opt">
                                         <input type="radio" name={`${panelId}-against`} checked={environment === e.name} onChange={() => pickEnvironment(e.name)} />
-                                        <span className="text">{e.name}{e.production ? " (production)" : ""}</span>                                    </label>
+                                        <span className="text">
+                                            {e.name}
+                                            {e.production ? " (production)" : ""}
+                                        </span>
+                                    </label>
                                 ))}
-                            </div>
-                        )}
-                        {needsConfirm && (
-                            <label className="run-opt run-production">
-                                <input type="checkbox" checked={confirmProduction} onChange={(e) => setConfirmProduction(e.target.checked)} />
-                                <span className="text">Yes, run on production</span>
-                                <span className="t-meta">{PRODUCTION_WARNING}</span>
-                            </label>
-                        )}
-                    </fieldset>
+                            </div>}
+                            {needsConfirm && (
+                                <label className="run-opt run-production">
+                                    <input type="checkbox" checked={confirmProduction} onChange={(e) => setConfirmProduction(e.target.checked)} />
+                                    <span className="text">Yes, run on production</span>
+                                    <span className="t-meta">{PRODUCTION_WARNING}</span>
+                                </label>
+                            )}
+                        </fieldset>
+                    )}
 
                     {!environment && (
                         <Disclosure label="How">
@@ -406,9 +383,18 @@ export function RunMenu({ projectId, scope = "project", tests = [], selectedIds 
                         </Disclosure>
                     )}
 
-                    <p className="run-sentence" data-testid="run-sentence" role="status">
-                        {sentence}
-                    </p>
+                    {codeToOwn && (
+                        <div data-testid="code-on-own">
+                            <Callout tone="warning" actions={<a href={routes.yourRunner}>Switch code scripts off in Settings</a>}>
+                                {codeScriptsNotice(authors)}
+                            </Callout>
+                        </div>
+                    )}
+                    {sentence && (
+                        <p className="run-sentence" data-testid="run-sentence" role="status">
+                            {sentence}
+                        </p>
+                    )}
                     {error !== null && <RunStartError error={error} />}
                     <div className="run-foot">
                         <Button onClick={() => setOpen(false)}>Close</Button>

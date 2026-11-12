@@ -2,7 +2,8 @@
  * One runner per person, set up in Settings and used for every run they start (round 45; docs/features/runner-settings.md). The rows are
  * in agent-store.ts; the download that carries the one-time code is routes/runner-kits.ts (POST /api/me/runner/download).
  *
- *   GET    /api/me/runner                       → { runner: null | RunnerMine }
+ *   GET    /api/me/runner                       → { runner: null | RunnerMine, canSeeEveryone }; RunnerMine.can says what it can start now
+ *                                                 ({ ok, why? } per kind: the sentence the server's up-front refusal would give)
  *   GET    /api/me/runner/enrollments/:id       → { status: "waiting" | "connected" | "expired" | "used" }   (the code's owner only)
  *   PATCH  /api/me/runner                       { name?, switches?: { codeScripts?, privateTargets?, realPhone? } } → { runner }
  *   POST   /api/me/runner/retire                "Remove this computer": its credential stops working at once → { runner: null }
@@ -14,10 +15,15 @@
  */
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { getAgentServices } from "../agent-services.js";
-import { OPEN_OWNER_ID, ownerIdOfActor, type AgentTokenRecord } from "../agent-store.js";
+import { hostDeviceProblem } from "../agent-device.js";
+import { recordProblem } from "../agent-record.js";
+import { capabilityProblem } from "../agent-routing.js";
+import { cannotRunSentence, getAgentServices } from "../agent-services.js";
+import { getAdapter, IOS_ADAPTER_ID } from "../../engine/frameworks/index.js";
+import { RUNNER_OFFLINE } from "../runner-only.js";
+import { OPEN_OWNER_ID, ownerIdOfActor, type AgentRecord, type AgentTokenRecord } from "../agent-store.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
-import { currentActor, permissionsOf, type Actor } from "../auth/actor.js";
+import { currentActor, type Actor } from "../auth/actor.js";
 import { HttpError } from "../http-error.js";
 import { CANNOT_HAVE_RUNNER, checkView, KEY_CANNOT_HAVE_RUNNER, networkSentence, RUNNER_NOT_FOUND, RUNNER_RETIRED, runnerState, seesEveryRunner } from "../runner-health.js";
 import { runnerUpdatesFor } from "../runner-update.js";
@@ -48,10 +54,34 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
 
     const projectName = (id: string): string => p.db.get<{ name: string }>("SELECT name FROM projects WHERE id = ?", id)?.name ?? "A project";
 
+    type Can = { ok: boolean; why?: string };
+    const can = (why: string | undefined): Can => (why ? { ok: false, why } : { ok: true });
+
+    /** What the runner can start now, in the words of the server's refusals (assertJobAllowed, chooseRecorder, chooseDeviceHost). */
+    const canOf = (t: AgentTokenRecord, latest: AgentRecord | undefined, online: boolean) => {
+        const kinds = ["web", "phone", "ios", "windows", "record", "recordHeaded", "phoneSession"] as const;
+        if (!latest || !online) return Object.fromEntries(kinds.map((k) => [k, can(RUNNER_OFFLINE)])) as Record<(typeof kinds)[number], Can>;
+        const tests = (id: string) => {
+            const adapter = getAdapter(id);
+            const why = capabilityProblem(adapter, latest.capabilities);
+            return can(why && cannotRunSentence(adapter, latest.name, why));
+        };
+        return {
+            web: tests("playwright"),
+            phone: tests("taqwright"),
+            ios: tests(IOS_ADAPTER_ID),
+            windows: tests("windows-uia"),
+            record: can(recordProblem(latest, false)),
+            recordHeaded: can(recordProblem(latest, true)),
+            phoneSession: can(hostDeviceProblem({ ...latest, personal: true, allowRealPhone: t.allowRealPhone })),
+        };
+    };
+
     /** GET /api/me/runner's runner, from the credential and the computer that last connected with it. */
     const mine = (t: AgentTokenRecord) => {
         const latest = svc.store.agentsOfToken(t.id)[0];
         const now = svc.clock();
+        const status = runnerState(svc.store, latest, now);
         const running = latest ? svc.store.runningTaskOf(latest.id) : undefined;
         const check = checkView(latest);
         const network = networkSentence(latest);
@@ -59,7 +89,7 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
             id: t.id,
             kind: "personal" as const,
             name: t.label ?? latest?.name ?? "Your computer",
-            status: runnerState(svc.store, latest, now),
+            status,
             lastSeenAt: latest ? new Date(latest.lastSeenMs).toISOString() : null,
             os: latest?.os ?? null,
             arch: latest?.arch ?? null,
@@ -69,6 +99,7 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
             ...(check ? { check } : {}),
             ...(network ? { network } : {}),
             switches: { codeScripts: t.allowCodeScripts, privateTargets: t.allowPrivateTargets, realPhone: t.allowRealPhone },
+            can: canOf(t, latest, status !== "offline"),
             ...(running ? { currentRun: { jobId: running.jobId, projectId: running.projectId, title: projectName(running.projectId) } } : {}),
         };
     };
@@ -76,8 +107,8 @@ export function registerRunnerRoutes(ctx: RouteCtx): void {
     app.get("/api/me/runner", async (req) => {
         const actor = who(req);
         const id = ownerIdOfActor(actor);
-        // Whether the admins' list (GET /api/admin/runners) answers this caller, so the page shows it only then.
-        const canSeeEveryone = seesEveryRunner(control.projects, actor) && permissionsOf(actor).has("ai_studio.runners.manage");
+        // Whether the admins' list (GET /api/admin/runners) answers this caller: the same rule as that route, so the page shows it exactly then.
+        const canSeeEveryone = seesEveryRunner(control.projects, actor);
         if (!id) return { runner: null, canSeeEveryone };
         const r = svc.store.runnerOf(id);
         return { runner: r ? mine(r.token) : null, canSeeEveryone };

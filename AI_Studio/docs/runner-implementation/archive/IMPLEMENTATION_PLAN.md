@@ -1,3 +1,5 @@
+> Archived round history, not the current design: see `../RUNNER_ARCHITECTURE.md` (one runner per person).
+
 # Local execution runner: implementation plan
 
 Date: 2026-11-07. Starting point: commit `e344261`. Updated the same day after the build: every work item below is in the tree. Line numbers in "Why this work is needed" are from `e344261`; elsewhere files and function names are the reference.

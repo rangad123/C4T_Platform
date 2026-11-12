@@ -232,14 +232,14 @@ export type Config = z.infer<typeof EnvSchema> & {
  * reach the port, so the switch is then ignored (and the platform says so, loudly, at start and in GET /api/config).
  */
 export const CUSTOM_SCRIPTS_NEEDS_API_KEY =
-    "ALLOW_CUSTOM_SCRIPTS=true is ignored because API_KEY is not set: anyone who can reach this server could run code on it. Set API_KEY (and keep it secret), or run hand-written tests on a runner agent started with --allow-custom-scripts.";
+    "ALLOW_CUSTOM_SCRIPTS=true is ignored because API_KEY is not set: anyone who can reach this server could run code on it. Set API_KEY (and keep it secret), or run hand-written tests on runners and switch code scripts on for your runner in Settings.";
 
 /**
  * With Crowd4Test sign-in on, everyone who can edit tests is someone else's account on a shared server: a code test would run with this server's
  * rights for all of them. So the switch is refused there, whatever else is set (the platform says so at start, in GET /api/config and in a refused run).
  */
 export const CUSTOM_SCRIPTS_NOT_WITH_CROWD4TEST =
-    "ALLOW_CUSTOM_SCRIPTS=true is refused because Crowd4Test sign-in is on (C4T_API_ORIGIN): a code test would run with this server's rights for everyone who can edit tests. Remove the setting, and run code tests on a runner agent started with --allow-custom-scripts.";
+    "ALLOW_CUSTOM_SCRIPTS=true is refused because Crowd4Test sign-in is on (C4T_API_ORIGIN): a code test would run with this server's rights for everyone who can edit tests. Remove the setting, and run code tests on runners (switch code scripts on for your runner in Settings).";
 
 /**
  * A plug-in is code that runs inside the server with all its power. Without an API_KEY anybody who can reach the port could be affected by whatever

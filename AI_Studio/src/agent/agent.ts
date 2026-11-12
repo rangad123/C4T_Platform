@@ -231,7 +231,6 @@ export class Agent {
         }
         if (this.cfg.insecureWarning) this.log.warn(this.cfg.insecureWarning);
         for (const note of this.cfg.allowAppNotes ?? []) this.log.warn(note);
-        if (this.cfg.allowCustomScripts) this.log.warn("Hand-written scripts are allowed on this agent (--allow-custom-scripts): code written by people on the project runs here with this user's rights.");
         if (this.cfg.tokenSource === "flag") this.log.warn("The token was given on the command line, where other users of this computer can see it. Prefer AITP_AGENT_TOKEN or --token-file.");
         this.log.info(`ai-test-agent ${AGENT_VERSION} starting. Platform: ${this.client.host}. Work folder: ${this.cfg.workDir}. Concurrency: ${this.cfg.concurrency}.`);
         // Which browser web tests use, before the runner says it is ready for them (a download, when one is needed, carries on in the background).

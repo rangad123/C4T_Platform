@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { EventRow, Job, PlatformConfig } from "../web/src/api.js";
-import type { Agent } from "../web/src/features/agents/agents.js";
+import type { RunnerMine } from "../web/src/features/runners/my-runner.js";
 import { countOf, createBody, createSentence, foundSentence, ideasOf, initialChoice, isOn, normalizePlan, phoneOnlyPlan, planLines, planTotal, type PlanAnswer, type PlanChoice, type ReadyPlan } from "../web/src/features/onboarding/onboarding.js";
 import * as phone from "../web/src/features/phone/phone.js";
 import { originOf, type OriginInput } from "../web/src/features/provenance/provenance.js";
@@ -12,25 +12,16 @@ import { jobLabel, KIND_LABEL } from "../web/src/lib/labels.js";
 
 const ev = (id: number, message: string, kind = "info"): EventRow => ({ id, stage: "discovery", kind, level: "info", message, createdAt: "2026-10-17T10:00:00Z" });
 const config = (mobile: PlatformConfig["mobile"]): PlatformConfig => ({ llm: { provider: "anthropic", model: "x", configured: true }, mobile, authRequired: false, frameworks: [] }) as PlatformConfig;
-const agent = (over: Partial<Omit<Agent, "capabilities">> & { capabilities?: Partial<Record<keyof Agent["capabilities"], unknown>> } = {}): Agent => {
-    const { capabilities, ...rest } = over;
-    return {
-        id: "a1",
-        name: "Maya’s laptop",
-        version: "1",
-        tokenId: "t",
-        os: "win32",
-        arch: "x64",
-        node: "24",
-        online: true,
-        lastSeenAt: new Date(Date.now() - 60_000).toISOString(),
-        firstSeenAt: "2026-01-01T00:00:00Z",
-        activeTasks: 0,
-        concurrency: 1,
-        capabilities: ({ browsers: ["chromium"], deviceSession: true, android: { adb: true, devices: [{ serial: "emulator-5554", state: "device", emulator: true }], avds: ["Pixel_6"], state: "emulator", summary: "Android: 1 emulator ready" }, ...capabilities }) as Agent["capabilities"],
-        ...rest,
-    };
-};
+const runner = (over: Partial<RunnerMine> = {}): RunnerMine => ({
+    id: "r1",
+    name: "Maya’s laptop",
+    status: "online",
+    lastSeenAt: new Date(Date.now() - 60_000).toISOString(),
+    os: "win32",
+    arch: "x64",
+    switches: { codeScripts: true, privateTargets: false, realPhone: false },
+    ...over,
+});
 
 /** A job answer from a platform that does not say what the job explored. */
 const NO_TARGETS = {} as Pick<Job, "targets">;
@@ -93,44 +84,23 @@ describe("the package name", () => {
     });
 });
 
-describe("where it can run", () => {
+describe("where it runs", () => {
     it("this server works only when the platform says an emulator is available, and says why not otherwise", () => {
-        const on = phone.whereOptions(config({ available: true, avds: ["Pixel_6"], toolchain: "system" }), []);
-        expect(on).toEqual([{ id: "platform", label: "This server", can: true, detail: "An Android emulator is ready here (Pixel_6)." }]);
-        const off = phone.whereOptions(config({ available: false, reason: "No Android toolchain was found", avds: [], toolchain: "none" }), []);
-        expect(off[0]).toMatchObject({ can: false, detail: "No Android toolchain was found." });
-        expect(phone.whereOptions(undefined, [])[0]).toMatchObject({ can: false, detail: "No Android emulator is set up on this server." });
+        expect(phone.phoneWhere(config({ available: true, avds: ["Pixel_6"], toolchain: "system" }), "platform", undefined)).toEqual({ label: "This server", can: true, detail: "An Android emulator is ready here (Pixel_6)." });
+        expect(phone.phoneWhere(config({ available: false, reason: "No Android toolchain was found", avds: [], toolchain: "none" }), "platform", undefined)).toMatchObject({ can: false, detail: "No Android toolchain was found." });
+        expect(phone.phoneWhere(undefined, "platform", undefined)).toMatchObject({ can: false, detail: "No Android emulator is set up on this server." });
     });
 
-    it("a runner is usable only when it is online, says it can explore phones, and has a phone or emulator", () => {
-        const now = Date.now();
-        const rows = phone.whereOptions(config({ available: false, avds: [], toolchain: "none" }), [
-            agent({ id: "off", name: "Offline", online: false, lastSeenAt: new Date(now - 2 * 86_400_000).toISOString() }),
-            agent({ id: "old", name: "Old", capabilities: { deviceSession: undefined } }),
-            agent({ id: "none", name: "None", capabilities: { android: { adb: true, devices: [], avds: [], state: "none", summary: "Android: no devices connected" } } }),
-            agent({ id: "notools", name: "No tools", capabilities: { android: { adb: false, devices: [], avds: [], state: "no-tools" } } }),
-            agent({ id: "ok", name: "Fine" }),
-        ], now);
-        const by = Object.fromEntries(rows.map((r) => [r.id, r]));
-        expect(by["ok"]).toMatchObject({ can: true, detail: "Android: 1 emulator ready." });
-        expect(by["off"]).toMatchObject({ can: false, detail: "Offline, last seen 2 days ago." });
-        expect(by["old"]).toMatchObject({ can: false, detail: "This runner is out of date and cannot explore phone apps. Update it from Your runner in Settings." });
-        expect(by["none"]).toMatchObject({ can: false, detail: "Android: no devices connected." });
-        expect(by["notools"]).toMatchObject({ can: false, detail: "No phone or emulator is connected to this runner." });
-        // Online ones come before offline ones.
-        expect(rows.map((r) => r.id).slice(0, 2)).toEqual(["platform", "old"]);
-    });
-
-    it("starts where the project already runs when that works, else at the first that works, else nowhere", () => {
-        const opts = phone.whereOptions(config({ available: true, avds: [], toolchain: "system" }), [agent({ id: "ok" })]);
-        expect(phone.defaultWhere(opts, { runOn: "platform", agentId: null })).toBe("platform");
-        expect(phone.defaultWhere(opts, { runOn: "agent", agentId: "ok" })).toBe("ok");
-        expect(phone.defaultWhere(opts, { runOn: "agent", agentId: "gone" })).toBe("platform");
-        expect(phone.defaultWhere(opts, undefined)).toBe("platform");
-        const none = phone.whereOptions(config({ available: false, avds: [], toolchain: "none" }), []);
-        expect(phone.defaultWhere(none, { runOn: "platform", agentId: null })).toBe("");
-        const onlyRunner = phone.whereOptions(config({ available: false, avds: [], toolchain: "none" }), [agent({ id: "ok" })]);
-        expect(phone.defaultWhere(onlyRunner, { runOn: "platform", agentId: null })).toBe("ok");
+    it("on the person's runner: the server's own sentence (can.phoneSession) decides; not set up and offline say so", () => {
+        const off = config({ available: false, avds: [], toolchain: "none" });
+        expect(phone.phoneWhere(off, "agent", null)).toMatchObject({ label: "Your runner", can: false, detail: "Set up your runner in Settings to run tests." });
+        expect(phone.phoneWhere(off, "agent", runner({ status: "offline" }))).toMatchObject({ can: false, detail: "Your runner is offline. Start it on your computer, then try again." });
+        const why = "Maya’s laptop has no emulator, and “Use my connected phone” is off for it. Set up an emulator on it, or turn that on for your runner in Settings.";
+        const can = (ok: boolean) => ({ web: { ok: true }, phone: { ok: true }, ios: { ok: true }, windows: { ok: true }, record: { ok: true }, recordHeaded: { ok: true }, phoneSession: ok ? { ok } : { ok, why } });
+        expect(phone.phoneWhere(off, "agent", runner({ can: can(false) }))).toEqual({ label: "Your runner, Maya’s laptop", can: false, detail: why });
+        expect(phone.phoneWhere(off, "agent", runner({ can: can(true) }))).toMatchObject({ label: "Your runner, Maya’s laptop", can: true });
+        // A server that does not say lets the click decide.
+        expect(phone.phoneWhere(off, "agent", runner())).toMatchObject({ can: true });
     });
 });
 
@@ -189,7 +159,7 @@ describe("while it runs", () => {
 });
 
 describe("the words keep the product's promises and vocabulary", () => {
-    const all = [phone.PHONE_TITLE, phone.NEED_APP, phone.NEED_PACKAGE, phone.IPHONE_NOTE, phone.willDo("com.example.shop"), ...phone.WONT_DO, phone.ACCOUNT_REMINDER, phone.NO_WHERE_TITLE, phone.NO_WHERE_BODY, phone.AI_MISSING];
+    const all = [phone.PHONE_TITLE, phone.NEED_APP, phone.NEED_PACKAGE, phone.IPHONE_NOTE, phone.willDo("com.example.shop"), ...phone.WONT_DO, phone.ACCOUNT_REMINDER, phone.NO_WHERE_TITLE, phone.AI_MISSING];
     it("says nothing is created before approval, that risky taps are never made and that passwords are hidden", () => {
         const text = phone.willDo("the app");
         expect(text).toMatch(/Nothing is created until you approve the plan/);

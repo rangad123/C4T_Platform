@@ -1,4 +1,12 @@
-/* "Check this computer" on a runner's row (check.tsx). Design tokens only. */
+/* Your runner in Settings (YourRunner.tsx, check.tsx, updates.tsx, UnsignedNotice.tsx). Design tokens only; shared classes do the rest. */
+.ag-steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; color: var(--text-secondary); }
+.ag-steps b { color: var(--text-primary); font-weight: var(--fw-medium); }
+.ag-facts { display: flex; gap: 4px 24px; flex-wrap: wrap; color: var(--text-secondary); font-size: var(--type-body-sm-size); }
+.ag-facts b { color: var(--text-primary); font-weight: var(--fw-medium); }
+.ag-update-line.is-warning { color: var(--status-warning-fg); }
+.ark-os { padding: 0; margin: 0; border: 0; min-width: 0; display: grid; gap: 8px; }
+.ark-file { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 13px; }
+.ark-wait { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--text-secondary); }
 .ag-check { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--status-warning-line); border-radius: var(--radius-sm); background: var(--status-warning-bg); }
 .ag-check-head { margin: 0; font-size: var(--type-body-sm-size); }
 .ag-check-count { color: var(--status-warning-fg); font-weight: var(--fw-medium); }

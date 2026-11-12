@@ -1,8 +1,8 @@
 /**
  * Runner updates, platform side (docs/features/runner-updates.md): which runners should move to the platform's own runner version, what
  * they are offered (the same prebuilt bundle a new download would hold, and for a complete download the folders that changed), the files
- * themselves, the per-runner "update automatically" setting and the "Update this runner" request, and the Activity rows for what the
- * runners report.
+ * themselves, the "Update now" request, and the Activity rows for what the runners report. Updates are always on here; the one opt-out is
+ * the runner's own AITP_UPDATES=0.
  *
  * Nothing here decides anything by trust in the runner: an offer only names files the platform itself checked (loadBundle and loadComplete
  * check every checksum), and the runner checks every byte it receives against the sha256 in the offer.
@@ -12,9 +12,8 @@
  * (src/agent/update-keys.ts). The offer carries the manifest and its signature unchanged; the runner checks both before it downloads
  * anything (src/agent-protocol/update-manifest.ts). Without a valid signature no runner is offered an update, and publicView says so.
  *
- * The setting is a row per runner in `runner_update_settings` (shared-state.ts), so every API process sees the same one: `auto` (absent =
- * on), a pending request and the last report already written to Activity. Before round 26 it was a JSON file in the data folder
- * (runner-updates.json); that file is read once into the empty table and left where it is.
+ * A row per runner in `runner_update_settings` (shared-state.ts), so every API process sees the same one: a pending request and the last
+ * report already written to Activity. Its `auto` column is no longer read or written.
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -42,8 +41,6 @@ type PartFolder = (typeof PART_FOLDERS)[number];
 const sha256 = (b: Uint8Array): string => createHash("sha256").update(b).digest("hex");
 
 interface Setting {
-    /** false: the runner updates only when a person asks. Absent: automatic. */
-    auto?: boolean;
     /** A person pressed "Update this runner" (ms). Cleared when the runner reports the outcome. */
     requestedAt?: number;
     /** The last update report already written to Activity ("state|at"). */
@@ -61,7 +58,7 @@ export function targetOfAgent(c: Pick<Capabilities, "os" | "arch">): CompleteTar
 export const partNames = (target: CompleteTarget, folder: PartFolder) => ({ list: `complete-${target}-${folder}.json`, pack: `complete-${target}-${folder}.pack` });
 
 export interface ActivityRow {
-    /** The project the runner was registered from; a runner registered on the Runners page has none. */
+    /** Null for a person's runner (rows from before round 45 may name the project they were registered from). */
     projectId: string | null;
     agentId: string;
     agentName: string;
@@ -73,7 +70,8 @@ export interface ActivityRow {
 export interface PublicUpdate {
     /** The runner can replace its own files (a download from this version on). */
     can: boolean;
-    auto: boolean;
+    /** Always true (updates are always on here); kept for the pages that still read it. */
+    auto: true;
     /** The platform's runner version, when the bundle is built. */
     latest?: string;
     /** The platform offers that version to runners (the bundle is signed with a key the runners trust). False: download it by hand. */
@@ -92,8 +90,6 @@ export interface PublicUpdate {
 
 export interface RunnerUpdatesOptions {
     db: Db;
-    /** Where the settings file of earlier releases may be (read once into the empty table). */
-    dataDir?: string;
     clock?: () => number;
     /** Where Activity rows go (the server passes the user store's writer). */
     activity?: (row: ActivityRow) => void;
@@ -123,35 +119,12 @@ export class RunnerUpdates {
         const extra = (process.env.RUNNER_UPDATE_PUBLIC_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);
         this.keys = opts.publicKeys ?? [...UPDATE_KEYS, ...extra];
         if (opts.activity) this.activity = opts.activity;
-        if (opts.dataDir) this.importSettingsFile(path.join(opts.dataDir, "runner-updates.json"));
-    }
-
-    /** The upgrade from the file: only into an empty table, so a later restart never brings back a value changed since. */
-    private importSettingsFile(file: string): void {
-        let agents: Record<string, Setting>;
-        try {
-            const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { agents?: Record<string, Setting> };
-            if (!raw || typeof raw.agents !== "object" || !raw.agents) return;
-            agents = raw.agents;
-        } catch {
-            return; // none, or unreadable: every runner updates automatically
-        }
-        if (this.db.get("SELECT agent_id FROM runner_update_settings LIMIT 1")) return;
-        for (const [agentId, s] of Object.entries(agents)) {
-            if (!agentId || typeof s !== "object" || !s) continue;
-            this.write(agentId, {
-                ...(typeof s.auto === "boolean" ? { auto: s.auto } : {}),
-                ...(typeof s.requestedAt === "number" && Number.isFinite(s.requestedAt) ? { requestedAt: s.requestedAt } : {}),
-                ...(typeof s.reported === "string" ? { reported: s.reported } : {}),
-            });
-        }
     }
 
     private setting(agentId: string): Setting {
-        const r = this.db.get<{ auto: number | null; requested_at: number | null; reported: string | null }>("SELECT auto, requested_at, reported FROM runner_update_settings WHERE agent_id = ?", agentId);
+        const r = this.db.get<{ requested_at: number | null; reported: string | null }>("SELECT requested_at, reported FROM runner_update_settings WHERE agent_id = ?", agentId);
         if (!r) return {};
         return {
-            ...(r.auto === null ? {} : { auto: Number(r.auto) === 1 }),
             ...(r.requested_at === null ? {} : { requestedAt: Number(r.requested_at) }),
             ...(r.reported === null ? {} : { reported: r.reported }),
         };
@@ -159,9 +132,8 @@ export class RunnerUpdates {
 
     private write(agentId: string, s: Setting): void {
         this.db.run(
-            "INSERT INTO runner_update_settings (agent_id, auto, requested_at, reported, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET auto = excluded.auto, requested_at = excluded.requested_at, reported = excluded.reported, updated_at = excluded.updated_at",
+            "INSERT INTO runner_update_settings (agent_id, requested_at, reported, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET requested_at = excluded.requested_at, reported = excluded.reported, updated_at = excluded.updated_at",
             agentId,
-            s.auto === undefined ? null : s.auto ? 1 : 0,
             s.requestedAt === undefined ? null : Math.round(s.requestedAt),
             s.reported ?? null,
             new Date(this.clock()).toISOString(),
@@ -254,9 +226,7 @@ export class RunnerUpdates {
         const latest = this.latest();
         if (!latest || c.kitVersion === latest) return undefined;
         if (!this.signed().ok) return undefined;
-        const s = this.setting(agent.id);
-        if (s.requestedAt) return "requested";
-        return s.auto === false ? undefined : "auto";
+        return this.setting(agent.id).requestedAt ? "requested" : "auto";
     }
 
     /** The poll answer's header value, or undefined. */
@@ -388,7 +358,7 @@ export class RunnerUpdates {
         const signed = latest ? this.signed() : undefined;
         return {
             can: u?.can === true,
-            auto: s.auto !== false,
+            auto: true,
             ...(latest ? { latest } : {}),
             published: signed?.ok === true,
             ...(signed && !signed.ok ? { unpublished: signed.reason } : {}),
@@ -406,10 +376,10 @@ export class RunnerUpdates {
 
 const services = new WeakMap<object, RunnerUpdates>();
 /** One per platform (the same object the agent routes and the admin routes use). */
-export function runnerUpdatesFor(p: { db: Db; config: { dataDir: string } }): RunnerUpdates {
+export function runnerUpdatesFor(p: { db: Db }): RunnerUpdates {
     let s = services.get(p);
     if (!s) {
-        s = new RunnerUpdates({ db: p.db, dataDir: p.config.dataDir });
+        s = new RunnerUpdates({ db: p.db });
         services.set(p, s);
     }
     return s;

@@ -38,7 +38,7 @@ import { defaultCaps, failedRun, FakeAgent, passedRun, viaInject } from "./fixtu
 const API_KEY = "handover-admin-key-7e21c4d0";
 const APP = "http://127.0.0.1:8461"; // never contacted: the fake runner runs nothing
 const PASSWORD = "HOLEAK-Password-29d1f7";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "AGENT_MAX_TOKENS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 let platform: Platform;
@@ -108,7 +108,7 @@ async function attemptOnce(projectId: string, job: JobRow, b: ExecutionBatch, en
 }
 
 beforeAll(async () => {
-    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "30", AGENT_WATCH_MS: "25", AGENT_NO_AGENT_GRACE_SECONDS: "60", AGENT_MAX_TOKENS: "25" });
+    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "30", AGENT_WATCH_MS: "25", AGENT_NO_AGENT_GRACE_SECONDS: "60" });
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-handover-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, API_KEY, SECRET_KEY: "runner-handover-secret-key-0123456789", LLM_PROVIDER: "anthropic", CONCURRENCY: "2", MAX_REPAIR_ATTEMPTS: "0" }));

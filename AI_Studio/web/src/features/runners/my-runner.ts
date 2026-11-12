@@ -2,11 +2,13 @@
  * The person's own runner (docs/features/runner-settings.md): one runner per person, set up once in Settings and used for every run they start.
  * A runner is the program on your computer that runs your tests. The shapes here are those of GET /api/me/runner and its routes.
  */
-import { ApiError, csrfHeader, getKey } from "../../api.js";
-import { useFetch, type Fetched } from "../../lib/hooks.js";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { api, ApiError, csrfHeader, getKey, type PlatformConfig } from "../../api.js";
+import { useConfig, type Fetched } from "../../lib/hooks.js";
 import { signedOutText } from "../../lib/labels.js";
 import { routes } from "../../lib/router.js";
-import type { RunnerCheck, RunnerUpdateView } from "../agents/agents.js";
+import type { RunnerCheck, RunnerUpdateView } from "./runners.js";
+import { DISPATCH_OFF, executionModeOf, RUNS_OFF_TIP, type ExecutionMode } from "../runs/runs-here.js";
 
 export type RunnerState = "online" | "busy" | "offline";
 
@@ -16,6 +18,14 @@ export interface RunnerSwitchValues {
     privateTargets: boolean;
     realPhone: boolean;
 }
+
+/** One thing the runner can or cannot do now, with the server's own sentence when it cannot (the same one it refuses a start with). */
+export interface Can {
+    ok: boolean;
+    why?: string;
+}
+export type RunnerNeed = "web" | "phone" | "ios" | "windows" | "record" | "recordHeaded" | "phoneSession";
+export type RunnerCan = Record<RunnerNeed, Can>;
 
 /** GET /api/me/runner → runner (null until the person has set one up). */
 export interface RunnerMine {
@@ -33,6 +43,8 @@ export interface RunnerMine {
     network?: string | null;
     switches: RunnerSwitchValues;
     currentRun?: { jobId: string; projectId: string; title: string } | null;
+    /** What it can start now, as the server would answer a start (missing from an older server: the server decides at the click). */
+    can?: RunnerCan;
 }
 
 export interface MyRunnerAnswer {
@@ -56,17 +68,126 @@ export interface AdminRunnerRow {
     ownerName?: string | null;
 }
 
-/** The person's runner, polled while the page is shown (a runner that comes online unlocks Run within seconds). */
-export function useMyRunner(pollMs = 15_000, on = true): Fetched<MyRunnerAnswer> {
-    return useFetch<MyRunnerAnswer>(on ? "/me/runner" : null, () => (on && pollMs > 0 ? pollMs : null));
+// ── the person's runner, one answer for the whole page ───────────────────────
+
+/**
+ * Every part of the page that shows the person's runner reads this one answer: one request, polled at the fastest rate anyone
+ * showing it asks for, read again when the window gets the focus and after a start the server refused (reloadMyRunner). It is kept
+ * while anything shows it, so Run, the "runs on" line and Settings never disagree.
+ */
+type Snap = { data?: MyRunnerAnswer; error?: Error };
+let snap: Snap = {};
+let generation = 0;
+const listeners = new Set<() => void>();
+const wants = new Map<object, number>();
+let timer: ReturnType<typeof setTimeout> | undefined;
+let flying: Promise<void> | undefined;
+let queued: Promise<void> | undefined;
+
+const emit = (next: Snap) => {
+    snap = next;
+    for (const l of listeners) l();
+};
+function schedule() {
+    clearTimeout(timer);
+    const every = [...wants.values()].filter((ms) => ms > 0);
+    timer = every.length ? setTimeout(() => void reloadMyRunner(), Math.min(...every)) : undefined;
+}
+async function readOnce(): Promise<void> {
+    const mine = generation;
+    try {
+        const data = await api<MyRunnerAnswer>("/me/runner");
+        if (mine === generation) emit({ data });
+    } catch (e) {
+        // A failed refresh keeps the answer already on screen.
+        if (mine === generation && snap.data === undefined) emit({ error: e as Error });
+    }
+    if (mine === generation && wants.size) schedule();
 }
 
-// ── what Run says before a click ─────────────────────────────────────────────
+/** Ask the server again now (a read already going is followed by one more, so the answer is never older than the call). */
+export function reloadMyRunner(): Promise<void> {
+    if (!flying) {
+        flying = readOnce().finally(() => (flying = undefined));
+        return flying;
+    }
+    queued ??= flying.then(() => {
+        queued = undefined;
+        return reloadMyRunner();
+    });
+    return queued;
+}
+
+const onFocus = () => {
+    farms.clear();
+    void reloadMyRunner();
+};
+
+/**
+ * Whether the project runs its phone tests on its device farm (GET /api/projects/:id/runner says `canRunMobile` then): the person's
+ * runner then needs no phone of its own. Read once per project while the page shows the person's runner, again after the focus.
+ */
+const farms = new Map<string, Promise<boolean>>();
+function useFarmPhones(projectId: string | undefined, on: boolean): boolean | undefined {
+    const [farm, setFarm] = useState<{ id: string; yes: boolean }>();
+    useEffect(() => {
+        if (!on || !projectId) return;
+        let live = true;
+        let asked = farms.get(projectId);
+        if (!asked) {
+            asked = api<{ canRunMobile?: boolean }>(`/projects/${projectId}/runner`).then(
+                (r) => r.canRunMobile === true,
+                () => false,
+            );
+            farms.set(projectId, asked);
+        }
+        void asked.then((yes) => live && setFarm({ id: projectId, yes }));
+        return () => {
+            live = false;
+        };
+    }, [projectId, on, snap]);
+    return farm && farm.id === projectId ? farm.yes : undefined;
+}
+const subscribe = (l: () => void) => {
+    listeners.add(l);
+    return () => listeners.delete(l);
+};
+
+/** The person's runner. `pollMs` 0: read once (the shared answer still refreshes while others poll); `on` false: not read. */
+export function useMyRunner(pollMs = 15_000, on = true): Fetched<MyRunnerAnswer> {
+    const s = useSyncExternalStore(subscribe, () => snap);
+    useEffect(() => {
+        if (!on) return;
+        const key = {};
+        const first = wants.size === 0;
+        wants.set(key, pollMs);
+        if (first) {
+            window.addEventListener("focus", onFocus);
+            void reloadMyRunner();
+        } else schedule();
+        return () => {
+            wants.delete(key);
+            if (wants.size) return schedule();
+            // Nothing shows it any more: forget it, so the next page asks afresh.
+            window.removeEventListener("focus", onFocus);
+            clearTimeout(timer);
+            generation++;
+            snap = {};
+            farms.clear();
+        };
+    }, [on, pollMs]);
+    if (!on) return { data: undefined, error: undefined, loading: false, reload: reloadMyRunner };
+    return { data: s.data, error: s.data ? undefined : s.error, loading: s.data === undefined && s.error === undefined, reload: reloadMyRunner };
+}
+
+// ── what a start control says before a click ─────────────────────────────────
 
 /** The server's typed refusals (409) for a run that has nowhere to go: the same words are said before the click. */
 export const RUNNER_NOT_SET_UP = "Set up your runner in Settings to run tests.";
 export const RUNNER_OFFLINE = "Your runner is offline. Start it on your computer, then try again.";
 export const RUNNER_CODE_OFF = "Code scripts are switched off on your runner. Switch them on in Settings to run this test.";
+/** The title over the "your runner can't take this" notice. */
+export const NO_RUNNER_TITLE = "Your runner can’t take runs right now";
 
 /** The code a refusal carries (in its details, or at the top of the answer). */
 export function refusalCode(e: unknown): string | null {
@@ -80,7 +201,7 @@ export function refusalLink(e: unknown): string | null {
     if (!(e instanceof ApiError)) return null;
     const link = (e.details as { link?: unknown } | undefined)?.link;
     if (typeof link === "string" && /^#\//.test(link)) return link;
-    return isRunnerRefusal(e) ? routes.allRunners : null;
+    return isRunnerRefusal(e) ? routes.yourRunner : null;
 }
 
 /** A refusal that Settings fixes: the person's runner is not set up, is offline, or may not run this. The message is the server's own. */
@@ -91,19 +212,77 @@ export function isRunnerRefusal(e: unknown): boolean {
     return /\byour runner\b/i.test(e.message);
 }
 
-/** Why a run started now has nowhere to go, or null when the person's runner can take it. A busy runner can: the run waits. */
-export function runnerProblem(answer: MyRunnerAnswer | undefined, needs: { code?: boolean } = {}): string | null {
+/** What a start needs from the person's runner: things it must be able to do (the server's `can`), and code scripts switched on. */
+export interface RunnerNeeds {
+    can?: readonly RunnerNeed[];
+    code?: boolean;
+}
+
+/** What a test needs its runner to do: its framework when that says (iOS), else its kind. */
+export function needOfTest(t: { kind: string; framework?: string }): RunnerNeed {
+    if (t.framework === "taqwright-ios") return "ios";
+    return t.kind === "mobile" ? "phone" : t.kind === "desktop" ? "windows" : "web";
+}
+
+/** Why a start now has nowhere to go, or null when the person's runner can take it. A busy runner can: the run waits. */
+export function runnerProblem(answer: MyRunnerAnswer | undefined, needs: RunnerNeeds = {}): string | null {
     if (!answer) return null;
     const r = answer.runner;
     if (!r) return RUNNER_NOT_SET_UP;
     if (r.status === "offline") return RUNNER_OFFLINE;
+    for (const n of needs.can ?? []) {
+        const c = r.can?.[n];
+        if (c && !c.ok) return c.why ?? RUNNER_OFFLINE;
+    }
     if (needs.code && r.switches && !r.switches.codeScripts) return RUNNER_CODE_OFF;
     return null;
 }
 
-/** "Runs on your runner, Maya's laptop (online)." */
-export function runsOnSentence(r: RunnerMine): string {
-    return `Runs on your runner, ${r.name} (${r.status === "busy" ? "busy" : r.status === "online" ? "online" : "offline"})`;
+export interface Readiness {
+    mode: ExecutionMode;
+    /** Still asking (a start stays off in runners mode until the answer is in). */
+    loading: boolean;
+    /** A start now has somewhere to go. */
+    ready: boolean;
+    /** Why not, in one sentence (null when ready). */
+    reason: string | null;
+    /** The person's runner (runners mode), null when not set up, undefined until known. */
+    runner: RunnerMine | null | undefined;
+    /** The reason is the person's runner (Settings fixes it), not the platform. */
+    runnerReason: boolean;
+}
+
+/**
+ * Can this person start it now? The one answer every start control uses (Run, a suite's Run, Record, a phone session).
+ * Local mode: when the server can run tests. Runners mode: when the platform hands runs out and the person's own runner is set up,
+ * connected and able to do what the start needs (a busy one makes it wait).
+ */
+export function readiness(mode: ExecutionMode, config: PlatformConfig | undefined, me: Pick<Fetched<MyRunnerAnswer>, "data" | "loading">, needs: RunnerNeeds = {}): Readiness {
+    const runner = me.data?.runner;
+    if (mode === "local") {
+        const off = config?.runsHere === false;
+        return { mode, loading: false, ready: !off, reason: off ? RUNS_OFF_TIP : null, runner, runnerReason: false };
+    }
+    if (config?.runsHere === false) return { mode, loading: false, ready: false, reason: DISPATCH_OFF, runner, runnerReason: false };
+    // The answer could not be read: the server decides at the click (and says why with a link to Settings).
+    if (!me.data) return { mode, loading: me.loading, ready: !me.loading, reason: null, runner: undefined, runnerReason: false };
+    const why = runnerProblem(me.data, needs);
+    return { mode, loading: false, ready: !why, reason: why, runner: me.data.runner, runnerReason: Boolean(why) };
+}
+
+/**
+ * The readiness hook: `readiness` for this page's config and the person's runner (read only in runners mode). With `projectId`, a
+ * phone need is met by the project's device farm when it has one (the runner still has to be set up and online).
+ */
+export function useReadiness(needs: RunnerNeeds = {}, projectId?: string): Readiness & { reload: () => Promise<void> } {
+    const config = useConfig();
+    const mode = executionModeOf(config);
+    const me = useMyRunner(15_000, mode === "runners");
+    const phone = Boolean(needs.can?.includes("phone"));
+    const farm = useFarmPhones(projectId, mode === "runners" && phone);
+    // Until the project answers, the phone need is left to the server at the click (as with an unread runner answer).
+    const met = projectId && phone && farm !== false ? { ...needs, can: needs.can!.filter((n) => n !== "phone") } : needs;
+    return { ...readiness(mode, config, me, met), reload: me.reload };
 }
 
 // ── the download ────────────────────────────────────────────────────────────

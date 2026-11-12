@@ -203,6 +203,33 @@ describe("Settings, Mobile app: is this phone ready, and the phone test settings
         await pwExpect(box.getByRole("button", { name: "Save phone settings", exact: true })).toBeDisabled();
     });
 
+    it("runners mode: the phones on your runner instead of the platform computer's, and no platform phone to choose", async () => {
+        settings = freshSettings();
+        const ok = { ok: true };
+        const why = "Your runner has no phone or emulator connected.";
+        fake.config.executionMode = "runners";
+        fake.me = { id: "r1", name: "Maya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), os: "win32", arch: "x64", switches: { codeScripts: true, privateTargets: false, realPhone: false }, can: { web: ok, phone: { ok: false, why }, ios: ok, windows: ok, record: ok, recordHeaded: ok, phoneSession: ok } };
+        try {
+            const p = fake.addProject("On runners", { appPackage: APP, apk: null, avd: null });
+            fake.requests.length = 0;
+            await visit(`#/projects/${p.id}/settings?section=mobile`);
+            const mine = page.getByTestId("runner-phones");
+            await pwExpect(mine.getByRole("heading", { name: "Phones on your runner", exact: true })).toBeVisible();
+            await pwExpect(mine.getByTestId("runner-phones-text")).toHaveText(why);
+            await pwExpect(mine).toContainText("Use my connected phone is off: only an emulator on it is used.");
+            await pwExpect(mine.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", "#/settings#runner");
+            await pwExpect(page.getByTestId("phones-panel")).toHaveCount(0);
+            expect(fake.requests.filter((r) => r.path.endsWith("/phones"))).toEqual([]);
+            const box = page.getByTestId("phone-settings");
+            await pwExpect(box.getByRole("radio", { name: /^Choose for me/ })).toBeVisible();
+            await pwExpect(box).toContainText("On your runner: a connected phone that has the app when Use my connected phone is on, else an emulator.");
+            await pwExpect(box.getByRole("radio", { name: /^CPH2467 \(R58N20ABCDE\)/ })).toHaveCount(0);
+        } finally {
+            delete fake.config.executionMode;
+            fake.me = null;
+        }
+    });
+
     it("fits a 375 px phone screen without sideways scroll", async () => {
         settings = freshSettings();
         const p = fake.addProject("Narrow", { appPackage: APP, apk: null, avd: null });

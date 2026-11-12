@@ -6,20 +6,19 @@ A run that goes to a runner shows, while it goes and afterwards, what the runner
 
 **Run page** (`#/projects/:id/runs/:jobId`), a card "Progress on the runner" (after the run: "On the runner"):
 
-- **Where the run is**: Queued, Offered, Accepted, Getting ready, Running, Sending results, Done. A run that ended badly shows how far it got, then Turned down, Did not finish, Stopped, Took too long or Lost contact. One sentence says it with the runner's name ("maya-laptop is getting ready: it fetches the tests and the files they need.").
-- **Runner**: its name; when it is the viewer's own runner (from `GET /api/me/runner`), "Your computer" and a link to Your runner in Settings.
-- **Started** (when the runner accepted the run or started its first test), **Running for** (ticking) or **Took**.
-- **Now**: the test and step it is on ("Checkout (WEB-002), step 4: Click Pay").
-- **Steps done** and **Results so far** ("2 passed, 1 failed, 1 running").
+- **Where the run is**, in four steps: Waiting for your runner (the protocol's queued, offered and accepted; "Waiting for the runner" when it is someone else's), Getting ready, Running (sending results included), Done. A run that ended badly shows how far it got, then Turned down, Did not finish, Stopped, Took too long or Lost contact, with one sentence that says why ("maya-laptop turned the run down. Google Chrome is not installed."). A run going well has no sentence repeating the steps.
+- **Now** (while it runs): the test and step it is on ("Checkout (WEB-002), step 4: Click Pay").
 - **What failed**: each failed test, the step that failed, the error text, and the stack trace behind a disclosure.
 - **Screenshots** as they arrive, newest first (six, then "Show all").
-- **Runner log**: the runner's own lines and the platform's lines about the task (offered again, turned down, stopped answering). It follows new lines only while the reader is at the bottom.
+- **Runner log**: the runner's own lines and the platform's lines about the task (offered again, turned down, stopped answering). It follows new lines only while the reader is at the bottom, and is folded once the run is over.
+
+The run's facts are said once, in **About this run** above the card: where it ran (the viewer's own runner says "Your computer" and links to Your runner in Settings), when, how long (ticking while it runs) and the results ("So far: 2 passed, 1 failed, 1 running." from the runner's report until the results are stored).
 
 The list of tests below shows each test's state as the runner reports it (and the step a running test is on) until the platform stores the run's results; a stored result always wins.
 
-**Run strip** (the project's pages): on a runner, it adds the phase while the runner is not running tests yet or is sending results ("Getting ready"), and replaces the newest event line with "Now: Checkout (WEB-002), step 4: Click Pay". Its passed and failed counts use the runner's report until the results are stored.
+**Run strip** (the project's pages): on a runner, it adds the step while the runner is not running tests yet ("Waiting for the runner", "Getting ready"), and replaces the newest event line with "Now: Checkout (WEB-002), step 4: Click Pay". Its passed and failed counts use the runner's report until the results are stored.
 
-**View technical details**: adds the runner (name and id) and the task's phase.
+**View technical details**: adds the runner (name and id) and the task's phase in the protocol's own words (Queued, Offered, Accepted, ...).
 
 A screen reader hears the phase and the test ("Test 3 of 7: Checkout."), never every step.
 

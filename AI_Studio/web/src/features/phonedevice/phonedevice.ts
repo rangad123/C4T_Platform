@@ -94,10 +94,11 @@ export interface WhereChoice {
     runsOn: RunsOn;
 }
 
-export function whereChoices(s: PhoneSettingsAnswer, phones: Phone[]): WhereChoice[] {
+/** `runnersOnly`: tests run on each person's runner, so no phone of the platform's computer is offered (Use my connected phone decides). */
+export function whereChoices(s: PhoneSettingsAnswer, phones: Phone[], runnersOnly = false): WhereChoice[] {
     const ex = s.exploredOn;
     const out: WhereChoice[] = [
-        { kind: "auto", label: "Choose for me", detail: "A connected phone that has the app, else an emulator.", runsOn: { kind: "auto" } },
+        { kind: "auto", label: "Choose for me", detail: runnersOnly ? "On your runner: a connected phone that has the app when Use my connected phone is on, else an emulator." : "A connected phone that has the app, else an emulator.", runsOn: { kind: "auto" } },
         {
             kind: "explored",
             label: "The phone the AI explored on",
@@ -112,7 +113,7 @@ export function whereChoices(s: PhoneSettingsAnswer, phones: Phone[]): WhereChoi
     if (s.runsOn?.kind === "phone" && !named.has(s.runsOn.serial)) named.set(s.runsOn.serial, s.runsOn);
     for (const p of named.values()) {
         const connected = phones.some((x) => x.serial === p.serial);
-        out.push({ kind: "phone", label: phoneName(p), detail: connected ? "This phone, whichever phone the AI explored on." : "This phone. It is not connected to the platform’s computer right now.", runsOn: { kind: "phone", serial: p.serial, ...(p.model ? { model: p.model } : {}) } });
+        out.push({ kind: "phone", label: phoneName(p), detail: connected ? "This phone, whichever phone the AI explored on." : runnersOnly ? "This phone, when it is connected to your runner." : "This phone. It is not connected to the platform’s computer right now.", runsOn: { kind: "phone", serial: p.serial, ...(p.model ? { model: p.model } : {}) } });
     }
     out.push({ kind: "emulator", label: "An emulator", detail: "Even when a phone is connected.", runsOn: { kind: "emulator" } });
     out.push({

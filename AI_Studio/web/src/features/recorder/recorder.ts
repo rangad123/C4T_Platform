@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../../api";
 import { describeApiError } from "../../lib/labels";
-import type { Agent } from "../agents/agents";
 
 export interface RecLocator {
     strategy: "testId" | "role" | "label" | "placeholder" | "text" | "css";
@@ -65,17 +64,6 @@ export interface Recording {
     runner?: { kind: "platform" } | { kind: "agent"; agentId: string; name: string };
     /** Commands (inspect on or off) the agent has not applied yet. */
     pendingCommands?: number;
-}
-
-/** A runner agent as the recorder needs it: the Runners tab's agent plus the two recording capabilities. */
-export type RecorderAgent = Omit<Agent, "capabilities"> & { capabilities: Agent["capabilities"] & { record?: boolean; recordHeaded?: boolean } };
-
-/** Why an agent cannot be picked to record right now, in words, or undefined when it can. */
-export function agentRecordProblem(a: RecorderAgent, headed: boolean): string | undefined {
-    if (!a.online) return "Offline";
-    if (a.capabilities.record !== true) return "Can’t record";
-    if (headed && a.capabilities.recordHeaded === false) return "No display, so it can’t show the window";
-    return undefined;
 }
 
 /** The agent a recording runs on, or undefined when it runs on this server. */

@@ -127,7 +127,7 @@ async function front(req: http.IncomingMessage, res: http.ServerResponse) {
         projectIdForRec = m[1]!;
         if (fake.start === "409") return json(409, { error: "A recording is already running for this project.", id: fake.rec?.id ?? "rec-active" });
         if (fake.start === "409-no-id") return json(409, { error: "A recording is already running for this project." });
-        if (fake.start === "422") return json(422, { error: "This computer has no screen to show a browser window on. Turn off “Show the browser window”, or run the platform on a machine with a screen." });
+        if (fake.start === "422") return json(422, { error: "This computer has no screen to show a browser window on. Run the platform on a machine with a screen." });
         if (fake.start === "500") return json(500, { error: "The recorder could not start. Try again in a moment." });
         const b = parsed() as { url: string; headed?: boolean; environment?: string };
         fake.rec = newRec({ projectId: m[1]!, startUrl: b.url, currentUrl: b.url, headed: b.headed !== false, ...(b.environment ? { environment: b.environment } : {}), status: "recording" });
@@ -383,7 +383,8 @@ describe("Record a test: start", () => {
         resetFake();
         await openStart();
         await pwExpect(page.getByLabel("Address to start from")).toHaveValue(APP);
-        await pwExpect(page.getByLabel("Show the browser window")).toBeChecked();
+        // A recording always has its window: there is no switch to turn it off.
+        await pwExpect(page.getByText("Show the browser window")).toHaveCount(0);
         await pwExpect(page.getByText("Don’t type real personal data or secrets while recording. Password fields are never recorded.")).toBeVisible();
         await pwExpect(page.getByText("Click through your application as a user would. We write down each step.")).toBeVisible();
         await pwExpect(page.getByLabel("Environment (optional)")).toHaveCount(0); // the project has no environments
@@ -425,14 +426,13 @@ describe("Record a test: start", () => {
         expect(fake.calls).toEqual([]);
     });
 
-    it("sends the address, the window choice and the environment, then opens the session", async () => {
+    it("sends the address, always with the window, then opens the session", async () => {
         resetFake();
         await openStart();
         await page.getByLabel("Address to start from").fill("127.0.0.1:8793/shop");
-        await page.getByLabel("Show the browser window").uncheck();
         await page.getByRole("button", { name: "Start recording", exact: true }).click();
         await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording");
-        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: "http://127.0.0.1:8793/shop", headed: false } });
+        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: "http://127.0.0.1:8793/shop", headed: true } });
         expect(page.url()).toContain("?session=rec-1");
         await pwExpect(page.getByText("Your steps appear here as you click in the browser window.")).toBeVisible();
         await pwExpect(page.getByTestId("rec-count")).toHaveText("0 steps");
@@ -443,12 +443,10 @@ describe("Record a test: start", () => {
         fake.start = "422";
         await openStart();
         await page.getByLabel("Address to start from").fill("http://127.0.0.1:8793/keep-me");
-        await page.getByLabel("Show the browser window").uncheck();
         await page.getByRole("button", { name: "Start recording", exact: true }).click();
         await pwExpect(page.getByText("We can’t open the browser window")).toBeVisible();
         await pwExpect(page.getByText("This computer has no screen to show a browser window on.", { exact: false })).toBeVisible();
         await pwExpect(page.getByLabel("Address to start from")).toHaveValue("http://127.0.0.1:8793/keep-me");
-        await pwExpect(page.getByLabel("Show the browser window")).not.toBeChecked();
         await pwExpect(page.getByRole("button", { name: "Start recording", exact: true })).toBeEnabled();
     });
 
@@ -885,7 +883,8 @@ describe("Record a test: against the real platform", () => {
         fake.enabled = false; // the front now only forwards: the platform's own recorder answers
         try {
             await openStart();
-            await page.getByLabel("Show the browser window").uncheck(); // headless: nobody sits at this machine
+            // Headless here, as a test hook: nobody sits at this machine (the page always asks for the window; the server parameter stays).
+            await page.route("**/api/projects/*/recordings", (route) => (route.request().method() === "POST" ? route.continue({ postData: JSON.stringify({ ...route.request().postDataJSON(), headed: false }) }) : route.continue()));
             await page.getByRole("button", { name: "Start recording", exact: true }).click();
             await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording", { timeout: 60_000 });
 
@@ -942,6 +941,7 @@ describe("Record a test: against the real platform", () => {
             await pwExpect(page.getByRole("heading", { level: 1 })).toContainText("Recorded shop journey");
         } finally {
             fake.enabled = true;
+            await page.unroute("**/api/projects/*/recordings");
             await recBrowser?.close().catch(() => undefined); // our own browser: the platform already closed it, this is only a guard
         }
     }, 360_000);
@@ -954,11 +954,6 @@ describe("Record a test: keyboard, phone, accessibility", () => {
         await page.getByLabel("Address to start from").focus();
         await page.keyboard.press("Control+A");
         await page.keyboard.type(APP);
-        await page.keyboard.press("Tab"); // the window checkbox
-        await pwExpect(page.getByLabel("Show the browser window")).toBeFocused();
-        await page.keyboard.press("Space");
-        await pwExpect(page.getByLabel("Show the browser window")).not.toBeChecked();
-        await page.keyboard.press("Space");
         await page.keyboard.press("Tab"); // Start recording
         await pwExpect(page.getByRole("button", { name: "Start recording", exact: true })).toBeFocused();
         await page.keyboard.press("Enter");

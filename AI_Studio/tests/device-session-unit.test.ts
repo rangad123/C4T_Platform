@@ -559,12 +559,13 @@ describe("where a phone session runs (decision table)", () => {
         expect(throws(() => chooseDeviceHost({ runner: agentRunner, agentId: "x", agents: [noAndroid] })).status).toBe(422);
     });
 
-    it("picks the least busy capable agent; a project's pin is no longer read (round 45)", () => {
+    it("uses the caller's own runner (the first of sessionHosts) and says why when it can't; a project's pin is not read", () => {
         const busy = agent("busy", { activeTasks: 3 });
         const idle = agent("idle", { activeTasks: 0 });
         const incapable = agent("inc", { capabilities: caps({ deviceSession: undefined, android: { adb: false, devices: [], avds: [] } }), activeTasks: 0 });
-        expect(chooseDeviceHost({ runner: agentRunner, agents: [busy, incapable, idle] })).toMatchObject({ agent: { id: "idle" } });
-        expect(chooseDeviceHost({ runner: { runOn: "agent", agentId: "busy" }, agents: [busy, idle] })).toMatchObject({ agent: { id: "idle" } });
+        expect(chooseDeviceHost({ runner: agentRunner, agents: [busy, idle] })).toMatchObject({ agent: { id: "busy" } });
+        expect(chooseDeviceHost({ runner: { runOn: "agent", agentId: "busy" }, agents: [idle, busy] })).toMatchObject({ agent: { id: "idle" } });
+        expect(() => chooseDeviceHost({ runner: agentRunner, agents: [incapable, idle] })).toThrowError(/Agent inc can.t be used to explore a phone/);
     });
 
     it("the capability rule gives a reason for each way a computer can fail", () => {

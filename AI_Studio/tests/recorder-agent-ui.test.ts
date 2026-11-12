@@ -1,10 +1,9 @@
 /**
- * Record a test, choosing where: this server or a runner agent (the browser opens on the tester's own machine).
+ * Record a test on the person's own runner (one runner per person, no picker: docs/features/runner-settings.md). Runners mode: always the
+ * person's runner, said once before the click from GET /api/me/runner `can`. Local mode: where the project runs its tests.
  *
- * The platform underneath is real (a seeded project, the real UI bundle). The recorder, agents and runner routes are a small
- * in-memory stand-in, served by a front server that forwards everything else to the platform, because the platform half
- * (Builder AO) is built in parallel: the shapes are the ones in .scratch/briefs/AP-record-on-agent-ui.md. A real journey with the
- * platform and tests/fixtures/fake-agent.ts is not included: the platform's recorder routes did not take `on` / `agentId` yet.
+ * The platform underneath is real (a seeded project, the real UI bundle). The recorder, /me/runner and project runner routes are a small
+ * in-memory stand-in, served by a front server that forwards everything else to the platform (with the execution mode set per test).
  * Ports: 6050 front (the address the browser uses), 6051 platform.
  *
  * Requires web/dist (build inside the browser lock):
@@ -34,6 +33,8 @@ const APP = "http://127.0.0.1:6052/";
 
 interface FakeAgent {
     id: string; name: string; online: boolean; record?: boolean; recordHeaded?: boolean;
+    /** The server's sentence when it cannot record with a window. */
+    why?: string;
 }
 type Runner = { kind: "platform" } | { kind: "agent"; agentId: string; name: string };
 interface FakeStep {
@@ -46,16 +47,17 @@ interface FakeRec {
 }
 const MAYA: FakeAgent = { id: "ag-maya", name: "Maya’s laptop", online: true, record: true, recordHeaded: true };
 const OMAR: FakeAgent = { id: "ag-omar", name: "Omar’s desktop", online: false, record: true, recordHeaded: true };
-const LIN: FakeAgent = { id: "ag-lin", name: "Lin’s phone lab", online: true, record: false };
-const DEE: FakeAgent = { id: "ag-dee", name: "Dee’s build box", online: true, record: true, recordHeaded: false };
+const DEE: FakeAgent = { id: "ag-dee", name: "Dee’s build box", online: true, record: true, recordHeaded: false, why: "Dee’s build box has no screen to show the recording window on. Start the runner from a signed-in desktop session." };
 
 const fake = {
-    agents: [] as FakeAgent[],
-    agentsStatus: 200,
+    /** The person's runner (GET /api/me/runner), null: not set up. */
+    me: null as FakeAgent | null,
+    meReads: 0,
+    mode: "local" as "local" | "runners",
     runner: { runOn: "platform" as "platform" | "agent", agentId: null as string | null },
     rec: null as FakeRec | null,
     /** "ok" starts; the others answer a refusal. */
-    start: "ok" as "ok" | "409" | "422",
+    start: "ok" as "ok" | "409" | "422" | "offline",
     /** On an agent the inspect command takes a moment to arrive: the answer keeps the old state and counts the command as pending. */
     slowInspect: false,
     calls: [] as string[],
@@ -63,13 +65,15 @@ const fake = {
 };
 const iso = (msAgo = 0) => new Date(Date.now() - msAgo).toISOString();
 function resetFake() {
-    Object.assign(fake, { agents: [], agentsStatus: 200, runner: { runOn: "platform", agentId: null }, rec: null, start: "ok", slowInspect: false, calls: [], bodies: [] });
+    Object.assign(fake, { me: null, meReads: 0, mode: "local", runner: { runOn: "platform", agentId: null }, rec: null, start: "ok", slowInspect: false, calls: [], bodies: [] });
 }
 const view = (r: FakeRec) => ({ ...r, canSave: r.steps.some((s) => s.kind !== "goto") });
-const agentView = (a: FakeAgent) => ({
-    id: a.id, name: a.name, version: "1.0.0", tokenId: "tok-1", os: "win32", arch: "x64", node: "v24.0.0", online: a.online, lastSeenAt: iso(a.online ? 1000 : 3_600_000), firstSeenAt: iso(86_400_000),
-    activeTasks: 0, concurrency: 1,
-    capabilities: { browsers: ["chromium"], ...(a.record !== undefined ? { record: a.record } : {}), ...(a.recordHeaded !== undefined ? { recordHeaded: a.recordHeaded } : {}) },
+const ok = { ok: true };
+/** GET /api/me/runner's runner, with the server's `can` for recording. */
+const mineView = (a: FakeAgent) => ({
+    id: a.id, name: a.name, status: a.online ? "online" : "offline", lastSeenAt: iso(a.online ? 1000 : 3_600_000), os: "win32", arch: "x64",
+    switches: { codeScripts: true, privateTargets: false, realPhone: false },
+    can: { web: ok, phone: ok, ios: ok, windows: ok, record: a.record ? ok : { ok: false, why: `${a.name} can't record.` }, recordHeaded: a.recordHeaded ? ok : { ok: false, why: a.why ?? `${a.name} can't show the window.` }, phoneSession: ok },
 });
 const GOTO = (i: number): FakeStep => ({ index: i, kind: "goto", describe: `Open ${APP}`, at: iso(4000) });
 const CLICK = (i: number): FakeStep => ({
@@ -96,8 +100,13 @@ async function front(req: http.IncomingMessage, res: http.ServerResponse) {
     };
     let m: RegExpMatchArray | null;
 
-    if ((m = p.match(/^\/api\/projects\/([^/]+)\/agents$/)) && method === "GET") {
-        return fake.agentsStatus === 200 ? json(200, fake.agents.map(agentView)) : json(fake.agentsStatus, { error: "Not found" });
+    if (p === "/api/me/runner" && method === "GET") {
+        fake.meReads++;
+        return json(200, { runner: fake.me ? mineView(fake.me) : null });
+    }
+    if (p === "/api/config" && method === "GET" && fake.mode === "runners") {
+        const up = (await (await fetch(`http://127.0.0.1:${PLATFORM_PORT}/api/config`)).json()) as Record<string, unknown>;
+        return json(200, { ...up, executionMode: "runners", runsHere: true });
     }
     if ((m = p.match(/^\/api\/projects\/([^/]+)\/runner$/)) && method === "GET") {
         return json(200, { ...fake.runner, status: "Runs here.", canRunWeb: true, canRunMobile: false, unavailableReason: null });
@@ -105,9 +114,11 @@ async function front(req: http.IncomingMessage, res: http.ServerResponse) {
     if ((m = p.match(/^\/api\/projects\/([^/]+)\/recordings$/)) && method === "POST") {
         log("start");
         if (fake.start === "409") return json(409, { error: "A recording is already running for this project.", details: { recordingId: "rec-active" } });
-        if (fake.start === "422") return json(422, { error: "Maya’s laptop is busy with another recording. Wait for it to finish, or record on this server." });
+        if (fake.start === "422") return json(422, { error: "Maya’s laptop is busy with another recording. Wait for it to finish." });
+        if (fake.start === "offline") return json(409, { error: "Your runner is offline. Start it on your computer, then try again.", details: { code: "RUNNER_OFFLINE", link: "#/settings#runner" } });
         const b = parsed();
-        const agent = b.on === "agent" ? fake.agents.find((a) => a.id === b.agentId) : undefined;
+        // The server picks the caller's own runner when the project runs on runners (always, in runners mode).
+        const agent = fake.mode === "runners" || fake.runner.runOn === "agent" ? (fake.me ?? undefined) : undefined;
         fake.rec = {
             id: "rec-1", projectId: m[1]!, status: "recording", startUrl: b.url, headed: b.headed !== false, steps: [], inspect: { on: false, mode: "locator" }, startedAt: iso(5000),
             runner: agent ? { kind: "agent", agentId: agent.id, name: agent.name } : { kind: "platform" },
@@ -175,7 +186,6 @@ const consoleErrors: string[] = [];
 beforeAll(async () => {
     if (!fs.existsSync(path.join(REPO_ROOT, "web/dist/index.html"))) throw new Error("web/dist is missing: build the UI first (see the header of this file)");
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
-    process.env.AGENT_MAX_TOKENS = "25"; // this file gives one project several runners
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-recorder-agent-ui-"));
     platform = bootstrap(loadConfig({ DATA_DIR: dataDir, SECRET_KEY: "test-secret-key-0123456789", HOST: "127.0.0.1", PORT: String(PLATFORM_PORT) }));
     server = await buildServer(platform);
@@ -211,19 +221,19 @@ async function openStart() {
     await pwExpect(page.getByRole("heading", { name: "Record a test", exact: true })).toBeVisible();
     await pwExpect(startButton()).toBeVisible();
 }
-const agentSelect = () => page.getByLabel("Runner", { exact: true });
 const onGroup = () => page.getByRole("radiogroup", { name: "Record on", exact: true });
-/** Open the form with agents answered, wait for the choice to appear. */
-async function openWithAgents(agents: FakeAgent[], runner: { runOn: "platform" | "agent"; agentId: string | null } = { runOn: "platform", agentId: null }) {
+/** Open the form with the person's runner and the project's setting answered. */
+async function openWith(me: FakeAgent | null, opts: { mode?: "local" | "runners"; runOn?: "platform" | "agent" } = {}) {
     resetFake();
-    fake.agents = agents;
-    fake.runner = runner;
+    fake.me = me;
+    fake.mode = opts.mode ?? "local";
+    fake.runner = { runOn: opts.runOn ?? "platform", agentId: null };
     await openStart();
-    await pwExpect(onGroup()).toBeVisible();
+    await pwExpect(page.getByLabel("Address to start from")).toHaveValue(APP);
 }
 async function startOnAgent(steps: FakeStep[] = []) {
-    await openWithAgents([MAYA, OMAR]);
-    await page.getByRole("radio", { name: "A runner", exact: true }).check();
+    await openWith(MAYA, { mode: "runners" });
+    await pwExpect(page.getByTestId("rec-on-hint")).toBeVisible();
     await startButton().click();
     await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording on Maya’s laptop");
     if (steps.length) {
@@ -273,135 +283,77 @@ async function settle(scheme: "light" | "dark") {
 
 // ── journeys ────────────────────────────────────────────────────────────────
 
-describe("Record on: the choice", () => {
-    it("is hidden when no agent can record, and the form and the request are what they were", async () => {
-        for (const agents of [[], [LIN], [{ ...LIN, record: undefined }]] as FakeAgent[][]) {
-            resetFake();
-            fake.agents = agents;
-            await openStart();
-            await pwExpect(page.getByLabel("Address to start from")).toHaveValue(APP);
-            await page.waitForTimeout(300); // the agents answer has arrived by now
-            await pwExpect(onGroup()).toHaveCount(0);
-            await pwExpect(page.getByText("Record on", { exact: true })).toHaveCount(0);
-            await pwExpect(page.getByText("We open a browser window on the computer that runs this platform. Click through your application as a user would. We write down each step.")).toBeVisible();
-            await pwExpect(page.getByText("The page the browser opens first.")).toBeVisible();
-            await pwExpect(page.getByLabel("Show the browser window")).toBeChecked();
-            await startButton().click();
-            await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording"); // no "on ..." for a server recording
-            expect(fake.bodies[0]).toEqual({ call: "start", body: { url: APP, headed: true } });
-            expect(fake.calls).toEqual(["start"]);
-        }
-    });
-
-    it("stays hidden when the agents list cannot be read", async () => {
-        resetFake();
-        fake.agentsStatus = 404;
-        await openStart();
-        await page.waitForTimeout(300);
+describe("Record on: no choice, the person's own runner", () => {
+    it("never offers a place or a window switch; local mode on this server sends what it sent before", async () => {
+        await openWith(MAYA);
+        await page.waitForTimeout(300); // every answer has arrived by now
         await pwExpect(onGroup()).toHaveCount(0);
-        await startButton().click();
-        await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording");
-        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: APP, headed: true } });
-    });
-
-    it("is shown with two options, defaults to this server, and a platform start sends exactly what it sent before", async () => {
-        await openWithAgents([MAYA, OMAR, LIN]);
-        await pwExpect(page.getByRole("radio", { name: "This server", exact: true })).toBeChecked();
-        await pwExpect(page.getByRole("radio", { name: "A runner", exact: true })).not.toBeChecked();
-        await pwExpect(agentSelect()).toHaveCount(0);
-        await pwExpect(page.getByTestId("rec-on-hint")).toHaveText("The browser window opens on the computer that runs this platform.");
+        await pwExpect(page.getByText("Record on", { exact: true })).toHaveCount(0);
+        await pwExpect(page.getByText("Show the browser window")).toHaveCount(0);
+        await pwExpect(page.getByText("We open a browser window on the computer that runs this platform. Click through your application as a user would. We write down each step.")).toBeVisible();
         await pwExpect(page.getByText("The page the browser opens first.")).toBeVisible();
         await startButton().click();
-        await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording");
+        await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording"); // no "on ..." for a server recording
         expect(fake.bodies[0]).toEqual({ call: "start", body: { url: APP, headed: true } });
+        expect(fake.calls).toEqual(["start"]);
     });
 
-    it("defaults to a runner agent when the project's runner setting says so, and to its agent when it can record", async () => {
-        await openWithAgents([MAYA, { ...MAYA, id: "ag-second", name: "Second laptop" }], { runOn: "agent", agentId: "ag-second" });
-        await pwExpect(page.getByRole("radio", { name: "A runner", exact: true })).toBeChecked();
-        await pwExpect(agentSelect()).toHaveValue("ag-second");
-        await startButton().click();
-        await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording on Second laptop");
-        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: APP, headed: true, on: "agent", agentId: "ag-second" } });
-        // the setting names an agent that cannot be used: the first one that can is chosen instead
-        await openWithAgents([LIN, MAYA], { runOn: "agent", agentId: "ag-lin" });
-        await pwExpect(agentSelect()).toHaveValue("ag-maya");
-        // a person's own choice wins over the setting
-        await page.getByRole("radio", { name: "This server", exact: true }).check();
-        await pwExpect(agentSelect()).toHaveCount(0);
-    });
-
-    it("lists every agent with the reason an unusable one is disabled, usable and online ones first", async () => {
-        await openWithAgents([OMAR, LIN, DEE, MAYA]);
-        await page.getByRole("radio", { name: "A runner", exact: true }).check();
-        const select = agentSelect();
-        const options = await select.locator("option").evaluateAll((os) => os.map((o) => ({ text: o.textContent, disabled: (o as HTMLOptionElement).disabled })));
-        expect(options).toEqual([
-            { text: "Maya’s laptop", disabled: false },
-            { text: "Lin’s phone lab (Can’t record)", disabled: true },
-            { text: "Dee’s build box (No display, so it can’t show the window)", disabled: true },
-            { text: "Omar’s desktop (Offline)", disabled: true },
-        ]);
-        await pwExpect(select).toHaveValue("ag-maya");
-        await pwExpect(page.getByTestId("rec-on-hint")).toHaveText("The browser window opens on Maya’s laptop, not on this computer.");
-        await pwExpect(page.getByText("We open this address from the runner’s computer, so it can be a private address.")).toBeVisible();
-        await pwExpect(page.getByText("The page the browser opens first.")).toHaveCount(0);
-        await pwExpect(page.getByLabel("Show the browser window")).toBeEnabled();
-        await shot("start-agent-light-1280");
-    });
-
-    it("sends the agent and its id, and only then, when an agent is chosen", async () => {
-        await openWithAgents([MAYA]);
+    it("local mode, a project that runs on runners: says your runner's computer and names no runner in the request", async () => {
+        await openWith(MAYA, { runOn: "agent" });
+        await pwExpect(page.getByText("We open a browser window on your runner’s computer.", { exact: false })).toBeVisible();
+        await pwExpect(page.getByText("We open this address from your runner’s computer, so it can be a private address.")).toBeVisible();
         await page.getByLabel("Address to start from").fill("192.168.1.20:3000/shop");
-        await page.getByRole("radio", { name: "A runner", exact: true }).check();
         await startButton().click();
         await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording on Maya’s laptop");
-        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: "http://192.168.1.20:3000/shop", headed: true, on: "agent", agentId: "ag-maya" } });
+        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: "http://192.168.1.20:3000/shop", headed: true } });
         expect(page.url()).toContain("?session=rec-1");
     });
 
-    it("turns the window off and locks it for an agent with no display, with the reason", async () => {
-        await openWithAgents([DEE, MAYA]);
-        await page.getByRole("radio", { name: "A runner", exact: true }).check();
-        const dee = agentSelect();
-        await pwExpect(dee).toHaveValue("ag-maya");
-        await page.getByLabel("Show the browser window").uncheck(); // Dee can be picked once the window is not wanted
-        await dee.selectOption("ag-dee");
-        const box = page.getByLabel("Show the browser window");
-        await pwExpect(box).not.toBeChecked();
-        await pwExpect(box).toBeDisabled();
-        await pwExpect(page.getByText("Dee’s build box has no display, so it can’t show the window.")).toBeVisible();
-        await pwExpect(page.getByTestId("rec-on-hint")).toHaveText("The browser runs on Dee’s build box without showing a window.");
+    it("runners mode: one line names the runner, and the start names none (the server picks it)", async () => {
+        await openWith(MAYA, { mode: "runners" });
+        await pwExpect(page.getByTestId("rec-on-hint")).toHaveText("The window opens on your runner, Maya’s laptop, not on this computer.");
+        await pwExpect(page.getByTestId("rec-runner-problem")).toHaveCount(0);
+        await pwExpect(startButton()).toBeEnabled();
+        await shot("start-agent-light-1280");
         await startButton().click();
-        await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording on Dee’s build box");
-        expect(fake.bodies[0]).toEqual({ call: "start", body: { url: APP, headed: false, on: "agent", agentId: "ag-dee" } });
-        // back to an agent that has a display: the box is a normal box again
-        await openWithAgents([DEE, MAYA]);
-        await page.getByRole("radio", { name: "A runner", exact: true }).check();
-        await pwExpect(page.getByLabel("Show the browser window")).toBeEnabled();
-    });
-
-    it("says so and sends nothing when the agent option is chosen but no agent can record now", async () => {
-        await openWithAgents([OMAR, DEE]);
-        await page.getByRole("radio", { name: "A runner", exact: true }).check();
-        await pwExpect(agentSelect()).toHaveValue("");
-        await pwExpect(page.getByTestId("rec-on-hint")).toHaveText("Start a runner that can record, or choose This server.");
-        await startButton().click();
-        await pwExpect(page.getByText("No runner can record right now").first()).toBeVisible();
-        await pwExpect(page.getByText("Pick a runner that is online and can record, or choose This server.")).toBeVisible();
-        expect(fake.calls).toEqual([]);
-        await page.getByRole("radio", { name: "This server", exact: true }).check();
-        await startButton().click();
-        await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording");
+        await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording on Maya’s laptop");
         expect(fake.bodies[0]).toEqual({ call: "start", body: { url: APP, headed: true } });
     });
 
+    it("runners mode: not set up, offline, or no screen for the window: the server's sentence once, a link to Settings, and nothing starts", async () => {
+        for (const [me, text] of [
+            [null, "Set up your runner in Settings to run tests."],
+            [OMAR, "Your runner is offline. Start it on your computer, then try again."],
+            [DEE, DEE.why!],
+        ] as const) {
+            await openWith(me, { mode: "runners" });
+            const box = page.getByTestId("rec-runner-problem");
+            await pwExpect(box).toContainText(text);
+            await pwExpect(box.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", "#/settings#runner");
+            await pwExpect(page.getByText(text)).toHaveCount(1);
+            await pwExpect(page.getByTestId("rec-on-hint")).toHaveCount(0);
+            await pwExpect(startButton()).toBeDisabled();
+            expect(fake.calls).toEqual([]);
+        }
+    });
+
+    it("a refused start shows the server's words with the Settings link, and reads the runner again", async () => {
+        await openWith(MAYA, { mode: "runners" });
+        await pwExpect(page.getByTestId("rec-on-hint")).toBeVisible();
+        const before = fake.meReads;
+        fake.start = "offline";
+        await startButton().click();
+        await pwExpect(page.getByText("Your runner is offline. Start it on your computer, then try again.")).toBeVisible();
+        await pwExpect(page.getByRole("link", { name: "Open Your runner in Settings" })).toHaveAttribute("href", "#/settings#runner");
+        await pwExpect.poll(() => fake.meReads).toBeGreaterThan(before);
+    });
+
     it("shows the platform's own words for a refusal, and resumes the running session from the details", async () => {
-        await openWithAgents([MAYA]);
-        await page.getByRole("radio", { name: "A runner", exact: true }).check();
+        await openWith(MAYA, { mode: "runners" });
+        await pwExpect(page.getByTestId("rec-on-hint")).toBeVisible();
         fake.start = "422";
         await startButton().click();
-        await pwExpect(page.getByText("Maya’s laptop is busy with another recording. Wait for it to finish, or record on this server.")).toBeVisible();
+        await pwExpect(page.getByText("Maya’s laptop is busy with another recording. Wait for it to finish.")).toBeVisible();
         fake.start = "409";
         fake.rec = { id: "rec-active", projectId, status: "recording", startUrl: APP, headed: true, steps: [], inspect: { on: false, mode: "locator" }, startedAt: iso(9000), runner: { kind: "agent", agentId: "ag-maya", name: "Maya’s laptop" } };
         await startButton().click();
@@ -489,10 +441,14 @@ describe("Record on: a recording on an agent", () => {
 });
 
 describe("Record on: phone width and accessibility", () => {
-    it("fits 375px with 44px targets on the start form (both options) and on a recording on an agent", async () => {
+    it("fits 375px with 44px targets on the start form and on a recording on an agent", async () => {
         await page.setViewportSize({ width: 375, height: 812 });
-        await openWithAgents([MAYA, OMAR, LIN, DEE]);
-        await page.getByRole("radio", { name: "A runner", exact: true }).check();
+        await openWith(DEE, { mode: "runners" });
+        await pwExpect(page.getByTestId("rec-runner-problem")).toBeVisible();
+        await noOverflow();
+        await bigTargets();
+        await openWith(MAYA, { mode: "runners" });
+        await pwExpect(page.getByTestId("rec-on-hint")).toBeVisible();
         await noOverflow();
         await bigTargets();
         await shot("start-agent-light-375");
@@ -510,15 +466,12 @@ describe("Record on: phone width and accessibility", () => {
     });
 
     it("is reachable and usable from the keyboard alone", async () => {
-        await openWithAgents([MAYA, OMAR]);
-        await page.getByRole("radio", { name: "This server", exact: true }).focus();
-        await page.keyboard.press("ArrowDown"); // radios move with the arrows
-        await pwExpect(page.getByRole("radio", { name: "A runner", exact: true })).toBeChecked();
-        await pwExpect(agentSelect()).toBeVisible();
+        await openWith(MAYA, { mode: "runners" });
+        await pwExpect(page.getByTestId("rec-on-hint")).toBeVisible();
+        await page.getByLabel("Address to start from").focus();
         await page.keyboard.press("Tab");
-        await pwExpect(agentSelect()).toBeFocused();
-        await page.keyboard.press("Tab");
-        await pwExpect(page.getByLabel("Address to start from")).toBeFocused();
+        await pwExpect(startButton()).toBeFocused();
+        await page.getByLabel("Address to start from").focus();
         await page.keyboard.press("Enter"); // submits the form
         await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording on Maya’s laptop");
     });
@@ -526,10 +479,11 @@ describe("Record on: phone width and accessibility", () => {
     it("has no accessibility violations in light and dark, on the start form and on recordings that end early", async () => {
         for (const scheme of ["light", "dark"] as const) {
             await settle(scheme);
-            await openWithAgents([MAYA, OMAR, LIN, DEE]);
-            await page.getByRole("radio", { name: "A runner", exact: true }).check();
-            await axe(); // the choice with disabled agents
-            await page.getByRole("radio", { name: "This server", exact: true }).check();
+            await openWith(DEE, { mode: "runners" });
+            await pwExpect(page.getByTestId("rec-runner-problem")).toBeVisible();
+            await axe(); // the runner can't record
+            await openWith(MAYA, { mode: "runners" });
+            await pwExpect(page.getByTestId("rec-on-hint")).toBeVisible();
             await axe();
             await shot(`start-${scheme}-1280`);
             await startOnAgent([GOTO(0), CLICK(1)]);
@@ -553,9 +507,9 @@ describe("Record on: phone width and accessibility", () => {
             for (const [w, h] of [[1280, 900], [390, 844]] as const) {
                 await settle(scheme);
                 await page.setViewportSize({ width: w, height: h });
-                await openWithAgents([MAYA, OMAR, LIN, DEE]);
-                await page.getByRole("radio", { name: "A runner", exact: true }).check();
-                await shot(`choice-${scheme}-${w}`);
+                await openWith(MAYA, { mode: "runners" });
+                await pwExpect(page.getByTestId("rec-on-hint")).toBeVisible();
+                await shot(`start-${scheme}-${w}`);
                 await startButton().click();
                 await pwExpect(page.getByTestId("rec-state")).toHaveText("Recording on Maya’s laptop");
                 fake.rec!.steps.push(GOTO(0), CLICK(1));

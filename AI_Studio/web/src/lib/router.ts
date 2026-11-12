@@ -153,7 +153,7 @@ export const routes = {
     dashboard: "#/dashboard",
     develop: "#/develop",
     /** The person's runner: the "Your runner" section of Settings (round 45 removed the Runners pages; old links land here). */
-    allRunners: RUNNER_SETTINGS,
+    yourRunner: RUNNER_SETTINGS,
     /** Integrations: every system the projects connect to, set up once for an organisation, and which projects use each. */
     integrations: "#/integrations",
     /** An old link (the Folders place of round 34): it lands on Reusable libraries (lib/aliases.ts). */

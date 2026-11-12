@@ -25,6 +25,7 @@ import { personalRunner } from "./helpers/personal-runner.js";
 import { DEFAULT_JOB_OPTIONS, WORKER_LOST_GIVE_UP } from "../src/platform/repo.js";
 import { EXPLORING_ON_RUNNERS_MESSAGE, PLAIN_ON_RUNNERS_MESSAGE, PLATFORM_SETTING_REFUSED, DISPATCH_DOWN_MESSAGE, removeServerExecutionGuard, serverRunRefusals, SERVER_RUN_REFUSED } from "../src/platform/runner-only.js";
 import { getScheduleServices } from "../src/platform/schedule-services.js";
+import { EXPLORE_SCHEDULE_REFUSED } from "../src/platform/routes/schedules.js";
 import { SecretBox } from "../src/platform/secrets.js";
 import { MAIN_ACCOUNT, SessionStore } from "../src/platform/session-store.js";
 import { ResetHookStore } from "../src/platform/test-data-reset-store.js";
@@ -37,7 +38,7 @@ const APP_PORT = 8001;
 const LOCAL_PORT = 8002;
 const BASE = `http://127.0.0.1:${PORT}`;
 const API_KEY = "ro-admin-key-41c7e2b9";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "AGENT_MAX_TOKENS"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 let platform: Platform;
@@ -79,7 +80,7 @@ const startDispatch = () => {
 };
 
 beforeAll(async () => {
-    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "3", AGENT_WATCH_MS: "50", AGENT_NO_AGENT_GRACE_SECONDS: "2", AGENT_MAX_TOKENS: "25" });
+    Object.assign(process.env, { AGENT_POLL_SECONDS: "1", AGENT_LEASE_SECONDS: "3", AGENT_WATCH_MS: "50", AGENT_NO_AGENT_GRACE_SECONDS: "2" });
     for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "LLM_API_KEY"]) process.env[k] = "";
     appServer = http.createServer((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end("{}"));
     await new Promise<void>((r) => appServer.listen(APP_PORT, "127.0.0.1", r));
@@ -219,6 +220,12 @@ describe("runners only: a run goes to the runner", () => {
         const listed = (await call("GET", `/api/projects/${pid}/schedules`)).body;
         expect(listed.executionMode).toBe("runners");
         expect(listed.schedulesFire).toBe(false); // SCHEDULER_ENABLED=false in this test platform: said, not hidden
+        // Made on the open server: nobody's name to show.
+        expect(listed.schedules[0]).not.toHaveProperty("ownerName");
+        // "Explore again" would fail at every fire here: refused when it is made, and when a schedule is changed to it.
+        const explore = await call("POST", `/api/projects/${pid}/schedules`, { kind: "generate", cadence: { type: "daily", time: "03:00" } });
+        expect(explore).toMatchObject({ status: 409, body: { error: EXPLORE_SCHEDULE_REFUSED } });
+        expect((await call("PATCH", `/api/projects/${pid}/schedules/${made.body.id}`, { kind: "generate" })).body.error).toBe(EXPLORE_SCHEDULE_REFUSED);
         platform.db.run("UPDATE schedules SET next_run_at = ? WHERE id = ?", Date.now() - 1000, made.body.id);
         const ticked = await getScheduleServices(platform).scheduler.tick();
         const fired = ticked.find((x) => x.scheduleId === made.body.id)!;

@@ -179,7 +179,7 @@ export class TaskRunner {
         if (task.kind === "record" || task.kind === "device") return undefined;
         const runtime = SUPPORTED[task.adapterId];
         if (!runtime) return { reason: "unsupported", message: `This agent can't run ${task.adapterId} tasks yet.` };
-        if (task.scripts.some((s) => s.custom) && this.deps.allowCustomScripts !== true) return { reason: "code-scripts-off", message: "This task has hand-written scripts, and this agent was not started with --allow-custom-scripts, so it did not run them." };
+        if (task.scripts.some((s) => s.custom) && this.deps.allowCustomScripts !== true) return { reason: "code-scripts-off", message: "This task has hand-written scripts, and code scripts are switched off for this runner, so it did not run them. Switch them on for your runner in Settings." };
         // Private and local addresses (address-guard.ts): the run's addresses are looked up on THIS computer's network, before anything is downloaded.
         if (runtime === "playwright" && this.refusesPrivate()) {
             const why = proxyTestsConflict(this.deps.env) ?? (await runAddressRefusal(task.env));
@@ -519,7 +519,7 @@ export class TaskRunner {
         // Hand-written scripts are code people wrote: this computer runs them only when its owner agreed, and only after its own safety check.
         const hand = scripts.filter((s) => s.custom);
         if (hand.length > 0) {
-            if (this.deps.allowCustomScripts !== true) return fail("This task has hand-written scripts, and this agent was not started with --allow-custom-scripts, so it did not run them.");
+            if (this.deps.allowCustomScripts !== true) return fail("This task has hand-written scripts, and code scripts are switched off for this runner, so it did not run them. Switch them on for your runner in Settings.");
             for (const s of hand) {
                 const r = checkScript(s.content, { kind: "test" });
                 if (!r.ok) return fail(`The script ${s.filename} did not pass this agent's safety check, so nothing was run: ${describeErrors(r.diagnostics)}`);

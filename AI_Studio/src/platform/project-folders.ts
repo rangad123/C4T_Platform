@@ -156,14 +156,6 @@ export async function deleteProject(db: Db, store: ObjectStore, projectId: strin
             const n = Number(db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t} WHERE project_id = ?`, projectId)?.n ?? 0);
             if (n) rows[t] = n;
         }
-        // A runner registered from this project and serving no other is retired with it: a token with nothing left to serve must not
-        // keep working. A runner registered on the Runners page belongs to its organisation and stays (it is managed there).
-        db.run(
-            "UPDATE agent_tokens SET revoked_at = ? WHERE project_id = ? AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM runner_access a WHERE a.token_id = agent_tokens.id AND a.project_id <> ?)",
-            new Date().toISOString(),
-            projectId,
-            projectId,
-        );
         db.run("DELETE FROM projects WHERE id = ?", projectId);
         // Tables that name the project without a foreign key (artifacts, budgets...): nothing cascaded to them.
         for (const t of tables) db.run(`DELETE FROM ${t} WHERE project_id = ?`, projectId);

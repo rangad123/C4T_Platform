@@ -113,16 +113,16 @@ Steps marked (P2) need a protocol-2 agent. A protocol-1 agent does the same work
 For each: what happens, the words people see, and how the platform reconciles it. "Before this round" means at `e344261`.
 
 ### No runner online
-- **At Run:** the job gate answers 409 with a sentence and nothing is queued (`agent-services.ts`). A chosen runner that is offline gets a 409 naming it; one the person may not use, a 404. *Built.*
-- **After the job was queued** (the runner went away): the executor counts how long no capable runner has been online. After 90 s it fails the task: "No runner agent that can run these tests is connected. …" (`agent-services.ts:771-781`). The job ends `FAILED`. *Built.* In `runners` mode the sentence is "No runner that can run these tests is online. Start the runner, or add one on the Runners page." Rejected by every runner that could take it: the task fails at once with their reasons. *Built.*
-- **A schedule's run with no runner:** the schedule records it as skipped with the reason (`scheduler.ts:229-240`). "Run now" on a schedule is refused (409) while runs cannot start, instead of queuing a job nothing runs (`schedule-services.ts`). *Built.*
+- **At Run:** a person's run is refused (409, nothing queued) when their runner is not set up or offline, with a typed code that links to Settings (`RUNNER_NOT_SET_UP`, `RUNNER_OFFLINE`; `assertJobAllowed`). A schedule's or deploy trigger's run is made and waits for its owner's computer. *Built.*
+- **After the job was queued** (the runner went away, or cannot take it): the executor counts how long the owner's runner has not been able to take it. A person's run fails after 90 s (`AGENT_NO_AGENT_GRACE_SECONDS`); a schedule's or trigger's run waits to the queue limit, 30 minutes (`noRunnerWaitMs`). Both end with one sentence (`noRunnerSentence`): "Your runner was offline or could not run these tests. Start it on your computer, then try again.", or for a schedule or trigger "{Name}'s runner was offline or could not run these tests while this schedule waited for it." The job ends `FAILED`. Rejected by the runner: the task fails at once with its reason. *Built.*
+- **A schedule's run while runs cannot start here:** the schedule records it as skipped with the reason (`scheduler.ts`). "Run now" on a schedule is refused (409) instead of queuing a job nothing runs (`schedule-services.ts`). *Built.*
 
 ### No capable runner
-- **At Run:** the job gate compares the run's adapters with every eligible online runner and answers 409 with the first reason, for example "The connected runner agent "X" can't run API tests: …" (`agent-services.ts:526-533`). *Built.*
-- The executor's "is a capable runner online" check uses the same rules as offering (owner, chosen runner, code scripts, rejections), so a run that only a shared runner could take, but that has code scripts, is no longer left waiting 30 minutes. *Built.*
+- **At Run:** the job gate compares the run's adapters with what the owner's runner last reported and answers 409 with the reason, for example "Your runner cannot run phone tests: it has no Android tools (adb) installed." (`cannotRunSentence`). `GET /api/me/runner` shows the same sentences in `can` before anyone clicks. *Built.*
+- The executor's check uses the same rules as offering (owner, code scripts, rejections). *Built.*
 
 ### Runner busy
-The task waits in the queue. If no runner takes it within 30 minutes it fails: "No runner agent picked up this run within 30 minutes." (`AgentStore.sweep`). The 30 minutes count from when the task last went into the queue, so a task put back after a long run whose runner went silent gets its full wait for the re-offer. *Built.*
+The task waits in the queue. If no runner takes it within 30 minutes it fails (`AgentStore.sweep`: "No runner took this run within 30 minutes."; the run itself shows the `noRunnerSentence` above). The 30 minutes count from when the task last went into the queue, so a task put back after a long run whose runner went silent gets its full wait for the re-offer. *Built.*
 
 ### Disconnect mid-run
 - **On the server:** the heartbeats stop, the 60 s lease runs out, and `sweep` puts the task back in the queue while it has used fewer than 2 offers. The second time it fails: "The runner agent stopped responding while it was running these tests." (`agent-store.ts:639-640`). The job ends `FAILED`. *Built.*

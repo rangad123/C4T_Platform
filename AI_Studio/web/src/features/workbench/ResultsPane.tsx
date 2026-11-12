@@ -5,7 +5,7 @@ import { Button, Callout, Term } from "../../components/ui";
 import { Tooltip } from "../../components/Tooltip";
 import { duration, relativeTime } from "../../lib/format";
 import { SEVERITY, VALIDATION, cleanReason } from "../../lib/labels";
-import type { RanOn } from "../agents/agents";
+import type { RanOn } from "../../api";
 import { RunsOnLine } from "../agents/RunsOnLine";
 import { TestCleanupLine } from "../cleanup/TestCleanupLine";
 import { EnvironmentStrip } from "../environments/EnvironmentStrip";

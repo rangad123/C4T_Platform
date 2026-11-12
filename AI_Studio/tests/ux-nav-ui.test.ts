@@ -403,7 +403,7 @@ describe("sidebar and the Projects page", () => {
 
     it("each global place opens with its own title, and the open one is marked in the sidebar", async () => {
         const side = page.getByRole("complementary", { name: "Main navigation" });
-        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.agents, "Agents", "Agents"], [routes.develop, "Test development", "Test development"], [routes.libraries, "Reusable libraries", "Reusable libraries"], [routes.projectFolders, "Project folders", "Projects"], [routes.allRunners, "Settings", "Settings"], [routes.settings, "Settings", "Settings"]] as const) {
+        for (const [h, title, nav] of [[routes.dashboard, "Dashboard", "Dashboard"], [routes.agents, "Agents", "Agents"], [routes.develop, "Test development", "Test development"], [routes.libraries, "Reusable libraries", "Reusable libraries"], [routes.projectFolders, "Project folders", "Projects"], [routes.yourRunner, "Settings", "Settings"], [routes.settings, "Settings", "Settings"]] as const) {
             await visit(h);
             await pwExpect(page.locator("h1"), h).toHaveText(title);
             await pwExpect(side.locator('a.nav-item[aria-current="page"]'), h).toHaveText(nav);
@@ -607,7 +607,7 @@ describe("old links keep working", () => {
         expect(routes.releases(p)).toBe("#/projects/p1/runs?section=releases");
         expect(routes.compliance(p)).toBe("#/projects/p1/runs?section=compliance");
         expect(routes.manualCases(p)).toBe("#/projects/p1/tests?section=manual");
-        expect(routes.allRunners).toBe("#/settings#runner");
+        expect(routes.yourRunner).toBe("#/settings#runner");
         // No helper of `routes` builds a link that the alias table would move again.
         const sample = (k: string, f: unknown): string[] => (typeof f === "string" ? [f] : k === "writeCode" ? [routes.writeCode(p, { title: "x", kind: "web" })] : k === "guideTopic" ? [routes.guideTopic("x")] : [(f as (a: string, b?: string) => string)(p), (f as (a: string, b: string) => string)(p, "x")]);
         // Round 37: `routes.folders` is kept on purpose as the old link of the Folders place; it lands on Reusable libraries.
@@ -695,7 +695,7 @@ describe("every route builder opens a page without an error", () => {
             dashboard: [routes.dashboard],
             develop: [routes.develop],
             createProject: [routes.createProject],
-            allRunners: [routes.allRunners],
+            yourRunner: [routes.yourRunner],
             folders: [routes.folders],
             integrations: [routes.integrations],
             libraries: [routes.libraries],
@@ -824,7 +824,7 @@ describe("accessibility and words", () => {
         });
         await axeBoth(routes.projectSettings(P(), "data"));
         await axeBoth(routes.scripts(P(), "steps"));
-        await axeBoth(routes.allRunners);
+        await axeBoth(routes.yourRunner);
         await axeBoth(routes.runs(P(), "schedules"));
     });
 

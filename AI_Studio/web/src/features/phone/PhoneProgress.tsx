@@ -1,7 +1,7 @@
 import type { EventRow, Job } from "../../api";
 import { Disclosure } from "../../components/ui";
 import { isActive } from "../../lib/labels";
-import { usePolled } from "../agents/agents";
+import { usePolled } from "../../lib/hooks";
 import { SKIP_CAP, countsLine, phoneCounts, skippedOf } from "./phone";
 import { coverageCounts, coverageOf } from "../phonedevice/phonedevice";
 import { SignInPause } from "../phonedevice/SignInPause";

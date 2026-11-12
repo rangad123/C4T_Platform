@@ -43,7 +43,7 @@ const APP = `http://127.0.0.1:${APP_PORT}`;
 const DIST = `http://127.0.0.1:${DIST_PORT}`;
 const API_KEY = "installer-mac-admin-key-7c3e51d0a9";
 const NODE_VERSION = "24.12.1";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "RUNNER_KIT_DIR", "AGENT_MAX_TOKENS", "RUNNER_KIT_RATE_PER_MINUTE"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "RUNNER_KIT_DIR", "RUNNER_KIT_RATE_PER_MINUTE"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 const fwd = (p: string) => p.replaceAll("\\", "/");

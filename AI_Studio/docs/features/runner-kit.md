@@ -96,7 +96,7 @@ A runner started from a kit reports its kit version (an additive optional field 
 - **The zip holds a one-time code.** `runner.enroll` lets whoever starts it first within 30 minutes become your runner and receive your runs, including the test accounts' credentials they carry. The file is marked owner-only in the zip. The README says to delete the zip once the runner is online. If a zip leaks before you start it, download again (the new runner replaces any made with the old code) or choose Remove this computer in Settings.
 - The platform stores only the code's hash. The zip is built per download, sent with `cache-control: no-store`, and the code is never logged.
 - The scripts contain no name, address or code: the runner reads `runner.json` and `runner.enroll`, so nothing typed by a person can reach a shell.
-- The kit does not make the runner any more powerful than a checkout-based one: hand-written code tests and Windows desktop apps stay off unless the person starts the runner with `--allow-custom-scripts` or `--allow-app` (edit the start script's line for that).
+- The kit does not make the runner any more powerful than a checkout-based one: hand-written code tests follow the owner's "Code scripts" switch in Settings, and Windows desktop apps stay off unless the person starts the runner with `--allow-app` (edit the start script's line for that).
 - The zip is not signed. Windows SmartScreen or macOS Gatekeeper may ask for a confirmation the first time (the README says what to choose).
 
 ## Limits

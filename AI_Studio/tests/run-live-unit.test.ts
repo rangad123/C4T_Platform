@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { EventRow } from "../web/src/api.js";
-import { currentLine, foldLiveRun, phaseSentence, runPhase, shotCaption, taskPhaseOf, TASK_PHASES, liveShotUrl, withLive } from "../web/src/features/runs/live-run.js";
+import { currentLine, foldLiveRun, LIVE_STEPS, phaseSentence, stepOf, runPhase, shotCaption, taskPhaseOf, TASK_PHASES, liveShotUrl, withLive } from "../web/src/features/runs/live-run.js";
 
 
 let id = 0;
@@ -55,7 +55,16 @@ describe("folding a runner's events", () => {
         expect(liveShotUrl("p1", "j1", end.shots[0]!)).toBe("/api/projects/p1/runs/j1/runner-files/task_1/WEB-002-step1.png");
         expect(shotCaption(end.shots[0]!, end.tests)).toBe("WEB-002 Checkout, step 1: Click Pay");
         expect(end.lines.map((l) => l.text)).toEqual(["Sent 2 script(s) to a runner agent.", "Closing the browser"]);
-        expect(end.furthest).toBe(5);
+        // Sending results is still the Running step of four.
+        expect(end.furthest).toBe(2);
+    });
+
+    it("shows four steps, never the protocol's offered and accepted", () => {
+        expect(LIVE_STEPS.map((s) => s.word)).toEqual(["Waiting for your runner", "Getting ready", "Running", "Done"]);
+        expect(["queued", "assigned", "accepted"].map((p) => stepOf(p as never))).toEqual([0, 0, 0]);
+        expect([stepOf("preparing"), stepOf("running"), stepOf("uploading"), stepOf("completed")]).toEqual([1, 2, 2, 3]);
+        for (const bad of ["rejected", "failed", "cancelled", "timed_out", "lost_connection"] as const) expect(stepOf(bad)).toBe(-1);
+        expect(LIVE_STEPS.map((s) => s.word).join(" ")).not.toMatch(/Offered|Accepted|Queued/);
     });
 
     it("starts the tests over on a new attempt, and a retried test starts over too", () => {

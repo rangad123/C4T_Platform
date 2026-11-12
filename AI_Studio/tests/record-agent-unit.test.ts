@@ -317,24 +317,24 @@ describe("where a recording runs (decision table)", () => {
         };
         expect(refuse({ on: "agent", headed: true, runner: platformRunner, agents: [] })).toMatchObject({ status: 409, message: "Set up your runner in Settings to run tests." });
         expect(refuse({ on: "agent", headed: true, runner: platformRunner, agents: [agent({ online: false })] })).toMatchObject({ status: 409, message: expect.stringMatching(/^Your runner is offline/) });
-        expect(refuse({ on: "agent", agentId: "a1", headed: true, runner: platformRunner, agents: [agent({ online: false })] })).toMatchObject({ status: 409, message: "Your runner is offline. Start it on your computer, then try again." });
+        expect(refuse({ on: "agent", agentId: "a1", headed: true, runner: platformRunner, agents: [agent({ online: false })] })).toMatchObject({ status: 409, message: "Your runner is offline. Start it on your computer, then try again. Or record on the platform instead." });
         expect(refuse({ on: "agent", agentId: "other", headed: true, runner: platformRunner, agents: [agent()] })).toMatchObject({ status: 404 });
         const noRecord = agent({ capabilities: { os: "linux", arch: "x64", node: "v24", browsers: ["chromium"] } });
         expect(refuse({ on: "agent", agentId: "a1", headed: false, runner: platformRunner, agents: [noRecord] })).toMatchObject({ status: 422, message: expect.stringMatching(/Maya's laptop can't record/) });
         const noDisplay = agent({ capabilities: { os: "linux", arch: "x64", node: "v24", browsers: ["chromium"], record: true } });
-        expect(refuse({ on: "agent", agentId: "a1", headed: true, runner: platformRunner, agents: [noDisplay] })).toMatchObject({ status: 422, message: "Maya's laptop has no display, so it can't show the browser window. Turn off “Show the browser window”, or use another agent." });
+        expect(refuse({ on: "agent", agentId: "a1", headed: true, runner: platformRunner, agents: [noDisplay] })).toMatchObject({ status: 422, message: "Maya's laptop has no screen to show the recording window on. Start the runner from a signed-in desktop session." });
         // Without the window it can record.
         expect(chooseRecorder({ on: "agent", agentId: "a1", headed: false, runner: platformRunner, agents: [noDisplay] })).toMatchObject({ kind: "agent" });
         expect(recordProblem(noDisplay, false)).toBeUndefined();
     });
 
-    it("picks, among several online agents, one that can record (and is least busy); a project's pin is no longer read (round 45)", () => {
+    it("uses the caller's own runner (the first of sessionHosts: online first, most recent first) and says plainly when it can't; a project's pin is not read", () => {
         const idle = agent({ id: "a2", name: "Idle", activeTasks: 0 });
         const busy = agent({ id: "a3", name: "Busy", activeTasks: 2 });
         const old = agent({ id: "a4", name: "Old", capabilities: { os: "linux", arch: "x64", node: "v24", browsers: ["chromium"] } });
-        expect(chooseRecorder({ on: "agent", headed: true, runner: platformRunner, agents: [old, busy, idle] })).toMatchObject({ agent: { id: "a2" } });
-        expect(chooseRecorder({ headed: true, runner: agentRunner("a3"), agents: [old, busy, idle] })).toMatchObject({ agent: { id: "a2" } });
-        expect(() => chooseRecorder({ headed: true, runner: agentRunner("a4"), agents: [old] })).toThrowError(/Old can't record/);
+        expect(chooseRecorder({ on: "agent", headed: true, runner: platformRunner, agents: [busy, idle] })).toMatchObject({ agent: { id: "a3" } });
+        expect(chooseRecorder({ headed: true, runner: agentRunner("a3"), agents: [idle, busy] })).toMatchObject({ agent: { id: "a2" } });
+        expect(() => chooseRecorder({ headed: true, runner: agentRunner(), agents: [old, idle] })).toThrowError(/Old can't record/);
     });
 
     it("the task's adapter id names the agent it is for", () => {

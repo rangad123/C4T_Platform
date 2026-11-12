@@ -85,7 +85,7 @@ async function startRunFromScripts(page: Page): Promise<{ jobId: string; sent: R
     await panel.getByRole("radio", { name: /^All tests/ }).check();
     if (RUNNERS_MODE) {
         await pwExpect(panel.getByText("This server", { exact: true })).toHaveCount(0);
-        await pwExpect(panel.getByTestId("run-where")).toContainText(`Runs on your runner, ${RUNNER}`, { timeout: 30_000 });
+        await pwExpect(panel.getByTestId("run-sentence")).toContainText(`on your runner, ${RUNNER}`, { timeout: 30_000 });
     }
     const answer = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/projects/${projectId}/runs`);
     await panel.getByRole("button", { name: "Start run" }).click();
@@ -98,11 +98,16 @@ async function startRunFromScripts(page: Page): Promise<{ jobId: string; sent: R
 async function seesRunGoing(page: Page) {
     await pwExpect(page.getByText("Running", { exact: true }).first()).toBeVisible();
     await pwExpect(page.getByRole("region", { name: "About this run" }).getByText(`On ${RUNNER}`)).toBeVisible();
-    await pwExpect(page.getByTestId("run-summary")).toHaveText("0 of 2 tests have a result so far.");
+    // The runner's own report until the results are stored: nothing has passed and the held test is still running (the receipt test
+    // may already have given up, as the comment below says).
+    await pwExpect(page.getByTestId("run-summary")).toHaveText(/^So far: 0 passed, (0 failed, 2|1 failed, 1) running\.$/);
     {
         const live = page.getByTestId("run-live");
-        await pwExpect(live.getByTestId("run-live-phase")).toContainText("Running");
-        await pwExpect(live.getByTestId("run-live-runner")).toContainText(RUNNER);
+        // Four steps, now at Running; the runner is named once, in About this run, as the person's own computer.
+        await pwExpect(live.getByRole("list", { name: "Where the run is" }).locator("[aria-current=step]")).toContainText("Running");
+        const about = page.getByRole("region", { name: "About this run" });
+        await pwExpect(about.getByTestId("run-live-runner")).toContainText(RUNNER);
+        await pwExpect(about.getByText("Your computer", { exact: true })).toBeVisible();
         // The two tests run side by side: the receipt test is the latest one running until its check gives up, then only the held one is.
         await pwExpect(live.getByTestId("run-live-current")).toContainText(CHECKOUT, { timeout: 30_000 });
     }
@@ -182,10 +187,11 @@ describe("a person's own runner runs their tests, from setting it up in Settings
         await pageA.goto(`${BASE}/#/settings#runner`);
         const section = pageA.getByTestId("your-runner");
         await pwExpect(section).toHaveAttribute("data-state", "not-set-up", { timeout: 20_000 });
+        await section.getByText("For another computer?", { exact: true }).click();
         await section.getByLabel("System").selectOption("linux");
         await section.getByLabel("Processor").selectOption(os.arch() === "arm64" ? "arm64" : "x64");
         const saved = pageA.waitForEvent("download");
-        await section.getByRole("button", { name: /^Download the runner/ }).click();
+        await section.getByRole("button", { name: /^Download for Linux/ }).click();
         const dl = await saved;
         const zipPath = await dl.path();
         const files = unzipSync(new Uint8Array(fs.readFileSync(zipPath!)));
@@ -266,7 +272,10 @@ describe("a person's own runner runs their tests, from setting it up in Settings
         expect(job.ranOn).toMatchObject({ kind: "agent", name: RUNNER });
         expect(job.phase ?? job.ranOn?.phase).toBe("completed");
         const live = pageA.getByTestId("run-live");
-        await pwExpect(live.getByTestId("run-live-phase")).toContainText(`Finished on ${RUNNER}`);
+        // Finished on the person's runner: every step done, no bad-ending sentence, and About this run still names that runner.
+        await pwExpect(live.getByRole("list", { name: "Where the run is" }).locator("li.is-done")).toHaveCount(4);
+        await pwExpect(live.getByTestId("run-live-phase")).toHaveCount(0);
+        await pwExpect(pageA.getByRole("region", { name: "About this run" }).getByTestId("run-live-runner")).toContainText(RUNNER);
         await pwExpect(live.getByTestId("run-live-failures")).toContainText(RECEIPT);
         await pwExpect(live.getByTestId("run-live-shots").getByRole("listitem").first()).toBeVisible();
         const exec = (await stack.as("ada", "GET", `/api/tests/${ids.receipt}/executions`)).body;

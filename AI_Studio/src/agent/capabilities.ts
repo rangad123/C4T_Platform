@@ -353,6 +353,6 @@ export function describeCapabilities(c: Capabilities): string {
         const w = c.windows;
         parts.push(`Windows desktop apps: ${w.uiautomation ? (w.elevated ? "UI Automation found, but this agent runs as administrator (desktop tests do not run elevated)" : w.interactive === false ? "UI Automation found, but this is not an interactive session" : `ready${w.allowedApps?.length ? `, may start: ${w.allowedApps.join(", ")}` : ", no application is allowed yet (use --allow-app)"}`) : "UI Automation not available"}`);
     }
-    if (c.customScripts) parts.push("hand-written scripts: allowed (--allow-custom-scripts)");
+    if (c.customScripts) parts.push("hand-written scripts: allowed");
     return parts.join("; ");
 }

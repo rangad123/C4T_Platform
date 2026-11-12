@@ -513,19 +513,22 @@ export class Repo {
      * READ COMMITTED: a worker that waited on the row re-checks only the outer condition, so without it two workers could both get
      * the job. `skipLocked` lets the next worker pass over a row being claimed instead of waiting for it.
      */
-    claimNextJob(leaseMs: number, owner: string, modes?: readonly JobMode[]): JobRow | undefined {
+    claimNextJob(leaseMs: number, owner: string, modes?: readonly JobMode[], skip: readonly string[] = []): JobRow | undefined {
         // The dispatch worker (EXECUTION_MODE=runners) takes only the kinds of job a runner can do; the mode is a fixed word list, never input.
         const only = modes ? ` AND ${this.db.dialect.jsonText("options_json", "mode")} IN (${modes.map((m) => `'${m.replace(/[^a-z]/g, "")}'`).join(",")})` : "";
+        // Jobs left in the queue for now (the dispatch worker: schedule and trigger runs whose owner's runner is offline, jobsWaitingForRunner).
+        const not = skip.length ? ` AND id NOT IN (${skip.map(() => "?").join(",")})` : "";
         const r = this.db.get(
             `UPDATE generation_jobs
                 SET status = CASE ${this.db.dialect.jsonText("options_json", "mode")} WHEN 'validate' THEN 'VALIDATING' ELSE 'DISCOVERING' END,
                     lease_until = ?, lease_owner = ?, attempts = attempts + 1, started_at = COALESCE(started_at, ?), updated_at = ?
-              WHERE id = (SELECT id FROM generation_jobs WHERE status = 'QUEUED'${only} ORDER BY created_at LIMIT 1${this.db.dialect.skipLocked()}) AND status = 'QUEUED'
+              WHERE id = (SELECT id FROM generation_jobs WHERE status = 'QUEUED'${only}${not} ORDER BY created_at LIMIT 1${this.db.dialect.skipLocked()}) AND status = 'QUEUED'
           RETURNING *`,
             Date.now() + leaseMs,
             owner,
             now(),
             now(),
+            ...skip,
         );
         return r ? toJob(r) : undefined;
     }
@@ -543,6 +546,13 @@ export class Repo {
             eventBus.publish(id);
         }
         return rows.length;
+    }
+
+    /** Ends a job that is still queued (it never started) with `reason`. False when it was no longer queued. */
+    failQueuedJob(id: string, reason: string): boolean {
+        const r = this.db.run("UPDATE generation_jobs SET status = 'FAILED', error = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'QUEUED'", reason, now(), now(), id);
+        if (Number(r.changes) > 0) eventBus.publish(id);
+        return Number(r.changes) > 0;
     }
 
     /** The job `claimNextJob` would take next, without taking it. */

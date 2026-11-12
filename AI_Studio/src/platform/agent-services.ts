@@ -1,11 +1,11 @@
 /**
- * Runner agents, the platform side: who may connect (tokens), who is connected (registry), the queue of tasks, the executor that
+ * Runners, the platform side: who may connect (tokens), who is connected (registry), the queue of tasks, the executor that
  * sends a run's scripts to an agent and brings the result back, and the rules that route a project's runs there or refuse them.
  *
  * Only script EXECUTION goes to the agent. Analysis (discovery, planning, writing tests), plain-English authoring, repair, healing
  * and vision judging still run on the platform: they need the model and the browser-driving loop.
  *
- * Security notes (the doc has the long version): a token belongs to one runner, which serves only the projects given access to it (runner_access); only the agent that claimed a task may heartbeat,
+ * Security notes (the doc has the long version): a credential is one person's runner, which takes only that person's runs; only the runner that claimed a task may heartbeat,
  * download for, upload to or answer it; every file name is checked and anchored under the task's own folder; uploads are streamed
  * with a size cap and hashed here; the task payload and the result are encrypted at rest and every credential of the run is scrubbed
  * from whatever the agent sends back before it is stored.
@@ -26,9 +26,10 @@ import type { TestSpec } from "../engine/spec/schema.js";
 import { secretsOfRun } from "../engine/evidence/model.js";
 import { scrubTraceFile, traceSecretsOfRun } from "../engine/evidence/trace-scrub.js";
 import { agentDesktopProblem, assertHostDesktop, desktopApps } from "./desktop-guard.js";
+import { farmChosen } from "./device-farm-store.js";
 import { desktopUnavailableReason, lastProbe, probeDesktop } from "../engine/desktop/probe.js";
 import type { Platform } from "./bootstrap.js";
-import { AgentStore, jobOwnerId, MAX_OFFERS, NEVER_ACCEPTED, OPEN_OWNER_ID, ownerIdOfActor, refusalsOf, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type SweepChange, type TaskFile, type TaskRecord } from "./agent-store.js";
+import { AgentStore, jobOwnerId, MAX_OFFERS, QUEUE_MAX_MS, NEVER_ACCEPTED, OPEN_OWNER_ID, ownerIdOfActor, refusalsOf, ONLINE_MS, type AgentRecord, type AgentTokenRecord, type DeviceNeed, type SweepChange, type TaskFile, type TaskRecord } from "./agent-store.js";
 import { currentActor } from "./auth/actor.js";
 import { crowd4testFromConfig } from "./auth/crowd4test.js";
 import { isPrivateHost } from "./net-guard.js";
@@ -89,14 +90,23 @@ export function agentLimits(env: NodeJS.ProcessEnv = process.env): AgentLimits {
     };
 }
 
+const isAutomated = (kind: string | undefined): boolean => kind === "schedule" || kind === "trigger";
+
+/**
+ * How long a queued run waits with no runner able to take it before it fails. A person's run is refused up front when their runner is off,
+ * so the short grace; a schedule's or deploy trigger's run waits for its owner's computer to the queue limit (Settings: "Schedules wait for it").
+ */
+export const noRunnerWaitMs = (kind: string | undefined, graceMs: number): number => (isAutomated(kind) ? Math.max(graceMs, QUEUE_MAX_MS) : graceMs);
+
+/** The up-front refusal of a run whose runner can't run this adapter's tests (also GET /api/me/runner's `can`, so both say the same). */
+export function cannotRunSentence(adapter: { id: string; kinds: readonly string[] }, runnerName: string, why: string): string {
+    if (adapter.id === IOS_ADAPTER_ID) return `iOS tests need a runner on a Mac with Xcode. Your runner “${runnerName}” can't run them: ${why}.`;
+    const what = adapter.id === "taqwright" ? "phone" : adapter.kinds[0] === "api" ? "API" : (adapter.kinds[0] ?? adapter.id);
+    return `Your runner cannot run ${what} tests: ${why}.`;
+}
+
 /** The failure of the run itself, not of a test: the agent could not run the tests, or was lost. Never a test verdict. */
 export class RunnerAgentError extends Error {}
-
-/** Who a run is for, as eligibility needs it (round 45: the run goes to that person's runner, nowhere else). */
-export interface RunContext {
-    /** The person whose run it is (a schedule's or trigger's: the person who made it; OPEN_OWNER_ID on an open server); null: nobody's. */
-    ownerId: string | null;
-}
 
 export { jobOwnerId, OPEN_OWNER_ID };
 
@@ -164,7 +174,7 @@ export function ledgerFromAgent(lines: Array<Record<string, unknown>> | undefine
         if (typeof o.status === "string" && (CLEANUP_STATUSES as string[]).includes(o.status)) {
             items.push({ ...base, ...(okPath(o.deletePath) ? { deletePath: o.deletePath } : {}), status: o.status as CleanupStatus, ...(typeof o.reason === "string" && o.reason ? { reason: o.reason.slice(0, 300) } : {}) });
         } else if (o.k === "created") {
-            items.push({ ...base, status: "failed", reason: "The runner agent did not say whether this record was removed, so it may still be in the application." });
+            items.push({ ...base, status: "failed", reason: "The runner did not say whether this record was removed, so it may still be in the application." });
         } else seq--;
     }
     return items;
@@ -187,8 +197,6 @@ export class AgentService {
     private lastSweepMs = Number.NEGATIVE_INFINITY;
     private apkHashes = new Map<string, { size: number; mtimeMs: number; sha: string }>();
     private lastPrune = 0;
-    /** Who each job is for, and the runner chosen for it (jobContext). */
-    private readonly jobContexts = new Map<string, RunContext>();
     /** POST /api/agent/enroll, per address and per code (enroll). */
     private readonly enrollLimit: RateLimiter;
     private readonly enrollCodeLimit: RateLimiter;
@@ -231,9 +239,9 @@ export class AgentService {
     /** The token behind an `Authorization` header. Missing or malformed: 401. Unknown or revoked: 404 (the two look the same). */
     authenticate(header: string | string[] | undefined): AgentTokenRecord {
         const presented = bearerToken(header);
-        if (!presented) throw new HttpError(401, "Missing runner agent token (send Authorization: Bearer aitg_...)");
+        if (!presented) throw new HttpError(401, "Missing runner token (send Authorization: Bearer aitg_...)");
         const token = this.store.findToken(presented);
-        if (!token) throw new HttpError(404, "This runner agent token is not valid or was revoked.");
+        if (!token) throw new HttpError(404, "This runner token is not valid or was revoked.");
         // Round 45: only a person's own runner works. A team, shared or project runner is refused with the sentence (the runner stops, exit 3).
         if (token.kind !== "personal") throw new HttpError(401, TEAM_RUNNER_REFUSED);
         this.store.touchToken(token.id);
@@ -243,20 +251,20 @@ export class AgentService {
     /** Per-token request budget (polls are limited separately: one at a time per agent). */
     throttle(token: AgentTokenRecord, kind: "hello" | "other"): void {
         const ok = kind === "hello" ? this.helloLimit.take(token.id) : this.generalLimit.take(token.id);
-        if (!ok) throw new HttpError(429, kind === "hello" ? "Too many connection attempts from this runner agent. Wait a minute." : "Too many requests from this runner agent. Slow down.");
+        if (!ok) throw new HttpError(429, kind === "hello" ? "Too many connection attempts from this runner. Wait a minute." : "Too many requests from this runner. Slow down.");
     }
 
     hello(token: AgentTokenRecord, body: HelloRequest) {
         // Version negotiation (protocol 2): the highest version both speak. An agent that names no list speaks only `protocol` (every protocol-1 agent).
         const speak = negotiateProtocol(body);
-        if (speak === undefined) throw new HttpError(409, `This runner agent speaks protocol ${body.protocol} and the platform speaks protocol ${PROTOCOL_VERSION}. Update the agent.`);
+        if (speak === undefined) throw new HttpError(409, `This runner speaks protocol ${body.protocol} and the platform speaks protocol ${PROTOCOL_VERSION}. Update the runner.`);
         // One token stands for one agent: it is what ties a task to the agent that claimed it.
         // The computer a credential is bound to (migration 51): the first install id it was used with. Another computer is refused; a runner
         // that sends no id keeps today's behaviour, unless its credential came from an enrollment code (such a runner always sends one).
         if (body.machineId) {
             if (token.machineId && token.machineId !== body.machineId) throw new MachineRefused(token);
             if (!token.machineId) this.store.bindMachine(token.id, body.machineId);
-        } else if (token.machineId && token.kind === "personal") throw new MachineRefused(token);
+        } else if (token.machineId) throw new MachineRefused(token);
         const other = this.store.agentsOfToken(token.id).find((a) => a.name !== body.name && (!body.machineId || a.machineId !== body.machineId) && this.clock() - a.lastSeenMs <= ONLINE_MS);
         if (other) throw new HttpError(409, `This runner's credential is already used by “${other.name}”, which is online. Set up each computer from Settings.`);
         const agent = this.store.upsertAgent(token, body);
@@ -298,14 +306,14 @@ export class AgentService {
     rotate(token: AgentTokenRecord, header: string | string[] | undefined): RotateResponse {
         const presented = bearerToken(header);
         const out = presented ? this.store.rotateToken(token.id, presented) : undefined;
-        if (!out) throw new HttpError(404, "This runner agent token is not valid or was revoked.");
+        if (!out) throw new HttpError(404, "This runner token is not valid or was revoked.");
         return { token: out.secret, previousValidUntil: new Date(out.previousUntilMs).toISOString() };
     }
 
     /** The agent a token's poll speaks for (it must be one this token registered). */
     agentOf(token: AgentTokenRecord, agentId: string): AgentRecord {
         const a = this.store.getAgent(agentId);
-        if (!a || a.tokenId !== token.id) throw new HttpError(404, "This runner agent is not registered. Connect again.");
+        if (!a || a.tokenId !== token.id) throw new HttpError(404, "This runner is not registered. Connect again.");
         return a;
     }
 
@@ -321,7 +329,7 @@ export class AgentService {
         }
         if (this.store.runningCount(agent.id) >= agent.concurrency) return undefined;
         const token = this.store.getToken(agent.tokenId);
-        if (!token || token.revokedAt || token.kind !== "personal" || !token.ownerId) return undefined;
+        if (!token || token.revokedAt || !token.ownerId) return undefined;
         // A person's runner looks at its owner's runs, wherever they are (round 45: the only runner there is).
         const candidates = this.store.queuedOfOwner(token.ownerId);
         for (const t of candidates) {
@@ -357,7 +365,7 @@ export class AgentService {
         if ((record ? recordAgentOf(t.adapterId) : deviceAgentOf(t.adapterId)) !== agent.id) return undefined;
         if (record ? agent.capabilities.record !== true : agent.capabilities.deviceSession !== true) return undefined;
         const starter = (record ? this.records.get(t.id) : this.devices.get(t.id))?.startedBy ?? null;
-        if (token.kind !== "personal" || !token.ownerId || starter !== token.ownerId || !this.store.ownerMayRun(token.ownerId, t.projectId)) return undefined;
+        if (!token.ownerId || starter !== token.ownerId || !this.store.ownerMayRun(token.ownerId, t.projectId)) return undefined;
         if (!record && agent.capabilities.runnerSwitches !== true) return undefined;
         const claimed = this.store.claimFor(t.id, agent, this.limits.leaseSeconds * 1000, record ? undefined : this.deviceOf(t));
         return claimed ? this.handOut(agent, claimed) : undefined;
@@ -395,25 +403,22 @@ export class AgentService {
 
     // ── who a run is for, and which runners may take it (migration 51) ─────
 
-    /** Who a job belongs to, read once per job (a job's options never change it). */
-    jobContext(jobId: string): RunContext {
-        const hit = this.jobContexts.get(jobId);
-        if (hit) return hit;
-        let ctx: RunContext = { ownerId: null };
+    /**
+     * Whose a job is (a schedule's or deploy trigger's: the person who made it; OPEN_OWNER_ID on an open server; null: nobody's) and what
+     * started it. A job that cannot be read is nobody's: no runner takes it.
+     */
+    jobStarter(jobId: string): { ownerId: string | null; kind: string | undefined } {
         try {
             const job = this.p.repo.getJob(jobId);
-            if (job) ctx = { ownerId: jobOwnerId(job.options) };
+            return job ? { ownerId: jobOwnerId(job.options), kind: job.options.startedBy?.kind } : { ownerId: null, kind: undefined };
         } catch {
-            /* a job that cannot be read is nobody's: no personal runner takes it */
+            return { ownerId: null, kind: undefined };
         }
-        if (this.jobContexts.size > 5000) this.jobContexts.clear();
-        this.jobContexts.set(jobId, ctx);
-        return ctx;
     }
 
     /** May hand-written (code) scripts go to this machine? The same rule for offering, the check when a run is made, and the executor's wait. */
     mayRunCodeScripts(agent: Pick<AgentRecord, "tokenId" | "capabilities">, token: AgentTokenRecord | undefined = this.store.getToken(agent.tokenId)): boolean {
-        if (!token || token.revokedAt || token.kind !== "personal") return false;
+        if (!token || token.revokedAt) return false;
         // Its owner's switch, applied by a runner that understands it (an older runner never gets them).
         return token.allowCodeScripts && agent.capabilities.runnerSwitches === true;
     }
@@ -422,7 +427,7 @@ export class AgentService {
     runnerSwitches(tokenId: string): { customScripts: boolean; privateTargets: boolean } {
         const t = this.store.getToken(tokenId);
         if (!t || t.revokedAt) return { customScripts: false, privateTargets: false };
-        return { customScripts: t.kind === "personal" && t.allowCodeScripts, privateTargets: t.allowPrivateTargets };
+        return { customScripts: t.allowCodeScripts, privateTargets: t.allowPrivateTargets };
     }
 
     /**
@@ -430,7 +435,7 @@ export class AgentService {
      * it again), and the owner may still run the project's tests (ownerMayRun also checks their role here).
      */
     private personalMayTake(token: AgentTokenRecord, t: { projectId: string }): boolean {
-        if (token.kind !== "personal" || !token.ownerId) return false;
+        if (!token.ownerId) return false;
         return this.store.ownerMayRun(token.ownerId, t.projectId);
     }
 
@@ -526,7 +531,6 @@ export class AgentService {
         // Retired (or unknown), or a person's own computer whose owner is gone or switched off here: finish what runs, take nothing new, exit.
         const t = this.store.getToken(agent.tokenId);
         if (!t || t.revokedAt) return true;
-        if (t.kind !== "personal") return true;
         // The open server's runner: while the server is open (it acts as one person).
         if (t.ownerId === OPEN_OWNER_ID) return !this.store.openMode();
         const owner = t.ownerId ? this.p.db.get<{ status: string | null }>("SELECT status FROM users WHERE id = ? AND role IS NOT NULL", t.ownerId) : undefined;
@@ -785,7 +789,7 @@ export class AgentService {
         if (!isRecordAdapter(t.adapterId)) throw new HttpError(409, "This task is not a recording.");
         if (t.status !== "running") throw new HttpError(409, "This recording has already ended.");
         const driver = this.records.get(taskId);
-        if (!driver) throw new HttpError(404, "The platform no longer has this recording. The agent should stop it.");
+        if (!driver) throw new HttpError(404, "The platform no longer has this recording. The runner should stop it.");
         if (!driver.allowPush()) throw new HttpError(429, "Too many recording updates. Slow down.");
         driver.onPush(body);
         return { ok: true };
@@ -797,7 +801,7 @@ export class AgentService {
         if (!isDeviceAdapter(t.adapterId)) throw new HttpError(409, "This task is not a phone session.");
         if (t.status !== "running") throw new HttpError(409, "This phone session has already ended.");
         const session = this.devices.get(taskId);
-        if (!session) throw new HttpError(404, "The platform no longer has this phone session. The agent should stop it.");
+        if (!session) throw new HttpError(404, "The platform no longer has this phone session. The runner should stop it.");
         if (!session.allowPush()) throw new HttpError(429, "Too many phone session updates. Slow down.");
         session.onPush(body);
         return { ok: true };
@@ -904,27 +908,11 @@ export class AgentService {
     }
 
     /**
-     * The computer that may take this project's work for `who` (round 45: only the run's owner's own runner, while they may still run the
-     * project's tests), online, as a list of at most one. `who` absent: the person asking now (a page's view of their own runner); nobody's
-     * run (no owner): none.
+     * The one runner that may take this project's work for this person (round 45: their own, while they may still run the project's tests),
+     * with the computer that last connected with it (`agent`, online or not) and whether it is online. Undefined: nobody's, none, or not allowed.
      */
-    eligibleAgents(projectId: string, who: RunContext = { ownerId: ownerIdOfActor(currentActor()) }): Array<AgentRecord & { online: boolean; activeTasks: number }> {
-        const own = who?.ownerId ? this.ownRunner(who.ownerId, projectId) : undefined;
-        return own?.agent && own.online ? [{ ...own.agent, online: true, activeTasks: this.store.runningCount(own.agent.id) }] : [];
-    }
-
-    /**
-     * The owner's runner as it last reported itself, online or not (what code scripts and capabilities are judged by when the run is made:
-     * a schedule that fires while the computer is off keeps its code tests and waits for it). `who` absent: the person asking now.
-     */
-    lastKnownRunner(projectId: string, who: RunContext = { ownerId: ownerIdOfActor(currentActor()) }): AgentRecord[] {
-        const own = who.ownerId ? this.ownRunner(who.ownerId, projectId) : undefined;
-        return own?.agent ? [own.agent] : [];
-    }
-
-    /** The person's runner as seen for this project: undefined when they have none or may not run its tests. */
-    private ownRunner(ownerId: string, projectId: string) {
-        if (!this.store.ownerMayRun(ownerId, projectId)) return undefined;
+    ownRunner(ownerId: string | null | undefined, projectId: string): ReturnType<AgentStore["runnerOf"]> {
+        if (!ownerId || !this.store.ownerMayRun(ownerId, projectId)) return undefined;
         return this.store.runnerOf(ownerId);
     }
 
@@ -1005,13 +993,14 @@ export class AgentService {
         if (address && looksPrivateAddress(address) && !own.token.allowPrivateTargets) {
             throw runnerRefusal("RUNNER_CANNOT_RUN", "This project's address is a private or local one (such as localhost or a computer on your network), and your runner does not open those. Switch on private addresses for your runner in Settings.");
         }
+        const farm = farmChosen(this.p.db, projectId);
         for (const id of this.adaptersFor(options)) {
+            // Android tests of a project that uses a device farm are driven on the farm (device-farm-run.ts), not by the runner: no adb needed.
+            if (id === "taqwright" && farm) continue;
             const adapter = this.adapterOrUndefined(id)!;
             const why = capabilityProblem(adapter, agent.capabilities);
             if (!why) continue;
-            if (adapter.id === IOS_ADAPTER_ID) throw runnerRefusal("RUNNER_CANNOT_RUN", `iOS tests need a runner on a Mac with Xcode. Your runner “${agent.name}” can't run them: ${why}.`);
-            const what = adapter.id === "taqwright" ? "phone" : adapter.kinds[0] === "api" ? "API" : (adapter.kinds[0] ?? adapter.id);
-            throw runnerRefusal("RUNNER_CANNOT_RUN", `Your runner cannot run ${what} tests: ${why}.`);
+            throw runnerRefusal("RUNNER_CANNOT_RUN", cannotRunSentence(adapter, agent.name, why));
         }
         if (desktop.length > 0) {
             const why = agentDesktopProblem(desktop, [agent]);
@@ -1020,17 +1009,40 @@ export class AgentService {
         options.runOn = "agent";
     }
 
-    /** Why a queued run of this job failed waiting for its owner's computer, in one sentence. */
-    noRunnerSentence(jobId: string): string {
-        let kind: string | undefined;
+    /**
+     * The dispatch worker's skip list: queued schedule and trigger runs whose owner's runner is offline (or gone). They stay queued, holding no
+     * dispatch place, until the computer is back; one never claimed and queued longer than the queue limit (QUEUE_MAX_MS) is ended with
+     * noRunnerSentence. A re-queued one (claimed before) is only skipped.
+     */
+    jobsWaitingForRunner(): string[] {
+        const waiting: string[] = [];
+        let rows: Array<{ id: string; project_id: string; options_json: string; created_at: string; attempts: number }>;
         try {
-            kind = this.p.repo.getJob(jobId)?.options.startedBy?.kind;
+            rows = this.p.db.all("SELECT id, project_id, options_json, created_at, attempts FROM generation_jobs WHERE status = 'QUEUED'");
         } catch {
-            kind = undefined;
+            return waiting;
         }
-        const owner = this.jobContext(jobId).ownerId;
-        if (owner && (kind === "schedule" || kind === "trigger")) return `${this.ownerName(owner)}'s computer was off when this ${kind === "schedule" ? "schedule" : "deploy trigger"} ran.`;
-        return runnersOnly(this.p.config) ? `${RUNNER_OFFLINE} Your runner was not online, or cannot run these tests.` : "Your runner is not connected or cannot run these tests. Start it on your computer, or switch the project back to running here.";
+        for (const r of rows) {
+            let options: JobOptions;
+            try {
+                options = JSON.parse(r.options_json) as JobOptions;
+            } catch {
+                continue;
+            }
+            if (!isAutomated(options.startedBy?.kind) || options.runOn !== "agent") continue;
+            if (this.ownRunner(jobOwnerId(options), r.project_id)?.online) continue;
+            // Only a job never claimed is ended: a re-queued one (a restart, a lost lease) may still be running on that runner (runner-handover.ts).
+            if (Number(r.attempts) === 0 && this.clock() - Date.parse(r.created_at) >= QUEUE_MAX_MS) this.p.repo.failQueuedJob(r.id, this.noRunnerSentence(r.id));
+            else waiting.push(r.id);
+        }
+        return waiting;
+    }
+
+    /** Why a queued run of this job failed waiting for its owner's computer, in one sentence (the executor's wait and the queue limit say the same). */
+    noRunnerSentence(jobId: string): string {
+        const { ownerId, kind } = this.jobStarter(jobId);
+        if (ownerId && isAutomated(kind)) return `${this.ownerName(ownerId)}'s runner was offline or could not run these tests while this ${kind === "schedule" ? "schedule" : "deploy trigger"} waited for it.`;
+        return runnersOnly(this.p.config) ? "Your runner was offline or could not run these tests. Start it on your computer, then try again." : "Your runner is not connected or cannot run these tests. Start it on your computer, or switch the project back to running here.";
     }
 
     /**
@@ -1038,13 +1050,17 @@ export class AgentService {
      * in CI logs). No name, or the open server: a neutral word.
      */
     ownerName(ownerId: string): string {
-        if (ownerId === OPEN_OWNER_ID) return "The owner";
+        return this.personName(ownerId) ?? "The owner";
+    }
+
+    /** A person's name only (never an email), or undefined: no name, the open server, or unreadable. Also the schedules list's `ownerName`. */
+    personName(ownerId: string): string | undefined {
+        if (ownerId === OPEN_OWNER_ID) return undefined;
         try {
-            const r = this.p.db.get<{ name: string | null }>("SELECT name FROM users WHERE id = ?", ownerId);
-            const name = (r?.name ?? "").trim();
-            return name && !name.includes("@") ? name.slice(0, 80) : "The owner";
+            const name = (this.p.db.get<{ name: string | null }>("SELECT name FROM users WHERE id = ?", ownerId)?.name ?? "").trim();
+            return name && !name.includes("@") ? name.slice(0, 80) : undefined;
         } catch {
-            return "The owner";
+            return undefined;
         }
     }
 
@@ -1074,7 +1090,9 @@ export class AgentService {
         // What the owner's runner can run, from what it last reported (also while it is off: a schedule waits for it).
         const own = ownerId ? this.ownRunner(ownerId, projectId) : undefined;
         const a = own?.agent;
-        const can = (id: string) => Boolean(a) && !capabilityProblem(getAdapter(id), a!.capabilities);
+        // Android tests on a device farm do not need the runner's phone tools (assertJobAllowed skips them too).
+        const farm = farmChosen(this.p.db, projectId);
+        const can = (id: string) => (id === "taqwright" && farm) || (Boolean(a) && !capabilityProblem(getAdapter(id), a!.capabilities));
         const status = !own ? RUNNER_NOT_SET_UP : !a ? "Your runner has not connected yet." : `Runs on your runner “${a.name}” (${own.online ? "online" : "offline"}).`;
         let reason: string | null = null;
         if (!own) reason = RUNNER_NOT_SET_UP;
@@ -1085,7 +1103,7 @@ export class AgentService {
             if (!can("taqwright")) parts.push(`Mobile tests can't run: ${capabilityProblem(getAdapter("taqwright"), a.capabilities)}.`);
             reason = parts.length ? parts.join(" ") : null;
         }
-        const phonesText = a && can("taqwright") ? `Phone tests can run on ${a.name}. ${androidSummary(a.capabilities.android).summary}.` : `Phone tests can't run: ${!own ? "your runner is not set up" : !a ? "your runner has not connected yet" : capabilityProblem(getAdapter("taqwright"), a.capabilities)}.`;
+        const phonesText = farm ? "Phone tests run on the project's device farm." : a && can("taqwright") ? `Phone tests can run on ${a.name}. ${androidSummary(a.capabilities.android).summary}.` : `Phone tests can't run: ${!own ? "your runner is not set up" : !a ? "your runner has not connected yet" : capabilityProblem(getAdapter("taqwright"), a.capabilities)}.`;
         return { runOn: "agent" as const, agentId: a?.id ?? null, status, canRunWeb: can("playwright"), canRunMobile: can("taqwright"), canRunWindows: can("windows-uia"), canRunIos: can(IOS_ADAPTER_ID), phones: { canRun: can("taqwright"), text: phonesText }, unavailableReason: reason };
     }
 
@@ -1111,7 +1129,7 @@ export class AgentService {
         // Named as Settings names the runner (its name there, else what the computer calls itself); the stored name once the rows are gone.
         const byToken = !agent && runnerId ? this.store.agentsOfToken(runnerId)[0] : undefined;
         const known = agent ?? byToken;
-        const name = (known ? this.runnerName(known) : undefined) ?? str(stored?.name) ?? (runnerId ? str(this.store.getToken(runnerId)?.label) : undefined) ?? "A runner agent";
+        const name = (known ? this.runnerName(known) : undefined) ?? str(stored?.name) ?? (runnerId ? str(this.store.getToken(runnerId)?.label) : undefined) ?? "A runner";
         return { kind: "agent", agentId: agentId ?? known?.id ?? "", name, ...(browser ? { browser } : {}), ...(runnerId ? { runnerId } : {}), ...(phase ? { phase } : {}), ...(attempt ? { attempt } : {}) };
     }
 
@@ -1252,7 +1270,7 @@ class RemoteExecutor implements ScriptExecutor {
     async execute(adapterId: string, batch: ExecutionBatch, env: ExecutionEnv, opts: ExecutionOptions): Promise<ScriptRun[]> {
         const { svc } = this;
         const { projectId, jobId } = this.scope;
-        if (!projectId || !jobId) throw new RunnerAgentError("This run cannot be sent to a runner agent because it does not belong to a project job.");
+        if (!projectId || !jobId) throw new RunnerAgentError("This run cannot be sent to a runner because it does not belong to a project job.");
         if (opts.signal?.aborted) throw new Error("Job cancelled");
         const adapter = getAdapter(adapterId);
         // Same answer as a local run without a device.
@@ -1287,7 +1305,7 @@ class RemoteExecutor implements ScriptExecutor {
                     try {
                         bytes = await fsp.readFile(b.path);
                     } catch {
-                        throw new RunnerAgentError(`A saved baseline image for ${s.testId} could not be read, so the run was not sent to the agent.`);
+                        throw new RunnerAgentError(`A saved baseline image for ${s.testId} could not be read, so the run was not sent to the runner.`);
                     }
                     const sha = FILE_NAME_SHA(bytes);
                     const ref = `b${n++}-${sha.slice(0, 12)}.png`;
@@ -1304,9 +1322,9 @@ class RemoteExecutor implements ScriptExecutor {
                 if (t.apkPath) {
                     // Only a file inside the platform's own store is ever offered to an agent.
                     const rel = keyOfStoredFile(svc.p.store, t.apkPath, projectId);
-                    if (!rel) throw new RunnerAgentError("The app file is not in this project's storage, so it cannot be sent to a runner agent. Upload it again.");
+                    if (!rel) throw new RunnerAgentError("The app file is not in this project's storage, so it cannot be sent to a runner. Upload it again.");
                     const { sha, size } = await svc.apkHash(rel).catch(() => {
-                        throw new RunnerAgentError("The app file could not be read, so the run was not sent to the agent.");
+                        throw new RunnerAgentError("The app file could not be read, so the run was not sent to the runner.");
                     });
                     const ref = `app-${sha.slice(0, 12)}.apk`;
                     apk = { ref, size, sha256: sha };
@@ -1344,7 +1362,7 @@ class RemoteExecutor implements ScriptExecutor {
             });
         } catch (e) {
             if (e instanceof RunnerAgentError) throw e;
-            throw new RunnerAgentError(`These tests cannot be sent to a runner agent: ${e instanceof Error ? e.message.split("\n")[0] : "invalid run"}`);
+            throw new RunnerAgentError(`These tests cannot be sent to a runner: ${e instanceof Error ? e.message.split("\n")[0] : "invalid run"}`);
         }
 
         // Taken up again after a restart of the platform, or after the worker that looked after the job was lost: the runner task an earlier
@@ -1362,7 +1380,7 @@ class RemoteExecutor implements ScriptExecutor {
         try {
             for (const f of toStore) await svc.p.store.put(f.key, f.bytes, { contentType: "image/png" });
         } catch (e) {
-            throw new RunnerAgentError(`These tests cannot be sent to a runner agent: ${e instanceof Error ? e.message.split("\n")[0] : "invalid run"}`);
+            throw new RunnerAgentError(`These tests cannot be sent to a runner: ${e instanceof Error ? e.message.split("\n")[0] : "invalid run"}`);
         }
 
         // A runner task of an earlier attempt for any of these tests that this one did not pick up is stopped before a new one is sent: a test
@@ -1450,6 +1468,8 @@ class RemoteExecutor implements ScriptExecutor {
         let announced = false;
         let logSeen = 0;
         let noAgentSince: number | undefined;
+        const starter = svc.jobStarter(jobId);
+        const graceMs = noRunnerWaitMs(starter.kind, svc.limits.noAgentGraceMs);
         for (;;) {
             if (opts.signal?.aborted) {
                 // A lost lease: the job, and its runner task with it, belong to the attempt that takes it next (runner-handover.ts). Anything
@@ -1469,8 +1489,10 @@ class RemoteExecutor implements ScriptExecutor {
                 const needsCustom = batch.scripts.some((s) => s.custom);
                 // A runner that said no (protocol 2 reject) is not counted: the task is never offered to it again.
                 const refused = new Set(refusalsOf(t).map((r) => r.agentId));
-                // The same rules as offering (migration 51): the job's owner's own computers count, and code scripts only where they may run.
-                const capable = svc.eligibleAgents(projectId, svc.jobContext(jobId)).some((a) => !refused.has(a.id) && !capabilityProblem(adapter, a.capabilities) && (!needsCustom || svc.mayRunCodeScripts(a)));
+                // The same rules as offering (migration 51): the job's owner's own runner, online, and code scripts only where they may run.
+                const own = svc.ownRunner(starter.ownerId, projectId);
+                const a = own?.online ? own.agent : undefined;
+                const capable = Boolean(a) && !refused.has(a!.id) && !capabilityProblem(adapter, a!.capabilities) && (!needsCustom || svc.mayRunCodeScripts(a!));
                 if (capable) noAgentSince = undefined;
                 else if (refusalsOf(t).length > 0) {
                     // Every runner that could take it said no: the run fails now, with their reasons (each is also in the run's events).
@@ -1478,13 +1500,13 @@ class RemoteExecutor implements ScriptExecutor {
                     svc.store.failQueuedOrRunning(taskId, `No runner that may take this run can run it. ${reasons}`.slice(0, 1000), "rejected");
                 } else {
                     noAgentSince ??= svc.clock();
-                    if (svc.clock() - noAgentSince >= svc.limits.noAgentGraceMs) svc.store.failQueuedOrRunning(taskId, svc.noRunnerSentence(jobId));
+                    if (svc.clock() - noAgentSince >= graceMs) svc.store.failQueuedOrRunning(taskId, svc.noRunnerSentence(jobId));
                 }
             } else if (t.status === "running") {
                 if (!announced) {
                     announced = true;
                     const a = t.agentId ? svc.store.getAgent(t.agentId) : undefined;
-                    emit(`Running on the runner “${(a ? svc.runnerName(a) : undefined) ?? "agent"}”.`, "info", "agent_task_started");
+                    emit(`Running on the runner “${(a ? svc.runnerName(a) : undefined) ?? "your computer"}”.`, "info", "agent_task_started");
                 }
                 for (const line of t.log.slice(logSeen)) (env.mobile ?? env.ios)?.log?.(scrubSecrets(line, secrets));
                 logSeen = t.log.length;
@@ -1493,12 +1515,14 @@ class RemoteExecutor implements ScriptExecutor {
             } else if (t.status === "cancelled") {
                 throw new Error("Job cancelled");
             } else {
-                throw new RunnerAgentError(t.error ?? "The runner agent could not run the tests.");
+                // Never taken within the queue limit (the sweep): the same sentence as the wait above.
+                const unclaimed = t.phase === "timed_out" && !t.agentId;
+                throw new RunnerAgentError(unclaimed ? svc.noRunnerSentence(jobId) : (t.error ?? "The runner could not run the tests."));
             }
             if (svc.clock() > deadline) {
                 svc.store.requestCancel(taskId);
-                svc.store.failQueuedOrRunning(taskId, "The runner agent did not finish in time.", "timed_out");
-                throw new RunnerAgentError("The runner agent did not finish in time.");
+                svc.store.failQueuedOrRunning(taskId, "The runner did not finish in time.", "timed_out");
+                throw new RunnerAgentError("The runner did not finish in time.");
             }
             await sleep(svc.limits.watchMs, opts.signal);
         }
@@ -1642,7 +1666,7 @@ class RemoteExecutor implements ScriptExecutor {
         }
 
         if (opts.projects?.length) return runs;
-        return batch.scripts.map((s): ScriptRun => runs.find((r) => r.testId === s.testId) ?? { testId: s.testId, status: "error", durationMs: 0, error: "The runner agent returned no result for this script.", failedStepIndex: -1, steps: [], artifacts: [], responses: [] });
+        return batch.scripts.map((s): ScriptRun => runs.find((r) => r.testId === s.testId) ?? { testId: s.testId, status: "error", durationMs: 0, error: "The runner returned no result for this script.", failedStepIndex: -1, steps: [], artifacts: [], responses: [] });
     }
 
     private storeLedger(task: TaskRecord, items: FinishedItem[]): void {
@@ -1757,6 +1781,12 @@ export function agentServiceOf(projectId: string): AgentService | undefined {
  * For a project whose scripts run on a runner agent: can a connected agent run mobile tests? Undefined for a project that runs here
  * (the caller then asks this machine's own toolchain).
  */
+/** AgentService.jobsWaitingForRunner of the platform that owns this database (none installed: nothing is skipped). */
+export function jobsWaitingForRunner(db: object): string[] {
+    for (const s of installed.values()) if (s.p.db === db) return s.jobsWaitingForRunner();
+    return [];
+}
+
 export function agentCanRunMobile(projectId: string, ownerId?: string | null): boolean | undefined {
     for (const s of installed.values()) {
         try {

@@ -1,4 +1,4 @@
-import { ArrowLeft, History } from "lucide-react";
+import { ArrowLeft, ChevronRight, History } from "lucide-react";
 import type { ProjectDetail } from "../../api";
 import { usePage } from "../../components/Shell";
 import { TechnicalDetails } from "../../components/TechnicalDetails";
@@ -8,14 +8,14 @@ import { friendlyJobErrors, friendlyError, isActive, nothingRan } from "../../li
 import { useDocumentTitle, useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
-import { browserSentence } from "../agents/agents";
+import { browserSentence } from "../runners/runners";
 import { versionHref } from "../review/review";
 import { RunMenu } from "./RunMenu";
 import { RunStrip } from "./RunStrip";
 import { RunTestList } from "./RunStrip";
-import { followsRunner, LiveRunPanel, useLiveRun } from "./LiveRun";
+import { followsRunner, liveCounts, LiveRunPanel, useIsMine, useLiveRun } from "./LiveRun";
 import { StopRun } from "./StopDialog";
-import { RelTime } from "./RunTime";
+import { Elapsed, RelTime } from "./RunTime";
 import { announceRunsChanged, ranSentence, runTitle, startedByText, STATE_WORD, stoppedLine, useRunAnswer, whereOf, type RunState } from "./runs";
 import { BadgeKey, keyEntries } from "../../components/Tooltip";
 import { RUN_TEST_STATE } from "../../lib/help";
@@ -31,6 +31,7 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
     const a = run.data;
     // A run on a runner: its phase, steps, screenshots and log, rebuilt from the run's stored events (so a refresh loses nothing).
     const runner = useLiveRun(jobId, followsRunner(a?.job), Boolean(a?.active), run.stream);
+    const mine = useIsMine(a?.job ?? {});
     useDocumentTitle(a ? `${runTitle(a.job)} · ${name ?? "Runs"}` : "Run");
     usePage({ crumbs: [{ label: "Projects", href: routes.home }, { label: name ?? "…", href: routes.project(id) }, { label: "Runs", href: routes.runs(id) }, { label: "Run" }], nav: "projects" });
 
@@ -53,6 +54,8 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
     const exploration = job.mode === "generate" || job.mode === undefined;
     const failing = a.tests.filter((t) => t.state === "failed");
     const problems = job.status === "FAILED" || job.status === "PARTIALLY_COMPLETED" ? friendlyJobErrors(job.error) : [];
+    // On a runner the results are stored when it sends them all; until then its own report is the count.
+    const liveSoFar = followsRunner(job) && runner.live.detailed;
     const sameEnvironment = job.mode === "environment" && job.environment ? { environment: job.environment } : {};
 
     return (
@@ -80,7 +83,21 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                         <dt>What ran</dt>
                         <dd>{exploration ? `The AI explored the app and created ${plural(c.planned, "test")}` : job.mode === "agent" ? "An agent run" : job.mode === "plain" ? "A test built from a description" : job.mode === "variants" ? `${plural(c.planned, "test")} on other browsers and screen sizes` : `${plural(c.planned, "test")}${job.environment ? ` against ${job.environment}` : ""}`}</dd>
                         <dt>Where</dt>
-                        <dd>{whereOf(job) === "this server" ? "On this server" : `On ${whereOf(job)}`}</dd>
+                        <dd>
+                            {whereOf(job) === "this server" ? (
+                                "On this server"
+                            ) : mine ? (
+                                <>
+                                    <a href={routes.yourRunner} data-testid="run-live-runner">
+                                        On {whereOf(job)}
+                                        <ChevronRight size={14} aria-hidden />
+                                    </a>{" "}
+                                    <Badge tone="brand">Your computer</Badge>
+                                </>
+                            ) : (
+                                `On ${whereOf(job)}`
+                            )}
+                        </dd>
                         {job.ranOn?.kind === "agent" && job.ranOn.browser && (
                             <>
                                 <dt>Browser</dt>
@@ -92,12 +109,12 @@ export function RunDetail({ id, jobId }: { id: string; jobId: string }) {
                             <RelTime iso={job.startedAt ?? job.createdAt} />
                         </dd>
                         <dt>How long</dt>
-                        <dd>{ms !== null ? duration(ms) : active ? "Still going" : "Not known"}</dd>
+                        <dd data-testid="run-duration">{ms !== null ? duration(ms) : active && job.startedAt ? <Elapsed since={job.startedAt} hidden={false} /> : active ? "Not started yet" : "Not known"}</dd>
                         <dt>Started by</dt>
                         <dd>{startedByText(a.startedBy)}</dd>
                     </dl>
                     <p className="run-summary" data-testid="run-summary">
-                        {active ? `${c.ran} of ${plural(c.planned, "test")} have a result so far.` : job.cancelled ? `${stoppedLine({ ran: job.cancelled.ran, planned: job.cancelled.planned })}. ${job.cancelled.note}` : ranSentence(c)}
+                        {active && liveSoFar ? `So far: ${liveCounts(runner.live)}.` : active ? `${c.ran} of ${plural(c.planned, "test")} have a result so far.` : job.cancelled ? `${stoppedLine({ ran: job.cancelled.ran, planned: job.cancelled.planned })}. ${job.cancelled.note}` : ranSentence(c)}
                     </p>
                     {job.counters.variantChecks ? (
                         <p className="t-secondary">

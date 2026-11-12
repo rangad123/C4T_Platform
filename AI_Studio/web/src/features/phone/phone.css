@@ -5,11 +5,6 @@ dialog.ph-dialog { width: min(560px, calc(100vw - 32px)); }
 /* On a short screen the panel scrolls: the two buttons stay in reach. */
 .ph-dialog form .foot { position: sticky; bottom: 0; padding: 12px 0 0; background: var(--surface-raised); border-top: 1px solid var(--border-default); }
 .ph-dialog .foot .btn { min-height: 44px; }
-.ph-where { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; min-width: 0; }
-.ph-where legend { margin-bottom: 8px; padding: 0; }
-.ph-where .check.is-off { cursor: not-allowed; background: var(--surface-sunken); }
-.ph-where .check.is-off .title { color: var(--text-secondary); }
-.ph-where .check input { flex: none; }
 
 /* ── the welcome card's choice ── */
 .welcome-kind { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }

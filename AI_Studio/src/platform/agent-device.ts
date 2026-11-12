@@ -12,7 +12,7 @@
  *  An infrastructure failure (the agent stopped answering, the phone went away, a limit) is thrown as DeviceSessionError and is never a test verdict.
  */
 import { randomUUID } from "node:crypto";
-import { ON_SERVER_REFUSED, RUNNER_NOT_SET_UP, RUNNER_OFFLINE, runnerRefusal } from "./runner-only.js";
+import { ON_SERVER_REFUSED } from "./runner-only.js";
 import { DeviceCommand, DEVICE_MAX_ELEMENTS, DEVICE_MAX_IMAGE_B64, TaskOffer, type DevicePush, type DeviceResultWire, type DeviceSnapshotWire, type ResultRequest } from "../agent-protocol/schema.js";
 import { parseAction } from "../engine/mobile/device/actions.js";
 import { DeviceSessionError } from "../engine/mobile/device/errors.js";
@@ -23,7 +23,7 @@ import { adbPath } from "../engine/mobile/toolchain.js";
 import { deviceSessionProblem } from "../engine/mobile/device/capability.js";
 import type { AgentService } from "./agent-services.js";
 import type { AgentRecord, RunnerSetting } from "./agent-store.js";
-import { sessionHosts, visibleHosts, type SessionHost } from "./agent-record.js";
+import { ownHostFor, sessionHosts, visibleHosts, type SessionHost } from "./agent-record.js";
 import { RateLimiter, scrubSecrets } from "./agent-routing.js";
 import { HttpError } from "./http-error.js";
 import { keyOfStoredFile } from "./object-store.js";
@@ -72,7 +72,7 @@ export function deviceProblem(agent: Pick<AgentRecord, "name" | "capabilities">)
     // An agent program from before phone exploration says nothing about it: then adb is the only thing we can judge.
     const why = c.android ? deviceSessionProblem(c) : "it has no Android tools";
     return c.android && why === undefined
-        ? `${agent.name} can't be used to explore a phone: its agent program is too old. Update the runner agent, or use the platform.`
+        ? `${agent.name} can't be used to explore a phone: its runner program is too old. Update the runner.`
         : `${agent.name} can't be used to explore a phone: ${why ?? "it has no Android tools"}`;
 }
 
@@ -90,17 +90,15 @@ export function hostDeviceProblem(agent: Pick<SessionHost, "name" | "capabilitie
 
 /** Why this computer cannot be used for a phone session, or undefined. */
 export function localDeviceProblem(env: NodeJS.ProcessEnv = process.env): string | undefined {
-    return adbPath(env) ? undefined : "This computer has no Android tools (adb), so a phone can't be explored here. Run `npx @taqwright/taqwright install --with-avd` on it, or use a runner agent that has a phone.";
+    return adbPath(env) ? undefined : "This computer has no Android tools (adb), so a phone can't be explored here. Run `npx @taqwright/taqwright install --with-avd` on it, or use your runner.";
 }
 
 /**
  * Where does a phone session run? Pure: the decision table.
- *  - `on` absent: the agent when the project's runner setting is "agent", else this computer (today's behaviour for tests);
- *  - `on: "platform"`: this computer; `on: "agent"`: the caller's own runner if it can host a session (round 45), otherwise a plain refusal
- *    naming what is missing.
+ *  - `on` absent: the runner when the project's runner setting is "agent", else this computer;
+ *  - `on: "platform"`: this computer (refused in `runners` mode); `on: "agent"`: the caller's own runner (ownHostFor; `runnerId` is ignored).
  */
 export function chooseDeviceHost(input: { on?: "platform" | "agent"; agentId?: string; runnerId?: string | null; runner: RunnerSetting; agents: SessionHost[]; localProblem?: string; caller?: string | null }): DeviceHostChoice {
-    const agents = visibleHosts(input.agents, input.caller);
     const target = input.on ?? (input.runner.runOn === "agent" ? "agent" : "platform");
     // EXECUTION_MODE=runners: nothing is started on the server, even when asked for by name (runner-only.ts).
     if (target === "platform" && input.runner.runnersOnly) throw new HttpError(409, ON_SERVER_REFUSED("A phone session"), { executionMode: "runners" });
@@ -108,23 +106,12 @@ export function chooseDeviceHost(input: { on?: "platform" | "agent"; agentId?: s
         if (input.localProblem) throw new HttpError(409, input.localProblem);
         return { kind: "platform" };
     }
-    // Round 45: the caller's own runner (`runnerId` is accepted and ignored). A named machine must be one of theirs, else "not found".
-    const wanted = input.agentId ?? undefined;
-    if (wanted) {
-        const agent = agents.find((a) => a.id === wanted);
-        if (!agent) throw new HttpError(404, "That runner is not yours. Phone sessions open on your own runner.");
-        if (!agent.online) throw runnerRefusal("RUNNER_OFFLINE", RUNNER_OFFLINE);
-        const why = hostDeviceProblem(agent);
-        if (why) throw new HttpError(422, why);
-        return { kind: "agent", agent };
-    }
-    const online = agents.filter((a) => a.online);
-    if (agents.length === 0) throw runnerRefusal("RUNNER_NOT_SET_UP", RUNNER_NOT_SET_UP);
-    if (online.length === 0) throw runnerRefusal("RUNNER_OFFLINE", input.runner.runnersOnly ? RUNNER_OFFLINE : `${RUNNER_OFFLINE} Or explore on the platform instead.`);
-    const capable = online.filter((a) => !hostDeviceProblem(a));
-    if (capable.length === 0) throw new HttpError(422, hostDeviceProblem(online[0]!)!);
-    capable.sort((a, b) => (a.activeTasks ?? 0) - (b.activeTasks ?? 0));
-    return { kind: "agent", agent: capable[0]! };
+    const agent = ownHostFor(visibleHosts(input.agents, input.caller), hostDeviceProblem, {
+        agentId: input.agentId,
+        notYours: "That runner is not yours. Phone sessions open on your own runner.",
+        ...(input.runner.runnersOnly ? {} : { offlineHint: "Or explore on the platform instead." }),
+    });
+    return { kind: "agent", agent };
 }
 
 // ── what the agent sends back ───────────────────────────────────────────────
@@ -555,9 +542,9 @@ export async function startDeviceTask(svc: AgentService, o: StartDeviceOptions):
     if (o.apkPath) {
         // Only a file inside the platform's own store is ever offered to an agent.
         const rel = keyOfStoredFile(svc.p.store, o.apkPath, o.projectId);
-        if (!rel) throw new DeviceSessionError("The app file is not in this project's storage, so it cannot be sent to a runner agent. Upload it again.");
+        if (!rel) throw new DeviceSessionError("The app file is not in this project's storage, so it cannot be sent to a runner. Upload it again.");
         const { sha, size } = await svc.apkHash(rel).catch(() => {
-            throw new DeviceSessionError("The app file could not be read, so the session was not sent to the agent.");
+            throw new DeviceSessionError("The app file could not be read, so the session was not sent to the runner.");
         });
         const ref = `app-${sha.slice(0, 12)}.apk`;
         apk = { ref, size, sha256: sha };
@@ -594,7 +581,7 @@ export async function startDeviceTask(svc: AgentService, o: StartDeviceOptions):
             },
         });
     } catch {
-        throw new DeviceSessionError("These phone settings cannot be sent to a runner agent. Check the app id and the emulator name.");
+        throw new DeviceSessionError("These phone settings cannot be sent to a runner. Check the app id and the emulator name.");
     }
     svc.store.enqueue({ id: taskId, projectId: o.projectId, jobId: offer.jobId, adapterId: offer.adapterId, payloadEnc: svc.encrypt(offer), files, ...(o.startedBy !== undefined ? { ownerId: o.startedBy } : {}) });
     const startedBy = o.startedBy !== undefined ? o.startedBy : o.jobId ? svc.store.ownerOfJob(o.jobId) : null;
@@ -640,7 +627,7 @@ export async function openDeviceSession(opts: OpenDeviceOptions, host: DeviceHos
     let choice: DeviceHostChoice;
     try {
         if (!host.agents || !host.projectId) {
-            if (host.on === "agent") throw new HttpError(409, "No runner agents are known here, so the phone can't be explored on one.");
+            if (host.on === "agent") throw new HttpError(409, "No runners are known here, so the phone can't be explored on one.");
             const problem = localDeviceProblem(env);
             if (problem) throw new HttpError(409, problem);
             choice = { kind: "platform" };

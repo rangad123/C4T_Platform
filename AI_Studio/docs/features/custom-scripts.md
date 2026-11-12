@@ -32,7 +32,7 @@ Hand-written scripts are arbitrary code. Two things stand between a script and t
 1. **The static guard** (`src/engine/custom/guard.ts`) reads the script with TypeScript's parser and refuses what it can recognise. It is a guard against **accidents and obvious escapes, not a security boundary.**
 2. **The run policy** (`src/platform/custom-policy.ts`) decides **where** a hand-written script may run. This is the boundary:
    - on the platform host only when `ALLOW_CUSTOM_SCRIPTS=true` is set in the platform's environment **and an `API_KEY` is set** (default off; it means running user-supplied code on the server for everyone who holds the key), or
-   - on a runner agent whose owner started it with `--allow-custom-scripts` (see `runner-agent-setup.md`).
+   - on a person's runner when its owner has switched **Run code scripts** on in Settings, Your runner (see `runner-settings.md`).
 
 ### The guard's rules
 
@@ -83,14 +83,14 @@ One decision function (`customRunDecision`) is used everywhere:
 | Where the project runs | Allowed when |
 |---|---|
 | the platform host | `ALLOW_CUSTOM_SCRIPTS=true` **and** an `API_KEY`. Without a key the switch is ignored: anyone who can reach the port could otherwise run code on the machine without signing in. The platform prints a warning when it starts, `GET /api/config` answers `customScripts: { platform: false, reason }`, and a refused run says why in its sentence. |
-| a runner agent | at least one eligible agent reports `customScripts: true` (started with `--allow-custom-scripts`). The host switch does not widen what an agent allows. |
+| a runner | the person's runner has **Run code scripts** switched on in Settings, Your runner. The host switch does not widen what a runner allows. |
 
 Layers (outside in), so forgetting one still fails closed:
 
-1. **Job creation** (`Repo.createJob`, so a person, a schedule, a trigger and a runbook all pass through it): a job that includes a hand-written test where it may not run is refused with a plain **409** before any job exists: "This project has hand-written tests. Start your runner agent with --allow-custom-scripts, or set ALLOW_CUSTOM_SCRIPTS=true on the server." (worded for host or agent). This covers validation, browser and screen-size checks and environment runs.
+1. **Job creation** (`Repo.createJob`, so a person, a schedule, a trigger and a runbook all pass through it): a job that includes a hand-written test where it may not run is refused with a plain **409** before any job exists: "This project has code tests, and code scripts are switched off on your runner. Switch them on for your runner in Settings." (on a runner), or the server wording (`ALLOW_CUSTOM_SCRIPTS=true`) when tests run on this server. This covers validation, browser and screen-size checks and environment runs.
 2. **Schedules, deploy triggers and runbooks** leave hand-written tests out when they may not run; the rest still runs, and the job records "N hand-written tests were not run" with the reason.
 3. **The job's executor** is wrapped when the run includes hand-written tests: on this machine it refuses them (an error result, nothing started) unless the host agreed.
-4. **`runScripts`** refuses a script marked custom unless the caller said this machine agrees, and checks each such script and helper with the guard again. A **runner agent** applies the same rules with its own flag: it never reports the capability without `--allow-custom-scripts`, the platform never offers it a hand-written task otherwise, and the agent refuses one anyway ("This task has hand-written scripts, and this agent was not started with --allow-custom-scripts").
+4. **`runScripts`** refuses a script marked custom unless the caller said this machine agrees, and checks each such script and helper with the guard again. A **runner** applies the same rules with its owner's switch: the platform never offers it a hand-written task while **Run code scripts** is off, and the runner refuses one anyway ("This task has hand-written scripts, and code scripts are switched off for this runner, so it did not run them. Switch them on for your runner in Settings."). The old `--allow-custom-scripts` start option is still accepted, so older start commands keep working, but the switch in Settings decides.
 
 Saving a script never runs it by itself. When running is not allowed, `PUT /script` still saves, answers `jobId: null` with the plain reason, and the test stays "Not validated".
 
@@ -111,7 +111,7 @@ Changing a helper marks every test that imports it (directly or through other he
 | Run policy, gate, executor wrapper | `src/platform/custom-policy.ts`, `custom-run.ts`, `custom-run-policy.ts` |
 | Routes | `src/platform/routes/custom-scripts.ts` (contract: `.scratch/briefs/CODE-API-SHAPES.md`) |
 | Execution | the same `runScripts` path; `ScriptInput.custom`, `ExecutionBatch.helpers`, `ExecutionOptions.allowCustom` |
-| Agent | `src/agent/config.ts` (`--allow-custom-scripts`), `capabilities.ts`, `task-runner.ts`; protocol fields `Capabilities.customScripts`, `WireScript.custom`, `TaskOffer.helpers` |
+| Runner | `src/agent/config.ts` (the old `--allow-custom-scripts` option, still accepted), `capabilities.ts`, `task-runner.ts`; protocol fields `Capabilities.customScripts`, `WireScript.custom`, `TaskOffer.helpers` |
 
 The current script of a hand-written test keeps living in `generated_scripts`, so downloads, backups and runs find it where they always did. `Repo.updateTest` ignores a spec for a hand-written test, so nothing (repair, healing, rewrite, import) can overwrite the archived steps. Versions: the newest 100 are kept per test, version 0 (the generated script) never pruned; saving identical content again does not create a version. Backups include hand-written tests (with their archived spec and versions) and helpers in `helpers.json`; a restore checks every runnable script of a hand-written test, every version of its history and every helper with the guard again and refuses the backup (a plain 400) if one fails. A backup in which two versions of one test have the same number is a plain 400 too, and so is a hand-written test of a framework other than Playwright.
 

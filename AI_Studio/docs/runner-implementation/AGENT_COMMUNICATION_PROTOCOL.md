@@ -68,7 +68,7 @@ The shared contract is one file, `src/agent-protocol/schema.ts`. The backend (`s
 | Agent timeout | `pollSeconds` + 20 s (`client.ts:197`) |
 | Acknowledgement | None. The task is claimed when the answer is made. If the answer is lost, the task stays "running" until its lease runs out, and that uses one of its 2 offers. Fixed by accept/reject in protocol 2. |
 
-Which task a runner is offered (`offerTo`, `agent-services.ts:199-235`): the oldest queued task among the projects it serves, skipping a task that is pinned to another computer, needs something this computer lacks (`capabilityProblem`, `agent-routing.ts:108-133`), has hand-written scripts when the agent does not allow them or the runner is a Crowd4Test shared runner, or needs a device another task holds. Record and phone-session tasks go only to the computer they were started on.
+Which task a runner is offered (`offerTo`, `agent-services.ts:199-235`): the oldest queued task of its owner (`queuedOfOwner`), skipping a task that needs something this computer lacks (`capabilityProblem`, `agent-routing.ts:108-133`), has hand-written scripts when its owner's switch is off, or needs a device another task holds. Record and phone-session tasks go only to the computer they were started on.
 
 ### 3.3 The task offer
 
@@ -154,7 +154,7 @@ The schemas are in `src/agent-protocol/schema.ts` (sections "enrollment" and "pr
 | Authentication | None: the code in the body is the credential. A request with an `Authorization` header is refused (400). Limited per address and per code (429). |
 | Request | `EnrollRequest`: `code` (`aite_` plus 32 random bytes), `name`, `machineId` (a random install id the agent makes once and keeps in `runner.machine`), optional `version` and `capabilities` |
 | Answer | 201 `EnrollResponse`: `{ token, runnerId, kind }`. `token` is the runner credential (`aitg_`), given once |
-| Backend checks | The code is stored as SHA-256, used once, valid 30 minutes (`AgentStore.redeemEnrollment`). Expired or used: 410; unknown: 404; at the cap of 5 personal runners, 50 per organisation, or the project's limit: 409. Each answer says to make a new code on the Runners page. A team code carries its organisation and the projects to grant. Activity: `runner-enrolled`. |
+| Backend checks | The code is stored as SHA-256, used once, valid 30 minutes (`AgentStore.redeemEnrollment`). Expired, used, or a team code made before one runner per person: 410; unknown: 404. Each answer says to download the runner again from Settings. Trading a code retires the person's earlier runner credential. |
 | Agent | Saves the credential in the operating system's store (`src/agent/credential-store.ts`), deletes the code file, then says hello with the credential |
 | Idempotent | Partly: if the answer is lost, the same install id may ask again with the same code while the code is valid and the first credential was never used; it gets a fresh credential and the first one stops working. Any other caller gets "already used". |
 
@@ -256,7 +256,7 @@ The website side (`POST /api/runners/enroll`, `GET /api/runners/enrollments/:id`
 | Task lease | 60 s (2-600), renewed by each heartbeat | `AGENT_LEASE_SECONDS` | Built |
 | Online window | Seen in the last 45 s | `ONLINE_MS` (`agent-store.ts:166`) | Built |
 | Offers per task | 2, then the task fails | `MAX_OFFERS` (`agent-store.ts:299`) | Built |
-| No capable runner online | Task fails after 90 s | `AGENT_NO_AGENT_GRACE_SECONDS` | Built |
+| No capable runner online | A person's run fails after 90 s; a schedule's or trigger's waits to the 30-minute queue limit (`noRunnerWaitMs`) | `AGENT_NO_AGENT_GRACE_SECONDS` | Built |
 | Nobody picked it up | Task fails after 30 minutes | `QUEUE_MAX_MS` (`agent-store.ts:301`) | Built |
 | Backend's wait for a task | `timeoutMs` + 5 minutes, or 4 hours without one | `agent-services.ts:759` | Built |
 | Agent watchdog | The task's limit + 90 s, then the process tree is ended | `WATCHDOG_GRACE_MS` (`task-runner.ts:47`) | Built |
@@ -307,7 +307,7 @@ There is no push channel. Each signal rides on an answer.
 
 ## 8. Requested event names and the real messages
 
-The event names from the requirements (R7 in `CURRENT_STATE_AUDIT.md`), mapped to what exists.
+The event names from the requirements (R7 in `archive/CURRENT_STATE_AUDIT.md`), mapped to what exists.
 
 | Requested name | Direction | Protocol 1 (built) | Protocol 2 (built) |
 |---|---|---|---|

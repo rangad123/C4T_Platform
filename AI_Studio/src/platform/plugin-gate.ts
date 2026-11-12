@@ -37,7 +37,7 @@ export function pluginGate(p: Pick<Platform, "repo" | "db" | "config">, projectI
     // Plug-ins are loaded into the server only; a runner agent has no copy of them.
     if (getAgentServices(p as Platform).routesToAgent(projectId)) {
         const named = used.map((id) => (hasAdapter(id) ? `"${getAdapter(id).label}" (${id})` : `"${id}"`)).join(", ");
-        throw new HttpError(409, `This project has tests that use the plug-in framework ${named}, which runs on the platform computer only: runner agents do not have plug-ins. This project runs its tests on a runner agent. Run the project on the platform computer, or move these tests to another project.`);
+        throw new HttpError(409, `This project has tests that use the plug-in framework ${named}, which runs on the platform computer only: runners do not have plug-ins. This project runs its tests on runners. Run the project on the platform computer, or move these tests to another project.`);
     }
 }
 
@@ -48,7 +48,7 @@ export function pluginGate(p: Pick<Platform, "repo" | "db" | "config">, projectI
 export function pluginSkipReason(p: Pick<Platform, "repo" | "db" | "config">, projectId: string, framework: string, shape: "validate" | "environment"): string | undefined {
     if (!hasAdapter(framework)) return explainMissingFramework(framework);
     if (shape === "environment") return "A plug-in framework can't be used in a run against an environment.";
-    if (getAgentServices(p as Platform).routesToAgent(projectId)) return "This project runs its tests on a runner agent, and runner agents do not have plug-ins.";
+    if (getAgentServices(p as Platform).routesToAgent(projectId)) return "This project runs its tests on runners, and runners do not have plug-ins.";
     return undefined;
 }
 

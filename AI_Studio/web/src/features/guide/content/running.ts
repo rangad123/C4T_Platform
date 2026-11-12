@@ -169,7 +169,7 @@ export const running: Topic[] = [
         why: "Every run you start runs on it, so it reaches what your computer reaches.",
         steps: [
             step("Open Settings and find Your runner.", "Settings", "Your runner"),
-            step("Check the system and processor, then choose Download the runner.", "Download the runner"),
+            step("Choose Download, or For another computer? first.", "For another computer?"),
             step("Unzip it there and open the setup program. It gets only what is missing."),
             step("Wait until Your runner says Online.", "Online"),
         ],
@@ -198,7 +198,7 @@ export const running: Topic[] = [
         goodToKnow: [
             "The AI explores Android apps only. Import tests for an iPhone app.",
             "The first emulator start takes a few minutes.",
-            "A runner's phone needs only USB debugging on.",
+            "Real phones need USB debugging and Use my connected phone.",
         ],
         open: { label: "Open Mobile app", to: { place: "setup", section: "mobile" } },
         words: ["emulator", "runner"],

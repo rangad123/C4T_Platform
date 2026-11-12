@@ -94,10 +94,6 @@ Options:
                          program name, repeat for more. Nothing is allowed by default
                                                                                  (env AITP_ALLOW_APPS, separated by ;)
   --allow-apps-file <f>  The same list in a file, one entry per line               (env AITP_ALLOW_APPS_FILE)
-  --allow-custom-scripts Run hand-written scripts (code people on the project wrote). They can
-                         do anything this user can do on this computer, so only switch it on
-                         when you trust everyone who edits tests. Off by default
-                                                                                 (env AITP_ALLOW_CUSTOM_SCRIPTS=1)
   --browser <choice>     Browser for web tests: auto (default: Playwright's Chromium if it is
                          here, else Google Chrome, else Microsoft Edge, else download Chromium),
                          bundled (always Playwright's Chromium), chrome or msedge (only that

@@ -550,21 +550,6 @@ export interface DeviceNeed {
     device: string;
 }
 
-export interface HealthTask {
-    id: string;
-    projectId: string;
-    /** The run it belongs to (round 39: the Runners page links current work to its run). */
-    jobId?: string;
-    adapterId: string;
-    status: TaskStatus;
-    agentId: string | null;
-    error: string | null;
-    done: number | null;
-    total: number | null;
-    createdMs: number;
-    claimedMs: number | null;
-    finishedMs: number | null;
-}
 
 export interface DeviceReservation extends DeviceNeed {
     agentId: string;
@@ -942,7 +927,7 @@ export class AgentStore {
         return this.db.all(`SELECT * FROM agent_tasks WHERE job_id = ? ORDER BY created_ms, ${this.db.dialect.insertionOrder()}`, jobId).map(toTask);
     }
 
-    /** Queued tasks of a project, oldest first: the FIFO an agent picks from. */
+    /** Queued tasks of a project, oldest first (tests read it; a runner picks from its owner's queue, queuedOfOwner). */
     queued(projectId: string, limit = 25): TaskRecord[] {
         return this.db.all(`SELECT * FROM agent_tasks WHERE project_id = ? AND status = 'queued' ORDER BY created_ms, ${this.db.dialect.insertionOrder()} LIMIT ?`, projectId, limit).map(toTask);
     }
@@ -1009,13 +994,6 @@ export class AgentStore {
         return rows
             .filter((r) => !agentIds || agentIds.includes(r.agent_id))
             .map((r) => ({ agentId: r.agent_id, family: r.family, device: r.device, taskId: r.task_id, projectId: r.project_id, reservedMs: r.reserved_ms }));
-    }
-
-    /** Running and queued work, and how the recent work went, for the runners' health (tasks are kept TASK_KEEP_MS). Never the payload or the result. */
-    tasksForHealth(): HealthTask[] {
-        return this.db
-            .all<Record<string, any>>("SELECT id, project_id, job_id, adapter_id, status, agent_id, error, progress_done, progress_total, created_ms, claimed_ms, finished_ms FROM agent_tasks ORDER BY created_ms DESC")
-            .map((r) => ({ id: r.id, projectId: r.project_id, jobId: r.job_id, adapterId: r.adapter_id, status: r.status, agentId: r.agent_id ?? null, error: r.error ?? null, done: r.progress_done ?? null, total: r.progress_total ?? null, createdMs: r.created_ms, claimedMs: r.claimed_ms ?? null, finishedMs: r.finished_ms ?? null }));
     }
 
     /**
@@ -1215,7 +1193,7 @@ export class AgentStore {
             const requeued = move("requeued", "status = 'running' AND lease_until < ? AND offers < ? AND adapter_id NOT LIKE 'record:%' AND adapter_id NOT LIKE 'device:%'", [now, MAX_OFFERS], "status = 'queued', agent_id = NULL, lease_until = NULL, phase = 'queued', phase_ms = ?", [now]);
             const lost = move("lost", "status = 'running' AND lease_until < ? AND (offers >= ? OR adapter_id LIKE 'record:%' OR adapter_id LIKE 'device:%')", [now, MAX_OFFERS], "status = 'failed', error = 'The runner agent stopped responding while it was running these tests.', finished_ms = ?, lease_until = NULL, phase = 'lost_connection', phase_ms = ?", [now, now]);
             // Counted from when it last went into the queue (phase_ms, set by every re-queue), so a task re-offered after a long run still gets its wait.
-            const stale = move("stale", "status = 'queued' AND COALESCE(phase_ms, created_ms) < ?", [now - QUEUE_MAX_MS], "status = 'failed', error = 'No runner agent picked up this run within 30 minutes.', finished_ms = ?, phase = 'timed_out', phase_ms = ?", [now, now]);
+            const stale = move("stale", "status = 'queued' AND COALESCE(phase_ms, created_ms) < ?", [now - QUEUE_MAX_MS], "status = 'failed', error = 'No runner took this run within 30 minutes.', finished_ms = ?, phase = 'timed_out', phase_ms = ?", [now, now]);
             const orphaned = move("cancelled", `status IN ('queued','running') AND job_id IN (SELECT id FROM generation_jobs WHERE status IN ${TERMINAL_JOB_SQL})`, [], "status = 'cancelled', finished_ms = ?, lease_until = NULL, phase = 'cancelled', phase_ms = ?", [now, now]);
             this.releaseDevices();
             return { requeued: requeued + notAccepted, failed: lost + stale + neverAccepted, cancelled: cancelledLost + orphaned, changes };

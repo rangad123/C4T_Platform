@@ -54,7 +54,6 @@ const cleanEnv = (): NodeJS.ProcessEnv => {
         AGENT_WATCH_MS: "100",
         AGENT_LEASE_SECONDS: "30",
         AGENT_NO_AGENT_GRACE_SECONDS: "60",
-        AGENT_MAX_TOKENS: "25",
         TAQWRIGHT_HOME: "/nonexistent-taqwright",
         LLM_PROVIDER: "anthropic",
     };

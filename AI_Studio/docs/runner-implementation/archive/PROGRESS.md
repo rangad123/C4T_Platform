@@ -1,3 +1,5 @@
+> Archived round history, not the current design: see `../RUNNER_ARCHITECTURE.md` (one runner per person).
+
 # Local execution runner: progress log
 
 A dated log of the runner work. Add a new entry at the top of "Log" whenever something lands, a test result changes, or a machine is checked. Keep the status table in step with the log.

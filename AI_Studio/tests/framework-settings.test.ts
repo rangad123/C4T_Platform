@@ -162,7 +162,7 @@ describe("the API", () => {
     it("refuses a visible browser while the project runs on this server, and an emulator nobody knows", async () => {
         const headed = await putSettings(projectId, { web: { headless: false } });
         expect(headed.status).toBe(400);
-        expect(headed.body.error).toMatch(/only opens when this project's tests run on a runner agent/);
+        expect(headed.body.error).toMatch(/only opens when this project's tests run on a runner, where/);
         const avd = await putSettings(projectId, { android: { defaultAvd: "Pixel_Nobody_Has" } });
         expect(avd.status).toBe(400);
         expect(avd.body.error).toContain("Pixel_Nobody_Has");

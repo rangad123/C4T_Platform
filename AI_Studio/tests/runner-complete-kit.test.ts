@@ -41,7 +41,7 @@ const BASE = `http://127.0.0.1:${PLATFORM_PORT}`;
 const APP = `http://127.0.0.1:${APP_PORT}`;
 const API_KEY = "complete-e2e-admin-key-71c3d9";
 const VERSION = "24.19.0";
-const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "RUNNER_KIT_DIR", "RUNNER_COMPLETE_DIR", "RUNNER_INSTALLER_DIR", "AGENT_MAX_TOKENS", "RUNNER_KIT_RATE_PER_MINUTE"];
+const ENV_KEYS = ["AGENT_POLL_SECONDS", "AGENT_LEASE_SECONDS", "AGENT_WATCH_MS", "AGENT_NO_AGENT_GRACE_SECONDS", "BLOCK_PRIVATE_TARGETS", "RUNNER_KIT_DIR", "RUNNER_COMPLETE_DIR", "RUNNER_INSTALLER_DIR", "RUNNER_KIT_RATE_PER_MINUTE"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 const ON_WINDOWS = process.platform === "win32";
 const SYSTEM_TAR = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");

@@ -38,6 +38,8 @@ export const DEFAULT_CONFIG = (): Json => ({
 export class PhoneFake {
     config: Json = DEFAULT_CONFIG();
     agents: Json[] = [];
+    /** The person's own runner (GET /api/me/runner), null: not set up. */
+    me: Json | null = null;
     readonly projects = new Map<string, FakeProject>();
     readonly jobs = new Map<string, Json>();
     readonly tests = new Map<string, Json>();
@@ -275,8 +277,8 @@ export class PhoneFake {
         // The web app asks who is using it before anything else (people and access): an open platform, as on a fresh install.
         if (method === "GET" && p === "/auth/state") return { body: { mode: "open", accessKeyConfigured: false, hasPeople: false, sso: { enabled: false, label: "" }, me: { kind: "open", name: "Anyone (open access)", role: "owner" } } };
         if (method === "GET" && p === "/config") return { body: this.config };
-        // The person's own runner (round 45): none in these tests.
-        if (method === "GET" && p === "/me/runner") return { body: { runner: null } };
+        // The person's own runner (round 45): none unless a test sets one.
+        if (method === "GET" && p === "/me/runner") return { body: { runner: this.me } };
         // The Security Assessment module (round 18): the shell asks whether it is on; these phone screens run with it off.
         if (method === "GET" && p === "/v1/security/status") return { body: { enabled: false } };
         if (method === "GET" && p === "/projects") return { body: [...this.projects.values()].map((x) => this.publicProject(x)) };

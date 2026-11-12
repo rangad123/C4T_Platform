@@ -275,7 +275,7 @@ describe("M1: tests of an unavailable plug-in are left out of automated runs", (
             const { pluginSkips } = await import("../src/platform/plugin-policy.js");
             const skipped = await pluginSkips(platform.repo, pid);
             expect([...skipped.ids]).toEqual([plug]);
-            expect(skipped.note).toMatch(/runner agents do not have plug-ins/);
+            expect(skipped.note).toMatch(/runners do not have plug-ins/);
             expect(await runnableTestIds(platform.repo, pid)).not.toContain(plug);
         } finally {
             svc.store.setRunner(pid, { runOn: "platform", agentId: null });

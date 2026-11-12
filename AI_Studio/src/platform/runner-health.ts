@@ -20,11 +20,13 @@ export function isPlatformAdmin(actor: Actor): boolean {
     return side === "admin" || (side === "local" && permissionsOf(actor).has("ai_studio.platform.settings"));
 }
 
-/** May this actor see every person's runner (GET /api/admin/runners) and remove one? Platform admins, and people who manage runners everywhere. */
+/**
+ * May this actor see every person's runner (GET /api/admin/runners) and remove one? People who manage runners (the route's permission) and are
+ * platform admins or see every project. The one rule for the route and for the page (GET /api/me/runner canSeeEveryone).
+ */
 export function seesEveryRunner(scope: Pick<ProjectScope, "allowed">, actor: Actor): boolean {
-    if (actor.kind !== "user") return false;
+    if (actor.kind !== "user" || !permissionsOf(actor).has("ai_studio.runners.manage")) return false;
     if (isPlatformAdmin(actor)) return true;
-    if (!permissionsOf(actor).has("ai_studio.runners.manage")) return false;
     const side = sideOf(actor);
     return side !== "customer" && side !== "tester" && scope.allowed(actor) === null;
 }

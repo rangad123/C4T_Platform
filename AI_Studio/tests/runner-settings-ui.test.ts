@@ -221,10 +221,12 @@ describe("not set up", () => {
         await pwExpect(section()).toHaveAttribute("data-state", "not-set-up");
         await pwExpect(section()).toContainText("A runner is the program on your computer that runs your tests.");
         await pwExpect(section().getByText("Not set up", { exact: true })).toBeVisible();
-        // Headless Chromium here is Linux on an Intel or AMD processor.
+        // One button for the computer the browser is on (headless Chromium here is Linux on an Intel or AMD processor); the choice is folded away.
+        await pwExpect(section().getByRole("button", { name: "Download for Linux" })).toBeEnabled();
+        await pwExpect(section().getByLabel("System")).toBeHidden();
+        await section().getByText("For another computer?", { exact: true }).click();
         await pwExpect(section().getByLabel("System")).toHaveValue("linux");
         await pwExpect(section().getByLabel("Processor")).toHaveValue("x64");
-        await pwExpect(section().getByRole("button", { name: "Download the runner" })).toBeEnabled();
         await axeBoth();
     }, 60_000);
 
@@ -232,24 +234,25 @@ describe("not set up", () => {
         fake.info = { ...fake.info, mayDownload: false, refusal: "Sign in with your own account to set up your runner." };
         await visit();
         await pwExpect(section().getByTestId("runner-download-refused")).toHaveText("Sign in with your own account to set up your runner.");
-        await pwExpect(section().getByRole("button", { name: /Download the runner/ })).toHaveCount(0);
+        await pwExpect(section().getByRole("button", { name: /Download for/ })).toHaveCount(0);
         fake.info = { ...fake.info, mayDownload: true, refusal: undefined };
     }, 60_000);
 
     it("says when this server has no download for the system chosen, with its reason", async () => {
         fake.info = { ...fake.info, systems: [{ os: "linux", arch: "x64", available: true, kind: "files" }, { os: "mac", arch: "arm64", available: false, kind: "installer", reason: "The Mac app is not built on this server." }] };
         await visit();
+        await section().getByText("For another computer?", { exact: true }).click();
         await section().getByLabel("System").selectOption("mac");
         await section().getByLabel("Processor").selectOption("arm64");
         await pwExpect(section()).toContainText("The Mac app is not built on this server.");
-        await pwExpect(section().getByRole("button", { name: /Download the runner/ })).toBeDisabled();
+        await pwExpect(section().getByRole("button", { name: /Download for Mac/ })).toBeDisabled();
         fake.info = { ...fake.info, systems: [] };
     }, 60_000);
 
     it("shows a refused download's sentence as it is", async () => {
         fake.download = { status: 403, error: "Setting up a runner needs permission to run tests in at least one project." };
         await visit();
-        await section().getByRole("button", { name: "Download the runner" }).click();
+        await section().getByRole("button", { name: "Download for Linux" }).click();
         await pwExpect(section().getByTestId("runner-download-error")).toHaveText("Setting up a runner needs permission to run tests in at least one project.");
         fake.download = { status: 200, error: "" };
     }, 60_000);
@@ -259,7 +262,7 @@ describe("not set up", () => {
         fake.enrollment = "waiting";
         await visit();
         const saved = page.waitForEvent("download");
-        await section().getByRole("button", { name: "Download the runner" }).click();
+        await section().getByRole("button", { name: "Download for Linux" }).click();
         const dl = await saved;
         expect(dl.suggestedFilename()).toBe("ai-testing-runner-linux-x64.zip");
         const post = calls.find((c) => c.path === "/api/me/runner/download");
@@ -269,6 +272,11 @@ describe("not set up", () => {
         await pwExpect(waiting).toContainText("ai-testing-runner-linux-x64.zip");
         await pwExpect(waiting).toContainText("sh start-runner.sh");
         await pwExpect(waiting.getByTestId("runner-wait")).toContainText("Waiting for the computer to connect");
+        // The steps say it once; the other cases and the computer check wait under Still blocked?
+        await pwExpect(waiting.getByTestId("still-blocked")).toBeVisible();
+        await pwExpect(waiting.getByText("check-computer.sh", { exact: false })).toBeHidden();
+        await waiting.getByText("Still blocked?", { exact: true }).click();
+        await pwExpect(waiting.getByText("sh check-computer.sh", { exact: false })).toBeVisible();
         // The code inside the download never reaches the page.
         expect(await page.content()).not.toContain(SECRET_CODE);
         await axeBoth();
@@ -283,10 +291,10 @@ describe("not set up", () => {
         fake.mine = null;
         fake.enrollment = "expired";
         await visit();
-        await section().getByRole("button", { name: "Download the runner" }).click();
+        await section().getByRole("button", { name: "Download for Linux" }).click();
         await pwExpect(section()).toContainText("The code in that download has expired", { timeout: 15_000 });
         await section().getByRole("button", { name: "Download again" }).click();
-        await pwExpect(section().getByRole("button", { name: "Download the runner" })).toBeVisible();
+        await pwExpect(section().getByRole("button", { name: "Download for Linux" })).toBeVisible();
         fake.enrollment = "waiting";
     }, 60_000);
 });
@@ -296,8 +304,12 @@ describe("connected", () => {
         fake.mine = runnerOf({ check: { at: new Date().toISOString(), items: [{ id: "node", status: "ok", title: "Node.js 24 found" }, { id: "chrome", status: "missing", title: "Google Chrome is not installed", fix: "Install Chrome, or let the runner download Chromium." }] } });
         calls.length = 0;
         await visit();
+        // The header says the name and when it was last heard from; the rest waits under Details.
+        await pwExpect(section().getByTestId("runner-head")).toContainText("Priya’s laptop, last heard from");
         const facts = section().getByTestId("runner-facts");
-        await pwExpect(facts).toContainText("Priya’s laptop");
+        await pwExpect(facts).toBeHidden();
+        await section().getByText("Details", { exact: true }).click();
+        await pwExpect(facts).toBeVisible();
         await pwExpect(facts).toContainText("PRIYA-LT");
         await pwExpect(facts).toContainText("Windows");
         await pwExpect(facts).toContainText("2.1.0");
@@ -394,8 +406,10 @@ describe("everyone's runners (admins)", () => {
         fake.canSeeEveryone = true;
         calls.length = 0;
         await visit();
-        const list = section().getByTestId("everyones-runners");
-        await list.getByText(/Everyone’s runners \(2\)/).click();
+        // Its own section below Your runner, not inside it.
+        await pwExpect(section().getByTestId("everyones-runners")).toHaveCount(0);
+        const list = page.getByTestId("everyones-runners");
+        await pwExpect(list.getByRole("heading", { name: "Everyone’s runners (2)" })).toBeVisible();
         await pwExpect(list).toContainText("Ana: Ana’s Mac");
         await pwExpect(list).toContainText("version 2.0.0");
         // Your own runner is removed from your own section, not from here.
@@ -411,7 +425,7 @@ describe("everyone's runners (admins)", () => {
     it("shows nothing when the list is refused", async () => {
         fake.admin = null;
         await visit();
-        await pwExpect(section().getByTestId("everyones-runners")).toHaveCount(0);
+        await pwExpect(page.getByTestId("everyones-runners")).toHaveCount(0);
     }, 60_000);
 
     it("is not shown, and never asked for, unless the server says canSeeEveryone (Manage runners alone is not enough)", async () => {
@@ -424,7 +438,7 @@ describe("everyone's runners (admins)", () => {
             await visit();
             await pwExpect(section()).toHaveAttribute("data-state", "online");
             await page.waitForTimeout(1500);
-            await pwExpect(section().getByTestId("everyones-runners")).toHaveCount(0);
+            await pwExpect(page.getByTestId("everyones-runners")).toHaveCount(0);
             expect(adminCalls, String(answer)).toEqual([]);
         }
         fake.permissions = null;
@@ -443,6 +457,27 @@ describe("the rest of Settings for someone who may run tests but not change the 
         await pwExpect(page.getByTestId("mobile-tooling")).toHaveCount(0);
         await pwExpect(page.locator("aside.sidebar a.nav-item", { hasText: /^Settings$/ })).toBeVisible();
         fake.permissions = null;
+    }, 60_000);
+});
+
+describe("the Dashboard card", () => {
+    it("shows only while the runner is not set up or offline", async () => {
+        const dashboard = async () => {
+            await page.goto("about:blank");
+            await page.goto(`${BASE}/#/dashboard`);
+            await pwExpect(page.getByRole("heading", { name: "Dashboard", exact: true }).first()).toBeVisible({ timeout: 20_000 });
+        };
+        fake.mine = null;
+        await dashboard();
+        const card = page.getByTestId("dashboard-runner");
+        await pwExpect(card.getByRole("link", { name: "Set up your runner" })).toHaveAttribute("href", "#/settings#runner");
+        fake.mine = runnerOf({ status: "offline", lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString() });
+        await dashboard();
+        await pwExpect(card).toContainText("Priya’s laptop: offline since");
+        fake.mine = runnerOf();
+        await dashboard();
+        await page.waitForTimeout(1500); // the runner's answer has arrived by now
+        await pwExpect(card).toHaveCount(0);
     }, 60_000);
 });
 
@@ -480,10 +515,10 @@ describe("against the real routes", () => {
 
         await visit();
         await pwExpect(section()).toHaveAttribute("data-state", "online", { timeout: 15_000 });
-        await pwExpect(section().getByTestId("runner-facts")).toContainText("Maya’s laptop");
+        await pwExpect(section().getByTestId("runner-head")).toContainText("Maya’s laptop");
         await pwExpect(section().getByTestId("agent-check")).toContainText("Only 0.4 GB free");
         expect(await section().innerText()).not.toContain(PASSWORD);
-        await section().getByText("Check this computer", { exact: true }).click();
+        await section().getByText("Details", { exact: true }).click();
         expect(await page.content()).not.toContain(PASSWORD);
 
         await section().getByRole("checkbox", { name: /Test private and local addresses/ }).check();

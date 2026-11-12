@@ -22,11 +22,13 @@ import { CustomScriptStore } from "./custom-script-store.js";
 import { HttpError } from "./http-error.js";
 import { runnerRefusal } from "./runner-only.js";
 import type { JobOptions, Repo } from "./repo.js";
-import { getAgentServices, jobOwnerId, ownerOfNewJob, type RunContext } from "./agent-services.js";
+import { getAgentServices, jobOwnerId, ownerOfNewJob } from "./agent-services.js";
+import { ownerIdOfActor } from "./agent-store.js";
+import { currentActor } from "./auth/actor.js";
 
 export const CUSTOM_REFUSAL = "This project has code tests, and no runner is set up for this run. Set up your runner in Settings (with code scripts switched on), or set ALLOW_CUSTOM_SCRIPTS=true on the server.";
 const AGENT_REFUSAL = "This project has code tests, and code scripts are switched off on your runner. Switch them on for your runner in Settings.";
-const HOST_REFUSAL = "This project has code tests, and this server does not run them. Set ALLOW_CUSTOM_SCRIPTS=true on the server, or run the project on a runner agent started with --allow-custom-scripts.";
+const HOST_REFUSAL = "This project has code tests, and this server does not run them. Set ALLOW_CUSTOM_SCRIPTS=true on the server, or run the project's tests on runners and switch code scripts on for your runner in Settings.";
 
 export interface PolicyInput {
     /** ALLOW_CUSTOM_SCRIPTS on the platform. */
@@ -52,9 +54,10 @@ export function customRunDecision(i: PolicyInput): PolicyDecision {
 }
 
 /** The decision for a project, from the live platform (config and runner agents). */
-export function customPolicyFor(p: Pick<Platform, "config" | "db" | "repo"> & Partial<Platform>, projectId: string, who?: RunContext): PolicyDecision {
+export function customPolicyFor(p: Pick<Platform, "config" | "db" | "repo"> & Partial<Platform>, projectId: string, ownerId: string | null = ownerIdOfActor(currentActor())): PolicyDecision {
     const svc = getAgentServices(p as Platform);
     const runsOnAgent = svc.routesToAgent(projectId);
+    const own = runsOnAgent ? svc.ownRunner(ownerId, projectId)?.agent : undefined;
     return customRunDecision({
         // The effective value: ALLOW_CUSTOM_SCRIPTS counts only with an API_KEY (config.ts).
         hostAllowed: p.config?.ALLOW_CUSTOM_SCRIPTS === true,
@@ -62,7 +65,7 @@ export function customPolicyFor(p: Pick<Platform, "config" | "db" | "repo"> & Pa
         runsOnAgent,
         // The same rule as offering (agent-services.ts mayRunCodeScripts): the owner's switch for their runner, as it last reported itself,
         // online or not (an offline runner is the job gate's refusal, or a schedule's wait, never a silent drop of its code tests).
-        agents: runsOnAgent ? svc.lastKnownRunner(projectId, who).map((a) => ({ customScripts: svc.mayRunCodeScripts(a) })) : [],
+        agents: own ? [{ customScripts: svc.mayRunCodeScripts(own) }] : [],
     });
 }
 
@@ -76,7 +79,7 @@ export function customIdsOfJob(repo: Repo, options: JobOptions): string[] {
 /** Checked by `Repo.createJob`: a plain 409 when the job includes code tests that may not run. */
 export function customGate(p: Platform, projectId: string, options: JobOptions): void {
     if (customIdsOfJob(p.repo, options).length === 0) return;
-    const d = customPolicyFor(p, projectId, { ownerId: ownerOfNewJob(options) });
+    const d = customPolicyFor(p, projectId, ownerOfNewJob(options));
     // On a runner the refusal is about the person's own runner, so it carries the code that links to Settings.
     if (!d.allowed) throw getAgentServices(p).routesToAgent(projectId) ? runnerRefusal("RUNNER_CANNOT_RUN", d.message) : new HttpError(409, d.message);
 }
@@ -84,7 +87,7 @@ export function customGate(p: Platform, projectId: string, options: JobOptions):
 /** Install the gate (and the lookup schedules and runbooks use) on the platform's repository. */
 export function installCustomGate(p: Platform): void {
     p.repo.customGate = async (projectId, options) => customGate(p, projectId, options);
-    p.repo.customPolicy = async (projectId, ownerId) => customPolicyFor(p, projectId, { ownerId: ownerId ?? null });
+    p.repo.customPolicy = async (projectId, ownerId) => customPolicyFor(p, projectId, ownerId ?? null);
 }
 
 /**

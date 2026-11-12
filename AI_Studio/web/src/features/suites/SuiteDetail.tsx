@@ -9,8 +9,8 @@ import { describeApiError, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
 import type { Environment } from "../environments/environments";
 import { PRODUCTION_WARNING } from "../environments/environments";
-import { NO_RUNNER_TITLE, useRunReadiness } from "../runs/runs-here";
-import { refusalLink } from "../runners/my-runner";
+import { isRunnerRefusal, refusalLink, useReadiness } from "../runners/my-runner";
+import { RunnerNotReady } from "../runs/RunnerNotReady";
 import { RunStartError } from "../runners/RunnerRefusal";
 import { VARIANT_UI, variantLabel, type VariantId } from "../variants/variants";
 import { moved, runResult, settingsSentence, type Suite, type SuiteDetailData, type SuiteSettings, type SuiteTest } from "./suites";
@@ -72,7 +72,7 @@ function SuiteHeader({ projectId, d, canWrite, canRunPerm, onChanged }: { projec
     const [started, setStarted] = useState<{ jobId: string; testCount: number; skipped: Array<{ testId: string; reason: string }> } | null>(null);
 
     // Runners mode: a suite's run goes to the person's own runner, so Run waits until it is set up and online (the server checks again).
-    const ready = useRunReadiness();
+    const ready = useReadiness();
     const runnersOnly = ready.mode === "runners";
     const noRunner = runnersOnly && d.canRun.ok && !ready.loading && !ready.ready;
     const runBlock = !d.canRun.ok ? (runnersOnly ? d.canRun.reason ?? "Runs can’t start right now." : "Tests do not run on this server.") : !canRunPerm ? "Running tests needs permission to run tests in this project." : d.tests.length === 0 ? "Add tests to the suite first." : noRunner ? ready.reason : runnersOnly && ready.loading ? "Looking for your runner…" : null;
@@ -89,6 +89,8 @@ function SuiteHeader({ projectId, d, canWrite, canRunPerm, onChanged }: { projec
         } catch (e) {
             if (refusalLink(e)) setRunError(e);
             else setError(describeApiError(e));
+            // The server knew better than the page: read the runner again so Run says the same.
+            if (isRunnerRefusal(e)) void ready.reload();
         } finally {
             setBusy(null);
         }
@@ -158,13 +160,7 @@ function SuiteHeader({ projectId, d, canWrite, canRunPerm, onChanged }: { projec
                         {d.canRun.reason}
                     </Callout>
                 )}
-                {noRunner && canRunPerm && d.tests.length > 0 && (
-                    <div data-testid="suite-no-runner">
-                        <Callout tone="warning" title={NO_RUNNER_TITLE} actions={<a href={routes.allRunners}>Open Your runner in Settings</a>}>
-                            {ready.reason}
-                        </Callout>
-                    </div>
-                )}
+                {canRunPerm && d.tests.length > 0 && <RunnerNotReady reason={noRunner ? ready.reason : null} testId="suite-no-runner" />}
                 {started && (
                     <Callout tone="success" title="Run started">
                         {plural(started.testCount, "test")} queued in this suite’s order. <a href={routes.run(projectId, started.jobId)}>Follow the run</a>.
@@ -528,7 +524,7 @@ function SettingsCard({ projectId, d, canWrite, onChanged }: { projectId: string
                 </fieldset>
                 <p className="t-meta">
                     {d.where ? `Where tests run: ${d.where} ` : ""}
-                    Every run goes to the runner of the person who starts it: <a href={routes.allRunners}>Your runner in Settings</a>.
+                    Every run goes to the runner of the person who starts it: <a href={routes.yourRunner}>Your runner in Settings</a>.
                 </p>
                 {error && <Callout tone="danger">{error}</Callout>}
                 {saved && !changed && <Callout tone="success">Saved. The next run uses these settings.</Callout>}

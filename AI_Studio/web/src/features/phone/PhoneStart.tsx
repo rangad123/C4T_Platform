@@ -7,24 +7,25 @@ import { Button, Callout, Disclosure, ErrorState, LinkButton, Skeleton } from ".
 import { useConfig, useFetch } from "../../lib/hooks";
 import { describeApiError, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
-import type { Agent, RunnerChoice } from "../agents/agents";
+import type { RunnerChoice } from "../runners/runners";
+import { reloadMyRunner, useMyRunner } from "../runners/my-runner";
 import { executionModeOf } from "../runs/runs-here";
-import { ACCOUNT_REMINDER, AI_MISSING, EXPLORE_ON_RUNNERS, EXPLORE_ON_RUNNERS_TITLE, IPHONE_NOTE, NEED_APP, NEED_PACKAGE, NO_WHERE_BODY, NO_WHERE_TITLE, PHONE_TITLE, WONT_DO, appLabel, appState, defaultWhere, startBody, whereOptions, willDo } from "./phone";
+import { ACCOUNT_REMINDER, AI_MISSING, EXPLORE_ON_RUNNERS, IPHONE_NOTE, NEED_APP, NEED_PACKAGE, NO_WHERE_TITLE, PHONE_TITLE, WONT_DO, appLabel, appState, phoneWhere, startBody, willDo } from "./phone";
 import "./phone.css";
 
 /**
  * The panel before an exploration of a phone app starts: what will happen, what it needs, where it will run, and one button.
- * It reads what the platform says it can do and never offers a place that cannot run it. It uses the plan mode, so nothing is
- * created until the person has seen the plan. Opened from the New test menu, from Setup > Mobile app and from the welcome page.
+ * It runs where the project runs its tests (this server or the person's runner); this panel never changes that. It uses the plan mode,
+ * so nothing is created until the person has seen the plan. Local mode only: in runners mode "Explore with AI" is switched off.
  */
 export function PhoneStartDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
     const ref = useRef<HTMLDialogElement>(null);
     const project = useFetch<ProjectDetail>(`/projects/${projectId}`);
     const runner = useFetch<RunnerChoice>(`/projects/${projectId}/runner`);
-    const agents = useFetch<Agent[]>(`/projects/${projectId}/agents`);
     const config = useConfig();
+    const onRunner = runner.data?.runOn === "agent";
+    const me = useMyRunner(15_000, onRunner);
     const aiReady = useProjectAiReady(projectId);
-    const [where, setWhere] = useState<string | null>(null);
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [busy, setBusy] = useState(false);
@@ -40,7 +41,7 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
         [opener],
     );
 
-    const loading = project.loading || runner.loading || agents.loading || !config;
+    const loading = project.loading || runner.loading || me.loading || !config;
 
     useEffect(() => {
         // Once the controls are there, the focus starts on the first one, so Tab moves through the panel in reading order and never leaves it first.
@@ -50,31 +51,22 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
         if (active !== d && active !== document.body && d.contains(active)) return;
         d.querySelector<HTMLElement>('input:not([disabled]), summary, button:not([disabled]), a[href], select:not([disabled]), textarea:not([disabled])')?.focus();
     }, [loading]);
-    // A runner list that cannot be read only takes the runners away: this server may still be able to explore.
     const failed = project.error ?? undefined;
     const m = project.data?.mobile ?? null;
-    const options = whereOptions(config, agents.data ?? []);
-    const chosen = where ?? defaultWhere(options, runner.data);
-    const picked = options.find((o) => o.id === chosen);
-    const anyWhere = options.some((o) => o.can);
+    const where = phoneWhere(config, onRunner ? "agent" : "platform", me.data?.runner);
     const aiMissing = config ? !aiReady : false;
-    // The hosted platform (runners mode) refuses an exploration when it is made: said here before the click, and Start stays off.
-    const runnersOnly = executionModeOf(config) === "runners";
-    const current = runner.data ? (runner.data.runOn === "agent" ? runner.data.agentId : "platform") : "platform";
-    const changesRunner = Boolean(picked?.can) && chosen !== current;
 
     async function start() {
-        if (!picked?.can) return;
+        if (!where.can) return;
         setBusy(true);
         setError("");
         try {
-            // The platform runs a project's phone work where the project runs, so choosing another place is saved first, and said so below.
-            if (changesRunner) await api(`/projects/${projectId}/runner`, { method: "PUT", body: chosen === "platform" ? { runOn: "platform" } : { runOn: "agent" } });
             await api(`/projects/${projectId}/test-generation`, { method: "POST", body: startBody({ username, password }) });
             onClose();
             go(routes.project(projectId));
         } catch (e) {
             setError(describeApiError(e));
+            if (onRunner) void reloadMyRunner();
             setBusy(false);
         }
     }
@@ -117,33 +109,18 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
                 </ul>
             </div>
 
-            <fieldset className="ph-where" aria-describedby={!anyWhere ? "ph-nowhere" : undefined}>
-                <legend className="t-card">Where it runs</legend>
-                {options.map((o) => (
-                    <label key={o.id} className={`check${o.can ? "" : " is-off"}`}>
-                        <input type="radio" name="ph-where" value={o.id} checked={chosen === o.id} disabled={!o.can} onChange={() => setWhere(o.id)} />
-                        <span>
-                            <span className="title">{o.label}</span>
-                            <span className="hint">{o.detail}</span>
-                        </span>
-                    </label>
-                ))}
-                {changesRunner && <p className="t-meta" data-testid="phone-runner-change">Phone tests for this project will run there from now on. Each person’s runs go to their own runner, set up in Settings.</p>}
-            </fieldset>
-            {!anyWhere && (
-                <div id="ph-nowhere">
-                    <Callout tone="warning" title={NO_WHERE_TITLE} actions={<LinkButton href={routes.allRunners}>Open Your runner in Settings</LinkButton>}>
-                        {NO_WHERE_BODY}
+            <div className="stack-sm" data-testid="phone-where">
+                <p className="t-card">Where it runs</p>
+                {where.can ? (
+                    <p className="hint">
+                        {where.label}. {where.detail}
+                    </p>
+                ) : (
+                    <Callout tone="warning" title={NO_WHERE_TITLE} actions={onRunner ? <LinkButton href={routes.yourRunner}>Open Your runner in Settings</LinkButton> : undefined}>
+                        {where.label}: {where.detail}
                     </Callout>
-                </div>
-            )}
-            {runnersOnly && (
-                <div data-testid="phone-runners-only">
-                    <Callout tone="info" title={EXPLORE_ON_RUNNERS_TITLE}>
-                        {EXPLORE_ON_RUNNERS}
-                    </Callout>
-                </div>
-            )}
+                )}
+            </div>
             {aiMissing && (
                 <Callout tone="warning" title="The AI model isn’t set up" actions={<LinkButton href={routes.settings}>Open Settings</LinkButton>}>
                     {AI_MISSING}
@@ -169,7 +146,7 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
             {error && <Callout tone="danger" title="We couldn’t start the exploration">{error}</Callout>}
             <div className="foot">
                 <Button type="button" onClick={onClose} disabled={busy}>Cancel</Button>
-                <Button type="submit" variant="primary" icon={Sparkles} loading={busy} disabled={busy || aiMissing || runnersOnly || !picked?.can}>
+                <Button type="submit" variant="primary" icon={Sparkles} loading={busy} disabled={busy || aiMissing || !where.can}>
                     {busy ? "Starting…" : "Start exploring"}
                 </Button>
             </div>
@@ -183,9 +160,19 @@ export function PhoneStartDialog({ projectId, onClose }: { projectId: string; on
     );
 }
 
-/** "Explore with AI" next to a phone app setting; also opens by itself when the page was reached with ?start=phone (right after the welcome page saved the app). */
+/**
+ * "Explore with AI" next to a phone app setting; also opens by itself when the page was reached with ?start=phone (right after the welcome
+ * page saved the app). Runners mode: switched off with the reason, since the platform refuses explorations there.
+ */
 export function ExploreWithAi({ projectId, auto }: { projectId: string; auto?: boolean }) {
+    const runnersOnly = executionModeOf(useConfig()) === "runners";
     const [open, setOpen] = useState(Boolean(auto));
+    if (runnersOnly)
+        return (
+            <Button icon={Sparkles} disabled data-tour="explore-phone" tip={EXPLORE_ON_RUNNERS}>
+                Explore with AI
+            </Button>
+        );
     return (
         <>
             <Button icon={Sparkles} onClick={() => setOpen(true)} data-tour="explore-phone" tip="Opens a panel that says what the AI will do and where it runs. Nothing starts until you choose Start exploring, and it stops at a plan for you to approve.">Explore with AI</Button>

@@ -6,7 +6,7 @@ import { useConfig, useDocumentTitle, useFetch } from "../../lib/hooks";
 import { describeApiError, frameworkLabel, friendlyError } from "../../lib/labels";
 import { go, routes } from "../../lib/router";
 import { bapi } from "../builder/builder";
-import type { RanOn } from "../agents/agents";
+import type { RanOn } from "../../api";
 import { CodeTab } from "./CodeTab";
 import { HistoryTab, type Restored } from "./HistoryTab";
 import { announceRunsChanged, useActiveRun } from "../runs/runs";

@@ -78,11 +78,11 @@ export function registerRecorderRoutes(ctx: RouteCtx): void {
         const body = StartBody.parse(req.body);
         const headed = body.headed ?? true;
         const agents = getAgentServices(p);
-        // The caller's own computers and the project's team runners: another person's computer never hosts their recording.
+        // The caller's own runner: another person's computer never hosts their recording.
         const caller = callerIdOf(currentActor());
         const where = chooseRecorder({ ...(body.on ? { on: body.on } : {}), ...(body.agentId ? { agentId: body.agentId } : {}), headed, runner: agents.store.getRunner(id), agents: sessionHosts(agents.store, id, caller, agents.clock()), caller });
         if (where.kind === "platform") {
-            if (headed && !hasDisplay()) throw new HttpError(422, "This computer has no screen for a recording window. Turn \"Show the browser\" off, or run the platform on a machine with a screen.");
+            if (headed && !hasDisplay()) throw new HttpError(422, "This computer has no screen for a recording window. Record on a computer with a screen, or on your runner.");
             if (!browserInstalled()) throw new HttpError(422, "No browser is installed on the machine that runs the platform. Run: npx playwright install chromium");
         }
         let url: string;

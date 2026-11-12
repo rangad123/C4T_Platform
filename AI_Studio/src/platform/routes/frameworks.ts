@@ -54,7 +54,9 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
     const adaptersFor = (projectId: string) => {
         const svc = agents();
         const onAgent = svc.routesToAgent(projectId);
-        const eligible = svc.eligibleAgents(projectId);
+        // The asker's own runner when it is online (round 45: the only one their runs go to).
+        const own = svc.ownRunner(ownerIdOfActor(currentActor()), projectId);
+        const online = own?.online ? own.agent : undefined;
         const settings = store().get(projectId);
         if (process.platform === "win32" && !lastProbe()) void probeDesktop();
         const mobile = mobileAvailability();
@@ -62,10 +64,9 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
         return FRAMEWORK_IDS.map((id) => {
             const a = getAdapter(id);
             const platformWhy = id === "taqwright" ? (mobile.available ? undefined : mobile.reason) : id === "windows-uia" ? windowsWhy : undefined;
-            const agentWhys = eligible.map((e) => capabilityProblem(a, e.capabilities));
-            const agentOk: boolean | null = eligible.length === 0 ? null : agentWhys.some((w) => !w);
-            const agentWhy = eligible.length === 0 ? undefined : agentWhys.every(Boolean) ? agentWhys[0] : undefined;
-            const reason = onAgent ? (agentOk === false ? `The connected runner agent can't run these tests: ${agentWhy}.` : agentOk === null ? "No runner agent is connected." : undefined) : platformWhy;
+            const agentWhy = online ? capabilityProblem(a, online.capabilities) : undefined;
+            const agentOk: boolean | null = online ? !agentWhy : null;
+            const reason = onAgent ? (agentWhy ? `Your runner can't run these tests: ${agentWhy}.` : !online ? "Your runner is not connected." : undefined) : platformWhy;
             return {
                 id,
                 label: a.label,
@@ -81,12 +82,13 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
         const runner = svc.runnerStatus(projectId);
         const settings = store().get(projectId);
         const chosen = runner.agentId ? svc.store.getAgent(runner.agentId) : undefined;
-        const onlineNames = svc.eligibleAgents(projectId, { ownerId: ownerIdOfActor(currentActor()) }).map((a) => a.name);
+        const own = svc.ownRunner(ownerIdOfActor(currentActor()), projectId);
+        const onlineName = own?.online ? own.agent?.name : undefined;
         return {
             settings,
             effective: effectiveSettings(settings, { onAgent: runner.runOn === "agent", platformWorkers: ctx.p.config.CONCURRENCY }),
             adapters: adaptersFor(projectId),
-            runner: { runOn: runner.runOn, ...(chosen ? { agentName: chosen.name } : onlineNames.length ? { agentName: onlineNames[0] } : {}) },
+            runner: { runOn: runner.runOn, ...(chosen ? { agentName: chosen.name } : onlineName ? { agentName: onlineName } : {}) },
             defaults: DEFAULT_FRAMEWORK_SETTINGS,
             limits: { ...LIMITS, platformWorkers: ctx.p.config.CONCURRENCY },
             avds: knownAvds(projectId).names,
@@ -114,7 +116,7 @@ export function registerFrameworkRoutes(ctx: RouteCtx): void {
         const svc = agents();
         const onAgent = svc.routesToAgent(id);
         if (patch.data.web?.headless === false && !onAgent) {
-            throw new HttpError(400, "A visible browser window only opens when this project's tests run on a runner agent, where a person can watch them. On this server the browser always runs without a window. Choose a runner agent first.");
+            throw new HttpError(400, "A visible browser window only opens when this project's tests run on a runner, where a person can watch them. On this server the browser always runs without a window. Run the project's tests on runners first.");
         }
         const current = store().get(id);
         const avd = patch.data.android?.defaultAvd?.trim();

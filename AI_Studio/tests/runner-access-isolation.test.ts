@@ -23,7 +23,6 @@ let platform: Platform;
 let app: Awaited<ReturnType<typeof buildServer>>;
 let tmp = "";
 const savedPoll = process.env.AGENT_POLL_SECONDS;
-const savedMax = process.env.AGENT_MAX_TOKENS;
 
 const asKey = async (method: string, url: string, payload?: unknown) => {
     const r = await app.inject({ method: method as "GET", url, headers: { "x-api-key": KEY }, ...(payload !== undefined ? { payload: payload as object } : {}) });
@@ -87,8 +86,6 @@ afterAll(async () => {
     fs.rmSync(tmp, { recursive: true, force: true });
     if (savedPoll === undefined) delete process.env.AGENT_POLL_SECONDS;
     else process.env.AGENT_POLL_SECONDS = savedPoll;
-    if (savedMax === undefined) delete process.env.AGENT_MAX_TOKENS;
-    else process.env.AGENT_MAX_TOKENS = savedMax;
 });
 
 describe("a task is its claiming runner's alone (protocol 2)", () => {

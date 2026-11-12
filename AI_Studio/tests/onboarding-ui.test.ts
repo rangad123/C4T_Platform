@@ -507,14 +507,15 @@ describe("explore, then a plan, then the tests (real jobs, scripted model)", () 
         await pwExpect(steps).toBeVisible();
         await pwExpect(steps.getByRole("heading", { name: "Next steps" })).toBeVisible();
         const done = async (key: string) => (await steps.locator(`[data-step="${key}"]`).getAttribute("data-done")) === "true";
-        for (const key of ["run", "schedule", "login", "runner"]) {
+        for (const key of ["run", "schedule", "login"]) {
             await pwExpect(steps.locator(`[data-step="${key}"]`)).toHaveCount(1);
             expect(await done(key), key).toBe(false);
         }
+        // The runner is asked for once, in Still to set up and on the Dashboard, not again here.
+        await pwExpect(steps.locator('[data-step="runner"]')).toHaveCount(0);
         // One action each, in words.
         await pwExpect(steps.getByRole("button", { name: "Run all tests" })).toBeVisible();
         await pwExpect(steps.getByRole("link", { name: "Set a schedule" })).toHaveAttribute("href", `#/projects/${projectId}/runs?section=schedules`);
-        await pwExpect(steps.getByRole("link", { name: "Set up your runner" })).toBeVisible();
         await pwExpect(steps.getByRole("link", { name: "Add sign-in details" })).toBeVisible();
         // The empty cards stay out of the way.
         const text = await contentText();
@@ -536,21 +537,14 @@ describe("explore, then a plan, then the tests (real jobs, scripted model)", () 
         await visit(`#/projects/${projectId}`);
         await pwExpect(steps.locator('[data-step="run"]')).toHaveAttribute("data-done", "true");
         await pwExpect(steps.getByText("You have run them again.")).toBeVisible();
-
-        // A runner is connected (answered by the test for this one request: connecting one needs a second computer).
-        // Round 45: the step reads the person's own runner (GET /api/me/runner).
-        await page.route("**/api/me/runner", (route) => route.fulfill({ json: { runner: { id: "a1", name: "Maya’s laptop", status: "online", lastSeenAt: new Date().toISOString(), os: "darwin", arch: "arm64", switches: { codeScripts: true, privateTargets: false, realPhone: false } } } }));
-        await visit(`#/projects/${projectId}`);
-        await pwExpect(steps.locator('[data-step="runner"]')).toHaveAttribute("data-done", "true");
-        await page.unroute("**/api/me/runner");
     }, 240_000);
 
     it("Next steps: keyboard path, 375 px, 44 px targets, axe in both themes", async () => {
         await visit(`#/projects/${projectId}`);
         await pwExpect(page.getByTestId("next-steps")).toBeVisible();
         for (const l of await page.getByTestId("next-steps").locator("a.btn, button.btn").all()) await tallEnough(l, `the action "${(await l.textContent())?.trim()}"`);
-        await page.getByTestId("next-steps").getByRole("link", { name: "Set up your runner" }).focus();
-        const ring = await page.getByTestId("next-steps").getByRole("link", { name: "Set up your runner" }).evaluate((el) => getComputedStyle(el).outlineStyle + "|" + getComputedStyle(el).boxShadow);
+        await page.getByTestId("next-steps").getByRole("link", { name: "Add sign-in details" }).focus();
+        const ring = await page.getByTestId("next-steps").getByRole("link", { name: "Add sign-in details" }).evaluate((el) => getComputedStyle(el).outlineStyle + "|" + getComputedStyle(el).boxShadow);
         expect(ring).not.toBe("none|none");
         await axeBoth(async () => {
             await visit(`#/projects/${projectId}`);

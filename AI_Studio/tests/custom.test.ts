@@ -598,7 +598,7 @@ describe("the run policy is the boundary: hand-written tests do not run where th
         const jobsBefore = (await e.call("GET", `/api/projects/${pid}/jobs`)).body.length;
         const r = await e.call("POST", `/api/tests/${hand}/validate`, {});
         expect(r.status).toBe(409);
-        expect(r.body.error).toBe("This project has code tests, and this server does not run them. Set ALLOW_CUSTOM_SCRIPTS=true on the server, or run the project on a runner agent started with --allow-custom-scripts.");
+        expect(r.body.error).toBe("This project has code tests, and this server does not run them. Set ALLOW_CUSTOM_SCRIPTS=true on the server, or run the project's tests on runners and switch code scripts on for your runner in Settings.");
         expect((await e.call("GET", `/api/projects/${pid}/jobs`)).body.length).toBe(jobsBefore);
         await expect(e.platform.repo.createJob(pid, e.platform.repo.getLatestApplicationPublic(pid)!.id as string, { ...DEFAULT_JOB_OPTIONS, mode: "validate", testIds: [hand] })).rejects.toThrow(/ALLOW_CUSTOM_SCRIPTS=true/);
         await expect(e.platform.repo.createJob(pid, e.platform.repo.getLatestApplicationPublic(pid)!.id as string, { ...DEFAULT_JOB_OPTIONS, mode: "variants", variants: ["firefox"], testIds: [hand] })).rejects.toThrow(/code tests/);
