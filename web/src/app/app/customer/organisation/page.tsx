@@ -366,6 +366,11 @@ export default async function CustomerOrganisationPage({
               ]}
             />
           </Panel>
+          <Panel title="Bug tracker" description="Send bugs to your own Jira project.">
+            <Button href={`${DETAIL_PATH}/bug-tracker`} variant="secondary" iconLeft="plug">
+              {isOwner ? 'Set up Jira' : 'View Jira setup'}
+            </Button>
+          </Panel>
         </>
       ) : null}
 

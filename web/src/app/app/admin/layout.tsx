@@ -95,6 +95,12 @@ const SECTIONS: readonly SidebarSection[] = [
         icon: 'briefcase',
         permission: 'project.read',
       },
+      {
+        href: '/app/admin/testing',
+        label: 'Testing reviews',
+        icon: 'check-check',
+        permission: 'project.read',
+      },
     ],
   },
   {

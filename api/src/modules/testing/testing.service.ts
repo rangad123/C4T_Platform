@@ -1,9 +1,15 @@
-import { type Prisma, AssignmentStatus, type TestCaseResult } from '@prisma/client'
+import {
+  type Prisma,
+  AssignmentStatus,
+  ExecutionReviewStatus,
+  type TestCaseResult,
+} from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, BadRequestError, ConflictError } from '../../lib/errors.js'
 import { buildMeta, buildOrderBy, toSkipTake } from '../../lib/pagination.js'
 import { projectRelations } from '../../lib/access/relations.js'
 import { authorize, can } from '../../lib/access/policy.js'
+import type { RelationSet } from '../../lib/access/relations.js'
 import { createNotifications } from '../notifications/notifications.service.js'
 import { TEST_CASE_SORT_FIELDS, type ListTestCasesQuery } from './testing.schema.js'
 
@@ -27,6 +33,36 @@ async function projectIdForBuild(buildId: string): Promise<{ projectId: string }
   return build
 }
 
+/**
+ * A customer (with no delivery role on the project) sees only executions a
+ * reviewer approved — a pending or rejected result does not count yet.
+ */
+function seesApprovedOnly(relations: RelationSet): boolean {
+  return (
+    relations.has('project:customer') &&
+    !relations.has('platform:admin') &&
+    !relations.has('platform:subadmin') &&
+    !relations.has('project:manager')
+  )
+}
+
+function approvedOnly<T extends { reports: { reviewStatus: ExecutionReviewStatus }[] }>(
+  testCase: T,
+): T & { _count: { reports: number } } {
+  const reports = testCase.reports.filter((r) => r.reviewStatus === ExecutionReviewStatus.APPROVED)
+  return { ...testCase, reports, _count: { reports: reports.length } }
+}
+
+/** A scenario named on a test case must be on the same build. */
+async function assertScenarioOnBuild(scenarioId: string | null | undefined, buildId: string) {
+  if (!scenarioId) return
+  const scenario = await prisma.testScenario.findFirst({
+    where: { id: scenarioId, buildId },
+    select: { id: true },
+  })
+  if (!scenario) throw new BadRequestError('That scenario is not on this build')
+}
+
 const testCaseSelect = {
   id: true,
   buildId: true,
@@ -37,6 +73,7 @@ const testCaseSelect = {
   expectedResult: true,
   createdAt: true,
   updatedAt: true,
+  scenario: { select: { id: true, title: true } },
   createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
   build: {
     select: {
@@ -61,6 +98,8 @@ const testCaseSelect = {
       browsers: true,
       linkedBugId: true,
       createdAt: true,
+      reviewStatus: true,
+      reviewNote: true,
       tester: { select: { id: true, firstName: true, lastName: true, email: true } },
       linkedBug: { select: { id: true, reference: true, title: true } },
     },
@@ -73,6 +112,7 @@ const testCaseSelect = {
 
 export async function listTestCases(user: Express.AuthenticatedUser, query: ListTestCasesQuery) {
   let where: Prisma.TestCaseWhereInput
+  let approvedResultsOnly = false
 
   if (query.buildId) {
     const { projectId } = await projectIdForBuild(query.buildId)
@@ -89,6 +129,7 @@ export async function listTestCases(user: Express.AuthenticatedUser, query: List
       !resolved.relations.has('project:manager') &&
       !resolved.relations.has('project:customer')
 
+    approvedResultsOnly = seesApprovedOnly(resolved.relations)
     where = {
       buildId: query.buildId,
       deletedAt: null,
@@ -106,6 +147,7 @@ export async function listTestCases(user: Express.AuthenticatedUser, query: List
 
   where = {
     ...where,
+    ...(query.scenarioId ? { scenarioId: query.scenarioId } : {}),
     ...(query.search
       ? {
           OR: [
@@ -126,7 +168,10 @@ export async function listTestCases(user: Express.AuthenticatedUser, query: List
     prisma.testCase.count({ where }),
   ])
 
-  return { items, meta: buildMeta(query, total) }
+  return {
+    items: approvedResultsOnly ? items.map(approvedOnly) : items,
+    meta: buildMeta(query, total),
+  }
 }
 
 export async function getTestCase(user: Express.AuthenticatedUser, id: string) {
@@ -151,7 +196,7 @@ export async function getTestCase(user: Express.AuthenticatedUser, id: string) {
   if (isPlainTester && !isAssignee) throw new NotFoundError('Test case')
 
   return {
-    ...testCase,
+    ...(seesApprovedOnly(resolved.relations) ? approvedOnly(testCase) : testCase),
     capabilities: {
       canManage: can(user, 'testcase.manage', resolved.relations),
       canReport: can(user, 'testreport.create', resolved.relations) && isAssignee,
@@ -170,6 +215,7 @@ export async function createTestCase(
     description: string
     steps: string
     expectedResult: string
+    scenarioId?: string
   },
 ) {
   const { projectId } = await projectIdForBuild(input.buildId)
@@ -178,10 +224,12 @@ export async function createTestCase(
     throw new NotFoundError('Build')
   }
   authorize(user, 'testcase.manage', resolved.relations)
+  await assertScenarioOnBuild(input.scenarioId, input.buildId)
 
   return prisma.testCase.create({
     data: {
       buildId: input.buildId,
+      scenarioId: input.scenarioId ?? null,
       feature: input.feature ?? null,
       title: input.title,
       description: input.description,
@@ -213,7 +261,8 @@ export async function updateTestCase(
   id: string,
   input: Record<string, unknown>,
 ) {
-  await loadForWrite(user, id)
+  const testCase = await loadForWrite(user, id)
+  await assertScenarioOnBuild(input.scenarioId as string | null | undefined, testCase.buildId)
   return prisma.testCase.update({
     where: { id },
     data: input,
@@ -426,8 +475,10 @@ export async function buildSummary(user: Express.AuthenticatedUser, buildId: str
     bugsByType,
     bugsByReproducibility,
     testCaseCount,
-    reportsByResult,
+    approvedReports,
+    pendingReviewCount,
     reviews,
+    approvedTime,
   ] = await Promise.all([
     prisma.projectAssignment.count({
       where: {
@@ -450,12 +501,42 @@ export async function buildSummary(user: Express.AuthenticatedUser, buildId: str
       _count: true,
     }),
     prisma.testCase.count({ where: { buildId, deletedAt: null } }),
-    prisma.testReport.groupBy({ by: ['result'], where: { buildId }, _count: true }),
+    // Only approved executions count; newest first so the head per case is current.
+    prisma.testReport.findMany({
+      where: {
+        buildId,
+        reviewStatus: ExecutionReviewStatus.APPROVED,
+        testCase: { deletedAt: null },
+      },
+      select: { testCaseId: true, result: true },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.testReport.count({
+      where: {
+        buildId,
+        reviewStatus: ExecutionReviewStatus.PENDING,
+        testCase: { deletedAt: null },
+      },
+    }),
     prisma.testReview.findMany({
       where: { buildId },
       select: { rating: true },
     }),
+    prisma.timesheetEntry.aggregate({
+      where: { buildId, status: 'APPROVED' },
+      _sum: { approvedMinutes: true },
+    }),
   ])
+
+  /** The current (latest approved) result of each case, tallied by result. */
+  const latestByCase = new Map<string, TestCaseResult>()
+  for (const r of approvedReports) {
+    if (!latestByCase.has(r.testCaseId)) latestByCase.set(r.testCaseId, r.result)
+  }
+  const reportsByResult = (['NOT_TESTED', 'PASS', 'FAIL', 'BLOCKED'] as const).map((result) => ({
+    result,
+    _count: [...latestByCase.values()].filter((v) => v === result).length,
+  }))
 
   const tally = <Row extends { _count: number }, T extends string>(
     rows: readonly Row[],
@@ -472,7 +553,8 @@ export async function buildSummary(user: Express.AuthenticatedUser, buildId: str
   const averageRating =
     ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null
 
-  const testedCaseCount = reportsByResult.reduce((sum, r) => sum + r._count, 0)
+  // A case counts as tested once it has an approved result other than "not run".
+  const testedCaseCount = [...latestByCase.values()].filter((v) => v !== 'NOT_TESTED').length
 
   return {
     testerCount,
@@ -512,6 +594,8 @@ export async function buildSummary(user: Express.AuthenticatedUser, buildId: str
       ['NOT_TESTED', 'PASS', 'FAIL', 'BLOCKED'] as const,
       (r) => r.result,
     ),
+    pendingReviewCount,
+    approvedMinutes: approvedTime._sum.approvedMinutes ?? 0,
     reviewCount: reviews.length,
     averageRating,
   }

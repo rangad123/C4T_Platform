@@ -8,6 +8,10 @@ import { LiveGetForm, LiveFormStatus } from '@/components/admin/LiveGetForm'
 import { ConfirmSubmit } from '@/components/admin/ConfirmSubmit'
 import { AssignmentBulkUpdate } from '@/components/admin/AssignmentBulkUpdate'
 import { Panel } from '@/components/admin/Panel'
+import {
+  ProjectBugAnalytics,
+  type ProjectBugAnalyticsData,
+} from '@/components/admin/ProjectBugAnalytics'
 import { DownloadLink } from '@/components/admin/DownloadLink'
 import { SectionTabs, resolveSection } from '@/components/admin/SectionTabs'
 import { DescriptionList, type DescriptionItem } from '@/components/admin/DescriptionList'
@@ -57,6 +61,7 @@ import {
   type ProjectRatingRow,
   type BadgeOption,
 } from './constants'
+import type { ScenarioRow } from '@/lib/testing/workflow'
 import { BarChart } from '@/components/admin/charts/BarChart'
 import { DonutChart } from '@/components/admin/charts/DonutChart'
 import {
@@ -66,6 +71,9 @@ import {
   changeProjectStatus,
   createBuild,
   createTestCase,
+  createScenario,
+  deleteScenario,
+  setApplicationsOpen,
   assignTestCase,
   removeFeature,
   removeMaterial,
@@ -286,6 +294,17 @@ export default async function ProjectDetailPage({
    * a visit only pays for the data it shows; `loading.tsx` already covers
    * the brief gap while that narrower set of fetches resolves.
    */
+  // Started here so it runs alongside the batch below. Project-wide, every build.
+  const bugAnalyticsPromise =
+    section === 'dashboard'
+      ? serverFetchOrNull<ProjectBugAnalyticsData>(`reports/by-project/${project.id}/bug-analytics`)
+      : Promise.resolve(null)
+  // The build's scenarios, for the Test reports tab (grouping and the add form).
+  const scenarios =
+    section === 'testing'
+      ? await serverFetchOrNull<readonly ScenarioRow[]>(`builds/${activeBuildId}/test-scenarios`)
+      : null
+
   const [bugs, features, buildSummaryData, testCases, projectReport, projectRatings] =
     await Promise.all([
       section === 'bugs'
@@ -338,6 +357,7 @@ export default async function ProjectDetailPage({
           })
         : Promise.resolve(null),
     ])
+  const bugAnalytics = await bugAnalyticsPromise
 
   /**
    * The badge catalogue, for the award modal's options. Seeded platform
@@ -508,6 +528,36 @@ export default async function ProjectDetailPage({
     'badge-forbidden': { tone: 'error', message: 'You do not have permission to award badges.' },
     'badge-invalid': { tone: 'error', message: 'Choose a badge to award.' },
     'badge-failed': { tone: 'error', message: 'The badge could not be awarded. Try again.' },
+    'scenario-created': { tone: 'success', message: 'The scenario has been added.' },
+    'scenario-removed': {
+      tone: 'success',
+      message: 'The scenario has been removed. Its test cases are kept, ungrouped.',
+    },
+    'scenario-invalid': {
+      tone: 'error',
+      message: 'Give the scenario a title of 3 characters or more.',
+    },
+    'scenario-missing': { tone: 'error', message: 'That scenario no longer exists.' },
+    'scenario-forbidden': {
+      tone: 'error',
+      message: 'Scenarios on this build are not yours to change.',
+    },
+    'scenario-conflict': { tone: 'error', message: 'The scenario could not be saved.' },
+    'scenario-failed': { tone: 'error', message: 'The scenario could not be saved. Try again.' },
+    'applications-opened': {
+      tone: 'success',
+      message:
+        'Verified testers can now apply to this build. Decide on them under Testing reviews.',
+    },
+    'applications-closed': { tone: 'success', message: 'This build no longer takes applications.' },
+    'applications-forbidden': {
+      tone: 'error',
+      message: 'Opening a build to applications needs the right to staff this project.',
+    },
+    'applications-missing': { tone: 'error', message: 'That build no longer exists.' },
+    'applications-invalid': { tone: 'error', message: 'That change was not recognised.' },
+    'applications-conflict': { tone: 'error', message: 'That change could not be made.' },
+    'applications-failed': { tone: 'error', message: 'That change did not save. Try again.' },
   }
   /*
     The bulk update reports NUMBERS, so its two notices are built rather than
@@ -1016,6 +1066,13 @@ export default async function ProjectDetailPage({
             >
               Download report
             </Button>
+            <Button
+              href={`${detailPath}/automation?buildId=${activeBuildId}`}
+              variant="secondary"
+              size="sm"
+            >
+              Automation
+            </Button>
           </div>
 
           <SectionTabs
@@ -1452,6 +1509,8 @@ export default async function ProjectDetailPage({
               </div>
             )}
           </Panel>
+
+          <ProjectBugAnalytics data={bugAnalytics} />
 
           {capabilities.canUpdate ? (
             <Modal open={briefModalOpen} closedHref={closedHref} title="Edit the brief">
@@ -1935,6 +1994,38 @@ export default async function ProjectDetailPage({
 
       {section === 'testers' ? (
         <>
+          {capabilities.canAssignTesters ? (
+            <Panel
+              title="Applications"
+              actions={
+                <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                  <Button href="/app/admin/testing?section=applications" variant="ghost" size="sm">
+                    Review applications
+                  </Button>
+                  <form action={setApplicationsOpen}>
+                    <input type="hidden" name="id" value={project.id} />
+                    <input type="hidden" name="buildId" value={activeBuildId} />
+                    <input
+                      type="hidden"
+                      name="open"
+                      value={buildDetail?.acceptsApplications ? 'false' : 'true'}
+                    />
+                    <SubmitButton variant="secondary" size="sm" pendingLabel="Saving…">
+                      {buildDetail?.acceptsApplications
+                        ? 'Close to applications'
+                        : 'Open to applications'}
+                    </SubmitButton>
+                  </form>
+                </div>
+              }
+            >
+              <Muted>
+                {buildDetail?.acceptsApplications
+                  ? `Verified testers can apply to ${activeBuild?.name ?? 'this build'}. Accepting one puts them on the roster.`
+                  : `${activeBuild?.name ?? 'This build'} is invite-only. Open it to let verified testers apply.`}
+              </Muted>
+            </Panel>
+          ) : null}
           <Panel
             title="Tester roster"
             description={
@@ -2318,6 +2409,7 @@ export default async function ProjectDetailPage({
                           <strong style={{ color: 'var(--text-primary)', flex: 1 }}>
                             {tc.title}
                           </strong>
+                          {tc.scenario ? <Badge tone="info">{tc.scenario.title}</Badge> : null}
                           {tc.feature ? <Badge tone="neutral">{tc.feature}</Badge> : null}
                           <Caption>
                             {tc.assignments.length} assigned · {tc._count.reports} report
@@ -2379,6 +2471,7 @@ export default async function ProjectDetailPage({
                               >
                                 <input type="hidden" name="id" value={project.id} />
                                 <input type="hidden" name="testCaseId" value={tc.id} />
+                                <input type="hidden" name="buildId" value={activeBuildId} />
                                 <Select
                                   name="testerId"
                                   required
@@ -2416,6 +2509,7 @@ export default async function ProjectDetailPage({
                                       }}
                                     >
                                       <StatusBadge status={r.result} />
+                                      <StatusBadge status={r.reviewStatus} />
                                       <span>{personName(r.tester)}</span>
                                       <Caption>{formatDate(r.createdAt)}</Caption>
                                     </span>
@@ -2455,6 +2549,66 @@ export default async function ProjectDetailPage({
             )}
           </Panel>
 
+          <Panel
+            title="Scenarios"
+            description="Named groups of this build's test cases. Removing one keeps its cases."
+            actions={
+              <Button href="/app/admin/testing?section=executions" variant="ghost" size="sm">
+                Review executions
+              </Button>
+            }
+          >
+            {scenarios === null ? (
+              <Muted>Scenarios could not be loaded. Refresh in a moment.</Muted>
+            ) : scenarios.length === 0 ? (
+              <Muted>No scenarios on this build.</Muted>
+            ) : (
+              <ul style={{ ...listResetStyle, gap: 'var(--space-2)' }}>
+                {scenarios.map((sc) => (
+                  <li key={sc.id} style={rowStyle}>
+                    <span style={{ flex: 1 }}>
+                      <strong style={{ color: 'var(--text-primary)' }}>{sc.title}</strong>{' '}
+                      <Caption>
+                        {sc._count.testCases} test case{sc._count.testCases === 1 ? '' : 's'}
+                      </Caption>
+                    </span>
+                    {capabilities.canAssignTesters ? (
+                      <form action={deleteScenario}>
+                        <input type="hidden" name="id" value={project.id} />
+                        <input type="hidden" name="buildId" value={activeBuildId} />
+                        <input type="hidden" name="scenarioId" value={sc.id} />
+                        <SubmitButton variant="ghost" size="sm" pendingLabel="Removing…">
+                          Remove
+                        </SubmitButton>
+                      </form>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {capabilities.canAssignTesters ? (
+              <form
+                action={createScenario}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  gap: 'var(--space-2)',
+                  flexWrap: 'wrap',
+                  marginTop: 'var(--space-4)',
+                }}
+              >
+                <input type="hidden" name="id" value={project.id} />
+                <input type="hidden" name="buildId" value={activeBuildId} />
+                <Field label="New scenario" htmlFor="sc-title">
+                  <Input id="sc-title" name="title" required minLength={3} maxLength={200} />
+                </Field>
+                <SubmitButton variant="secondary" size="sm" iconLeft="plus" pendingLabel="Adding…">
+                  Add scenario
+                </SubmitButton>
+              </form>
+            ) : null}
+          </Panel>
+
           {capabilities.canAssignTesters ? (
             <Panel
               title="Add a test case"
@@ -2470,6 +2624,19 @@ export default async function ProjectDetailPage({
                   <Field label="Feature" htmlFor="tc-feature" hint="Optional — free text.">
                     <Input id="tc-feature" name="feature" maxLength={160} />
                   </Field>
+                  {scenarios && scenarios.length > 0 ? (
+                    <Field label="Scenario" htmlFor="tc-scenario" hint="Optional.">
+                      <Select
+                        id="tc-scenario"
+                        name="scenarioId"
+                        defaultValue=""
+                        options={[
+                          { value: '', label: 'None' },
+                          ...scenarios.map((sc) => ({ value: sc.id, label: sc.title })),
+                        ]}
+                      />
+                    </Field>
+                  ) : null}
                 </div>
                 <Field label="Description" htmlFor="tc-description" required>
                   <Textarea

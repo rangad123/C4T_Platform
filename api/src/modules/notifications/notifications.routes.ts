@@ -9,6 +9,7 @@ import * as service from './notifications.service.js'
 import { verifyUnsubscribeToken } from '../../lib/email/unsubscribe.js'
 import { prisma } from '../../lib/prisma.js'
 import { UnauthorizedError } from '../../lib/errors.js'
+import { NotificationType } from '@prisma/client'
 
 export const notificationsRouter = Router()
 
@@ -79,29 +80,77 @@ notificationsRouter.post('/read-all', async (req, res) => {
 
 /**
  * The account-settings toggle behind the same flag the unsubscribe link
- * clears. Read and write, so the settings page can show the current state
- * rather than a checkbox that always starts checked.
+ * clears, plus the per-type choices (in the app, by email). Read and write,
+ * so the settings page can show the current state rather than a checkbox that
+ * always starts checked. Essential types are listed but locked on.
  */
+async function readPreferences(userId: string) {
+  const [user, rows] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { emailNotifications: true } }),
+    prisma.notificationPreference.findMany({ where: { userId } }),
+  ])
+  const byType = new Map(rows.map((row) => [row.type, row]))
+  return {
+    emailNotifications: user?.emailNotifications ?? true,
+    types: Object.values(NotificationType).map((type) => {
+      const essential = service.isEssential(type)
+      const row = byType.get(type)
+      return {
+        type,
+        essential,
+        inApp: essential || (row?.inApp ?? true),
+        email: essential || (row?.email ?? true),
+      }
+    }),
+  }
+}
+
 notificationsRouter.get('/preferences', async (req, res) => {
-  const user = await prisma.user.findUnique({
-    where: { id: req.user!.id },
-    select: { emailNotifications: true },
-  })
-  res.json({ data: { emailNotifications: user?.emailNotifications ?? true } })
+  res.json({ data: await readPreferences(req.user!.id) })
 })
 
-const preferencesSchema = z.object({ emailNotifications: z.boolean() }).strict()
+const preferencesSchema = z
+  .object({
+    emailNotifications: z.boolean().optional(),
+    types: z
+      .array(
+        z
+          .object({ type: z.nativeEnum(NotificationType), inApp: z.boolean(), email: z.boolean() })
+          .strict(),
+      )
+      .max(Object.values(NotificationType).length)
+      .optional(),
+  })
+  .strict()
+  .refine((d) => d.emailNotifications !== undefined || d.types !== undefined, {
+    message: 'Nothing to change',
+  })
 
 notificationsRouter.patch(
   '/preferences',
   validate({ body: preferencesSchema }),
   async (req, res) => {
     const input = req.body as z.infer<typeof preferencesSchema>
-    const updated = await prisma.user.update({
-      where: { id: req.user!.id },
-      data: { emailNotifications: input.emailNotifications },
-      select: { emailNotifications: true },
-    })
-    res.json({ data: updated })
+    const userId = req.user!.id
+    if (input.emailNotifications !== undefined) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { emailNotifications: input.emailNotifications },
+      })
+    }
+    // Essential types are not stored: they cannot be turned off.
+    const choices = (input.types ?? []).filter((t) => !service.isEssential(t.type))
+    if (choices.length > 0) {
+      await prisma.$transaction(
+        choices.map((t) =>
+          prisma.notificationPreference.upsert({
+            where: { userId_type: { userId, type: t.type } },
+            create: { userId, type: t.type, inApp: t.inApp, email: t.email },
+            update: { inApp: t.inApp, email: t.email },
+          }),
+        ),
+      )
+    }
+    res.json({ data: await readPreferences(userId) })
   },
 )

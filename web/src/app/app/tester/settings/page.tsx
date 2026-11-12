@@ -17,6 +17,7 @@ import { serverFetch } from '@/lib/api/server'
 import { type ActiveSession } from '@/lib/api/types'
 import { formatDateTime } from '@/lib/admin/format'
 import { EmailNotificationsPanel } from '@/components/settings/EmailNotificationsPanel'
+import { NotificationTypesPanel } from '@/components/settings/NotificationTypesPanel'
 import { changePassword, revokeSession, signOutEverywhere } from './actions'
 
 export const metadata: Metadata = {
@@ -53,6 +54,10 @@ const NOTICES: Record<string, NoticeCopy> = {
     tone: 'success',
     message:
       'Email notifications are off. You will still see everything under the bell, and payments and account changes are still emailed.',
+  },
+  notification_types_saved: {
+    tone: 'success',
+    message: 'Your notification choices are saved.',
   },
   email_prefs_failed: {
     tone: 'error',
@@ -244,7 +249,10 @@ export default async function TesterSettingsPage({
       <Notice code={noticeCode} notices={NOTICES} param={noticeParam} />
 
       {section === 'notifications' ? (
-        <EmailNotificationsPanel returnTo={`${SETTINGS_PATH}?section=notifications`} />
+        <>
+          <EmailNotificationsPanel returnTo={`${SETTINGS_PATH}?section=notifications`} />
+          <NotificationTypesPanel returnTo={`${SETTINGS_PATH}?section=notifications`} />
+        </>
       ) : null}
 
       {section === 'password' ? (

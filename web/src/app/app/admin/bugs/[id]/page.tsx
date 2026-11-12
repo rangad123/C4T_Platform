@@ -22,6 +22,7 @@ import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
 import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
+import { JiraIssuePanel, type BugExport } from '@/components/bug-tracker/BugTracker'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, personName } from '@/lib/admin/format'
 import { RecordingLink } from '@/components/admin/RecordingLink'
@@ -263,12 +264,12 @@ export default async function BugDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; section?: string; edit?: string }>
+  searchParams: Promise<{ error?: string; section?: string; edit?: string; jiraError?: string }>
 }) {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
 
   const { id } = await params
-  const { error, section: rawSection, edit } = await searchParams
+  const { error, section: rawSection, edit, jiraError } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let bug: BugDetail
@@ -337,6 +338,8 @@ export default async function BugDetailPage({
   // carries which panel failed ("triage:reason"), so no change is needed
   // to the redirects in actions.ts to make that work.
   const detailPath = `${LIST_PATH}/${bug.id}`
+  // Jira export: the link once exported, or the export button.
+  const jira = await serverFetchOrNull<BugExport>(`bug-tracker/bugs/${bug.id}`)
   const closedHref = section === SECTIONS[0].value ? detailPath : `${detailPath}?section=${section}`
   const triageModalOpen = edit === 'triage' || Boolean(error?.startsWith('triage:'))
   const classificationModalOpen = edit === 'classification' || Boolean(error?.startsWith('triage:'))
@@ -436,6 +439,13 @@ export default async function BugDetailPage({
       }
       aside={
         <>
+          <JiraIssuePanel
+            bugId={bug.id}
+            back={detailPath}
+            state={jira}
+            connectHref={`/app/admin/organisations/${bug.project.organisationId}/bug-tracker`}
+            error={jiraError}
+          />
           {/* ── Triage: severity ─────────────────────────────────────────── */}
           <Panel
             title="Triage"

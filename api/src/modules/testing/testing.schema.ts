@@ -11,6 +11,7 @@ export const listTestCasesQuery = paginationQuery.extend({
    * Everyone else must supply one; see `listTestCases` in the service.
    */
   buildId: z.string().cuid().optional(),
+  scenarioId: z.string().cuid().optional(),
   search: z.string().trim().max(160).optional(),
   sort: z.enum(TEST_CASE_SORT_FIELDS).optional(),
 })
@@ -22,6 +23,7 @@ export const createTestCaseSchema = z.object({
   description: z.string().trim().min(5).max(10_000),
   steps: z.string().trim().min(5).max(10_000),
   expectedResult: z.string().trim().min(1).max(4000),
+  scenarioId: z.string().cuid().optional(),
 })
 
 export const updateTestCaseSchema = z.object({
@@ -30,6 +32,7 @@ export const updateTestCaseSchema = z.object({
   description: z.string().trim().min(5).max(10_000).optional(),
   steps: z.string().trim().min(5).max(10_000).optional(),
   expectedResult: z.string().trim().min(1).max(4000).optional(),
+  scenarioId: z.string().cuid().nullable().optional(),
 })
 
 export const assignTestCaseSchema = z.object({

@@ -19,7 +19,8 @@ import { Textarea } from '@/components/ds/forms/Textarea'
 import { Checkbox } from '@/components/ds/forms/Checkbox'
 import { TrackedForm } from '@/components/ds/forms/TrackedForm'
 import { requireRole } from '@/lib/auth/session'
-import { serverFetch } from '@/lib/api/server'
+import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
+import { JiraIssuePanel, type BugExport } from '@/components/bug-tracker/BugTracker'
 import { ApiError } from '@/lib/api/types'
 import { titleCase, formatDate, personName } from '@/lib/admin/format'
 import { RecordingLink } from '@/components/admin/RecordingLink'
@@ -209,12 +210,12 @@ export default async function CustomerBugDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; section?: string; edit?: string }>
+  searchParams: Promise<{ error?: string; section?: string; edit?: string; jiraError?: string }>
 }) {
   await requireRole(['CUSTOMER'])
 
   const { id } = await params
-  const { error, section: rawSection, edit } = await searchParams
+  const { error, section: rawSection, edit, jiraError } = await searchParams
   const section = resolveSection(SECTIONS, rawSection)
 
   let bug: BugDetail
@@ -267,6 +268,8 @@ export default async function CustomerBugDetailPage({
   const isDuplicate = bug.status === 'DUPLICATE' || bug.duplicateOfId !== null
 
   const detailPath = `${LIST_PATH}/${bug.id}`
+  // Jira export: the link once exported, or the export button.
+  const jira = await serverFetchOrNull<BugExport>(`bug-tracker/bugs/${bug.id}`)
   const closedHref = section === SECTIONS[0].value ? detailPath : `${detailPath}?section=${section}`
   const statusModalOpen = edit === 'status' || Boolean(error?.startsWith('status:'))
 
@@ -357,6 +360,13 @@ export default async function CustomerBugDetailPage({
       }
       aside={
         <>
+          <JiraIssuePanel
+            bugId={bug.id}
+            back={detailPath}
+            state={jira}
+            connectHref="/app/customer/organisation/bug-tracker"
+            error={jiraError}
+          />
           <Panel
             title="Status"
             description="Only the moves the API will accept from this status are listed."

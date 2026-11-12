@@ -129,6 +129,9 @@ export interface BuildDetail {
   testersCanSeeOtherBugs: boolean | null
   startDate: string | null
   endDate: string | null
+  /** Minor units per accepted bug (a BigInt, so a string). Null when none is set. */
+  testerRewardMinor?: string | null
+  rewardsCurrency?: string | null
   testDocumentFileId: string | null
   testDocument: {
     id: string
@@ -210,7 +213,10 @@ export interface TestCaseRow {
     devices: string | null
     browsers: string | null
     createdAt: string
+    reviewStatus: 'PENDING' | 'APPROVED' | 'REJECTED'
+    reviewNote: string | null
     linkedBug: { id: string; reference: string; title: string } | null
   }[]
   _count: { reports: number }
+  scenario: { id: string; title: string } | null
 }

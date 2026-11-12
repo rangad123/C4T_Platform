@@ -256,6 +256,7 @@ export interface BuildDetail {
   startDate: string | null
   endDate: string | null
   testDocumentFileId: string | null
+  acceptsApplications?: boolean
   testDocument: {
     id: string
     originalName: string
@@ -329,10 +330,13 @@ export interface TestCaseRow {
     browsers: string | null
     linkedBugId: string | null
     createdAt: string
+    reviewStatus: string
+    reviewNote: string | null
     tester: ProjectPerson
     linkedBug: { id: string; reference: string; title: string } | null
   }[]
   _count: { reports: number }
+  scenario: { id: string; title: string } | null
 }
 
 /** A row from `GET /v1/bugs?projectId=…`. */

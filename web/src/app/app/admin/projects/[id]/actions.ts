@@ -637,25 +637,35 @@ export async function createTestCase(formData: FormData): Promise<void> {
   if (!id || !buildId || !title || !description || !steps || !expectedResult) return
 
   const feature = formTrimmed(formData, 'feature')
+  const scenarioId = formTrimmed(formData, 'scenarioId')
 
   let notice = 'test-case-created'
   try {
     await actionFetch('test-cases', {
       method: 'POST',
-      body: { buildId, title, description, steps, expectedResult, ...(feature ? { feature } : {}) },
+      body: {
+        buildId,
+        title,
+        description,
+        steps,
+        expectedResult,
+        ...(feature ? { feature } : {}),
+        ...(scenarioId ? { scenarioId } : {}),
+      },
     })
   } catch (error) {
     notice = noticeFor(error, 'test-case')
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'test-cases', buildId, notice }), 'replace')
+  redirect(projectHref(id, { section: 'testing', buildId, notice }), 'replace')
 }
 
 export async function assignTestCase(formData: FormData): Promise<void> {
   const id = formTrimmed(formData, 'id')
   const testCaseId = formTrimmed(formData, 'testCaseId')
   const testerId = formTrimmed(formData, 'testerId')
+  const buildId = formTrimmed(formData, 'buildId')
   if (!id || !testCaseId || !testerId) return
 
   let notice = 'test-case-assigned'
@@ -669,5 +679,70 @@ export async function assignTestCase(formData: FormData): Promise<void> {
   }
 
   revalidateProject(id)
-  redirect(projectHref(id, { section: 'test-cases', notice }), 'replace')
+  redirect(projectHref(id, { section: 'testing', buildId, notice }), 'replace')
+}
+
+/** A named group of the build's test cases (legacy `test_scenarios`). */
+export async function createScenario(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  const title = formTrimmed(formData, 'title')
+  if (!id || !buildId || !title) return
+  const description = formTrimmed(formData, 'description')
+
+  let notice = 'scenario-created'
+  let detail: string | undefined
+  try {
+    await actionFetch(`builds/${buildId}/test-scenarios`, {
+      method: 'POST',
+      body: { title, ...(description ? { description } : {}) },
+    })
+  } catch (error) {
+    notice = noticeFor(error, 'scenario')
+    if (error instanceof ApiError && error.status < 500) detail = error.message
+  }
+
+  revalidateProject(id)
+  redirect(projectHref(id, { section: 'testing', buildId, notice, detail }), 'replace')
+}
+
+/** Removing a scenario keeps its test cases; they are just no longer grouped. */
+export async function deleteScenario(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  const scenarioId = formTrimmed(formData, 'scenarioId')
+  if (!id || !scenarioId) return
+
+  let notice = 'scenario-removed'
+  try {
+    await actionFetch(`test-scenarios/${scenarioId}`, { method: 'DELETE' })
+  } catch (error) {
+    notice = noticeFor(error, 'scenario')
+  }
+
+  revalidateProject(id)
+  redirect(projectHref(id, { section: 'testing', buildId, notice }), 'replace')
+}
+
+/** Open or close a build to tester applications (legacy crowd cycle). */
+export async function setApplicationsOpen(formData: FormData): Promise<void> {
+  const id = formTrimmed(formData, 'id')
+  const buildId = formTrimmed(formData, 'buildId')
+  const open = formTrimmed(formData, 'open')
+  if (!id || !buildId || (open !== 'true' && open !== 'false')) return
+
+  let notice = open === 'true' ? 'applications-opened' : 'applications-closed'
+  let detail: string | undefined
+  try {
+    await actionFetch(`builds/${buildId}/applications-open`, {
+      method: 'PUT',
+      body: { open: open === 'true' },
+    })
+  } catch (error) {
+    notice = noticeFor(error, 'applications')
+    if (error instanceof ApiError && error.status < 500) detail = error.message
+  }
+
+  revalidateProject(id)
+  redirect(projectHref(id, { section: 'testers', buildId, notice, detail }), 'replace')
 }

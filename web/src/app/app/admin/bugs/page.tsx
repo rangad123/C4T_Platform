@@ -93,6 +93,9 @@ export default async function BugsPage({
     notice?: string
     moved?: string
     skipped?: string
+    /** Set by the bulk Jira export. */
+    exported?: string
+    error?: string
   }>
 }) {
   await requirePermission('bug.read')
@@ -109,7 +112,7 @@ export default async function BugsPage({
   */
   const bulkNoticeCopy = ((): { tone: 'success' | 'warning' | 'error'; message: string } | null => {
     const p = params
-    if (!p.notice) return null
+    if (!p.notice && !p.error) return null
     if (p.notice === 'bulk-forbidden') {
       return { tone: 'error', message: 'You do not have permission to change those bugs.' }
     }
@@ -122,6 +125,19 @@ export default async function BugsPage({
     if (p.notice === 'bulk-failed') {
       return { tone: 'error', message: 'Those bugs could not be updated. Try again in a moment.' }
     }
+    if (p.notice === 'jira-bulk') {
+      const exported = Number(p.exported ?? 0)
+      const skipped = Number(p.skipped ?? 0)
+      return {
+        tone: skipped > 0 ? 'warning' : 'success',
+        message:
+          `${exported} bug${exported === 1 ? '' : 's'} exported to Jira.` +
+          (skipped > 0
+            ? ` ${skipped} skipped — already in Jira, no Jira connection for that organisation, or Jira refused it. The bug page says which.`
+            : ''),
+      }
+    }
+    if (p.error) return { tone: 'error', message: p.error.slice(0, 240) }
     if (p.notice !== 'bulk-applied') return null
     const moved = Number(p.moved ?? 0)
     const skipped = Number(p.skipped ?? 0)
@@ -388,6 +404,15 @@ export default async function BugsPage({
             />
             <SubmitButton variant="secondary" iconLeft="check-check" pendingLabel="Applying…">
               Apply to selected
+            </SubmitButton>
+            <SubmitButton
+              variant="secondary"
+              iconLeft="upload"
+              name="intent"
+              value="jira"
+              pendingLabel="Exporting…"
+            >
+              Export selected to Jira
             </SubmitButton>
             <p
               style={{

@@ -144,6 +144,109 @@ reportsRouter.get(
   },
 )
 
+// ─── Bug analytics for one project ───────────────────────────────────────────
+
+/** Weekly buckets up to this many weeks of history, monthly beyond it. */
+const WEEKLY_LIMIT = 16
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+/** Monday 00:00 UTC of the week holding `d`, or the 1st of its month. */
+function bucketStart(d: Date, bucket: 'week' | 'month'): Date {
+  if (bucket === 'month') return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
+  const day = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7))
+  return day
+}
+
+function nextBucket(d: Date, bucket: 'week' | 'month'): Date {
+  return bucket === 'month'
+    ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))
+    : new Date(d.getTime() + WEEK_MS)
+}
+
+/**
+ * Bugs on one project by severity, status, build, tester and over time.
+ *
+ * Read-only. Gated like the project report (customer, manager, admin side;
+ * a tester or another organisation's customer gets nothing), and the counts
+ * are also ANDed with `bugScope`, so it can never count a bug the caller's
+ * own bug list would not show. Reporter names only, never their email.
+ */
+reportsRouter.get(
+  '/by-project/:projectId/bug-analytics',
+  validate({ params: projectIdParam }),
+  async (req, res) => {
+    const projectId = param(req, 'projectId')
+    await assertProjectReportAccess(req.user!, projectId)
+
+    const where: Prisma.BugWhereInput = {
+      AND: [bugScope(req.user!), { projectId, deletedAt: null }],
+    }
+
+    const [bySeverity, byStatus, byBuild, byTester, dates] = await Promise.all([
+      prisma.bug.groupBy({ by: ['severity'], where, _count: true }),
+      prisma.bug.groupBy({ by: ['status'], where, _count: true }),
+      prisma.bug.groupBy({ by: ['buildId'], where, _count: true }),
+      prisma.bug.groupBy({ by: ['reportedById'], where, _count: true }),
+      prisma.bug.findMany({ where, select: { createdAt: true }, orderBy: { createdAt: 'asc' } }),
+    ])
+
+    const [builds, testers] = await Promise.all([
+      prisma.build.findMany({
+        where: { id: { in: byBuild.map((r) => r.buildId) } },
+        select: { id: true, name: true },
+      }),
+      prisma.user.findMany({
+        where: { id: { in: byTester.map((r) => r.reportedById) } },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+    ])
+    const buildName = new Map(builds.map((b) => [b.id, b.name]))
+    const testerById = new Map(testers.map((t) => [t.id, t]))
+
+    // Over time: zero-filled buckets from the first bug to the last.
+    const first = dates[0]?.createdAt
+    const last = dates[dates.length - 1]?.createdAt
+    const bucket: 'week' | 'month' =
+      first && last && last.getTime() - first.getTime() > WEEKLY_LIMIT * WEEK_MS ? 'month' : 'week'
+    const overTime: { start: string; count: number }[] = []
+    if (first && last) {
+      const counts = new Map<number, number>()
+      for (const { createdAt } of dates) {
+        const key = bucketStart(createdAt, bucket).getTime()
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+      const end = bucketStart(last, bucket).getTime()
+      for (let d = bucketStart(first, bucket); d.getTime() <= end; d = nextBucket(d, bucket)) {
+        overTime.push({ start: d.toISOString().slice(0, 10), count: counts.get(d.getTime()) ?? 0 })
+      }
+    }
+
+    res.json({
+      data: {
+        total: dates.length,
+        bySeverity: Object.fromEntries(bySeverity.map((r) => [r.severity, r._count])),
+        byStatus: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
+        byBuild: byBuild
+          .map((r) => ({ id: r.buildId, name: buildName.get(r.buildId) ?? '', count: r._count }))
+          .sort((a, b) => b.count - a.count),
+        byTester: byTester
+          .map((r) => {
+            const t = testerById.get(r.reportedById)
+            return {
+              id: r.reportedById,
+              firstName: t?.firstName ?? null,
+              lastName: t?.lastName ?? null,
+              count: r._count,
+            }
+          })
+          .sort((a, b) => b.count - a.count),
+        overTime: { bucket, points: overTime },
+      },
+    })
+  },
+)
+
 // ─── By build ────────────────────────────────────────────────────────────────
 
 const buildIdParam = z.object({ buildId: z.string().cuid() })

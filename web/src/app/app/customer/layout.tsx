@@ -13,11 +13,8 @@ export const metadata: Metadata = {
  * The customer area — `/app/customer/*`.
  *
  * Same shell as `admin/layout.tsx` and `tester/layout.tsx`: gates the route
- * to CUSTOMER, then mounts the sidebar. Reports/Ratings/Transactions/
- * Communication are real, ownership-scoped API surface (see `scopes.ts`/
- * `policy.ts`) but don't have pages yet — they show as disabled "coming
- * soon" links via `Sidebar`'s existing mechanism, rather than being silently
- * missing from the nav.
+ * to CUSTOMER, then mounts the sidebar. Every list here reads API surface
+ * that is already ownership-scoped (see `scopes.ts`/`policy.ts`).
  */
 
 const CUSTOMER_SECTIONS: readonly SidebarSection[] = [
@@ -33,12 +30,16 @@ const CUSTOMER_SECTIONS: readonly SidebarSection[] = [
   },
   {
     label: 'Insights',
-    links: [{ href: '/app/customer/reports', label: 'Reports', icon: 'line-chart' }],
+    links: [
+      { href: '/app/customer/reports', label: 'Reports', icon: 'line-chart' },
+      { href: '/app/customer/ratings', label: 'Ratings', icon: 'star' },
+    ],
   },
   {
     label: 'Operations',
     links: [
       { href: '/app/customer/communication', label: 'Communication', icon: 'message-square' },
+      { href: '/app/customer/transactions', label: 'Transactions', icon: 'credit-card' },
     ],
   },
   {

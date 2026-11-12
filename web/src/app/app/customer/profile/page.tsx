@@ -21,6 +21,7 @@ import { serverFetch } from '@/lib/api/server'
 import { ApiError, type ActiveSession } from '@/lib/api/types'
 import { orDash, personName } from '@/lib/admin/format'
 import { EmailNotificationsPanel } from '@/components/settings/EmailNotificationsPanel'
+import { NotificationTypesPanel } from '@/components/settings/NotificationTypesPanel'
 import {
   saveProfile,
   changePassword,
@@ -82,6 +83,10 @@ const NOTICES: Record<string, Notice> = {
   email_prefs_off: {
     tone: 'success',
     text: 'Email notifications are off. You will still see everything under the bell, and payments and account changes are still emailed.',
+  },
+  notification_types_saved: {
+    tone: 'success',
+    text: 'Your notification choices are saved.',
   },
   email_prefs_failed: {
     tone: 'error',
@@ -472,7 +477,10 @@ export default async function CustomerProfilePage({
       ) : null}
 
       {section === 'notifications' ? (
-        <EmailNotificationsPanel returnTo={`${PROFILE_PATH}?section=notifications`} />
+        <>
+          <EmailNotificationsPanel returnTo={`${PROFILE_PATH}?section=notifications`} />
+          <NotificationTypesPanel returnTo={`${PROFILE_PATH}?section=notifications`} />
+        </>
       ) : null}
 
       {section === 'password' ? (

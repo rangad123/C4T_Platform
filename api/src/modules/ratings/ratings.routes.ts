@@ -179,7 +179,12 @@ ratingsRouter.post('/', validate({ body: createRatingSchema }), async (req, res)
       type: 'RATING_RECEIVED',
       title: `You received a ${input.score}-star rating`,
       body: input.comment,
-      link: '/app/tester/ratings',
+      // A tester may rate the customer they worked for; that subject reads it
+      // on the customer portal, not the tester one.
+      link:
+        input.subjectType === RatingSubjectType.CUSTOMER
+          ? '/app/customer/ratings'
+          : '/app/tester/ratings',
     })
   }
 

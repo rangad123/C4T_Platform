@@ -24,7 +24,7 @@ import { serverFetch, serverFetchOrNull } from '@/lib/api/server'
 import { loadList } from '@/lib/admin/list'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
-import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
+import { formatDate, formatDateTime, formatMoney, personName, titleCase } from '@/lib/admin/format'
 import { DownloadLink } from '@/components/admin/DownloadLink'
 import { reportTestResult, respondToInvitation } from './actions'
 import type {
@@ -69,8 +69,16 @@ const BUG_PAGE_SIZE = 50
  * pages.
  */
 
-/** Mirrors `TestCaseResult`, so a tampered post fails validation, not silently. */
-const TEST_RESULTS = ['PASS', 'FAIL', 'BLOCKED', 'NOT_TESTED'] as const
+/**
+ * The quick results. A failure is not among them: it is filed as a bug from
+ * the case ("Failed — file a bug"), which records the failed execution linked
+ * to that bug.
+ */
+const TEST_RESULTS = [
+  { value: 'PASS', label: 'Pass' },
+  { value: 'BLOCKED', label: 'Blocked' },
+  { value: 'NOT_TESTED', label: 'Not run' },
+] as const
 
 const NOTICES: Record<string, NoticeCopy> = {
   'result-saved': {
@@ -94,6 +102,10 @@ const NOTICES: Record<string, NoticeCopy> = {
   forbidden: { tone: 'error', message: 'You are not able to answer this invitation.' },
   missing: { tone: 'error', message: 'That invitation is no longer there. Reload the page.' },
   failed: { tone: 'error', message: 'That did not go through. Try again in a moment.' },
+  'failure-filed': {
+    tone: 'success',
+    message: 'Your bug is filed and the case is recorded as failed. The team reviews it next.',
+  },
   reported: {
     tone: 'success',
     message: 'Your report is filed. It appears under Bugs below.',
@@ -355,6 +367,17 @@ export default async function TesterProjectWorkspacePage({
               />
             ) : null}
             {isInvited ? null : (
+              <div>
+                <Button
+                  href={`${detailPath}/automation?buildId=${activeBuildId}`}
+                  variant="secondary"
+                  size="sm"
+                >
+                  Automation
+                </Button>
+              </div>
+            )}
+            {isInvited ? null : (
               <SectionTabs
                 basePath={detailPath}
                 tabs={SECTIONS}
@@ -492,6 +515,15 @@ export default async function TesterProjectWorkspacePage({
                   { label: 'Test type', value: buildDetail.testType ?? '—' },
                   { label: 'Test start date', value: formatDate(buildDetail.startDate) },
                   { label: 'Test end date', value: formatDate(buildDetail.endDate) },
+                  {
+                    label: 'Reward per accepted bug',
+                    value: buildDetail.testerRewardMinor
+                      ? formatMoney(
+                          buildDetail.testerRewardMinor,
+                          buildDetail.rewardsCurrency ?? 'INR',
+                        )
+                      : '—',
+                  },
                   {
                     label: 'Application / website URL',
                     wide: true,
@@ -735,11 +767,17 @@ export default async function TesterProjectWorkspacePage({
                       }}
                     >
                       <strong style={{ color: 'var(--text-primary)' }}>{tc.title}</strong>
-                      {latest ? (
-                        <StatusBadge status={latest.result} />
-                      ) : (
-                        <Badge tone="neutral">Not tested</Badge>
-                      )}
+                      <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
+                        {latest ? (
+                          <>
+                            <StatusBadge status={latest.result} />
+                            {/* Whether the team has accepted it yet: only approved results count. */}
+                            <StatusBadge status={latest.reviewStatus} />
+                          </>
+                        ) : (
+                          <Badge tone="neutral">Not tested</Badge>
+                        )}
+                      </span>
                     </div>
 
                     {/*
@@ -750,6 +788,7 @@ export default async function TesterProjectWorkspacePage({
                     <DescriptionList
                       items={[
                         { label: 'Feature', value: tc.feature ?? '—' },
+                        ...(tc.scenario ? [{ label: 'Scenario', value: tc.scenario.title }] : []),
                         { label: 'Steps', value: <Prose>{tc.steps}</Prose>, wide: true },
                         {
                           label: 'Expected result',
@@ -762,6 +801,9 @@ export default async function TesterProjectWorkspacePage({
                                 label: 'You reported',
                                 value: `${titleCase(latest.result)} on ${formatDate(latest.createdAt)}`,
                               },
+                              ...(latest.reviewNote
+                                ? [{ label: 'Reviewer note', value: latest.reviewNote, wide: true }]
+                                : []),
                             ]
                           : []),
                       ]}
@@ -800,11 +842,12 @@ export default async function TesterProjectWorkspacePage({
                           id={`result-${tc.id}`}
                           name="result"
                           required
-                          defaultValue={latest?.result ?? 'PASS'}
-                          options={TEST_RESULTS.map((value) => ({
-                            value,
-                            label: titleCase(value),
-                          }))}
+                          defaultValue={
+                            TEST_RESULTS.some((r) => r.value === latest?.result)
+                              ? latest?.result
+                              : 'PASS'
+                          }
+                          options={TEST_RESULTS}
                         />
                       </Field>
                       <Field label="Notes" htmlFor={`notes-${tc.id}`} hint="Optional.">
@@ -813,6 +856,13 @@ export default async function TesterProjectWorkspacePage({
                       <SubmitButton variant="primary" pendingLabel="Saving…">
                         {latest ? 'Report again' : 'Report result'}
                       </SubmitButton>
+                      <Button
+                        href={`/app/tester/bugs/new?projectId=${project.id}&buildId=${activeBuildId}&testCaseId=${tc.id}`}
+                        variant="secondary"
+                        iconLeft="bug"
+                      >
+                        Failed — file a bug
+                      </Button>
                     </form>
                   </li>
                 )

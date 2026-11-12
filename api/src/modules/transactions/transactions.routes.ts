@@ -14,6 +14,7 @@ import { createNotification } from '../notifications/notifications.service.js'
 import { PERMISSIONS } from '../../config/permissions.js'
 import { transactionScope } from '../../lib/access/scopes.js'
 import { assertEmailVerified } from '../../lib/access/verification.js'
+import { drawForEarning } from '../org-finance/org-finance.service.js'
 
 /**
  * §2.2 "Transactions" — payment and billing RECORDS for projects, Customers and
@@ -610,8 +611,18 @@ transactionsRouter.post(
           throw new BadRequestError('That is more than the tester has available to withdraw')
         }
       }
+      // An earning on a build with funds locked for it is paid out of that
+      // lock (and tagged as the draw); on any other build nothing changes.
+      const draw =
+        input.type === TransactionType.TESTER_EARNING && input.buildId
+          ? await drawForEarning(db, {
+              buildId: input.buildId,
+              amountMinor: input.amountMinor,
+              currency: input.currency,
+            })
+          : null
       const created = await db.transaction.create({
-        data: { ...input, paidAmountMinor, reference, recordedById: req.user!.id },
+        data: { ...input, ...draw, paidAmountMinor, reference, recordedById: req.user!.id },
         select: txSelect,
       })
       if (settles) {
@@ -635,7 +646,7 @@ transactionsRouter.post(
         userId: input.counterpartyId,
         type: 'TRANSACTION_UPDATED',
         title,
-        link: '/app/transactions',
+        link: '/app/tester/profile?section=payment',
       })
     }
 

@@ -62,7 +62,13 @@ async function recipientsFor(input: NotificationEmailInput, essential: boolean) 
       // asked to be left alone, and the second has not yet proved the address
       // belongs to them, which is the one thing we must not assume.
       status: UserStatus.ACTIVE,
-      ...(essential ? {} : { emailNotifications: true }),
+      // Non-essential mail also honours the per-type choice (no row = on).
+      ...(essential
+        ? {}
+        : {
+            emailNotifications: true,
+            notificationPreferences: { none: { type: input.type, email: false } },
+          }),
     },
     select: { id: true, email: true, firstName: true },
   })

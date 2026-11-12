@@ -151,6 +151,12 @@ export const createBugSchema = z
       .max(50)
       .optional(),
     attachmentFileIds: z.array(z.string().cuid()).max(20).default([]),
+    /**
+     * Filed as the failure of this test case: the bug and a FAIL execution
+     * linked to it are written together. Must be assigned to the reporter on
+     * the same build — checked in the service.
+     */
+    testCaseId: z.string().cuid().optional(),
   })
   .superRefine(refineOccurrence)
 

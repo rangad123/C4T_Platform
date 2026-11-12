@@ -224,6 +224,22 @@ async function assertCanDownload(
     return
   }
 
+  /**
+   * An automation run's report document (round 52). Keyed on the join, like
+   * the test document above; readable by whoever may read the automation
+   * page itself (`project.read_brief`).
+   */
+  const automationReport = await prisma.automationReport.findFirst({
+    where: { fileId: file.id },
+    select: { projectId: true },
+  })
+  if (automationReport) {
+    const ctx = await projectRelations(user, automationReport.projectId)
+    if (!ctx) throw new NotFoundError('File')
+    authorize(user, 'project.read_brief', ctx.relations)
+    return
+  }
+
   if (file.scope === FileScope.PROJECT_MATERIAL) {
     const material = await prisma.projectMaterial.findFirst({
       where: { fileId: file.id },

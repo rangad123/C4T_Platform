@@ -4,6 +4,7 @@ import {
   type BugSeverity,
   OrgMemberRole,
   AssignmentStatus,
+  TestCaseResult,
 } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { NotFoundError, ForbiddenError, BadRequestError, ConflictError } from '../../lib/errors.js'
@@ -379,9 +380,17 @@ export async function createBug(
     buildId?: string
     attachmentFileIds: string[]
     customAnswers?: { fieldId: string; value: string }[]
+    testCaseId?: string
   },
 ) {
-  const { projectId, buildId: requestedBuildId, attachmentFileIds, customAnswers, ...data } = input
+  const {
+    projectId,
+    buildId: requestedBuildId,
+    attachmentFileIds,
+    customAnswers,
+    testCaseId,
+    ...data
+  } = input
 
   const resolved = await projectRelations(user, projectId)
   if (!resolved) throw new NotFoundError('Project')
@@ -444,10 +453,31 @@ export async function createBug(
    */
   const customValues = await resolveCustomValues(buildId, customAnswers)
 
+  // A bug filed from a test case is that case's failed execution.
+  if (testCaseId) {
+    const assigned = await prisma.testCaseAssignment.findFirst({
+      where: { testerId: user.id, testCase: { id: testCaseId, buildId, deletedAt: null } },
+      select: { id: true },
+    })
+    if (!assigned) throw new BadRequestError('That test case is not assigned to you on this build')
+  }
+
   const bug = await prisma.bug.create({
     data: {
       ...(data as Prisma.BugCreateInput),
       ...(customValues.length > 0 ? { customValues: { create: customValues } } : {}),
+      ...(testCaseId
+        ? {
+            testReports: {
+              create: {
+                result: TestCaseResult.FAIL,
+                testCase: { connect: { id: testCaseId } },
+                build: { connect: { id: buildId } },
+                tester: { connect: { id: user.id } },
+              },
+            },
+          }
+        : {}),
       reference: await nextReference('bug'),
       project: { connect: { id: projectId } },
       build: { connect: { id: buildId } },

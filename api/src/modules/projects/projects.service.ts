@@ -126,7 +126,11 @@ const buildSelect = {
   startDate: true,
   endDate: true,
   bugCustomizationEnabled: true,
+  /// Customer finance (round 52): shown to testers on the build.
+  testerRewardMinor: true,
+  rewardsCurrency: true,
   testDocumentFileId: true,
+  acceptsApplications: true,
   testDocument: {
     /*
       `isComplete` so the portals can tell a downloadable document from one
@@ -1184,7 +1188,10 @@ export async function assignTesters(
   notes?: string,
   requestedBuildId?: string,
   configurations?: AssignmentConfiguration[],
+  /** The tester asked for this (an accepted application): no invitation to answer. */
+  accepted = false,
 ) {
+  const initialStatus = accepted ? AssignmentStatus.ACCEPTED : AssignmentStatus.INVITED
   const project = await prisma.project.findFirst({
     where: { id: projectId, deletedAt: null },
     select: { id: true, title: true, status: true, maxTesters: true },
@@ -1301,7 +1308,8 @@ export async function assignTesters(
                 projectId,
                 buildId,
                 testerId,
-                status: AssignmentStatus.INVITED,
+                status: initialStatus,
+                ...(accepted ? { respondedAt: new Date() } : {}),
                 notes: notes ?? null,
                 assignedDeviceId: configured.get(testerId)?.deviceId ?? null,
                 assignedBrowserId: configured.get(testerId)?.browserId ?? null,
@@ -1321,9 +1329,9 @@ export async function assignTesters(
         prisma.projectAssignment.update({
           where: { id: row.id },
           data: {
-            status: AssignmentStatus.INVITED,
+            status: initialStatus,
             invitedAt: new Date(),
-            respondedAt: null,
+            respondedAt: accepted ? new Date() : null,
             removedAt: null,
             completedAt: null,
             ...(notes ? { notes } : {}),
@@ -1346,7 +1354,9 @@ export async function assignTesters(
 
     await createNotifications(invitedTesterIds, {
       type: 'PROJECT_ASSIGNED',
-      title: `You have been invited to test "${project.title}"`,
+      title: accepted
+        ? `Your application to test "${project.title}" was accepted`
+        : `You have been invited to test "${project.title}"`,
       body: notes,
       // Carries the build so a tester invited onto two builds of the same
       // project gets two notifications that actually land on the right one,

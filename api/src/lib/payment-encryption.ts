@@ -127,3 +127,17 @@ function maskEmail(email: string): string {
   const visible = local.slice(0, 2)
   return `${visible}${'*'.repeat(Math.max(local.length - visible.length, 1))}@${domain}`
 }
+
+/**
+ * The same envelope, key and AAD binding for a single secret string — a bug
+ * tracker's API token. Kept here so there is one AES-256-GCM implementation.
+ */
+export function encryptSecret(secret: string, aad: string): Buffer {
+  return encryptPaymentDetails({ accountNumber: secret }, aad)
+}
+
+export function decryptSecret(envelope: Buffer, aad: string): string {
+  const plain = decryptPaymentDetails(envelope, aad)
+  if (typeof plain.accountNumber !== 'string') throw new Error('Secret envelope is malformed')
+  return plain.accountNumber
+}

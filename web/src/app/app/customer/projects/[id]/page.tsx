@@ -36,6 +36,7 @@ import { loadList, parsePage } from '@/lib/admin/list'
 import { requireRole } from '@/lib/auth/session'
 import { ApiError } from '@/lib/api/types'
 import { formatDate, formatDateTime, personName, titleCase } from '@/lib/admin/format'
+import { formatMinutes } from '@/lib/testing/workflow'
 import { BuildSwitcher } from '@/components/admin/BuildSwitcher'
 import {
   BUILD_STATUSES,
@@ -56,6 +57,10 @@ import {
   BUG_FIELD_TYPE_LABEL,
 } from './constants'
 import { BugBreakdownView } from '@/components/admin/BugBreakdownView'
+import {
+  ProjectBugAnalytics,
+  type ProjectBugAnalyticsData,
+} from '@/components/admin/ProjectBugAnalytics'
 import { CustomFieldForm } from '@/components/admin/CustomFieldForm'
 import { Notice, type NoticeCopy } from '@/components/admin/Notice'
 import { BarChart } from '@/components/admin/charts/BarChart'
@@ -421,6 +426,11 @@ export default async function CustomerProjectDetailPage({
     bugQueryString({ bugScope: scope === 'build' ? 'build' : undefined, bugPage: undefined })
   const newBuildModalOpen = edit === 'new-build'
 
+  // Started here so it runs alongside the batch below. Project-wide, every build.
+  const bugAnalyticsPromise =
+    section === 'dashboard'
+      ? serverFetchOrNull<ProjectBugAnalyticsData>(`reports/by-project/${project.id}/bug-analytics`)
+      : Promise.resolve(null)
   const [
     buildSummaryData,
     features,
@@ -441,7 +451,8 @@ export default async function CustomerProjectDetailPage({
      * fetching the second endpoint for charts this one could already draw,
      * which is how the same build ended up with two sets of bug charts.
      */
-    section === 'dashboard'
+    // Also read on Test reports, for its progress panel.
+    section === 'dashboard' || section === 'testing'
       ? serverFetchOrNull<BuildSummary>(`builds/${activeBuildId}/summary`)
       : Promise.resolve(null),
     section === 'features'
@@ -518,6 +529,7 @@ export default async function CustomerProjectDetailPage({
         })
       : Promise.resolve({ error: 'forbidden' as const }),
   ])
+  const bugAnalytics = await bugAnalyticsPromise
   const priority = isProjectPriority(project.priority) ? project.priority : 'NORMAL'
   /**
    * What THIS reader may move the project to — not what the lifecycle allows.
@@ -951,6 +963,13 @@ export default async function CustomerProjectDetailPage({
             >
               Download report
             </Button>
+            <Button
+              href={`${detailPath}/automation?buildId=${activeBuildId}`}
+              variant="secondary"
+              size="sm"
+            >
+              Automation
+            </Button>
             {capabilities.canUpdate ? (
               <>
                 <Button
@@ -1257,6 +1276,8 @@ export default async function CustomerProjectDetailPage({
               />
             )}
           </Panel>
+
+          <ProjectBugAnalytics data={bugAnalytics} />
 
           {/* ── Testing progress ──────────────────────────────────────────
               Execution rather than defects: what the test runs returned. */}
@@ -2157,6 +2178,46 @@ export default async function CustomerProjectDetailPage({
               </div>
             )}
           </div>
+        </Panel>
+      ) : null}
+
+      {section === 'testing' ? (
+        <Panel
+          title="Progress"
+          description={`Approved results on ${activeBuild?.name ?? 'this build'}. An execution counts once the Crowd4Test team has reviewed it.`}
+        >
+          {buildSummaryData === null ? (
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+              Progress could not be loaded. Refresh in a moment.
+            </p>
+          ) : (
+            <DescriptionList
+              items={[
+                { label: 'Test cases', value: String(buildSummaryData.testCaseCount) },
+                {
+                  label: 'Completed',
+                  value:
+                    buildSummaryData.testCaseCompletion === null
+                      ? '—'
+                      : `${buildSummaryData.testCaseCompletion}%`,
+                },
+                { label: 'Passed', value: String(buildSummaryData.testReportsByResult.PASS ?? 0) },
+                { label: 'Failed', value: String(buildSummaryData.testReportsByResult.FAIL ?? 0) },
+                {
+                  label: 'Blocked',
+                  value: String(buildSummaryData.testReportsByResult.BLOCKED ?? 0),
+                },
+                {
+                  label: 'Awaiting review',
+                  value: String(buildSummaryData.pendingReviewCount ?? 0),
+                },
+                {
+                  label: 'Approved tester time',
+                  value: formatMinutes(buildSummaryData.approvedMinutes ?? 0),
+                },
+              ]}
+            />
+          )}
         </Panel>
       ) : null}
 

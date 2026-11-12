@@ -361,6 +361,12 @@ model User {
   testCaseAssignments  TestCaseAssignment[] @relation("TestCaseAssignee")
   testReportsSubmitted TestReport[]         @relation("TestReportSubmittedBy")
   testReviewsWritten   TestReview[]         @relation("TestReviewCreatedBy")
+  testReportsReviewed  TestReport[]         @relation("TestReportReviewedBy")
+  testScenariosCreated TestScenario[]       @relation("TestScenarioCreatedBy")
+  projectApplications  ProjectApplication[] @relation("ProjectApplicant")
+  applicationsDecided  ProjectApplication[] @relation("ProjectApplicationDecidedBy")
+  timesheetEntries     TimesheetEntry[]     @relation("TimesheetTester")
+  timesheetsReviewed   TimesheetEntry[]     @relation("TimesheetReviewedBy")
 
   threadsCreated       Thread[]            @relation("ThreadCreatedBy")
   threadParticipations ThreadParticipant[]
@@ -386,6 +392,8 @@ model User {
   orgInvitationsSent       OrganisationInvitation[] @relation("OrgInvitationAuthor")
   platformSettingsEdited   PlatformSetting[]        @relation("PlatformSettingEditor")
   blogPostsAuthored        BlogPost[]               @relation("BlogPostAuthor")
+  // Automation and settings (round 52)
+  notificationPreferences  NotificationPreference[]
 
   @@index([role, status])
   @@index([createdAt])
@@ -563,6 +571,16 @@ model Organisation {
   notes       String? // internal admin notes
   onboardedAt DateTime? @map("onboarded_at")
 
+  // Customer finance (round 52) — legacy `org_wallet_balance` / `locked_amount`
+  // / `org_currency`. Minor units, like `Transaction.amountMinor`. Only
+  // `org-finance.service.ts` writes these, inside the same DB transaction as
+  // the ledger row that explains the move. Neither may go below zero.
+  walletBalanceMinor BigInt         @default(0) @map("org_wallet_balance")
+  lockedAmountMinor  BigInt         @default(0) @map("locked_amount")
+  walletCurrency     String         @default("INR") @map("org_currency")
+  plans              ActivePlan[]
+  // End customer finance (round 52)
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -574,6 +592,8 @@ model Organisation {
   transactions Transaction[]
   /// Marketing enquiries that converted into this organisation.
   leads        Lead[]
+  // Bug tracker export (round 52)
+  bugTrackerConnection BugTrackerConnection?
 
   @@index([status])
   @@index([name])
@@ -1105,6 +1125,19 @@ model Build {
 
   testDocumentFileId String? @map("test_document_file_id")
 
+  /// Legacy `build_cycle_type = 'crowd'`: verified testers may apply to this
+  /// build themselves (see `ProjectApplication`). Off by default, so every
+  /// existing build stays invite-only.
+  acceptsApplications Boolean @default(false) @map("accepts_applications")
+
+  // Customer finance (round 52) — legacy `builds.tester_reward` /
+  // `rewards_currency`: what a tester earns per accepted bug on this build,
+  // in minor units. Null means no reward is set. Shown to testers; nothing
+  // pays it automatically.
+  testerRewardMinor BigInt? @map("tester_reward")
+  rewardsCurrency   String? @map("rewards_currency")
+  // End customer finance (round 52)
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -1121,8 +1154,14 @@ model Build {
   testCases     TestCase[]
   testReports   TestReport[]
   testReviews   TestReview[]
+  testScenarios TestScenario[]
+  applications  ProjectApplication[]
+  timesheets    TimesheetEntry[]
   /// Payouts and earnings recorded against this build.
   transactions  Transaction[]
+  // Automation and settings (round 52)
+  automationModules AutomationModule[]
+  automationReports AutomationReport[]
 
   @@unique([projectId, name])
   @@index([projectId])
@@ -1139,13 +1178,10 @@ model Build {
 // optionally pointing at the Bug that failing it produced. TestReview is
 // the build-level summary + rating that closes the cycle out.
 //
-// Deliberately NOT modelled: `applied_tests` (tester-initiated application —
-// this platform is invite-only, see `ProjectAssignment`), `testing_time_sheet`
-// (per-tester time logging/billing), and the separate `test_scenarios` /
-// `test_scenario_reports` pair, which the legacy schema shows as a lighter,
-// parallel flavour of the same case → report shape — the brief's own
-// "Test Case / Scenario" phrasing treats them as one concept here rather
-// than a second model.
+// Added later, as their own models below: tester applications
+// (`ProjectApplication`, legacy `applied_tests`), scenarios grouping test
+// cases (`TestScenario`), a review of each execution before it counts
+// (`TestReport.reviewStatus`) and timesheets (`TimesheetEntry`).
 
 model TestCase {
   id             String    @id @default(cuid())
@@ -1158,12 +1194,15 @@ model TestCase {
   description    String
   steps          String
   expectedResult String    @map("expected_result")
+  /// Optional grouping (legacy `test_scenarios`). Null = not in a scenario.
+  scenarioId     String?   @map("scenario_id")
   createdById    String    @map("created_by_id")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
   deletedAt      DateTime? @map("deleted_at")
 
   build       Build                @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  scenario    TestScenario?        @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
   createdBy   User                 @relation("TestCaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   assignments TestCaseAssignment[]
   reports     TestReport[]
@@ -1204,6 +1243,11 @@ model TestReport {
   browsers    String?
   /// Set when executing this case produced a defect — see `Bug.testReports`.
   linkedBugId String?        @map("linked_bug_id")
+  /// An execution counts towards progress only once a reviewer approves it.
+  reviewStatus ExecutionReviewStatus @default(PENDING) @map("review_status")
+  reviewNote   String?               @map("review_note")
+  reviewedById String?               @map("reviewed_by_id")
+  reviewedAt   DateTime?             @map("reviewed_at")
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
@@ -1211,8 +1255,10 @@ model TestReport {
   build     Build    @relation(fields: [buildId], references: [id], onDelete: Cascade)
   tester    User     @relation("TestReportSubmittedBy", fields: [testerId], references: [id], onDelete: Cascade)
   linkedBug Bug?     @relation("TestReportDefect", fields: [linkedBugId], references: [id], onDelete: SetNull)
+  reviewedBy User?   @relation("TestReportReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([buildId])
+  @@index([buildId, reviewStatus])
   @@index([testCaseId])
   @@index([testerId])
   @@map("test_reports")
@@ -1236,6 +1282,100 @@ model TestReview {
 
   @@index([buildId])
   @@map("test_reviews")
+}
+
+/// Review of one execution (`TestReport`) before it counts.
+enum ExecutionReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Legacy `test_scenarios` — a named group of a build's test cases.
+model TestScenario {
+  id          String   @id @default(cuid())
+  buildId     String   @map("build_id")
+  title       String
+  description String?
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  build     Build      @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  createdBy User       @relation("TestScenarioCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  testCases TestCase[]
+
+  @@index([buildId])
+  @@map("test_scenarios")
+}
+
+enum ProjectApplicationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+/// Legacy `applied_tests` — a tester asking to work on a build that is open
+/// to applications. Accepting one puts the tester on the build's roster.
+model ProjectApplication {
+  id           String                   @id @default(cuid())
+  projectId    String                   @map("project_id")
+  buildId      String                   @map("build_id")
+  testerId     String                   @map("tester_id")
+  status       ProjectApplicationStatus @default(PENDING)
+  message      String?
+  decisionNote String?                  @map("decision_note")
+  decidedById  String?                  @map("decided_by_id")
+  decidedAt    DateTime?                @map("decided_at")
+  createdAt    DateTime                 @default(now()) @map("created_at")
+  updatedAt    DateTime                 @updatedAt @map("updated_at")
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build     Build   @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  tester    User    @relation("ProjectApplicant", fields: [testerId], references: [id], onDelete: Cascade)
+  decidedBy User?   @relation("ProjectApplicationDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@unique([buildId, testerId])
+  @@index([projectId, status])
+  @@index([testerId])
+  @@map("project_applications")
+}
+
+enum TimesheetStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Legacy `testing_time_sheet` — time a tester logged on one build on one
+/// day, reviewed by an admin. Recording only: approving it moves no money.
+model TimesheetEntry {
+  id              String          @id @default(cuid())
+  projectId       String          @map("project_id")
+  buildId         String          @map("build_id")
+  testerId        String          @map("tester_id")
+  workDate        DateTime        @map("work_date") @db.Date
+  minutes         Int
+  description     String?
+  status          TimesheetStatus @default(PENDING)
+  /// Legacy `tts_approved_time`; may be less than `minutes`.
+  approvedMinutes Int?            @map("approved_minutes")
+  reviewNote      String?         @map("review_note")
+  reviewedById    String?         @map("reviewed_by_id")
+  reviewedAt      DateTime?       @map("reviewed_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build      Build   @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  tester     User    @relation("TimesheetTester", fields: [testerId], references: [id], onDelete: Cascade)
+  reviewedBy User?   @relation("TimesheetReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([buildId, testerId, workDate])
+  @@index([projectId, status])
+  @@index([testerId, workDate])
+  @@map("timesheet_entries")
 }
 
 model Project {
@@ -1298,6 +1438,11 @@ model Project {
   transactions  Transaction[]
   announcements Announcement[]
   builds        Build[]
+  applications  ProjectApplication[]
+  timesheets    TimesheetEntry[]
+  // Automation and settings (round 52)
+  automationModules AutomationModule[]
+  automationReports AutomationReport[]
 
   @@index([organisationId])
   @@index([status])
@@ -1492,6 +1637,8 @@ model Bug {
   /// described — see `TestReport.linkedBugId`. Not every bug traces back to
   /// a test case; a tester can still file one directly.
   testReports   TestReport[]       @relation("TestReportDefect")
+  // Bug tracker export (round 52)
+  externalIssues BugExternalIssue[]
 
   @@index([projectId, status])
   @@index([buildId])
@@ -2031,6 +2178,13 @@ model Transaction {
   /// build".
   buildOrContestRef String?        @map("build_or_contest_ref")
 
+  // Customer finance (round 52) — which organisation-wallet move this row
+  // records, if any, and the key that makes recording it idempotent: a retry
+  // with the same key finds this row instead of moving the money twice.
+  walletMove WalletMove? @map("wallet_move")
+  walletKey  String?     @unique @map("wallet_key")
+  // End customer finance (round 52)
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -2082,6 +2236,132 @@ model PayoutRequest {
   @@map("payout_requests")
 }
 
+// Customer finance (round 52) ─────────────────────────────────────────────────
+//
+// Legacy `organisation.org_wallet_balance` / `locked_amount` (escrow),
+// `active_plans` and `pricing_models`. Recording only: no gateway, no
+// automatic billing. Every wallet move is a `Transaction` row tagged with
+// `walletMove`, written in the same DB transaction as the change to the
+// organisation's two figures.
+
+/// What a wallet-tagged ledger row did to the organisation's wallet.
+///   TOP_UP  — a customer payment the admin recorded: balance up.
+///   LOCK    — funds set aside for one build (escrow): balance down, locked up.
+///   DRAW    — a tester earning on that build, paid out of its lock: locked down.
+///   RELEASE — what was left of a closed build's lock: locked down, balance up.
+enum WalletMove {
+  TOP_UP
+  LOCK
+  DRAW
+  RELEASE
+}
+
+/// A plan an admin defines (legacy `active_plans.plan_name` values and
+/// `pricing_models`). A price and the included quotas are informational.
+model PricingPlan {
+  id                     String    @id @default(cuid())
+  name                   String    @unique
+  description            String?
+  /// Minor units. Null when the plan is quoted per customer.
+  priceMinor             BigInt?   @map("price_minor")
+  currency               String    @default("INR")
+  projectsIncluded       Int?      @map("projects_included")
+  privateTestersIncluded Int?      @map("private_testers_included")
+  /// Archived plans stay on the organisations that hold them but cannot be
+  /// given to another one.
+  archivedAt             DateTime? @map("archived_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  activePlans ActivePlan[]
+
+  @@map("pricing_plans")
+}
+
+/// Legacy `active_plans`: a plan an organisation holds for a period. The
+/// current one is the latest whose period covers today.
+model ActivePlan {
+  id                      String    @id @default(cuid())
+  organisationId          String    @map("organisation_id")
+  planId                  String    @map("plan_id")
+  startDate               DateTime  @map("start_date")
+  /// Null means open-ended.
+  endDate                 DateTime? @map("end_date")
+  remainingProjects       Int?      @map("remaining_projects")
+  remainingPrivateTesters Int?      @map("remaining_private_testers")
+  createdAt               DateTime  @default(now()) @map("created_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  plan         PricingPlan  @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, startDate])
+  @@map("active_plans")
+}
+// End customer finance (round 52) ─────────────────────────────────────────────
+
+// Bug tracker export (round 52) ───────────────────────────────────────────────
+//
+// Legacy `bug_export_jira`. An organisation connects its own bug tracker
+// (Jira Cloud first) and exports bugs into it. The API token is encrypted at
+// rest (AES-256-GCM, the PaymentAccount helper) and never returned.
+
+enum BugTrackerProvider {
+  JIRA_CLOUD
+}
+
+/// PENDING while the request to the tracker is in flight; FAILED keeps the
+/// last error and may be retried; EXPORTED is final (a bug exports once).
+enum ExternalIssueStatus {
+  PENDING
+  EXPORTED
+  FAILED
+}
+
+/// One connection per organisation, managed by its owners and platform admins.
+model BugTrackerConnection {
+  id             String             @id @default(cuid())
+  organisationId String             @unique @map("organisation_id")
+  provider       BugTrackerProvider @default(JIRA_CLOUD)
+  /// https only, and never a private, loopback or link-local address.
+  siteUrl        String             @map("site_url")
+  accountEmail   String             @map("account_email")
+  projectKey     String             @map("project_key")
+  issueType      String             @default("Bug") @map("issue_type")
+  /// [key version][IV][ciphertext][tag], AAD `${id}:${organisationId}`.
+  tokenEncrypted Bytes              @map("token_encrypted")
+  /// The masked ending shown back, computed at write time.
+  tokenLast4     String             @map("token_last4")
+  lastTestedAt   DateTime?          @map("last_tested_at")
+  lastTestOk     Boolean?           @map("last_test_ok")
+  lastTestError  String?            @map("last_test_error")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@map("bug_tracker_connections")
+}
+
+/// A bug's issue in an external tracker. One per bug and provider.
+model BugExternalIssue {
+  id         String              @id @default(cuid())
+  bugId      String              @map("bug_id")
+  provider   BugTrackerProvider
+  externalId String?             @map("external_id")
+  key        String?
+  url        String?
+  status     ExternalIssueStatus @default(PENDING)
+  lastError  String?             @map("last_error")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  bug Bug @relation(fields: [bugId], references: [id], onDelete: Cascade)
+
+  @@unique([bugId, provider])
+  @@map("bug_external_issues")
+}
+// End bug tracker export (round 52) ───────────────────────────────────────────
+
 // ─── Notifications ───────────────────────────────────────────────────────────
 
 model Notification {
@@ -2103,6 +2383,80 @@ model Notification {
   @@index([createdAt])
   @@map("notifications")
 }
+
+// Automation and settings (round 52) ─────────────────────────────────────────
+//
+// Legacy `automation_modules` / `automation_reports` and the per-user half of
+// legacy `notification` (which kinds of notification someone receives).
+// Automation is recording only: a customer or admin writes down which suites
+// exist for a build and what each run produced. Nothing here runs a suite.
+
+/// An automated suite or module maintained for a build.
+model AutomationModule {
+  id            String   @id @default(cuid())
+  projectId     String   @map("project_id")
+  buildId       String   @map("build_id")
+  name          String
+  /// "Playwright", "Appium", "Selenium" … free text, like `Build.testType`.
+  framework     String?
+  /// Where the code lives, a full https:// URL.
+  repositoryUrl String?  @map("repository_url")
+  /// Who looks after it. Free text: often someone on the customer's side
+  /// with no Crowd4Test account.
+  owner         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build   Build              @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  reports AutomationReport[]
+
+  @@index([buildId])
+  @@map("automation_modules")
+}
+
+/// The result of one automated run against a build.
+model AutomationReport {
+  id              String   @id @default(cuid())
+  projectId       String   @map("project_id")
+  buildId         String   @map("build_id")
+  /// The module the run belongs to, if it is one of the build's modules.
+  moduleId        String?  @map("module_id")
+  runAt           DateTime @map("run_at")
+  passed          Int      @default(0)
+  failed          Int      @default(0)
+  skipped         Int      @default(0)
+  durationSeconds Int?     @map("duration_seconds")
+  /// The full report document, uploaded under PROJECT_MATERIAL.
+  fileId          String?  @map("file_id")
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  build   Build             @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  module  AutomationModule? @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  file    FileObject?       @relation("AutomationReportFile", fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([buildId, runAt])
+  @@map("automation_reports")
+}
+
+/// Which notifications one person receives, per type. No row means both on.
+/// `email` is ignored for types the email policy marks essential.
+model NotificationPreference {
+  userId    String           @map("user_id")
+  type      NotificationType
+  inApp     Boolean          @default(true) @map("in_app")
+  email     Boolean          @default(true)
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type])
+  @@map("notification_preferences")
+}
+
+// End automation and settings (round 52) ─────────────────────────────────────
 
 // ─── Files ───────────────────────────────────────────────────────────────────
 
@@ -2136,6 +2490,8 @@ model FileObject {
   blogFeaturedImages  BlogPost[]          @relation("BlogPostFeaturedImage")
   blogSecondaryImages BlogPost[]          @relation("BlogPostSecondaryImage")
   blogGalleryImages   BlogPostImage[]     @relation("BlogPostGalleryImage")
+  // Automation and settings (round 52)
+  automationReports   AutomationReport[]  @relation("AutomationReportFile")
 
   @@index([uploadedById])
   @@index([scope])

@@ -81,7 +81,13 @@ interface BugCustomField {
 export default async function NewTesterBugPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; projectId?: string; buildId?: string }>
+  searchParams: Promise<{
+    error?: string
+    projectId?: string
+    buildId?: string
+    /** Set by "Failed — file a bug" on a test case: this bug is that case's failure. */
+    testCaseId?: string
+  }>
 }) {
   await requireRole(['TESTER'])
   const params = await searchParams
@@ -136,6 +142,23 @@ export default async function NewTesterBugPage({
    * blocking the report, because an unfiled bug is worse than an unlabelled
    * one.
    */
+  /**
+   * The test case this bug is the failure of, when filed from one. The API
+   * re-checks it is assigned to this tester on this build; here it only
+   * prefills the steps and expectation and is dropped if it is for another build.
+   */
+  const fromCase =
+    params.testCaseId && activeBuildId
+      ? await serverFetchOrNull<{
+          id: string
+          buildId: string
+          title: string
+          steps: string
+          expectedResult: string
+        }>(`test-cases/${params.testCaseId}`)
+      : null
+  const testCase = fromCase?.buildId === activeBuildId ? fromCase : null
+
   const [features, customFields] = await Promise.all([
     activeProjectId
       ? serverFetchOrNull<readonly { id: string; name: string }[]>(
@@ -267,6 +290,21 @@ export default async function NewTesterBugPage({
                 </p>
               </div>
 
+              {testCase ? (
+                <div>
+                  <input type="hidden" name="testCaseId" value={testCase.id} />
+                  <span
+                    className="c4t-eyebrow"
+                    style={{ display: 'block', color: 'var(--text-muted)' }}
+                  >
+                    Failed test case
+                  </span>
+                  <p style={{ margin: 'var(--space-1) 0 0', color: 'var(--text-primary)' }}>
+                    {testCase.title}. Filing this bug records the case as failed, linked to it.
+                  </p>
+                </div>
+              ) : null}
+
               {features && features.length > 0 ? (
                 <Field
                   label="Feature"
@@ -334,6 +372,7 @@ export default async function NewTesterBugPage({
                 <Textarea
                   id="stepsToReproduce"
                   name="stepsToReproduce"
+                  defaultValue={testCase?.steps}
                   rows={6}
                   required
                   minLength={5}
@@ -355,6 +394,7 @@ export default async function NewTesterBugPage({
                   <Textarea
                     id="expectedResult"
                     name="expectedResult"
+                    defaultValue={testCase?.expectedResult}
                     rows={3}
                     required
                     minLength={5}

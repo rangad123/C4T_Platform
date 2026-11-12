@@ -4,6 +4,26 @@ import { logger } from '../../lib/logger.js'
 import { buildMeta, toSkipTake } from '../../lib/pagination.js'
 import { NotFoundError } from '../../lib/errors.js'
 import { dispatchNotificationEmails } from '../../lib/email/dispatch.js'
+import { EMAIL_POLICY } from '../../lib/email/policy.js'
+
+/**
+ * Per-type preferences (`NotificationPreference`). No row means on. Types the
+ * email policy marks essential (money, account standing) cannot be muted at
+ * all: someone who turned them off would still hold us to telling them.
+ */
+export function isEssential(type: NotificationType): boolean {
+  return EMAIL_POLICY[type]?.essential === true
+}
+
+/** The users among `userIds` who turned this type off in the app. */
+async function mutedInApp(userIds: string[], type: NotificationType): Promise<Set<string>> {
+  if (isEssential(type) || userIds.length === 0) return new Set()
+  const rows = await prisma.notificationPreference.findMany({
+    where: { userId: { in: userIds }, type, inApp: false },
+    select: { userId: true },
+  })
+  return new Set(rows.map((row) => row.userId))
+}
 
 /**
  * Notifications. Deliberately fire-and-forget: a notification failing to write
@@ -35,16 +55,19 @@ export async function createNotification(input: {
   const cutoff = new Date()
 
   try {
-    await prisma.notification.create({
-      data: {
-        userId: input.userId,
-        type: input.type,
-        title: input.title,
-        body: input.body ?? null,
-        link: input.link ?? null,
-        metadata: input.metadata ?? undefined,
-      },
-    })
+    // Muted in the app: no row. Email is its own choice, checked in dispatch.
+    const muted = await mutedInApp([input.userId], input.type)
+    if (!muted.has(input.userId))
+      await prisma.notification.create({
+        data: {
+          userId: input.userId,
+          type: input.type,
+          title: input.title,
+          body: input.body ?? null,
+          link: input.link ?? null,
+          metadata: input.metadata ?? undefined,
+        },
+      })
   } catch (error) {
     logger.error(
       { err: error, userId: input.userId, type: input.type },
@@ -75,15 +98,18 @@ export async function createNotifications(
   const cutoff = new Date()
 
   try {
+    const muted = await mutedInApp(unique, input.type)
     await prisma.notification.createMany({
-      data: unique.map((userId) => ({
-        userId,
-        type: input.type,
-        title: input.title,
-        body: input.body ?? null,
-        link: input.link ?? null,
-        metadata: input.metadata ?? undefined,
-      })),
+      data: unique
+        .filter((userId) => !muted.has(userId))
+        .map((userId) => ({
+          userId,
+          type: input.type,
+          title: input.title,
+          body: input.body ?? null,
+          link: input.link ?? null,
+          metadata: input.metadata ?? undefined,
+        })),
     })
   } catch (error) {
     logger.error(

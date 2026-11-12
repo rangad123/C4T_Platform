@@ -7,6 +7,7 @@ import { actionFetch } from '@/lib/api/action-fetch'
 import { requireRole } from '@/lib/auth/session'
 import { formTrimmed } from '@/lib/form-data'
 import { BUG_SEVERITIES, BUG_STATUSES } from '@/lib/domain/enums'
+import { bulkExportBugsToJira } from '@/lib/bug-tracker/actions'
 
 const LIST_PATH = '/app/admin/bugs'
 
@@ -31,6 +32,8 @@ const SEVERITIES = BUG_SEVERITIES
  */
 export async function bulkChangeBugStatusAction(formData: FormData): Promise<void> {
   await requireRole(['ADMIN', 'SUB_ADMIN'])
+  // The same ticked rows, sent to Jira instead (the form's second button).
+  if (formData.get('intent') === 'jira') return bulkExportBugsToJira(formData)
 
   // FormData.getAll('ids') returns every checkbox value in submission order,
   // so duplicates (a row selected twice somehow) are kept as-is — the API

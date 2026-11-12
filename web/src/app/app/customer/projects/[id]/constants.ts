@@ -267,6 +267,10 @@ export interface BuildSummary {
   testCaseCount: number
   testCaseCompletion: number | null
   testReportsByResult: Record<string, number>
+  /** Executions not yet reviewed — they do not count until approved. */
+  pendingReviewCount?: number
+  /** Tester time approved on this build, in minutes. */
+  approvedMinutes?: number
   reviewCount: number
   averageRating: number | null
 }

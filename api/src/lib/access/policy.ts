@@ -47,12 +47,16 @@ export type Action =
   | 'bug.comment_internal'
   | 'bug.attach'
   | 'bug.change_status'
+  /** Send the bug to the organisation's connected bug tracker. */
+  | 'bug.export'
   // Organisation
   | 'organisation.read'
   | 'organisation.read_internal'
   | 'organisation.update'
   | 'organisation.manage_members'
   | 'organisation.delete'
+  /** The organisation's bug tracker connection (Jira). */
+  | 'organisation.manage_integrations'
   // Communication
   | 'thread.read'
   | 'thread.post'
@@ -69,6 +73,8 @@ export type Action =
   | 'testcase.manage'
   | 'testreport.create'
   | 'testreview.create'
+  /** Approve or reject an execution or a timesheet entry. */
+  | 'testing.review'
 
 interface Rule {
   /** Holding any one of these grants the action. */
@@ -205,6 +211,15 @@ const POLICY: Record<Action, Rule> = {
     permission: PERMISSIONS.BUG_TRIAGE,
   },
 
+  /**
+   * The customer whose bug it is, and the platform side. Never a tester: the
+   * report goes into the customer's own tracker.
+   */
+  'bug.export': {
+    relations: ['platform:admin', 'platform:subadmin', 'project:manager', 'bug:customer'],
+    permission: PERMISSIONS.BUG_TRIAGE,
+  },
+
   // ─── Organisation ──────────────────────────────────────────────────────────
   'organisation.read': {
     relations: ['platform:admin', 'platform:subadmin', 'org:member'],
@@ -226,6 +241,11 @@ const POLICY: Record<Action, Rule> = {
   'organisation.delete': {
     relations: ['platform:admin', 'platform:subadmin'],
     permission: PERMISSIONS.ORGANISATION_DELETE,
+  },
+  /** Holds a third-party API token, so owners only on the customer side. */
+  'organisation.manage_integrations': {
+    relations: ['platform:admin', 'platform:subadmin', 'org:owner'],
+    permission: PERMISSIONS.ORGANISATION_WRITE,
   },
 
   // ─── Communication ─────────────────────────────────────────────────────────
@@ -288,6 +308,10 @@ const POLICY: Record<Action, Rule> = {
   },
   'testreport.create': { relations: ['project:tester_active'] },
   'testreview.create': {
+    relations: ['platform:admin', 'platform:subadmin', 'project:manager'],
+    permission: PERMISSIONS.PROJECT_WRITE,
+  },
+  'testing.review': {
     relations: ['platform:admin', 'platform:subadmin', 'project:manager'],
     permission: PERMISSIONS.PROJECT_WRITE,
   },

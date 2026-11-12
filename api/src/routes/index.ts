@@ -5,6 +5,7 @@ import { organisationsRouter } from '../modules/organisations/organisations.rout
 import { testersRouter } from '../modules/testers/testers.routes.js'
 import { projectsRouter } from '../modules/projects/projects.routes.js'
 import { bugsRouter } from '../modules/bugs/bugs.routes.js'
+import { bugTrackerRouter } from '../modules/bug-tracker/bug-tracker.routes.js'
 import { managersRouter } from '../modules/managers/managers.routes.js'
 import { communicationRouter } from '../modules/communication/communication.routes.js'
 import { broadcastsRouter } from '../modules/communication/broadcasts.routes.js'
@@ -23,6 +24,8 @@ import { reportsRouter } from '../modules/reports/reports.routes.js'
 import { blogRouter } from '../modules/blog/blog.routes.js'
 import { hrmsRouter } from '../modules/hrms/hrms.routes.js'
 import { aiStudioRouter } from '../modules/ai-studio/ai-studio.routes.js'
+import { orgFinanceRouter } from '../modules/org-finance/org-finance.routes.js'
+import { automationRouter } from '../modules/automation/automation.routes.js'
 
 /**
  * API v1. Every route is mounted under /v1 so a future breaking change can ship
@@ -37,6 +40,8 @@ v1Router.use('/testers', testersRouter)
 v1Router.use('/catalog', catalogRouter)
 v1Router.use('/projects', projectsRouter)
 v1Router.use('/bugs', bugsRouter)
+/** Jira export: an organisation's connection and per-bug exports. */
+v1Router.use('/bug-tracker', bugTrackerRouter)
 v1Router.use('/managers', managersRouter)
 /**
  * Mounted BEFORE `communicationRouter` so `/communication/broadcasts` is not
@@ -47,6 +52,10 @@ v1Router.use('/communication', communicationRouter)
 v1Router.use('/ratings', ratingsRouter)
 v1Router.use('/badges', badgesRouter)
 v1Router.use('/transactions', transactionsRouter)
+/** Organisation wallets, escrow per build, plans (customer finance). */
+v1Router.use('/org-finance', orgFinanceRouter)
+/** Automation modules and run reports per build (round 52). */
+v1Router.use('/automation', automationRouter)
 v1Router.use('/settings', settingsRouter)
 v1Router.use('/payment-accounts', paymentAccountsRouter)
 v1Router.use('/notifications', notificationsRouter)

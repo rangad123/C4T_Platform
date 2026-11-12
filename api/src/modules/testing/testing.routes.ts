@@ -2,6 +2,8 @@ import { Router } from 'express'
 import { authenticate } from '../../middleware/authenticate.js'
 import { validate } from '../../middleware/validate.js'
 import * as controller from './testing.controller.js'
+import * as workflow from './workflow.controller.js'
+import * as wf from './workflow.schema.js'
 import {
   listTestCasesQuery,
   createTestCaseSchema,
@@ -68,4 +70,69 @@ testingRouter.get(
   '/builds/:buildId/summary',
   validate({ params: buildIdParam }),
   controller.summary,
+)
+
+// ─── Applications, execution reviews, timesheets, scenarios ──────────────────
+// Same relationship-based model: every decision is made in workflow.service.ts.
+
+testingRouter.put(
+  '/builds/:buildId/applications-open',
+  validate({ params: wf.buildIdParam, body: wf.setApplicationsOpenSchema }),
+  workflow.setApplicationsOpen,
+)
+testingRouter.get('/open-builds', workflow.listOpenBuilds)
+testingRouter.get(
+  '/applications',
+  validate({ query: wf.listApplicationsQuery }),
+  workflow.listApplications,
+)
+testingRouter.post('/applications', validate({ body: wf.applySchema }), workflow.apply)
+testingRouter.post(
+  '/applications/:id/decision',
+  validate({ params: wf.idParam, body: wf.decideApplicationSchema }),
+  workflow.decideApplication,
+)
+testingRouter.post(
+  '/applications/:id/withdraw',
+  validate({ params: wf.idParam }),
+  workflow.withdrawApplication,
+)
+
+testingRouter.get(
+  '/test-reports',
+  validate({ query: wf.listExecutionsQuery }),
+  workflow.listExecutions,
+)
+testingRouter.post(
+  '/test-reports/:id/review',
+  validate({ params: wf.idParam, body: wf.reviewExecutionSchema }),
+  workflow.reviewExecution,
+)
+
+testingRouter.get(
+  '/timesheets',
+  validate({ query: wf.listTimesheetsQuery }),
+  workflow.listTimesheets,
+)
+testingRouter.post('/timesheets', validate({ body: wf.logTimeSchema }), workflow.logTime)
+testingRouter.post(
+  '/timesheets/:id/review',
+  validate({ params: wf.idParam, body: wf.reviewTimesheetSchema }),
+  workflow.reviewTimesheet,
+)
+
+testingRouter.get(
+  '/builds/:buildId/test-scenarios',
+  validate({ params: wf.buildIdParam }),
+  workflow.listScenarios,
+)
+testingRouter.post(
+  '/builds/:buildId/test-scenarios',
+  validate({ params: wf.buildIdParam, body: wf.createScenarioSchema }),
+  workflow.createScenario,
+)
+testingRouter.delete(
+  '/test-scenarios/:id',
+  validate({ params: wf.idParam }),
+  workflow.deleteScenario,
 )

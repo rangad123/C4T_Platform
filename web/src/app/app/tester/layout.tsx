@@ -24,7 +24,11 @@ const TESTER_SECTIONS: readonly SidebarSection[] = [
   },
   {
     label: 'Work',
-    links: [{ href: '/app/tester/projects', label: 'Projects', icon: 'briefcase' }],
+    links: [
+      { href: '/app/tester/projects', label: 'Projects', icon: 'briefcase' },
+      { href: '/app/tester/apply', label: 'Find work', icon: 'handshake' },
+      { href: '/app/tester/timesheets', label: 'Timesheets', icon: 'clock' },
+    ],
   },
   /**
    * Two entries, because they are two different things. Announcements are a

@@ -433,6 +433,33 @@ export default async function OrganisationDetailPage({
             )}
           </Panel>
 
+          <Panel
+            title="Wallet"
+            description="Top-ups, funds locked per build, and this organisation's plan."
+          >
+            <Button
+              href={`${BASE}/${organisation.id}/wallet`}
+              variant="secondary"
+              iconLeft="banknote"
+              fullWidth
+            >
+              Open wallet
+            </Button>
+          </Panel>
+
+          {canWrite ? (
+            <Panel title="Bug tracker" description="The Jira site this organisation's bugs go to.">
+              <Button
+                href={`${BASE}/${organisation.id}/bug-tracker`}
+                variant="secondary"
+                iconLeft="plug"
+                fullWidth
+              >
+                Open bug tracker
+              </Button>
+            </Panel>
+          ) : null}
+
           <Panel title="Record" description="What the platform knows about this account.">
             <DescriptionList
               items={[

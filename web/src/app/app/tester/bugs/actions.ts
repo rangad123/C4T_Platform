@@ -58,6 +58,7 @@ export async function reportBugAction(formData: FormData): Promise<void> {
   const projectId = formTrimmed(formData, 'projectId')
   const buildId = formTrimmed(formData, 'buildId')
   const featureId = formTrimmed(formData, 'featureId')
+  const testCaseId = formTrimmed(formData, 'testCaseId')
   const title = formTrimmed(formData, 'title')
   const description = formTrimmed(formData, 'description')
   const stepsToReproduce = formTrimmed(formData, 'stepsToReproduce')
@@ -102,6 +103,7 @@ export async function reportBugAction(formData: FormData): Promise<void> {
     const sp = new URLSearchParams({ error: code })
     if (projectId) sp.set('projectId', projectId)
     if (buildId) sp.set('buildId', buildId)
+    if (testCaseId) sp.set('testCaseId', testCaseId)
     return `${NEW_PATH}?${sp.toString()}`
   }
 
@@ -189,6 +191,7 @@ export async function reportBugAction(formData: FormData): Promise<void> {
         ...(networkType ? { networkType } : {}),
         ...(attachmentFileIds.length > 0 ? { attachmentFileIds } : {}),
         ...(customAnswers.length > 0 ? { customAnswers } : {}),
+        ...(testCaseId ? { testCaseId } : {}),
       },
     })
   } catch (error) {
@@ -197,5 +200,9 @@ export async function reportBugAction(formData: FormData): Promise<void> {
 
   revalidatePath(`/app/tester/projects/${projectId}`)
   // Outside any try/catch on purpose — `redirect` works by throwing.
-  redirect(reason ? back(reason) : `${projectPath(projectId)}&notice=reported`)
+  // A bug filed from a test case lands back on the cases, where its failure now shows.
+  const done = testCaseId
+    ? `/app/tester/projects/${projectId}?section=testing${buildId ? `&buildId=${buildId}` : ''}&notice=failure-filed`
+    : `${projectPath(projectId)}&notice=reported`
+  redirect(reason ? back(reason) : done)
 }
