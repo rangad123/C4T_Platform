@@ -2,7 +2,7 @@
  * AI configuration per project (AD-10, AD-11, AI-02 to AI-05, FL-E), against a stand-in Crowd4Test sign-in (port 7825), a stand-in
  * OpenAI-compatible provider that records which key each call carried (port 7826) and a real platform through inject. No real provider is
  * ever called. Covers: the key is encrypted and write-only; a project on its own key uses that key and never the server's, with no
- * fallback; managed AI uses the server's key; "Test this key"; usage rows carry who pays; permissions (a tester sees only availability, a
+ * fallback; managed AI uses the server's key (with none, a working Crowd4Test configuration); "Test this key"; usage rows carry who pays; permissions (a tester sees only availability, a
  * customer stays inside their organisation); budgets; and what the hosted preview says.
  */
 import fs from "node:fs";
@@ -457,6 +457,42 @@ describe("the hosted preview", () => {
             await server.close();
             hosted.db.close();
             fs.rmSync(hostedDir, { recursive: true, force: true });
+        }
+    });
+
+    it("with no key on the server, a working Crowd4Test configuration answers for managed projects and the AI shows as connected", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-aiconfig-stand-in-"));
+        const keyless = bootstrap(loadConfig({ DATA_DIR: dir, SCHEDULER_ENABLED: "false", WORKER_EMBEDDED: "false", API_KEY: KEY, SECRET_KEY: SECRET, LLM_PROVIDER: "anthropic", LLM_API_KEY: "" } as never));
+        const server = await buildServer(keyless);
+        try {
+            const req = async (method: string, url: string, payload?: object) => JSON.parse((await server.inject({ method: method as "GET", url, headers: { "x-api-key": KEY }, ...(payload ? { payload } : {}) })).body);
+            const d = { sql: keyless.sql, config: keyless.config };
+            const pid = (await req("POST", "/api/projects", { name: "Managed, no server key" })).id;
+            expect((await req("GET", "/api/config")).llm).toMatchObject({ configured: false, via: "none" });
+            const c = await req("POST", "/api/ai-configurations", { ...FIELDS, label: "Crowd4Test key", apiKey: GOOD, owner: "platform" });
+            // Not tested yet: not used, so nothing is shown as connected before the key is known to work.
+            expect((await req("GET", "/api/config")).llm.configured).toBe(false);
+            expect((await resolveProjectAi(d, pid)).source).toBe("server");
+            keyless.db.run("UPDATE ai_configurations SET status = 'working' WHERE id = ?", c.id);
+            const llm = (await req("GET", "/api/config")).llm;
+            expect(llm).toEqual({ configured: true, via: "configuration", label: "Crowd4Test key", provider: "openai-compatible", model: "stand-in-main" });
+            expect(JSON.stringify(llm)).not.toContain(GOOD);
+            expect(await resolveProjectAi(d, pid)).toMatchObject({ mode: "managed", source: "configuration", billing: { owner: "crowd4test" }, configuration: { id: c.id } });
+            expect(await req("GET", "/api/ai-configurations")).toMatchObject({ server: { hasKey: true } });
+            expect(await req("GET", `/api/projects/${pid}/ai`)).toMatchObject({ ready: true, serverHasKey: true, mode: "managed" });
+            // A project on its own key keeps to it: the stand-in is managed AI only.
+            const own = (await req("POST", "/api/projects", { name: "Own key" })).id;
+            const o = await req("POST", `/api/projects/${own}/ai/configurations`, { ...FIELDS, label: "Own", apiKey: BAD });
+            await req("PUT", `/api/projects/${own}/ai`, { mode: "own", configurationId: o.id });
+            expect(await resolveProjectAi(d, own)).toMatchObject({ mode: "own", configuration: { id: o.id } });
+            // Failed: no longer used, and the AI is not set up again.
+            keyless.db.run("UPDATE ai_configurations SET status = 'failed' WHERE id = ?", c.id);
+            expect((await req("GET", "/api/config")).llm.configured).toBe(false);
+            expect((await resolveProjectAi(d, pid)).source).toBe("server");
+        } finally {
+            await server.close();
+            keyless.db.close();
+            fs.rmSync(dir, { recursive: true, force: true });
         }
     });
 });

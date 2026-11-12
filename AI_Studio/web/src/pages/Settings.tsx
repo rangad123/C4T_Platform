@@ -49,13 +49,20 @@ export function Settings() {
                     ) : config.llm.configured ? (
                         <>
                             <p className="t-secondary">
-                                Using <strong>{config.llm.model}</strong> ({PROVIDER_NAME[config.llm.provider] ?? config.llm.provider}). It explores applications, plans tests and writes them.
+                                Using <strong>{config.llm.model}</strong> ({PROVIDER_NAME[config.llm.provider] ?? config.llm.provider})
+                                {config.llm.via === "configuration" && config.llm.label ? (
+                                    <>
+                                        {" "}
+                                        from the AI configuration <strong>{config.llm.label}</strong>, as this server has no key of its own
+                                    </>
+                                ) : null}
+                                . It explores applications, plans tests and writes them.
                             </p>
-                            <ModelHealth />
+                            {config.llm.via !== "configuration" && <ModelHealth />}
                             <PromptCacheSetting />
                             <CompactSnapshotsSetting />
                             <WithoutAiSetting />
-                            <FastModelSetting />
+                            {config.llm.via !== "configuration" && <FastModelSetting />}
                         </>
                     ) : (
                         <>

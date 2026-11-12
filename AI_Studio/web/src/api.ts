@@ -178,7 +178,8 @@ export interface MobileApp {
 }
 
 export interface PlatformConfig {
-    llm: { provider: string; model: string; configured: boolean };
+    /** `via`: the server's own key, or (none on the server) the working Crowd4Test configuration named `label` that managed projects use. */
+    llm: { provider: string; model: string; configured: boolean; via?: "server" | "configuration" | "none"; label?: string };
     /** Whether a run or an exploration started now would start: false while tests are switched off on this server (no worker). */
     runsHere?: boolean;
     /** "runners" on the hosted platform: every run goes to a runner and this server runs no test itself. "local" (or absent): as before. */

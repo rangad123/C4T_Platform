@@ -74,7 +74,7 @@ export const STATUS_WORDS: Record<ConfigStatus, { label: string; tone: Tone; tip
 
 export const OWNER_WORDS: Record<string, string> = { crowd4test: "Crowd4Test", organization: "Your organisation" };
 
-export const SERVER_HAS_NO_KEY = "This server has no AI key of its own, so Crowd4Test’s managed AI cannot answer here. A project on its own key is not affected.";
+export const SERVER_HAS_NO_KEY = "This server has no AI key of its own and no working Crowd4Test configuration, so Crowd4Test’s managed AI cannot answer here. Add a Crowd4Test configuration and test it. A project on its own key is not affected.";
 export const NOTHING_RUNS_HERE = "AI work does not run on this server: nothing here picks up a job, so an exploration would wait in the queue and never start. You can still save and test a key.";
 
 /**

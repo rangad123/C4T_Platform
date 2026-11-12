@@ -18,6 +18,7 @@ import type { Row } from "../db.js";
 import { DEFAULT_PLATFORMS, projectSetupOf, type ProjectPlatform, type TestingMode } from "../project-setup.js";
 import type { JobOptions, Repo } from "../repo.js";
 import { runsCanStartHere } from "../suite-run.js";
+import { platformAi } from "../ai-config.js";
 import { AGENTS_NEED_AGENT_MODE, agentById, applyAgentChoice, switchesFor, TESTING_AGENTS, TestingAgentStore, validateChoice, type AgentId, type AskedSwitches, type TestingAgent } from "../testing-agents.js";
 import type { RouteCtx } from "./types.js";
 
@@ -77,13 +78,13 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
         }
         return out;
     };
-    const where = () => ({ canRun: runsCanStartHere(p), ai: { configured: p.llm.modelName !== "unavailable" } });
+    const where = async () => ({ canRun: runsCanStartHere(p), ai: { configured: (await platformAi(p, p.llm.modelName)).configured } });
 
     app.get("/api/testing-agents", async (req) => {
         const projects = await projectsUsing(req);
         return {
             agents: TESTING_AGENTS.map((a) => ({ ...publicAgent(a), projects: projects.filter((x) => x.agents.includes(a.id)).map(({ id, name, source }) => ({ id, name, source })) })),
-            ...where(),
+            ...(await where()),
         };
     });
 
@@ -91,7 +92,7 @@ export function registerTestingAgentRoutes(ctx: RouteCtx): void {
         const a = agentById((req.params as { agentId: string }).agentId);
         if (!a) throw new HttpError(404, AGENT_NOT_FOUND);
         const projects = (await projectsUsing(req)).filter((x) => x.agents.includes(a.id)).map(({ id, name, source }) => ({ id, name, source }));
-        return { agent: publicAgent(a), projects, ...where() };
+        return { agent: publicAgent(a), projects, ...(await where()) };
     });
 
     const view = async (id: string) => {

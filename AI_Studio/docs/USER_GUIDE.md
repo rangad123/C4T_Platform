@@ -992,7 +992,7 @@ These ideas run through the whole product.
 
 | Problem | What to do |
 |---|---|
-| **The AI is not set up.** The sidebar says **AI not set up**, or exploring says the AI model is not set up. | Ask your admin to add the AI service key and restart. API tests and accessibility checks still work without it. |
+| **The AI is not set up.** The sidebar says **AI not set up**, or exploring says the AI model is not set up. | Ask your admin to add the AI service key and restart, or to add a Crowd4Test AI configuration in Settings, AI configurations, and test it: with no key on the server, projects on Crowd4Test’s managed AI use the first configuration that works. API tests and accessibility checks still work without it. |
 | **I cannot reach the platform, or it asks for a key.** | Check the address. If it says access is denied, ask the owner for the access key and type it on the first screen. |
 | **"We couldn't access this application".** | Check that the address is right and that the app is running and reachable from the platform's computer. A site on your own network may need a runner. |
 | **Only sign-in tests were made.** | Add a test account when you explore, so the platform can see past the sign-in page. |

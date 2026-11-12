@@ -18,7 +18,7 @@ import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { defaultModelOf, LLM_PROVIDERS, type LlmProviderId } from "../../engine/llm/provider.js";
 import { groupRows, monthBounds, monthOf, dayOf } from "../../engine/llm/usage.js";
-import { aiConfigStore, belongsTo, billingOfConfiguration, keyProblemWords, projectAiGate, resolveProjectAi, testConfiguration } from "../ai-config.js";
+import { aiConfigStore, belongsTo, billingOfConfiguration, keyProblemWords, platformAi, projectAiGate, resolveProjectAi, testConfiguration } from "../ai-config.js";
 import type { AiConfiguration, AiMode, ConfigOwnerKind } from "../ai-config-store.js";
 import { accessControlOf, actorOf } from "../auth/access.js";
 import { actorLabel, currentActor, permissionsOf, sideOf, type Actor } from "../auth/actor.js";
@@ -154,9 +154,10 @@ export function registerAiConfigRoutes(ctx: RouteCtx): void {
         return c;
     };
 
-    const serverFacts = () => {
+    // `hasKey`: whether Crowd4Test's managed AI can answer here, from the server's own key or a working Crowd4Test configuration.
+    const serverFacts = async () => {
         const runs = runsCanStartHere(p);
-        return { hasKey: p.llm.modelName !== "unavailable", runsHere: runs.ok };
+        return { hasKey: (await platformAi(p, p.llm.modelName)).configured, runsHere: runs.ok };
     };
     const providers = () => LLM_PROVIDERS.map((id) => ({ id, name: PROVIDER_WORDS[id], defaultModel: defaultModelOf(id), needsAddress: id === "openai-compatible" }));
 
@@ -168,7 +169,7 @@ export function registerAiConfigRoutes(ctx: RouteCtx): void {
         const seesUsage = held.has("ai_studio.usage.view") && sideOf(actor) !== "tester";
         const gate = await projectAiGate(p, id);
         const ai = await resolveProjectAi(p, id);
-        const server = serverFacts();
+        const server = await serverFacts();
         // A key known not to work does not count: nobody is told AI is available until it is fixed and tested again.
         const ready = gate.ok && !(ai.mode === "own" && ai.configuration?.status === "failed");
         const answer: Record<string, unknown> = { available: ready && server.runsHere, ready, runsHere: server.runsHere };
@@ -249,7 +250,7 @@ export function registerAiConfigRoutes(ctx: RouteCtx): void {
         const mine = (await store.list()).filter((c) => manages(actor, c));
         const orgs = control.projects.store.organizations().filter((o) => mayOwn(actor, "organization", o.id));
         const customerOrg = sideOf(actor) === "customer" && actor.organizationId && !orgs.some((o) => o.id === actor.organizationId) ? [{ id: actor.organizationId, name: orgName(actor.organizationId) }] : [];
-        return { configurations: mine.map((c) => viewOf(c, uses)), organizations: [...orgs.map((o) => ({ id: o.id, name: o.name })), ...customerOrg], canAddPlatform: mayOwn(actor, "platform", null), providers: providers(), server: serverFacts() };
+        return { configurations: mine.map((c) => viewOf(c, uses)), organizations: [...orgs.map((o) => ({ id: o.id, name: o.name })), ...customerOrg], canAddPlatform: mayOwn(actor, "platform", null), providers: providers(), server: await serverFacts() };
     });
 
     app.post("/api/ai-configurations", async (req, reply) => {

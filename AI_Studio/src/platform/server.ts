@@ -63,6 +63,7 @@ import { prunedMessage } from "../engine/retention/format.js";
 import { redactTriggerUrl } from "./trigger-store.js";
 import { redactStreamUrl } from "./stream-core.js";
 import { EXPLORING_OFF_MESSAGE, IMPORTED_NOT_RUN, refuseUnlessRunsStart, runsCanStartHere } from "./suite-run.js";
+import { platformAi } from "./ai-config.js";
 import { agentCanRunIos, agentCanRunMobile, assertRunTarget, IOS_NEEDS_AGENT_MESSAGE, jobRanOn } from "./agent-services.js";
 import { farmChosen } from "./device-farm-store.js";
 import { assertPhoneExploration } from "./phone-explore.js";
@@ -282,7 +283,8 @@ export async function buildServer(p: Platform): Promise<FastifyInstance> {
     // ── meta ───────────────────────────────────────────────────────────────────
     app.get("/api/health", async () => ({ status: "ok" }));
     app.get("/api/config", async () => ({
-        llm: { provider: p.config.LLM_PROVIDER, model: p.llm.modelName, configured: p.llm.modelName !== "unavailable" },
+        // The server's key, else the working Crowd4Test configuration managed projects use (ai-config.ts): what the "AI connected" signs show.
+        llm: await platformAi(p, p.llm.modelName),
         authRequired: Boolean(p.config.API_KEY),
         // Whether a run or an exploration started now would start (suite-run.ts): false while tests are switched off on this server.
         runsHere: runsCanStartHere(p).ok,

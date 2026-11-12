@@ -2,7 +2,8 @@
  * Which AI a project's work uses, and who pays (AD-11, AI-02, AI-03). Read when a job starts, or when a route is about to call the model: the
  * answer is fixed for that piece of work, so the engine keeps reading only its own client and the settings caches, and never waits on this.
  *
- * - Managed AI: Crowd4Test pays. The platform's configuration the project picked, or the server's key when none is picked or it cannot be used.
+ * - Managed AI: Crowd4Test pays. The platform's configuration the project picked, or the server's key when none is picked or it cannot be used;
+ *   with no key on the server, the first working platform configuration.
  * - Own key: the organisation pays. Only that configuration is used, with its own models: no fallback models, no fast model from Settings, no
  *   server key. Anything wrong with it stops the AI work with a clear message; it never turns into spending Crowd4Test's key.
  *
@@ -88,6 +89,41 @@ async function usable(store: AiConfigStore, c: AiConfiguration): Promise<{ key: 
  * The AI this project's work uses right now. Never throws: when the choice itself cannot be read the work is stopped, because a project on
  * its own key must not reach the server's key by accident.
  */
+/** Whether the server's own settings name a usable key (LLM_PROVIDER and its key in .env). */
+export function serverHasKey(config: Config): boolean {
+    try {
+        assertLlmConfigured(config);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** The first Crowd4Test configuration whose last test worked and whose key can be read: managed AI's stand-in when the server has no key. */
+async function workingPlatformConfiguration(store: AiConfigStore): Promise<{ row: AiConfiguration; key: string } | undefined> {
+    for (const row of await store.list()) {
+        if (row.ownerKind !== "platform" || row.status !== "working") continue;
+        const u = await usable(store, row);
+        if ("key" in u) return { row, key: u.key };
+    }
+    return undefined;
+}
+
+/**
+ * The AI the platform as a whole has, for the "AI connected" signs: the server's key, else a working Crowd4Test configuration (what managed
+ * projects then use). Names no key, only the provider, model and the configuration's label.
+ */
+export async function platformAi(d: AiDeps, serverModel: string): Promise<{ configured: boolean; provider: string; model: string; via: "server" | "configuration" | "none"; label?: string }> {
+    if (serverModel !== "unavailable") return { configured: true, provider: d.config.LLM_PROVIDER, model: serverModel, via: "server" };
+    try {
+        const stand = await workingPlatformConfiguration(aiConfigStore(d));
+        if (stand) return { configured: true, provider: stand.row.provider, model: stand.row.model, via: "configuration", label: stand.row.label };
+    } catch {
+        // An unreadable store says nothing more than "not set up".
+    }
+    return { configured: false, provider: d.config.LLM_PROVIDER, model: serverModel, via: "none" };
+}
+
 export async function resolveProjectAi(d: AiDeps, projectId: string): Promise<ProjectAi> {
     let organizationId: string | null = null;
     const stop = (problem: string): ProjectAi => ({ mode: "own", billing: { owner: "organization", organizationId }, source: "blocked", blocked: AI_NOT_AVAILABLE, problem });
@@ -97,9 +133,13 @@ export async function resolveProjectAi(d: AiDeps, projectId: string): Promise<Pr
         organizationId = await organizationOf(d.sql, projectId);
         const row = choice.configurationId ? await store.get(choice.configurationId) : undefined;
         if (choice.mode === "managed") {
-            if (row?.ownerKind !== "platform" || row.status === "failed") return { mode: "managed", billing: CROWD4TEST, source: "server" };
-            const u = await usable(store, row);
-            return "key" in u ? { mode: "managed", billing: CROWD4TEST, source: "configuration", configuration: row, key: u.key } : { mode: "managed", billing: CROWD4TEST, source: "server" };
+            if (row?.ownerKind === "platform" && row.status !== "failed") {
+                const u = await usable(store, row);
+                if ("key" in u) return { mode: "managed", billing: CROWD4TEST, source: "configuration", configuration: row, key: u.key };
+            }
+            // No key on the server: a working Crowd4Test configuration stands in for it, so managed AI works without one being picked.
+            const stand = serverHasKey(d.config) ? undefined : await workingPlatformConfiguration(store);
+            return stand ? { mode: "managed", billing: CROWD4TEST, source: "configuration", configuration: stand.row, key: stand.key } : { mode: "managed", billing: CROWD4TEST, source: "server" };
         }
         if (!row) return stop("No configuration is chosen for this project.");
         if (!belongsTo(row, projectId, organizationId)) return stop("This configuration belongs to another organisation. Choose another one.");
