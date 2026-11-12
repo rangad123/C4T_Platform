@@ -42,6 +42,7 @@ const NOT_A_TOPIC: Record<string, string> = {
     "runner-restarts.md": "how runs on runners survive a restart of the platform, for whoever runs the platform; nothing for a person to do",
     "runner-resources.md": "the runner's limits on priority, memory and disk, set in the runner's environment by whoever installs it",
     "runner-only-mode.md": "a pointer to runner-settings.md, which the runners topic links",
+    "explore-on-runner.md": "how an exploration runs on the person's runner with the platform's AI; Explore my app says on screen which runner it uses and what to fix, and the user guide section Exploring on your runner covers it",
     "runner-agent-setup.md": "install and token steps for the person who sets up a runner; the runner topic links runner-agent.md and the admin guide",
     "runner-installer.md": "how the runner installer program is built, what it checks and where it installs; the runners topic covers what a tester does",
     "runner-installer-mac.md": "how the Mac installer app is built and what it has not been tested on; the runners topic covers what a tester does",

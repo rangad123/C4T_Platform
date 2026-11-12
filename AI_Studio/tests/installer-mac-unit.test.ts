@@ -1097,15 +1097,16 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
         const first = start(makeAppKit({ code: "aite_FirstDownload0123456789abcdefghijklmnop", runner: forever }).setup);
         let second: ReturnType<typeof start> | undefined;
         try {
-            await waitFor(() => first.out.includes("Connected to the platform"), 40_000, () => first.out);
+            await waitFor(() => first.out.includes("Connected to the platform as"), 40_000, () => first.out);
             const pid = read(path.join(w.install, "runner.pid")).trim();
             const next = makeAppKit({ code: "aite_SecondDownload123456789abcdefghijklmnop", runner: forever });
             second = start(next.setup);
             await waitFor(() => first.child.exitCode !== null || first.child.signalCode !== null, 40_000, () => `${first.out}\n--- second ---\n${second!.out}`);
-            await waitFor(() => second!.out.includes("Connected to the platform"), 40_000, () => second!.out);
+            await waitFor(() => second!.out.includes("Connected to the platform as"), 40_000, () => second!.out);
             expect(second.out).toContain(`Stopping the runner this app started (process ${pid}).`);
             expect(second.out).not.toContain("already running");
             expect(read(path.join(w.install, "runner", "runner.enroll")).trim()).toBe("aite_SecondDownload123456789abcdefghijklmnop");
+            expect(fs.existsSync(path.join(w.install, "runner.pid")), `${second.out}\n--- first ---\n${first.out}`).toBe(true);
             expect(read(path.join(w.install, "runner.pid")).trim()).not.toBe(pid);
             // The same download opened again: its code was copied already, so the running runner stays and only its status is shown.
             const again = runScript(next.setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env });
