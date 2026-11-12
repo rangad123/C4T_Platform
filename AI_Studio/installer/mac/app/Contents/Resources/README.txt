@@ -2,7 +2,8 @@ AI Testing Runner
 =================
 
 This app sets up the AI Testing runner on your Mac and starts it. It runs your tests on this computer and reports the results to the
-platform. Open it from inside the folder you unzipped, next to runner.mjs, runner.json and runner.token.
+platform. The download from the platform holds your runner files inside the app (Contents/Resources/kit), so the app is all you need:
+open the download, then open AI Testing Runner. (An older download had the files beside the app: open it from that unzipped folder.)
 
 What it does
   1. Looks for Node.js 24 or newer. If you have it (Homebrew, nvm, fnm, Volta and others are checked), it uses it and downloads nothing.
@@ -20,7 +21,7 @@ Developer ID, so macOS blocks it until you allow it once:
   - macOS 15 and newer: choose Done, open System Settings, then Privacy & Security, scroll down to Security and choose
     Open Anyway next to "AI Testing Runner". Sign in with your Mac password, then open the app again.
   - macOS 14 and older: right-click the app, choose Open, then Open.
-  - Any version, in Terminal: type  xattr -dr com.apple.quarantine  and a space, drag the unzipped folder into the window,
+  - Any version, in Terminal: type  xattr -dr com.apple.quarantine  and a space, drag the app into the window,
     press Enter, then open the app again.
 
 Stopping and removing

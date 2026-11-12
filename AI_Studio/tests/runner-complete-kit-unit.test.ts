@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 import { unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { splitStampedExe } from "./fixtures/runner-person.js";
+import { splitLinuxScript, splitStampedExe } from "./fixtures/runner-person.js";
 import { loadConfig } from "../src/config.js";
 import { accessControlOf } from "../src/platform/auth/access.js";
 import { bootstrap, type Platform } from "../src/platform/bootstrap.js";
@@ -456,7 +456,8 @@ describe("the download route", () => {
         expect(info.available).toBe(true);
         expect(info.systems.map((x: { os: string; arch: string }) => `${x.os}-${x.arch}`)).toEqual(["windows-x64", "windows-arm64", "mac-x64", "mac-arm64", "linux-x64", "linux-arm64"]);
         const linux = systemOf(info, "linux", "x64");
-        expect(Object.keys(linux).sort()).toEqual(["arch", "available", "bytes", "os"]);
+        expect(Object.keys(linux).sort()).toEqual(["arch", "available", "bytes", "fileName", "os"]);
+        expect((linux as unknown as { fileName: string }).fileName).toBe("ai-testing-runner.sh");
         expect(linux.bytes).toBeGreaterThan(readManifest("linux-x64").packBytes);
         // Windows never carries its own Node.js, even with a Windows complete build on the server; nor a processor it was not built for.
         expect(systemOf(info, "windows", "x64")).toMatchObject({ available: true });
@@ -476,37 +477,87 @@ describe("the download route", () => {
         expect(names).toContain("runner-my-computer-windows/start-runner.cmd");
     });
 
-    it("streams the Linux download with its own Node.js, every package, the runner, the start scripts, with the right modes and length", async () => {
+    it("streams the Linux download (round 50: one sh script, the kit as a gzip tar) with its own Node.js, every package, the runner, with the right modes and length", async () => {
         const r = await complete("linux", "x64");
         expect(r.status, r.text).toBe(200);
-        expect(r.headers["content-type"]).toBe("application/zip");
-        expect(r.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-linux-x64.zip"');
+        expect(r.headers["content-type"]).toBe("application/x-sh");
+        expect(r.headers["content-disposition"]).toBe('attachment; filename="ai-testing-runner.sh"');
         expect(r.headers["x-runner-kit-kind"]).toBe("files");
         expect(r.headers["x-runner-kit-target"]).toBe("linux-x64");
         expect(r.headers["cache-control"]).toBe("no-store");
         expect(Number(r.headers["content-length"])).toBe(r.buf.length);
-        const z = unzipSync(new Uint8Array(r.buf));
-        const dir = "runner-my-computer-linux-x64";
-        for (const n of ["node/bin/node", "node/LICENSE", "node_modules/.aitp-complete", "node_modules/@playwright/test/package.json", "complete-kit.json", "runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt", "runner.json", "runner.enroll", "start-runner.cmd", "start-runner.sh", "start-runner.command", "README.txt"]) {
-            expect(z[`${dir}/${n}`], n).toBeDefined();
+        const { files: z, modes: m } = splitLinuxScript(r.buf)!;
+        for (const n of ["node/bin/node", "node/LICENSE", "node_modules/.aitp-complete", "node_modules/@playwright/test/package.json", "complete-kit.json", "runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt", "runner.json", "runner.enroll", "start-runner.sh", "check-computer.sh"]) {
+            expect(z[n], n).toBeDefined();
         }
-        expect(Object.keys(z).every((k) => k.startsWith(`${dir}/`))).toBe(true);
-        // Exactly the bytes the build packed (fflate checks every CRC while unzipping, too).
-        const m = modes(new Uint8Array(r.buf));
-        expect(m[`${dir}/node/bin/node`]).toEqual({ mode: 0o755, unix: true });
-        expect(m[`${dir}/runner.enroll`]!.mode).toBe(0o600);
-        expect(m[`${dir}/start-runner.sh`]!.mode).toBe(0o755);
-        expect(m[`${dir}/start-runner.cmd`]!.mode).toBe(0o755);
-        expect(m[`${dir}/runner.mjs`]!.mode).toBe(0o644);
-        const cfg = JSON.parse(Buffer.from(z[`${dir}/runner.json`]!).toString());
+        // Nothing for other systems, and no README: the header says what it does.
+        for (const n of ["start-runner.cmd", "start-runner.command", "README.txt"]) expect(z[n], n).toBeUndefined();
+        // Exactly the bytes the build packed (each gzip member's CRC is checked while it is read).
+        const manifest = readManifest("linux-x64");
+        for (const f of manifest.files) expect(z[f.path]?.length, f.path).toBe(f.size);
+        expect(m["node/bin/node"]).toBe(0o755);
+        expect(m["runner.enroll"]).toBe(0o600);
+        expect(m["start-runner.sh"]).toBe(0o755);
+        expect(m["runner.mjs"]).toBe(0o644);
+        const cfg = JSON.parse(z["runner.json"]!.toString());
         expect(Object.keys(cfg).sort()).toEqual(["kitVersion", "url"]);
         expect(cfg.url).toBe("https://tests.example.com");
-        const readme = Buffer.from(z[`${dir}/README.txt`]!).toString();
-        expect(readme).not.toContain("\r\n");
-        for (const needle of ["Download: complete, for Linux on an Intel or AMD processor (linux-x64)", "Nothing is installed: this download already holds Node.js and the test tools.", `Node.js v${VERSION} in the node folder`, "start-runner.sh", "Settings, Your runner"]) expect(readme, needle).toContain(needle);
-        expect(readme).not.toMatch(/You need Node\.js 24 or newer/);
         // The bundle is the same prebuilt one as the plain kit.
-        expect(Buffer.from(z[`${dir}/runner.mjs`]!).equals(fs.readFileSync(path.join(bundleDir, "runner.mjs")))).toBe(true);
+        expect(z["runner.mjs"]!.equals(fs.readFileSync(path.join(bundleDir, "runner.mjs")))).toBe(true);
+        // This computer's GNU tar reads the many gzip members as one stream, as the header has it do.
+        const file = path.join(tmp, "complete-linux.sh");
+        fs.writeFileSync(file, r.buf);
+        const listed = spawnSync("sh", ["-c", 'n=$(sed -n "s/^AITP_SKIP=//p" "$1" | head -n 1); tail -c +"$n" "$1" | tar tzf - | wc -l', "sh", file], { encoding: "utf8" });
+        expect(listed.status, listed.stderr).toBe(0);
+        expect(Number(listed.stdout.trim())).toBe(Object.keys(z).length);
+    });
+
+    it.skipIf(process.platform !== "linux")("the Linux script, run by sh: unpacks privately, installs, starts the runner with its own Node.js, deletes the temporary copy, never copies a used code again", async () => {
+        const r = await complete("linux", "x64");
+        const dl = fs.mkdtempSync(path.join(tmp, "linux-dl-"));
+        fs.writeFileSync(path.join(dl, "ai-testing-runner.sh"), r.buf);
+        const home = path.join(dl, "home (1)");
+        const temp = path.join(dl, "temp");
+        fs.mkdirSync(home);
+        fs.mkdirSync(temp);
+        const env = { PATH: pathWithoutNode(), HOME: home, TMPDIR: temp, AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1" };
+        // The download's node/bin/node is a stand-in that answers its version and exits: the runner "stops" at once, as a real one would after Ctrl-C.
+        const first = run("sh", ["ai-testing-runner.sh"], dl, env);
+        expect(first.out).toContain("Unpacking the runner");
+        expect(first.out).toContain(`Using the Node.js that came with this download, version v${VERSION}.`);
+        expect(first.out).toContain("The test tools came with this download. Nothing to install.");
+        expect(first.out).toContain("The runner stopped.");
+        expect(first.code, first.out).toBe(0);
+        const inst = path.join(home, ".local", "share", "ai-testing-runner");
+        for (const n of ["runner.mjs", "runner.json", "start-runner.sh", "check-computer.sh", "node/bin/node", "node_modules/.aitp-complete", "runner.enroll", "runner.pid", "enroll-copied", ".created-by-ai-testing-runner"]) expect(fs.existsSync(path.join(inst, n)), n).toBe(true);
+        expect(fs.statSync(inst).mode & 0o777).toBe(0o700);
+        expect(fs.statSync(path.join(inst, "runner.enroll")).mode & 0o777).toBe(0o600);
+        // The temporary copy is gone; the script itself was not copied anywhere; enroll-copied holds a hash, not the code.
+        expect(fs.readdirSync(temp)).toEqual([]);
+        expect(fs.readdirSync(inst).some((n) => n.endsWith(".sh") && n !== "start-runner.sh" && n !== "check-computer.sh")).toBe(false);
+        const code = fs.readFileSync(path.join(inst, "runner.enroll"), "utf8").trim();
+        expect(fs.readFileSync(path.join(inst, "enroll-copied"), "utf8")).not.toContain(code);
+        // The runner trades and deletes the code; the same file run again must not bring the spent code back.
+        fs.rmSync(path.join(inst, "runner.enroll"));
+        const again = run("sh", ["ai-testing-runner.sh"], dl, env);
+        expect(again.code, again.out).toBe(0);
+        expect(again.out).toContain("Starting the runner");
+        expect(fs.existsSync(path.join(inst, "runner.enroll"))).toBe(false);
+        expect(fs.readdirSync(temp)).toEqual([]);
+        // A folder the runner did not make is refused.
+        const foreign = path.join(dl, "foreign");
+        fs.mkdirSync(foreign);
+        fs.writeFileSync(path.join(foreign, "notes.txt"), "mine");
+        const refused = run("sh", ["ai-testing-runner.sh"], dl, { ...env, AITP_RUNNER_INSTALL_DIR: foreign });
+        expect(refused.code).toBe(1);
+        expect(refused.out).toContain("already holds files that the runner did not put there");
+        expect(fs.readdirSync(foreign)).toEqual(["notes.txt"]);
+        // A damaged file says so plainly and leaves nothing in the temporary folder.
+        fs.writeFileSync(path.join(dl, "damaged.sh"), r.buf.subarray(0, r.buf.length - 4096));
+        const damagedRun = run("sh", ["damaged.sh"], dl, { ...env, AITP_RUNNER_INSTALL_DIR: path.join(dl, "elsewhere") });
+        expect(damagedRun.code).toBe(1);
+        expect(damagedRun.out).toContain("This file is damaged or incomplete");
+        expect(fs.readdirSync(temp)).toEqual([]);
     });
 
     it("puts the Mac app inside when the server has it; the Windows installer download never carries the complete parts (260-character path limit)", async () => {
@@ -528,19 +579,24 @@ describe("the download route", () => {
             expect(systemOf(info, "windows", "x64").bytes).toBeUndefined();
             expect(systemOf(info, "mac", "arm64").bytes).toBeGreaterThan(0);
 
-            // Mac: the app inside the complete download; it leads the README, the start scripts stay as the way without installing.
+            // Mac (round 50): a zip holding only the app, with the complete kit inside it; no README or start scripts beside it.
             const mac = await complete("mac", "arm64");
             expect(mac.status, mac.text).toBe(200);
             expect(mac.headers["x-runner-kit-kind"]).toBe("installer");
             expect(mac.headers["x-runner-kit-note"]).toBeUndefined();
             expect(mac.headers["x-runner-kit-target"]).toBe("mac-arm64");
+            expect(mac.headers["content-disposition"]).toBe('attachment; filename="ai-testing-runner-mac.zip"');
+            expect(Number(mac.headers["content-length"])).toBe(mac.buf.length);
             const z = unzipSync(new Uint8Array(mac.buf));
-            const dir = "runner-my-computer-mac-arm64";
-            for (const n of ["AI Testing Runner.app/Contents/MacOS/AITestingRunner", "node/bin/node", "node_modules/.aitp-complete", "start-runner.sh", "runner.enroll"]) expect(z[`${dir}/${n}`], n).toBeDefined();
-            const readme = Buffer.from(z[`${dir}/README.txt`]!).toString();
-            expect(readme.indexOf('Double-click "AI Testing Runner"')).toBeGreaterThan(-1);
-            expect(readme.indexOf('Double-click "AI Testing Runner"')).toBeLessThan(readme.indexOf("sh start-runner.sh"));
-            expect(readme).toContain("Or, to run it without installing, open Terminal");
+            const app = "AI Testing Runner.app";
+            const kit = `${app}/Contents/Resources/kit`;
+            expect([...new Set(Object.keys(z).map((n) => n.split("/")[0]))]).toEqual([app]);
+            for (const n of [`${app}/Contents/MacOS/AITestingRunner`, `${kit}/node/bin/node`, `${kit}/node_modules/.aitp-complete`, `${kit}/node_modules/mac-watcher/package.json`, `${kit}/complete-kit.json`, `${kit}/runner.mjs`, `${kit}/runner.json`, `${kit}/runner.enroll`]) expect(z[n], n).toBeDefined();
+            expect(Object.keys(z).some((n) => /start-runner|README\.txt$|check-computer/.test(n))).toBe(false);
+            const mm = modes(new Uint8Array(mac.buf));
+            expect(mm[`${kit}/node/bin/node`]).toEqual({ mode: 0o755, unix: true });
+            expect(mm[`${app}/Contents/MacOS/AITestingRunner`]).toEqual({ mode: 0o755, unix: true });
+            expect(mm[`${kit}/runner.enroll`]!.mode).toBe(0o600);
             // Linux never gets an installer.
             const linux = await complete("linux", "x64");
             expect(linux.headers["x-runner-kit-kind"]).toBe("files");
@@ -550,18 +606,21 @@ describe("the download route", () => {
         }
     });
 
-    it("streams Linux and Mac downloads with node/bin/node executable, chosen by os and arch", async () => {
+    it("streams Linux and Mac downloads with node/bin/node executable, chosen by os and arch; a Mac without the app here gets the folder zip with a README", async () => {
         const linux = await complete("linux", "x64");
         expect(linux.status, linux.text).toBe(200);
-        expect(linux.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-linux-x64.zip"');
-        const lm = modes(new Uint8Array(linux.buf));
-        expect(lm["runner-my-computer-linux-x64/node/bin/node"]).toEqual({ mode: 0o755, unix: true });
-        const lz = unzipSync(new Uint8Array(linux.buf));
-        expect(Buffer.from(lz["runner-my-computer-linux-x64/README.txt"]!).toString()).not.toContain("\r\n");
+        expect(linux.headers["content-disposition"]).toBe('attachment; filename="ai-testing-runner.sh"');
+        expect(splitLinuxScript(linux.buf)!.modes["node/bin/node"]).toBe(0o755);
         const mac = await complete("mac", "arm64");
         expect(mac.status, mac.text).toBe(200);
         expect(mac.headers["x-runner-kit-target"]).toBe("mac-arm64");
-        expect(Object.keys(unzipSync(new Uint8Array(mac.buf)))).toContain("runner-my-computer-mac-arm64/node_modules/mac-watcher/package.json");
+        expect(mac.headers["content-disposition"]).toBe('attachment; filename="runner-my-computer-mac-arm64.zip"');
+        const mz = unzipSync(new Uint8Array(mac.buf));
+        expect(Object.keys(mz)).toContain("runner-my-computer-mac-arm64/node_modules/mac-watcher/package.json");
+        expect(modes(new Uint8Array(mac.buf))["runner-my-computer-mac-arm64/node/bin/node"]).toEqual({ mode: 0o755, unix: true });
+        const readme = Buffer.from(mz["runner-my-computer-mac-arm64/README.txt"]!).toString();
+        expect(readme).not.toContain("\r\n");
+        for (const needle of ["Download: complete, for a Mac with an Apple chip (mac-arm64)", "Nothing is installed: this download already holds Node.js and the test tools.", `Node.js v${VERSION} in the node folder`, "start-runner.sh", "Settings, Your runner"]) expect(readme, needle).toContain(needle);
     });
 
     it("a target that was not built gets the download without its own Node.js", async () => {
@@ -600,8 +659,9 @@ describe("the download route", () => {
 
     it("never puts the server's secrets, paths or data in a download with its own Node.js; the single-use code is in runner.enroll only", async () => {
         const r = await complete("linux", "x64");
-        const z = unzipSync(new Uint8Array(r.buf));
-        const token = Buffer.from(z["runner-my-computer-linux-x64/runner.enroll"]!).toString().trim();
+        const parts = splitLinuxScript(r.buf)!;
+        const z: Record<string, Uint8Array> = { "the script's header": Buffer.from(parts.header), ...parts.files };
+        const token = Buffer.from(z["runner.enroll"]!).toString().trim();
         expect(token).toMatch(/^aite_/);
         const forbidden = [...Object.values(SENTINELS), API_KEY, bearer, "platform.db", tmp, fwd(tmp), ROOT, fwd(ROOT)];
         for (const [name, bytes] of Object.entries(z)) {
@@ -649,7 +709,8 @@ describe("the start scripts with a complete download", () => {
     });
 
     it.skipIf(!BASH || !NODE_24)("start-runner.sh, under Git Bash, makes node/bin/node executable again and runs the runner with it, with no Node.js on the PATH", async () => {
-        const r = await complete("linux", "x64");
+        // The folder zip (a Mac download when the app is not built here): Linux is one script since round 50, tested above.
+        const r = await complete("mac", "arm64");
         const kit = unpackWithFflate(r.buf, "sh");
         const nodeBin = path.join(kit, "node", "bin", "node");
         // The stand-in for a real Node.js: a two-line script that runs this computer's node. It loses its executable bit, as some unzip tools do.
@@ -679,7 +740,7 @@ describe("the start scripts with a complete download", () => {
     });
 
     it.skipIf(!BASH || !NODE_24)("a complete download whose node_modules is missing says it is incomplete instead of trying npm", async () => {
-        const r = await complete("linux", "x64");
+        const r = await complete("mac", "arm64");
         const kit = unpackWithFflate(r.buf, "half");
         fs.writeFileSync(path.join(kit, "node", "bin", "node"), `#!/bin/sh\nexec "${msys(process.execPath)}" "$@"\n`);
         fs.rmSync(path.join(kit, "node_modules"), { recursive: true, force: true });

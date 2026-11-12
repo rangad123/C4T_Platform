@@ -78,3 +78,4 @@ Node 24.22.3 (the version CI uses):
 - The update-signing key does not exist yet, so runners cannot update themselves; people re-download from Settings until it does.
 - Someone who keeps an active Crowd4Test account but loses only the "run tests" permission is stopped at their next visit, not at their next scheduled run (the Crowd4Test people service does not report permissions).
 - A schedule run that fails because its creator's computer stayed off does not update the schedule's "last outcome".
+- One-file downloads (round 50) work only while the Windows program and the Mac app are unsigned: a signed one gets the zip with the kit beside it. When signing starts, the one-time code should come from a browser-approved connect code instead of a file inside the download. The Mac app with nothing beside it and the Linux `sh ai-testing-runner.sh` are proven only on GitHub's machines, not yet on a person's Mac (Safari's own unzip, App Translocation) or a non-Ubuntu Linux.

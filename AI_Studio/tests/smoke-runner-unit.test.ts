@@ -18,7 +18,8 @@ import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 import { afterAll, describe, expect, it } from "vitest";
 // @ts-expect-error plain JavaScript script (no type declarations)
-import { Children, hostTarget, interpretKitAnswer, isBrowserNotReady, startWhenBrowserReady, kitRequestBody, parseArgs, pathWithoutNode, plainCredentialsIn, platformEnv, redact, renderReport, runnerEnv, runSmoke, startCommand, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
+import { Children, hostTarget, interpretKitAnswer, isBrowserNotReady, startWhenBrowserReady, kitRequestBody, parseArgs, pathWithoutNode, placeDownload, plainCredentialsIn, platformEnv, redact, renderReport, runnerEnv, runSmoke, startCommand, unpackZip, usedBundledNode, UsageError, zipModes } from "../scripts/smoke-runner.mjs";
+import { buildCompleteZip } from "../src/platform/runner-kit-complete.js";
 
 const WIN = process.platform === "win32";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitp-smoke-unit-"));
@@ -124,9 +125,12 @@ describe("decisions", () => {
         const w = startCommand("files", win, "K", "I");
         expect(path.basename(w.command).toLowerCase()).toBe("cmd.exe");
         expect(w.args).toEqual(["/d", "/c", ".\\start-runner.cmd"]);
-        expect(startCommand("complete", linux, "K", "I")).toEqual({ command: "sh", args: ["start-runner.sh"] });
+        // Linux is one file (round 50): sh ai-testing-runner.sh, run where it was saved.
+        expect(startCommand("complete", linux, "K", "I")).toEqual({ command: "sh", args: ["ai-testing-runner.sh"] });
+        expect(startCommand("files", mac, "K", "I")).toEqual({ command: "sh", args: ["start-runner.sh"] });
         expect(startCommand("installer", win, "K", "I")).toEqual({ command: path.join("K", "AITestingRunnerSetup.exe"), args: ["--silent", "--no-start-at-sign-in", "--install-dir", "I"] });
-        expect(startCommand("installer", mac, "K", "I")).toEqual({ command: "sh", args: [path.join("K", "AI Testing Runner.app", "Contents", "Resources", "runner-setup.sh"), "--silent", "--no-autostart", "--install-dir", "I"] });
+        // The Mac app is opened through its own launcher (with AITP_INSTALLER_NO_TERMINAL it runs the setup in this window).
+        expect(startCommand("installer", mac, "K", "I")).toEqual({ command: "sh", args: [path.join("K", "AI Testing Runner.app", "Contents", "MacOS", "AITestingRunner"), "--silent", "--no-autostart", "--install-dir", "I"] });
     });
 
     it("builds a PATH without Node.js, and says when a system folder holds it", () => {
@@ -158,7 +162,8 @@ describe("environments and secrets", () => {
 
     it("the runner gets the person's environment without the platform's settings, and the clean PATH when asked", () => {
         const env = runnerEnv({ Path: "C:\\a", HOME: "/h", AGENT_URL: "x", RUNNER_KIT_DIR: "y", AITP_LOCK_HELD: "browser", API_KEY: "z", DATA_DIR: "d" }, { linkNodeModules: true, path: "C:\\clean" });
-        expect(env).toEqual({ HOME: "/h", PATH: "C:\\clean", AITP_KIT_NO_PAUSE: "1", AITP_INSTALLER_NO_PAUSE: "1", AITP_INSTALLER_NO_UI: "1", AITP_KIT_SKIP_INSTALL: "1" });
+        expect(env).toEqual({ HOME: "/h", PATH: "C:\\clean", AITP_KIT_NO_PAUSE: "1", AITP_INSTALLER_NO_PAUSE: "1", AITP_INSTALLER_NO_UI: "1", AITP_INSTALLER_NO_TERMINAL: "1", AITP_KIT_SKIP_INSTALL: "1" });
+        expect(runnerEnv({ PATH: "/bin" }, { installDir: "/tmp/x/install folder" }).AITP_RUNNER_INSTALL_DIR).toBe("/tmp/x/install folder");
         expect(runnerEnv({ PATH: "/bin" }).PATH).toBe("/bin");
         expect(runnerEnv({ PATH: "/bin" }).AITP_KIT_SKIP_INSTALL).toBeUndefined();
     });
@@ -220,6 +225,38 @@ describe("unpacking", () => {
         expect(["tar.exe", "ditto", "unzip", "built-in unzip"]).toContain(tool);
         expect(fs.readFileSync(path.join(dest, "runner-x", "start-runner.sh"), "utf8")).toBe("echo hi\n");
         if (!WIN) expect(fs.statSync(path.join(dest, "runner-x", "node", "bin", "node")).mode & 0o111).not.toBe(0);
+    });
+});
+
+describe("placing a download the way a person has it (round 50)", () => {
+    const attrs = (m: number) => (0o100000 | m) * 65536;
+    const code = "aite_SmokePlacedCode0123456789abcdefghijklmn";
+    const mac = hostTarget("darwin", "arm64");
+
+    it("a Mac zip must hold the app alone; its code is read from inside the app", async () => {
+        const app = path.join(tmp, "app.zip");
+        fs.writeFileSync(app, zipSync({ "AI Testing Runner.app/Contents/MacOS/AITestingRunner": [new TextEncoder().encode("#!/bin/sh\n"), { os: 3, attrs: attrs(0o755) }], "AI Testing Runner.app/Contents/Resources/kit/runner.enroll": [new TextEncoder().encode(`${code}\n`), { os: 3, attrs: attrs(0o600) }] }));
+        const placed = await placeDownload(app, path.join(tmp, "mac (1)"), mac);
+        expect(placed.kitDir).toBe(path.join(tmp, "mac (1)"));
+        expect(placed.code).toBe(code);
+        expect(placed.tool).toContain("the app alone");
+        const beside = path.join(tmp, "beside.zip");
+        fs.writeFileSync(beside, zipSync({ "runner-x/AI Testing Runner.app/Contents/MacOS/AITestingRunner": new TextEncoder().encode("x"), "runner-x/runner.enroll": new TextEncoder().encode(code) }));
+        await expect(placeDownload(beside, path.join(tmp, "mac (2)"), mac)).rejects.toThrow(/not the app alone/);
+    });
+
+    it.skipIf(WIN)("the Linux script is left as it is, and its code is read with tail and tar like its header does", async () => {
+        const files = new Map<string, Uint8Array>([["runner.mjs", Buffer.from("// r\n")], ["task-child.mjs", Buffer.from("//\n")], ["record-child.mjs", Buffer.from("//\n")], ["package.json", Buffer.from("{}\n")], ["LICENSES.txt", Buffer.from("l\n")]]);
+        const z = buildCompleteZip({ bundle: { ok: true, manifest: { kitVersion: "1.0.0+abc" } as never, files }, layout: "linux", platformUrl: "https://tests.example.com", enrollCode: code });
+        const chunks: Buffer[] = [];
+        for await (const c of z.stream) chunks.push(c as Buffer);
+        const dl = path.join(tmp, "dl");
+        fs.mkdirSync(dl);
+        fs.writeFileSync(path.join(dl, "ai-testing-runner.sh"), Buffer.concat(chunks));
+        const placed = await placeDownload(path.join(dl, "ai-testing-runner.sh"), path.join(tmp, "linux (1)"), hostTarget("linux", "x64"));
+        expect(placed.code).toBe(code);
+        expect(placed.files).toEqual(expect.arrayContaining(["runner.mjs", "runner.json", "runner.enroll", "start-runner.sh", "check-computer.sh"]));
+        expect(fs.existsSync(path.join(tmp, "linux (1)", "ai-testing-runner.sh"))).toBe(true);
     });
 });
 

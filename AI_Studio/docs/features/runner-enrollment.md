@@ -24,14 +24,17 @@ No download carries a runner credential. The download from Settings holds a sing
 `runner.enroll` (mode 0600), stored on the platform only as a SHA-256 hash, valid 30 minutes:
 
 - `GET /api/me/runner/download/info` -> `{ available, reason?, urlOk, urlWarning?, mayDownload, refusal?, systems }` (only what Settings
-  reads), where `systems` lists each `os` (windows, mac, linux) and `arch` (x64, arm64) with `available`, `reason?`, `note?` (why it is the
-  plain files) and `bytes?` (set when it carries its own Node.js).
+  reads), where `systems` lists each `os` (windows, mac, linux) and `arch` (x64, arm64) with `available`, `fileName` (what the download
+  will be saved as), `reason?`, `note?` (why it is the plain files) and `bytes?` (set when it carries its own Node.js).
 - `POST /api/me/runner/download` `{ os, arch }` (nothing else) -> the zip (on Windows with the installer built here: `AITestingRunnerSetup.exe`
   itself, with the kit and its `runner.enroll` appended at its end, round 49, `runner-installer.md`), with `x-runner-enrollment-id`, `x-runner-enrollment-expires`,
   `x-runner-kit-kind`, `x-runner-kit-note` (Windows or Mac fell back to the plain files), `x-runner-kit-target` (it carries its own Node.js).
   One download per system: Windows the setup program (it installs the test tools itself; without it, the plain files), a Mac the app, Linux
   the plain files; the Mac and Linux downloads carry their own Node.js and test tools when the server built that target
-  (`runner-complete-kit.md`), the Mac app then inside it. Every file and folder is named `runner-my-computer-...`. `runner.json` holds no name: the runner is named
+  (`runner-complete-kit.md`), the Mac app then inside it. Since round 50 each is one thing: the Mac a zip holding only the app with the
+  kit (and its code) inside it (`ai-testing-runner-mac.zip`, `runner-installer-mac.md`), Linux one `ai-testing-runner.sh` (`runner-kit.md`);
+  a signed Mac app or Windows program gets the zip with the kit beside it. A new download with an unused code replaces a runner that is
+  running from an earlier install (Mac and Linux). Zips are named `runner-my-computer-...`. `runner.json` holds no name: the runner is named
   after the computer, and the person can rename it in Settings.
 - Who may download: a signed-in person who may run tests in at least one project, and the open server (no access key, nobody signed up),
   which acts as one person (owner id "open"). The shared access key is refused with 403 "Sign in with your own account to set up your

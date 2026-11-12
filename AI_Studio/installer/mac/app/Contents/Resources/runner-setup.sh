@@ -10,7 +10,8 @@
 #   --autostart     Run the runner in the background, also after every sign-in (a LaunchAgent). This is the default answer, and what
 #                   --silent does. --no-autostart: run it in this Terminal window instead, and do not ask.
 #   --install-dir   Where to install. Default: ~/Library/Application Support/AITestingRunner
-#   --kit-dir       The unzipped runner kit (runner.mjs, runner.json, runner.enroll, ...). Default: the folder that holds this app.
+#   --kit-dir       The unzipped runner kit (runner.mjs, runner.json, runner.enroll, ...). Default: the kit inside this app
+#                   (Contents/Resources/kit, round 50), else the folder that holds this app.
 #   --log FILE      Also write what is printed to FILE.
 #   --uninstall     Stop the runner this installer started, remove its LaunchAgent and the install folder it created.
 #
@@ -490,7 +491,9 @@ kit_complete_in() {
 # find_kit: sets KIT_SRC to the folder that holds the runner files, or to "" when only an earlier install has them.
 find_kit() {
     KIT_SRC=""
-    for fk_dir in "$KIT_DIR_ARG" "${AITP_KIT_DIR:-}" "$( [ -n "$APP_DIR" ] && dirname "$APP_DIR" )"; do
+    # The kit the platform put inside this app (round 50) comes first: it travels with the app, also when macOS runs the app from a
+    # temporary read-only copy (App Translocation). Then the folder beside the app (a download from before round 50, or a signed app).
+    for fk_dir in "$KIT_DIR_ARG" "${AITP_KIT_DIR:-}" "$( [ -n "$APP_DIR" ] && printf '%s' "$SELF_DIR/kit" )" "$( [ -n "$APP_DIR" ] && dirname "$APP_DIR" )"; do
         [ -n "$fk_dir" ] || continue
         if kit_complete_in "$fk_dir"; then
             KIT_SRC=$fk_dir
@@ -514,6 +517,11 @@ end run' "Choose the folder you unzipped. It holds runner.mjs and runner.json.")
         fi
     fi
     return 1
+}
+
+# kit_new_code: does the kit hold a one-time code that was never copied before (a new download)?
+kit_new_code() {
+    [ -n "$KIT_SRC" ] && [ -f "$KIT_SRC/runner.enroll" ] && [ "$(sha256_of "$KIT_SRC/runner.enroll")" != "$(head -n 1 "$ENROLL_SEEN" 2>/dev/null)" ]
 }
 
 kit_missing_message() {
@@ -794,6 +802,10 @@ step_files() {
     mkdir -p "$RUNNER_DIR" || die "Setup stopped. I could not create $RUNNER_DIR."
     sf_copied=0
     sf_list=$(kit_copy_list)
+    case " $sf_list " in
+        # A new download's code replaces the runner's saved access (round 50): the runner prefers a saved credential to a code.
+        *" runner.enroll "*) forget_saved_access ;;
+    esac
     for sf_file in $sf_list; do
         if [ ! -f "$RUNNER_DIR/$sf_file" ] || ! cmp -s "$KIT_SRC/$sf_file" "$RUNNER_DIR/$sf_file"; then
             # Written under a private name and moved into place, so a runner that is running never reads half a file. The token is private.
@@ -1293,6 +1305,13 @@ stop_recorded_runner() {
 # forget_credential: the runner deletes the credential it keeps in the login Keychain (it knows the entry; this script never sees it),
 # and the files that could hold one go too: a one-time code not yet traded, and an older download's runner.token.
 forget_credential() {
+    forget_saved_access
+    rm -f "$RUNNER_DIR/runner.enroll" "$RUNNER_DIR/runner.token" "$ENROLL_SEEN"
+    return 0
+}
+
+# forget_saved_access: only the Keychain part (also before a new download's code is copied: a kept credential would win over the code).
+forget_saved_access() {
     [ -f "$RUNNER_DIR/runner.mjs" ] || return 0
     fc_node=""
     if [ -f "$NODE_PATH_FILE" ]; then
@@ -1318,7 +1337,6 @@ forget_credential() {
             say "The runner could not remove its saved access (an older runner, or it was never connected). Nothing else holds it."
         fi
     fi
-    rm -f "$RUNNER_DIR/runner.enroll" "$RUNNER_DIR/runner.token" "$ENROLL_SEEN"
     return 0
 }
 
@@ -1420,7 +1438,12 @@ do_setup() {
 
     if [ "$MODE" = "run" ]; then
         if rp=$(runner_pid); then
-            show_status "$rp"
+            # A new download replaces the runner that is running (round 50); opening the same download again only shows its status.
+            if kit_new_code; then
+                stop_recorded_runner
+            else
+                show_status "$rp"
+            fi
         fi
         # What the first screen has to say: what could be downloaded.
         find_node

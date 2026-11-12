@@ -7,7 +7,8 @@ import { runnerUpdatesFor } from "../runner-update.js";
 import { RateLimiter } from "../agent-routing.js";
 import { HttpError } from "../http-error.js";
 import { mayHaveRunner } from "../runner-health.js";
-import { buildInstallerExe, buildInstallerZip, installerFileName, loadInstaller, WINDOWS_EXE_NAME, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
+import { buildInstallerExe, buildInstallerZip, installerFileName, loadInstaller, MAC_ZIP_NAME, macAppSigned, peSigned, WINDOWS_EXE_NAME, type InstallerPart, type KitKind, type LoadedInstaller } from "../runner-installer.js";
+import { LINUX_SCRIPT_NAME } from "../runner-linux-script.js";
 import { buildKitZip, decideAddress, DownloadRequest, kitFileName, loadBundle, type Bundle } from "../runner-kit.js";
 import { buildCompleteZip, completeFileName, loadComplete, MAX_COMPLETE_AT_ONCE, targetOf, type CompleteBuild, type CompleteTarget } from "../runner-kit-complete.js";
 import type { RouteCtx } from "./types.js";
@@ -19,6 +20,8 @@ import type { RouteCtx } from "./types.js";
  *   POST /api/me/runner/download        { os: "windows" | "mac" | "linux", arch: "x64" | "arm64" } -> the zip with this person's one-time code
  *
  * One download per system, nothing to choose: Windows gets the setup program, a Mac the app, Linux the plain files with the start scripts.
+ * Each is one thing (rounds 49 and 50): Windows the program with the kit appended, a Mac a zip holding only the app with the kit inside it,
+ * Linux one `ai-testing-runner.sh` with the kit at its end. A signed program or app gets the zip with the kit beside it instead.
  * The Mac app and the Linux files also carry their own Node.js and every test tool (the complete build, runner-kit-complete.ts) when this
  * server has built it for that system and processor (the Mac app is then put inside it). Windows never does: its installer finds or
  * downloads Node.js and installs the test tools with npm ci, because a complete node_modules copied into its install folder passes
@@ -45,6 +48,9 @@ interface Plan {
     complete?: Extract<CompleteBuild, { ok: true }>;
     /** Why the download is not the installer, for Windows and Mac. */
     note?: string;
+    /** What is sent: the Windows program, the zip holding only the Mac app, the Linux script, or a zip with one folder. */
+    form: "exe" | "mac-app" | "linux" | "zip";
+    fileName: string;
 }
 
 function planFor(req: DownloadRequest, bundle: Extract<Bundle, { ok: true }>, installers: LoadedInstaller | undefined, completes: (t: CompleteTarget) => CompleteBuild): Plan {
@@ -53,10 +59,21 @@ function planFor(req: DownloadRequest, bundle: Extract<Bundle, { ok: true }>, in
     // the plain files.
     const build = req.os === "windows" ? undefined : completes(targetOf(req.os, req.arch));
     const complete = build?.ok ? build : undefined;
-    if (req.os === "linux") return { kind: "files", ...(complete ? { complete } : {}) };
+    const has = complete ? { complete } : {};
+    if (req.os === "linux") return { kind: "files", ...has, form: "linux", fileName: LINUX_SCRIPT_NAME };
     const part = installers ? (req.os === "windows" ? installers.windows : installers.mac) : undefined;
-    if (part?.ok) return { kind: "installer", installer: part, ...(complete ? { complete } : {}) };
-    return { kind: "files", ...(complete ? { complete } : {}), note: `${part && !part.ok ? part.reason : ""} The plain files were sent instead.`.trim() };
+    if (part?.ok) {
+        // shortcut: a signed program or app gets the zip with the kit beside it (bytes added to it break the signature); when signing starts,
+        // let the browser approve a connect code instead of a file inside the download, so every download is the same file.
+        if (req.os === "windows") {
+            const signed = peSigned(part.files.find((f) => f.name === WINDOWS_EXE_NAME)!.data);
+            return { kind: "installer", installer: part, form: signed ? "zip" : "exe", fileName: signed ? installerFileName("windows") : WINDOWS_EXE_NAME };
+        }
+        if (macAppSigned(part)) return { kind: "installer", installer: part, ...has, form: "zip", fileName: complete ? completeFileName(complete.target) : installerFileName("unix") };
+        return { kind: "installer", installer: part, ...has, form: "mac-app", fileName: MAC_ZIP_NAME };
+    }
+    const note = `${part && !part.ok ? part.reason : ""} The plain files were sent instead.`.trim();
+    return { kind: "files", ...has, note, form: "zip", fileName: complete ? completeFileName(complete.target) : kitFileName(req.os === "windows" ? "windows" : "unix") };
 }
 
 export function registerRunnerKitRoutes(ctx: RouteCtx): void {
@@ -100,6 +117,7 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
                     os,
                     arch,
                     available: address.urlOk,
+                    fileName: plan.fileName,
                     // The size of a download that carries its own Node.js and test tools.
                     ...(plan.complete ? { bytes: plan.complete.manifest.packBytes + plan.complete.manifest.files.length * 120 + 2 * 1024 * 1024 } : {}),
                     ...(plan.note ? { note: plan.note } : {}),
@@ -168,52 +186,55 @@ export function registerRunnerKitRoutes(ctx: RouteCtx): void {
         };
         // Header values are single-line ASCII; the sentence is plain English without quotes or line breaks.
         if (plan.note) reply.header("x-runner-kit-note", plan.note.replace(/[^ -~]/g, " "));
-        if (plan.complete) {
-            const target = plan.complete.target;
+        if (plan.complete || plan.form === "mac-app" || plan.form === "linux") {
+            const target = plan.complete?.target;
+            if (plan.form === "zip" && plan.installer && request.os === "mac") req.log.info({ enrollmentId: enrollment.record.id }, "the Mac app is signed: sending the zip with the kit beside it");
             let zip: ReturnType<typeof buildCompleteZip> | undefined;
             try {
-                zip = buildCompleteZip({ bundle, build: plan.complete, ...(plan.installer ? { installer: plan.installer } : {}), platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() });
+                const layout = plan.form === "mac-app" ? "mac-app" : plan.form === "linux" ? "linux" : "folder";
+                zip = buildCompleteZip({ bundle, ...(plan.complete ? { build: plan.complete } : {}), ...(plan.installer ? { installer: plan.installer } : {}), layout, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() });
             } catch {
                 failed();
             }
             const stream = zip!.stream;
-            logged(`${target}, ${plan.kind}, own Node.js`);
-            completeStreaming++;
-            let released = false;
-            const release = (): void => {
-                if (!released) {
-                    released = true;
-                    completeStreaming--;
-                }
-            };
-            stream.once("close", release);
-            stream.once("end", release);
-            stream.once("error", release);
+            logged(`${request.os} ${request.arch}, ${plan.kind}, ${plan.form}${target ? ", own Node.js" : ""}`);
+            if (plan.complete) {
+                completeStreaming++;
+                let released = false;
+                const release = (): void => {
+                    if (!released) {
+                        released = true;
+                        completeStreaming--;
+                    }
+                };
+                stream.once("close", release);
+                stream.once("end", release);
+                stream.once("error", release);
+            }
             return reply
                 .headers(common)
-                .header("content-type", "application/zip")
+                .header("content-type", plan.form === "linux" ? "application/x-sh" : "application/zip")
                 .header("content-length", String(zip!.bytes))
-                .header("content-disposition", `attachment; filename="${completeFileName(target)}"`)
-                .header("x-runner-kit-target", target)
+                .header("content-disposition", `attachment; filename="${plan.fileName}"`)
+                .headers(target ? { "x-runner-kit-target": target } : {})
                 .send(stream);
         }
         let zip: Uint8Array | undefined;
-        let exe = false;
         try {
             const base = { bundle, platformUrl: k.platformUrl, enrollCode: enrollment.code, ...seq() };
             // Windows (round 49): the setup program itself with the kit appended; a signed program gets the zip (runner-installer.ts).
-            const stamped = plan.installer && platform === "windows" ? buildInstallerExe({ ...base, part: plan.installer, platform }) : undefined;
-            if (plan.installer && platform === "windows" && !stamped) req.log.info({ enrollmentId: enrollment.record.id }, "the Windows installer is signed: sending the zip");
-            exe = Boolean(stamped);
-            zip = stamped ?? (plan.installer ? buildInstallerZip({ ...base, part: plan.installer, platform }) : buildKitZip({ ...base, request: { platform } }));
+            if (plan.installer && platform === "windows" && plan.form === "zip") req.log.info({ enrollmentId: enrollment.record.id }, "the Windows installer is signed: sending the zip");
+            if (plan.installer && request.os === "mac") req.log.info({ enrollmentId: enrollment.record.id }, "the Mac app is signed: sending the zip with the kit beside it");
+            zip = plan.form === "exe" ? buildInstallerExe({ ...base, part: plan.installer!, platform }) : plan.installer ? buildInstallerZip({ ...base, part: plan.installer, platform }) : buildKitZip({ ...base, request: { platform } });
+            if (!zip) throw new Error("the program could not be stamped");
         } catch {
             failed();
         }
-        logged(`${request.os} ${request.arch}, ${plan.kind}${exe ? ", one program" : ""}`);
+        logged(`${request.os} ${request.arch}, ${plan.kind}, ${plan.form}`);
         return reply
             .headers(common)
-            .header("content-type", exe ? "application/vnd.microsoft.portable-executable" : "application/zip")
-            .header("content-disposition", `attachment; filename="${exe ? WINDOWS_EXE_NAME : plan.installer ? installerFileName(platform) : kitFileName(platform)}"`)
+            .header("content-type", plan.form === "exe" ? "application/vnd.microsoft.portable-executable" : "application/zip")
+            .header("content-disposition", `attachment; filename="${plan.fileName}"`)
             .send(Buffer.from(zip!));
     }
 }

@@ -304,6 +304,8 @@ export interface DownloadSystem {
     available: boolean;
     /** Set when it carries its own Node.js and test tools. */
     bytes?: number;
+    /** The name the download is saved under (AITestingRunnerSetup.exe, ai-testing-runner-mac.zip, ai-testing-runner.sh, or a zip's name). */
+    fileName?: string;
     note?: string;
     reason?: string;
 }
@@ -426,7 +428,7 @@ export function saveBlob(blob: Blob, fileName: string): void {
 /** "14:32", in the person's own clock. */
 export const clockTime = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-/** What to do on the computer once the download is saved (on Windows the setup program itself, round 49): the installer on Windows and Mac, the plain files on Linux. `code` words are typed. */
+/** What to do on the computer once the download is saved (one thing on each system: the setup program, the zip holding only the app, the one Linux script; rounds 49 and 50). `code` words are typed. */
 export function startSteps(os: RunnerOs, kind: "installer" | "files" = os === "linux" ? "files" : "installer"): { steps: string[]; command?: string } {
     if (kind === "files" && os === "windows") {
         return { steps: ["Unzip the download and open the folder.", "Double-click start-runner.cmd. Leave the window open: the runner runs while it is open."] };
@@ -446,15 +448,16 @@ export function startSteps(os: RunnerOs, kind: "installer" | "files" = os === "l
     if (os === "mac") {
         return {
             steps: [
-                "Unzip the download and open the folder.",
-                "Double-click “AI Testing Runner”. If macOS says it could not verify the app, choose Done, open System Settings, Privacy & Security and choose Open Anyway (on macOS 14 or older, right-click the app and choose Open).",
+                "Open the download, then open “AI Testing Runner”. The app is all there is: your runner files are inside it.",
+                "If macOS says it could not verify the app, choose Done, open System Settings, Privacy & Security and choose Open Anyway (on macOS 14 or older, right-click the app and choose Open).",
                 "It downloads only what this Mac is missing, then the runner starts by itself whenever you sign in.",
             ],
         };
     }
+    // Linux (round 50): one file, nothing to unzip. It installs the runner in ~/.local/share/ai-testing-runner and starts it.
     return {
-        steps: ["Unzip the download.", "Open a terminal in the unzipped folder and run the command below. Leave the window open: the runner runs while it is open."],
-        command: "sh start-runner.sh",
+        steps: ["Open a terminal where the download was saved (usually Downloads). Run the command below and leave the window open: the runner runs while it is open."],
+        command: "sh ai-testing-runner.sh",
     };
 }
 
@@ -463,6 +466,7 @@ export function checkComputerHelp(os: RunnerOs, kind: "installer" | "files" = os
     // The one-file Windows download has no folder: Setup runs the same check when it finishes and shows it in its window.
     if (os === "windows" && kind === "installer") return "If it does not connect, open the runner's window (its icon next to the clock, or AI Testing Runner in the Start menu). Setup checked this computer when it finished and says there what to fix.";
     if (os === "windows") return "If it does not connect, double-click check-computer.cmd in the unzipped folder. It checks this computer and says what to fix.";
+    if (os === "mac" && kind === "installer") return "If it does not connect, look at the Terminal window the app opened. It checked this Mac when it finished and says there what to fix.";
     if (os === "mac") return "If it does not connect, double-click check-computer.command in the unzipped folder. It checks this Mac and says what to fix.";
-    return "If it does not connect, run `sh check-computer.sh` in the same folder. It checks this computer and says what to fix, and changes nothing.";
+    return "If it does not connect, run `sh ~/.local/share/ai-testing-runner/check-computer.sh`. It checks this computer and says what to fix, and changes nothing.";
 }

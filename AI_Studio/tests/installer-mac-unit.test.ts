@@ -327,6 +327,19 @@ function makeKit(opts: { dependencies?: Record<string, string>; url?: string; na
     return { kit, app, setup: path.join(app, "Contents", "Resources", "runner-setup.sh") };
 }
 
+/** Round 50: the download as the platform now builds it, the app alone with the kit inside it (Contents/Resources/kit) and nothing beside it. */
+function makeAppKit(opts: { code: string; runner?: string }): Kit {
+    const beside = makeKit({ withFiles: true, ...(opts.runner ? { runner: opts.runner } : {}) });
+    const kit = path.join(beside.app, "Contents", "Resources", "kit");
+    fs.mkdirSync(kit);
+    for (const n of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt", "runner.json"]) fs.renameSync(path.join(beside.kit, n), path.join(kit, n));
+    fs.rmSync(path.join(beside.kit, "runner.token"));
+    fs.writeFileSync(path.join(kit, "runner.enroll"), `${opts.code}\n`, { mode: 0o600 });
+    const alone = path.join(fresh("Downloads"), APP_NAME);
+    fs.renameSync(beside.app, alone);
+    return { kit, app: alone, setup: path.join(alone, "Contents", "Resources", "runner-setup.sh") };
+}
+
 interface Ran {
     status: number | null;
     out: string;
@@ -926,6 +939,24 @@ describe.skipIf(!BASH)("the runner files and the install folder", () => {
         expect(r.out).toContain("xattr -dr com.apple.quarantine");
     });
 
+    it("round 50: finds the kit inside the app first, with nothing beside it, also when macOS runs the app from a translocated copy", () => {
+        const w = world();
+        const { app } = makeAppKit({ code: "aite_InsideTheApp0123456789abcdefghijklmnop" });
+        expect(fs.readdirSync(path.dirname(app))).toEqual([APP_NAME]);
+        const moved = path.join(fresh("var", "folders", "AppTranslocation", "DEF456", "d"), APP_NAME);
+        fs.cpSync(app, moved, { recursive: true });
+        const nodeDir = fresh("bin");
+        shim(path.join(nodeDir, "node"), "v26.0.0");
+        const r = runScript(path.join(moved, "Contents", "Resources", "runner-setup.sh"), SETUP_FLAGS(w), w.home, { stubDir: w.stubDir, env: { AITP_INSTALLER_NODE_SEARCH_ONLY: msys(nodeDir), AITP_INSTALLER_SKIP_NPM: "1" } });
+        expect(r.status, r.out).toBe(0);
+        expect(r.out).not.toContain("temporary place");
+        for (const n of ["runner.mjs", "runner.json", "runner.enroll"]) expect(fs.existsSync(path.join(w.install, "runner", n)), n).toBe(true);
+        expect(read(path.join(w.install, "runner", "runner.enroll")).trim()).toBe("aite_InsideTheApp0123456789abcdefghijklmnop");
+        // Only the code's hash is kept, and the kit itself is not copied into the install folder twice.
+        expect(read(path.join(w.install, "enroll-copied"))).not.toContain("aite_");
+        expect(fs.existsSync(path.join(w.install, "runner", "kit"))).toBe(false);
+    });
+
     it("refuses an install folder that already holds files it did not create, and changes nothing there", () => {
         const w = world();
         const { setup } = makeKit();
@@ -1051,6 +1082,41 @@ describe.skipIf(!BASH)("starting the runner, the pid file, and uninstall", () =>
             if (first.exitCode === null) first.kill();
         }
     }, 120_000);
+
+    it("round 50: a new download (an unused one-time code) stops the runner that is running and starts the new one; opening it again only shows the status", async () => {
+        const w = world();
+        const forever = 'console.log(\'Connected to the platform as "stub" \' + process.argv.slice(2).join(" ")); setInterval(() => {}, 1000);\n';
+        const env = withNode();
+        const start = (setup: string) => {
+            const child = spawn(BASH!, [msys(setup), "--install-dir", msys(w.install), "--silent", "--no-autostart"], { env: mkEnv(w.home, { stubDir: w.stubDir, env }, w.log), stdio: ["ignore", "pipe", "pipe"] });
+            const ran = { child, out: "" };
+            child.stdout.on("data", (d) => (ran.out += d));
+            child.stderr.on("data", (d) => (ran.out += d));
+            return ran;
+        };
+        const first = start(makeAppKit({ code: "aite_FirstDownload0123456789abcdefghijklmnop", runner: forever }).setup);
+        let second: ReturnType<typeof start> | undefined;
+        try {
+            await waitFor(() => first.out.includes("Connected to the platform"), 40_000, () => first.out);
+            const pid = read(path.join(w.install, "runner.pid")).trim();
+            const next = makeAppKit({ code: "aite_SecondDownload123456789abcdefghijklmnop", runner: forever });
+            second = start(next.setup);
+            await waitFor(() => first.child.exitCode !== null || first.child.signalCode !== null, 40_000, () => `${first.out}\n--- second ---\n${second!.out}`);
+            await waitFor(() => second!.out.includes("Connected to the platform"), 40_000, () => second!.out);
+            expect(second.out).toContain(`Stopping the runner this app started (process ${pid}).`);
+            expect(second.out).not.toContain("already running");
+            expect(read(path.join(w.install, "runner", "runner.enroll")).trim()).toBe("aite_SecondDownload123456789abcdefghijklmnop");
+            expect(read(path.join(w.install, "runner.pid")).trim()).not.toBe(pid);
+            // The same download opened again: its code was copied already, so the running runner stays and only its status is shown.
+            const again = runScript(next.setup, ["--install-dir", msys(w.install), "--silent", "--no-autostart"], w.home, { stubDir: w.stubDir, env });
+            expect(again.status, again.out).toBe(0);
+            expect(again.out).toMatch(/The AI Testing runner is already running on this Mac \(process \d+\)\./);
+            expect(second.child.exitCode).toBeNull();
+        } finally {
+            for (const r of [first, second]) if (r && r.child.exitCode === null) r.child.kill("SIGTERM");
+            await sleep(1500);
+        }
+    }, 150_000);
 
     it("a pid file that is stale, or points at some other program, is ignored and that program is never killed", () => {
         const w = world();

@@ -83,12 +83,12 @@ const newProject = async (name: string) => {
     return id;
 };
 /**
- * The person's download: plain files (no installer or complete build here), all three start scripts inside. One runner per person: the
+ * The person's download: plain files (no installer or complete build here, so a Mac gets them; Linux is one script since round 50), all three start scripts inside. One runner per person: the
  * one the last test left (stopped, maybe still shown online for a while) is removed first, so "online" always means this download's runner.
  */
 const download = async (_projectId: string, _label: string, platformName: "windows" | "unix") => {
     await retireMyRunner(BASE, person.token);
-    return downloadRunner(BASE, person.token, platformName === "windows" ? "windows" : "linux");
+    return downloadRunner(BASE, person.token, platformName === "windows" ? "windows" : "mac");
 };
 /** The person's runner while it is connected (as a one-element list, so "none" reads as empty). */
 const onlineAgents = async (_projectId?: string) => {

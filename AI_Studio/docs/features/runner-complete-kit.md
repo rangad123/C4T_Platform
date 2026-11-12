@@ -94,3 +94,7 @@ The **Docker image** builds all six at build time (`ARG RUNNER_COMPLETE_TARGETS=
 - Real API and web tests through the copied packages were run from a win-x64 complete download only, with this laptop's Chromium already in the Playwright cache; the runner downloading a browser on a computer without one was not exercised here (that is the runner's part, see runner-browsers.md).
 - A complete download is about 56 to 70 MB per target and the image grows by about 400 MB for all six; there is no delta update: a new version is a new download.
 - Not signed (no certificates exist); the same SmartScreen and Gatekeeper prompts as the other downloads apply to the start scripts and installers. The Node.js programs inside are the Node.js project's own.
+
+## Round 50: one thing to download
+
+The complete builds are now sent in each system's one-file form (same pack, no recompression): **Mac** a zip holding only `AI Testing Runner.app`, with `node/`, `node_modules/`, `complete-kit.json` and the runner files inside it under `Contents/Resources/kit/` (`runner-installer-mac.md`); **Linux** `ai-testing-runner.sh`, the same files as a gzip tar after a short sh header, installed into `~/.local/share/ai-testing-runner` (`runner-kit.md`). The folder zip described above is left for a Mac whose app is signed or not built here. `x-runner-kit-target` is still set when the download carries its own Node.js, and the same three-at-once limit applies.

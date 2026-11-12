@@ -521,8 +521,10 @@ namespace AITestingRunner
                     if (sha == State.EnrollSha) continue;
                     State.EnrollSha = sha;
                     State.Save(L);
-                    // The new code replaces the credential of an older download.
-                    try { if (File.Exists(Path.Combine(L.App, "runner.token"))) File.Delete(Path.Combine(L.App, "runner.token")); } catch (Exception) { }
+                    // The new code replaces the credential of an older download: the runner prefers a saved credential to a code, so it forgets
+                    // its saved one first (round 50; an older runner was stopped before Install). This also removes the old runner.enroll and
+                    // runner.token; the new code is copied just below.
+                    Say(ForgetCredential());
                 }
                 if (name == "runner.token" && File.Exists(Path.Combine(SourceDir, "runner.enroll"))) continue;
                 File.Copy(src, dst, true);

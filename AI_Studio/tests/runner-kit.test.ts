@@ -67,8 +67,11 @@ const newProject = async (name: string) => {
     expect((await admin("PUT", `/api/projects/${id}/review-policy`, { aiGenerated: false, edits: false, healing: false })).status).toBe(200);
     return id;
 };
-/** This person's runner download. Linux is the plain files with all three start scripts; there is no installer or complete build here. */
-const download = (system: "windows" | "linux" = "linux") => admin("POST", "/api/me/runner/download", { os: system, arch: "x64" });
+/**
+ * This person's runner download. No installer or complete build is made here, so a Mac gets the plain files with all three start scripts
+ * (the zip these tests unzip); Linux is one script, `ai-testing-runner.sh` (round 50), run with sh below.
+ */
+const download = (system: "windows" | "mac" | "linux" = "mac") => admin("POST", "/api/me/runner/download", { os: system, arch: "x64" });
 /** The person's runner as Settings shows it, when it is connected. */
 const myRunner = async () => {
     const r = (await admin("GET", "/api/me/runner")).body?.runner as { id: string; name: string; status: string; update?: unknown } | null | undefined;
@@ -311,7 +314,7 @@ describe("the routes", () => {
     });
 
     it("the zip holds none of the server's secrets, paths or data", async () => {
-        const r = await download("linux");
+        const r = await download("mac");
         expect(r.status).toBe(200);
         const files = unzipSync(new Uint8Array(r.buf));
         const secrets = [API_KEY, personToken, PASSWORD, dataDir, dataDir.replaceAll("\\", "/"), "platform.db", REPO, REPO.replaceAll("\\", "/")];
@@ -363,7 +366,7 @@ describe("the unzipped kit really runs", () => {
 
     it("runner.mjs from the download trades its code, shows in Settings under the computer's name, runs a web and an API test, and the verdicts come back", async () => {
         const p = await newProject("Kit end to end");
-        const dl = await download("linux");
+        const dl = await download("mac");
         expect(dl.status).toBe(200);
         const kit = unpack(dl.buf, "mjs");
         const code = fs.readFileSync(path.join(kit, "runner.enroll"), "utf8").trim();
@@ -422,7 +425,7 @@ describe("the unzipped kit really runs", () => {
 
     it.skipIf(!BASH)("start-runner.sh (bash) connects, runs an API test, and ends with a plain message when the computer is removed", async () => {
         const p = await newProject("Kit sh");
-        const dl = await download("linux");
+        const dl = await download("mac");
         const kit = unpack(dl.buf, "sh");
         const run = launch(BASH!, ["start-runner.sh"], kit, { AITP_KIT_SKIP_INSTALL: "1", AITP_KIT_NO_PAUSE: "1" });
         const mine = await until("the runner started from the .sh to be connected", myRunner, 90_000).catch((e) => {
@@ -467,7 +470,7 @@ describe("the unzipped kit really runs", () => {
     }, 60_000);
 
     it.skipIf(!BASH)("start-runner.sh on a computer without Node.js explains it and does not start a runner", async () => {
-        const kit = unpack((await download("linux")).buf, "shnonode");
+        const kit = unpack((await download("mac")).buf, "shnonode");
         const tools = path.dirname(BASH!); // Git's own tools (dirname, uname), but no node
         const home = fs.mkdtempSync(path.join(tmp, "home-")); // an empty home: no nvm, Volta or fnm to find
         const run = launch(BASH!, ["start-runner.sh"], kit, { PATH: tools, Path: tools, HOME: home.replaceAll("\\", "/"), AITP_KIT_NO_PAUSE: "1", AITP_KIT_SKIP_SHELL_SEARCH: "1" });
@@ -480,8 +483,96 @@ describe("the unzipped kit really runs", () => {
         expect(fs.existsSync(path.join(kit, "work"))).toBe(false);
     }, 60_000);
 
-    it("a runner whose runner.json is damaged stops with exit code 2 and a plain message", async () => {
+    /** The download saved where a person's browser saves it, a home folder of its own and a temporary folder to check is left empty. */
+    function saved(buf: Buffer, label: string) {
+        const root = fs.mkdtempSync(path.join(tmp, `${label}-`));
+        const downloads = path.join(root, "Downloads");
+        const home = path.join(root, "home");
+        const temp = path.join(root, "temp");
+        for (const d of [downloads, home, temp]) fs.mkdirSync(d);
+        fs.writeFileSync(path.join(downloads, "ai-testing-runner.sh"), buf);
+        return { downloads, home, temp, install: path.join(home, ".local", "share", "ai-testing-runner") };
+    }
+    const start = (where: ReturnType<typeof saved>, home = where.home, shell = "sh") =>
+        launch(shell, shell === "sh" ? ["ai-testing-runner.sh"] : ["sh", "ai-testing-runner.sh"], where.downloads, { HOME: home, TMPDIR: where.temp, AITP_KIT_SKIP_INSTALL: "1", AITP_KIT_NO_PAUSE: "1" });
+
+    it.skipIf(process.platform !== "linux")("Linux, one file (round 50): sh ai-testing-runner.sh installs into ~/.local/share/ai-testing-runner, connects, runs an API test; a new download replaces the running runner; no code is left behind", async () => {
+        const p = await newProject("Kit one file");
         const dl = await download("linux");
+        expect(dl.status, dl.text.slice(0, 200)).toBe(200);
+        expect(dl.headers.get("content-disposition")).toBe('attachment; filename="ai-testing-runner.sh"');
+        const first = saved(dl.buf, "linux1");
+        // The test tools: this repository's node_modules, linked into the install folder the script will use (marked as the runner's own),
+        // and the script's install step skipped, as in the other kit tests.
+        fs.mkdirSync(first.install, { recursive: true });
+        fs.writeFileSync(path.join(first.install, ".created-by-ai-testing-runner"), "test\n");
+        fs.symlinkSync(path.join(REPO, "node_modules"), path.join(first.install, "node_modules"), "junction");
+        links.push(path.join(first.install, "node_modules"));
+        const run = start(first);
+        let run2: Running | undefined;
+        try {
+        const mine = await until("the runner started by sh ai-testing-runner.sh to be connected", myRunner, 90_000).catch((e) => {
+            throw new Error(`${e.message}\n--- output ---\n${output(run)}`);
+        });
+        expect(mine.name).toBe(computerName);
+        expect(output(run)).toContain(`Installed in ${first.install}.`);
+        // The code is traded and deleted; the temporary copy is gone; only its hash is kept.
+        expect(fs.existsSync(path.join(first.install, "runner.enroll"))).toBe(false);
+        expect(fs.readdirSync(first.temp).filter((n) => n.startsWith("ai-testing-runner."))).toEqual([]); // the runner itself may use the folder too
+        expect(fs.existsSync(path.join(first.install, "work"))).toBe(true);
+        const [api] = await runTests(p, mine.name, false);
+        expect(api).toMatchObject({ status: "passed" });
+
+        // A second download, started while the first runner runs (busybox sh where there is one): the first stops, the new one connects.
+        const again = await download("linux");
+        const second = saved(again.buf, "linux2");
+        const shell = spawnSync("busybox", ["sh", "-c", "exit 0"]).status === 0 ? "busybox" : "sh";
+        const next = start(second, first.home, shell);
+        run2 = next;
+        expect(await Promise.race([run.exited, sleep(60_000).then(() => "timeout")]), `${output(run)}\n--- new download ---\n${output(next)}\nsignal ${run.child.signalCode}`).toBe(0);
+        expect(output(next)).toMatch(/A new download: stopping the runner that is running from the earlier one \(process \d+\)\./);
+        const replaced = await until("the new runner to be connected", async () => {
+            const r = await myRunner();
+            return r && r.id !== mine.id ? r : undefined;
+        }, 90_000).catch((e) => {
+            throw new Error(`${e.message}\n--- output ---\n${output(next)}`);
+        });
+        expect(replaced.name).toBe(computerName);
+        expect(fs.existsSync(path.join(first.install, "runner.enroll"))).toBe(false);
+        expect(fs.readdirSync(second.temp).filter((n) => n.startsWith("ai-testing-runner."))).toEqual([]);
+        // Nothing in the install folder holds either code: the runner deleted the one it traded, and the header was never copied there.
+        for (const n of fs.readdirSync(first.install)) {
+            const f = path.join(first.install, n);
+            if (fs.statSync(f).isFile()) expect(/aite_[A-Za-z0-9_-]{20,}/.test(fs.readFileSync(f, "latin1")), n).toBe(false);
+        }
+
+        // The same file run again: the runner is already running and nothing changes.
+        const same = spawnSync("sh", ["ai-testing-runner.sh"], { cwd: second.downloads, env: { ...process.env, HOME: first.home, TMPDIR: second.temp }, encoding: "utf8", timeout: 60_000 });
+        expect(same.status, same.stdout + same.stderr).toBe(0);
+        expect(same.stdout).toContain("The AI Testing runner is already running on this computer");
+        expect(next.child.exitCode).toBeNull();
+
+        expect((await retire()).status).toBe(200);
+        expect(await Promise.race([next.exited, sleep(60_000).then(() => "timeout")]), output(next)).toBe(3);
+        expect(output(next)).toMatch(/no longer accepts this runner/);
+        } finally {
+            // The script runs the runner as its child: on a failure stop that child too (ours, found by its parent's pid), then the script.
+            for (const r of [run, run2]) {
+                if (!r?.child.pid || r.child.exitCode !== null) continue;
+                for (const d of fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+                    try {
+                        if (fs.readFileSync(`/proc/${d}/stat`, "utf8").replace(/^.*\) /s, "").split(" ")[1] === String(r.child.pid)) process.kill(Number(d), "SIGTERM");
+                    } catch {
+                        /* gone */
+                    }
+                }
+                killOurs(r.child);
+            }
+        }
+    }, 400_000);
+
+    it("a runner whose runner.json is damaged stops with exit code 2 and a plain message", async () => {
+        const dl = await download("mac");
         const kit = unpack(dl.buf, "broken");
         fs.writeFileSync(path.join(kit, "runner.json"), "{ not json");
         const run = launch(process.execPath, ["runner.mjs"], kit);

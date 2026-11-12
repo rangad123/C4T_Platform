@@ -847,7 +847,7 @@ describeWin("the one-file download: AITestingRunnerSetup.exe alone, with the kit
         const first = await run(oldKit, ["--silent", "--no-start"], inst, {}, 120_000);
         expect(first.code, first.text).toBe(0);
         const old = launch(path.join(inst, "AITestingRunner.exe"), ["--silent"], inst);
-        await until("the older runner to be online", async () => (await onlineAgents(oldKit.projectId))[0], 120_000).catch((e) => {
+        const before = await until("the older runner to be online", async () => (await onlineAgents(oldKit.projectId))[0], 120_000).catch((e) => {
             throw new Error(`${e.message}\n--- output ---\n${output(old)}`);
         });
         // A new one-file download (not retired first: the older copy keeps running until the new runner replaces it).
@@ -873,6 +873,11 @@ describeWin("the one-file download: AITestingRunnerSetup.exe alone, with the kit
         expect(splitStampedExe(fs.readFileSync(path.join(inst, "AITestingRunner.exe")))).toBeUndefined();
         expect(output(main).includes(code) || output(old).includes(code)).toBe(false);
         expect(await onlineAgents(oldKit.projectId)).toHaveLength(1);
+        // The new code was traded (round 50: Setup makes the runner forget its saved credential first, which it would prefer to a code):
+        // the download's enrollment is connected and the person's runner is a new credential, not the older one.
+        const enrollment = await fetch(`${BASE}/api/me/runner/enrollments/${r.headers.get("x-runner-enrollment-id")}`, { headers: { authorization: `Bearer ${person.token}` } });
+        expect(await enrollment.json()).toEqual({ status: "connected" });
+        expect((await onlineAgents(oldKit.projectId))[0]!.id).not.toBe(before.id);
         const stop = launch(exe, ["--stop", "--install-dir", inst], path.dirname(exe));
         expect(await stop.exited, output(stop)).toBe(0);
         expect(await Promise.race([main.exited, sleep(30_000).then(() => "timeout")]), output(main)).toBe(0);

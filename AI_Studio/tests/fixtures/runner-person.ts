@@ -3,6 +3,8 @@
  *  - personToken: a person (an owner) with their own API token, made in the platform's user store (no sign-in page needed).
  *  - downloadRunner: POST /api/me/runner/download as that person, the way Settings, Your runner does.
  *  - splitStampedExe: the one-file Windows download taken apart (program, kit zip, format).
+ *  - splitLinuxScript: the one-file Linux download taken apart (the sh header, and each file of its gzip tar with its mode), read here
+ *    without the server's writer so the format is checked independently.
  *  - myRunner / retireMyRunner: GET /api/me/runner and POST /api/me/runner/retire ("Remove this computer").
  *  - enrollByHand: trade a download's runner.enroll at /api/agent/enroll the way the runner does, and keep the credential in this computer's
  *    store for that folder with the install id in runner.machine (exactly what the runner leaves behind), for tests that need a working
@@ -11,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 import { MACHINE_ID_FILE, saveCredential } from "../../src/agent/credential-store.js";
 import { accessControlOf } from "../../src/platform/auth/access.js";
 
@@ -34,6 +37,36 @@ export function splitStampedExe(b: Uint8Array): { program: Buffer; payload: Buff
     if (buf.length < 16 || buf.toString("latin1", buf.length - 8) !== "AITP-KIT") return undefined;
     const len = buf.readUInt32LE(buf.length - 16);
     return { program: buf.subarray(0, buf.length - 16 - len), payload: buf.subarray(buf.length - 16 - len, buf.length - 16), format: buf.readUInt32LE(buf.length - 12) };
+}
+
+export function splitLinuxScript(b: Uint8Array): { header: string; files: Record<string, Buffer>; modes: Record<string, number> } | undefined {
+    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+    const m = /^AITP_SKIP=(\d+)$/m.exec(buf.subarray(0, 64 * 1024).toString("latin1"));
+    if (!buf.subarray(0, 10).toString("latin1").startsWith("#!/bin/sh") || !m) return undefined;
+    const start = Number(m[1]) - 1;
+    const tar = zlib.gunzipSync(buf.subarray(start));
+    const files: Record<string, Buffer> = {};
+    const modes: Record<string, number> = {};
+    const field = (h: Buffer, at: number, len: number) => h.subarray(at, at + len).toString("utf8").replace(/\0.*$/s, "");
+    let pax: string | undefined;
+    for (let at = 0; at + 512 <= tar.length; ) {
+        const h = tar.subarray(at, at + 512);
+        if (h.every((x) => x === 0)) break;
+        const size = parseInt(field(h, 124, 12), 8);
+        const type = field(h, 156, 1) || "0";
+        const data = tar.subarray(at + 512, at + 512 + size);
+        at += 512 + Math.ceil(size / 512) * 512;
+        if (type === "x") {
+            pax = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(data.toString("utf8"))?.[1];
+            continue;
+        }
+        const prefix = field(h, 345, 155);
+        const name = pax ?? (prefix ? `${prefix}/${field(h, 0, 100)}` : field(h, 0, 100));
+        pax = undefined;
+        files[name] = Buffer.from(data);
+        modes[name] = parseInt(field(h, 100, 8), 8);
+    }
+    return { header: buf.subarray(0, start).toString("utf8"), files, modes };
 }
 
 export type MyRunner = { id: string; name: string; status: string; update?: Record<string, unknown> & { state?: string }; check?: { at: string; items: Array<{ id: string; status: string; title: string }> }; version?: string };

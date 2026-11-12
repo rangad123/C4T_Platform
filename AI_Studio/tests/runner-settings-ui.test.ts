@@ -58,7 +58,10 @@ describe("the rules (no browser)", () => {
         // Round 49: the Windows download is the setup program itself.
         expect(startSteps("windows").steps.join(" ")).not.toMatch(/Unzip/);
         expect(startSteps("mac").steps.join(" ")).toContain("AI Testing Runner");
-        expect(startSteps("linux").command).toBe("sh start-runner.sh");
+        expect(startSteps("linux").command).toBe("sh ai-testing-runner.sh");
+        expect(startSteps("linux").steps.join(" ")).not.toMatch(/Unzip/);
+        expect(startSteps("mac").steps.join(" ")).toContain("Open the download, then open “AI Testing Runner”");
+        expect(startSteps("mac").steps.join(" ")).toContain("Open Anyway");
         expect(startSteps("windows", "files").steps.join(" ")).toContain("start-runner.cmd");
         expect(offlineSteps("windows")[0]).toContain("notification area");
     });
@@ -164,10 +167,10 @@ beforeAll(async () => {
         if (fake.download.status !== 200) return route.fulfill({ status: fake.download.status, json: { error: fake.download.error } });
         await route.fulfill({
             status: 200,
-            body: Buffer.from(`PK-stand-in runner.enroll=${SECRET_CODE}`),
+            body: Buffer.from(`#!/bin/sh stand-in runner.enroll=${SECRET_CODE}`),
             headers: {
-                "content-type": "application/zip",
-                "content-disposition": 'attachment; filename="ai-testing-runner-linux-x64.zip"',
+                "content-type": "application/x-sh",
+                "content-disposition": 'attachment; filename="ai-testing-runner.sh"',
                 "x-runner-enrollment-id": "enr-1",
                 "x-runner-enrollment-expires": new Date(Date.now() + 30 * 60_000).toISOString(),
                 "x-runner-kit-kind": "files",
@@ -266,19 +269,19 @@ describe("not set up", () => {
         const saved = page.waitForEvent("download");
         await section().getByRole("button", { name: "Download for Linux" }).click();
         const dl = await saved;
-        expect(dl.suggestedFilename()).toBe("ai-testing-runner-linux-x64.zip");
+        expect(dl.suggestedFilename()).toBe("ai-testing-runner.sh");
         const post = calls.find((c) => c.path === "/api/me/runner/download");
         expect(post?.method).toBe("POST");
         expect(post?.body).toEqual({ os: "linux", arch: "x64" });
         const waiting = section().getByTestId("runner-waiting");
-        await pwExpect(waiting).toContainText("ai-testing-runner-linux-x64.zip");
-        await pwExpect(waiting).toContainText("sh start-runner.sh");
+        await pwExpect(waiting).toContainText("ai-testing-runner.sh");
+        await pwExpect(waiting).toContainText("sh ai-testing-runner.sh");
         await pwExpect(waiting.getByTestId("runner-wait")).toContainText("Waiting for the computer to connect");
         // The steps say it once; the other cases and the computer check wait under Still blocked?
         await pwExpect(waiting.getByTestId("still-blocked")).toBeVisible();
         await pwExpect(waiting.getByText("check-computer.sh", { exact: false })).toBeHidden();
         await waiting.getByText("Still blocked?", { exact: true }).click();
-        await pwExpect(waiting.getByText("sh check-computer.sh", { exact: false })).toBeVisible();
+        await pwExpect(waiting.getByText("sh ~/.local/share/ai-testing-runner/check-computer.sh", { exact: false })).toBeVisible();
         // The code inside the download never reaches the page.
         expect(await page.content()).not.toContain(SECRET_CODE);
         await axeBoth();

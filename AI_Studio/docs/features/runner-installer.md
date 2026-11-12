@@ -119,7 +119,7 @@ Rebuild after updating the platform, as with `npm run build:runner`.
 
 ## Round 49: one file for Windows
 
-The Windows download is `AITestingRunnerSetup.exe` itself; a person double-clicks it and nothing is unzipped. Mac and Linux are unchanged.
+The Windows download is `AITestingRunnerSetup.exe` itself; a person double-clicks it and nothing is unzipped. (Round 50 did the same for Mac and Linux: `runner-installer-mac.md`, `runner-kit.md`.)
 
 - **The server stamps it at download time** (`buildInstallerExe` in `src/platform/runner-installer.ts`). The program built by CI is the same for everyone; each download is those exact bytes, then a zip of this download's kit, then a 16-byte footer:
 

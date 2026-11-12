@@ -4,8 +4,11 @@
 # while the Windows installer installs the test tools itself), install it with the real
 # installer without questions, check that it connects, run a web test and an API test on it end to end, stop it, start it again, remove
 # the computer, uninstall it and check that nothing is left (AI_Studio/scripts/smoke-runner.mjs --kit installer --lifecycle). The same
-# download started with its start script, and with no Node.js on the PATH (its own Node.js), is checked too (on Mac and Linux; Windows
-# skips them plainly, its installer download has no start script). What this proves and what it cannot: AI_Studio/docs/features/real-machine-checks.md.
+# download started with its start script, and with no Node.js on the PATH (its own Node.js), is checked too (on Linux; Windows and a Mac
+# skip them plainly, their installer download has no start script). Each download is one thing (rounds 49 and 50) and is used as people
+# get it: Windows starts AITestingRunnerSetup.exe, a Mac unzips a zip that must hold only "AI Testing Runner.app" and opens it with
+# nothing beside it, Linux runs `sh ai-testing-runner.sh`. On a Mac and on Linux a second download is then started while the runner runs:
+# the earlier runner must stop and the new one come online. What this proves and what it cannot: AI_Studio/docs/features/real-machine-checks.md.
 #
 # GitHub's Windows machines run Windows Server 2022 and 2025, not Windows 10 or 11 desktop, and nobody is signed in at a screen: a manual
 # pass on a real Windows 11 PC and a real Mac is still needed (AI_Studio/docs/runner-implementation/MANUAL_VERIFICATION.md).
@@ -23,6 +26,9 @@ on:
       - "AI_Studio/scripts/build-runner*"
       - "AI_Studio/scripts/build-installer*"
       - "AI_Studio/scripts/smoke-runner.mjs"
+      # What the server makes of a download (round 50: the Mac zip with the app alone, the Linux script).
+      - "AI_Studio/src/platform/runner-*.ts"
+      - "AI_Studio/src/platform/routes/runner-kits.ts"
       - ".github/workflows/runner-matrix.yml"
   pull_request:
     paths:
@@ -32,6 +38,9 @@ on:
       - "AI_Studio/scripts/build-runner*"
       - "AI_Studio/scripts/build-installer*"
       - "AI_Studio/scripts/smoke-runner.mjs"
+      # What the server makes of a download (round 50: the Mac zip with the app alone, the Linux script).
+      - "AI_Studio/src/platform/runner-*.ts"
+      - "AI_Studio/src/platform/routes/runner-kits.ts"
       - ".github/workflows/runner-matrix.yml"
 
 permissions:
@@ -122,6 +131,7 @@ jobs:
       - name: Installer, unattended, with stop, restart, uninstall
         if: matrix.installer
         run: node scripts/smoke-runner.mjs --kit installer --lifecycle --port 6952 --out smoke-report/installer
+      # Linux: sh ai-testing-runner.sh (round 50), then a second download replacing the running runner.
       - name: The download started with its start script
         if: success() || failure()
         run: node scripts/smoke-runner.mjs --kit files --port 6950 --out smoke-report/files

@@ -6,12 +6,16 @@
 //    new temporary data folder with a new access key, and signs up its first person (an owner) the way the setup page does.
 // 2. Creates a project with one web test and one API test, imported through the API (no AI, no model key).
 // 3. Downloads that person's runner the way Settings, Your runner does (POST /api/me/runner/download with this computer's system and
-//    processor: the installer on Windows and a Mac, the plain files on Linux, with its own Node.js when the platform built it), unpacks it
-//    with the computer's own unzip tool (Windows' tar.exe, macOS' ditto, unzip on Linux) into a folder with a space and brackets in its
-//    name, and starts it the way the README says (the installer's --silent switch, or start-runner.cmd / sh start-runner.sh).
+//    processor: the installer on Windows and a Mac, the plain files on Linux, with its own Node.js when the platform built it). Each is
+//    one thing (rounds 49 and 50): Windows' AITestingRunnerSetup.exe is started as it is, a Mac's zip is unpacked with ditto and must
+//    hold only "AI Testing Runner.app" (opened through its own launcher, with nothing beside it), Linux's ai-testing-runner.sh is run with
+//    sh; a fallback zip is unpacked with the computer's own tool (tar.exe, ditto, unzip) into a folder with a space and brackets in its
+//    name and started with start-runner.cmd / sh start-runner.sh.
 // 4. Waits for the person's runner to be connected, runs both tests as that person and checks they passed ON THE RUNNER.
 // 5. With --lifecycle (installer only): stops the runner the way a person does (Windows: --stop; Mac: the window's Ctrl-C), starts it
 //    again (it now uses the credential it saved, the one-time code is used up) and waits for it to be online again.
+// 5b. On Mac (installer) and Linux: downloads again and starts the new download while the runner runs; the earlier one must stop and the
+//    new one come online (a new download replaces a running runner, round 50).
 // 6. Removes the computer (Settings, Your runner, Remove this computer) and checks the runner ends with the plain "no longer accepts this
 //    runner" message. With --lifecycle,
 //    uninstalls with the installer's own --uninstall and checks that nothing is left: no install folder, no sign-in start.
@@ -31,6 +35,10 @@ export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const WIN = process.platform === "win32";
 
 export const KITS = ["files", "installer", "complete"];
+export const MAC_APP = "AI Testing Runner.app";
+export const LINUX_SCRIPT = "ai-testing-runner.sh";
+/** The Mac app's setup script (uninstall and the like are run through it). */
+export const macSetup = (kitDir) => path.join(kitDir, MAC_APP, "Contents", "Resources", "runner-setup.sh");
 export const DEFAULT_PORT = 6950;
 /** Kept per child process (the end of what it printed); older output is dropped so a chatty run cannot fill the memory. */
 export const MAX_OUTPUT_CHARS = 4 * 1024 * 1024;
@@ -180,8 +188,10 @@ export function startCommand(kit, target, kitDir, installDir) {
     if (kit === "installer") {
         // No sign-in start: a check must not leave a Startup shortcut behind on the computer it runs on.
         if (target.system === "windows") return { command: path.join(kitDir, "AITestingRunnerSetup.exe"), args: ["--silent", "--no-start-at-sign-in", "--install-dir", installDir] };
-        return { command: "sh", args: [path.join(kitDir, "AI Testing Runner.app", "Contents", "Resources", "runner-setup.sh"), "--silent", "--no-autostart", "--install-dir", installDir] };
+        // The app's own launcher, as opening the app runs it (AITP_INSTALLER_NO_TERMINAL: in this window instead of a new Terminal).
+        return { command: "sh", args: [path.join(kitDir, MAC_APP, "Contents", "MacOS", "AITestingRunner"), "--silent", "--no-autostart", "--install-dir", installDir] };
     }
+    if (target.system === "linux") return { command: "sh", args: [LINUX_SCRIPT] };
     if (target.system === "windows") return { command: path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"), args: ["/d", "/c", ".\\start-runner.cmd"] };
     return { command: "sh", args: ["start-runner.sh"] };
 }
@@ -451,11 +461,13 @@ export function platformEnv(base, s) {
 }
 
 /** Environment for the runner: the computer's own, as a person's window has it, without the platform's settings or our test switches. */
-export function runnerEnv(base, { linkNodeModules = false, path: pathValue } = {}) {
+export function runnerEnv(base, { linkNodeModules = false, path: pathValue, installDir } = {}) {
     const env = Object.fromEntries(Object.entries(base).filter(([k, v]) => v !== undefined && !/^(AGENT_|RUNNER_|AITP_)/i.test(k) && !/^(API_KEY|DATA_DIR|PUBLIC_URL|SECRET_KEY)$/i.test(k)));
     // No "press a key" pause and no window: the script must end on its own when the runner stops.
-    Object.assign(env, { AITP_KIT_NO_PAUSE: "1", AITP_INSTALLER_NO_PAUSE: "1", AITP_INSTALLER_NO_UI: "1" });
+    Object.assign(env, { AITP_KIT_NO_PAUSE: "1", AITP_INSTALLER_NO_PAUSE: "1", AITP_INSTALLER_NO_UI: "1", AITP_INSTALLER_NO_TERMINAL: "1" });
     if (linkNodeModules) env.AITP_KIT_SKIP_INSTALL = "1";
+    // The Linux script installs here instead of ~/.local/share/ai-testing-runner (a check leaves nothing in the person's home).
+    if (installDir) env.AITP_RUNNER_INSTALL_DIR = installDir;
     if (pathValue !== undefined) {
         for (const k of Object.keys(env)) if (k.toUpperCase() === "PATH") delete env[k];
         env.PATH = pathValue;
@@ -517,6 +529,33 @@ export async function unpackZip(zipFile, dest, { platform = process.platform, bu
     }
     await unpackBuiltIn(zipFile, dest);
     return "built-in unzip";
+}
+
+/** What the Linux script carries: the files of its gzip tar (`tar tzf`), or one file's text (`tar xzOf`), read the way its header reads it. */
+export function scriptPayload(file, member) {
+    const r = spawnSync("sh", ["-c", `n=$(sed -n "s/^AITP_SKIP=//p" "$1" | head -n 1); tail -c +"$n" "$1" | tar ${member ? 'xzOf - "$2"' : "tzf -"}`, "sh", file, member ?? ""], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+    if (r.status !== 0) throw new Error(`${path.basename(file)} could not be read with tail and tar: ${(r.stderr || "").trim().slice(0, 300)}`);
+    return member ? r.stdout : r.stdout.split("\n").filter(Boolean);
+}
+
+/** Puts a downloaded file where a person has it and finds its one-time code: the Linux script as it is, a zip unpacked. */
+export async function placeDownload(file, dest, target) {
+    fs.mkdirSync(dest, { recursive: true });
+    if (file.endsWith(".sh")) {
+        fs.renameSync(file, path.join(dest, path.basename(file)));
+        return { kitDir: dest, code: scriptPayload(path.join(dest, path.basename(file)), "runner.enroll").trim(), files: scriptPayload(path.join(dest, path.basename(file))), tool: "one file, nothing to unpack" };
+    }
+    const tool = await unpackZip(file, dest);
+    const top = fs.readdirSync(dest);
+    if (top.length !== 1 || !fs.statSync(path.join(dest, top[0])).isDirectory()) throw new Error(`The zip should hold one folder or the app, it holds: ${top.join(", ")}`);
+    // The Mac app alone (round 50): its kit is inside it, and there is nothing beside it.
+    const app = top[0] === MAC_APP;
+    if (target.system === "mac" && !app && fs.existsSync(path.join(dest, top[0], MAC_APP))) throw new Error("The Mac download holds a folder with the app and the runner files beside it, not the app alone.");
+    const kitDir = app ? dest : path.join(dest, top[0]);
+    const files = app ? path.join(dest, MAC_APP, "Contents", "Resources", "kit") : kitDir;
+    const credential = ["runner.enroll", "runner.token"].map((f) => path.join(files, f)).find((f) => fs.existsSync(f));
+    if (!credential) throw new Error("The download has neither runner.enroll nor runner.token.");
+    return { kitDir, code: fs.readFileSync(credential, "utf8").trim(), files: undefined, filesDir: files, tool: `with ${tool}${app ? ", the app alone" : ""}` };
 }
 
 // ── the report ──────────────────────────────────────────────────────────────
@@ -671,7 +710,7 @@ export async function runSmoke(opts, deps = {}) {
             // The download holds the person's one-time code; their runner is made when the runner trades it, and found once it is connected.
             const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "runner.zip";
             // Windows' installer download is one program with the kit appended (round 49); everything else is a zip.
-            if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName) && !(target.system === "windows" && fileName === "AITestingRunnerSetup.exe")) throw new Error(`Unexpected file name ${fileName}`);
+            if (!/^[A-Za-z0-9._-]+\.zip$/.test(fileName) && !(target.system === "windows" && fileName === "AITestingRunnerSetup.exe") && !(target.system === "linux" && fileName === LINUX_SCRIPT)) throw new Error(`Unexpected file name ${fileName}`);
             zipFile = path.join(downloads, fileName);
             fs.renameSync(path.join(downloads, "download.part"), zipFile);
             return `${fileName}, ${(res.bytes / 1048576).toFixed(1)} MB`;
@@ -697,25 +736,25 @@ export async function runSmoke(opts, deps = {}) {
                 if (opts.kit !== "installer") throw new Skip(`The download for ${target.label} is the installer and has no start script here. Use --kit installer.`);
                 return "one program, nothing to unpack";
             }
-            const tool = await unpackZip(zipFile, dest);
-            const top = fs.readdirSync(dest);
-            if (top.length !== 1 || !fs.statSync(path.join(dest, top[0])).isDirectory()) throw new Error(`The zip should hold one folder, it holds: ${top.join(", ")}`);
-            kitDir = path.join(dest, top[0]);
-            const credential = ["runner.enroll", "runner.token"].map((f) => path.join(kitDir, f)).find((f) => fs.existsSync(f));
-            if (!credential) throw new Error("The download has neither runner.enroll nor runner.token.");
-            secrets.push(fs.readFileSync(credential, "utf8").trim());
+            const placed = await placeDownload(zipFile, dest, target);
+            kitDir = placed.kitDir;
+            secrets.push(placed.code);
             if (opts.kit === "complete") {
-                const own = ["node.exe", path.join("bin", "node")].some((f) => fs.existsSync(path.join(kitDir, "node", f)));
+                const own = placed.files ? placed.files.includes("node/bin/node") : ["node.exe", path.join("bin", "node")].some((f) => fs.existsSync(path.join(placed.filesDir, "node", f)));
                 if (!own) throw new Error("The complete download has no Node.js of its own (no node folder with node.exe or bin/node).");
             }
-            // Windows and a Mac get the installer; its start scripts are there only when the download carries its own Node.js.
-            if (opts.kit !== "installer" && !fs.existsSync(path.join(kitDir, target.system === "windows" ? "start-runner.cmd" : "start-runner.sh"))) throw new Skip(`The download for ${target.label} is the installer and has no start script here (the platform built no complete download for ${target.id}). Use --kit installer.`);
+            // Windows and a Mac get the installer; its start scripts are there only when the platform built no installer.
+            if (opts.kit !== "installer" && !fs.existsSync(path.join(kitDir, target.system === "windows" ? "start-runner.cmd" : target.system === "linux" ? LINUX_SCRIPT : "start-runner.sh"))) throw new Skip(`The download for ${target.label} is the installer and has no start script here. Use --kit installer.`);
             if (opts.linkNodeModules) {
-                const link = path.join(kitDir, "node_modules");
+                // The Linux script installs first: this checkout's node_modules goes into the install folder it will use (marked as its own).
+                const into = target.system === "linux" ? path.join(tmp, "install folder") : kitDir;
+                fs.mkdirSync(into, { recursive: true });
+                if (target.system === "linux") fs.writeFileSync(path.join(into, ".created-by-ai-testing-runner"), "smoke check\n");
+                const link = path.join(into, "node_modules");
                 fs.symlinkSync(path.join(REPO, "node_modules"), link, WIN ? "junction" : "dir");
                 links.push(link);
             }
-            return `with ${tool}${opts.linkNodeModules ? ", node_modules linked to this checkout" : ""}`;
+            return `${placed.tool}${opts.linkNodeModules ? ", node_modules linked to this checkout" : ""}`;
         });
 
         let pathValue;
@@ -731,9 +770,9 @@ export async function runSmoke(opts, deps = {}) {
         const cmd = startCommand(opts.kit, target, kitDir, path.join(tmp, "install folder"));
         report.lifecycle = Boolean(opts.lifecycle);
         await step(`Start it (${[path.basename(cmd.command), ...cmd.args.map((a) => (a.length > 3 && path.isAbsolute(a) ? path.basename(a) : a))].join(" ")})`, async () => {
-            const program = opts.kit === "installer" ? (target.system === "windows" ? cmd.command : cmd.args[0]) : path.join(kitDir, target.system === "windows" ? "start-runner.cmd" : "start-runner.sh");
+            const program = opts.kit === "installer" ? (target.system === "windows" ? cmd.command : cmd.args[0]) : path.join(kitDir, target.system === "windows" ? "start-runner.cmd" : target.system === "linux" ? LINUX_SCRIPT : "start-runner.sh");
             if (!fs.existsSync(program)) throw new Error(`${path.basename(program)} is not in the download.`);
-            runner = children.start("runner", cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
+            runner = children.start("runner", cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue, installDir: path.join(tmp, "install folder") }) });
             return undefined;
         });
 
@@ -814,7 +853,7 @@ export async function runSmoke(opts, deps = {}) {
             });
             await step("Start it again (its saved credential, no new code)", async () => {
                 if (fs.existsSync(path.join(installDir, "app", "runner.enroll")) || fs.existsSync(path.join(installDir, "runner", "runner.enroll"))) throw new Error("The one-time code is still in the install folder after the runner used it.");
-                runner = children.start("runner (again)", cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
+                runner = children.start("runner (again)", cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue, installDir: path.join(tmp, "install folder") }) });
                 const t0 = Date.now();
                 await until("the runner to be online again", async () => {
                     if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
@@ -848,7 +887,7 @@ export async function runSmoke(opts, deps = {}) {
                     if (Children.running(runner)) throw new Error(`The runner was still running a minute after it was asked to stop.\n${tail(runner.output)}`);
                 };
                 const startRunner = async (name) => {
-                    runner = children.start(name, cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue }) });
+                    runner = children.start(name, cmd.command, cmd.args, { cwd: kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue, installDir: path.join(tmp, "install folder") }) });
                     await until("the runner to be online again", async () => {
                         if (!Children.running(runner)) throw new Error(`The runner stopped before it was online again (code ${runner.code}).\n${tail(runner.output)}`);
                         return (await myRunner())?.id === tokenId && (target.system !== "windows" || runner.output.includes("Runner started"));
@@ -880,6 +919,35 @@ export async function runSmoke(opts, deps = {}) {
             }
         }
 
+        // Round 50: a new download replaces a running runner (the Mac app, and the Linux script). Windows is not part of it.
+        if (target.system === "mac" ? opts.kit === "installer" : target.system === "linux") {
+            await step("Download again and start the new download while the runner runs: the earlier one stops, the new one comes online", async () => {
+                const part = path.join(tmp, "Downloads", "download2.part");
+                const res = await downloadKit(platform.base, auth, kitRequestBody(target), part);
+                if (res.status !== 200) throw new Error(`The second download was refused (${res.status}): ${res.message}`);
+                const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "runner.zip";
+                const dest = path.join(tmp, "Downloads", "smoke runner (2)");
+                fs.mkdirSync(dest, { recursive: true });
+                fs.renameSync(part, path.join(dest, fileName));
+                const placed = await placeDownload(path.join(dest, fileName), path.join(dest, "here"), target);
+                secrets.push(placed.code);
+                const again = startCommand(opts.kit, target, placed.kitDir, installDir);
+                const earlier = runner;
+                runner = children.start("runner (new download)", again.command, again.args, { cwd: placed.kitDir, env: runnerEnv(process.env, { linkNodeModules: opts.linkNodeModules, path: pathValue, installDir }) });
+                await Promise.race([earlier.exited, sleep(90_000)]);
+                if (Children.running(earlier)) throw new Error(`The earlier runner was still running 90 s after the new download started.\n${tail(runner.output)}`);
+                const t0 = Date.now();
+                const now = await until("the new download's runner to be online", async () => {
+                    if (!Children.running(runner)) throw new Error(`The new download's runner stopped before it was online (code ${runner.code}).\n${tail(runner.output)}`);
+                    const r = await myRunner();
+                    return r && r.id !== tokenId ? r : undefined;
+                }, opts.onlineTimeout * 1000, 2000);
+                tokenId = now.id;
+                runnerName = now.name;
+                return `the earlier runner ended with code ${earlier.code}; the new one is online after ${fmtMs(Date.now() - t0)}`;
+            });
+        }
+
         await step("Remove this computer (Settings, Your runner) and check the runner stops with a plain message", async () => {
             const r = await api("POST", "/api/me/runner/retire");
             if (r.status !== 200) throw new Error(`Removing the computer failed (${r.status}): ${r.message}`);
@@ -897,7 +965,7 @@ export async function runSmoke(opts, deps = {}) {
 
         if (opts.lifecycle) {
             await step("Uninstall it and check nothing is left", async () => {
-                const un = target.system === "windows" ? spawnSync(cmd.command, ["--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000, windowsHide: true }) : spawnSync("sh", [cmd.args[0], "--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000 });
+                const un = target.system === "windows" ? spawnSync(cmd.command, ["--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000, windowsHide: true }) : spawnSync("sh", [macSetup(kitDir), "--uninstall", "--silent", "--install-dir", installDir], { cwd: kitDir, encoding: "utf8", timeout: 120_000 });
                 if (un.status !== 0) throw new Error(`--uninstall ended with code ${un.status}: ${redact(`${un.stdout ?? ""}${un.stderr ?? ""}`.slice(-400), secrets)}`);
                 // A copy of the Windows program that runs from the install folder removes itself a few seconds after it exits; nothing else is
                 // removed later, so a folder still here after 30 s is a finding (the report below says what could hold it).

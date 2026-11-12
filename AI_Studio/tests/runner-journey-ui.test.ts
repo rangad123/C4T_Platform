@@ -20,10 +20,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect as pwExpect } from "@playwright/test";
-import { unzipSync } from "fflate";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { REPO_ROOT } from "../src/config.js";
+import { splitLinuxScript } from "./fixtures/runner-person.js";
 import { startRunnerStack, waitFor, type AgentProcess, type RunnerStack } from "./helpers/runner-stack.js";
 // @ts-expect-error plain JavaScript build script (no type declarations)
 import { buildRunner } from "../scripts/build-runner.mjs";
@@ -194,7 +194,8 @@ describe("a person's own runner runs their tests, from setting it up in Settings
         await section.getByRole("button", { name: /^Download for Linux/ }).click();
         const dl = await saved;
         const zipPath = await dl.path();
-        const files = unzipSync(new Uint8Array(fs.readFileSync(zipPath!)));
+        // Linux is one file since round 50: a sh header with the kit as a gzip tar at its end.
+        const files = splitLinuxScript(fs.readFileSync(zipPath!))!.files;
         const enrollFile = Object.keys(files).find((f) => f.endsWith("runner.enroll"));
         expect(enrollFile, Object.keys(files).join(", ")).toBeDefined();
         enrollCode = new TextDecoder().decode(files[enrollFile!]).trim();

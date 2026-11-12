@@ -19,7 +19,8 @@ import { Readable } from "node:stream";
 import zlib from "node:zlib";
 import { z } from "zod";
 import { REPO_ROOT } from "../config.js";
-import type { InstallerPart } from "./runner-installer.js";
+import { MAC_KIT_DIR, type InstallerPart } from "./runner-installer.js";
+import { linuxScript } from "./runner-linux-script.js";
 import { KIT_SLUG, kitCredentialFile, type Bundle } from "./runner-kit.js";
 import { readme, START_CMD, START_COMMAND, START_SH, withLineEnding } from "./runner-kit-scripts.js";
 import { CHECK_FILES } from "./runner-check-scripts.js";
@@ -165,15 +166,8 @@ export function loadComplete(target: CompleteTarget, bundle: Extract<Bundle, { o
 export const completeFolder = (target: CompleteTarget): string => `runner-${KIT_SLUG}-${target}`;
 export const completeFileName = (target: CompleteTarget): string => `${completeFolder(target)}.zip`;
 
-interface ZipEntry {
+interface ZipEntry extends Omit<PackedFile, "name"> {
     name: Buffer;
-    mode: number;
-    crc: number;
-    size: number;
-    csize: number;
-    /** Where the compressed bytes are: in the pack (offset), or here. */
-    packOffset?: number;
-    body?: Buffer;
     localOffset: number;
 }
 
@@ -218,9 +212,16 @@ function centralHeader(e: ZipEntry, time: number, date: number): Buffer {
 
 export interface BuildCompleteInput {
     bundle: Extract<Bundle, { ok: true }>;
-    build: Extract<CompleteBuild, { ok: true }>;
+    /** The complete build (own Node.js and test tools). Left out: only the runner files (the plain Mac app or the plain Linux script). */
+    build?: Extract<CompleteBuild, { ok: true }>;
     /** The installer program for this system, when the server has one: put next to the start scripts as the double-click alternative. */
     installer?: Extract<InstallerPart, { ok: true }>;
+    /**
+     * How the download is laid out (round 50). "folder": one folder with the start scripts, the check and a README (today's zip).
+     * "mac-app": a zip holding only the app, with the kit inside it (MAC_KIT_DIR; needs `installer`). "linux": one sh script with the kit
+     * as a gzip tar at its end (runner-linux-script.ts).
+     */
+    layout?: "folder" | "mac-app" | "linux";
     /** Left out: the runner uses the computer's own name (round 45). */
     runnerName?: string;
     platformUrl: string;
@@ -233,27 +234,24 @@ export interface BuildCompleteInput {
 }
 
 /**
- * The zip, as a stream and its exact length. The big part is copied from the pack as it is (already compressed); the rest is
- * compressed here. Every entry carries Unix permissions: node and the start scripts 0755, runner.token 0600.
+ * The download, as a stream and its exact length. The big part is copied from the pack as it is (already compressed); the rest is
+ * compressed here. Every entry carries Unix permissions: node and the start scripts 0755, runner.enroll 0600.
  */
 export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; bytes: number } {
-    const { manifest } = i.build;
-    const target = i.build.target;
-    const dir = completeFolder(target);
-    const win = target.startsWith("win");
-    const time = manifest.dosTime;
-    const date = manifest.dosDate;
+    const layout = i.layout ?? "folder";
+    const manifest = i.build?.manifest;
+    const target = i.build?.target;
+    const win = Boolean(target?.startsWith("win"));
     const kitVersion = i.bundle.manifest.kitVersion;
-    const entries: ZipEntry[] = [];
+    // Where the kit's files go: one folder (today), inside the app, or the tar's root (the Linux script unpacks it into a folder of its own).
+    if (layout === "folder" && !target) throw new Error("the folder layout is the complete download");
+    const prefix = layout === "mac-app" ? `${MAC_KIT_DIR}/` : layout === "linux" ? "" : `${completeFolder(target!)}/`;
+    const files: PackedFile[] = [];
     const taken = new Set<string>();
-    let offset = 0;
-    const push = (name: string, e: Omit<ZipEntry, "name" | "localOffset">): void => {
+    const push = (name: string, e: Omit<PackedFile, "name">): void => {
         if (taken.has(name)) throw new Error(`two files named ${name}`);
         taken.add(name);
-        const nameBuf = Buffer.from(`${dir}/${name}`, "utf8");
-        const entry: ZipEntry = { ...e, name: nameBuf, localOffset: offset };
-        entries.push(entry);
-        offset += 30 + nameBuf.length + e.csize;
+        files.push({ ...e, name });
     };
     const small = (name: string, data: Uint8Array, mode = 0o644): void => {
         const body = zlib.deflateRawSync(data, { level: 9 });
@@ -262,29 +260,98 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     const text = (s: string): Buffer => Buffer.from(s, "utf8");
 
     // The runtime and the packages, straight from the pack.
-    for (const f of manifest.files) push(f.path, { mode: f.mode, crc: f.crc, size: f.size, csize: f.csize, packOffset: f.offset });
+    if (manifest) for (const f of manifest.files) push(prefix + f.path, { mode: f.mode, crc: f.crc, size: f.size, csize: f.csize, packOffset: f.offset });
     // The runner programs: exactly the prebuilt bytes.
-    for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) small(name, i.bundle.files.get(name)!);
+    for (const name of ["runner.mjs", "task-child.mjs", "record-child.mjs", "package.json", "LICENSES.txt"]) small(prefix + name, i.bundle.files.get(name)!);
+    const lock = i.bundle.files.get("package-lock.json");
+    if (lock && !manifest) small(prefix + "package-lock.json", lock);
     // What belongs to this download.
-    small("runner.json", text(`${JSON.stringify({ url: i.platformUrl, ...(i.runnerName ? { name: i.runnerName } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
+    small(prefix + "runner.json", text(`${JSON.stringify({ url: i.platformUrl, ...(i.runnerName ? { name: i.runnerName } : {}), kitVersion, ...(i.updateSequence !== undefined ? { updateSequence: i.updateSequence } : {}) }, null, 2)}\n`));
     const credential = kitCredentialFile(i);
-    small(credential.name, text(credential.text), 0o600);
-    small("start-runner.cmd", text(withLineEnding(START_CMD, "\r\n")), 0o755);
-    small("start-runner.sh", text(withLineEnding(START_SH, "\n")), 0o755);
-    small("start-runner.command", text(withLineEnding(START_COMMAND, "\n")), 0o755);
-    // "Check this computer" (docs/features/runner-check.md): double-clickable, in every download.
-    for (const f of CHECK_FILES) small(f.name, text(withLineEnding(f.text, f.eol)), 0o755);
-    if (i.installer) for (const f of i.installer.files) small(f.name, f.data, f.mode);
-    const readmeText = readme({
-        platform: win ? "windows" : "unix",
-        ...(i.runnerName ? { runnerName: i.runnerName } : {}),
-        platformUrl: i.platformUrl,
-        kitVersion,
-        complete: { target, words: TARGET_WORDS[target], nodeVersion: manifest.nodeVersion, installer: Boolean(i.installer) },
-    });
-    small("README.txt", text(withLineEnding(readmeText, win ? "\r\n" : "\n")));
-    if (entries.length > 0xffff - 1) throw new Error("too many files for a zip without zip64");
+    small(prefix + credential.name, text(credential.text), 0o600);
+    if (layout === "mac-app") {
+        // The app itself, the same bytes for everyone: the kit inside it is the only difference. No README, no start scripts beside it.
+        if (!i.installer) throw new Error("the Mac app layout needs the app");
+        for (const f of i.installer.files) small(f.name, f.data, f.mode);
+    } else if (layout === "linux") {
+        // The script's header runs start-runner.sh from the installed copy; check-computer.sh stays there for "If the runner does not connect".
+        small("start-runner.sh", text(withLineEnding(START_SH, "\n")), 0o755);
+        const check = CHECK_FILES.find((f) => f.name === "check-computer.sh")!;
+        small(check.name, text(withLineEnding(check.text, check.eol)), 0o755);
+    } else {
+        small(prefix + "start-runner.cmd", text(withLineEnding(START_CMD, "\r\n")), 0o755);
+        small(prefix + "start-runner.sh", text(withLineEnding(START_SH, "\n")), 0o755);
+        small(prefix + "start-runner.command", text(withLineEnding(START_COMMAND, "\n")), 0o755);
+        // "Check this computer" (docs/features/runner-check.md): double-clickable, in every download.
+        for (const f of CHECK_FILES) small(prefix + f.name, text(withLineEnding(f.text, f.eol)), 0o755);
+        if (i.installer) for (const f of i.installer.files) small(prefix + f.name, f.data, f.mode);
+        const readmeText = readme({
+            platform: win ? "windows" : "unix",
+            ...(i.runnerName ? { runnerName: i.runnerName } : {}),
+            platformUrl: i.platformUrl,
+            kitVersion,
+            ...(target && manifest ? { complete: { target, words: TARGET_WORDS[target], nodeVersion: manifest.nodeVersion, installer: Boolean(i.installer) } } : {}),
+        });
+        small(prefix + "README.txt", text(withLineEnding(readmeText, win ? "\r\n" : "\n")));
+    }
+    if (layout === "linux") return linuxScript(files, i.build?.packPath);
+    return zipOf(files, i.build?.packPath, manifest ? { time: manifest.dosTime, date: manifest.dosDate } : dosNow());
+}
 
+/** One file of a download, already compressed (raw deflate): its bytes are here (`body`) or in the complete build's pack (`packOffset`). */
+export interface PackedFile {
+    name: string;
+    mode: number;
+    crc: number;
+    size: number;
+    csize: number;
+    packOffset?: number;
+    body?: Buffer;
+}
+
+const dosNow = (): { time: number; date: number } => {
+    const d = new Date();
+    return { time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), date: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate() };
+};
+
+/** The compressed bytes of every file in order, read from the pack where they live there. */
+export async function* packedBodies(files: PackedFile[], packPath: string | undefined, around: (f: PackedFile, i: number) => { before: Buffer; after?: Buffer }): AsyncGenerator<Buffer> {
+    const fh = packPath ? await fs.promises.open(packPath, "r") : undefined;
+    try {
+        const chunk = Buffer.allocUnsafe(1024 * 1024);
+        for (let n = 0; n < files.length; n++) {
+            const e = files[n]!;
+            const { before, after } = around(e, n);
+            yield before;
+            if (e.body) yield e.body;
+            else {
+                let left = e.csize;
+                let pos = e.packOffset!;
+                while (left > 0) {
+                    const { bytesRead } = await fh!.read(chunk, 0, Math.min(chunk.length, left), pos);
+                    if (bytesRead <= 0) throw new Error("the complete download's pack ended early");
+                    // A copy: the chunk buffer is reused for the next read while this one may still be queued.
+                    yield Buffer.from(chunk.subarray(0, bytesRead));
+                    left -= bytesRead;
+                    pos += bytesRead;
+                }
+            }
+            if (after) yield after;
+        }
+    } finally {
+        await fh?.close();
+    }
+}
+
+function zipOf(files: PackedFile[], packPath: string | undefined, { time, date }: { time: number; date: number }): { stream: Readable; bytes: number } {
+    const entries: ZipEntry[] = [];
+    let offset = 0;
+    for (const f of files) {
+        const name = Buffer.from(f.name, "utf8");
+        entries.push({ ...f, name, localOffset: offset });
+        offset += 30 + name.length + f.csize;
+    }
+    if (entries.length > 0xffff - 1) throw new Error("too many files for a zip without zip64");
     const central = Buffer.concat(entries.map((e) => centralHeader(e, time, date)));
     const end = Buffer.alloc(22);
     end.writeUInt32LE(0x06054b50, 0);
@@ -294,34 +361,10 @@ export function buildCompleteZip(i: BuildCompleteInput): { stream: Readable; byt
     end.writeUInt32LE(offset, 16);
     const bytes = offset + central.length + end.length;
     if (bytes > 0xffffffff) throw new Error("the download is larger than a zip without zip64 can be");
-
-    const packPath = i.build.packPath;
     async function* body(): AsyncGenerator<Buffer> {
-        const fh = await fs.promises.open(packPath, "r");
-        try {
-            const chunk = Buffer.allocUnsafe(1024 * 1024);
-            for (const e of entries) {
-                yield localHeader(e, time, date);
-                if (e.body) {
-                    yield e.body;
-                    continue;
-                }
-                let left = e.csize;
-                let pos = e.packOffset!;
-                while (left > 0) {
-                    const { bytesRead } = await fh.read(chunk, 0, Math.min(chunk.length, left), pos);
-                    if (bytesRead <= 0) throw new Error("the complete download's pack ended early");
-                    // A copy: the chunk buffer is reused for the next read while this one may still be queued.
-                    yield Buffer.from(chunk.subarray(0, bytesRead));
-                    left -= bytesRead;
-                    pos += bytesRead;
-                }
-            }
-            yield central;
-            yield end;
-        } finally {
-            await fh.close();
-        }
+        yield* packedBodies(files, packPath, (_f, n) => ({ before: localHeader(entries[n]!, time, date) }));
+        yield central;
+        yield end;
     }
     return { stream: Readable.from(body(), { objectMode: false }), bytes };
 }

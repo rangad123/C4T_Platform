@@ -24,7 +24,7 @@ const wf = YAML.parse(text) as any;
 
 type Step = { name?: string; run?: string; uses?: string; if?: string; with?: Record<string, unknown>; env?: Record<string, string>; "continue-on-error"?: boolean | string };
 const runs = (steps: Step[]) => steps.filter((s) => s.run).map((s) => s.run!.trim());
-const PATHS = ["AI_Studio/src/agent/**", "AI_Studio/src/agent-protocol/**", "AI_Studio/installer/**", "AI_Studio/scripts/build-runner*", "AI_Studio/scripts/smoke-runner.mjs", ".github/workflows/runner-matrix.yml"];
+const PATHS = ["AI_Studio/src/agent/**", "AI_Studio/src/agent-protocol/**", "AI_Studio/installer/**", "AI_Studio/scripts/build-runner*", "AI_Studio/scripts/smoke-runner.mjs", "AI_Studio/src/platform/runner-*.ts", "AI_Studio/src/platform/routes/runner-kits.ts", ".github/workflows/runner-matrix.yml"];
 
 describe("the real-machine workflow", () => {
     it("parses and runs on demand and on pushes and pull requests that touch the runner", () => {
