@@ -65,6 +65,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionRule> = {
     "POST /api/agent/tasks/:id/accept": "own",
     "POST /api/agent/tasks/:id/reject": "own",
     "POST /api/agent/tasks/:id/events": "own",
+    // Round 51: an exploration on the runner asks the platform's AI and saves what it made (fenced to the running task attempt).
+    "POST /api/agent/tasks/:id/explore/llm": "own",
+    "POST /api/agent/tasks/:id/explore/sink": "own",
     "POST /api/agent/update": "own",
     "GET /api/agent/update/files/:name": "own",
     "POST /api/agent/check": "own",
